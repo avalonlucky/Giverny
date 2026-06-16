@@ -25,8 +25,9 @@
 </p>
 
 > English readers: see [English Overview](#english-overview).
+> 下面截图来自正式站真实界面，任务名称、需求、人名和动态细节已替换为示例数据。
 
-![Giverny 产品界面概览](./docs/assets/readme/product-overview.svg)
+![Giverny 工作台真实截图（已脱敏）](./docs/assets/readme/screenshots/dashboard.png)
 
 ## 目录
 
@@ -34,6 +35,7 @@
 - [为什么需要 Giverny](#为什么需要-giverny)
 - [典型使用场景](#典型使用场景)
 - [核心工作流](#核心工作流)
+- [真实产品截图](#真实产品截图)
 - [模块详解](#模块详解)
 - [角色与权限](#角色与权限)
 - [数据口径与结算规则](#数据口径与结算规则)
@@ -119,6 +121,30 @@ Giverny 的目标是把这些分散信息收敛成一条可追溯链路：
 3. **工时沉淀**：所有统计以“实际工时”为准；预计开始时间和预计交付时间只用于排期参考，不参与数据分析、工时计算或结算。
 4. **交付验收**：展开交付验收面板，核对基础信息、进度、分段工时、验收附件和备注；确认后状态变为“已验收”，进度锁定为 100%，工时计入结算。
 5. **月度结算**：按结算月份汇总工时、收入、验收情况和年度趋势，生成只读甲方链接和 PDF。
+
+## 真实产品截图
+
+这些截图来自正式站真实页面，不是重新绘制的示意图。为了适合公开仓库展示，任务名称、具体需求、人员姓名和动态细节已替换为示例数据；页面布局、组件密度、状态样式和整体视觉保持真实。
+
+### 工作台
+
+![Giverny 工作台真实截图（已脱敏）](./docs/assets/readme/screenshots/dashboard.png)
+
+### 任务导航
+
+![Giverny 任务导航真实截图（已脱敏）](./docs/assets/readme/screenshots/tasks.png)
+
+### 文件库
+
+![Giverny 文件库真实截图（已脱敏）](./docs/assets/readme/screenshots/files.png)
+
+### 结算
+
+![Giverny 结算页真实截图（已脱敏）](./docs/assets/readme/screenshots/reports.png)
+
+### 收入
+
+![Giverny 收入页真实截图（已脱敏）](./docs/assets/readme/screenshots/income.png)
 
 ## 模块详解
 
