@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Giverny task lifecycle</title>
+  <desc id="desc">The task lifecycle from creation to progress tracking, acceptance, settlement, and client sharing.</desc>
+  <rect width="1280" height="360" rx="28" fill="#f8f9f5"/>
+  <text x="70" y="72" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#17282f">任务生命周期 / Task Lifecycle</text>
+  <g font-family="Inter, Arial, sans-serif">
+    <g transform="translate(70 128)">
+      <rect width="180" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+      <circle cx="36" cy="36" r="16" fill="#2f6f6d"/>
+      <text x="36" y="42" text-anchor="middle" font-size="16" font-weight="800" fill="#ffffff">1</text>
+      <text x="64" y="42" font-size="18" font-weight="800" fill="#17282f">新建任务</text>
+      <text x="24" y="78" font-size="14" fill="#5f6d70">需求、类型、对接人</text>
+      <text x="24" y="100" font-size="14" fill="#5f6d70">结算月份与排期</text>
+    </g>
+    <path d="M270 188h70" stroke="#9fbdb8" stroke-width="4" stroke-linecap="round"/>
+    <g transform="translate(360 128)">
+      <rect width="180" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+      <circle cx="36" cy="36" r="16" fill="#2f6f6d"/>
+      <text x="36" y="42" text-anchor="middle" font-size="16" font-weight="800" fill="#ffffff">2</text>
+      <text x="64" y="42" font-size="18" font-weight="800" fill="#17282f">推进过程</text>
+      <text x="24" y="78" font-size="14" fill="#5f6d70">进展记录、附件</text>
+      <text x="24" y="100" font-size="14" fill="#5f6d70">时间段与进度</text>
+    </g>
+    <path d="M560 188h70" stroke="#9fbdb8" stroke-width="4" stroke-linecap="round"/>
+    <g transform="translate(650 128)">
+      <rect width="180" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+      <circle cx="36" cy="36" r="16" fill="#2f6f6d"/>
+      <text x="36" y="42" text-anchor="middle" font-size="16" font-weight="800" fill="#ffffff">3</text>
+      <text x="64" y="42" font-size="18" font-weight="800" fill="#17282f">交付验收</text>
+      <text x="24" y="78" font-size="14" fill="#5f6d70">终审、附件、备注</text>
+      <text x="24" y="100" font-size="14" fill="#5f6d70">锁定实际工时</text>
+    </g>
+    <path d="M850 188h70" stroke="#9fbdb8" stroke-width="4" stroke-linecap="round"/>
+    <g transform="translate(940 128)">
+      <rect width="180" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+      <circle cx="36" cy="36" r="16" fill="#2f6f6d"/>
+      <text x="36" y="42" text-anchor="middle" font-size="16" font-weight="800" fill="#ffffff">4</text>
+      <text x="64" y="42" font-size="18" font-weight="800" fill="#17282f">月度结算</text>
+      <text x="24" y="78" font-size="14" fill="#5f6d70">统计、PDF、只读链接</text>
+      <text x="24" y="100" font-size="14" fill="#5f6d70">甲方对账</text>
+    </g>
+  </g>
+</svg>

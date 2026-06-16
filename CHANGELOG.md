@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-06-16 21:05 · v0.10.68（GitHub README 多语言与图示完善）
+
+### 开源展示
+- README 从简短备忘升级为完整项目首页，补充产品定位、适用人群、核心工作流、功能总览、业务规则、技术架构、快速开始、部署说明和文档索引。
+- 新增中文主文与 English Overview，方便中文用户、英文读者和后续协作者快速理解项目。
+- README 增加 logo、版本徽章、产品界面概览图、任务生命周期图和 Cloudflare 架构图，不再是纯文字介绍。
+
+### 资料资产
+- 新增 `docs/assets/readme/product-overview.svg`、`workflow.svg`、`architecture.svg` 三张仓库内图示，GitHub README 可直接展示。
+
 ## 2026-06-16 20:40 · v0.10.67（GitHub Release 发布纪律）
 
 ### 发布流程

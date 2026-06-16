@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">Giverny architecture</title>
+  <desc id="desc">Giverny architecture: React frontend, Cloudflare Worker API, D1 database, R2 storage, and share links.</desc>
+  <rect width="1280" height="420" rx="28" fill="#f8f9f5"/>
+  <text x="70" y="72" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#17282f">技术架构 / Architecture</text>
+  <g font-family="Inter, Arial, sans-serif">
+    <rect x="74" y="132" width="250" height="160" rx="22" fill="#fdfdfb" stroke="#d8ded9"/>
+    <text x="104" y="178" font-size="22" font-weight="800" fill="#17282f">React App</text>
+    <text x="104" y="212" font-size="15" fill="#5f6d70">Vite + TypeScript</text>
+    <text x="104" y="240" font-size="15" fill="#5f6d70">Admin UI + Share Report</text>
+    <rect x="404" y="132" width="250" height="160" rx="22" fill="#eef5ef" stroke="#9fbdb8"/>
+    <text x="434" y="178" font-size="22" font-weight="800" fill="#17282f">Cloudflare Worker</text>
+    <text x="434" y="212" font-size="15" fill="#5f6d70">API, auth, reports</text>
+    <text x="434" y="240" font-size="15" fill="#5f6d70">Static Assets routing</text>
+    <rect x="734" y="108" width="210" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+    <text x="764" y="154" font-size="22" font-weight="800" fill="#17282f">D1</text>
+    <text x="764" y="188" font-size="15" fill="#5f6d70">tasks, updates</text>
+    <text x="764" y="212" font-size="15" fill="#5f6d70">reports, audit log</text>
+    <rect x="734" y="252" width="210" height="120" rx="20" fill="#fdfdfb" stroke="#d8ded9"/>
+    <text x="764" y="298" font-size="22" font-weight="800" fill="#17282f">R2</text>
+    <text x="764" y="332" font-size="15" fill="#5f6d70">process files</text>
+    <text x="764" y="356" font-size="15" fill="#5f6d70">delivery assets</text>
+    <rect x="1024" y="132" width="186" height="160" rx="22" fill="#fdfdfb" stroke="#d8ded9"/>
+    <text x="1054" y="178" font-size="22" font-weight="800" fill="#17282f">Clients</text>
+    <text x="1054" y="212" font-size="15" fill="#5f6d70">/share/:token</text>
+    <text x="1054" y="240" font-size="15" fill="#5f6d70">read-only reports</text>
+    <path d="M324 212h80" stroke="#2f6f6d" stroke-width="4" stroke-linecap="round"/>
+    <path d="M654 188h80" stroke="#2f6f6d" stroke-width="4" stroke-linecap="round"/>
+    <path d="M654 236h80" stroke="#2f6f6d" stroke-width="4" stroke-linecap="round"/>
+    <path d="M944 212h80" stroke="#2f6f6d" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>
