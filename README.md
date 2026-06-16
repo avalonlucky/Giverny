@@ -11,8 +11,6 @@
 <p align="center">
   <a href="https://mayeai.com">正式站 mayeai.com</a>
   ·
-  <a href="https://mayeai.com/readme-multilingual">多语言版 README</a>
-  ·
   <a href="./使用手册.md">使用手册</a>
   ·
   <a href="./CHANGELOG.md">更新日志</a>
@@ -26,7 +24,21 @@
   <img alt="License" src="https://img.shields.io/github/license/avalonlucky/Giverny" />
 </p>
 
-> English readers: see [English Overview](#english-overview). For a button-based interactive multi-language README, open [mayeai.com/readme-multilingual](https://mayeai.com/readme-multilingual).
+<p align="center">
+  <a href="#本地开发">快速开始</a>
+  ·
+  简体中文
+  ·
+  <a href="./README.zh-TW.md">繁體中文</a>
+  ·
+  <a href="./README.en.md">English</a>
+  ·
+  <a href="./README.ja.md">日本語</a>
+  ·
+  <a href="./README.ko.md">한국어</a>
+</p>
+
+> English readers: see [README.en.md](./README.en.md).
 > 下面截图来自正式站真实界面，由项目维护者提供，用于展示当前产品的真实视觉状态。
 
 > 一句话：把“需求在微信、工时在 Excel、文件在网盘、月底手工做账”的兼职设计工作，收敛成一条可追溯的链路，从接需求到验收结算，全在一个系统里。
@@ -61,9 +73,9 @@ Giverny 不是泛用项目管理工具。它更偏向一个“设计服务结算
 
 ## 多语言版本
 
-仓库内提供一个交互式多语言 README 页面：[docs/README_MULTILINGUAL.html](./docs/README_MULTILINGUAL.html)，正式站也提供可直接点击语言按钮切换的在线版本：[mayeai.com/readme-multilingual](https://mayeai.com/readme-multilingual)。
+README 顶部提供 GitHub 原生多语言入口：简体中文、繁體中文、English、日本語、한국어。点击对应语言会进入独立 Markdown README 文件，而不是跳转到外部集合页。
 
-这个页面基于项目维护者提供的多语言版本整理，支持简体中文、繁體中文、English、日本語、한국어。点击顶部语言按钮后，整篇 README 会切换到对应语言，并复用当前真实产品截图。
+各语言版本保留同一套核心说明：Giverny 是什么、为什么不用 Notion / 飞书 / Excel、核心工作流、关键业务规则、技术架构和发布纪律。
 
 ## 为什么需要 Giverny
 
