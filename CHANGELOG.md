@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-17 00:23 · v0.10.73（多语言 README 上线为可点击页面）
+
+### 开源展示
+- 将交互式多语言 README 发布为正式站静态页面：`https://mayeai.com/readme-multilingual`，顶部语言按钮可直接切换整篇 README 内容。
+- 主 README 顶部“多语言版 README”入口改为正式站在线页面，避免 GitHub 直接打开 HTML 只显示源码的问题。
+- 主 README 开头补入项目维护者提供的“一句话”简介，让访问者第一眼就理解 Giverny 要解决的实际问题。
+
+### 资料资产
+- 新增 `public/readme-multilingual.html` 及 `public/readme/screenshots/`，让多语言页面在正式站可直接加载真实产品截图。
+- 保留 `docs/README_MULTILINGUAL.html` 作为仓库内源文件和本地预览版本。
+
 ## 2026-06-16 22:25 · v0.10.72（接入交互式多语言 README）
 
 ### 开源展示
