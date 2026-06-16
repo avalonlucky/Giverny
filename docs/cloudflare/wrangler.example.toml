@@ -1,0 +1,19 @@
+name = "designer-worklog"
+compatibility_date = "2026-06-10"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+# Fill these IDs after creating the Cloudflare resources:
+# npx wrangler d1 create designer_worklog
+# npx wrangler r2 bucket create designer-worklog-files
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "designer_worklog"
+# database_id = "YOUR_D1_DATABASE_ID"
+#
+# [[r2_buckets]]
+# binding = "FILES"
+# bucket_name = "designer-worklog-files"

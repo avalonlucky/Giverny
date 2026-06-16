@@ -1,0 +1,24 @@
+name = "designer-worklog"
+main = "src/worker.ts"
+compatibility_date = "2026-06-10"
+account_id = "ccd312f47f0dca574199fa6e33758c6d"
+
+routes = [
+  { pattern = "mayeai.com/*", zone_name = "mayeai.com" },
+  { pattern = "www.mayeai.com/*", zone_name = "mayeai.com" }
+]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "designer-worklog-db"
+database_id = "4b784afe-7d17-4b22-b101-bec380ddc075"
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "designer-worklog-uploads"

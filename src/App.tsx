@@ -1,0 +1,7341 @@
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AlarmClock,
+  AlertTriangle,
+  Archive,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  Clock3,
+  Copy,
+  Download,
+  Eye,
+  ExternalLink,
+  FileArchive,
+  FileImage,
+  FileText,
+  FolderKanban,
+  GripVertical,
+  KeyRound,
+  LayoutDashboard,
+  List,
+  ListChecks,
+  LoaderCircle,
+  Lock,
+  LogOut,
+  Mail,
+  Paperclip,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Search,
+  Settings,
+  Share2,
+  Sparkles,
+  Info,
+  Tag,
+  Trash2,
+  UploadCloud,
+  UserCircle,
+  X,
+} from 'lucide-react'
+import {
+  appReleaseDate,
+  appVersion,
+  defaultDesignTypeGroups,
+  defaultDesignTypes,
+  defaultHourlyRate,
+  defaultPdfTitle,
+  defaultServiceCompanyName,
+  importedHoursMonth,
+  importedMonthlyHours,
+  type DesignTypeGroup,
+} from './config/appConfig'
+import {
+  api,
+  ApiError,
+  authedPreviewUrl,
+  clearStoredAuth,
+  getStoredAuth,
+  setStoredAuth,
+  type AccessToken,
+  type ActivityItem,
+  type AuthRole,
+  type ReportRecord,
+  type StoredAuth,
+  type TaskAssistantSuggestion,
+} from './lib/api'
+import { formatFileSize, toChineseAmount } from './lib/format'
+import { createPsdPreviewFile } from './lib/psdPreview'
+import type { AppView, FileAsset, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
+import './App.css'
+
+const navItems = [
+  { label: '工作台', icon: LayoutDashboard },
+  { label: '任务', icon: FolderKanban },
+  { label: '文件库', icon: Archive },
+  { label: '结算', icon: FileText },
+  { label: '收入', icon: BarChart3 },
+]
+
+const viewRoutes: Record<AppView, string> = {
+  工作台: '/dashboard',
+  任务: '/tasks',
+  文件库: '/files',
+  收入: '/income',
+  结算: '/reports',
+  甲方查看: '/client-preview',
+  设置: '/settings',
+}
+
+const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
+
+function viewFromPath(pathname: string): AppView {
+  if (pathname === '/updates') {
+    return '任务'
+  }
+  return routeViews[pathname] ?? '工作台'
+}
+
+const pad = (value: number) => String(value).padStart(2, '0')
+
+function isoDate(offsetDays = 0) {
+  const date = new Date()
+  date.setDate(date.getDate() + offsetDays)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function isoDateTime(offsetMinutes = 0) {
+  const date = new Date()
+  date.setMinutes(date.getMinutes() + offsetMinutes)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function datePart(value: string) {
+  return value.slice(0, 10)
+}
+
+function monthPart(value: string) {
+  return datePart(value).slice(0, 7)
+}
+
+function toDateTimeInputValue(value: string) {
+  if (!value) {
+    return ''
+  }
+  return value.includes('T') ? value.slice(0, 16) : `${datePart(value)}T09:00`
+}
+
+function formatPlanDateTime(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value).replaceAll('-', '/')
+  return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
+}
+
+function formatMonthDayTime(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value)
+  const monthDay = `${date.slice(5, 7)}/${date.slice(8, 10)}`
+  return value.includes('T') ? `${monthDay} ${value.slice(11, 16)}` : monthDay
+}
+
+function formatMonthDay(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value)
+  return `${date.slice(5, 7)}/${date.slice(8, 10)}`
+}
+
+function formatTimePart(value: string) {
+  return value.includes('T') ? value.slice(11, 16) : ''
+}
+
+function addMinutesToPlanDateTime(value: string, minutes: number) {
+  const normalized = toDateTimeInputValue(value)
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  date.setMinutes(date.getMinutes() + minutes)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+type ScheduleAnchor = 'start' | 'end'
+
+async function createOptionalPsdPreviewFile(file: File) {
+  try {
+    return await createPsdPreviewFile(file)
+  } catch (error) {
+    console.warn('PSD preview generation failed', error)
+    return undefined
+  }
+}
+
+function stringifyCellValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return ''
+  }
+  if (value instanceof Date) {
+    return value.toLocaleString('zh-CN')
+  }
+  if (typeof value === 'object') {
+    const maybeFormula = value as { result?: unknown; text?: string; richText?: { text?: string }[]; hyperlink?: string }
+    if (maybeFormula.result !== undefined) {
+      return stringifyCellValue(maybeFormula.result)
+    }
+    if (maybeFormula.text) {
+      return maybeFormula.text
+    }
+    if (Array.isArray(maybeFormula.richText)) {
+      return maybeFormula.richText.map((item) => item.text ?? '').join('')
+    }
+    if (maybeFormula.hyperlink) {
+      return maybeFormula.hyperlink
+    }
+    return JSON.stringify(value)
+  }
+  return String(value)
+}
+
+function appendQueryParam(url: string | undefined, key: string, value: string) {
+  if (!url) {
+    return undefined
+  }
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+}
+
+function parseFileTags(tag: string | undefined) {
+  return (tag ?? '')
+    .split(/[、,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function serializeFileTags(tags: string[]) {
+  return Array.from(new Set(tags.map((item) => item.trim()).filter(Boolean))).join('、')
+}
+
+function nowStamp() {
+  const now = new Date()
+  return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+}
+
+// Cloudflare Workers Free/Pro 计划单次请求体上限 100MB，留出 multipart 开销后取 95MB 作为硬上限。
+const UPLOAD_HARD_LIMIT = 95 * 1024 * 1024
+const UPLOAD_SOFT_LIMIT = 50 * 1024 * 1024
+
+function validateUploadFile(file: File) {
+  if (file.size > UPLOAD_HARD_LIMIT) {
+    throw new Error(`「${file.name}」超过 ${(UPLOAD_HARD_LIMIT / 1024 / 1024).toFixed(0)}MB，无法上传`)
+  }
+  if (file.size > UPLOAD_SOFT_LIMIT) {
+    return true
+  }
+  return false
+}
+
+const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
+
+type DonutItem = { label: string; value: number; color: string }
+
+const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
+const progressOptions = Array.from({ length: 11 }, (_, index) => index * 10)
+
+const statusDotColors: Record<TaskStatus, string> = {
+  计划中: '#6366f1',
+  进行中: '#305b93',
+  挂起: '#8a6f24',
+  待验收: '#b07412',
+  已验收: '#2f6f6d',
+  终止: '#b84a45',
+  不计费: '#8a9496',
+}
+
+const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
+
+function isoDateFromLocalDate(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function localDateFromIsoDate(value: string) {
+  const [year, month, day] = datePart(value || isoDate()).split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function calendarDaysForMonth(monthValue: string) {
+  const [year, month] = monthValue.split('-').map(Number)
+  const firstDay = new Date(year, month - 1, 1)
+  const startOffset = (firstDay.getDay() + 6) % 7
+  const start = new Date(year, month - 1, 1 - startOffset)
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + index)
+    return {
+      value: isoDateFromLocalDate(date),
+      day: date.getDate(),
+      inMonth: date.getMonth() === month - 1,
+    }
+  })
+}
+
+function monthLabelOf(value: string) {
+  return `${Number(value.slice(0, 4))} 年 ${Number(value.slice(5, 7))} 月`
+}
+
+function monthSelectOptions(anchorValue: string, extraValue?: string) {
+  const anchor = localDateFromIsoDate(`${anchorValue || isoDate().slice(0, 7)}-01`)
+  const values = new Set<string>()
+  for (let offset = -12; offset <= 6; offset += 1) {
+    const date = new Date(anchor)
+    date.setMonth(anchor.getMonth() + offset)
+    values.add(`${date.getFullYear()}-${pad(date.getMonth() + 1)}`)
+  }
+  if (extraValue) {
+    values.add(extraValue)
+  }
+  return [...values].sort((a, b) => b.localeCompare(a))
+}
+
+function taskSettlementMonth(task: Task) {
+  return task.settlementMonth || ''
+}
+
+function isSupplementalTask(task: Task) {
+  return Boolean(task.settlementMonth) && task.settlementMonth !== monthPart(task.date)
+}
+
+const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
+
+const durationMinuteOptions = Array.from({ length: 6 }, (_, index) => index * 10)
+const durationHourOptions = Array.from({ length: 11 }, (_, index) => index)
+
+function formatDuration(minutes: number) {
+  const safeMinutes = Math.max(0, minutes)
+  const hours = Math.floor(safeMinutes / 60)
+  const restMinutes = safeMinutes % 60
+  if (hours === 0) {
+    return `${restMinutes} min`
+  }
+  if (restMinutes === 0) {
+    return `${hours} h`
+  }
+  return `${hours} h ${restMinutes} min`
+}
+
+function minutesBetween(start: string, end: string) {
+  if (!start || !end) {
+    return 0
+  }
+  const [startHour, startMinute] = start.split(':').map(Number)
+  const [endHour, endMinute] = end.split(':').map(Number)
+  if ([startHour, startMinute, endHour, endMinute].some((value) => !Number.isFinite(value))) {
+    return 0
+  }
+  return Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute))
+}
+
+function normalizeClockInput(value: string) {
+  const raw = value.trim()
+  const colonMatch = raw.match(/^(\d{1,2})(?::(\d{1,2}))?$/)
+  const compactMatch = raw.match(/^(\d{1,2})(\d{2})$/)
+  const hour = colonMatch ? Number(colonMatch[1]) : compactMatch ? Number(compactMatch[1]) : Number.NaN
+  const minute = colonMatch ? Number(colonMatch[2] ?? '0') : compactMatch ? Number(compactMatch[2]) : Number.NaN
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return ''
+  }
+  return `${pad(hour)}:${pad(minute)}`
+}
+
+function sumTimeEntries(entries: TimeEntry[]) {
+  return entries.reduce((sum, entry) => sum + minutesBetween(entry.start, entry.end), 0)
+}
+
+function serializeTimeEntries(entries: TimeEntry[]) {
+  return JSON.stringify(entries.map((entry) => ({ start: entry.start, end: entry.end, note: entry.note ?? '' })))
+}
+
+function hoursFromTimeEntries(entries: TimeEntry[]) {
+  return Math.round((sumTimeEntries(entries) / 60) * 100) / 100
+}
+
+function defaultTimeEntryDraft() {
+  const now = new Date()
+  const startHour = Math.min(22, now.getHours())
+  const endHour = Math.min(23, startHour + 1)
+  return {
+    start: `${pad(startHour)}:00`,
+    end: `${pad(endHour)}:00`,
+    note: '',
+  }
+}
+
+const cumulativeTaxBrackets = [
+  { limit: 36000, rate: 0.03, quick: 0 },
+  { limit: 144000, rate: 0.1, quick: 2520 },
+  { limit: 300000, rate: 0.2, quick: 16920 },
+  { limit: 420000, rate: 0.25, quick: 31920 },
+  { limit: 660000, rate: 0.3, quick: 52920 },
+  { limit: 960000, rate: 0.35, quick: 85920 },
+  { limit: Number.POSITIVE_INFINITY, rate: 0.45, quick: 181920 },
+]
+
+const laborTaxBrackets = [
+  { limit: 20000, rate: 0.2, quick: 0 },
+  { limit: 50000, rate: 0.3, quick: 2000 },
+  { limit: Number.POSITIVE_INFINITY, rate: 0.4, quick: 7000 },
+]
+
+type AnnualIncomeRow = {
+  month: string
+  hours: number
+  amount: number
+  locked: boolean
+}
+
+function resolveCumulativeTaxBracket(taxableIncome: number) {
+  return cumulativeTaxBrackets.find((bracket) => taxableIncome <= bracket.limit) ?? cumulativeTaxBrackets[0]
+}
+
+function resolveLaborTaxBracket(taxableIncome: number) {
+  return laborTaxBrackets.find((bracket) => taxableIncome <= bracket.limit) ?? laborTaxBrackets[0]
+}
+
+function calculateCumulativeWithholding(
+  rows: AnnualIncomeRow[],
+  monthlySpecialDeduction: number,
+  monthlyAdditionalDeduction: number,
+  monthlyOtherDeduction: number,
+) {
+  let cumulativeIncome = 0
+  let cumulativePaidTax = 0
+  const monthlyDeduction = 5000 + monthlySpecialDeduction + monthlyAdditionalDeduction + monthlyOtherDeduction
+
+  return rows.map((row, index) => {
+    cumulativeIncome += row.amount
+    const cumulativeDeduction = monthlyDeduction * (index + 1)
+    const taxableIncome = Math.max(0, cumulativeIncome - cumulativeDeduction)
+    const bracket = resolveCumulativeTaxBracket(taxableIncome)
+    const cumulativeTax = Math.max(0, taxableIncome * bracket.rate - bracket.quick)
+    const tax = Math.max(0, Math.round(cumulativeTax - cumulativePaidTax))
+    cumulativePaidTax += tax
+
+    return {
+      ...row,
+      taxableIncome,
+      tax,
+      netIncome: Math.max(0, row.amount - tax),
+      cumulativeIncome,
+      cumulativeTax: Math.round(cumulativePaidTax),
+      rate: bracket.rate,
+      quick: bracket.quick,
+    }
+  })
+}
+
+function calculateLaborWithholding(rows: AnnualIncomeRow[]) {
+  let cumulativeIncome = 0
+  let cumulativeTax = 0
+  return rows.map((row) => {
+    cumulativeIncome += row.amount
+    const taxableIncome = row.amount <= 800 ? 0 : row.amount <= 4000 ? Math.max(0, row.amount - 800) : row.amount * 0.8
+    const bracket = resolveLaborTaxBracket(taxableIncome)
+    const tax = Math.max(0, Math.round(taxableIncome * bracket.rate - bracket.quick))
+    cumulativeTax += tax
+    return {
+      ...row,
+      taxableIncome,
+      tax,
+      netIncome: Math.max(0, row.amount - tax),
+      cumulativeIncome,
+      cumulativeTax,
+      rate: bracket.rate,
+      quick: bracket.quick,
+    }
+  })
+}
+
+const normalizeDesignTypeGroups = (groups: DesignTypeGroup[]) => {
+  const normalized = groups
+    .map((group) => ({
+      name: group.name.trim(),
+      items: [...new Set(group.items.map((item) => item.trim()).filter(Boolean))],
+    }))
+    .filter((group) => group.name)
+
+  return normalized.length > 0 ? normalized : defaultDesignTypeGroups
+}
+
+function MonthPicker({
+  value,
+  taskMonthValues,
+  onChange,
+}: {
+  value: string
+  taskMonthValues: Set<string>
+  onChange: (value: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [displayYear, setDisplayYear] = useState(() => Number(value.slice(0, 4)))
+  const selectedYear = Number(value.slice(0, 4))
+  const selectedMonth = Number(value.slice(5, 7))
+
+  const chooseMonth = (month: number) => {
+    onChange(`${displayYear}-${pad(month)}`)
+    setIsOpen(false)
+  }
+
+  return (
+    <div
+      className="month-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false)
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={`select-button month-trigger ${isOpen ? 'active' : ''}`}
+        aria-label="选择年份和月份"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!isOpen) {
+            setDisplayYear(selectedYear)
+          }
+          setIsOpen((open) => !open)
+        }}
+      >
+        <CalendarDays size={17} />
+        <span>{monthLabelOf(value)}</span>
+        <ChevronDown size={16} />
+      </button>
+
+      {isOpen && (
+        <div className="month-popover" role="dialog" aria-label="选择年份和月份">
+          <div className="month-popover-header">
+            <button type="button" className="icon-button compact-button" aria-label="上一年" onClick={() => setDisplayYear((year) => year - 1)}>
+              <ChevronLeft size={16} />
+            </button>
+            <strong>{displayYear} 年</strong>
+            <button type="button" className="icon-button compact-button" aria-label="下一年" onClick={() => setDisplayYear((year) => year + 1)}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="month-grid">
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => {
+              const isSelected = displayYear === selectedYear && month === selectedMonth
+              const monthValue = `${displayYear}-${pad(month)}`
+              const hasTasks = taskMonthValues.has(monthValue)
+              return (
+                <button
+                  type="button"
+                  className={`${isSelected ? 'selected' : ''} ${hasTasks ? 'has-tasks' : ''}`.trim()}
+                  key={month}
+                  aria-label={`${displayYear} 年 ${month} 月${hasTasks ? '，有任务' : ''}`}
+                  aria-pressed={isSelected}
+                  onClick={() => chooseMonth(month)}
+                >
+                  <span>{month} 月</span>
+                  {hasTasks && <i aria-hidden="true" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CompactMonthSelector({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  const currentYear = Number(value.slice(0, 4)) || new Date().getFullYear()
+  const selectedYear = Number(value.slice(0, 4))
+  const selectedMonth = Number(value.slice(5, 7))
+  const [displayYear, setDisplayYear] = useState(currentYear)
+
+  return (
+    <div className="compact-month-selector" role="group" aria-label="选择结算月份">
+      <div className="compact-month-header">
+        <button type="button" className="icon-button compact-button" aria-label="上一年" onClick={() => setDisplayYear((year) => year - 1)}>
+          <ChevronLeft size={15} />
+        </button>
+        <strong>{displayYear} 年</strong>
+        <button type="button" className="icon-button compact-button" aria-label="下一年" onClick={() => setDisplayYear((year) => year + 1)}>
+          <ChevronRight size={15} />
+        </button>
+      </div>
+      <div className="month-grid compact-month-grid">
+        {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => {
+          const isSelected = displayYear === selectedYear && month === selectedMonth
+          return (
+            <button
+              type="button"
+              className={isSelected ? 'selected' : ''}
+              key={month}
+              aria-pressed={isSelected}
+              onClick={() => onChange(`${displayYear}-${pad(month)}`)}
+            >
+              <span>{month} 月</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SettlementMonthField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <label
+      className="field settlement-month-field"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false)
+        }
+      }}
+    >
+      <span>{label}</span>
+      <button
+        type="button"
+        className={`month-field-trigger ${isOpen ? 'active' : ''}`}
+        aria-label={`选择${label}`}
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span>{monthLabelOf(value)}</span>
+        <CalendarDays size={16} />
+      </button>
+      {isOpen && (
+        <div className="settlement-month-popover">
+          <CompactMonthSelector
+            value={value}
+            onChange={(nextValue) => {
+              onChange(nextValue)
+              setIsOpen(false)
+            }}
+          />
+        </div>
+      )}
+    </label>
+  )
+}
+
+function TimeTextInput({
+  value,
+  ariaLabel,
+  onChange,
+}: {
+  value: string
+  ariaLabel: string
+  onChange: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  const [syncedValue, setSyncedValue] = useState(value)
+
+  if (value !== syncedValue) {
+    setSyncedValue(value)
+    setDraft(value)
+  }
+
+  const commit = () => {
+    const normalized = normalizeClockInput(draft)
+    if (!normalized) {
+      setDraft(value)
+      return
+    }
+    onChange(normalized)
+    setDraft(normalized)
+  }
+
+  return (
+    <input
+      className="time-text-input"
+      type="text"
+      inputMode="numeric"
+      value={draft}
+      placeholder="HH:mm"
+      aria-label={ariaLabel}
+      onChange={(event) => setDraft(event.target.value.replace(/[^\d:]/g, '').slice(0, 5))}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
+function PlanDateTimeField({
+  label,
+  value,
+  onChange,
+  isActive = false,
+  readOnly = false,
+  control,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  isActive?: boolean
+  readOnly?: boolean
+  control?: ReactNode
+}) {
+  const [draft, setDraft] = useState(() => formatPlanDateTime(value))
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
+
+  const normalizeDateTimeInput = (input: string) => {
+    const match = input.trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$/)
+    if (!match) {
+      return ''
+    }
+    const [, year, month, day, hour = '9', minute = '0'] = match
+    const monthNumber = Number(month)
+    const dayNumber = Number(day)
+    const hourNumber = Number(hour)
+    const minuteNumber = Number(minute)
+    if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31 || hourNumber < 0 || hourNumber > 23 || minuteNumber < 0 || minuteNumber > 59) {
+      return ''
+    }
+    const normalized = `${year}-${pad(monthNumber)}-${pad(dayNumber)}T${pad(hourNumber)}:${pad(minuteNumber)}`
+    const date = new Date(normalized)
+    if (Number.isNaN(date.getTime()) || date.getFullYear() !== Number(year) || date.getMonth() + 1 !== monthNumber || date.getDate() !== dayNumber) {
+      return ''
+    }
+    return normalized
+  }
+
+  const commitDraft = () => {
+    if (readOnly) {
+      setDraft(formatPlanDateTime(value))
+      return
+    }
+    const normalized = normalizeDateTimeInput(draft)
+    if (normalized) {
+      onChange(normalized)
+      setDraft(formatPlanDateTime(normalized))
+      return
+    }
+    setDraft(formatPlanDateTime(value))
+  }
+
+  const selectedValue = toDateTimeInputValue(value || isoDateTime())
+  const selectedDate = datePart(selectedValue)
+  const selectedHour = selectedValue.slice(11, 13)
+  const selectedMinute = selectedValue.slice(14, 16)
+  const calendarDays = calendarDaysForMonth(calendarMonth)
+
+  const shiftMonth = (offset: number) => {
+    const current = localDateFromIsoDate(`${calendarMonth}-01`)
+    current.setMonth(current.getMonth() + offset)
+    setCalendarMonth(`${current.getFullYear()}-${pad(current.getMonth() + 1)}`)
+  }
+
+  const applyDatePart = (dateValue: string) => {
+    if (readOnly) {
+      return
+    }
+    const next = `${dateValue}T${selectedHour}:${selectedMinute}`
+    onChange(next)
+    setDraft(formatPlanDateTime(next))
+    setCalendarMonth(monthPart(next))
+  }
+
+  const applyTimePart = (part: 'hour' | 'minute', rawValue: string) => {
+    if (readOnly) {
+      return
+    }
+    const digits = rawValue.replace(/\D/g, '')
+    if (!digits) {
+      return
+    }
+    const max = part === 'hour' ? 23 : 59
+    const nextValue = pad(Math.max(0, Math.min(max, Number(digits))))
+    const next = part === 'hour' ? `${selectedDate}T${nextValue}:${selectedMinute}` : `${selectedDate}T${selectedHour}:${nextValue}`
+    onChange(next)
+    setDraft(formatPlanDateTime(next))
+  }
+
+  const applyToday = () => {
+    if (readOnly) {
+      return
+    }
+    const now = isoDateTime()
+    onChange(now)
+    setDraft(formatPlanDateTime(now))
+    setCalendarMonth(monthPart(now))
+  }
+
+  return (
+    <label className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''}`}>
+      <span className="field-label-row">
+        <span>{label}</span>
+        {control}
+      </span>
+      <div className="date-input-wrap">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          placeholder="YYYY/MM/DD HH:mm"
+          readOnly={readOnly}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur()
+            }
+          }}
+        />
+        <button
+          type="button"
+          aria-label={`选择${label}`}
+          title={readOnly ? '打开右侧开关后可编辑' : `选择${label}`}
+          disabled={readOnly}
+          onClick={() => {
+            if (!readOnly) {
+              setIsPickerOpen((current) => !current)
+            }
+          }}
+        >
+          <CalendarDays size={16} />
+        </button>
+        {isPickerOpen && (
+          <div className="date-time-popover" role="dialog" aria-label={`${label}选择器`}>
+            <div className="date-time-popover-header">
+              <button type="button" aria-label="上个月" title="上个月" onClick={() => shiftMonth(-1)}>
+                <ChevronLeft size={15} />
+              </button>
+              <strong>{monthLabelOf(calendarMonth)}</strong>
+              <button type="button" aria-label="下个月" title="下个月" onClick={() => shiftMonth(1)}>
+                <ChevronRight size={15} />
+              </button>
+            </div>
+            <div className="date-time-weekdays">
+              {weekdayLabels.map((day) => (
+                <span key={day}>{day}</span>
+              ))}
+            </div>
+            <div className="date-time-days">
+              {calendarDays.map((day) => (
+                <button
+                  type="button"
+                  key={day.value}
+                  className={`${day.inMonth ? '' : 'muted'} ${day.value === selectedDate ? 'active' : ''}`}
+                  onClick={() => applyDatePart(day.value)}
+                >
+                  {day.day}
+                </button>
+              ))}
+            </div>
+            <div className="date-time-clock">
+              <span>时间</span>
+              <input
+                value={selectedHour}
+                inputMode="numeric"
+                maxLength={2}
+                aria-label="小时"
+                onChange={(event) => applyTimePart('hour', event.target.value)}
+              />
+              <b>:</b>
+              <input
+                value={selectedMinute}
+                inputMode="numeric"
+                maxLength={2}
+                aria-label="分钟"
+                onChange={(event) => applyTimePart('minute', event.target.value)}
+              />
+            </div>
+            <div className="date-time-popover-actions">
+              <button type="button" onClick={applyToday}>今天</button>
+              <button type="button" onClick={() => setIsPickerOpen(false)}>完成</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </label>
+  )
+}
+
+function ScheduleAnchorSwitch({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`switch-control schedule-anchor-switch ${active ? 'active' : ''}`}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      onClick={onClick}
+    >
+      <i />
+    </button>
+  )
+}
+
+function DurationPicker({
+  valueMinutes,
+  onChange,
+}: {
+  valueMinutes: number
+  onChange: (valueMinutes: number) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const selectedHours = Math.floor(valueMinutes / 60)
+  const selectedMinutes = valueMinutes % 60
+  const manualHours = Number.isInteger(valueMinutes / 60) ? String(valueMinutes / 60) : (valueMinutes / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+
+  const choose = (hours: number, minutes: number) => {
+    onChange(hours * 60 + minutes)
+  }
+
+  const setManualHours = (value: string) => {
+    const hours = Number.parseFloat(value)
+    if (!Number.isFinite(hours) || hours < 0) {
+      return
+    }
+    onChange(Math.round(hours * 60))
+  }
+
+  return (
+    <div
+      className="duration-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false)
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={`duration-trigger ${isOpen ? 'active' : ''}`}
+        aria-label="选择预估工时"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span>{formatDuration(valueMinutes)}</span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div className="duration-menu" aria-label="预估工时选择器">
+          <div className="duration-column">
+            <strong>h</strong>
+            <div className="duration-options">
+              {durationHourOptions.map((hour) => (
+                <button
+                  type="button"
+                  className={hour === selectedHours ? 'selected' : ''}
+                  key={hour}
+                  onClick={() => choose(hour, selectedMinutes)}
+                >
+                  {hour} h
+                </button>
+              ))}
+            </div>
+            <label className="duration-manual">
+              <span>手动输入 h</span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={manualHours}
+                onChange={(event) => setManualHours(event.target.value)}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </label>
+          </div>
+          <div className="duration-column">
+            <strong>min</strong>
+            <div className="duration-options">
+              {durationMinuteOptions.map((minutes) => (
+                <button
+                  type="button"
+                  className={minutes === selectedMinutes ? 'selected' : ''}
+                  key={minutes}
+                  onClick={() => {
+                    choose(selectedHours, minutes)
+                    setIsOpen(false)
+                  }}
+                >
+                  {minutes} min
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CascadingDesignTypePicker({
+  groups,
+  value,
+  onChange,
+}: {
+  groups: DesignTypeGroup[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  const availableGroups = normalizeDesignTypeGroups(groups)
+  const initialGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value)) ?? availableGroups[0]
+  const [isOpen, setIsOpen] = useState(false)
+  const [activeGroupName, setActiveGroupName] = useState(initialGroup.name)
+  const activeGroup = availableGroups.find((group) => group.name === activeGroupName) ?? availableGroups[0]
+
+  const choose = (groupName: string, item: string) => {
+    onChange(`${groupName} / ${item}`)
+    setIsOpen(false)
+  }
+
+  return (
+    <div
+      className="cascade-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false)
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={`cascade-trigger ${isOpen ? 'active' : ''}`}
+        aria-label="选择设计类型"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!isOpen) {
+            setActiveGroupName(initialGroup.name)
+          }
+          setIsOpen((open) => !open)
+        }}
+      >
+        <span>{value}</span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div className="cascade-menu" role="listbox" aria-label="设计类型二级选择器">
+          <div className="cascade-column">
+            {availableGroups.map((group) => (
+              <button
+                type="button"
+                className={group.name === activeGroup.name ? 'active' : ''}
+                key={group.name}
+                onMouseEnter={() => setActiveGroupName(group.name)}
+                onFocus={() => setActiveGroupName(group.name)}
+              >
+                <span>{group.name}</span>
+                <ChevronRight size={14} />
+              </button>
+            ))}
+          </div>
+          <div className="cascade-column child-column">
+            {activeGroup.items.map((item) => {
+              const optionValue = `${activeGroup.name} / ${item}`
+              return (
+                <button
+                  type="button"
+                  className={optionValue === value ? 'selected' : ''}
+                  key={item}
+                  aria-selected={optionValue === value}
+                  onClick={() => choose(activeGroup.name, item)}
+                >
+                  {item}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+type DueState = 'overdue' | 'soon' | null
+
+/** 未完成任务的交付提醒状态：已过预计交付日 → 逾期；3 天内到期 → 临期 */
+function taskDueState(task: Task, today: string, soonDate: string): DueState {
+  if (!task.estimatedDate || task.status === '已验收' || task.status === '终止' || task.status === '不计费') {
+    return null
+  }
+  const estimatedDate = datePart(task.estimatedDate)
+  if (estimatedDate < today) {
+    return 'overdue'
+  }
+  if (estimatedDate <= soonDate) {
+    return 'soon'
+  }
+  return null
+}
+
+const taskFieldLabels: Record<string, string> = {
+  title: '任务名称',
+  type: '设计类型',
+  date: '预计开始时间',
+  estimatedDate: '预计交付时间',
+  requester: '需求人',
+  contact: '对接人',
+  reviewer: '验收人',
+  requirement: '需求描述',
+}
+
+/** 把审计日志条目翻译成时间轴文案 */
+function describeActivity(item: ActivityItem): string {
+  const payload = item.payload ?? {}
+  if (item.entityType === 'task') {
+    if (item.action === 'create') {
+      return '接受任务'
+    }
+    if (item.action === 'void') {
+      const reason = typeof payload.reason === 'string' ? payload.reason.trim() : ''
+      return reason ? `作废任务；原因：${reason}` : '作废任务'
+    }
+    if (item.action === 'delete') {
+      return '删除任务'
+    }
+    if (payload.status === '已验收') {
+      const acceptanceNote = typeof payload.acceptanceNote === 'string' ? payload.acceptanceNote.trim() : ''
+      const actualHours = Number(payload.actualHours)
+      const timeEntries = Array.isArray(payload.timeEntries) ? payload.timeEntries : []
+      const acceptanceFiles = Array.isArray(payload.acceptanceFiles) ? payload.acceptanceFiles.map(String).filter(Boolean) : []
+      const details: string[] = ['确认验收']
+      if (Number.isFinite(actualHours)) {
+        details.push(`系统计算工时 ${actualHours.toFixed(2)}h`)
+      }
+      if (acceptanceNote) {
+        details.push(`验收备注：${acceptanceNote}`)
+      } else if (timeEntries.length > 0) {
+        details.push(`包含 ${timeEntries.length} 段时间记录`)
+      }
+      if (acceptanceFiles.length > 0) {
+        details.push(`验收文件：${acceptanceFiles.slice(0, 3).join('、')}${acceptanceFiles.length > 3 ? ` 等 ${acceptanceFiles.length} 个` : ''}`)
+      }
+      return details.join('；')
+    }
+    const parts: string[] = []
+    if (typeof payload.status === 'string') {
+      parts.push(`状态更新为「${payload.status}」`)
+    }
+    if (payload.progress !== undefined) {
+      parts.push(`进度更新为 ${payload.progress}%`)
+    }
+    if (payload.actualHours !== undefined) {
+      parts.push(`实际工时改为 ${payload.actualHours}h`)
+    }
+    if (Array.isArray(payload.timeEntries)) {
+      parts.push(`记录了 ${payload.timeEntries.length} 段时间`)
+    }
+    if (typeof payload.estimatedDate === 'string') {
+      parts.push(`预计交付改为 ${formatPlanDateTime(payload.estimatedDate)}`)
+    }
+    Object.keys(taskFieldLabels).forEach((key) => {
+      if (payload[key] !== undefined) {
+        parts.push(`修改了${taskFieldLabels[key]}`)
+      }
+    })
+    return parts.length > 0 ? parts.join('；') : '更新了任务信息'
+  }
+  if (item.entityType === 'attachment') {
+    if (item.action === 'create') {
+      return `上传了文件「${String(payload.fileName ?? '未命名')}」`
+    }
+    if (item.action === 'delete') {
+      return `删除了文件「${String(payload.fileName ?? '')}」`
+    }
+  }
+  if (item.entityType === 'update') {
+    if (item.action === 'create') {
+      const hours = Number(payload.hours)
+      return `添加进展「${String(payload.title ?? '')}」${hours > 0 ? `（${hours}h）` : ''}`
+    }
+    if (item.action === 'update') {
+      return '修改了进展记录'
+    }
+    if (item.action === 'delete') {
+      return `删除了进展「${String(payload.title ?? '')}」`
+    }
+  }
+  return '其他操作'
+}
+
+function timelineTimePart(value: string) {
+  if (value.length <= 10) {
+    return ''
+  }
+  if (value.includes('T')) {
+    return value.slice(11, 16)
+  }
+  return value.slice(11, 16).trim()
+}
+
+function TimelineStamp({ value, audience }: { value: string; audience: 'admin' | 'public' }) {
+  const privateTime = audience === 'admin' ? timelineTimePart(value) : ''
+  return (
+    <time>
+      {datePart(value)}
+      {privateTime && <span className="admin-only-data"> {privateTime}</span>}
+    </time>
+  )
+}
+
+function snapProgress(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+}
+
+type ConfirmDialogState = {
+  eyebrow: string
+  title: string
+  body: string
+  confirmText: string
+  cancelText?: string
+  tone?: 'danger' | 'default'
+  details?: string[]
+  onConfirm: () => void | Promise<void>
+}
+
+type StatusReasonTarget = {
+  task: Task
+  status: Extract<TaskStatus, '挂起' | '终止'>
+} | null
+
+type ToastTone = 'success' | 'error' | 'info'
+
+type ToastState = {
+  id: number
+  message: string
+  tone: ToastTone
+}
+
+const inferToastTone = (message: string): ToastTone => {
+  if (/(失败|异常|不正确|失效|错误|不可用|无效)/.test(message)) {
+    return 'error'
+  }
+  if (/(正在|上传中|加载)/.test(message)) {
+    return 'info'
+  }
+  return 'success'
+}
+
+function ToastIcon({ tone }: { tone: ToastTone }) {
+  if (tone === 'error') {
+    return <AlertTriangle size={17} />
+  }
+  if (tone === 'info') {
+    return <Info size={17} />
+  }
+  return <CheckCircle2 size={17} />
+}
+
+function App() {
+  const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
+  const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>('列表')
+  const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
+  const [role, setRole] = useState<AuthRole>('member')
+  const [accessTokens, setAccessTokens] = useState<AccessToken[]>([])
+  const [newTokenId, setNewTokenId] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [isLoaded, setIsLoaded] = useState(false)
+  const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
+  const [taskItems, setTaskItems] = useState<Task[]>([])
+  const [updateItems, setUpdateItems] = useState<TaskUpdate[]>([])
+  const [fileItems, setFileItems] = useState<FileAsset[]>([])
+  const [reports, setReports] = useState<ReportRecord[]>([])
+  const [hourlyRate, setHourlyRate] = useState(defaultHourlyRate)
+  const [pdfTitle, setPdfTitle] = useState(defaultPdfTitle)
+  const [serviceCompanyName, setServiceCompanyName] = useState(defaultServiceCompanyName)
+  const [taxMode, setTaxMode] = useState<TaxMode>('salary')
+  const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
+  const [selectedTaskId, setSelectedTaskId] = useState(0)
+  const [detailTaskId, setDetailTaskId] = useState(0)
+  const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
+  const [isSideUploading, setIsSideUploading] = useState(false)
+  const [sideUploadProgress, setSideUploadProgress] = useState(0)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
+  const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
+  const [voidTaskTarget, setVoidTaskTarget] = useState<Task | null>(null)
+  const [isVoidTaskBusy, setIsVoidTaskBusy] = useState(false)
+  const [statusReasonTarget, setStatusReasonTarget] = useState<StatusReasonTarget>(null)
+  const [showVoidedTasks, setShowVoidedTasks] = useState(false)
+  const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
+  const [showFireworks, setShowFireworks] = useState(false)
+  const [toastQueue, setToastQueue] = useState<ToastState[]>([])
+  const toastTimersRef = useRef<number[]>([])
+  const updatingTaskIdsRef = useRef<Set<number>>(new Set())
+  const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
+  const [backendStatus, setBackendStatus] = useState<'连接中' | '已接入 D1/R2' | '后端异常'>('连接中')
+  const [taskQuery, setTaskQuery] = useState('')
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
+  const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
+  const taskMonthValues = useMemo(
+    () => new Set(taskItems.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value))),
+    [taskItems],
+  )
+  const monthTasks = useMemo(() => taskItems.filter((task) => taskSettlementMonth(task) === currentMonth.value), [currentMonth.value, taskItems])
+  const activeMonthTasks = useMemo(() => monthTasks.filter((task) => !task.voidedAt), [monthTasks])
+  const taskPageSourceTasks = useMemo(() => (showVoidedTasks ? monthTasks : activeMonthTasks), [activeMonthTasks, monthTasks, showVoidedTasks])
+  const monthUpdates = useMemo(
+    () =>
+      updateItems.filter((update) => {
+        const task = taskItems.find((item) => item.id === update.taskId)
+        if (task?.voidedAt) {
+          return false
+        }
+        return update.date.startsWith(currentMonth.value) || (task ? taskSettlementMonth(task) === currentMonth.value : false)
+      }),
+    [currentMonth.value, taskItems, updateItems],
+  )
+  const monthFiles = useMemo(
+    () =>
+      fileItems.filter((file) => {
+        const task = taskItems.find((item) => item.id === file.taskId)
+        if (task?.voidedAt) {
+          return false
+        }
+        return file.uploadedAt.startsWith(currentMonth.value) || (task ? taskSettlementMonth(task) === currentMonth.value : false)
+      }),
+    [currentMonth.value, fileItems, taskItems],
+  )
+  const importedHours = currentMonth.value === importedHoursMonth ? importedMonthlyHours : 0
+  const selectedTaskSource = activeView === '任务' ? taskPageSourceTasks : activeMonthTasks
+  const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
+  const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
+
+  const notify = (message: string, tone: ToastTone = inferToastTone(message)) => {
+    const id = Date.now() + Math.random()
+    const nextToast: ToastState = { id, message, tone }
+    const duration = tone === 'error' ? 4200 : 2400
+    setToastQueue((current) => [...current, nextToast].slice(-3))
+    const timer = window.setTimeout(() => {
+      setToastQueue((current) => current.filter((item) => item !== nextToast))
+      toastTimersRef.current = toastTimersRef.current.filter((value) => value !== timer)
+    }, duration)
+    toastTimersRef.current = [...toastTimersRef.current, timer]
+  }
+
+  const handleConfirmDialogConfirm = async () => {
+    if (!confirmDialog || isConfirmDialogBusy) {
+      return
+    }
+    setIsConfirmDialogBusy(true)
+    try {
+      await confirmDialog.onConfirm()
+      setConfirmDialog(null)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '操作失败，请重试')
+    } finally {
+      setIsConfirmDialogBusy(false)
+    }
+  }
+
+  const navigateView = (view: AppView) => {
+    setIsAccountMenuOpen(false)
+    setActiveView(view)
+    const nextPath = viewRoutes[view]
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ view }, '', nextPath)
+    }
+  }
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) {
+      return undefined
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (accountMenuRef.current?.contains(event.target as Node)) {
+        return
+      }
+      setIsAccountMenuOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAccountMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isAccountMenuOpen])
+
+  useEffect(() => () => {
+    toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+  }, [])
+
+  useEffect(() => {
+    if (window.location.pathname === '/') {
+      window.history.replaceState({ view: activeView }, '', viewRoutes[activeView])
+    }
+    const handlePopState = () => setActiveView(viewFromPath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const refreshState = async () => {
+    const state = await api.getState()
+    setTaskItems(state.tasks)
+    setUpdateItems(state.updates)
+    setFileItems(state.files)
+    setReports(state.reports ?? [])
+    setRole(state.role)
+    setAccessTokens(state.accessTokens ?? [])
+    setHourlyRate(state.settings.hourlyRate)
+    setPdfTitle(state.settings.pdfTitle || defaultPdfTitle)
+    setServiceCompanyName(state.settings.serviceCompanyName || defaultServiceCompanyName)
+    setTaxMode(state.settings.taxMode ?? 'salary')
+    setDesignTypeGroups(normalizeDesignTypeGroups(state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }]))
+    setSelectedTaskId((currentId) => {
+      const activeTasks = state.tasks.filter((task) => !task.voidedAt)
+      return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? state.tasks[0]?.id ?? 0
+    })
+    setBackendStatus('已接入 D1/R2')
+    setIsLoaded(true)
+  }
+
+  useEffect(() => {
+    if (!auth) {
+      return
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshState().catch((error) => {
+      if (error instanceof ApiError && error.status === 401) {
+        clearStoredAuth()
+        setAuth(null)
+        setAuthError('登录已失效（口令可能被停用或已过期），请重新登录')
+        return
+      }
+      setBackendStatus('后端异常')
+      setIsLoaded(true)
+      notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
+    })
+     
+  }, [auth])
+
+  const filterTasks = (tasks: Task[]) =>
+    tasks.filter((task) => {
+      const matchesFilter = taskFilter === '全部' || (!task.voidedAt && task.status === taskFilter)
+      const query = taskQuery.trim().toLowerCase()
+      const matchesQuery =
+        !query ||
+        [task.title, task.requirement, task.type, task.requester ?? '', task.contact, task.reviewer, task.voidReason ?? ''].some((value) =>
+          value.toLowerCase().includes(query),
+        )
+
+      return matchesFilter && matchesQuery
+    })
+
+  const visibleTasks = filterTasks(activeMonthTasks)
+  const taskPageTasks = filterTasks(taskPageSourceTasks)
+
+  const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
+
+  const taskContextOptions = useMemo(
+    () => ({
+      currentMonthValue: currentMonth.value,
+      reports,
+    }),
+    [currentMonth.value, reports],
+  )
+
+  const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
+
+  const stats = useMemo(() => {
+    const totalHours = activeMonthTasks.reduce((sum, task) => sum + task.actualHours, importedHours)
+    const billableHours = activeMonthTasks
+      .filter((task) => task.status !== '不计费')
+      .reduce((sum, task) => sum + task.actualHours, importedHours)
+    const accepted = activeMonthTasks.filter((task) => task.status === '已验收').length
+    const pending = activeMonthTasks.filter((task) => task.status === '待验收').length
+
+    return {
+      totalHours,
+      billableHours,
+      amount: Math.round(billableHours * hourlyRate),
+      accepted,
+      pending,
+    }
+  }, [activeMonthTasks, hourlyRate, importedHours])
+
+  const donutData = useMemo(() => {
+    // 本月洞察只统计实际投入；预计工时只作为排期参考，不参与分析。
+    const hoursByType = new Map<string, number>()
+    activeMonthTasks.forEach((task) => {
+      const hours = task.actualHours
+      if (hours > 0) {
+        hoursByType.set(task.type, Number(((hoursByType.get(task.type) ?? 0) + hours).toFixed(1)))
+      }
+    })
+    const items: DonutItem[] = [...hoursByType.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], index) => ({ label, value, color: donutPalette[index % donutPalette.length] }))
+
+    return { items, total: Number(items.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
+  }, [activeMonthTasks])
+
+  const today = isoDate()
+  const dueSoonDate = isoDate(3)
+  const dueTasks = useMemo(() => {
+    const overdue = activeTaskItems.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue')
+    const soon = activeTaskItems.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon')
+    return { overdue, soon }
+  }, [activeTaskItems, dueSoonDate, today])
+
+  const annualData = useMemo(() => {
+    const year = currentMonth.value.slice(0, 4)
+    const lockedByMonth = new Map(reports.filter((report) => report.month.startsWith(year)).map((report) => [report.month, report]))
+    const months = Array.from({ length: 12 }, (_, index) => `${year}-${pad(index + 1)}`)
+    const rows = months.map((month) => {
+      const tasks = activeTaskItems.filter((task) => taskSettlementMonth(task) === month && task.status !== '不计费')
+      const imported = month === importedHoursMonth ? importedMonthlyHours : 0
+      const hours = Number(tasks.reduce((sum, task) => sum + task.actualHours, imported).toFixed(1))
+      const locked = lockedByMonth.get(month)
+      const amount = locked ? locked.totalAmount : Math.round(hours * hourlyRate)
+      return { month, hours, amount, locked: Boolean(locked) }
+    })
+    return {
+      year,
+      rows,
+      totalHours: Number(rows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)),
+      totalAmount: rows.reduce((sum, row) => sum + row.amount, 0),
+    }
+  }, [activeTaskItems, currentMonth.value, hourlyRate, reports])
+
+  const weeklyTrendData = useMemo(() => {
+    const [year, month] = currentMonth.value.split('-').map(Number)
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const weeks: { label: string; value: number }[] = []
+    for (let start = 1; start <= daysInMonth; start += 7) {
+      const end = Math.min(start + 6, daysInMonth)
+      weeks.push({ label: `${month}/${start}-${month}/${end}`, value: 0 })
+    }
+    monthUpdates.forEach((update) => {
+      const hours = Number(update.hours) || 0
+      if (hours <= 0 || !update.date.startsWith(currentMonth.value)) {
+        return
+      }
+      const day = Number(datePart(update.date).slice(8, 10))
+      const weekIndex = Math.min(Math.floor((day - 1) / 7), weeks.length - 1)
+      weeks[weekIndex].value += hours
+    })
+    return weeks.map((week) => ({ ...week, value: Number(week.value.toFixed(1)) }))
+  }, [currentMonth.value, monthUpdates])
+
+  const handleCreateTask = async (task: Task) => {
+    try {
+      const savedTask = await api.createTask(task)
+      await refreshState()
+      setSelectedTaskId(savedTask.id)
+      if (taskSettlementMonth(savedTask).length >= 7) {
+        setMonthValue(taskSettlementMonth(savedTask))
+      }
+      clearNewTaskDraftCache()
+      setIsModalOpen(false)
+      setBackendStatus('已接入 D1/R2')
+      notify('任务已写入 D1，最新进展已同步')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `任务保存失败：${error.message}` : '任务保存失败')
+    }
+  }
+
+  const loadTaskActivity = async (taskId: number) => {
+    try {
+      const result = await api.getTaskActivity(taskId)
+      setTaskActivity(result.items)
+    } catch {
+      setTaskActivity([])
+    }
+  }
+
+  const handleOpenTaskDetail = (taskId: number) => {
+    setSelectedTaskId(taskId)
+    setDetailTaskId(taskId)
+    void loadTaskActivity(taskId)
+  }
+
+  useEffect(() => {
+    if (!dashboardContextMenu) {
+      return
+    }
+    const closeMenu = () => setDashboardContextMenu(null)
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('keydown', handleKeydown)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('keydown', handleKeydown)
+    }
+  }, [dashboardContextMenu])
+
+  const openDashboardContextMenu = (event: React.MouseEvent, task: Task) => {
+    event.preventDefault()
+    setSelectedTaskId(task.id)
+    setDashboardContextMenu({ x: event.clientX, y: event.clientY, task })
+  }
+
+  // 选中任务变化时自动加载它的动态时间轴（工作台右侧明细卡用）
+  useEffect(() => {
+    if (selectedTask) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadTaskActivity(selectedTask.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTask?.id])
+
+  const handleSideUpload = async (fileList: FileList | null) => {
+    const file = fileList?.[0]
+    if (!file || !selectedTask || isSideUploading) {
+      return
+    }
+    setIsSideUploading(true)
+    setSideUploadProgress(0)
+    try {
+      await handleQuickUploadImage(selectedTask.id, file, (ratio) => setSideUploadProgress(Math.round(ratio * 100)))
+    } finally {
+      setIsSideUploading(false)
+      setSideUploadProgress(0)
+    }
+  }
+
+  const handleQuickUploadImage = async (taskId: number, file: File, onProgress?: (ratio: number) => void) => {
+    try {
+      validateUploadFile(file)
+      const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+      const preview = await createOptionalPsdPreviewFile(file)
+      await api.uploadFile({
+        taskId,
+        file,
+        preview,
+        type: extension,
+        size: formatFileSize(file.size),
+        final: false,
+        visible: true,
+      }, onProgress)
+      await refreshState()
+      await loadTaskActivity(taskId)
+      notify('图片已上传')
+    } catch (error) {
+      notify(error instanceof Error ? `上传失败：${error.message}` : '上传失败')
+    }
+  }
+
+  const handleAcceptanceFileUpload = async (taskId: number, file: File, onProgress?: (ratio: number) => void) => {
+    const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+    const preview = await createOptionalPsdPreviewFile(file)
+    const savedFile = await api.uploadFile(
+      {
+        taskId,
+        file,
+        preview,
+        type: extension,
+        size: formatFileSize(file.size),
+        final: false,
+        visible: true,
+        tag: '验收文件',
+      },
+      onProgress,
+    )
+    setFileItems((currentFiles) => [savedFile, ...currentFiles])
+    setTaskItems((currentTasks) =>
+      currentTasks.map((task) => (task.id === taskId ? { ...task, files: Array.from(new Set([savedFile.name, ...task.files])) } : task)),
+    )
+    await loadTaskActivity(taskId)
+    return savedFile
+  }
+
+  const handleUpdateTask = async (taskId: number, changes: Partial<Task>) => {
+    if (updatingTaskIdsRef.current.has(taskId)) {
+      pendingTaskChangesRef.current.set(taskId, { ...(pendingTaskChangesRef.current.get(taskId) ?? {}), ...changes })
+      return
+    }
+    const currentTask = taskItems.find((task) => task.id === taskId)
+    if (!currentTask) {
+      return
+    }
+    const normalizedChanges = { ...changes }
+    if (changes.status) {
+      normalizedChanges.stage = changes.status === '已验收' ? '完成' : changes.status
+      normalizedChanges.progress = changes.status === '已验收' ? 100 : changes.status === '待验收' ? Math.max(currentTask.progress, 88) : currentTask.progress
+      notify('正在保存…', 'info')
+    }
+
+    updatingTaskIdsRef.current.add(taskId)
+    try {
+      const savedTask = await api.updateTask(taskId, normalizedChanges)
+      setTaskItems((currentTasks) => currentTasks.map((task) => (task.id === taskId ? { ...task, ...savedTask } : task)))
+      setBackendStatus('已接入 D1/R2')
+      if (detailTaskId === taskId) {
+        void loadTaskActivity(taskId)
+      }
+      if (selectedTask?.id === taskId) {
+        void loadTaskActivity(taskId)
+      }
+      if (changes.status === '已验收') {
+        setShowFireworks(true)
+        window.setTimeout(() => setShowFireworks(false), 3000)
+      }
+      notify('任务已同步到 D1')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `任务更新失败：${error.message}` : '任务更新失败')
+    } finally {
+      updatingTaskIdsRef.current.delete(taskId)
+      const pendingChanges = pendingTaskChangesRef.current.get(taskId)
+      if (pendingChanges) {
+        pendingTaskChangesRef.current.delete(taskId)
+        void handleUpdateTask(taskId, pendingChanges)
+      }
+    }
+  }
+
+  const handleCreateTaskUpdate = async (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => {
+    try {
+      const savedUpdate = await api.createUpdate({
+        id: Date.now(),
+        taskId,
+        date: nowStamp(),
+        title: update.title,
+        body: update.body,
+        hours: update.hours,
+        visible: update.visible,
+        files: [],
+      })
+      setUpdateItems((currentUpdates) => [savedUpdate, ...currentUpdates])
+      await refreshState()
+      await loadTaskActivity(taskId)
+      notify('进展记录已同步到 D1')
+    } catch (error) {
+      notify(error instanceof Error ? `进展记录失败：${error.message}` : '进展记录失败')
+    }
+  }
+
+  const handleDeleteActivity = async (activityId: string, taskId: number) => {
+    try {
+      await api.deleteActivity(activityId)
+      await loadTaskActivity(taskId)
+      notify('动态已删除')
+    } catch (error) {
+      notify(error instanceof Error ? `删除动态失败：${error.message}` : '删除动态失败')
+    }
+  }
+
+  const handleRequestDeleteActivity = (item: ActivityItem, task: Task) => {
+    if (role !== 'admin') {
+      return
+    }
+    setConfirmDialog({
+      eyebrow: '删除动态',
+      title: '确定删除这条任务动态吗？',
+      body: '删除后只会移除时间轴记录，不会回滚任务当前进度、状态、工时或文件数据。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [task.title, describeActivity(item)],
+      onConfirm: () => handleDeleteActivity(item.id, task.id),
+    })
+  }
+
+  const handleVoidTask = (taskId: number) => {
+    const task = taskItems.find((item) => item.id === taskId)
+    if (!task || task.voidedAt) {
+      return
+    }
+    setVoidTaskTarget(task)
+  }
+
+  const handleRequestTaskStatus = (taskId: number, status: TaskStatus) => {
+    const task = taskItems.find((item) => item.id === taskId)
+    if (!task || task.voidedAt) {
+      return
+    }
+    if (status === '挂起' || status === '终止') {
+      setStatusReasonTarget({ task, status })
+      return
+    }
+    const changes: Partial<Task> = status === '待验收' ? { status, progress: Math.max(task.progress, 88) } : { status }
+    void handleUpdateTask(taskId, changes)
+  }
+
+  const confirmStatusReason = async (reason: string) => {
+    if (!statusReasonTarget) {
+      return
+    }
+    const trimmedReason = reason.trim()
+    if (!trimmedReason) {
+      return
+    }
+    const changes: Partial<Task> =
+      statusReasonTarget.status === '挂起'
+        ? { status: '挂起', suspendReason: trimmedReason, progress: statusReasonTarget.task.progress }
+        : { status: '终止', terminateReason: trimmedReason, progress: statusReasonTarget.task.progress }
+    await handleUpdateTask(statusReasonTarget.task.id, changes)
+    setStatusReasonTarget(null)
+  }
+
+  const confirmVoidTask = async (reason: string) => {
+    if (!voidTaskTarget || isVoidTaskBusy) {
+      return
+    }
+    setIsVoidTaskBusy(true)
+    try {
+      await api.voidTask(voidTaskTarget.id, reason.trim())
+      await refreshState()
+      setVoidTaskTarget(null)
+      notify('任务已作废，不再计入工时和结算')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `作废失败：${error.message}` : '作废失败')
+    } finally {
+      setIsVoidTaskBusy(false)
+    }
+  }
+
+  const handleRestoreTask = async (taskId: number) => {
+    try {
+      await api.restoreTask(taskId)
+      await refreshState()
+      notify('任务已恢复')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `恢复失败：${error.message}` : '恢复失败')
+    }
+  }
+
+  const handleDeleteTask = (taskId: number) => {
+    const task = taskItems.find((item) => item.id === taskId)
+    if (!task?.voidedAt) {
+      notify('只有已作废任务才能永久删除', 'error')
+      return
+    }
+    setConfirmDialog({
+      eyebrow: '永久删除',
+      title: `确定永久删除「${task.title}」吗？`,
+      body: '永久删除只允许用于已作废任务。删除后任务不会再出现在后台列表中，关联文件仍会保留在文件库记录里。',
+      confirmText: '永久删除',
+      tone: 'danger',
+      details: [task.type, `作废原因：${task.voidReason || '未记录'}`],
+      onConfirm: async () => {
+        try {
+          await api.deleteTask(taskId)
+          await refreshState()
+          notify('已作废任务已永久删除')
+        } catch (error) {
+          setBackendStatus('后端异常')
+          notify(error instanceof Error ? `删除失败：${error.message}` : '删除失败')
+        }
+      },
+    })
+  }
+
+  const handleCopyShareLink = async (token: string) => {
+    const link = `${window.location.origin}/share/${token}`
+    try {
+      await window.navigator.clipboard.writeText(link)
+      notify('甲方分享链接已复制')
+    } catch {
+      notify(link)
+    }
+  }
+
+  const handleDownloadFile = (file: FileAsset) => {
+    const sourceUrl = authedPreviewUrl(file.sourceUrl)
+    if (!sourceUrl) {
+      notify('源文件链接不可用', 'error')
+      return
+    }
+    const link = document.createElement('a')
+    link.href = sourceUrl
+    link.download = file.name
+    link.rel = 'noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const handleCopyTaskTitle = async (title: string) => {
+    try {
+      await window.navigator.clipboard.writeText(title)
+      notify('任务名称已复制')
+    } catch {
+      notify(title, 'info')
+    }
+  }
+
+  const handleDeleteFile = async (fileId: number) => {
+    const file = fileItems.find((item) => item.id === fileId)
+    setConfirmDialog({
+      eyebrow: '删除文件',
+      title: `确定删除「${file?.name ?? '该文件'}」吗？`,
+      body: '删除后会同时移除 D1 文件记录、R2 源文件和预览图。请只删除误传文件，已验收或已发给甲方的文件建议保留。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [file?.task, file?.type, file?.size].filter(Boolean) as string[],
+      onConfirm: async () => {
+        try {
+          await api.deleteFile(fileId)
+          if (previewFile?.id === fileId) {
+            setPreviewFile(null)
+          }
+          await refreshState()
+          notify('文件已删除')
+        } catch (error) {
+          setBackendStatus('后端异常')
+          notify(error instanceof Error ? `文件删除失败：${error.message}` : '文件删除失败')
+        }
+      },
+    })
+  }
+
+  const handleUpdateFile = async (fileId: number, changes: { name?: string; tag?: string }) => {
+    try {
+      const updatedFile = await api.updateFile(fileId, changes)
+      setFileItems((currentFiles) => currentFiles.map((file) => (file.id === fileId ? { ...file, ...updatedFile } : file)))
+      setTaskItems((currentTasks) =>
+        currentTasks.map((task) =>
+          task.id === updatedFile.taskId
+            ? { ...task, files: Array.from(new Set([updatedFile.name, ...task.files.filter((fileName) => fileName !== updatedFile.name)])) }
+            : task,
+        ),
+      )
+      notify('文件信息已更新')
+      return updatedFile
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `文件更新失败：${error.message}` : '文件更新失败')
+      throw error
+    }
+  }
+
+  const handleExportBackup = () => {
+    const payload = {
+      exportedAt: nowStamp(),
+      settings: { hourlyRate, pdfTitle, serviceCompanyName, taxMode },
+      tasks: taskItems,
+      updates: updateItems,
+      files: fileItems,
+      reports,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `worklog-backup-${isoDate()}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    notify('备份已导出到下载目录')
+  }
+
+  const handleUnlock = async (email: string, key: string) => {
+    try {
+      await api.login(email, key)
+      const credentials = { email, key }
+      setStoredAuth(credentials)
+      setAuthError('')
+      setBackendStatus('连接中')
+      setAuth(credentials)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthError('账号或密码不正确')
+      } else {
+        setAuthError(error instanceof Error ? `登录失败：${error.message}` : '登录失败，请重试')
+      }
+    }
+  }
+
+  const handleSignOut = () => {
+    clearStoredAuth()
+    window.location.reload()
+  }
+
+  const handleChangeAdminPassword = async (currentPassword: string, newPassword: string) => {
+    try {
+      await api.changeAdminPassword({ currentPassword, newPassword })
+      setAuth((current) => {
+        if (!current) {
+          return current
+        }
+        const next = { ...current, key: newPassword }
+        setStoredAuth(next)
+        return next
+      })
+      notify('管理员密码已更新')
+    } catch (error) {
+      notify(error instanceof Error ? `密码更新失败：${error.message}` : '密码更新失败')
+      throw error
+    }
+  }
+
+  const handleCreateAccessToken = async (label: string, expiresInDays: number | null) => {
+    try {
+      const created = await api.createAccessToken({ label, expiresInDays })
+      setAccessTokens((current) => [created, ...current])
+      setNewTokenId(created.id)
+      try {
+        await window.navigator.clipboard.writeText(created.token)
+        notify('口令已生成并复制到剪贴板')
+      } catch {
+        notify('口令已生成，请在列表中复制')
+      }
+    } catch (error) {
+      notify(error instanceof Error ? `口令生成失败：${error.message}` : '口令生成失败')
+    }
+  }
+
+  const handleToggleAccessToken = async (tokenId: string, disabled: boolean) => {
+    try {
+      const saved = await api.setAccessTokenDisabled(tokenId, disabled)
+      setAccessTokens((current) => current.map((token) => (token.id === tokenId ? saved : token)))
+      notify(disabled ? '口令已停用' : '口令已恢复')
+    } catch (error) {
+      notify(error instanceof Error ? `操作失败：${error.message}` : '操作失败')
+    }
+  }
+
+  const handleDeleteAccessToken = async (tokenId: string) => {
+    const token = accessTokens.find((item) => item.id === tokenId)
+    setConfirmDialog({
+      eyebrow: '删除口令',
+      title: `确定删除「${token?.label || '该口令'}」吗？`,
+      body: '正在使用这个口令登录的设备会立即失效，删除后无法恢复。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [token?.expiresAt ? `有效期：${token.expiresAt}` : '永久有效', token?.lastUsedAt ? `最后使用：${token.lastUsedAt}` : '尚未使用'],
+      onConfirm: async () => {
+        try {
+          await api.deleteAccessToken(tokenId)
+          setAccessTokens((current) => current.filter((token) => token.id !== tokenId))
+          notify('口令已删除')
+        } catch (error) {
+          notify(error instanceof Error ? `删除失败：${error.message}` : '删除失败')
+        }
+      },
+    })
+  }
+
+  const handleCopyAccessToken = async (token: string) => {
+    try {
+      await window.navigator.clipboard.writeText(token)
+      notify('口令已复制')
+    } catch {
+      notify(token)
+    }
+  }
+
+  const handleRateChange = async (rate: number) => {
+    setHourlyRate(rate)
+    try {
+      const result = await api.setHourlyRate(rate)
+      setHourlyRate(result.hourlyRate)
+      setBackendStatus('已接入 D1/R2')
+      notify('小时单价已写入 D1')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `单价保存失败：${error.message}` : '单价保存失败')
+    }
+  }
+
+  const handlePdfTitleChange = async (title: string) => {
+    const nextTitle = title.trim() || defaultPdfTitle
+    setPdfTitle(nextTitle)
+    try {
+      const saved = await api.setPdfTitle(nextTitle)
+      setPdfTitle(saved.pdfTitle)
+      notify('PDF 抬头已保存')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `PDF 抬头保存失败：${error.message}` : 'PDF 抬头保存失败')
+    }
+  }
+
+  const handleServiceCompanyNameChange = async (name: string) => {
+    const nextName = name.trim() || defaultServiceCompanyName
+    setServiceCompanyName(nextName)
+    try {
+      const saved = await api.setServiceCompanyName(nextName)
+      setServiceCompanyName(saved.serviceCompanyName)
+      notify('服务公司名称已保存')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `服务公司名称保存失败：${error.message}` : '服务公司名称保存失败')
+    }
+  }
+
+  const handleTaxModeChange = async (mode: TaxMode) => {
+    setTaxMode(mode)
+    try {
+      const saved = await api.setTaxMode(mode)
+      setTaxMode(saved.taxMode)
+      setBackendStatus('已接入 D1/R2')
+      notify('计税方式已保存')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `计税方式保存失败：${error.message}` : '计税方式保存失败')
+    }
+  }
+
+  const handleDesignTypeGroupsChange = async (nextGroups: DesignTypeGroup[]) => {
+    const safeGroups = normalizeDesignTypeGroups(nextGroups)
+    setDesignTypeGroups(safeGroups)
+    try {
+      const result = await api.setDesignTypeGroups(safeGroups)
+      setDesignTypeGroups(result.designTypeGroups)
+      setBackendStatus('已接入 D1/R2')
+      notify('设计类型已写入 D1')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `设计类型保存失败：${error.message}` : '设计类型保存失败')
+    }
+  }
+
+  const handleLockMonthlyReport = async () => {
+    try {
+      const report = await api.lockMonthlyReport({ month: currentMonth.value, hourlyRate, importedHours })
+      await refreshState()
+      const link = `${window.location.origin}/share/${report.publicToken}`
+      try {
+        await window.navigator.clipboard.writeText(link)
+        notify(`结算已锁定 ¥${report.totalAmount.toLocaleString()}，甲方链接已复制`)
+      } catch {
+        notify(`结算已锁定 ¥${report.totalAmount.toLocaleString()}：${link}`)
+      }
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `结算锁定失败：${error.message}` : '结算锁定失败')
+    }
+  }
+
+  if (!auth) {
+    return <LockScreen error={authError} onSubmit={handleUnlock} />
+  }
+
+  if (!isLoaded) {
+    return (
+      <main className="boot-screen">
+        <div className="boot-card">
+          <div className="brand-mark">
+            <img className="brand-logo" src="/giverny-logo.png" alt="" />
+          </div>
+          <strong>正在连接工作台</strong>
+          <p>正在读取任务、文件和结算数据</p>
+          <span className="loading-indicator">
+            <LoaderCircle size={15} />
+            Cloudflare D1 / R2
+          </span>
+        </div>
+      </main>
+    )
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">
+            <img className="brand-logo" src="/giverny-logo.png" alt="" />
+          </div>
+          <div>
+            <strong>Giverny</strong>
+            <span className={`brand-status ${backendStatus === '后端异常' ? 'error' : backendStatus === '已接入 D1/R2' ? 'ok' : 'pending'}`} title={backendStatus}>
+              <i aria-hidden="true" />
+              让创作在自己的花园里生长
+            </span>
+          </div>
+        </div>
+
+        <nav className="nav-list" aria-label="主导航">
+          {navItems.map((item) => {
+            const Icon = item.icon
+            return (
+              <div key={item.label}>
+                <button
+                  className={`nav-item ${activeView === item.label ? 'active' : ''}`}
+                  aria-label={`切换到${item.label}`}
+                  onClick={() => navigateView(item.label as AppView)}
+                >
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                </button>
+              </div>
+            )
+          })}
+        </nav>
+
+        <div className="sidebar-account" ref={accountMenuRef}>
+          {isAccountMenuOpen && (
+            <div className="sidebar-account-menu" role="menu" aria-label="管理员菜单">
+              <div className="account-menu-identity">
+                <UserCircle size={18} />
+                <div>
+                  <strong>{auth.email}</strong>
+                  <span>{role === 'admin' ? '最终管理员' : '访问成员'}</span>
+                </div>
+              </div>
+              <button className="account-menu-item" type="button" role="menuitem" onClick={() => navigateView('设置')}>
+                <Settings size={17} />
+                <span>全站设置</span>
+              </button>
+              <div className="account-menu-storage" title="Cloudflare R2 文件空间">
+                <Archive size={17} />
+                <div>
+                  <span>R2 文件空间</span>
+                  <strong>18.6 GB</strong>
+                </div>
+              </div>
+              <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
+                <LogOut size={17} />
+                <span>退出登录</span>
+              </button>
+              <div className="account-menu-version" title={`发布于 ${appReleaseDate}`}>v{appVersion}</div>
+            </div>
+          )}
+          <button className={`sidebar-account-trigger ${isAccountMenuOpen || activeView === '设置' ? 'active' : ''}`} type="button" onClick={() => setIsAccountMenuOpen((value) => !value)}>
+            <Settings size={18} />
+            <span>设置</span>
+          </button>
+        </div>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <h1>{viewTitle}</h1>
+          </div>
+          <div className="topbar-actions">
+            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} />
+            <button className="primary-button" onClick={() => setIsModalOpen(true)}>
+              <Plus size={18} />
+              新建任务
+            </button>
+          </div>
+        </header>
+
+        {activeView === '工作台' && (
+          <>
+        <section className="stats-grid" aria-label="本月统计">
+          <StatCard
+            label="本月总工时"
+            value={`${stats.totalHours.toFixed(1)}h`}
+            trend={importedHours > 0 ? `含导入工时 ${importedHours.toFixed(1)}h` : '本月任务实际投入'}
+            icon={<Clock3 size={20} />}
+          />
+          <StatCard label="计费工时" value={`${stats.billableHours.toFixed(1)}h`} trend="已排除不计费项" icon={<CheckCircle2 size={20} />} />
+          <StatCard label="预计收入" value={`¥${stats.amount.toLocaleString()}`} trend={`按 ¥${hourlyRate} / 小时`} icon={<BarChart3 size={20} />} />
+          <StatCard label="验收情况" value={`${stats.accepted} / ${activeMonthTasks.length}`} trend={`${stats.pending} 个待验收`} icon={<ListChecks size={20} />} />
+        </section>
+
+        {(dueTasks.overdue.length > 0 || dueTasks.soon.length > 0) && (
+          <button className="due-strip" onClick={() => navigateView('任务')}>
+            <AlarmClock size={17} />
+            <span>
+              {dueTasks.overdue.length > 0 && <strong className="due-text-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
+              {dueTasks.overdue.length > 0 && dueTasks.soon.length > 0 && ' · '}
+              {dueTasks.soon.length > 0 && <strong className="due-text-soon">{dueTasks.soon.length} 个任务 3 天内交付</strong>}
+            </span>
+            <em>{[...dueTasks.overdue, ...dueTasks.soon].slice(0, 3).map((task) => task.title).join('、')}</em>
+            <ChevronDown size={15} className="due-arrow" />
+          </button>
+        )}
+
+        <section className="content-grid">
+          <div className="main-column">
+            <section className="panel task-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>任务明细</h2>
+                  <p>按月份汇总工作内容、工时和验收状态</p>
+                </div>
+                <div className="panel-tools">
+                  <label className="search-box">
+                    <Search size={16} />
+                    <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、对接人" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="segment-tabs">
+                {taskFilters.map((filter) => (
+                  <button className={taskFilter === filter ? 'active' : ''} key={filter} onClick={() => setTaskFilter(filter)}>
+                    {filter}
+                  </button>
+                ))}
+              </div>
+
+              <div className="task-list">
+                {visibleTasks.length === 0 && (
+                  <div className="empty-state">
+                    <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
+                    <p>{activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}</p>
+                    {activeMonthTasks.length === 0 && (
+                      <button className="ghost-button compact-button empty-state-action" onClick={() => setIsModalOpen(true)}>
+                        <Plus size={15} />
+                        新建任务
+                      </button>
+                    )}
+                  </div>
+                )}
+                {visibleTasks.map((task) => {
+                  const dueState = taskDueState(task, today, dueSoonDate)
+                  return (
+                  <button
+                    className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
+                    key={task.id}
+                    onClick={() => setSelectedTaskId(task.id)}
+                    onContextMenu={(event) => openDashboardContextMenu(event, task)}
+                  >
+                    {isSupplementalTask(task) && (
+                      <small className="task-supplement-corner" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
+                        补录
+                      </small>
+                    )}
+                    <div className="task-date">
+                      <b>{formatMonthDay(task.date)}</b>
+                      <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <div className="task-main">
+                      <strong>{task.title}</strong>
+                      <p>{task.requirement}</p>
+                    </div>
+                    <div className="task-meta">
+                      <b>{task.contact}</b>
+                      <span>
+                        实际 <strong>{task.actualHours.toFixed(1)}h</strong>
+                      </span>
+                    </div>
+                    <div className="task-state">
+                      <div className="task-state-badges">
+                        {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
+                        <StatusBadge status={task.status} />
+                      </div>
+                      <div className="progress-cell">
+                        <div className="mini-meter">
+                          <span style={{ width: `${task.progress}%` }} />
+                        </div>
+                        <small>{task.progress}%</small>
+                      </div>
+                    </div>
+                  </button>
+                  )
+                })}
+                {dashboardContextMenu && (
+                  <TaskContextMenu
+                    menu={dashboardContextMenu}
+                    onClose={() => setDashboardContextMenu(null)}
+                    onOpenTask={handleOpenTaskDetail}
+                    onRequestStatus={handleRequestTaskStatus}
+                    onUpdateTask={handleUpdateTask}
+                    onVoidTask={handleVoidTask}
+                    onRestoreTask={handleRestoreTask}
+                    onDeleteTask={handleDeleteTask}
+                    onCopyTitle={handleCopyTaskTitle}
+                    onCopyShareLink={handleCopyShareLink}
+                    reports={taskContextOptions.reports}
+                    currentMonthValue={taskContextOptions.currentMonthValue}
+                  />
+                )}
+              </div>
+            </section>
+
+            <details className="insight-shell">
+              <summary className="insight-summary">
+                <div>
+                  <h2>本月洞察</h2>
+                  <p>设计类型、周趋势和年度统计</p>
+                </div>
+                <span className="insight-summary-action">
+                  <ChevronDown size={16} />
+                  <em className="show-closed">展开</em>
+                  <em className="show-open">收起</em>
+                </span>
+              </summary>
+
+              <div className="insight-body">
+                <section className="bottom-grid">
+                  <section className="panel distribution-panel">
+                    <div className="panel-header compact">
+                      <div>
+                        <h2>设计类型工时分布</h2>
+                        <p>本月工作类型分布</p>
+                      </div>
+                    </div>
+                    <DonutChart items={donutData.items} total={donutData.total} />
+                  </section>
+
+                  <section className="panel trend-panel">
+                    <div className="panel-header compact">
+                      <div>
+                        <h2>工时趋势 <span>小时</span></h2>
+                        <p>按周查看本月投入变化</p>
+                      </div>
+                    </div>
+                    <TrendChart data={weeklyTrendData} />
+                  </section>
+                </section>
+
+                <section className="panel annual-panel">
+                  <div className="panel-header compact">
+                    <div>
+                      <h2>{annualData.year} 年度统计</h2>
+                      <p>全年计费工时与收入（已锁定月份按结算快照计）</p>
+                    </div>
+                    <div className="annual-totals">
+                      <span>
+                        累计工时 <strong>{annualData.totalHours.toFixed(1)}h</strong>
+                      </span>
+                      <span>
+                        累计收入 <strong>¥{annualData.totalAmount.toLocaleString()}</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="annual-bars">
+                    {annualData.rows.map((row) => {
+                      const maxHours = Math.max(...annualData.rows.map((item) => item.hours), 1)
+                      return (
+                        <div
+                          className={`annual-bar ${row.month === currentMonth.value ? 'current' : ''}`}
+                          key={row.month}
+                          title={`${monthLabelOf(row.month)}：${row.hours.toFixed(1)}h · ¥${row.amount.toLocaleString()}${row.locked ? '（已锁定）' : ''}`}
+                        >
+                          <span className="annual-bar-amount">{row.hours > 0 ? `${row.hours.toFixed(1)}h` : ''}</span>
+                          <div className="annual-bar-track">
+                            <span style={{ height: `${Math.max(row.hours > 0 ? 6 : 0, (row.hours / maxHours) * 100)}%` }} />
+                          </div>
+                          <small>
+                            {Number(row.month.slice(5, 7))}月{row.locked ? ' 🔒' : ''}
+                          </small>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              </div>
+            </details>
+          </div>
+
+          <aside className="side-column">
+            {selectedTask && (
+            <section className="panel detail-card">
+              <div className="detail-title-row">
+                <div className="detail-title">
+                  <p>{selectedTask.type}</p>
+                  <h2>{selectedTask.title}</h2>
+                </div>
+                <TaskStateBadge task={selectedTask} />
+              </div>
+
+              <dl className="detail-meta">
+                <div>
+                  <dt>结算月份</dt>
+                  <dd>
+                    {monthLabelOf(taskSettlementMonth(selectedTask))}
+                    {isSupplementalTask(selectedTask) ? <span className="supplement-inline">补录</span> : null}
+                  </dd>
+                </div>
+                <div>
+                  <dt>预计交付时间</dt>
+                  <dd className="detail-due">
+                    {selectedTask.estimatedDate ? formatPlanDateTime(selectedTask.estimatedDate) : '未设置'}
+                    {(() => {
+                      const dueState = taskDueState(selectedTask, today, dueSoonDate)
+                      return dueState ? <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span> : null
+                    })()}
+                  </dd>
+                </div>
+                <div>
+                  <dt>实际工时</dt>
+                  <dd>{selectedTask.actualHours.toFixed(1)}h</dd>
+                </div>
+                <div>
+                  <dt>需求人</dt>
+                  <dd>{selectedTask.requester || '未填写'}</dd>
+                </div>
+                <div>
+                  <dt>对接人</dt>
+                  <dd>{selectedTask.contact}</dd>
+                </div>
+                <div>
+                  <dt>验收人</dt>
+                  <dd>{selectedTask.reviewer}</dd>
+                </div>
+              </dl>
+
+              <div className="progress-block">
+                <div>
+                  <span>整体进展</span>
+                  <strong>{selectedTask.progress}%</strong>
+                </div>
+                <div className="large-meter">
+                  <span style={{ width: `${selectedTask.progress}%` }} />
+                </div>
+              </div>
+
+              <label className="detail-upload">
+                <UploadCloud size={16} />
+                <em>{isSideUploading ? `上传中 ${sideUploadProgress}%` : '上传附件到该任务'}</em>
+                <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" disabled={isSideUploading} onChange={(event) => void handleSideUpload(event.target.files)} />
+              </label>
+
+              {selectedTask.files.length > 0 && (
+                <div className="file-list">
+                  {selectedTask.files.slice(0, 4).map((file) => (
+                    <span key={file}>
+                      {file.endsWith('.psd') || file.endsWith('.ai') ? <FileArchive size={15} /> : <FileText size={15} />}
+                      {file}
+                    </span>
+                  ))}
+                  {selectedTask.files.length > 4 && <span>+{selectedTask.files.length - 4}</span>}
+                </div>
+              )}
+
+              <div className="detail-activity">
+                <div className="section-heading">
+                  <h3>动态时间轴</h3>
+                  <Clock3 size={15} />
+                </div>
+                {taskActivity.length === 0 && <p className="calendar-empty-hint">暂无操作记录。</p>}
+                <div className="timeline">
+                  {taskActivity.slice(0, 4).map((item) => (
+                    <article className="timeline-item" key={item.id}>
+                      <span className="dot" />
+                      <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
+                      <p>{describeActivity(item)}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+
+              <button className="ghost-button detail-more" onClick={() => handleOpenTaskDetail(selectedTask.id)}>
+                查看更多
+                <ChevronDown size={15} />
+              </button>
+            </section>
+            )}
+
+          </aside>
+        </section>
+          </>
+        )}
+
+        {activeView === '任务' && (
+          <TasksView
+            role={role}
+            viewMode={taskViewMode}
+            onViewModeChange={setTaskViewMode}
+            monthValue={currentMonth.value}
+            activeMonthTasks={activeMonthTasks}
+            selectedTask={selectedTask}
+            tasks={taskPageTasks}
+            taskFilter={taskFilter}
+            taskQuery={taskQuery}
+            showVoidedTasks={showVoidedTasks}
+            voidedTaskCount={voidedMonthTaskCount}
+            onUploadAcceptanceFile={handleAcceptanceFileUpload}
+            onFilterChange={setTaskFilter}
+            onQueryChange={setTaskQuery}
+            onShowVoidedChange={setShowVoidedTasks}
+            onSelectTask={setSelectedTaskId}
+            onUpdateTask={handleUpdateTask}
+            onCreateTaskUpdate={handleCreateTaskUpdate}
+            onRequestDeleteActivity={handleRequestDeleteActivity}
+            onRequestStatus={handleRequestTaskStatus}
+            onVoidTask={handleVoidTask}
+            onRestoreTask={handleRestoreTask}
+            onDeleteTask={handleDeleteTask}
+            onCopyTitle={handleCopyTaskTitle}
+            onCopyShareLink={handleCopyShareLink}
+            onOpenTask={(taskId) => {
+              setSelectedTaskId(taskId)
+              setTaskViewMode('列表')
+            }}
+            reports={reports}
+            activity={taskActivity}
+            onUploadImage={handleQuickUploadImage}
+            onCreateTask={() => setIsModalOpen(true)}
+          />
+        )}
+
+        {activeView === '文件库' && (
+          <FilesView
+            files={fileItems}
+            tasks={taskItems}
+            currentMonthValue={currentMonth.value}
+            onPreviewFile={setPreviewFile}
+            onDeleteFile={handleDeleteFile}
+            onDownloadFile={handleDownloadFile}
+            onUpdateFile={handleUpdateFile}
+          />
+        )}
+
+        {activeView === '收入' && (
+          <IncomeView
+            annualData={annualData}
+            currentMonth={currentMonth}
+            taxMode={taxMode}
+            onMonthChange={setMonthValue}
+          />
+        )}
+
+        {activeView === '结算' && (
+          <ReportsView
+            stats={stats}
+            tasks={activeMonthTasks}
+            updates={monthUpdates}
+            hourlyRate={hourlyRate}
+            importedHours={importedHours}
+            currentMonth={currentMonth}
+            pdfTitle={pdfTitle}
+            serviceCompanyName={serviceCompanyName}
+            reports={reports}
+            onClientPreview={() => navigateView('甲方查看')}
+            onCopyShareLink={handleCopyShareLink}
+            onLockReport={handleLockMonthlyReport}
+          />
+        )}
+
+        {activeView === '甲方查看' && (
+          <ClientReportView
+            stats={stats}
+            tasks={activeMonthTasks}
+            updates={monthUpdates}
+            files={monthFiles}
+            currentMonth={currentMonth}
+            pdfTitle={pdfTitle}
+            serviceCompanyName={serviceCompanyName}
+            onBack={() => navigateView('结算')}
+            onPreviewFile={setPreviewFile}
+          />
+        )}
+
+        {activeView === '设置' && (
+          <SettingsView
+            hourlyRate={hourlyRate}
+            pdfTitle={pdfTitle}
+            serviceCompanyName={serviceCompanyName}
+            taxMode={taxMode}
+            designTypeGroups={designTypeGroups}
+            role={role}
+            accessTokens={accessTokens}
+            newTokenId={newTokenId}
+            onRateChange={handleRateChange}
+            onPdfTitleChange={handlePdfTitleChange}
+            onServiceCompanyNameChange={handleServiceCompanyNameChange}
+            onTaxModeChange={handleTaxModeChange}
+            onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
+            onExportBackup={handleExportBackup}
+            onSignOut={handleSignOut}
+            onChangePassword={handleChangeAdminPassword}
+            onCreateToken={handleCreateAccessToken}
+            onToggleToken={handleToggleAccessToken}
+            onDeleteToken={handleDeleteAccessToken}
+            onCopyToken={handleCopyAccessToken}
+          />
+        )}
+      </section>
+
+      {isModalOpen && (
+        <NewTaskModal
+          designTypeGroups={designTypeGroups}
+          currentMonthValue={currentMonth.value}
+          onClose={() => setIsModalOpen(false)}
+          onCreate={handleCreateTask}
+          onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
+        />
+      )}
+      {detailTaskId > 0 && (() => {
+        const detailTask = taskItems.find((task) => task.id === detailTaskId)
+        return detailTask ? (
+          <TaskDetailModal
+            key={detailTask.id}
+            task={detailTask}
+            role={role}
+            activity={taskActivity}
+            onClose={() => setDetailTaskId(0)}
+            onUpdateTask={handleUpdateTask}
+            onUploadImage={handleQuickUploadImage}
+          />
+        ) : null
+      })()}
+      {confirmDialog && (
+        <ConfirmDialogModal
+          dialog={confirmDialog}
+          isBusy={isConfirmDialogBusy}
+          onClose={() => setConfirmDialog(null)}
+          onConfirm={() => void handleConfirmDialogConfirm()}
+        />
+      )}
+      {voidTaskTarget && (
+        <VoidTaskModal
+          task={voidTaskTarget}
+          isBusy={isVoidTaskBusy}
+          onClose={() => setVoidTaskTarget(null)}
+          onConfirm={(reason) => void confirmVoidTask(reason)}
+        />
+      )}
+      {statusReasonTarget && (
+        <StatusReasonModal
+          target={statusReasonTarget}
+          onClose={() => setStatusReasonTarget(null)}
+          onConfirm={(reason) => void confirmStatusReason(reason)}
+        />
+      )}
+      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
+      {showFireworks && <Fireworks />}
+      {toastQueue.length > 0 && (
+        <div className="toast-stack" role="region" aria-label="操作提示">
+          {toastQueue.map((item) => (
+            <div className={`toast toast-${item.tone}`} key={item.id} role={item.tone === 'error' ? 'alert' : 'status'}>
+              <ToastIcon tone={item.tone} />
+              <span>{item.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </main>
+  )
+}
+
+function DonutChart({
+  items,
+  total,
+}: {
+  items: DonutItem[]
+  total: number
+}) {
+  if (total <= 0) {
+    return (
+      <div className="empty-state">
+        <strong>暂无工时数据</strong>
+        <p>记录任务工时后，这里会按设计类型自动汇总。</p>
+      </div>
+    )
+  }
+
+  const gradient = items
+    .reduce(
+      (result, item) => {
+        const start = result.cursor
+        const end = start + (item.value / total) * 100
+
+        return {
+          cursor: end,
+          segments: [...result.segments, `${item.color} ${start}% ${end}%`],
+        }
+      },
+      { cursor: 0, segments: [] as string[] },
+    )
+    .segments.join(', ')
+
+  return (
+    <div className="donut-layout">
+      <div className="donut-chart" style={{ '--donut-gradient': gradient } as CSSProperties}>
+        <div>
+          <strong>{total.toFixed(1)}h</strong>
+          <span>总计</span>
+        </div>
+      </div>
+      <div className="donut-legend">
+        {items.map((item) => {
+          const percent = Math.round((item.value / total) * 100)
+          return (
+            <div className="legend-row" key={item.label}>
+              <i style={{ background: item.color }} />
+              <span>{item.label}</span>
+              <strong>
+                {item.value.toFixed(1)}h ({percent}%)
+              </strong>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function TrendChart({ data }: { data: { label: string; value: number }[] }) {
+  const width = 560
+  const height = 230
+  const padding = { top: 24, right: 24, bottom: 36, left: 38 }
+  const maxValue = Math.max(4, Math.ceil(Math.max(...data.map((item) => item.value)) / 4) * 4)
+  const ticks = [0, maxValue / 4, maxValue / 2, (maxValue / 4) * 3, maxValue]
+  const innerWidth = width - padding.left - padding.right
+  const innerHeight = height - padding.top - padding.bottom
+  const points = data.map((item, index) => {
+    const x = padding.left + (innerWidth / (data.length - 1)) * index
+    const y = padding.top + innerHeight - (item.value / maxValue) * innerHeight
+    return { ...item, x, y }
+  })
+  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`
+
+  return (
+    <div className="trend-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="本月每周工时趋势">
+        <defs>
+          <linearGradient id="trend-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#2f8f89" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#2f8f89" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ticks.map((tick) => {
+          const y = padding.top + innerHeight - (tick / maxValue) * innerHeight
+          return (
+            <g key={tick}>
+              <line className="grid-line" x1={padding.left} x2={width - padding.right} y1={y} y2={y} />
+              <text className="axis-label y-label" x={10} y={y + 5}>
+                {tick}
+              </text>
+            </g>
+          )
+        })}
+        <path className="trend-area" d={areaPath} />
+        <path className="trend-line" d={linePath} />
+        {points.map((point) => (
+          <g key={point.label}>
+            <circle className="trend-point" cx={point.x} cy={point.y} r="5.5" />
+            <text className="point-label" x={point.x} y={point.y - 14}>
+              {point.value.toFixed(1)}
+            </text>
+            <text className="axis-label x-label" x={point.x} y={height - 9}>
+              {point.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+function StatCard({
+  label,
+  value,
+  trend,
+  icon,
+}: {
+  label: string
+  value: string
+  trend: string
+  icon: React.ReactNode
+}) {
+  return (
+    <article className="stat-card">
+      <div className="stat-icon">{icon}</div>
+      <div className="stat-text">
+        <p>{label}</p>
+        <strong>{value}</strong>
+        <span>{trend}</span>
+      </div>
+    </article>
+  )
+}
+
+function StatusBadge({ status }: { status: TaskStatus }) {
+  return <span className={`status-badge status-${status}`}>{status}</span>
+}
+
+function TaskStateBadge({ task }: { task: Task }) {
+  if (task.voidedAt) {
+    return <span className="status-badge status-voided">已作废</span>
+  }
+  return <StatusBadge status={task.status} />
+}
+
+function Fireworks() {
+  return (
+    <div className="fireworks" aria-hidden="true">
+      {Array.from({ length: 32 }, (_, index) => (
+        <span key={index} style={{ '--i': index } as CSSProperties} />
+      ))}
+    </div>
+  )
+}
+
+function LockScreen({ error, onSubmit }: { error: string; onSubmit: (email: string, key: string) => void }) {
+  const resetParams = new URLSearchParams(window.location.search)
+  const initialResetToken = resetParams.get('resetToken') ?? ''
+  const initialResetEmail = resetParams.get('email') ?? ''
+  const [mode, setMode] = useState<'login' | 'forgot' | 'reset'>(initialResetToken ? 'reset' : 'login')
+  const [email, setEmail] = useState(initialResetEmail)
+  const [key, setKey] = useState('')
+  const [resetToken, setResetToken] = useState(initialResetToken)
+  const [newPassword, setNewPassword] = useState('')
+  const [localMessage, setLocalMessage] = useState('')
+  const [localError, setLocalError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!key.trim() || isSubmitting) {
+      return
+    }
+    setIsSubmitting(true)
+    await Promise.resolve(onSubmit(email.trim(), key.trim()))
+    setIsSubmitting(false)
+  }
+
+  const requestReset = async () => {
+    if (!email.trim() || isSubmitting) {
+      return
+    }
+    setIsSubmitting(true)
+    setLocalError('')
+    setLocalMessage('')
+    try {
+      await api.requestPasswordReset(email.trim())
+      setLocalMessage('如果邮箱匹配管理员账号，系统会发送一封密码重置邮件。')
+    } catch (requestError) {
+      setLocalError(requestError instanceof Error ? requestError.message : '重置邮件发送失败')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const confirmReset = async () => {
+    if (!email.trim() || !resetToken.trim() || !newPassword.trim() || isSubmitting) {
+      return
+    }
+    setIsSubmitting(true)
+    setLocalError('')
+    setLocalMessage('')
+    try {
+      await api.confirmPasswordReset({ email: email.trim(), token: resetToken.trim(), newPassword })
+      setLocalMessage('密码已重置，正在进入工作台。')
+      window.history.replaceState({}, document.title, window.location.pathname)
+      await Promise.resolve(onSubmit(email.trim(), newPassword))
+    } catch (resetError) {
+      setLocalError(resetError instanceof Error ? resetError.message : '密码重置失败')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      void handleSubmit()
+    }
+  }
+
+  return (
+    <main className="lock-screen">
+      <section className="lock-card">
+        <div className="brand-mark">
+          <img className="brand-logo" src="/giverny-logo.png" alt="" />
+        </div>
+        <h1>Giverny</h1>
+        <p>{mode === 'login' ? '管理员使用邮箱和密码登录；访问口令登录时邮箱留空即可。' : '输入管理员邮箱，按邮件中的链接完成密码重置。'}</p>
+        <label className="lock-input">
+          <Mail size={16} />
+          <input
+            type="email"
+            value={email}
+            placeholder="管理员邮箱（访问口令登录可留空）"
+            autoFocus
+            onChange={(event) => setEmail(event.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </label>
+        {mode === 'login' && (
+          <>
+            <label className="lock-input">
+              <Lock size={16} />
+              <input
+                type="password"
+                value={key}
+                placeholder="管理密码或访问口令"
+                onChange={(event) => setKey(event.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+            </label>
+            {error && <p className="lock-error">{error}</p>}
+            <button className="primary-button" onClick={() => void handleSubmit()} disabled={!key.trim() || isSubmitting}>
+              {isSubmitting ? '登录中…' : '进入工作台'}
+            </button>
+            <button className="text-button" onClick={() => { setMode('forgot'); setLocalError(''); setLocalMessage('') }}>
+              忘记密码？
+            </button>
+          </>
+        )}
+        {mode === 'forgot' && (
+          <>
+            {localMessage && <p className="lock-message">{localMessage}</p>}
+            {localError && <p className="lock-error">{localError}</p>}
+            <button className="primary-button" onClick={() => void requestReset()} disabled={!email.trim() || isSubmitting}>
+              {isSubmitting ? '发送中…' : '发送重置邮件'}
+            </button>
+            <button className="text-button" onClick={() => { setMode('login'); setLocalError(''); setLocalMessage('') }}>
+              返回登录
+            </button>
+          </>
+        )}
+        {mode === 'reset' && (
+          <>
+            <label className="lock-input">
+              <KeyRound size={16} />
+              <input value={resetToken} placeholder="重置令牌" onChange={(event) => setResetToken(event.target.value)} />
+            </label>
+            <label className="lock-input">
+              <Lock size={16} />
+              <input type="password" value={newPassword} placeholder="设置新密码（至少 8 位）" onChange={(event) => setNewPassword(event.target.value)} />
+            </label>
+            {localMessage && <p className="lock-message">{localMessage}</p>}
+            {localError && <p className="lock-error">{localError}</p>}
+            <button className="primary-button" onClick={() => void confirmReset()} disabled={!email.trim() || !resetToken.trim() || newPassword.length < 8 || isSubmitting}>
+              {isSubmitting ? '重置中…' : '重置并登录'}
+            </button>
+            <button className="text-button" onClick={() => { setMode('login'); setLocalError(''); setLocalMessage('') }}>
+              返回登录
+            </button>
+          </>
+        )}
+      </section>
+    </main>
+  )
+}
+
+function TaskContextMenu({
+  menu,
+  onClose,
+  onOpenTask,
+  onRequestStatus,
+  onUpdateTask,
+  onVoidTask,
+  onRestoreTask,
+  onDeleteTask,
+  onCopyTitle,
+  onCopyShareLink,
+  reports,
+  currentMonthValue,
+}: {
+  menu: { x: number; y: number; task: Task }
+  onClose: () => void
+  onOpenTask: (taskId: number) => void
+  onRequestStatus: (taskId: number, status: TaskStatus) => void
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
+  onVoidTask: (taskId: number) => void
+  onRestoreTask: (taskId: number) => void
+  onDeleteTask: (taskId: number) => void
+  onCopyTitle: (title: string) => void
+  onCopyShareLink: (token: string) => void
+  reports: ReportRecord[]
+  currentMonthValue: string
+}) {
+  const run = (action: () => void) => {
+    action()
+    onClose()
+  }
+
+  const taskMonth = taskSettlementMonth(menu.task)
+  const report = reports.find((item) => item.month === taskMonth)
+  const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
+  const isVoided = Boolean(menu.task.voidedAt)
+
+  return (
+    <div className="task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+      <button type="button" onClick={() => run(() => onOpenTask(menu.task.id))}>
+        <Eye size={15} />
+        查看详情
+      </button>
+      {!isVoided && (
+        <div className="context-submenu">
+          <button type="button" className="context-menu-parent" aria-haspopup="menu">
+            <ListChecks size={15} />
+            状态
+            <ChevronRight size={14} />
+          </button>
+          <div className="context-submenu-panel" role="menu">
+            {(['进行中', '待验收', '挂起', '终止'] as TaskStatus[]).map((status) => (
+              <button type="button" key={status} onClick={() => run(() => onRequestStatus(menu.task.id, status))}>
+                {status === '进行中' ? <Clock3 size={15} /> : status === '待验收' ? <CheckCircle2 size={15} /> : status === '挂起' ? <Archive size={15} /> : <AlertTriangle size={15} />}
+                {status}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <button type="button" onClick={() => run(() => onCopyTitle(menu.task.title))}>
+        <Copy size={15} />
+        复制任务名称
+      </button>
+      {report && (
+        <button type="button" onClick={() => run(() => onCopyShareLink(report.publicToken))}>
+          <Share2 size={15} />
+          复制甲方分享链接
+        </button>
+      )}
+      {!isVoided && (
+        <div className="context-submenu">
+          <button type="button" className="context-menu-parent" aria-haspopup="menu">
+            <CalendarDays size={15} />
+            改归属月份
+            <ChevronRight size={14} />
+          </button>
+          <div className="context-submenu-panel month-submenu-panel" role="menu">
+            {monthOptions.map((month) => (
+              <button type="button" key={month} onClick={() => run(() => onUpdateTask(menu.task.id, { settlementMonth: month }))}>
+                {month === taskMonth ? <CheckCircle2 size={15} /> : <CalendarDays size={15} />}
+                {monthLabelOf(month)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {isVoided && (
+        <button type="button" onClick={() => run(() => onRestoreTask(menu.task.id))}>
+          <RotateCcw size={15} />
+          恢复任务
+        </button>
+      )}
+      <div className="context-menu-separator" />
+      {isVoided ? (
+        <button type="button" className="danger" onClick={() => run(() => onDeleteTask(menu.task.id))}>
+          <Trash2 size={15} />
+          永久删除
+        </button>
+      ) : (
+        <button type="button" className="danger" onClick={() => run(() => onVoidTask(menu.task.id))}>
+          <Trash2 size={15} />
+          作废任务
+        </button>
+      )}
+    </div>
+  )
+}
+
+function FileContextMenu({
+  menu,
+  onClose,
+  onPreview,
+  onOpen,
+  onDownload,
+  onFocusName,
+  onFocusTag,
+  onDelete,
+}: {
+  menu: { x: number; y: number; file: FileAsset }
+  onClose: () => void
+  onPreview: (file: FileAsset) => void
+  onOpen: (file: FileAsset) => void
+  onDownload: (file: FileAsset) => void
+  onFocusName: (file: FileAsset) => void
+  onFocusTag: (file: FileAsset) => void
+  onDelete: (fileId: number) => void
+}) {
+  const run = (action: () => void) => {
+    action()
+    onClose()
+  }
+
+  return (
+    <div className="task-context-menu file-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+      <button type="button" onClick={() => run(() => onPreview(menu.file))}>
+        <Eye size={15} />
+        预览
+      </button>
+      <button type="button" onClick={() => run(() => onOpen(menu.file))}>
+        <ExternalLink size={15} />
+        打开原文件
+      </button>
+      <button type="button" onClick={() => run(() => onFocusName(menu.file))}>
+        <Pencil size={15} />
+        重命名
+      </button>
+      <button type="button" onClick={() => run(() => onFocusTag(menu.file))}>
+        <Tag size={15} />
+        添加标签
+      </button>
+      <button type="button" onClick={() => run(() => onDownload(menu.file))}>
+        <Download size={15} />
+        下载源文件
+      </button>
+      <div className="context-menu-separator" />
+      <button type="button" className="danger" onClick={() => run(() => onDelete(menu.file.id))}>
+        <Trash2 size={15} />
+        删除
+      </button>
+    </div>
+  )
+}
+
+function TasksView({
+  role,
+  viewMode,
+  onViewModeChange,
+  monthValue,
+  activeMonthTasks,
+  selectedTask,
+  tasks,
+  taskFilter,
+  taskQuery,
+  showVoidedTasks,
+  voidedTaskCount,
+  onUploadAcceptanceFile,
+  onFilterChange,
+  onQueryChange,
+  onShowVoidedChange,
+  onSelectTask,
+  onUpdateTask,
+  onCreateTaskUpdate,
+  onRequestDeleteActivity,
+  onRequestStatus,
+  onVoidTask,
+  onRestoreTask,
+  onDeleteTask,
+  onCopyTitle,
+  onCopyShareLink,
+  onOpenTask,
+  reports,
+  activity,
+  onUploadImage,
+  onCreateTask,
+}: {
+  role: AuthRole
+  viewMode: TaskViewMode
+  onViewModeChange: (mode: TaskViewMode) => void
+  monthValue: string
+  activeMonthTasks: Task[]
+  selectedTask: Task | undefined
+  tasks: Task[]
+  taskFilter: TaskFilter
+  taskQuery: string
+  showVoidedTasks: boolean
+  voidedTaskCount: number
+  onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
+  onFilterChange: (filter: TaskFilter) => void
+  onQueryChange: (query: string) => void
+  onShowVoidedChange: (value: boolean) => void
+  onSelectTask: (id: number) => void
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
+  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
+  onRequestDeleteActivity: (item: ActivityItem, task: Task) => void
+  onRequestStatus: (taskId: number, status: TaskStatus) => void
+  onVoidTask: (taskId: number) => void
+  onRestoreTask: (taskId: number) => void
+  onDeleteTask: (taskId: number) => void
+  onCopyTitle: (title: string) => void
+  onCopyShareLink: (token: string) => void
+  onOpenTask: (taskId: number) => void
+  reports: ReportRecord[]
+  activity: ActivityItem[]
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onCreateTask: () => void
+}) {
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
+  const viewTabs = (
+    <div className="view-mode-tabs" aria-label="任务视图切换">
+      <button className={viewMode === '列表' ? 'active' : ''} onClick={() => onViewModeChange('列表')}>
+        <List size={15} />
+        列表视图
+      </button>
+      <button className={viewMode === '日历' ? 'active' : ''} onClick={() => onViewModeChange('日历')}>
+        <CalendarDays size={15} />
+        日历视图
+      </button>
+    </div>
+  )
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+    const closeMenu = () => setContextMenu(null)
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('keydown', handleKeydown)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('keydown', handleKeydown)
+    }
+  }, [contextMenu])
+
+  const openContextMenu = (event: React.MouseEvent, task: Task) => {
+    event.preventDefault()
+    onSelectTask(task.id)
+    setContextMenu({ x: event.clientX, y: event.clientY, task })
+  }
+
+  if (viewMode === '日历') {
+    return (
+      <section className="view-stack">
+        <section className="panel view-toolbar">
+          <div className="panel-header compact">
+            <div>
+              <h2>任务日历</h2>
+              <p>按日期查看已完成与待完成任务，点击日期查看当天安排</p>
+            </div>
+            {viewTabs}
+          </div>
+        </section>
+        <CalendarView key={monthValue} monthValue={monthValue} tasks={activeMonthTasks} onOpenTask={onOpenTask} />
+      </section>
+    )
+  }
+
+  return (
+    <section className="view-stack">
+      <section className="panel view-toolbar">
+        <div className="panel-header compact">
+          <div>
+            <h2>任务管理</h2>
+            <p>集中维护任务字段、验收状态、工时与交付文件</p>
+          </div>
+          {viewTabs}
+        </div>
+        <div className="task-toolbar-row">
+          <div className="segment-tabs">
+            {taskFilters.map((filter) => (
+              <button className={taskFilter === filter ? 'active' : ''} key={filter} onClick={() => onFilterChange(filter)}>
+                {filter === '全部' ? '全部任务' : filter}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={`voided-toggle ${showVoidedTasks ? 'active' : ''}`}
+            onClick={() => {
+              const nextValue = !showVoidedTasks
+              onShowVoidedChange(nextValue)
+              if (nextValue) {
+                onFilterChange('全部')
+              }
+            }}
+            title="作废任务默认隐藏，不参与统计、月报和工时"
+          >
+            <Archive size={15} />
+            {showVoidedTasks ? '隐藏作废' : `显示作废${voidedTaskCount ? ` ${voidedTaskCount}` : ''}`}
+          </button>
+        </div>
+        <label className="search-box wide-search">
+          <Search size={16} />
+          <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、对接人" />
+        </label>
+      </section>
+
+      <section className="management-grid">
+        <div className="panel task-management-list">
+          <div className="table-head">
+            <span>任务</span>
+            <span>对接</span>
+            <span>交付</span>
+            <span>工时</span>
+            <span>状态</span>
+          </div>
+          {tasks.map((task) => {
+            const dueState = taskDueState(task, isoDate(), isoDate(3))
+            return (
+            <button
+              className={`management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''}`}
+              key={task.id}
+              onClick={() => onSelectTask(task.id)}
+              onContextMenu={(event) => openContextMenu(event, task)}
+            >
+              <div>
+                <strong>{task.title}</strong>
+                <small>
+                  {task.type} · {task.requirement}
+                </small>
+                {isSupplementalTask(task) && <em>补录至 {monthLabelOf(taskSettlementMonth(task))}</em>}
+                {task.voidedAt && <em className="voided-row-note">已作废{task.voidReason ? `：${task.voidReason}` : ''}</em>}
+              </div>
+              <span className="management-contact">{task.contact}</span>
+              <div className="management-deliver">
+                <span>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
+                {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '逾期' : '临期'}</span>}
+              </div>
+              <strong className="management-hours">{task.actualHours.toFixed(1)}h</strong>
+              <TaskStateBadge task={task} />
+            </button>
+            )
+          })}
+          {tasks.length === 0 && (
+            <div className="empty-state">
+              <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
+              <p>{activeMonthTasks.length === 0 ? '新建任务后，右侧会显示信息和进展时间轴。' : '换一个关键词或状态筛选试试。'}</p>
+              {activeMonthTasks.length === 0 && (
+                <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
+                  <Plus size={15} />
+                  新建任务
+                </button>
+              )}
+            </div>
+          )}
+          {contextMenu && (
+            <TaskContextMenu
+              menu={contextMenu}
+              onClose={() => setContextMenu(null)}
+              onOpenTask={onOpenTask}
+              onRequestStatus={onRequestStatus}
+              onUpdateTask={onUpdateTask}
+              onVoidTask={onVoidTask}
+              onRestoreTask={onRestoreTask}
+              onDeleteTask={onDeleteTask}
+              onCopyTitle={onCopyTitle}
+              onCopyShareLink={onCopyShareLink}
+              reports={reports}
+              currentMonthValue={monthValue}
+            />
+          )}
+        </div>
+
+        {selectedTask ? (
+          <TaskEditor
+            key={`${selectedTask.id}-${selectedTask.status}`}
+            task={selectedTask}
+            role={role}
+            activity={activity}
+            onUpdateTask={onUpdateTask}
+            onCreateTaskUpdate={onCreateTaskUpdate}
+            onRequestDeleteActivity={onRequestDeleteActivity}
+            onUploadAcceptanceFile={onUploadAcceptanceFile}
+            onUploadImage={onUploadImage}
+          />
+        ) : (
+        <aside className="panel task-editor-preview">
+          <div className="empty-state">
+            <strong>还没有任务</strong>
+            <p>点击「新建任务」开始记录这个月的设计工作。</p>
+            <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
+              <Plus size={15} />
+              新建任务
+            </button>
+          </div>
+        </aside>
+        )}
+      </section>
+    </section>
+  )
+}
+
+function TaskEditor({
+  task,
+  role,
+  activity,
+  onUpdateTask,
+  onCreateTaskUpdate,
+  onRequestDeleteActivity,
+  onUploadAcceptanceFile,
+  onUploadImage,
+}: {
+  task: Task
+  role: AuthRole
+  activity: ActivityItem[]
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
+  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
+  onRequestDeleteActivity: (item: ActivityItem, task: Task) => void
+  onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+}) {
+  const [activeTab, setActiveTab] = useState<'信息' | '进展'>(() => (task.status === '待验收' ? '进展' : '信息'))
+  const [draft, setDraft] = useState({
+    title: task.title,
+    type: task.type,
+    date: task.date,
+    estimatedDate: task.estimatedDate,
+    settlementMonth: taskSettlementMonth(task),
+    requester: task.requester ?? '',
+    contact: task.contact,
+    reviewer: task.reviewer,
+    requirement: task.requirement,
+  })
+  const [acceptanceOpen, setAcceptanceOpen] = useState(false)
+  const [reasonDraft, setReasonDraft] = useState<{ status: '挂起' | '终止'; reason: string } | null>(null)
+  const [timeDraft, setTimeDraft] = useState(defaultTimeEntryDraft)
+  const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>('start')
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [pickProgress, setPickProgress] = useState(0)
+  const [uploadError, setUploadError] = useState('')
+  const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
+  const [acceptancePanelOpen, setAcceptancePanelOpen] = useState(false)
+  const [progressNote, setProgressNote] = useState('')
+  const [isSavingProgressNote, setIsSavingProgressNote] = useState(false)
+  const [progressDraftState, setProgressDraftState] = useState<{ taskId: number; value: number } | null>(null)
+  const [progressSavedOverride, setProgressSavedOverride] = useState<{ taskId: number; value: number } | null>(null)
+  const [activityCollapsed, setActivityCollapsed] = useState(false)
+
+  const setField = (field: keyof typeof draft) => (value: string) => setDraft((current) => ({ ...current, [field]: value }))
+  const timeEntries = task.timeEntries ?? []
+  const trackedMinutes = sumTimeEntries(timeEntries)
+  const reviewHours = timeEntries.length > 0 ? hoursFromTimeEntries(timeEntries) : task.actualHours
+  const updateActivity = activity.filter((item) => item.entityType === 'update')
+  const editorDueState = taskDueState(task, isoDate(), isoDate(3))
+  const savedProgressFromTask = snapProgress(task.progress)
+  const savedProgress = progressSavedOverride?.taskId === task.id && progressSavedOverride.value !== savedProgressFromTask
+    ? progressSavedOverride.value
+    : savedProgressFromTask
+  const progressDraftValue = progressDraftState?.taskId === task.id ? progressDraftState.value : null
+  const displayedProgress = progressDraftValue ?? savedProgress
+  const progressDirty = progressDraftValue !== null && progressDraftValue !== savedProgress
+  const progressOptions = [0, 20, 40, 60, 80, 100]
+  const canManageActivity = role === 'admin'
+
+  const saveTimeEntries = (entries: TimeEntry[]) => {
+    const actualHours = hoursFromTimeEntries(entries)
+    onUpdateTask(task.id, {
+      timeEntries: entries,
+      actualHours,
+      status: task.status === '计划中' ? '进行中' : task.status,
+    })
+  }
+
+  const addTimeEntry = () => {
+    const start = timeDraft.start.trim()
+    const end = timeDraft.end.trim()
+    const note = timeDraft.note.trim()
+    if (!start || !end || minutesBetween(start, end) <= 0) {
+      return
+    }
+    saveTimeEntries([...timeEntries, { id: crypto.randomUUID(), start, end, note }])
+    setTimeDraft(defaultTimeEntryDraft())
+  }
+
+  const deleteTimeEntry = (entryId: string) => {
+    saveTimeEntries(timeEntries.filter((entry) => entry.id !== entryId))
+  }
+
+  const requestDeleteTimeEntry = (entry: TimeEntry) => {
+    setTimeEntryToDelete(entry)
+  }
+
+  const commitText = (field: 'title' | 'type' | 'date' | 'estimatedDate' | 'settlementMonth' | 'requester' | 'contact' | 'reviewer' | 'requirement') => {
+    const value = draft[field].trim()
+    const originalValue = field === 'settlementMonth' ? taskSettlementMonth(task) : String(task[field] ?? '')
+    if (value && value !== originalValue) {
+      const changes: Partial<Task> = { [field]: value }
+      if (field === 'requester' && (!task.reviewer || task.reviewer === '待确认' || task.reviewer === originalValue)) {
+        changes.reviewer = value
+        setDraft((current) => ({ ...current, reviewer: value }))
+      }
+      onUpdateTask(task.id, changes)
+    } else if (!value) {
+      setDraft((current) => ({ ...current, [field]: originalValue }))
+    }
+  }
+
+  const taskEstimatedMinutes = Math.round((Number(task.estimatedHours) || 0) * 60)
+
+  const updatePlannedStartTime = (value: string) => {
+    const estimatedDate = addMinutesToPlanDateTime(value, taskEstimatedMinutes)
+    const changes: Partial<Task> = { date: value, estimatedDate }
+    setDraft((current) => ({ ...current, date: value, estimatedDate }))
+    onUpdateTask(task.id, changes)
+  }
+
+  const updatePlannedEndTime = (value: string) => {
+    const date = addMinutesToPlanDateTime(value, -taskEstimatedMinutes)
+    const changes: Partial<Task> = { date, estimatedDate: value }
+    setDraft((current) => ({ ...current, date, estimatedDate: value }))
+    onUpdateTask(task.id, changes)
+  }
+
+  const updateEstimatedHours = (valueMinutes: number) => {
+    const estimatedHours = Math.round((valueMinutes / 60) * 100) / 100
+    if (scheduleAnchor === 'end') {
+      const date = addMinutesToPlanDateTime(draft.estimatedDate || task.estimatedDate || task.date, -valueMinutes)
+      const changes: Partial<Task> = { estimatedHours, date }
+      setDraft((current) => ({ ...current, date }))
+      onUpdateTask(task.id, changes)
+      return
+    }
+    const estimatedDate = addMinutesToPlanDateTime(draft.date || task.date, valueMinutes)
+    setDraft((current) => ({ ...current, estimatedDate }))
+    onUpdateTask(task.id, { estimatedHours, estimatedDate })
+  }
+
+  const updateSettlementMonth = (value: string) => {
+    const nextValue = monthPart(value)
+    setDraft((current) => ({ ...current, settlementMonth: nextValue }))
+    if (nextValue !== taskSettlementMonth(task)) {
+      onUpdateTask(task.id, { settlementMonth: nextValue })
+    }
+  }
+
+  const setProgressDraft = (nextValue: number) => {
+    const value = snapProgress(nextValue)
+    setProgressDraftState({ taskId: task.id, value })
+  }
+
+  const resetProgressDraft = () => {
+    setProgressDraftState(null)
+  }
+
+  const confirmProgress = () => {
+    if (progressDraftValue === null || progressDraftValue === savedProgress) {
+      resetProgressDraft()
+      return
+    }
+    onUpdateTask(task.id, { progress: progressDraftValue })
+    setProgressSavedOverride({ taskId: task.id, value: progressDraftValue })
+    setProgressDraftState(null)
+  }
+
+  const requestDeleteActivity = (item: ActivityItem) => {
+    if (!canManageActivity) {
+      return
+    }
+    onRequestDeleteActivity(item, task)
+  }
+
+  const commitProgressNote = async () => {
+    const body = progressNote.trim()
+    if (!body || isSavingProgressNote) {
+      return
+    }
+    setIsSavingProgressNote(true)
+    try {
+      await onCreateTaskUpdate(task.id, {
+        title: '进展更新',
+        body,
+        hours: 0,
+        visible: false,
+      })
+      setProgressNote('')
+    } finally {
+      setIsSavingProgressNote(false)
+    }
+  }
+
+  const changeStatus = (status: TaskStatus) => {
+    if (status === '挂起') {
+      setAcceptanceOpen(false)
+      setReasonDraft({ status, reason: task.suspendReason || '' })
+      return
+    }
+    if (status === '终止') {
+      setAcceptanceOpen(false)
+      setReasonDraft({ status, reason: task.terminateReason || '' })
+      return
+    }
+    if (status === '已验收') {
+      setReasonDraft(null)
+      setAcceptanceOpen(true)
+      return
+    }
+    setReasonDraft(null)
+    onUpdateTask(task.id, { status })
+  }
+
+  const confirmReasonStatus = () => {
+    if (!reasonDraft?.reason.trim()) {
+      return
+    }
+    if (reasonDraft.status === '挂起') {
+      onUpdateTask(task.id, { status: '挂起', suspendReason: reasonDraft.reason.trim(), progress: task.progress })
+    } else {
+      onUpdateTask(task.id, { status: '终止', terminateReason: reasonDraft.reason.trim(), progress: task.progress })
+    }
+    setReasonDraft(null)
+  }
+
+  const confirmAcceptance = (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => {
+    onUpdateTask(task.id, {
+      status: '已验收',
+      reviewer: draft.reviewer.trim() || draft.requester.trim() || task.reviewer,
+      actualHours: payload.actualHours,
+      acceptanceNote: payload.acceptanceNote,
+      timeEntries: payload.timeEntries,
+      acceptanceFiles: payload.acceptanceFiles,
+      progress: 100,
+    })
+    setAcceptanceOpen(false)
+    setAcceptancePanelOpen(false)
+  }
+
+  const handlePickImage = async (fileList: FileList | null) => {
+    const file = fileList?.[0]
+    if (!file) {
+      return
+    }
+    setUploadError('')
+    try {
+      validateUploadFile(file)
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : '文件过大，无法上传')
+      return
+    }
+    setIsUploadingImage(true)
+    setPickProgress(0)
+    try {
+      await onUploadImage(task.id, file, (ratio) => setPickProgress(Math.round(ratio * 100)))
+      if (task.status === '计划中') {
+        onUpdateTask(task.id, { status: '进行中' })
+      }
+    } finally {
+      setIsUploadingImage(false)
+      setPickProgress(0)
+    }
+  }
+
+  return (
+    <aside className="panel task-editor-preview">
+      <div className="task-editor-hero">
+        <div>
+          <p>任务详情</p>
+          <h2>{task.title}</h2>
+          <small>
+            {datePart(task.date).replaceAll('-', '/')} · {task.type} · 对接 {task.contact}
+          </small>
+        </div>
+        <TaskStateBadge task={task} />
+      </div>
+
+      <div className="task-editor-tabs" aria-label="任务详情页签">
+        <button className={activeTab === '信息' ? 'active' : ''} onClick={() => setActiveTab('信息')}>
+          信息
+        </button>
+        <button className={activeTab === '进展' ? 'active' : ''} onClick={() => setActiveTab('进展')}>
+          进展 <span />
+        </button>
+      </div>
+
+      {activeTab === '信息' ? (
+        <section className="task-editor-pane">
+          <div className="editor-section-title">
+            <div>
+              <h3>核心信息</h3>
+              <p>任务名称、需求和对接关系，修改后离开输入框自动保存。</p>
+            </div>
+          </div>
+          <div className="editor-fields">
+            <label className="field wide">
+              <span>任务名称</span>
+              <input value={draft.title} onChange={(event) => setField('title')(event.target.value)} onBlur={() => commitText('title')} />
+            </label>
+            <label className="field">
+              <span>设计类型</span>
+              <input value={draft.type} onChange={(event) => setField('type')(event.target.value)} onBlur={() => commitText('type')} />
+            </label>
+            <label className="field">
+              <span>对接人</span>
+              <input value={draft.contact} onChange={(event) => setField('contact')(event.target.value)} onBlur={() => commitText('contact')} />
+            </label>
+            <label className="field">
+              <span>需求人</span>
+              <input value={draft.requester} onChange={(event) => setField('requester')(event.target.value)} onBlur={() => commitText('requester')} />
+            </label>
+            <label className="field">
+              <span>验收人</span>
+              <input value={draft.reviewer} onChange={(event) => setField('reviewer')(event.target.value)} onBlur={() => commitText('reviewer')} />
+            </label>
+            <label className="field wide">
+              <span>任务需求</span>
+              <textarea
+                value={draft.requirement}
+                onChange={(event) => setField('requirement')(event.target.value)}
+                onBlur={() => commitText('requirement')}
+              />
+            </label>
+          </div>
+
+          <div className="editor-section-title">
+            <div>
+              <h3>排期与结算</h3>
+              <p>预计开始、预计交付、预估工时和结算月份。</p>
+            </div>
+          </div>
+          <div className="editor-fields">
+            <PlanDateTimeField
+              label="预计开始时间"
+              value={draft.date}
+              onChange={updatePlannedStartTime}
+              isActive={scheduleAnchor === 'start'}
+              readOnly={scheduleAnchor !== 'start'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+            />
+            <PlanDateTimeField
+              label="预计交付时间"
+              value={draft.estimatedDate}
+              onChange={updatePlannedEndTime}
+              isActive={scheduleAnchor === 'end'}
+              readOnly={scheduleAnchor !== 'end'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+            />
+            <label className="field">
+              <span>预估工时</span>
+              <DurationPicker valueMinutes={taskEstimatedMinutes} onChange={updateEstimatedHours} />
+            </label>
+            <SettlementMonthField label="结算月份" value={draft.settlementMonth} onChange={updateSettlementMonth} />
+          </div>
+        </section>
+      ) : (
+        <section className="task-editor-pane progress-editor-pane">
+          <section className="progress-log-panel">
+            <div className="workflow-section-title">
+              <h3>进展记录</h3>
+              <span>进行中随时更新</span>
+            </div>
+            <div className="progress-note-box">
+              <div className="progress-note-box-head">
+                <strong>进展时间轴</strong>
+                <div>
+                  <span>{activity.length} 条记录</span>
+                  {activity.length > 0 && (
+                    <button type="button" onClick={() => setActivityCollapsed((current) => !current)}>
+                      {activityCollapsed ? '展开' : '折叠'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="progress-note-list">
+                {activity.length === 0 && <p className="calendar-empty-hint">还没有动态记录。可以写下当前做到哪一步，或先上传过程附件。</p>}
+                {activity.length > 0 && activityCollapsed && (
+                  <p className="progress-collapsed-hint">已折叠 {activity.length} 条任务动态。</p>
+                )}
+                {!activityCollapsed && activity.slice(0, 8).map((item) => (
+                  <article
+                    className="progress-note-card"
+                    key={item.id}
+                    onContextMenu={(event) => {
+                      if (!canManageActivity) {
+                        return
+                      }
+                      event.preventDefault()
+                      requestDeleteActivity(item)
+                    }}
+                  >
+                    <div>
+                      <strong>{item.entityType === 'update' ? String(item.payload?.title ?? '进展更新') : '任务动态'}</strong>
+                      <span>
+                        <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
+                        {canManageActivity && (
+                          <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => requestDeleteActivity(item)}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <p>{item.entityType === 'update' ? String(item.payload?.body ?? describeActivity(item)) : describeActivity(item)}</p>
+                  </article>
+                ))}
+              </div>
+              <div className="progress-note-create">
+                <textarea
+                  value={progressNote}
+                  placeholder="写一下目前的进度到哪了，例如：与对接人确认了尺寸，正在出草图。"
+                  onChange={(event) => setProgressNote(event.target.value)}
+                />
+                <div className="progress-note-actions">
+                  <label className="ghost-link-button progress-attach-button">
+                    <Plus size={14} />
+                    {isUploadingImage ? `上传中 ${pickProgress}%` : '添加过程附件'}
+                    <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" disabled={isUploadingImage} onChange={(event) => void handlePickImage(event.target.files)} />
+                  </label>
+                  <button className="primary-button compact-button" disabled={!progressNote.trim() || isSavingProgressNote} onClick={() => void commitProgressNote()}>
+                    {isSavingProgressNote ? '发布中…' : '发布进展'}
+                  </button>
+                </div>
+              </div>
+              <div className="progress-record-controls">
+                <section className="progress-slider-panel">
+                  <div className="workflow-section-title">
+                    <h3>整体进展</h3>
+                    <span className={progressDirty ? 'progress-unsaved-label' : ''}>
+                      {progressDirty ? `● 未保存（${displayedProgress}%）` : '已保存'}
+                    </span>
+                  </div>
+                  <div className="progress-slider-row">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={10}
+                      value={displayedProgress}
+                      style={{ '--progress-value': `${displayedProgress}%` } as CSSProperties}
+                      onChange={(event) => setProgressDraft(Number.parseInt(event.target.value, 10))}
+                    />
+                    <strong>{displayedProgress}%</strong>
+                  </div>
+                  <div className="progress-draft-row">
+                    <div className="progress-quick-options" aria-label="进度档位快选">
+                      {progressOptions.map((value) => (
+                        <button
+                          type="button"
+                          className={displayedProgress === value ? 'active' : ''}
+                          key={value}
+                          onClick={() => setProgressDraft(value)}
+                        >
+                          {value}
+                        </button>
+                      ))}
+                    </div>
+                    {progressDirty && (
+                      <div className="progress-draft-actions">
+                        <button type="button" className="ghost-button compact-button" onClick={resetProgressDraft}>
+                          撤销
+                        </button>
+                        <button type="button" className="primary-button compact-button" onClick={confirmProgress}>
+                          确认
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="progress-status-panel">
+                  <div className="workflow-section-title">
+                    <h3>任务状态</h3>
+                    <span>{editorDueState === 'overdue' ? '已逾期' : editorDueState === 'soon' ? '临期' : '内部维护'}</span>
+                  </div>
+                  <div className="editor-fields">
+                    <label className="field">
+                      <span>任务状态</span>
+                      <select value={task.status} onChange={(event) => changeStatus(event.target.value as TaskStatus)}>
+                        <option>计划中</option>
+                        <option>进行中</option>
+                        <option>挂起</option>
+                        <option>待验收</option>
+                        <option>已验收</option>
+                        <option>终止</option>
+                        <option>不计费</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>实际工时（系统计算）</span>
+                      <input value={`${task.actualHours.toFixed(2)} h`} readOnly />
+                    </label>
+                    {task.status === '挂起' && (
+                      <label className="field wide">
+                        <span>挂起原因</span>
+                        <textarea value={task.suspendReason ?? ''} onChange={(event) => onUpdateTask(task.id, { suspendReason: event.target.value })} />
+                      </label>
+                    )}
+                    {task.status === '终止' && (
+                      <label className="field wide">
+                        <span>终止原因</span>
+                        <textarea value={task.terminateReason ?? ''} onChange={(event) => onUpdateTask(task.id, { terminateReason: event.target.value })} />
+                      </label>
+                    )}
+                  </div>
+                  {reasonDraft && (
+                    <section className="status-reason-panel">
+                      <div className="section-heading">
+                        <h3>{reasonDraft.status === '挂起' ? '填写挂起原因' : '填写终止原因'}</h3>
+                        <StatusBadge status={reasonDraft.status} />
+                      </div>
+                      <label className="field wide">
+                        <span>{reasonDraft.status === '挂起' ? '挂起原因' : '终止原因'}</span>
+                        <textarea
+                          autoFocus
+                          value={reasonDraft.reason}
+                          onChange={(event) => setReasonDraft((current) => (current ? { ...current, reason: event.target.value } : current))}
+                          placeholder={reasonDraft.status === '挂起' ? '例如：等待甲方补充资料或确认方向。' : '例如：需求方要求暂时不进行。'}
+                        />
+                      </label>
+                      <div className="status-reason-actions">
+                        <button className="ghost-button compact-button" onClick={() => setReasonDraft(null)}>
+                          取消
+                        </button>
+                        <button className="primary-button compact-button" disabled={!reasonDraft.reason.trim()} onClick={confirmReasonStatus}>
+                          确认{reasonDraft.status}
+                        </button>
+                      </div>
+                    </section>
+                  )}
+                </section>
+              </div>
+            </div>
+            {uploadError && <p className="upload-inline-error">{uploadError}</p>}
+            {task.files.length > 0 && (
+              <div className="file-list progress-file-list">
+                {task.files.slice(0, 5).map((file) => (
+                  <span key={file}>
+                    {file.endsWith('.psd') || file.endsWith('.ai') ? <FileArchive size={15} /> : <FileText size={15} />}
+                    {file}
+                  </span>
+                ))}
+                {task.files.length > 5 && <span>+{task.files.length - 5}</span>}
+              </div>
+            )}
+          </section>
+
+          <section className="task-time-panel">
+            <div className="workflow-section-title">
+              <h3>时间记录</h3>
+              <span>{timeEntries.length} 段 · {formatDuration(trackedMinutes)}</span>
+            </div>
+            <div className="task-time-list">
+              {timeEntries.length === 0 && <p className="calendar-empty-hint">还没有记录时间段。</p>}
+              {timeEntries.map((entry) => (
+                <div className="task-time-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.start} - {entry.end}</strong>
+                    <span>{entry.note || '未填写具体内容'}</span>
+                  </div>
+                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                  <button className="icon-button danger-icon" aria-label="删除时间段" title="删除时间段" onClick={() => requestDeleteTimeEntry(entry)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="time-entry-create">
+              <TimeTextInput value={timeDraft.start} ariaLabel="开始时间" onChange={(value) => setTimeDraft((current) => ({ ...current, start: value }))} />
+              <span>至</span>
+              <TimeTextInput value={timeDraft.end} ariaLabel="结束时间" onChange={(value) => setTimeDraft((current) => ({ ...current, end: value }))} />
+              <input
+                value={timeDraft.note}
+                placeholder="这段时间具体做了什么"
+                onChange={(event) => setTimeDraft((current) => ({ ...current, note: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    addTimeEntry()
+                  }
+                }}
+              />
+              <button className="primary-button compact-button" disabled={minutesBetween(timeDraft.start, timeDraft.end) <= 0} onClick={addTimeEntry}>
+                <Plus size={15} />
+                添加
+              </button>
+            </div>
+          </section>
+
+          <section className="acceptance-collapse-panel">
+            <div className="workflow-section-title acceptance-workflow-title">
+              <h3>交付验收</h3>
+              <span>项目收尾时进行</span>
+            </div>
+            <button
+              type="button"
+              className={`acceptance-collapse-trigger ${task.status === '已验收' ? 'done' : ''}`}
+              aria-expanded={task.status !== '已验收' && acceptancePanelOpen}
+              onClick={() => task.status !== '已验收' && setAcceptancePanelOpen((open) => !open)}
+            >
+              <span>{task.status === '已验收' ? <CheckCircle2 size={16} /> : <ClipboardCheck size={16} />}</span>
+              <div>
+                <strong>{task.status === '已验收' ? '已验收' : '交付验收'}</strong>
+                <small>{task.status === '已验收' ? '本任务已完成验收，工时已锁定。' : task.status === '待验收' ? '项目已完成，展开后进入终审确认。' : `当前为${task.status}，项目收尾时再展开验收。`}</small>
+              </div>
+              {task.status !== '已验收' && (
+                <span className="acceptance-collapse-action">
+                  {acceptancePanelOpen ? '收起' : '展开'}
+                  <ChevronDown size={15} />
+                </span>
+              )}
+            </button>
+            {acceptancePanelOpen && task.status !== '已验收' && (
+              <div className="acceptance-inline-card">
+                <div className="acceptance-inline-head">
+                  <h4>
+                    <CheckCircle2 size={15} />
+                    验收前请确认所有内容
+                  </h4>
+                  <button type="button" className="ghost-link-button" onClick={() => setAcceptancePanelOpen(false)}>
+                    收起
+                  </button>
+                </div>
+                <div className="acceptance-review-grid">
+                  <div>
+                    <span>实际工时</span>
+                    <strong>{reviewHours.toFixed(2)} h</strong>
+                    <small>{timeEntries.length > 0 ? `来自 ${timeEntries.length} 段时间记录` : '终审弹窗内可补充分段时间'}</small>
+                  </div>
+                  <label>
+                    <span>验收人</span>
+                    <input value={draft.reviewer} onChange={(event) => setField('reviewer')(event.target.value)} onBlur={() => commitText('reviewer')} />
+                  </label>
+                  <div>
+                    <span>结算月份</span>
+                    <strong>{taskSettlementMonth(task) ? monthLabelOf(taskSettlementMonth(task)) : '未设置'}</strong>
+                    <small>{isSupplementalTask(task) ? '补录结算任务' : '按当前归属月份计入'}</small>
+                  </div>
+                  <div>
+                    <span>当前进度</span>
+                    <strong>{task.progress}%</strong>
+                    <small>确认验收后自动设为 100%</small>
+                  </div>
+                </div>
+                <div className="acceptance-review-meta">
+                  <span>{updateActivity.length} 条进展记录</span>
+                  <span>{(task.files ?? []).length} 个任务附件</span>
+                  <span>{trackedMinutes > 0 ? formatDuration(trackedMinutes) : '未记录分段工时'}</span>
+                </div>
+                <p>点击“去验收”打开终审弹窗，核对基础信息、进度、分段工时、验收附件和备注；确认后状态变为已验收，工时锁定计入结算，本次项目结束。</p>
+                <button type="button" className="primary-button acceptance-go-button" onClick={() => setAcceptanceOpen(true)}>
+                  去验收
+                </button>
+              </div>
+            )}
+          </section>
+        </section>
+      )}
+      {acceptanceOpen && (
+        <AcceptanceModal
+          task={task}
+          initialNote={task.acceptanceNote ?? ''}
+          onClose={() => setAcceptanceOpen(false)}
+          onConfirm={confirmAcceptance}
+          onUploadFile={onUploadAcceptanceFile}
+        />
+      )}
+      {timeEntryToDelete && (
+        <ConfirmDialogModal
+          dialog={{
+            eyebrow: '删除时间段',
+            title: `确定删除 ${timeEntryToDelete.start} - ${timeEntryToDelete.end} 吗？`,
+            body: '删除后系统会重新计算这个任务的实际工时。若这段时间已经用于验收或结算，请确认后再删除。',
+            confirmText: '确认删除',
+            tone: 'danger',
+            details: [timeEntryToDelete.note || '未填写具体内容', formatDuration(minutesBetween(timeEntryToDelete.start, timeEntryToDelete.end))],
+            onConfirm: () => {
+              deleteTimeEntry(timeEntryToDelete.id)
+              setTimeEntryToDelete(null)
+            },
+          }}
+          isBusy={false}
+          onClose={() => setTimeEntryToDelete(null)}
+          onConfirm={() => {
+            deleteTimeEntry(timeEntryToDelete.id)
+            setTimeEntryToDelete(null)
+          }}
+        />
+      )}
+    </aside>
+  )
+}
+
+function AcceptanceModal({
+  task,
+  initialNote,
+  onClose,
+  onConfirm,
+  onUploadFile,
+}: {
+  task: Task
+  initialNote: string
+  onClose: () => void
+  onConfirm: (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => void
+  onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
+}) {
+  const [acceptanceNote, setAcceptanceNote] = useState(initialNote)
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(
+    task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }],
+  )
+  const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadError, setUploadError] = useState('')
+  const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const isSupplemental = isSupplementalTask(task)
+  const initialTimeEntriesSignature = useMemo(
+    () => serializeTimeEntries(task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: '', start: '09:00', end: '10:00' }]),
+    [task.timeEntries],
+  )
+
+  const updateEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
+    setTimeEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
+  }
+
+  const deleteTimeEntry = (entryId: string) => {
+    setTimeEntries((current) => current.filter((item) => item.id !== entryId))
+    setTimeEntryToDelete(null)
+  }
+
+  const computedMinutes = sumTimeEntries(timeEntries)
+  const computedHours = Math.round((computedMinutes / 60) * 100) / 100
+  const hasUnsavedChanges =
+    acceptanceNote !== initialNote ||
+    serializeTimeEntries(timeEntries) !== initialTimeEntriesSignature ||
+    uploadedFiles.length > 0
+  const canConfirmAcceptance = computedMinutes > 0 && !isUploading
+  const dueState = taskDueState(task, isoDate(), isoDate(3))
+
+  const uploadAcceptanceFiles = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? [])
+    if (files.length === 0 || isUploading) {
+      return
+    }
+    setUploadError('')
+    const oversized = files.find((file) => file.size > UPLOAD_HARD_LIMIT)
+    if (oversized) {
+      setUploadError(`「${oversized.name}」超过 ${(UPLOAD_HARD_LIMIT / 1024 / 1024).toFixed(0)}MB，无法上传`)
+      return
+    }
+    setIsUploading(true)
+    setUploadProgress(0)
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]
+        const saved = await onUploadFile(task.id, file, (ratio) => {
+          const overall = (index + ratio) / files.length
+          setUploadProgress(Math.round(overall * 100))
+        })
+        setUploadedFiles((current) => [saved, ...current])
+      }
+    } finally {
+      setIsUploading(false)
+      setUploadProgress(0)
+    }
+  }
+
+  const requestClose = () => {
+    if (isUploading || hasUnsavedChanges) {
+      setCloseConfirmOpen(true)
+      return
+    }
+    onClose()
+  }
+
+  return (
+    <ModalShell
+      className="acceptance-modal"
+      labelledBy="acceptance-title"
+      onClose={requestClose}
+      closeOnEscape={!closeConfirmOpen && !timeEntryToDelete}
+    >
+      <header className="modal-header acceptance-final-header">
+        <div>
+          <p className="eyebrow">任务验收 · 终审</p>
+          <h2 id="acceptance-title">确认验收「{task.title}」</h2>
+          <span>请逐项核对全部信息，确认无误后锁定工时进入结算</span>
+        </div>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={requestClose}>
+          <X size={18} />
+        </button>
+      </header>
+
+      <div className="acceptance-modal-body">
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">1</span>
+            <h3>基础信息</h3>
+            <button type="button" className="acceptance-edit-button" onClick={requestClose}>
+              <Pencil size={13} />
+              修改
+            </button>
+          </div>
+          <div className="acceptance-basic-grid">
+            <div className="wide">
+              <span>任务名称</span>
+              <strong>{task.title}</strong>
+            </div>
+            <div>
+              <span>设计类型</span>
+              <strong>{task.type || '未分类'}</strong>
+            </div>
+            <div>
+              <span>对接人</span>
+              <strong>{task.contact || '待确认'}</strong>
+            </div>
+            <div>
+              <span>预计开始</span>
+              <strong>{formatPlanDateTime(task.date)}</strong>
+            </div>
+            <div>
+              <span>预计交付</span>
+              <strong className={dueState === 'overdue' ? 'acceptance-due-overdue' : dueState === 'soon' ? 'acceptance-due-soon' : ''}>
+                {formatPlanDateTime(task.estimatedDate || task.date)}
+                {dueState ? `（${dueState === 'overdue' ? '已逾期' : '临期'}）` : ''}
+              </strong>
+            </div>
+            {isSupplemental && (
+              <div>
+                <span>补录结算</span>
+                <strong>{monthLabelOf(taskSettlementMonth(task))}</strong>
+              </div>
+            )}
+            <div className="wide">
+              <span>任务需求</span>
+              <strong>{task.requirement || '未填写任务需求'}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">2</span>
+            <h3>进度</h3>
+            <button type="button" className="acceptance-edit-button" onClick={requestClose}>
+              <Pencil size={13} />
+              修改
+            </button>
+          </div>
+          <div className="acceptance-final-progress">
+            <div className="acceptance-progress-track" aria-label={`当前进度 ${task.progress}%`}>
+              <span style={{ width: `${task.progress}%` }} />
+            </div>
+            <strong>{task.progress}%</strong>
+          </div>
+          <p className="acceptance-muted-hint">验收通过后，进度将自动设为 100%</p>
+        </section>
+
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">3</span>
+            <h3>分段计时</h3>
+            <button type="button" className="acceptance-edit-button" onClick={() => document.querySelector<HTMLInputElement>('.acceptance-time-row input')?.focus()}>
+              <Pencil size={13} />
+              修改
+            </button>
+          </div>
+          <div className="acceptance-time-list">
+            {timeEntries.map((entry) => (
+              <div className="acceptance-time-row" key={entry.id}>
+                <div className="acceptance-time-range">
+                  <TimeTextInput value={entry.start} ariaLabel="开始时间" onChange={(value) => updateEntry(entry.id, 'start', value)} />
+                  <span>至</span>
+                  <TimeTextInput value={entry.end} ariaLabel="结束时间" onChange={(value) => updateEntry(entry.id, 'end', value)} />
+                </div>
+                <input value={entry.note ?? ''} aria-label="分段说明" placeholder="例如：初稿 / 终稿 / 修改" onChange={(event) => updateEntry(entry.id, 'note', event.target.value)} />
+                <strong>{formatDuration(minutesBetween(entry.start, entry.end))}</strong>
+                <button className="icon-button danger-icon" aria-label="删除验收时间段" title="删除时间段" onClick={() => setTimeEntryToDelete(entry)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button className="ghost-button compact-button" onClick={() => setTimeEntries((current) => [...current, { id: crypto.randomUUID(), start: '14:00', end: '15:00', note: '新记录' }])}>
+            <Plus size={15} />
+            添加一段时间
+          </button>
+          <div className="acceptance-hours-total">
+            <span>实际工时合计</span>
+            <strong>{computedHours.toFixed(2)} h</strong>
+          </div>
+        </section>
+
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">4</span>
+            <h3>验收附件</h3>
+            <span className="file-tag-chip">验收文件</span>
+          </div>
+          <label className="acceptance-upload-box">
+            <UploadCloud size={18} />
+            <strong>{isUploading ? `上传中 ${uploadProgress}%` : '上传验收附件'}</strong>
+            <em>支持 PNG / PDF / PSD / ZIP · 进入文件库并自动打标签</em>
+            <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" multiple disabled={isUploading} onChange={(event) => void uploadAcceptanceFiles(event.target.files)} />
+          </label>
+          {uploadError && <p className="upload-inline-error">{uploadError}</p>}
+          {uploadedFiles.length > 0 && (
+            <div className="acceptance-file-list">
+              {uploadedFiles.map((file) => (
+                <span key={file.id}>
+                  <Paperclip size={14} />
+                  {file.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">5</span>
+            <h3>验收备注</h3>
+            <small>可选</small>
+          </div>
+          <label className="acceptance-note-field">
+            <textarea
+              value={acceptanceNote}
+              onChange={(event) => setAcceptanceNote(event.target.value)}
+              placeholder={isSupplemental ? '例如：该任务已于 5 月完成，本次补录到 6 月结算；验收文件已补充上传。' : '例如：完成 3 项主视觉修改，输出 PNG / PDF / 源文件，附件已上传。'}
+            />
+          </label>
+        </section>
+      </div>
+
+      <footer className="modal-footer acceptance-final-footer">
+        <p>
+          <AlertTriangle size={15} />
+          <span>
+            <b>确认验收后：</b>状态变为「已验收」、工时 <b>{computedHours.toFixed(2)} h</b> 锁定并计入结算，进度设为 <b>100%</b>，<em>本次项目结束。</em>
+          </span>
+        </p>
+        <button className="ghost-button" onClick={requestClose}>
+          取消
+        </button>
+        <button
+          className="primary-button"
+          disabled={!canConfirmAcceptance}
+          onClick={() => onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name) })}
+        >
+          {isUploading ? '上传中…' : '确认验收'}
+        </button>
+      </footer>
+      {closeConfirmOpen && (
+        <ConfirmDialogModal
+          dialog={{
+            eyebrow: '未完成验收',
+            title: isUploading ? '附件还在上传，确定关闭吗？' : '关闭后将放弃本次验收填写',
+            body: isUploading
+              ? '当前验收附件仍在上传中，关闭弹窗可能让你失去本次验收上下文。建议等上传完成后再确认验收。'
+              : '你已经修改了验收备注、时间段或上传了验收文件，但还没有点击确认验收。关闭后这些验收填写不会写入任务。',
+            confirmText: '放弃并关闭',
+            cancelText: '继续填写',
+            tone: 'danger',
+            details: [`系统计算工时：${computedHours.toFixed(2)} h`, uploadedFiles.length > 0 ? `已上传 ${uploadedFiles.length} 个验收附件` : '尚未确认验收'],
+            onConfirm: onClose,
+          }}
+          isBusy={false}
+          onClose={() => setCloseConfirmOpen(false)}
+          onConfirm={onClose}
+        />
+      )}
+      {timeEntryToDelete && (
+        <ConfirmDialogModal
+          dialog={{
+            eyebrow: '删除验收时间段',
+            title: `确定删除 ${timeEntryToDelete.start} - ${timeEntryToDelete.end} 吗？`,
+            body: '删除后会立即影响本次验收弹窗中系统计算的实际工时。请确认这段时间确实不需要纳入验收。',
+            confirmText: '确认删除',
+            tone: 'danger',
+            details: [formatDuration(minutesBetween(timeEntryToDelete.start, timeEntryToDelete.end))],
+            onConfirm: () => deleteTimeEntry(timeEntryToDelete.id),
+          }}
+          isBusy={false}
+          onClose={() => setTimeEntryToDelete(null)}
+          onConfirm={() => deleteTimeEntry(timeEntryToDelete.id)}
+        />
+      )}
+    </ModalShell>
+  )
+}
+
+function TaskDetailModal({
+  task,
+  role,
+  activity,
+  onClose,
+  onUpdateTask,
+  onUploadImage,
+}: {
+  task: Task
+  role: AuthRole
+  activity: ActivityItem[]
+  onClose: () => void
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+}) {
+  const [progressDraft, setProgressDraft] = useState(String(task.progress))
+  const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>('start')
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [pickProgress, setPickProgress] = useState(0)
+  const [uploadError, setUploadError] = useState('')
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const taskEstimatedMinutes = Math.round((Number(task.estimatedHours) || 0) * 60)
+
+  const updatePlannedStartTime = (value: string) => {
+    const estimatedDate = addMinutesToPlanDateTime(value, taskEstimatedMinutes)
+    const changes: Partial<Task> = { date: value, estimatedDate }
+    onUpdateTask(task.id, changes)
+  }
+
+  const updatePlannedEndTime = (value: string) => {
+    const date = addMinutesToPlanDateTime(value, -taskEstimatedMinutes)
+    const changes: Partial<Task> = { date, estimatedDate: value }
+    onUpdateTask(task.id, changes)
+  }
+
+  const updateEstimatedHours = (valueMinutes: number) => {
+    const estimatedHours = Math.round((valueMinutes / 60) * 100) / 100
+    if (scheduleAnchor === 'end') {
+      const date = addMinutesToPlanDateTime(task.estimatedDate || task.date, -valueMinutes)
+      const changes: Partial<Task> = { estimatedHours, date }
+      onUpdateTask(task.id, changes)
+      return
+    }
+    const estimatedDate = addMinutesToPlanDateTime(task.date, valueMinutes)
+    onUpdateTask(task.id, { estimatedHours, estimatedDate })
+  }
+
+  const commitProgress = (value: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+    setProgressDraft(String(clamped))
+    if (clamped !== task.progress) {
+      onUpdateTask(task.id, { progress: clamped })
+    }
+  }
+
+  const handlePickImage = async (fileList: FileList | null) => {
+    const file = fileList?.[0]
+    if (!file) {
+      return
+    }
+    setUploadError('')
+    try {
+      validateUploadFile(file)
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : '文件过大，无法上传')
+      return
+    }
+    setIsUploadingImage(true)
+    setPickProgress(0)
+    try {
+      await onUploadImage(task.id, file, (ratio) => setPickProgress(Math.round(ratio * 100)))
+    } finally {
+      setIsUploadingImage(false)
+      setPickProgress(0)
+    }
+  }
+
+  const requestClose = () => {
+    if (isUploadingImage) {
+      setCloseConfirmOpen(true)
+      return
+    }
+    onClose()
+  }
+
+  return (
+    <ModalShell className="task-detail-modal" labelledBy="task-detail-title" onClose={requestClose} closeOnEscape={!closeConfirmOpen}>
+      <header className="modal-header">
+        <div>
+          <p className="eyebrow">{task.type} · {task.contact}</p>
+          <h2 id="task-detail-title">{task.title}</h2>
+        </div>
+        <div className="modal-header-actions">
+          <StatusBadge status={task.status} />
+          <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={requestClose}>
+            <X size={18} />
+          </button>
+        </div>
+      </header>
+
+      <div className="task-detail-body">
+        <details className="task-detail-section" open>
+          <summary>
+            <div>
+              <h3>排期与状态</h3>
+              <p>计划时间、预估工时和当前进展</p>
+            </div>
+            <ChevronDown size={16} />
+          </summary>
+          <div className="form-grid task-detail-fields">
+            <label className="field">
+              <span>任务状态</span>
+              <select value={task.status} onChange={(event) => onUpdateTask(task.id, { status: event.target.value as TaskStatus })}>
+                <option>计划中</option>
+                <option>进行中</option>
+                <option>挂起</option>
+                <option>待验收</option>
+                <option>已验收</option>
+                <option>终止</option>
+                <option>不计费</option>
+              </select>
+            </label>
+            <PlanDateTimeField
+              label="预计开始时间"
+              value={task.date}
+              onChange={updatePlannedStartTime}
+              isActive={scheduleAnchor === 'start'}
+              readOnly={scheduleAnchor !== 'start'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+            />
+            <label className="field">
+              <span>预估工时</span>
+              <DurationPicker valueMinutes={taskEstimatedMinutes} onChange={updateEstimatedHours} />
+            </label>
+            <PlanDateTimeField
+              label="预计交付时间"
+              value={task.estimatedDate}
+              onChange={updatePlannedEndTime}
+              isActive={scheduleAnchor === 'end'}
+              readOnly={scheduleAnchor !== 'end'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+            />
+            <label className="field">
+              <span>实际工时（系统计算）</span>
+              <input value={`${task.actualHours.toFixed(2)} h`} readOnly />
+            </label>
+            <label className="field">
+              <span>整体进展（%）</span>
+              <select value={progressDraft} onChange={(event) => commitProgress(Number.parseInt(event.target.value, 10))}>
+                {progressOptions.map((value) => (
+                  <option key={value} value={value}>{value}%</option>
+                ))}
+              </select>
+            </label>
+            <div className="field wide">
+              <span>整体进展</span>
+              <div className="progress-block inline-progress">
+                <div className="large-meter">
+                  <span style={{ width: `${Number.parseInt(progressDraft, 10) || 0}%` }} />
+                </div>
+                <strong>{Number.parseInt(progressDraft, 10) || 0}%</strong>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details className="task-detail-section">
+          <summary>
+            <div>
+              <h3>附件</h3>
+              <p>上传图片或源文件，自动关联到本任务</p>
+            </div>
+            <ChevronDown size={16} />
+          </summary>
+          <label className="field wide image-upload-field">
+            <span>上传图片 / 附件</span>
+            <div className="image-upload-box">
+              <UploadCloud size={18} />
+              <em>{isUploadingImage ? `上传中 ${pickProgress}%` : '点击选择图片或文件，上传后自动关联到本任务'}</em>
+              <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" disabled={isUploadingImage} onChange={(event) => void handlePickImage(event.target.files)} />
+            </div>
+            {uploadError && <p className="upload-inline-error">{uploadError}</p>}
+          </label>
+        </details>
+
+        <details className="task-detail-section">
+          <summary>
+            <div>
+              <h3>动态时间轴</h3>
+              <p>创建、状态、附件和进展记录</p>
+            </div>
+            <ChevronDown size={16} />
+          </summary>
+          <div className="task-activity">
+            {activity.length === 0 && <p className="calendar-empty-hint">正在加载动态，或该任务还没有操作记录。</p>}
+            <div className="timeline activity-timeline">
+              {activity.map((item) => (
+                <article className="timeline-item" key={item.id}>
+                  <span className="dot" />
+                  <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
+                  <p>{describeActivity(item)}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <footer className="modal-footer">
+        <button className="ghost-button" onClick={requestClose}>
+          {isUploadingImage ? `上传中 ${pickProgress}%` : '完成'}
+        </button>
+      </footer>
+      {closeConfirmOpen && (
+        <ConfirmDialogModal
+          dialog={{
+            eyebrow: '附件上传中',
+            title: '确定关闭任务详情吗？',
+            body: '当前附件还在上传中。关闭详情不会取消上传，但你可能看不到上传结果反馈，建议等上传完成后再离开。',
+            confirmText: '仍然关闭',
+            cancelText: '继续等待',
+            tone: 'danger',
+            details: [task.title],
+            onConfirm: onClose,
+          }}
+          isBusy={false}
+          onClose={() => setCloseConfirmOpen(false)}
+          onConfirm={onClose}
+        />
+      )}
+    </ModalShell>
+  )
+}
+
+function CalendarView({
+  monthValue,
+  tasks,
+  onOpenTask,
+}: {
+  monthValue: string
+  tasks: Task[]
+  onOpenTask: (taskId: number) => void
+}) {
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = isoDate()
+    return today.startsWith(monthValue) ? today : `${monthValue}-01`
+  })
+
+  const [year, month] = monthValue.split('-').map(Number)
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const leadingBlanks = (new Date(year, month - 1, 1).getDay() + 6) % 7
+  const today = isoDate()
+
+  const tasksByDate = useMemo(() => {
+    const map = new Map<string, Task[]>()
+    tasks.forEach((task) => {
+      const key = datePart(task.date)
+      map.set(key, [...(map.get(key) ?? []), task])
+    })
+    return map
+  }, [tasks])
+
+  const dayTasks = tasksByDate.get(selectedDate) ?? []
+  const doneTasks = dayTasks.filter((task) => task.status === '已验收' || task.status === '不计费')
+  const ongoingTasks = dayTasks.filter((task) => task.status === '进行中' || task.status === '待验收')
+  const plannedTasks = dayTasks.filter((task) => task.status === '计划中')
+  const upcomingTasks = tasks
+    .filter((task) => datePart(task.date) > selectedDate && (task.status === '计划中' || task.status === '进行中'))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 6)
+
+  const renderTaskRows = (list: Task[]) =>
+    list.map((task) => (
+      <button className="calendar-task-row" key={task.id} onClick={() => onOpenTask(task.id)}>
+        <i style={{ background: statusDotColors[task.status] }} />
+        <div>
+          <strong>{task.title}</strong>
+          <small>
+            {task.type} · {task.actualHours > 0 ? `${task.actualHours.toFixed(1)}h` : `预估 ${task.estimatedHours.toFixed(1)}h`}
+          </small>
+        </div>
+        <StatusBadge status={task.status} />
+      </button>
+    ))
+
+  return (
+    <section className="calendar-layout">
+      <section className="panel calendar-panel">
+        <div className="calendar-weekdays">
+          {weekdayLabels.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </div>
+        <div className="calendar-grid">
+          {Array.from({ length: leadingBlanks }).map((_, index) => (
+            <div className="calendar-cell blank" key={`blank-${index}`} />
+          ))}
+          {Array.from({ length: daysInMonth }).map((_, index) => {
+            const day = index + 1
+            const dateValue = `${monthValue}-${pad(day)}`
+            const cellTasks = tasksByDate.get(dateValue) ?? []
+            const cellClass = [
+              'calendar-cell',
+              selectedDate === dateValue ? 'selected' : '',
+              today === dateValue ? 'today' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+
+            return (
+              <button className={cellClass} key={dateValue} onClick={() => setSelectedDate(dateValue)}>
+                <span className="calendar-day-number">{day}</span>
+                <span className="calendar-dots">
+                  {cellTasks.slice(0, 4).map((task) => (
+                    <i key={task.id} style={{ background: statusDotColors[task.status] }} />
+                  ))}
+                </span>
+                {cellTasks.slice(0, 2).map((task) => (
+                  <span className="calendar-chip" key={task.id} style={{ '--chip-color': statusDotColors[task.status] } as CSSProperties}>
+                    {task.title}
+                  </span>
+                ))}
+                {cellTasks.length > 2 && <span className="calendar-more">+{cellTasks.length - 2} 项</span>}
+              </button>
+            )
+          })}
+        </div>
+        <div className="calendar-legend">
+          {(Object.keys(statusDotColors) as TaskStatus[]).map((status) => (
+            <span key={status}>
+              <i style={{ background: statusDotColors[status] }} />
+              {status}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <aside className="panel calendar-day-panel">
+        <div className="panel-header compact">
+          <div>
+            <h2>
+              {month} 月 {Number(selectedDate.slice(8, 10))} 日{today === selectedDate ? ' · 今天' : ''}
+            </h2>
+            <p>{dayTasks.length > 0 ? `共 ${dayTasks.length} 个任务` : '当天没有安排任务'}</p>
+          </div>
+        </div>
+
+        {ongoingTasks.length > 0 && (
+          <div className="calendar-day-group">
+            <h3>进行中 / 待验收</h3>
+            {renderTaskRows(ongoingTasks)}
+          </div>
+        )}
+        {plannedTasks.length > 0 && (
+          <div className="calendar-day-group">
+            <h3>计划中</h3>
+            {renderTaskRows(plannedTasks)}
+          </div>
+        )}
+        {doneTasks.length > 0 && (
+          <div className="calendar-day-group">
+            <h3>已完成</h3>
+            {renderTaskRows(doneTasks)}
+          </div>
+        )}
+
+        <div className="calendar-day-group upcoming">
+          <h3>接下来待完成</h3>
+          {upcomingTasks.length === 0 && <p className="calendar-empty-hint">本月之后暂无待办任务。</p>}
+          {upcomingTasks.map((task) => (
+            <button className="calendar-task-row" key={task.id} onClick={() => onOpenTask(task.id)}>
+              <i style={{ background: statusDotColors[task.status] }} />
+              <div>
+                <strong>{task.title}</strong>
+                <small>
+                  {formatMonthDayTime(task.date)} · {task.type}
+                </small>
+              </div>
+              <StatusBadge status={task.status} />
+            </button>
+          ))}
+        </div>
+      </aside>
+    </section>
+  )
+}
+
+function FilesView({
+  files,
+  tasks,
+  currentMonthValue,
+  onPreviewFile,
+  onDeleteFile,
+  onDownloadFile,
+  onUpdateFile,
+}: {
+  files: FileAsset[]
+  tasks: Task[]
+  currentMonthValue: string
+  onPreviewFile: (file: FileAsset) => void
+  onDeleteFile: (fileId: number) => void
+  onDownloadFile: (file: FileAsset) => void
+  onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
+}) {
+  const [monthFilter, setMonthFilter] = useState(currentMonthValue)
+  const [fileQuery, setFileQuery] = useState('')
+  const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; file: FileAsset } | null>(null)
+  const [focusFileField, setFocusFileField] = useState<'name' | 'tag' | null>(null)
+  const monthOptions = useMemo(
+    () =>
+      [...new Set([
+        currentMonthValue,
+        ...files.map((file) => file.uploadedAt.slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)),
+        ...tasks.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value)),
+      ])].sort((a, b) => b.localeCompare(a)),
+    [currentMonthValue, files, tasks],
+  )
+  const filteredFiles = useMemo(() => {
+    const query = fileQuery.trim().toLowerCase()
+    return files.filter((file) => {
+      const task = tasks.find((item) => item.id === file.taskId)
+      const matchesMonth = monthFilter === 'all' || file.uploadedAt.startsWith(monthFilter) || (task ? taskSettlementMonth(task) === monthFilter : false)
+      const matchesQuery =
+        !query ||
+        [file.name, file.task, file.type, file.tag ?? ''].some((value) => value.toLowerCase().includes(query))
+      return matchesMonth && matchesQuery
+    })
+  }, [fileQuery, files, monthFilter, tasks])
+  const groupedTasks = useMemo(() => {
+    const taskMap = new Map(tasks.map((task) => [task.id, task]))
+    const fileTaskIds = [...new Set(filteredFiles.map((file) => file.taskId))]
+    return fileTaskIds
+      .map((taskId) => taskMap.get(taskId) ?? {
+        id: taskId,
+        title: filteredFiles.find((file) => file.taskId === taskId)?.task ?? '未关联任务',
+        type: '未分类',
+        actualHours: 0,
+        status: '计划中' as TaskStatus,
+      })
+      .filter((task) => filteredFiles.some((file) => file.taskId === task.id))
+      .sort((a, b) => {
+        const latestA = filteredFiles.filter((file) => file.taskId === a.id).map((file) => file.uploadedAt).sort().at(-1) ?? ''
+        const latestB = filteredFiles.filter((file) => file.taskId === b.id).map((file) => file.uploadedAt).sort().at(-1) ?? ''
+        return latestB.localeCompare(latestA)
+      })
+  }, [filteredFiles, tasks])
+  const [selectedProjectId, setSelectedProjectId] = useState(() => groupedTasks[0]?.id ?? 0)
+  const selectedProject = groupedTasks.find((task) => task.id === selectedProjectId) ?? groupedTasks[0]
+  const selectedFiles = selectedProject
+    ? filteredFiles.filter((file) => file.taskId === selectedProject.id).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))
+    : []
+  const [selectedFileId, setSelectedFileId] = useState(0)
+  const selectedFile = selectedFiles.find((file) => file.id === selectedFileId)
+  const openFileSource = (file: FileAsset) => {
+    const sourceUrl = authedPreviewUrl(file.sourceUrl)
+    if (sourceUrl) {
+      window.open(sourceUrl, '_blank', 'noreferrer')
+    }
+  }
+  const focusInspectorField = (file: FileAsset, field: 'name' | 'tag') => {
+    setSelectedFileId(file.id)
+    setFocusFileField(field)
+  }
+  const openFileContextMenu = (event: React.MouseEvent, file: FileAsset) => {
+    event.preventDefault()
+    setSelectedFileId(file.id)
+    setFileContextMenu({ x: event.clientX, y: event.clientY, file })
+  }
+
+  useEffect(() => {
+    if (!fileContextMenu) {
+      return
+    }
+    const closeMenu = () => setFileContextMenu(null)
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('keydown', handleKeydown)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('keydown', handleKeydown)
+    }
+  }, [fileContextMenu])
+
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable
+      if (event.code === 'Space' && selectedFile && !isTyping) {
+        event.preventDefault()
+        onPreviewFile(selectedFile)
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [onPreviewFile, selectedFile])
+
+  return (
+    <section className="view-stack">
+      <section className="panel view-toolbar">
+        <div className="panel-header compact">
+          <div>
+            <h2>文件库</h2>
+            <p>自动汇总任务生命周期中的过程文件、最终稿和验收文件</p>
+          </div>
+        </div>
+      </section>
+
+      <section className={`file-library-layout ${selectedFile ? 'inspector-open' : ''}`}>
+        <aside className="panel file-project-list">
+          <div className="panel-header compact">
+            <div>
+              <h2>项目 / 任务</h2>
+              <p>{groupedTasks.length} 个条目 · 最近上传优先</p>
+            </div>
+          </div>
+          <div className="file-library-filters">
+            <label className="search-box file-search-box">
+              <Search size={16} />
+              <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="搜索项目或文件" />
+            </label>
+            <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)}>
+              <option value="all">全部月份</option>
+              {monthOptions.map((month) => (
+                <option value={month} key={month}>{monthLabelOf(month)}</option>
+              ))}
+            </select>
+          </div>
+          {groupedTasks.length === 0 && <p className="calendar-empty-hint">当前筛选下还没有文件。</p>}
+          {groupedTasks.map((task) => {
+            const taskFiles = filteredFiles.filter((file) => file.taskId === task.id)
+            const latestUploadedAt = taskFiles.map((file) => file.uploadedAt).sort().at(-1)
+            return (
+              <button
+                className={`file-project-row ${selectedProject?.id === task.id ? 'active' : ''}`}
+                key={task.id}
+                onClick={() => {
+                  setSelectedProjectId(task.id)
+                  setSelectedFileId(0)
+                }}
+              >
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>{task.type}{latestUploadedAt ? ` · ${latestUploadedAt.slice(0, 10)}` : ''}</span>
+                </div>
+                <em>{taskFiles.length} 个文件</em>
+              </button>
+            )
+          })}
+        </aside>
+
+        <section className="file-project-detail">
+          <div className="panel-header compact">
+            <div>
+              <h2>{selectedProject?.title ?? '选择一个项目'}</h2>
+              <p>{selectedProject ? `${selectedFiles.length} 个关联文件 · 点击文件查看信息，双击或空格预览` : '点击左侧条目查看文件'}</p>
+            </div>
+          </div>
+          <div className="grouped-file-grid">
+            {selectedFiles.map((file) => {
+              const fileType = file.type.toUpperCase()
+              const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
+              const hasVisualPreview = Boolean(file.previewUrl) || isImage
+              const thumbUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
+              return (
+                <article
+                  className={`file-thumb-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
+                  key={file.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedFileId(file.id)}
+                  onDoubleClick={() => onPreviewFile(file)}
+                  onContextMenu={(event) => openFileContextMenu(event, file)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onPreviewFile(file)
+                    }
+                  }}
+                >
+                  <div className={`file-thumb-preview ${hasVisualPreview ? 'visual-preview' : ''}`}>
+                    <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
+                    {thumbUrl ? (
+                      <img src={thumbUrl} alt={file.name} />
+                    ) : (
+                      <div className="file-thumb-placeholder">
+                        {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
+                        <strong>{fileType}</strong>
+                      </div>
+                    )}
+                  </div>
+                  <div className="file-thumb-info">
+                    <h2>{file.name}</h2>
+                    <p>{file.size} · {file.uploadedAt}</p>
+                  </div>
+                </article>
+              )
+            })}
+            {selectedProject && selectedFiles.length === 0 && <p className="calendar-empty-hint">这个项目下还没有文件。</p>}
+          </div>
+        </section>
+        {selectedFile && (
+          <FileInspector
+            key={selectedFile.id}
+            file={selectedFile}
+            onPreview={onPreviewFile}
+            onDelete={onDeleteFile}
+            onUpdateFile={onUpdateFile}
+            focusField={focusFileField}
+            onFocusHandled={() => setFocusFileField(null)}
+          />
+        )}
+      </section>
+      {fileContextMenu && (
+        <FileContextMenu
+          menu={fileContextMenu}
+          onClose={() => setFileContextMenu(null)}
+          onPreview={onPreviewFile}
+          onOpen={openFileSource}
+          onDownload={onDownloadFile}
+          onFocusName={(file) => focusInspectorField(file, 'name')}
+          onFocusTag={(file) => focusInspectorField(file, 'tag')}
+          onDelete={onDeleteFile}
+        />
+      )}
+    </section>
+  )
+}
+
+function FileInspector({
+  file,
+  onPreview,
+  onDelete,
+  onUpdateFile,
+  focusField,
+  onFocusHandled,
+}: {
+  file: FileAsset | undefined
+  onPreview: (file: FileAsset) => void
+  onDelete: (fileId: number) => void
+  onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
+  focusField?: 'name' | 'tag' | null
+  onFocusHandled?: () => void
+}) {
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const tagInputRef = useRef<HTMLInputElement>(null)
+  const [draftName, setDraftName] = useState(file?.name ?? '')
+  const [tagInput, setTagInput] = useState('')
+  const [tags, setTags] = useState(() => parseFileTags(file?.tag))
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    if (!focusField || !file) {
+      return
+    }
+    const input = focusField === 'name' ? nameInputRef.current : tagInputRef.current
+    input?.focus()
+    input?.select()
+    onFocusHandled?.()
+  }, [file, focusField, onFocusHandled])
+
+  if (!file) {
+    return (
+      <aside className="panel file-inspector">
+        <div className="file-inspector-empty">
+          <FileImage size={28} />
+          <strong>选择一个文件</strong>
+          <span>右侧会显示预览、重命名、标签和基础信息。</span>
+        </div>
+      </aside>
+    )
+  }
+
+  const fileType = file.type.toUpperCase()
+  const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
+  const inspectorPreviewUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
+  const sourceUrl = authedPreviewUrl(file.sourceUrl)
+  const saveMetadata = async (nextTags = tags) => {
+    setIsSaving(true)
+    try {
+      const updatedFile = await onUpdateFile(file.id, { name: draftName, tag: serializeFileTags(nextTags) })
+      setTags(parseFileTags(updatedFile.tag))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+  const addTag = async () => {
+    const nextTag = tagInput.trim()
+    if (!nextTag) {
+      return
+    }
+    const nextTags = Array.from(new Set([...tags, nextTag]))
+    setTags(nextTags)
+    setTagInput('')
+    await saveMetadata(nextTags)
+  }
+  const removeTag = async (tag: string) => {
+    const nextTags = tags.filter((item) => item !== tag)
+    setTags(nextTags)
+    await saveMetadata(nextTags)
+  }
+
+  return (
+    <aside className="panel file-inspector">
+      <button className="file-inspector-preview" type="button" onClick={() => onPreview(file)}>
+        <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
+        {inspectorPreviewUrl ? (
+          <img src={inspectorPreviewUrl} alt={file.name} />
+        ) : (
+          <div className="file-thumb-placeholder">
+            {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
+            <strong>{fileType}</strong>
+          </div>
+        )}
+      </button>
+      <div className="inspector-color-dots" aria-hidden="true">
+        {['#f7f5ed', '#d8c3a5', '#9b6d52', '#c9c2ba', '#425f72', '#67c6c0', '#5aa3ce', '#526f48', '#8b7189', '#d8d158'].map((color) => (
+          <span key={color} style={{ backgroundColor: color }} />
+        ))}
+      </div>
+      <label className="inspector-field">
+        <span>文件名</span>
+        <input ref={nameInputRef} value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={() => void saveMetadata()} />
+      </label>
+      <label className="inspector-field">
+        <span>标签</span>
+        <input
+          ref={tagInputRef}
+          value={tagInput}
+          onChange={(event) => setTagInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              void addTag()
+            }
+          }}
+          placeholder={isSaving ? '保存中…' : '输入标签后按回车'}
+        />
+      </label>
+      <label className="inspector-field">
+        <span>链接</span>
+        <input value={sourceUrl ?? ''} readOnly placeholder="源文件链接" />
+      </label>
+      <div className="inspector-tags">
+        <strong>标签</strong>
+        {tags.length === 0 && <em>暂无标签</em>}
+        {tags.map((tag) => (
+          <span key={tag}>
+            {tag}
+            <button type="button" aria-label={`移除标签 ${tag}`} onClick={() => void removeTag(tag)}>
+              <Trash2 size={12} />
+            </button>
+          </span>
+        ))}
+      </div>
+      <dl className="inspector-meta">
+        <div>
+          <dt>关联任务</dt>
+          <dd>{file.task}</dd>
+        </div>
+        <div>
+          <dt>尺寸 / 大小</dt>
+          <dd>{file.size}</dd>
+        </div>
+        <div>
+          <dt>格式</dt>
+          <dd>{file.type}</dd>
+        </div>
+        <div>
+          <dt>上传日期</dt>
+          <dd>{file.uploadedAt}</dd>
+        </div>
+        <div>
+          <dt>版本状态</dt>
+          <dd>{file.final ? '最终稿' : '过程文件'}</dd>
+        </div>
+      </dl>
+      <div className="inspector-actions">
+        <button className="inspector-action-button" type="button" title="预览" aria-label="预览" onClick={() => onPreview(file)}>
+          <Eye size={16} />
+        </button>
+        <button className="inspector-action-button" type="button" title="打开" aria-label="打开" onClick={() => sourceUrl && window.open(sourceUrl, '_blank', 'noreferrer')}>
+          <ExternalLink size={16} />
+        </button>
+        <button className="inspector-action-button danger-action" type="button" title="删除" aria-label="删除" onClick={() => onDelete(file.id)}>
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function IncomeView({
+  annualData,
+  currentMonth,
+  taxMode,
+  onMonthChange,
+}: {
+  annualData: {
+    year: string
+    rows: AnnualIncomeRow[]
+    totalHours: number
+    totalAmount: number
+  }
+  currentMonth: { label: string; value: string }
+  taxMode: TaxMode
+  onMonthChange: (month: string) => void
+}) {
+  const [monthlySpecialDeduction, setMonthlySpecialDeduction] = useState(0)
+  const [monthlyAdditionalDeduction, setMonthlyAdditionalDeduction] = useState(0)
+  const [monthlyOtherDeduction, setMonthlyOtherDeduction] = useState(0)
+  const taxRows = useMemo(
+    () =>
+      taxMode === 'labor'
+        ? calculateLaborWithholding(annualData.rows)
+        : calculateCumulativeWithholding(annualData.rows, monthlySpecialDeduction, monthlyAdditionalDeduction, monthlyOtherDeduction),
+    [annualData.rows, monthlyAdditionalDeduction, monthlyOtherDeduction, monthlySpecialDeduction, taxMode],
+  )
+  const currentRow = taxRows.find((row) => row.month === currentMonth.value) ?? taxRows[0]
+  const totalTax = taxRows.reduce((sum, row) => sum + row.tax, 0)
+  const totalNet = taxRows.reduce((sum, row) => sum + row.netIncome, 0)
+  const maxAmount = Math.max(...taxRows.map((row) => row.amount), 1)
+
+  return (
+    <section className="income-view view-stack">
+      <section className="stats-grid" aria-label="年度收入统计">
+        <StatCard label="年度税前收入" value={`¥${annualData.totalAmount.toLocaleString()}`} trend={`${annualData.totalHours.toFixed(1)}h 已记录工时`} icon={<BarChart3 size={20} />} />
+        <StatCard label="估算已预扣税" value={`¥${totalTax.toLocaleString()}`} trend={taxMode === 'labor' ? '按劳务报酬预扣预缴' : '按工资薪金累计预扣法'} icon={<CalculatorIcon />} />
+        <StatCard label="估算税后收入" value={`¥${totalNet.toLocaleString()}`} trend="未含社保外其他真实申报差异" icon={<CheckCircle2 size={20} />} />
+        <StatCard label="本月税后" value={`¥${(currentRow?.netIncome ?? 0).toLocaleString()}`} trend={`${currentMonth.label}估算`} icon={<Clock3 size={20} />} />
+      </section>
+
+      <section className="income-grid">
+        <section className="panel income-chart-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>{annualData.year} 收入趋势</h2>
+              <p>按每月结算金额估算税前、预扣税和税后收入</p>
+            </div>
+            <span className="income-method-pill">{taxMode === 'labor' ? '劳务报酬估算' : '累计预扣法估算'}</span>
+          </div>
+          <div className="income-bars">
+            {taxRows.map((row) => {
+              const grossHeight = Math.max(4, (row.amount / maxAmount) * 100)
+              const netHeight = row.amount > 0 ? Math.max(4, (row.netIncome / maxAmount) * 100) : 0
+              return (
+                <button
+                  className={`income-bar ${row.month === currentMonth.value ? 'current' : ''}`}
+                  key={row.month}
+                  onClick={() => onMonthChange(row.month)}
+                >
+                  <span className="income-bar-value">¥{Math.round(row.netIncome).toLocaleString()}</span>
+                  <span className="income-bar-track">
+                    <i className="gross" style={{ height: `${grossHeight}%` }} />
+                    <i className="net" style={{ height: `${netHeight}%` }} />
+                  </span>
+                  <small>{Number(row.month.slice(5, 7))}月</small>
+                </button>
+              )
+            })}
+          </div>
+          <div className="income-legend">
+            <span><i className="gross" />税前收入</span>
+            <span><i className="net" />税后收入</span>
+          </div>
+        </section>
+
+        <details className="panel income-tax-panel">
+          <summary className="income-tax-summary">
+            <div>
+              <h2>税务估算参数</h2>
+              <p>公司最终申报可能包含更多扣除，以实际个税 App 为准</p>
+            </div>
+            <span>展开参数</span>
+          </summary>
+          <div className="income-form">
+            <label className="field">
+              <span>每月专项扣除</span>
+              <input type="number" min="0" step="100" value={monthlySpecialDeduction} disabled={taxMode === 'labor'} onChange={(event) => setMonthlySpecialDeduction(Math.max(0, Number(event.target.value) || 0))} />
+            </label>
+            <label className="field">
+              <span>每月专项附加扣除</span>
+              <input type="number" min="0" step="100" value={monthlyAdditionalDeduction} disabled={taxMode === 'labor'} onChange={(event) => setMonthlyAdditionalDeduction(Math.max(0, Number(event.target.value) || 0))} />
+            </label>
+            <label className="field">
+              <span>每月其他扣除</span>
+              <input type="number" min="0" step="100" value={monthlyOtherDeduction} disabled={taxMode === 'labor'} onChange={(event) => setMonthlyOtherDeduction(Math.max(0, Number(event.target.value) || 0))} />
+            </label>
+          </div>
+          <div className="tax-note">
+            <strong>当前计算口径</strong>
+            <p>
+              {taxMode === 'labor'
+                ? '劳务报酬按次或按月预扣预缴：收入不超过 4000 元减除 800 元，超过 4000 元减除 20%，再按 20% / 30% / 40% 预扣率计算。'
+                : '累计应纳税所得额 = 累计收入 - 5000 × 月份数 - 累计专项扣除 - 累计专项附加扣除 - 累计其他扣除。'}
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <section className="panel income-table-panel">
+        <div className="panel-header compact">
+          <div>
+            <h2>月度收入明细</h2>
+            <p>点击趋势柱可切换当前月份；税额为系统估算，不替代财务确认</p>
+          </div>
+        </div>
+        <div className="income-table-wrap">
+          <table className="income-table">
+            <thead>
+              <tr>
+                <th>月份</th>
+                <th className="num">工时</th>
+                <th className="num">税前收入</th>
+                <th className="num">{taxMode === 'labor' ? '预扣应纳税所得额' : '累计应纳税所得额'}</th>
+                <th className="num">预扣率</th>
+                <th className="num">本月预扣税</th>
+                <th className="num">税后收入</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taxRows.map((row) => (
+                <tr className={row.month === currentMonth.value ? 'current' : ''} key={row.month}>
+                  <td>{monthLabelOf(row.month)}</td>
+                  <td className="num">{row.hours.toFixed(1)}h</td>
+                  <td className="num">¥{row.amount.toLocaleString()}</td>
+                  <td className="num">¥{Math.round(row.taxableIncome).toLocaleString()}</td>
+                  <td className="num">{Math.round(row.rate * 100)}%</td>
+                  <td className="num">¥{row.tax.toLocaleString()}</td>
+                  <td className="num">¥{row.netIncome.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  )
+}
+
+function CalculatorIcon() {
+  return <BarChart3 size={20} />
+}
+
+function ReportsView({
+  stats,
+  tasks,
+  updates,
+  hourlyRate,
+  importedHours,
+  currentMonth,
+  pdfTitle,
+  serviceCompanyName,
+  reports,
+  onClientPreview,
+  onCopyShareLink,
+  onLockReport,
+}: {
+  stats: {
+    totalHours: number
+    billableHours: number
+    amount: number
+    accepted: number
+    pending: number
+  }
+  tasks: Task[]
+  updates: TaskUpdate[]
+  hourlyRate: number
+  importedHours: number
+  currentMonth: { label: string; value: string }
+  pdfTitle: string
+  serviceCompanyName: string
+  reports: ReportRecord[]
+  onClientPreview: () => void
+  onCopyShareLink: (token: string) => void
+  onLockReport: () => void
+}) {
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
+  const billableTasks = tasks.filter((task) => task.status !== '不计费' && task.status !== '计划中')
+  const receiptDetailTasks = tasks.filter((task) => task.status !== '不计费')
+  const plannedCount = tasks.filter((task) => task.status === '计划中').length
+  const freeTasks = tasks.filter((task) => task.status === '不计费')
+  const visibleReports = isHistoryExpanded ? reports : reports.slice(0, 1)
+  const receiptNo = `AK-${currentMonth.value.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
+  const latestUpdatesByTask = useMemo(() => {
+    const result = new Map<number, TaskUpdate>()
+    updates
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .forEach((update) => {
+        if (!result.has(update.taskId)) {
+          result.set(update.taskId, update)
+        }
+      })
+    return result
+  }, [updates])
+
+  const formatReceiptDate = (value: string) => (value ? datePart(value).replaceAll('-', '/') : '—')
+  const formatReceiptHours = (value: number) => (Number.isFinite(value) ? Number(value.toFixed(2)).toString() : '0')
+  const getActualDeliveryDate = (task: Task) => {
+    if (task.status === '已验收') {
+      return formatReceiptDate(latestUpdatesByTask.get(task.id)?.date ?? '')
+    }
+    return '—'
+  }
+  const getTaskStage = (task: Task) => task.stage || (task.status === '已验收' ? '完成' : task.status)
+  const getTaskRisk = (task: Task) => {
+    if (task.status === '挂起') {
+      return task.suspendReason || '挂起，原因未记录'
+    }
+    if (task.status === '终止') {
+      return task.terminateReason || '终止，原因未记录'
+    }
+    return '无'
+  }
+  const getTaskProgressText = (task: Task) => {
+    const latestUpdate = latestUpdatesByTask.get(task.id)
+    const parts: string[] = []
+    if (task.acceptanceNote?.trim()) {
+      parts.push(task.acceptanceNote.trim())
+    }
+    if (latestUpdate) {
+      parts.push(`${latestUpdate.title}${latestUpdate.body ? `：${latestUpdate.body}` : ''}`)
+    }
+    if (task.acceptanceFiles && task.acceptanceFiles.length > 0) {
+      parts.push(`验收文件：${task.acceptanceFiles.slice(0, 3).join('、')}${task.acceptanceFiles.length > 3 ? ` 等 ${task.acceptanceFiles.length} 个` : ''}`)
+    }
+    if (parts.length === 0) {
+      parts.push(`${task.status}，进度 ${task.progress}%`)
+    }
+    return parts.join('；')
+  }
+
+  const handleExportPdf = () => {
+    const previousTitle = document.title
+    document.title = `${pdfTitle}_${currentMonth.value}`
+    window.print()
+    document.title = previousTitle
+  }
+
+  return (
+    <section className="report-workspace">
+      <section className="panel report-control-bar">
+        <div className="report-summary-chips">
+          <div>
+            <span>总工时</span>
+            <strong>{stats.totalHours.toFixed(1)}h</strong>
+          </div>
+          <div>
+            <span>计费工时</span>
+            <strong>{stats.billableHours.toFixed(1)}h</strong>
+          </div>
+          <div>
+            <span>结算金额</span>
+            <strong>¥{stats.amount.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>已验收</span>
+            <strong>{stats.accepted} 个</strong>
+          </div>
+        </div>
+        <p className="report-flow-hint">
+          核对下方结算单 → 「锁定结算」生成甲方分享链接（金额快照不再变动）→ 把链接发给甲方，或「导出 PDF」另存发送。
+        </p>
+        <div className="report-bar-actions">
+          <button className="primary-button" onClick={onLockReport}>
+            <CheckCircle2 size={18} />
+            锁定结算并生成甲方链接
+          </button>
+          <button className="ghost-button" onClick={handleExportPdf}>
+            <Download size={18} />
+            导出 PDF
+          </button>
+          <button className="ghost-button" onClick={onClientPreview}>
+            <Share2 size={18} />
+            预览甲方页面
+          </button>
+        </div>
+
+        {reports.length > 0 && (
+          <div className="report-history">
+            <div className="report-history-header">
+              <h3>结算历史</h3>
+              {reports.length > 1 && (
+                <button type="button" onClick={() => setIsHistoryExpanded((expanded) => !expanded)}>
+                  {isHistoryExpanded ? '收起' : `展开全部 ${reports.length} 条`}
+                </button>
+              )}
+            </div>
+            {visibleReports.map((report) => (
+              <div className="report-history-row" key={report.id}>
+                <strong>{monthLabelOf(report.month)}</strong>
+                <span>
+                  {report.billableHours.toFixed(1)}h · ¥{report.totalAmount.toLocaleString()}
+                </span>
+                <small>
+                  锁定于 {report.generatedAt || '—'}
+                  {report.viewCount > 0 ? ` · 甲方已查看 ${report.viewCount} 次（最近 ${report.viewedAt}）` : ' · 甲方尚未查看'}
+                </small>
+                <div className="report-history-actions">
+                  <button className="icon-button" aria-label={`复制 ${report.month} 甲方链接`} onClick={() => onCopyShareLink(report.publicToken)}>
+                    <Copy size={15} />
+                  </button>
+                  <a className="icon-button" aria-label={`打开 ${report.month} 甲方页面`} href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
+                    <ExternalLink size={15} />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="receipt" aria-label="月度结算回单" data-company={serviceCompanyName}>
+        <header className="receipt-header">
+          <div className="receipt-brand">
+            <span className="receipt-mark">
+              <Sparkles size={16} />
+            </span>
+            <div>
+              <strong>{serviceCompanyName}</strong>
+              <small>ANKKI TECHNOLOGY</small>
+            </div>
+          </div>
+          <div className="receipt-title">
+            <h2>{pdfTitle}</h2>
+            <span>MONTHLY SETTLEMENT RECEIPT</span>
+          </div>
+          <div className="receipt-no">
+            <span>回单编号：{receiptNo}</span>
+            <span>出单时间：{nowStamp()}</span>
+          </div>
+        </header>
+
+        <div className="receipt-rule" />
+
+        <dl className="receipt-info">
+          <div>
+            <dt>客户名称</dt>
+            <dd>{serviceCompanyName}</dd>
+          </div>
+          <div>
+            <dt>服务内容</dt>
+            <dd>平面设计兼职</dd>
+          </div>
+          <div>
+            <dt>结算月份</dt>
+            <dd>{currentMonth.label}</dd>
+          </div>
+          <div>
+            <dt>结算单价</dt>
+            <dd>¥{hourlyRate} / 小时</dd>
+          </div>
+        </dl>
+
+        <table className="receipt-table">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>结算月份</th>
+              <th>项目名称</th>
+              <th>类型</th>
+              <th className="num">工时</th>
+              <th className="num">金额（元）</th>
+            </tr>
+          </thead>
+          <tbody>
+            {billableTasks.map((task, index) => (
+              <tr key={task.id}>
+                <td>{String(index + 1).padStart(2, '0')}</td>
+                <td>{monthLabelOf(taskSettlementMonth(task))}{isSupplementalTask(task) ? '（补录）' : ''}</td>
+                <td className="receipt-task-name">{task.title}</td>
+                <td>{task.type}</td>
+                <td className="num">{task.actualHours.toFixed(1)}</td>
+                <td className="num">{Math.round(task.actualHours * hourlyRate).toLocaleString()}</td>
+              </tr>
+            ))}
+            {importedHours > 0 && (
+              <tr>
+                <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
+                <td>—</td>
+                <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
+                <td>导入</td>
+                <td className="num">{importedHours.toFixed(1)}</td>
+                <td className="num">{Math.round(importedHours * hourlyRate).toLocaleString()}</td>
+              </tr>
+            )}
+            {billableTasks.length === 0 && importedHours === 0 && (
+              <tr>
+                <td colSpan={6} className="receipt-empty">
+                  本月暂无计费任务
+                </td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={4}>合计</td>
+              <td className="num">{stats.billableHours.toFixed(1)}</td>
+              <td className="num">¥{stats.amount.toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <section className="receipt-detail-section" aria-label="工时明细附表">
+          <div className="receipt-detail-title">
+            <h3>工时明细附表</h3>
+            <span>字段对应 Excel「6月」工时明细表，由平台任务、验收和进展记录自动生成。</span>
+          </div>
+          <div className="receipt-detail-table-wrap">
+            <table className="receipt-table receipt-detail-table">
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>参考开始日期</th>
+                  <th>设计类型</th>
+                  <th>项目/任务名称</th>
+                  <th>具体任务需求</th>
+                  <th>对接人</th>
+                  <th>工作阶段</th>
+                  <th className="num">参考预估工时</th>
+                  <th className="num">实际工时</th>
+                  <th>参考交付日期</th>
+                  <th>实际交付日期</th>
+                  <th>修改轮次上限</th>
+                  <th>状态</th>
+                  <th>验收人/确认</th>
+                  <th>风险/阻塞</th>
+                  <th>进展</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receiptDetailTasks.map((task, index) => (
+                  <tr key={task.id}>
+                    <td>{String(index + 1).padStart(2, '0')}</td>
+                    <td>{formatReceiptDate(task.date)}{isSupplementalTask(task) ? '（补录）' : ''}</td>
+                    <td>{task.type}</td>
+                    <td>{task.title}</td>
+                    <td>{task.requirement || '—'}</td>
+                    <td>{task.contact || '—'}</td>
+                    <td>{getTaskStage(task)}</td>
+                    <td className="num">{formatReceiptHours(task.estimatedHours)}</td>
+                    <td className="num">{formatReceiptHours(task.actualHours)}</td>
+                    <td>{formatReceiptDate(task.estimatedDate)}</td>
+                    <td>{getActualDeliveryDate(task)}</td>
+                    <td>—</td>
+                    <td>{task.status}</td>
+                    <td>{task.reviewer || task.requester || '—'}</td>
+                    <td>{getTaskRisk(task)}</td>
+                    <td>{getTaskProgressText(task)}</td>
+                  </tr>
+                ))}
+                {receiptDetailTasks.length === 0 && (
+                  <tr>
+                    <td colSpan={16} className="receipt-empty">
+                      本月暂无可纳入结算明细的任务
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={7}>合计</td>
+                  <td className="num">—</td>
+                  <td className="num">{receiptDetailTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1)}</td>
+                  <td colSpan={7}>计费金额以已验收/计费任务摘要为准</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+
+        <div className="receipt-amount">
+          <span>人民币（大写）</span>
+          <strong>{toChineseAmount(stats.amount)}</strong>
+        </div>
+
+        <div className="receipt-remarks">
+          <p>
+            备注：本月共 {tasks.length} 项任务，已验收 {stats.accepted} 项，待验收 {stats.pending} 项
+            {plannedCount > 0 ? `，计划中 ${plannedCount} 项（未计费）` : ''}
+            {freeTasks.length > 0 ? `，另含 ${freeTasks.length} 项不计费协助` : ''}。
+          </p>
+          <p>本回单由系统根据任务与工时记录自动生成，验收状态以甲方确认为准。</p>
+          <div className="receipt-stamp" aria-hidden="true">
+            <span>{serviceCompanyName}</span>
+            <em>★</em>
+            <span>工时结算确认</span>
+          </div>
+        </div>
+
+        <div className="receipt-cutline">
+          <span>✂</span>
+        </div>
+      </section>
+    </section>
+  )
+}
+
+function ClientReportView({
+  stats,
+  tasks,
+  updates,
+  files,
+  currentMonth,
+  pdfTitle,
+  serviceCompanyName,
+  onBack,
+  onPreviewFile,
+}: {
+  stats: {
+    totalHours: number
+    billableHours: number
+    amount: number
+    accepted: number
+    pending: number
+  }
+  tasks: Task[]
+  updates: TaskUpdate[]
+  files: FileAsset[]
+  currentMonth: { label: string; value: string }
+  pdfTitle: string
+  serviceCompanyName: string
+  onBack: () => void
+  onPreviewFile: (file: FileAsset) => void
+}) {
+  const visibleUpdates = updates.filter((update) => update.visible)
+  const visibleFiles = files.filter((file) => file.visible)
+
+  return (
+    <section className="client-view">
+      <section className="client-hero panel">
+        <div>
+          <p className="eyebrow">查看页 · {serviceCompanyName}</p>
+          <h2>{currentMonth.label}{pdfTitle}</h2>
+          <p>包含本月任务明细、进展记录、计费工时和可下载交付文件。</p>
+        </div>
+        <div className="client-hero-actions">
+          <button className="ghost-button" onClick={onBack}>
+            <ChevronLeft size={17} />
+            返回结算
+          </button>
+          <button className="primary-button" onClick={() => window.print()}>
+            <Download size={18} />
+            下载 PDF
+          </button>
+        </div>
+      </section>
+
+      <section className="stats-grid">
+        <StatCard label="总工时" value={`${stats.totalHours.toFixed(1)}h`} trend="本月投入" icon={<Clock3 size={20} />} />
+        <StatCard label="预计结算" value={`¥${stats.amount.toLocaleString()}`} trend="按当前单价" icon={<BarChart3 size={20} />} />
+        <StatCard label="已验收" value={`${stats.accepted}`} trend={`${stats.pending} 个待验收`} icon={<CheckCircle2 size={20} />} />
+        <StatCard label="可下载文件" value={`${visibleFiles.length}`} trend="交付资料" icon={<Archive size={20} />} />
+      </section>
+
+      <section className="client-grid">
+        <div className="panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>任务明细</h2>
+              <p>仅展示本月计费或交付相关任务</p>
+            </div>
+          </div>
+          {tasks
+            .filter((task) => task.status !== '不计费')
+            .map((task) => (
+              <div className="client-task-row" key={task.id}>
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>
+                    {formatPlanDateTime(task.date)}
+                    {isSupplementalTask(task) ? ` · 补录至 ${monthLabelOf(taskSettlementMonth(task))}` : ''}
+                    {' · '}
+                    {task.requirement}
+                  </span>
+                </div>
+                <em>{task.actualHours.toFixed(1)}h</em>
+                <StatusBadge status={task.status} />
+              </div>
+            ))}
+        </div>
+
+        <aside className="panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>交付文件</h2>
+              <p>点击文件即可在线预览，无需下载</p>
+            </div>
+          </div>
+          <div className="client-files">
+            {visibleFiles.length === 0 && <p className="calendar-empty-hint">本月暂无交付文件。</p>}
+            {visibleFiles.map((file) => (
+              <button className="client-file-row" key={file.id} onClick={() => onPreviewFile(file)}>
+                <Paperclip size={15} />
+                <span>{file.name}</span>
+                <Eye size={15} />
+              </button>
+            ))}
+          </div>
+        </aside>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header compact">
+          <div>
+            <h2>进展记录</h2>
+            <p>项目动态</p>
+          </div>
+        </div>
+        <div className="timeline">
+          {visibleUpdates.map((update) => (
+            <article className="timeline-item" key={update.id}>
+              <span className="dot" />
+              <TimelineStamp value={update.date} audience="public" />
+              <h3>{update.title}</h3>
+              <p>{update.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
+  )
+}
+
+function SettingsView({
+  hourlyRate,
+  pdfTitle,
+  serviceCompanyName,
+  taxMode,
+  designTypeGroups,
+  role,
+  accessTokens,
+  newTokenId,
+  onRateChange,
+  onPdfTitleChange,
+  onServiceCompanyNameChange,
+  onTaxModeChange,
+  onDesignTypeGroupsChange,
+  onExportBackup,
+  onSignOut,
+  onChangePassword,
+  onCreateToken,
+  onToggleToken,
+  onDeleteToken,
+  onCopyToken,
+}: {
+  hourlyRate: number
+  pdfTitle: string
+  serviceCompanyName: string
+  taxMode: TaxMode
+  designTypeGroups: DesignTypeGroup[]
+  role: AuthRole
+  accessTokens: AccessToken[]
+  newTokenId: string
+  onRateChange: (rate: number) => void
+  onPdfTitleChange: (title: string) => void
+  onServiceCompanyNameChange: (name: string) => void
+  onTaxModeChange: (mode: TaxMode) => void
+  onDesignTypeGroupsChange: (groups: DesignTypeGroup[]) => void | Promise<void>
+  onExportBackup: () => void
+  onSignOut: () => void
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  onCreateToken: (label: string, expiresInDays: number | null) => void
+  onToggleToken: (tokenId: string, disabled: boolean) => void
+  onDeleteToken: (tokenId: string) => void
+  onCopyToken: (token: string) => void
+}) {
+  const [tokenLabel, setTokenLabel] = useState('')
+  const [tokenExpiry, setTokenExpiry] = useState('permanent')
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupItems, setNewGroupItems] = useState<Record<string, string>>({})
+  const [groupNameDrafts, setGroupNameDrafts] = useState<Record<string, string>>({})
+  const [serviceCompanyDraft, setServiceCompanyDraft] = useState(serviceCompanyName)
+  const [pdfTitleDraft, setPdfTitleDraft] = useState(pdfTitle)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+  const [draggingGroupName, setDraggingGroupName] = useState('')
+  const [draggingItem, setDraggingItem] = useState<{ groupName: string; item: string } | null>(null)
+  const [settingsConfirmDialog, setSettingsConfirmDialog] = useState<ConfirmDialogState | null>(null)
+  const [isSettingsConfirmDialogBusy, setIsSettingsConfirmDialogBusy] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [isPasswordSaving, setIsPasswordSaving] = useState(false)
+
+  const tokenStatus = (token: AccessToken) => {
+    if (token.disabled) {
+      return { label: '已停用', className: 'status-不计费' }
+    }
+    if (token.expired) {
+      return { label: '已过期', className: 'status-待验收' }
+    }
+    return { label: '有效', className: 'status-已验收' }
+  }
+
+  const handleCreate = () => {
+    const expiresInDays = tokenExpiry === 'permanent' ? null : Number(tokenExpiry)
+    onCreateToken(tokenLabel.trim() || '未命名口令', expiresInDays)
+    setTokenLabel('')
+  }
+
+  const savePdfTitle = () => {
+    const value = pdfTitleDraft.trim()
+    if (value && value !== pdfTitle) {
+      onPdfTitleChange(value)
+    }
+    if (!value) {
+      setPdfTitleDraft(defaultPdfTitle)
+      onPdfTitleChange(defaultPdfTitle)
+    }
+  }
+
+  const saveServiceCompanyName = () => {
+    const value = serviceCompanyDraft.trim()
+    if (value && value !== serviceCompanyName) {
+      onServiceCompanyNameChange(value)
+    }
+    if (!value) {
+      setServiceCompanyDraft(defaultServiceCompanyName)
+      onServiceCompanyNameChange(defaultServiceCompanyName)
+    }
+  }
+
+  const addDesignTypeGroup = () => {
+    const value = newGroupName.trim()
+    if (!value || designTypeGroups.some((group) => group.name === value)) {
+      return
+    }
+    onDesignTypeGroupsChange([...designTypeGroups, { name: value, items: [] }])
+    setNewGroupName('')
+  }
+
+  const performDeleteDesignTypeGroup = async (name: string) => {
+    if (designTypeGroups.length <= 1) {
+      return
+    }
+    await onDesignTypeGroupsChange(designTypeGroups.filter((group) => group.name !== name))
+    setGroupNameDrafts((current) => {
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
+    setNewGroupItems((current) => {
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
+    setCollapsedGroups((current) => {
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
+  }
+
+  const requestDeleteDesignTypeGroup = (name: string) => {
+    const group = designTypeGroups.find((item) => item.name === name)
+    if (!group || designTypeGroups.length <= 1) {
+      return
+    }
+    setSettingsConfirmDialog({
+      eyebrow: '删除设计类型大类',
+      title: `确定删除「${name}」吗？`,
+      body: '删除大类后，这个大类下的子类会一起从新建任务的选择器中移除。已创建任务的历史记录不会被删除，但后续新建任务不能再选择这些类型。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [`${group.items.length} 个子类`, '影响后续新建任务选项'],
+      onConfirm: () => performDeleteDesignTypeGroup(name),
+    })
+  }
+
+  const renameDesignTypeGroup = (oldName: string) => {
+    const nextName = (groupNameDrafts[oldName] ?? oldName).trim()
+    if (!nextName || nextName === oldName || designTypeGroups.some((group) => group.name === nextName && group.name !== oldName)) {
+      setGroupNameDrafts((current) => ({ ...current, [oldName]: oldName }))
+      return
+    }
+    onDesignTypeGroupsChange(designTypeGroups.map((group) => (group.name === oldName ? { ...group, name: nextName } : group)))
+    setGroupNameDrafts((current) => {
+      const next = { ...current }
+      delete next[oldName]
+      return { ...next, [nextName]: nextName }
+    })
+    setNewGroupItems((current) => {
+      const { [oldName]: oldDraft, ...rest } = current
+      return oldDraft === undefined ? rest : { ...rest, [nextName]: oldDraft }
+    })
+    setCollapsedGroups((current) => {
+      const { [oldName]: oldCollapsed, ...rest } = current
+      return oldCollapsed === undefined ? rest : { ...rest, [nextName]: oldCollapsed }
+    })
+    setDraggingGroupName((current) => (current === oldName ? nextName : current))
+    setDraggingItem((current) => (current?.groupName === oldName ? { ...current, groupName: nextName } : current))
+  }
+
+  const addDesignTypeItem = (groupName: string) => {
+    const value = (newGroupItems[groupName] ?? '').trim()
+    if (!value) {
+      return
+    }
+    onDesignTypeGroupsChange(
+      designTypeGroups.map((group) => (group.name === groupName ? { ...group, items: [...group.items, value] } : group)),
+    )
+    setNewGroupItems((current) => ({ ...current, [groupName]: '' }))
+  }
+
+  const performDeleteDesignTypeItem = async (groupName: string, item: string) => {
+    await onDesignTypeGroupsChange(
+      designTypeGroups.map((group) => (group.name === groupName ? { ...group, items: group.items.filter((value) => value !== item) } : group)),
+    )
+  }
+
+  const requestDeleteDesignTypeItem = (groupName: string, item: string) => {
+    setSettingsConfirmDialog({
+      eyebrow: '删除设计类型子类',
+      title: `确定删除「${item}」吗？`,
+      body: '删除后，这个子类会从新建任务的设计类型选择器中移除。已创建任务不会被删除，历史任务仍会保留原来的类型文字。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [`所属大类：${groupName}`, '影响后续新建任务选项'],
+      onConfirm: () => performDeleteDesignTypeItem(groupName, item),
+    })
+  }
+
+  const handleSettingsConfirm = async () => {
+    if (!settingsConfirmDialog || isSettingsConfirmDialogBusy) {
+      return
+    }
+    setIsSettingsConfirmDialogBusy(true)
+    try {
+      await settingsConfirmDialog.onConfirm()
+      setSettingsConfirmDialog(null)
+    } finally {
+      setIsSettingsConfirmDialogBusy(false)
+    }
+  }
+
+  const submitPasswordChange = async () => {
+    if (isPasswordSaving) {
+      return
+    }
+    if (newPassword.length < 8) {
+      setPasswordError('新密码至少需要 8 位')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('两次输入的新密码不一致')
+      return
+    }
+    setIsPasswordSaving(true)
+    setPasswordError('')
+    try {
+      await onChangePassword(currentPassword, newPassword)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : '密码更新失败')
+    } finally {
+      setIsPasswordSaving(false)
+    }
+  }
+
+  const moveDesignTypeGroup = (targetName: string) => {
+    if (!draggingGroupName || draggingGroupName === targetName) {
+      return
+    }
+    const fromIndex = designTypeGroups.findIndex((group) => group.name === draggingGroupName)
+    const toIndex = designTypeGroups.findIndex((group) => group.name === targetName)
+    if (fromIndex < 0 || toIndex < 0) {
+      return
+    }
+    const nextGroups = [...designTypeGroups]
+    const [moved] = nextGroups.splice(fromIndex, 1)
+    nextGroups.splice(toIndex, 0, moved)
+    onDesignTypeGroupsChange(nextGroups)
+  }
+
+  const moveDesignTypeItem = (targetGroupName: string, targetItem: string) => {
+    if (!draggingItem || draggingItem.groupName !== targetGroupName || draggingItem.item === targetItem) {
+      return
+    }
+    const nextGroups = designTypeGroups.map((group) => {
+      if (group.name !== targetGroupName) {
+        return group
+      }
+      const items = [...group.items]
+      const fromIndex = items.indexOf(draggingItem.item)
+      const toIndex = items.indexOf(targetItem)
+      if (fromIndex < 0 || toIndex < 0) {
+        return group
+      }
+      const [moved] = items.splice(fromIndex, 1)
+      items.splice(toIndex, 0, moved)
+      return { ...group, items }
+    })
+    onDesignTypeGroupsChange(nextGroups)
+  }
+
+  return (
+    <section className="settings-grid">
+      <details className="settings-group-panel settings-business-group" open>
+        <summary className="settings-group-summary">
+          <div>
+            <h2>业务设置</h2>
+            <p>结算口径、服务公司和设计类型</p>
+          </div>
+          <ChevronDown size={18} />
+        </summary>
+        <div className="settings-group-body">
+          <section className="panel settings-settlement-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>结算设置</h2>
+                <p>用于自动计算月度费用，已锁定的结算单不受影响</p>
+              </div>
+            </div>
+            <div className="form-grid settings-form">
+              <label className="field">
+                <span>小时单价（元 / 小时）</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="10"
+                  value={hourlyRate}
+                  onChange={(event) => onRateChange(Math.max(0, Number.parseFloat(event.target.value) || 0))}
+                />
+              </label>
+              <label className="field">
+                <span>服务公司名称</span>
+                <input
+                  value={serviceCompanyDraft}
+                  placeholder="例如：昂楷科技"
+                  onChange={(event) => setServiceCompanyDraft(event.target.value)}
+                  onBlur={saveServiceCompanyName}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>计税方式</span>
+                <select value={taxMode} onChange={(event) => onTaxModeChange(event.target.value as TaxMode)}>
+                  <option value="salary">工资薪金</option>
+                  <option value="labor">劳务报酬</option>
+                </select>
+              </label>
+              <label className="field wide">
+                <span>PDF 抬头</span>
+                <input
+                  value={pdfTitleDraft}
+                  placeholder="例如：设计服务工时结算回单"
+                  onChange={(event) => setPdfTitleDraft(event.target.value)}
+                  onBlur={savePdfTitle}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          </section>
+          {role === 'admin' && (
+            <section className="panel settings-design-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>设计类型</h2>
+                  <p>新建任务时使用二级选择器：大类 / 子类，管理员可自定义增删</p>
+                </div>
+              </div>
+              <div className="design-type-create">
+                <input
+                  value={newGroupName}
+                  placeholder="新增大类，例如：展会类"
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      addDesignTypeGroup()
+                    }
+                  }}
+                />
+                <button className="primary-button" onClick={addDesignTypeGroup}>
+                  <Plus size={17} />
+                  添加大类
+                </button>
+              </div>
+              <div className="design-type-groups">
+                {designTypeGroups.map((group) => (
+                  <div
+                    className={`design-type-group-row ${draggingGroupName === group.name ? 'dragging' : ''}`}
+                    key={group.name}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => moveDesignTypeGroup(group.name)}
+                  >
+                    <button
+                      type="button"
+                      className="design-type-drag-handle"
+                      draggable
+                      aria-label={`拖动排序 ${group.name}`}
+                      onDragStart={() => setDraggingGroupName(group.name)}
+                      onDragEnd={() => setDraggingGroupName('')}
+                    >
+                      <GripVertical size={18} />
+                    </button>
+                    <div className="design-type-group">
+                      <div className="design-type-group-header">
+                        <div className="design-type-group-title">
+                          <button
+                            type="button"
+                            className="design-type-collapse-trigger"
+                            aria-label={`${collapsedGroups[group.name] ? '展开' : '折叠'}设计类型大类 ${group.name}`}
+                            onClick={() => setCollapsedGroups((current) => ({ ...current, [group.name]: !current[group.name] }))}
+                          >
+                            {collapsedGroups[group.name] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                          </button>
+                          <input
+                            className="design-type-group-name-input"
+                            aria-label={`设计类型大类名称：${group.name}`}
+                            value={groupNameDrafts[group.name] ?? group.name}
+                            onChange={(event) => setGroupNameDrafts((current) => ({ ...current, [group.name]: event.target.value }))}
+                            onBlur={() => renameDesignTypeGroup(group.name)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.currentTarget.blur()
+                              }
+                              if (event.key === 'Escape') {
+                                setGroupNameDrafts((current) => ({ ...current, [group.name]: group.name }))
+                                event.currentTarget.blur()
+                              }
+                            }}
+                          />
+                          <small>{group.items.length} 个子类</small>
+                        </div>
+                        <div className="design-type-group-actions">
+                          <button
+                            className="icon-button danger-icon"
+                            aria-label={`删除设计类型大类 ${group.name}`}
+                            disabled={designTypeGroups.length <= 1}
+                            onClick={() => requestDeleteDesignTypeGroup(group.name)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      {!collapsedGroups[group.name] && (
+                        <>
+                          <div className="design-type-create nested">
+                            <input
+                              value={newGroupItems[group.name] ?? ''}
+                              placeholder="新增子类，例如：邀请函长图"
+                              onChange={(event) => setNewGroupItems((current) => ({ ...current, [group.name]: event.target.value }))}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  addDesignTypeItem(group.name)
+                                }
+                              }}
+                            />
+                            <button className="ghost-button compact-button" onClick={() => addDesignTypeItem(group.name)}>
+                              <Plus size={15} />
+                              添加
+                            </button>
+                          </div>
+                          <div className="design-type-list">
+                            {group.items.map((item) => (
+                              <span
+                                className={`design-type-chip ${draggingItem?.groupName === group.name && draggingItem.item === item ? 'dragging' : ''}`}
+                                draggable
+                                key={item}
+                                onDragStart={() => setDraggingItem({ groupName: group.name, item })}
+                                onDragOver={(event) => event.preventDefault()}
+                                onDrop={() => moveDesignTypeItem(group.name, item)}
+                                onDragEnd={() => setDraggingItem(null)}
+                              >
+                                {item}
+                                <button aria-label={`删除设计类型 ${group.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(group.name, item)}>
+                                  <Trash2 size={13} />
+                                </button>
+                              </span>
+                            ))}
+                            {group.items.length === 0 && <p className="calendar-empty-hint">这个大类还没有子类。</p>}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </details>
+
+      <details className="settings-group-panel settings-security-group">
+        <summary className="settings-group-summary">
+          <div>
+            <h2>权限安全</h2>
+            <p>访问口令、账号状态和退出登录</p>
+          </div>
+          <ChevronDown size={18} />
+        </summary>
+        <div className="settings-group-body settings-security-body">
+          {role === 'admin' && (
+            <section className="settings-subsection settings-permission-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>口令管理</h2>
+                  <p>生成或停用后台访问口令</p>
+                </div>
+              </div>
+              <div className="token-create">
+                <label className="field">
+                  <span>备注</span>
+                  <input value={tokenLabel} placeholder="例如：手机 / iPad / 协作设计师" onChange={(event) => setTokenLabel(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>有效期</span>
+                  <select value={tokenExpiry} onChange={(event) => setTokenExpiry(event.target.value)}>
+                    <option value="permanent">永久有效</option>
+                    <option value="7">7 天</option>
+                    <option value="30">30 天</option>
+                    <option value="90">90 天</option>
+                  </select>
+                </label>
+                <button className="primary-button" onClick={handleCreate}>
+                  <KeyRound size={17} />
+                  申请口令
+                </button>
+              </div>
+              <div className="token-list">
+                {accessTokens.length === 0 && <p className="calendar-empty-hint">还没有生成过口令。</p>}
+                {accessTokens.map((token) => {
+                  const status = tokenStatus(token)
+                  return (
+                    <div className={`token-row ${token.id === newTokenId ? 'fresh' : ''}`} key={token.id}>
+                      <div className="token-row-main">
+                        <strong>{token.label}</strong>
+                        <code>{token.token}</code>
+                        <small>
+                          创建于 {token.createdAt} · {token.expiresAt ? `${token.expiresAt} 到期` : '永久有效'}
+                          {token.lastUsedAt ? ` · 最近使用 ${token.lastUsedAt}` : ' · 未使用过'}
+                        </small>
+                      </div>
+                      <span className={`status-badge ${status.className}`}>{status.label}</span>
+                      <div className="token-row-actions">
+                        <button className="icon-button" aria-label="复制口令" onClick={() => onCopyToken(token.token)}>
+                          <Copy size={15} />
+                        </button>
+                        <button
+                          className="ghost-button compact-button"
+                          onClick={() => onToggleToken(token.id, !token.disabled)}
+                        >
+                          {token.disabled ? '启用' : '停用'}
+                        </button>
+                        <button className="icon-button danger-icon" aria-label="删除口令" onClick={() => onDeleteToken(token.id)}>
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+          <section className="settings-subsection settings-security-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>账号安全</h2>
+                <p>当前登录身份和退出操作</p>
+              </div>
+            </div>
+            <p className="settings-tool-note">当前身份：{role === 'admin' ? '管理员（最高权限）' : '访问口令用户'}；公共电脑用完请退出。</p>
+            {role === 'admin' && (
+              <div className="password-change-form">
+                <label className="field">
+                  <span>当前密码</span>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    placeholder="输入当前密码"
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>新密码</span>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    placeholder="至少 8 位"
+                    onChange={(event) => setNewPassword(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>确认新密码</span>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    placeholder="再次输入新密码"
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                  />
+                </label>
+                {passwordError && <p className="settings-inline-error">{passwordError}</p>}
+                <button className="ghost-button" onClick={() => void submitPasswordChange()} disabled={!currentPassword || !newPassword || !confirmPassword || isPasswordSaving}>
+                  <KeyRound size={16} />
+                  {isPasswordSaving ? '保存中…' : '修改密码'}
+                </button>
+              </div>
+            )}
+            <button className="danger-button" onClick={onSignOut}>
+              <LogOut size={17} />
+              退出登录
+            </button>
+          </section>
+        </div>
+      </details>
+
+      <details className="settings-group-panel settings-system-group">
+        <summary className="settings-group-summary">
+          <div>
+            <h2>系统信息</h2>
+            <p>备份、版本和 Cloudflare 资源</p>
+          </div>
+          <ChevronDown size={18} />
+        </summary>
+        <div className="settings-group-body settings-system-body">
+          <section className="settings-subsection settings-backup-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>数据备份</h2>
+                <p>导出当前数据快照</p>
+              </div>
+            </div>
+            <button className="ghost-button" onClick={onExportBackup}>
+              <Download size={17} />
+              导出备份 JSON
+            </button>
+          </section>
+          <section className="settings-subsection settings-version-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>产品版本</h2>
+                <p>用于确认当前上线批次</p>
+              </div>
+            </div>
+            <dl className="version-meta">
+              <div>
+                <dt>当前版本</dt>
+                <dd>v{appVersion}</dd>
+              </div>
+              <div>
+                <dt>发布时间</dt>
+                <dd>{appReleaseDate}</dd>
+              </div>
+            </dl>
+          </section>
+          <section className="settings-subsection settings-cloudflare-panel cloudflare-details">
+            <div className="panel-header compact">
+              <div>
+                <h2>系统资源</h2>
+                <p>当前正式环境绑定信息</p>
+              </div>
+            </div>
+            <div className="cloudflare-list">
+              <span>Worker：designer-worklog（mayeai.com）</span>
+              <span>D1：designer-worklog-db</span>
+              <span>R2：designer-worklog-uploads · 18.6 GB</span>
+              <span>登录体系：管理员邮箱 + 管理密码，或后台生成的访问口令</span>
+            </div>
+          </section>
+        </div>
+      </details>
+      {settingsConfirmDialog && (
+        <ConfirmDialogModal
+          dialog={settingsConfirmDialog}
+          isBusy={isSettingsConfirmDialogBusy}
+          onClose={() => setSettingsConfirmDialog(null)}
+          onConfirm={() => void handleSettingsConfirm()}
+        />
+      )}
+    </section>
+  )
+}
+
+function ConfirmDialogModal({
+  dialog,
+  isBusy,
+  onClose,
+  onConfirm,
+}: {
+  dialog: ConfirmDialogState
+  isBusy: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const isDanger = dialog.tone === 'danger'
+
+  return (
+    <ModalShell className={`delete-confirm-modal confirm-dialog-modal ${isDanger ? 'danger-confirm' : ''}`} labelledBy="confirm-dialog-title" onClose={onClose}>
+      <div className="delete-confirm-icon">
+        {isDanger ? <Trash2 size={24} /> : <CheckCircle2 size={24} />}
+      </div>
+      <div className="delete-confirm-copy">
+        <p className="eyebrow">{dialog.eyebrow}</p>
+        <h2 id="confirm-dialog-title">{dialog.title}</h2>
+        <p>{dialog.body}</p>
+      </div>
+      {dialog.details && dialog.details.length > 0 && (
+        <div className="delete-confirm-meta">
+          {dialog.details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
+        </div>
+      )}
+      <div className="delete-confirm-actions">
+        <button className="ghost-button" disabled={isBusy} onClick={onClose}>
+          {dialog.cancelText ?? '取消'}
+        </button>
+        <button className={isDanger ? 'danger-button solid-danger-button' : 'primary-button'} disabled={isBusy} onClick={onConfirm}>
+          {isBusy ? '处理中…' : dialog.confirmText}
+        </button>
+      </div>
+    </ModalShell>
+  )
+}
+
+function VoidTaskModal({
+  task,
+  isBusy,
+  onClose,
+  onConfirm,
+}: {
+  task: Task
+  isBusy: boolean
+  onClose: () => void
+  onConfirm: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+
+  const submit = () => {
+    if (isBusy) {
+      return
+    }
+    onConfirm(reason.trim())
+  }
+
+  return (
+    <ModalShell className="delete-confirm-modal void-task-modal danger-confirm" labelledBy="void-task-title" onClose={onClose}>
+      <div className="delete-confirm-icon">
+        <Trash2 size={24} />
+      </div>
+      <div className="delete-confirm-copy">
+        <p className="eyebrow">作废任务</p>
+        <h2 id="void-task-title">确定作废「{task.title}」吗？</h2>
+        <p>作废后，这个任务不会计入工时、收入和结算；管理员仍可在数据中保留记录，避免误删真实历史。</p>
+      </div>
+      <label className="void-reason-field">
+        <span>作废原因（选填）</span>
+        <textarea
+          value={reason}
+          autoFocus
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="例如：测试任务、不计入工时、需求取消或录入错误。"
+        />
+      </label>
+      <div className="delete-confirm-meta">
+        <span>{task.type}</span>
+        <span>{monthLabelOf(taskSettlementMonth(task))}</span>
+      </div>
+      <div className="delete-confirm-actions">
+        <button className="ghost-button" disabled={isBusy} onClick={onClose}>
+          取消
+        </button>
+        <button className="danger-button solid-danger-button" disabled={isBusy} onClick={submit}>
+          {isBusy ? '处理中…' : '确认作废'}
+        </button>
+      </div>
+    </ModalShell>
+  )
+}
+
+function StatusReasonModal({
+  target,
+  onClose,
+  onConfirm,
+}: {
+  target: NonNullable<StatusReasonTarget>
+  onClose: () => void
+  onConfirm: (reason: string) => void
+}) {
+  const initialReason = target.status === '挂起' ? target.task.suspendReason ?? '' : target.task.terminateReason ?? ''
+  const [reason, setReason] = useState(initialReason)
+  const isSuspend = target.status === '挂起'
+  const submit = () => {
+    const trimmedReason = reason.trim()
+    if (!trimmedReason) {
+      return
+    }
+    onConfirm(trimmedReason)
+  }
+
+  return (
+    <ModalShell className="delete-confirm-modal status-reason-modal danger-confirm" labelledBy="status-reason-title" onClose={onClose}>
+      <div className="delete-confirm-icon">
+        {isSuspend ? <Archive size={24} /> : <AlertTriangle size={24} />}
+      </div>
+      <div className="delete-confirm-copy">
+        <p className="eyebrow">{target.status}</p>
+        <h2 id="status-reason-title">
+          {isSuspend ? '填写挂起原因' : '填写终止原因'}
+        </h2>
+        <p>{isSuspend ? '挂起任务会暂时从计费统计中排除，请记录等待什么条件恢复。' : '终止任务会从后续计费中排除，请记录取消或停止的原因。'}</p>
+      </div>
+      <label className="void-reason-field">
+        <span>{isSuspend ? '挂起原因' : '终止原因'}</span>
+        <textarea
+          value={reason}
+          autoFocus
+          onChange={(event) => setReason(event.target.value)}
+          placeholder={isSuspend ? '例如：等待甲方补充资料或确认方向。' : '例如：需求取消，本次不再继续制作。'}
+        />
+      </label>
+      <div className="delete-confirm-meta">
+        <span>{target.task.title}</span>
+        <StatusBadge status={target.status} />
+      </div>
+      <div className="delete-confirm-actions">
+        <button className="ghost-button" onClick={onClose}>
+          取消
+        </button>
+        <button className="danger-button solid-danger-button" disabled={!reason.trim()} onClick={submit}>
+          确认{target.status}
+        </button>
+      </div>
+    </ModalShell>
+  )
+}
+
+function ModalShell({
+  className,
+  labelledBy,
+  onClose,
+  closeOnBackdrop = true,
+  closeOnEscape = true,
+  children,
+}: {
+  className?: string
+  labelledBy: string
+  onClose: () => void
+  closeOnBackdrop?: boolean
+  closeOnEscape?: boolean
+  children: React.ReactNode
+}) {
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (closeOnEscape && event.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [closeOnEscape, onClose])
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (closeOnBackdrop && event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
+      <section className={`task-modal ${className ?? ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
+        {children}
+      </section>
+    </div>
+  )
+}
+
+function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
+  const fileType = file.type.toUpperCase()
+  const sourceUrl = authedPreviewUrl(fileType === 'AI' ? appendQueryParam(file.sourceUrl, 'as', 'pdf') : file.sourceUrl)
+  const previewUrl = authedPreviewUrl(file.previewUrl ?? file.sourceUrl)
+  const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
+  const isRasterPreview = Boolean(file.previewUrl) && ['PSD', 'AI'].includes(fileType)
+  const isPdfLike = ['PDF', 'AI'].includes(fileType)
+  const isVideo = ['MP4', 'WEBM', 'MOV'].includes(fileType)
+  const isOffice = ['DOCX', 'XLSX', 'PPTX', 'DOC', 'XLS', 'PPT'].includes(fileType)
+
+  return (
+    <ModalShell className="file-preview-modal" labelledBy="file-preview-title" onClose={onClose}>
+        <header className="modal-header">
+          <div>
+            <p className="eyebrow">文件预览</p>
+            <h2 id="file-preview-title">{file.name}</h2>
+          </div>
+          <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="file-preview-body">
+          {(isImage || isRasterPreview) && previewUrl ? (
+            <img src={previewUrl} alt={file.name} />
+          ) : isVideo && sourceUrl ? (
+            <video className="file-preview-video" src={sourceUrl} controls preload="metadata" />
+          ) : isPdfLike && sourceUrl ? (
+            <iframe className="file-preview-frame" src={sourceUrl} title={file.name} />
+          ) : isOffice && sourceUrl ? (
+            <OfficePreview fileType={fileType} sourceUrl={sourceUrl} />
+          ) : (
+            <div className="file-preview-placeholder">
+              {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
+              <strong>{file.type}</strong>
+              <span>该格式无法在浏览器中稳定直接预览，可以在新窗口打开源文件查看或下载。</span>
+              {sourceUrl && (
+                <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={15} />
+                  打开源文件
+                </a>
+              )}
+            </div>
+          )}
+          <dl className="preview-meta">
+            <div>
+              <dt>关联任务</dt>
+              <dd>{file.task}</dd>
+            </div>
+            <div>
+              <dt>文件大小</dt>
+              <dd>{file.size}</dd>
+            </div>
+            <div>
+              <dt>版本状态</dt>
+              <dd>{file.final ? '最终稿' : '过程文件'}</dd>
+            </div>
+            <div>
+              <dt>文件标签</dt>
+              <dd>{file.tag || '无'}</dd>
+            </div>
+          </dl>
+        </div>
+    </ModalShell>
+  )
+}
+
+type SpreadsheetPreview = {
+  name: string
+  rows: string[][]
+}[]
+
+function OfficePreview({ fileType, sourceUrl }: { fileType: string; sourceUrl: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [status, setStatus] = useState('正在加载预览…')
+  const [error, setError] = useState('')
+  const [workbookPreview, setWorkbookPreview] = useState<SpreadsheetPreview>([])
+  const isLegacyOffice = ['DOC', 'XLS', 'PPT'].includes(fileType)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const renderPreview = async () => {
+      setError('')
+      setStatus('正在加载预览…')
+      setWorkbookPreview([])
+      if (!containerRef.current) {
+        return
+      }
+      containerRef.current.replaceChildren()
+
+      if (isLegacyOffice) {
+        setStatus('')
+        setError('旧版 Office 二进制格式暂不支持稳定浏览器直读，请转为 DOCX / XLSX / PPTX 后可直接预览。')
+        return
+      }
+
+      try {
+        const response = await fetch(sourceUrl)
+        if (!response.ok) {
+          throw new Error('文件读取失败')
+        }
+        const buffer = await response.arrayBuffer()
+        if (cancelled) {
+          return
+        }
+
+        if (fileType === 'DOCX') {
+          const { renderAsync } = await import('docx-preview')
+          await renderAsync(buffer, containerRef.current, undefined, {
+            className: 'docx-preview-document',
+            inWrapper: true,
+            ignoreWidth: false,
+            ignoreHeight: false,
+            breakPages: true,
+            useBase64URL: true,
+          })
+          if (!cancelled) {
+            setStatus('')
+          }
+          return
+        }
+
+        if (fileType === 'PPTX') {
+          const { init } = await import('pptx-preview')
+          const previewer = init(containerRef.current, { width: 960, height: 540 })
+          await previewer.preview(buffer)
+          if (!cancelled) {
+            setStatus('')
+          }
+          return
+        }
+
+        if (fileType === 'XLSX') {
+          const ExcelJS = await import('exceljs')
+          const workbook = new ExcelJS.Workbook()
+          await workbook.xlsx.load(buffer)
+          const sheets = workbook.worksheets.slice(0, 5).map((sheet) => {
+            const rows: string[][] = []
+            sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+              if (rowNumber > 60) {
+                return
+              }
+              const values = Array.isArray(row.values) ? row.values.slice(1, 16) : []
+              rows.push(values.map(stringifyCellValue))
+            })
+            return { name: sheet.name, rows }
+          })
+          if (!cancelled) {
+            setWorkbookPreview(sheets)
+            setStatus('')
+          }
+          return
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setStatus('')
+          setError(caughtError instanceof Error ? caughtError.message : '预览失败，请打开源文件查看。')
+        }
+      }
+    }
+
+    void renderPreview()
+
+    return () => {
+      cancelled = true
+    }
+  }, [fileType, isLegacyOffice, sourceUrl])
+
+  return (
+    <div className={`office-preview office-preview-${fileType.toLowerCase()}`}>
+      {status && <div className="office-preview-status">{status}</div>}
+      {error && (
+        <div className="file-preview-placeholder">
+          <FileText size={42} />
+          <strong>{fileType}</strong>
+          <span>{error}</span>
+          <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={15} />
+            打开源文件
+          </a>
+        </div>
+      )}
+      {fileType === 'XLSX' && workbookPreview.length > 0 && (
+        <div className="spreadsheet-preview">
+          {workbookPreview.map((sheet) => (
+            <section key={sheet.name}>
+              <h3>{sheet.name}</h3>
+              <div className="spreadsheet-table-wrap">
+                <table>
+                  <tbody>
+                    {sheet.rows.map((row, rowIndex) => (
+                      <tr key={`${sheet.name}-${rowIndex}`}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={`${sheet.name}-${rowIndex}-${cellIndex}`}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+      <div ref={containerRef} className="office-render-root" />
+    </div>
+  )
+}
+
+type NewTaskDraftCache = {
+  title: string
+  requirement: string
+  type: string
+  startDate: string
+  estimatedMinutes: number
+  estimatedDate: string
+  scheduleAnchor: ScheduleAnchor
+  isSupplemental: boolean
+  settlementMonth: string
+  requester: string
+  contact: string
+  supplementalNote: string
+}
+
+const newTaskDraftStorageKey = 'giverny:new-task-draft:v1'
+
+const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, fallbackSettlementMonth = monthPart(fallbackStartDate)): NewTaskDraftCache => {
+  const fallbackMinutes = 120
+  const fallbackDraft: NewTaskDraftCache = {
+    title: '',
+    requirement: '',
+    type: fallbackType,
+    startDate: fallbackStartDate,
+    estimatedMinutes: fallbackMinutes,
+    estimatedDate: addMinutesToPlanDateTime(fallbackStartDate, fallbackMinutes),
+    scheduleAnchor: 'start',
+    isSupplemental: false,
+    settlementMonth: fallbackSettlementMonth,
+    requester: '',
+    contact: '黄媚',
+    supplementalNote: '',
+  }
+  if (typeof window === 'undefined') {
+    return fallbackDraft
+  }
+  try {
+    const raw = window.localStorage.getItem(newTaskDraftStorageKey)
+    if (!raw) {
+      return fallbackDraft
+    }
+    const parsed = JSON.parse(raw) as Partial<NewTaskDraftCache>
+    const startDate = parsed.startDate || fallbackDraft.startDate
+    const estimatedMinutes = Number.isFinite(parsed.estimatedMinutes) && Number(parsed.estimatedMinutes) > 0 ? Number(parsed.estimatedMinutes) : fallbackMinutes
+    return {
+      title: parsed.title ?? '',
+      requirement: parsed.requirement ?? '',
+      type: parsed.type || fallbackType,
+      startDate,
+      estimatedMinutes,
+      estimatedDate: parsed.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
+      scheduleAnchor: parsed.scheduleAnchor === 'end' ? 'end' : 'start',
+      isSupplemental: Boolean(parsed.isSupplemental),
+      settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
+      requester: parsed.requester ?? '',
+      contact: parsed.contact || '黄媚',
+      supplementalNote: parsed.supplementalNote ?? '',
+    }
+  } catch {
+    return fallbackDraft
+  }
+}
+
+const writeNewTaskDraftCache = (draft: NewTaskDraftCache) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(newTaskDraftStorageKey, JSON.stringify(draft))
+}
+
+const clearNewTaskDraftCache = () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.removeItem(newTaskDraftStorageKey)
+}
+
+function NewTaskModal({
+  designTypeGroups,
+  currentMonthValue,
+  onClose,
+  onCreate,
+  onDesignTypeGroupsChange,
+}: {
+  designTypeGroups: DesignTypeGroup[]
+  currentMonthValue: string
+  onClose: () => void
+  onCreate: (task: Task) => void
+  onDesignTypeGroupsChange: (nextGroups: DesignTypeGroup[]) => void | Promise<void>
+}) {
+  const availableDesignTypeGroups = normalizeDesignTypeGroups(designTypeGroups)
+  const fallbackType = flattenDesignTypeGroups(availableDesignTypeGroups)[0] ?? defaultDesignTypes[0]
+  const defaultStartDateTime = useMemo(() => isoDateTime(), [])
+  const initialDraft = useMemo(() => readNewTaskDraftCache(defaultStartDateTime, fallbackType, currentMonthValue), [currentMonthValue, defaultStartDateTime, fallbackType])
+  const [title, setTitle] = useState(initialDraft.title)
+  const [requirement, setRequirement] = useState(initialDraft.requirement)
+  const [type, setType] = useState(initialDraft.type)
+  const [startDate, setStartDate] = useState(initialDraft.startDate)
+  const [estimatedMinutes, setEstimatedMinutes] = useState(initialDraft.estimatedMinutes)
+  const [estimatedDate, setEstimatedDate] = useState(initialDraft.estimatedDate)
+  const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
+  const [isSupplemental, setIsSupplemental] = useState(initialDraft.isSupplemental)
+  const [settlementMonth, setSettlementMonth] = useState(initialDraft.settlementMonth)
+  const [requester, setRequester] = useState(initialDraft.requester)
+  const [contact, setContact] = useState(initialDraft.contact)
+  const [supplementalNote, setSupplementalNote] = useState(initialDraft.supplementalNote)
+  const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
+  const [aiError, setAiError] = useState('')
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const supplementalMonthOptions = useMemo(() => monthSelectOptions(currentMonthValue, settlementMonth), [currentMonthValue, settlementMonth])
+
+  useEffect(() => {
+    writeNewTaskDraftCache({
+      title,
+      requirement,
+      type,
+      startDate,
+      estimatedMinutes,
+      estimatedDate,
+      scheduleAnchor,
+      isSupplemental,
+      settlementMonth,
+      requester,
+      contact,
+      supplementalNote,
+    })
+  }, [contact, estimatedDate, estimatedMinutes, isSupplemental, requirement, requester, scheduleAnchor, settlementMonth, startDate, supplementalNote, title, type])
+
+  const updateStartDate = (value: string) => {
+    setScheduleAnchor('start')
+    setStartDate(value)
+    setEstimatedDate(addMinutesToPlanDateTime(value, estimatedMinutes))
+  }
+
+  const updateEstimatedDate = (value: string) => {
+    setScheduleAnchor('end')
+    setEstimatedDate(value)
+    setStartDate(addMinutesToPlanDateTime(value, -estimatedMinutes))
+  }
+
+  const updateEstimatedMinutes = (value: number) => {
+    setEstimatedMinutes(value)
+    if (scheduleAnchor === 'end') {
+      setStartDate(addMinutesToPlanDateTime(estimatedDate, -value))
+      return
+    }
+    setEstimatedDate(addMinutesToPlanDateTime(startDate, value))
+  }
+
+  const handleSubmit = () => {
+    const estimated = Math.round((estimatedMinutes / 60) * 100) / 100
+    const status: TaskStatus = '计划中'
+
+    onCreate({
+      id: Date.now(),
+      date: startDate,
+      estimatedDate,
+      settlementMonth: isSupplemental ? settlementMonth : currentMonthValue,
+      type,
+      title: title.trim() || '未命名设计任务',
+      requirement: requirement.trim() || `预计于 ${formatPlanDateTime(estimatedDate)} 交付，待补充详细需求。`,
+      requester: requester.trim(),
+      contact: contact.trim() || '待填写',
+      reviewer: requester.trim() || '待确认',
+      stage: status,
+      estimatedHours: estimated,
+      actualHours: 0,
+      status,
+      progress: 0,
+      acceptanceNote: isSupplemental ? supplementalNote.trim() : '',
+      files: [],
+    })
+  }
+
+  const toggleSupplemental = () => {
+    const next = !isSupplemental
+    setIsSupplemental(next)
+    if (next && !settlementMonth) {
+      setSettlementMonth(currentMonthValue)
+    }
+    if (!next) {
+      setSupplementalNote('')
+    }
+  }
+
+  const requestAiSuggestion = async () => {
+    setAiError('')
+    setAiSuggestion(null)
+    setIsAiLoading(true)
+    try {
+      const suggestion = await api.suggestTaskAssistant({
+        title,
+        requirement,
+        selectedType: type,
+        designTypeGroups: availableDesignTypeGroups,
+      })
+      setAiSuggestion(suggestion)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'AI 助手暂时不可用')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  const applyAiSuggestion = () => {
+    if (!aiSuggestion) {
+      return
+    }
+    setRequirement(aiSuggestion.optimizedRequirement)
+    if (aiSuggestion.categoryExists) {
+      setType(aiSuggestion.suggestedType)
+    }
+  }
+
+  const addSuggestedCategoryAndApply = async () => {
+    if (!aiSuggestion) {
+      return
+    }
+    const parent = aiSuggestion.suggestedParentType.trim()
+    const child = aiSuggestion.suggestedChildType.trim()
+    if (!parent || !child) {
+      return
+    }
+    const nextGroups = [...availableDesignTypeGroups]
+    const index = nextGroups.findIndex((group) => group.name === parent)
+    if (index >= 0) {
+      const current = nextGroups[index]
+      nextGroups[index] = { ...current, items: current.items.includes(child) ? current.items : [...current.items, child] }
+    } else {
+      nextGroups.push({ name: parent, items: [child] })
+    }
+    await onDesignTypeGroupsChange(nextGroups)
+    setType(`${parent} / ${child}`)
+    setRequirement(aiSuggestion.optimizedRequirement)
+    setAiSuggestion({ ...aiSuggestion, categoryExists: true, missingCategory: undefined })
+  }
+
+  return (
+    <ModalShell className="new-task-modal" labelledBy="new-task-title" onClose={onClose} closeOnBackdrop={false} closeOnEscape={false}>
+        <header className="modal-header">
+          <div>
+            <p className="eyebrow">任务管理</p>
+            <h2 id="new-task-title">新建设计任务</h2>
+          </div>
+          <div className="modal-header-actions">
+            <div className="supplemental-switch-wrap">
+              <span className="supplemental-label">补录</span>
+              <button
+                type="button"
+                className={`switch-control ${isSupplemental ? 'active' : ''}`}
+                aria-label="补录任务"
+                aria-pressed={isSupplemental}
+                title={isSupplemental ? `补录至 ${monthLabelOf(settlementMonth)}` : '标记为补录任务'}
+                onClick={toggleSupplemental}
+              >
+                <i />
+              </button>
+              {isSupplemental && (
+                <label className="supplemental-month-select">
+                  <span>计入月份</span>
+                  <select value={settlementMonth} onChange={(event) => setSettlementMonth(event.target.value)} aria-label="计入结算月份">
+                    {supplementalMonthOptions.map((monthValue) => (
+                      <option key={monthValue} value={monthValue}>
+                        {monthLabelOf(monthValue)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </div>
+        </header>
+
+        <div className="form-grid new-task-form">
+          <label className="field wide new-task-type-field">
+            <span>设计类型</span>
+            <CascadingDesignTypePicker groups={availableDesignTypeGroups} value={type} onChange={setType} />
+          </label>
+          <label className="field wide">
+            <span>项目 / 任务名称</span>
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：金博会邀请函长图设计" />
+          </label>
+          <div className="field wide">
+            <span className="field-label-row">
+              <span>任务具体需求</span>
+              <button
+                type="button"
+                className="icon-button ai-assist-button"
+                aria-label="AI 优化任务需求"
+                title="AI 优化任务需求"
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  void requestAiSuggestion()
+                }}
+                disabled={isAiLoading || (!title.trim() && !requirement.trim())}
+              >
+                <Sparkles size={16} />
+              </button>
+            </span>
+            <textarea
+              aria-label="任务具体需求"
+              value={requirement}
+              onChange={(event) => setRequirement(event.target.value)}
+              placeholder="记录甲方需求、修改范围、交付规格等"
+            />
+          </div>
+          {(aiSuggestion || aiError || isAiLoading) && (
+            <div className="ai-suggestion-panel wide">
+              <div className="ai-suggestion-head">
+                <span>{isAiLoading ? 'AI 正在整理需求' : 'AI 建议'}</span>
+                {aiSuggestion && <em>{aiSuggestion.suggestedType}</em>}
+              </div>
+              {isAiLoading && <p>正在优化文案并匹配设计类型...</p>}
+              {aiError && <p className="ai-suggestion-error">{aiError}</p>}
+              {aiSuggestion && (
+                <>
+                  <div className="ai-suggestion-body">
+                    {aiSuggestion.optimizedRequirement.split('\n').map((line, index) => {
+                      const trimmed = line.trim()
+                      if (!trimmed) {
+                        return null
+                      }
+                      const isHeading = /^【.+】/.test(trimmed)
+                      const isItem = trimmed.startsWith('·') || trimmed.startsWith('•')
+                      if (isHeading) {
+                        return <strong className="ai-suggestion-heading" key={index}>{trimmed}</strong>
+                      }
+                      if (isItem) {
+                        return <span className="ai-suggestion-item" key={index}>{trimmed}</span>
+                      }
+                      return <span className="ai-suggestion-line" key={index}>{trimmed}</span>
+                    })}
+                  </div>
+                  {aiSuggestion.reason && <small>{aiSuggestion.reason}</small>}
+                  <div className="ai-suggestion-actions">
+                    <button type="button" className="ghost-button compact-button" onClick={applyAiSuggestion}>
+                      采用文案{aiSuggestion.categoryExists ? '和分类' : ''}
+                    </button>
+                    {!aiSuggestion.categoryExists && (
+                      <button type="button" className="primary-button compact-button" onClick={() => void addSuggestedCategoryAndApply()}>
+                        新增分类并采用
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          <label className="field">
+            <span>需求人</span>
+            <input value={requester} onChange={(event) => setRequester(event.target.value)} placeholder="提出需求的人" />
+          </label>
+          <label className="field">
+            <span>对接人</span>
+            <input value={contact} onChange={(event) => setContact(event.target.value)} placeholder="黄媚" />
+          </label>
+          <div className="new-task-schedule-row">
+            <PlanDateTimeField
+              key={`start-${startDate}`}
+              label="预计开始时间"
+              value={startDate}
+              onChange={updateStartDate}
+              isActive={scheduleAnchor === 'start'}
+              readOnly={scheduleAnchor !== 'start'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+            />
+            <label className="field">
+              <span>预估工时</span>
+              <DurationPicker valueMinutes={estimatedMinutes} onChange={updateEstimatedMinutes} />
+            </label>
+            <PlanDateTimeField
+              key={`end-${estimatedDate}`}
+              label="预计交付时间"
+              value={estimatedDate}
+              onChange={updateEstimatedDate}
+              isActive={scheduleAnchor === 'end'}
+              readOnly={scheduleAnchor !== 'end'}
+              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+            />
+          </div>
+          {isSupplemental && (
+            <label className="field wide">
+              <span>补录说明</span>
+              <textarea
+                value={supplementalNote}
+                onChange={(event) => setSupplementalNote(event.target.value)}
+                placeholder="例如：该任务已于 5 月完成，本次补录到 6 月结算单。验收、实际工时和交付文件请在任务详情中确认。"
+              />
+            </label>
+          )}
+        </div>
+
+        <footer className="modal-footer">
+          <button className="primary-button" onClick={handleSubmit}>
+            <Plus size={18} />
+            创建任务
+          </button>
+        </footer>
+    </ModalShell>
+  )
+}
+
+export default App
