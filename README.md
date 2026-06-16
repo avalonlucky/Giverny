@@ -25,9 +25,9 @@
 </p>
 
 > English readers: see [English Overview](#english-overview).
-> 下面截图来自正式站真实界面，任务名称、需求、人名和动态细节已替换为示例数据。
+> 下面截图来自正式站真实界面，由项目维护者提供，用于展示当前产品的真实视觉状态。
 
-![Giverny 工作台真实截图（已脱敏）](./docs/assets/readme/screenshots/dashboard.png)
+![Giverny 工作台真实截图](./docs/assets/readme/screenshots/dashboard.png)
 
 ## 目录
 
@@ -124,27 +124,19 @@ Giverny 的目标是把这些分散信息收敛成一条可追溯链路：
 
 ## 真实产品截图
 
-这些截图来自正式站真实页面，不是重新绘制的示意图。为了适合公开仓库展示，任务名称、具体需求、人员姓名和动态细节已替换为示例数据；页面布局、组件密度、状态样式和整体视觉保持真实。
+这些截图来自正式站真实页面，不是重新绘制的示意图。截图由项目维护者提供，用于展示当前工作台、任务进展和收入统计的真实布局、组件密度、状态样式和整体视觉。
 
 ### 工作台
 
-![Giverny 工作台真实截图（已脱敏）](./docs/assets/readme/screenshots/dashboard.png)
+![Giverny 工作台真实截图](./docs/assets/readme/screenshots/dashboard.png)
 
 ### 任务导航
 
-![Giverny 任务导航真实截图（已脱敏）](./docs/assets/readme/screenshots/tasks.png)
-
-### 文件库
-
-![Giverny 文件库真实截图（已脱敏）](./docs/assets/readme/screenshots/files.png)
-
-### 结算
-
-![Giverny 结算页真实截图（已脱敏）](./docs/assets/readme/screenshots/reports.png)
+![Giverny 任务导航真实截图](./docs/assets/readme/screenshots/tasks.png)
 
 ### 收入
 
-![Giverny 收入页真实截图（已脱敏）](./docs/assets/readme/screenshots/income.png)
+![Giverny 收入页真实截图](./docs/assets/readme/screenshots/income.png)
 
 ## 模块详解
 
