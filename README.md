@@ -61,7 +61,6 @@
 - [本地开发](#本地开发)
 - [部署与发布](#部署与发布)
 - [文档索引](#文档索引)
-- [English Overview](#english-overview)
 
 ## 项目定位
 
@@ -443,50 +442,3 @@ env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u htt
 ### 为什么管理员专属信息是棕色？
 
 棕色是后台内部信息标记。管理员看到棕色就知道这类信息不会出现在普通成员、甲方预览或公开只读链接里。
-
-## English Overview
-
-Giverny is a worklog and settlement platform for freelance designers and small design-service teams. It keeps design tasks, requirements, progress notes, actual working hours, process files, acceptance evidence, monthly settlement, and client read-only reports in one place.
-
-It is not a generic project management tool. It is designed around the operational loop of design-service delivery: request intake, progress tracking, time logging, file archiving, acceptance, monthly settlement, and client reconciliation.
-
-### Why it exists
-
-Freelance design work often spreads across chats, spreadsheets, local folders, and cloud drives. At the end of the month, the designer still needs to explain what was done, how much time was spent, which files were delivered, and why the amount should be paid. Giverny turns that scattered evidence into a traceable workflow.
-
-### Main workflows
-
-- Create a task with title, design type, requirement, planned start, planned delivery, contact person, and settlement month.
-- Record progress notes, upload process files, add time entries, and maintain task progress.
-- Confirm acceptance by reviewing task info, progress, segmented hours, acceptance files, and notes.
-- Lock accepted hours into monthly settlement.
-- Generate a read-only client report and PDF for reconciliation.
-
-### Key rules
-
-- Actual hours are the source for analytics, income, settlement, annual statistics, and reports.
-- Planned start and planned delivery are only scheduling references. They do not participate in hour calculation or settlement.
-- `settlement_month` is the only source for monthly ownership.
-- Supplemental tasks must remain visible to clients as public explanation tags.
-- Admin-only internal information uses the brown `admin-only-data` visual rule and is hidden from public/client views.
-- Every production update must include code commit, git tag, GitHub Release notes, and screenshots/assets when UI changes are significant.
-
-### Stack
-
-- Frontend: React 19 + TypeScript + Vite
-- Backend: Cloudflare Worker
-- Database: Cloudflare D1
-- File storage: Cloudflare R2
-- Assets: Workers Static Assets
-- Production: [mayeai.com](https://mayeai.com)
-
-### Development
-
-```bash
-npm install
-npm run dev
-npm run lint
-npm run build
-```
-
-See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) before deploying.
