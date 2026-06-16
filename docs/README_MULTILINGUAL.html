@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Giverny · README (Multi-language)</title>
+<style>
+  :root{
+    --text:#17282f; --text-2:#5f6d70; --text-3:#8a9496;
+    --primary:#2f6f6d; --primary-2:#1f4751;
+    --line:#e3e6df; --line-2:#d4d9cf;
+    --bg:#f8f9f5; --bg-2:#fdfdfb; --bg-code:#eef1ea;
+    --warn-bg:rgba(230,164,58,.16);
+    --radius:8px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei","Hiragino Sans",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.7;padding:0 16px 80px}
+  .page{max-width:840px;margin:0 auto;padding:20px 0 48px}
+
+  /* ===== 语言切换器（固定在右上）===== */
+  .lang-bar{position:sticky;top:0;z-index:50;background:rgba(248,249,245,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+    padding:10px 0;margin:0 -16px 24px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap}
+  .lang-btn{padding:6px 14px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--text-2);
+    font-size:13px;font-weight:500;border-radius:18px;cursor:pointer;font-family:inherit;transition:all .15s}
+  .lang-btn:hover{border-color:var(--primary);color:var(--primary)}
+  .lang-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .lang-flag{font-size:14px;margin-right:3px}
+
+  /* hero */
+  .hero{text-align:center;padding:24px 0 32px;border-bottom:1px solid var(--line);margin-bottom:32px}
+  .hero .logo{width:88px;height:88px;border-radius:20px;background:var(--primary);
+    display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:38px;font-weight:800;margin-bottom:14px}
+  .hero h1{font-size:32px;font-weight:800;margin:0 0 8px;letter-spacing:-.01em}
+  .hero .tagline{font-size:15px;color:var(--text-2);margin:0 0 16px}
+  .hero .links{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .hero .links a{font-size:13px;color:var(--primary);text-decoration:none;padding:6px 14px;
+    background:rgba(47,111,109,.1);border-radius:20px;font-weight:500}
+  .hero .links a:hover{background:rgba(47,111,109,.18)}
+  .badges{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+    padding:3px 10px;border-radius:12px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--text-2)}
+  .badge .dot{width:6px;height:6px;border-radius:50%;background:var(--primary)}
+
+  .one-liner{background:var(--bg-2);border-left:3px solid var(--primary);padding:14px 20px;
+    border-radius:0 8px 8px 0;margin:0 0 32px;font-size:15px;color:var(--text)}
+  .one-liner b{color:var(--primary-2)}
+
+  h2{font-size:22px;font-weight:700;margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--text)}
+  h2:first-of-type{margin-top:8px}
+  h3{font-size:17px;font-weight:600;margin:28px 0 10px;color:var(--primary-2)}
+  h4{font-size:14px;font-weight:600;margin:18px 0 8px;color:var(--text)}
+  p{margin:0 0 12px;font-size:15px;color:var(--text)}
+  strong{color:var(--text);font-weight:600}
+  a{color:var(--primary);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;background:var(--bg-code);
+    padding:2px 6px;border-radius:4px;color:var(--primary-2)}
+  pre{background:var(--bg-code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+    overflow-x:auto;margin:0 0 16px}
+  pre code{background:none;padding:0;font-size:13px;color:var(--text);line-height:1.6}
+
+  .table-wrap{overflow-x:auto;margin:0 0 16px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:var(--bg-2);font-weight:600;color:var(--text-2);font-size:13px}
+  td{color:var(--text)}
+  td:first-child{font-weight:500}
+  .yes{color:#2e7d32;font-weight:600}
+  .no{color:var(--text-3)}
+
+  ul,ol{padding-left:22px;margin:0 0 14px}
+  li{font-size:15px;color:var(--text);margin-bottom:5px}
+  li b{color:var(--primary-2)}
+
+  blockquote{margin:0 0 16px;padding:11px 18px;background:var(--warn-bg);border-left:3px solid #c89028;
+    border-radius:0 6px 6px 0;font-size:14px;color:#6b5520}
+  blockquote b{color:#4a3a10}
+
+  hr{border:none;border-top:1px solid var(--line);margin:32px 0}
+
+  .flow{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:22px;margin:0 0 18px;text-align:center}
+  .flow .chain{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:5px;font-size:13px}
+  .flow .node{padding:7px 13px;background:rgba(47,111,109,.1);color:var(--primary-2);border-radius:6px;font-weight:500;white-space:nowrap}
+  .flow .arr{color:var(--text-3);font-size:16px}
+
+  .arch{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:18px;margin:0 0 18px}
+  .arch .layer{display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .arch .layer:last-child{border-bottom:none}
+  .arch .layer .lname{font-size:13px;font-weight:600;color:var(--text-2);width:80px;flex:none}
+  .arch .layer .ltech{font-size:14px;color:var(--text)}
+  .arch .layer .ltech b{color:var(--primary-2);font-weight:600}
+  .arch .layer .ldesc{font-size:12px;color:var(--text-3);margin-left:auto;max-width:260px}
+
+  .scenario{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:13px 18px;margin:0 0 12px}
+  .scenario h4{margin:0 0 5px;color:var(--primary-2)}
+
+  .shots{display:grid;gap:18px;margin:0 0 20px}
+  .shot{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px}
+  .shot h3{margin:2px 4px 10px;font-size:15px}
+  .shot img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff}
+
+  .footer-note{margin-top:36px;padding:14px 20px;background:var(--bg-2);border:1px solid var(--line);
+    border-radius:8px;font-size:13px;color:var(--text-3);text-align:center}
+  .footer-note a{color:var(--primary)}
+</style>
+</head>
+<body>
+
+<div class="lang-bar" id="lang-bar"></div>
+
+<div class="page" id="content"></div>
+
+<script>
+/* ============================================================
+   多语言数据：5 种语言（简中 / 繁中 / 英 / 日 / 韩）
+   每种语言包含完整 README 内容，用统一的 HTML 模板渲染
+   ============================================================ */
+const LANGS = [
+  {code:'zh-CN', flag:'🇨🇳', name:'简体中文'},
+  {code:'zh-TW', flag:'🇭🇰', name:'繁體中文'},
+  {code:'en',    flag:'🇺🇸', name:'English'},
+  {code:'ja',    flag:'🇯🇵', name:'日本語'},
+  {code:'ko',    flag:'🇰🇷', name:'한국어'},
+];
+
+const I18N = {
+/* ==================== 简体中文 ==================== */
+'zh-CN': {
+  tagline:'面向兼职设计师与轻量设计团队的任务、工时、文件、验收与月度结算平台',
+  oneLiner:'<b>一句话：</b>把"需求在微信、工时在 Excel、文件在网盘、月底手工做账"的兼职设计工作，收敛成<strong>一条可追溯的链路</strong>——从接需求到验收结算，全在一个系统里。',
+  what:'这是什么',
+  whatDesc:'Giverny 是一个<strong>设计兼职运营后台</strong>——围绕设计任务的生命周期，把需求、过程、工时、文件、验收和月度结算串成一个系统。',
+  flow:['任务需求','过程进展','时间记录','文件归档','交付验收','月度结算','甲方只读对账'],
+  whatServes:'它服务于正式站 <a href="https://mayeai.com">mayeai.com</a>，使用 Cloudflare D1 存业务数据、R2 存文件。',
+  whatNot:'<strong>它不是</strong>泛用的项目管理工具（不是 Jira / Trello / 飞书任务的替代）。它更偏向一个<strong>"设计服务结算工作台"</strong>——专门解决兼职设计交付 → 结算 → 对账这条链路。',
+  whyTitle:'为什么不用 Notion / 飞书 / Excel',
+  whyDesc:'这些工具能记信息，但很难把"任务进展、实际工时、附件、验收、结算、甲方只读链接"<strong>稳定串成一条可审计链路</strong>。每到月底，你仍然要：',
+  whyList:['在聊天记录里翻需求','在表格里算工时','在网盘里找最终稿','手工做账给甲方解释"为什么结算这笔钱"'],
+  whyEnd:'Giverny 的价值就是<strong>专门为这条链路做约束和自动化</strong>，让每次结算都有据可查。',
+  whoTitle:'适合谁',
+  who:[
+    {role:'兼职设计师',need:'清楚记录每项需求、过程修改、实际工时和验收文件',provide:'任务详情、进展时间轴、分段工时、验收附件、月度统计'},
+    {role:'设计服务负责人',need:'按月核对工作量、收入、文件和结算状态',provide:'工作台、收入统计、文件库、月报、PDF'},
+    {role:'甲方 / 协作方',need:'只看最终月报、任务明细和交付文件，不进后台',provide:'<code>/share/:token</code> 只读链接'},
+    {role:'接手开发者',need:'快速理解代码结构、业务规则和发布纪律',provide:'<code>AGENTS.md</code>、<code>docs/</code>、Releases'},
+  ],
+  whoCols:['角色','主要诉求','Giverny 提供'],
+  flowTitle:'核心工作流',
+  shotsTitle:'真实产品截图',
+  shotsDesc:'以下截图来自正式站真实界面，由项目维护者提供，用于展示当前产品的真实布局、组件密度、状态样式和整体视觉。',
+  shots:['工作台','任务导航','收入统计'],
+  flowSteps:[
+    '<strong>新建任务</strong>：填写任务名称、设计类型、需求说明、预计开始 / 交付、对接人和结算月份。',
+    '<strong>过程推进</strong>：在"进展"面板记录进展、上传过程附件、追加时间段、维护状态和整体进度。',
+    '<strong>工时沉淀</strong>：所有统计以<strong>实际工时</strong>为准；预计开始 / 交付时间只用于排期，不参与结算。',
+    '<strong>交付验收</strong>：展开"交付验收"，逐项核对基础信息、进度、分段工时、验收附件和备注；确认后状态变"已验收"、进度锁定 100%、工时计入结算。',
+    '<strong>月度结算</strong>：按结算月份汇总工时、收入、验收情况和年度趋势，生成只读甲方链接和 PDF。',
+  ],
+  sceneTitle:'两个典型场景',
+  scene1T:'📋 补录历史任务',
+  scene1D:'打开"补录"，任务日期填真实发生时间（如 5/20），结算月份选需计入的月份（如 2026-06）。补录是<strong>公开标记</strong>，让甲方理解这条任务为何出现在本月——不能做成管理员专属。',
+  scene2T:'👁 甲方月底对账',
+  scene2D:'管理员锁定月度数据 → 生成只读链接 → 甲方查看任务、工时、文件和金额。甲方页<strong>无任何编辑 / 删除入口</strong>。',
+  modTitle:'模块一览',
+  mods:[
+    {name:'工作台',desc:'"这个月做了多少、能结算多少、哪些还没验收"——月度运营总览'},
+    {name:'任务导航',desc:'日常维护任务：筛选 / 搜索、列表 + 详情、进展记录、时间记录、交付验收'},
+    {name:'文件库',desc:'任务生命周期的文件归档视图。删除仅清理误传/重复文件，需二次确认，写审计日志'},
+    {name:'收入',desc:'收入趋势和税后估算'},
+    {name:'月报 / 结算',desc:'锁定月度数据，生成只读甲方链接和 PDF'},
+    {name:'设置',desc:'口令管理、设计类型、时薪计税、PDF 抬头、账号安全、系统信息'},
+  ],
+  modCols:['模块','解决什么问题'],
+  ruleTitle:'关键业务规则',
+  ruleIntro:'这三条规则贯穿全系统，理解它们就能理解 Giverny 的设计逻辑：',
+  rule1T:'1. 月份归属只看 <code>settlement_month</code>',
+  rule1D:'普通任务默认归属当前选中月份；补录任务可以把真实日期和结算月份分开。工作台、任务列表、收入统计、月报<strong>全部按 <code>settlement_month</code> 汇总</strong>。',
+  rule2T:'2. 实际工时是唯一结算依据',
+  rule2D:'实际工时来自分段记录汇总，参与工时洞察、收入估算、月报、年度统计和结算 PDF。',
+  rule2Warn:'<b>⚠ 重要：</b>预计开始 / 预计交付时间<strong>只用于排期和提醒</strong>，<strong>不参与工时计算，不参与收入计算，不参与结算月份兜底</strong>。',
+  rule3T:'3. 任务不能直接删除',
+  rule3D:'任务影响工时、收入、月报和历史对账，直接删除会破坏数据完整性。异常任务应使用<strong>挂起 / 终止 / 作废</strong>来保留解释痕迹。',
+  rule4T:'4. 文件优先归档，不优先删除',
+  rule4D:'文件没有自动定期清理机制——历史附件可能被月报、甲方分享页、复盘或返修继续引用。删除仅用于清理<strong>误传 / 重复</strong>文件。',
+  roleTitle:'角色与权限',
+  roleCols:['能力','管理员','访问口令用户','甲方分享链接'],
+  roles:[
+    ['查看工作台 / 月报','✅','✅','❌'],
+    ['新建 / 编辑任务','✅','受限','❌'],
+    ['上传 / 删除文件','✅','受限','❌'],
+    ['确认验收','✅','❌','❌'],
+    ['生成访问口令','✅','❌','❌'],
+    ['查看管理员专属信息','✅','❌','❌'],
+    ['查看月报和交付文件','✅','✅','只读'],
+  ],
+  roleNote:'<strong>视觉规则：</strong>管理员专属信息用棕色 <code>admin-only-data</code>；补录用绿色公开标记；甲方页不显示后台按钮和内部信息。',
+  techTitle:'技术架构',
+  tech:[
+    {name:'前端',tech:'<b>React 19</b> · TypeScript · Vite',desc:'后台主应用 + 甲方分享页'},
+    {name:'样式',tech:'<code>src/App.css</code>（单文件）',desc:'视觉规则见 docs/DESIGN.md'},
+    {name:'后端',tech:'<b>Cloudflare Worker</b>',desc:'API、鉴权、AI 助手、月报、静态资源路由'},
+    {name:'数据库',tech:'<b>Cloudflare D1</b>',desc:'任务、进展、附件、月报、设置、审计日志'},
+    {name:'文件',tech:'<b>Cloudflare R2</b>',desc:'原始文件、预览图、交付附件'},
+    {name:'部署',tech:'<b>Wrangler</b>',desc:'正式域名 mayeai.com'},
+  ],
+  techEntry:'<strong>关键代码入口：</strong><code>src/App.tsx</code>（主应用）· <code>src/App.css</code>（全站样式）· <code>src/SharedReport.tsx</code>（甲方页）· <code>src/worker.ts</code>（API）',
+  devTitle:'本地开发',
+  devComment:'# 启动本地开发，默认 http://localhost:5173',
+  deployTitle:'部署与发布',
+  deployWarn:'<b>部署前必读 <code>docs/DEPLOYMENT.md</code>。</b>本地验证通过后直接部署正式站。',
+  deployRes:'<strong>生产资源：</strong>Worker <code>designer-worklog</code> · D1 <code>designer-worklog-db</code> · R2 <code>designer-worklog-uploads</code>',
+  deployStepsTitle:'正式更新必须完成：',
+  deploySteps:[
+    '更新版本号（<code>appConfig.ts</code>、<code>package.json</code>）',
+    '更新 <code>CHANGELOG.md</code> 和相关文档',
+    '<code>npm run lint</code> + <code>npm run build</code>',
+    '部署正式站，验证线上版本',
+    '<code>git commit</code> + <code>git push</code> + 推送 tag',
+    '创建 GitHub Release，UI 变化明显时附截图',
+  ],
+  docTitle:'文档索引',
+  docCols:['文档','内容'],
+  docs:[
+    ['<code>使用手册.md</code>','日常使用和运营说明'],
+    ['<code>CHANGELOG.md</code>','版本记录'],
+    ['<code>docs/DESIGN.md</code>','UI 视觉层级、颜色和组件规则'],
+    ['<code>docs/UX_OPTIMIZATION_AUDIT.md</code>','交互流程和操作路径规范'],
+    ['<code>AGENTS.md</code>','AI 助手与接手开发者必读'],
+  ],
+},
+
+/* ==================== 繁體中文 ==================== */
+'zh-TW': {
+  tagline:'面向兼職設計師與輕量設計團隊的任務、工時、檔案、驗收與月度結算平台',
+  oneLiner:'<b>一句話：</b>把「需求在微信、工時在 Excel、檔案在網盤、月底手工做帳」的兼職設計工作，收斂成<strong>一條可追溯的鏈路</strong>——從接需求到驗收結算，全在一個系統裡。',
+  what:'這是什麼',
+  whatDesc:'Giverny 是一個<strong>設計兼職營運後台</strong>——圍繞設計任務的生命週期，把需求、過程、工時、檔案、驗收和月度結算串成一個系統。',
+  flow:['任務需求','過程進展','時間記錄','檔案歸檔','交付驗收','月度結算','甲方唯讀對帳'],
+  whatServes:'它服務於正式站 <a href="https://mayeai.com">mayeai.com</a>，使用 Cloudflare D1 存業務資料、R2 存檔案。',
+  whatNot:'<strong>它不是</strong>泛用的專案管理工具（不是 Jira / Trello / 飛書任務的替代）。它更偏向一個<strong>「設計服務結算工作台」</strong>——專門解決兼職設計交付 → 結算 → 對帳這條鏈路。',
+  whyTitle:'為什麼不用 Notion / 飛書 / Excel',
+  whyDesc:'這些工具能記資訊，但很難把「任務進展、實際工時、附件、驗收、結算、甲方唯讀連結」<strong>穩定串成一條可稽核鏈路</strong>。每到月底，你仍然要：',
+  whyList:['在聊天記錄裡翻需求','在表格裡算工時','在網盤裡找最終稿','手工做帳給甲方解釋「為什麼結算這筆錢」'],
+  whyEnd:'Giverny 的價值就是<strong>專門為這條鏈路做約束和自動化</strong>，讓每次結算都有據可查。',
+  whoTitle:'適合誰',
+  who:[
+    {role:'兼職設計師',need:'清楚記錄每項需求、過程修改、實際工時和驗收檔案',provide:'任務詳情、進展時間軸、分段工時、驗收附件、月度統計'},
+    {role:'設計服務負責人',need:'按月核對工作量、收入、檔案和結算狀態',provide:'工作台、收入統計、檔案庫、月報、PDF'},
+    {role:'甲方 / 協作方',need:'只看最終月報、任務明細和交付檔案，不進後台',provide:'<code>/share/:token</code> 唯讀連結'},
+    {role:'接手開發者',need:'快速理解程式碼結構、業務規則和發布紀律',provide:'<code>AGENTS.md</code>、<code>docs/</code>、Releases'},
+  ],
+  whoCols:['角色','主要訴求','Giverny 提供'],
+  flowTitle:'核心工作流',
+  shotsTitle:'真實產品截圖',
+  shotsDesc:'以下截圖來自正式站真實介面，由專案維護者提供，用於展示目前產品的真實版面、元件密度、狀態樣式和整體視覺。',
+  shots:['工作台','任務導航','收入統計'],
+  flowSteps:[
+    '<strong>新建任務</strong>：填寫任務名稱、設計類型、需求說明、預計開始 / 交付、對接人和結算月份。',
+    '<strong>過程推進</strong>：在「進展」面板記錄進展、上傳過程附件、追加時間段、維護狀態和整體進度。',
+    '<strong>工時沉澱</strong>：所有統計以<strong>實際工時</strong>為準；預計開始 / 交付時間只用於排期，不參與結算。',
+    '<strong>交付驗收</strong>：展開「交付驗收」，逐項核對基礎資訊、進度、分段工時、驗收附件和備註；確認後狀態變「已驗收」、進度鎖定 100%、工時計入結算。',
+    '<strong>月度結算</strong>：按結算月份彙總工時、收入、驗收情況和年度趨勢，生成唯讀甲方連結和 PDF。',
+  ],
+  sceneTitle:'兩個典型場景',
+  scene1T:'📋 補錄歷史任務',
+  scene1D:'打開「補錄」，任務日期填真實發生時間（如 5/20），結算月份選需計入的月份（如 2026-06）。補錄是<strong>公開標記</strong>，讓甲方理解這條任務為何出現在本月——不能做成管理員專屬。',
+  scene2T:'👁 甲方月底對帳',
+  scene2D:'管理員鎖定月度資料 → 生成唯讀連結 → 甲方查看任務、工時、檔案和金額。甲方頁<strong>無任何編輯 / 刪除入口</strong>。',
+  modTitle:'模組一覽',
+  mods:[
+    {name:'工作台',desc:'「這個月做了多少、能結算多少、哪些還沒驗收」——月度營運總覽'},
+    {name:'任務導航',desc:'日常維護任務：篩選 / 搜尋、列表 + 詳情、進展記錄、時間記錄、交付驗收'},
+    {name:'檔案庫',desc:'任務生命週期的檔案歸檔視圖。刪除僅清理誤傳/重複檔案，需二次確認，寫稽核日誌'},
+    {name:'收入',desc:'收入趨勢和稅後估算'},
+    {name:'月報 / 結算',desc:'鎖定月度資料，生成唯讀甲方連結和 PDF'},
+    {name:'設定',desc:'口令管理、設計類型、時薪計稅、PDF 抬頭、帳號安全、系統資訊'},
+  ],
+  modCols:['模組','解決什麼問題'],
+  ruleTitle:'關鍵業務規則',
+  ruleIntro:'這三條規則貫穿全系統，理解它們就能理解 Giverny 的設計邏輯：',
+  rule1T:'1. 月份歸屬只看 <code>settlement_month</code>',
+  rule1D:'普通任務預設歸屬當前選中月份；補錄任務可以把真實日期和結算月份分開。工作台、任務列表、收入統計、月報<strong>全部按 <code>settlement_month</code> 彙總</strong>。',
+  rule2T:'2. 實際工時是唯一結算依據',
+  rule2D:'實際工時來自分段記錄彙總，參與工時洞察、收入估算、月報、年度統計和結算 PDF。',
+  rule2Warn:'<b>⚠ 重要：</b>預計開始 / 預計交付時間<strong>只用於排期和提醒</strong>，<strong>不參與工時計算，不參與收入計算，不參與結算月份兜底</strong>。',
+  rule3T:'3. 任務不能直接刪除',
+  rule3D:'任務影響工時、收入、月報和歷史對帳，直接刪除會破壞資料完整性。異常任務應使用<strong>掛載 / 終止 / 作廢</strong>來保留解釋痕跡。',
+  rule4T:'4. 檔案優先歸檔，不優先刪除',
+  rule4D:'檔案沒有自動定期清理機制——歷史附件可能被月報、甲方分享頁、複盤或返修繼續引用。刪除僅用於清理<strong>誤傳 / 重複</strong>檔案。',
+  roleTitle:'角色與權限',
+  roleCols:['能力','管理員','存取口令使用者','甲方分享連結'],
+  roles:[
+    ['查看工作台 / 月報','✅','✅','❌'],
+    ['新建 / 編輯任務','✅','受限','❌'],
+    ['上傳 / 刪除檔案','✅','受限','❌'],
+    ['確認驗收','✅','❌','❌'],
+    ['產生存取口令','✅','❌','❌'],
+    ['查看管理員專屬資訊','✅','❌','❌'],
+    ['查看月報和交付檔案','✅','✅','唯讀'],
+  ],
+  roleNote:'<strong>視覺規則：</strong>管理員專屬資訊用棕色 <code>admin-only-data</code>；補錄用綠色公開標記；甲方頁不顯示後台按鈕和內部資訊。',
+  techTitle:'技術架構',
+  tech:[
+    {name:'前端',tech:'<b>React 19</b> · TypeScript · Vite',desc:'後台主應用 + 甲方分享頁'},
+    {name:'樣式',tech:'<code>src/App.css</code>（單檔案）',desc:'視覺規則見 docs/DESIGN.md'},
+    {name:'後端',tech:'<b>Cloudflare Worker</b>',desc:'API、鑑權、AI 助手、月報、靜態資源路由'},
+    {name:'資料庫',tech:'<b>Cloudflare D1</b>',desc:'任務、進展、附件、月報、設定、稽核日誌'},
+    {name:'檔案',tech:'<b>Cloudflare R2</b>',desc:'原始檔案、預覽圖、交付附件'},
+    {name:'部署',tech:'<b>Wrangler</b>',desc:'正式網域 mayeai.com'},
+  ],
+  techEntry:'<strong>關鍵程式碼入口：</strong><code>src/App.tsx</code>（主應用）· <code>src/App.css</code>（全站樣式）· <code>src/SharedReport.tsx</code>（甲方頁）· <code>src/worker.ts</code>（API）',
+  devTitle:'本地開發',
+  devComment:'# 啟動本地開發，預設 http://localhost:5173',
+  deployTitle:'部署與發布',
+  deployWarn:'<b>部署前必讀 <code>docs/DEPLOYMENT.md</code>。</b>本地驗證通過後直接部署正式站。',
+  deployRes:'<strong>生產資源：</strong>Worker <code>designer-worklog</code> · D1 <code>designer-worklog-db</code> · R2 <code>designer-worklog-uploads</code>',
+  deployStepsTitle:'正式更新必須完成：',
+  deploySteps:[
+    '更新版本號（<code>appConfig.ts</code>、<code>package.json</code>）',
+    '更新 <code>CHANGELOG.md</code> 和相關文件',
+    '<code>npm run lint</code> + <code>npm run build</code>',
+    '部署正式站，驗證線上版本',
+    '<code>git commit</code> + <code>git push</code> + 推送 tag',
+    '建立 GitHub Release，UI 變化明顯時附截圖',
+  ],
+  docTitle:'文件索引',
+  docCols:['文件','內容'],
+  docs:[
+    ['<code>使用手冊.md</code>','日常使用和營運說明'],
+    ['<code>CHANGELOG.md</code>','版本記錄'],
+    ['<code>docs/DESIGN.md</code>','UI 視覺層級、顏色和元件規則'],
+    ['<code>docs/UX_OPTIMIZATION_AUDIT.md</code>','互動流程和操作路徑規範'],
+    ['<code>AGENTS.md</code>','AI 助手與接手開發者必讀'],
+  ],
+},
+
+/* ==================== English ==================== */
+'en': {
+  tagline:'A task, time-tracking, file, acceptance and monthly settlement platform for freelance designers and small design teams',
+  oneLiner:'<b>In short:</b> Turn the scattered freelance design workflow — "requirements in WeChat, hours in Excel, files in cloud drives, manual accounting at month-end" — into <strong>one traceable pipeline</strong> from intake to settlement.',
+  what:'What is this',
+  whatDesc:'Giverny is a <strong>freelance design operations backend</strong> — it connects requirements, progress, hours, files, acceptance and monthly settlement around the task lifecycle.',
+  flow:['Request','Progress','Time log','File archive','Acceptance','Settlement','Client read-only'],
+  whatServes:'It powers <a href="https://mayeai.com">mayeai.com</a>, using Cloudflare D1 for business data and R2 for files.',
+  whatNot:'<strong>It is not</strong> a generic project management tool (not a Jira / Trello / Feishu replacement). It is a <strong>"design-service settlement workbench"</strong> — purpose-built for the freelance delivery → settlement → reconciliation chain.',
+  whyTitle:'Why not Notion / Feishu / Excel',
+  whyDesc:'These tools can record information, but they cannot stably connect "progress, actual hours, attachments, acceptance, settlement, client read-only links" into <strong>one auditable chain</strong>. At month-end you still have to:',
+  whyList:['Dig through chat logs for requirements','Calculate hours in a spreadsheet','Hunt for final files in cloud drives','Manually explain to the client why this amount is charged'],
+  whyEnd:'Giverny\'s value is to <strong>constrain and automate exactly this chain</strong>, so every settlement is verifiable.',
+  whoTitle:'Who is it for',
+  who:[
+    {role:'Freelance designer',need:'Clearly log each requirement, revision, actual hours and acceptance files',provide:'Task details, progress timeline, segmented hours, acceptance attachments, monthly stats'},
+    {role:'Design service lead',need:'Reconcile workload, income, files and settlement status by month',provide:'Dashboard, income stats, file library, monthly report, PDF'},
+    {role:'Client / collaborator',need:'View only the final report, task details and delivered files',provide:'<code>/share/:token</code> read-only link'},
+    {role:'Onboarding developer',need:'Quickly understand code structure, business rules and release discipline',provide:'<code>AGENTS.md</code>, <code>docs/</code>, Releases'},
+  ],
+  whoCols:['Role','Main need','What Giverny provides'],
+  flowTitle:'Core workflow',
+  shotsTitle:'Real product screenshots',
+  shotsDesc:'These screenshots come from the production interface and are provided by the project maintainer to show the current layout, component density, status styling and overall visual state.',
+  shots:['Dashboard','Tasks','Income'],
+  flowSteps:[
+    '<strong>Create task</strong>: fill in name, design type, requirement, planned start / delivery, contact and settlement month.',
+    '<strong>Track progress</strong>: log progress, upload process attachments, add time segments, maintain status and overall progress.',
+    '<strong>Accumulate hours</strong>: all statistics use <strong>actual hours</strong>; planned times are for scheduling only.',
+    '<strong>Deliver & accept</strong>: review basic info, progress, segmented hours, acceptance files and notes; on confirm, status becomes "Accepted", progress locked at 100%, hours enter settlement.',
+    '<strong>Monthly settlement</strong>: aggregate hours, income, acceptance status and yearly trends, generate client link and PDF.',
+  ],
+  sceneTitle:'Two typical scenarios',
+  scene1T:'📋 Supplemental task backfill',
+  scene1D:'Open "Supplement", set the real date (e.g. 5/20) and the settlement month (e.g. 2026-06). Supplemental is a <strong>public tag</strong> so the client understands why it appears this month — it must not be admin-only.',
+  scene2T:'👁 Client month-end reconciliation',
+  scene2D:'Admin locks monthly data → generates read-only link → client views tasks, hours, files and amounts. The client page has <strong>no edit / delete entry points</strong>.',
+  modTitle:'Module overview',
+  mods:[
+    {name:'Dashboard',desc:'"How much was done, how much is billable, what is pending acceptance" — monthly ops overview'},
+    {name:'Tasks',desc:'Daily task maintenance: filter / search, list + detail, progress, time log, acceptance'},
+    {name:'File library',desc:'Lifecycle file archive. Deletion only for mis-uploads/duplicates, requires confirmation, logged'},
+    {name:'Income',desc:'Income trends and after-tax estimates'},
+    {name:'Monthly report / Settlement',desc:'Lock monthly data, generate read-only client link and PDF'},
+    {name:'Settings',desc:'Token management, design types, rate & tax, PDF header, account security, system info'},
+  ],
+  modCols:['Module','What it solves'],
+  ruleTitle:'Key business rules',
+  ruleIntro:'These rules run through the entire system — understand them and you understand Giverny:',
+  rule1T:'1. Month ownership is solely by <code>settlement_month</code>',
+  rule1D:'Normal tasks default to the selected month; supplemental tasks can split the real date and settlement month. Dashboard, task list, income stats and reports <strong>all aggregate by <code>settlement_month</code></strong>.',
+  rule2T:'2. Actual hours are the sole settlement basis',
+  rule2D:'Actual hours come from segmented time logs and feed analytics, income estimates, reports, yearly stats and settlement PDFs.',
+  rule2Warn:'<b>⚠ Important:</b> Planned start / delivery are <strong>scheduling references only</strong> — they <strong>never participate in hour calculation, income, or settlement month fallback</strong>.',
+  rule3T:'3. Tasks cannot be directly deleted',
+  rule3D:'Tasks affect hours, income, reports and historical reconciliation. Direct deletion breaks data integrity. Use <strong>suspend / terminate / void</strong> to preserve an audit trail.',
+  rule4T:'4. Prefer archiving over deletion for files',
+  rule4D:'There is no automatic periodic cleanup — historical attachments may be referenced by reports, client pages, reviews or rework. Deletion is only for <strong>mis-uploaded / duplicate</strong> files.',
+  roleTitle:'Roles & permissions',
+  roleCols:['Capability','Admin','Token user','Client share link'],
+  roles:[
+    ['View dashboard / report','✅','✅','❌'],
+    ['Create / edit tasks','✅','Limited','❌'],
+    ['Upload / delete files','✅','Limited','❌'],
+    ['Confirm acceptance','✅','❌','❌'],
+    ['Generate access token','✅','❌','❌'],
+    ['View admin-only info','✅','❌','❌'],
+    ['View report and files','✅','✅','Read-only'],
+  ],
+  roleNote:'<strong>Visual rule:</strong> admin-only info uses brown <code>admin-only-data</code>; supplemental uses green public tag; client page hides backend buttons and internal info.',
+  techTitle:'Tech architecture',
+  tech:[
+    {name:'Frontend',tech:'<b>React 19</b> · TypeScript · Vite',desc:'Admin app + client share page'},
+    {name:'Styles',tech:'<code>src/App.css</code> (single file)',desc:'See docs/DESIGN.md for visual rules'},
+    {name:'Backend',tech:'<b>Cloudflare Worker</b>',desc:'API, auth, AI assistant, report, static routing'},
+    {name:'Database',tech:'<b>Cloudflare D1</b>',desc:'Tasks, progress, attachments, reports, settings, audit'},
+    {name:'Files',tech:'<b>Cloudflare R2</b>',desc:'Original files, previews, deliverables'},
+    {name:'Deploy',tech:'<b>Wrangler</b>',desc:'Production domain mayeai.com'},
+  ],
+  techEntry:'<strong>Key code entry points:</strong> <code>src/App.tsx</code> (main) · <code>src/App.css</code> (styles) · <code>src/SharedReport.tsx</code> (client page) · <code>src/worker.ts</code> (API)',
+  devTitle:'Local development',
+  devComment:'# Start dev server, default http://localhost:5173',
+  deployTitle:'Deployment & release',
+  deployWarn:'<b>Read <code>docs/DEPLOYMENT.md</code> before deploying.</b> After local verification, deploy directly to production.',
+  deployRes:'<strong>Production resources:</strong> Worker <code>designer-worklog</code> · D1 <code>designer-worklog-db</code> · R2 <code>designer-worklog-uploads</code>',
+  deployStepsTitle:'A production update must complete:',
+  deploySteps:[
+    'Bump version (<code>appConfig.ts</code>, <code>package.json</code>)',
+    'Update <code>CHANGELOG.md</code> and related docs',
+    '<code>npm run lint</code> + <code>npm run build</code>',
+    'Deploy to production, verify online',
+    '<code>git commit</code> + <code>git push</code> + push tag',
+    'Create GitHub Release, attach screenshots for UI changes',
+  ],
+  docTitle:'Documentation index',
+  docCols:['Doc','Content'],
+  docs:[
+    ['<code>使用手册.md</code>','Daily usage and operations guide'],
+    ['<code>CHANGELOG.md</code>','Version history'],
+    ['<code>docs/DESIGN.md</code>','UI visual hierarchy, colors, component rules'],
+    ['<code>docs/UX_OPTIMIZATION_AUDIT.md</code>','Interaction flow and path standards'],
+    ['<code>AGENTS.md</code>','Required reading for AI assistants and developers'],
+  ],
+},
+
+/* ==================== 日本語 ==================== */
+'ja': {
+  tagline:'フリーランスデザイナーと小規模デザインチーム向けの、タスク・工数・ファイル・検収・月次決済プラットフォーム',
+  oneLiner:'<b>一言で：</b>「要件は WeChat、工数は Excel、ファイルはクラウド、月末は手作業で決算」というフリーランスデザインの仕事を、<strong>一つの追跡可能なパイプライン</strong>にまとめます。',
+  what:'これは何か',
+  whatDesc:'Giverny は<strong>フリーランスデザイン運用のバックエンド</strong>です。タスクのライフサイクルを中心に、要件・進捗・工数・ファイル・検収・月次決済を一つのシステムに繋ぎます。',
+  flow:['タスク要件','進捗','工数記録','ファイル保管','検収','月次決済','クライアント閲覧'],
+  whatServes:'正式サイト <a href="https://mayeai.com">mayeai.com</a> で稼働し、Cloudflare D1 にビジネスデータ、R2 にファイルを保存します。',
+  whatNot:'<strong>汎用のプロジェクト管理ツールではありません</strong>（Jira / Trello / Feishu の代替ではありません）。フリーランスの受注 → 決済 → 照合のチェーンに特化した<strong>「デザインサービス決済ワークベンチ」</strong>です。',
+  whyTitle:'なぜ Notion / Feishu / Excel でないのか',
+  whyDesc:'これらのツールは情報を記録できますが、「進捗・実工数・添付ファイル・検収・決済・クライアント閲覧リンク」を<strong>一つの監査可能なチェーンとして安定して繋ぐ</strong>ことは困難です。月末にはまだ：',
+  whyList:['チャット履歴から要件を探す','スプレッドシートで工数を計算する','クラウドで最終稿を探す','手作業でクライアントに金額を説明する'],
+  whyEnd:'Giverny の価値は、<strong>このチェーンに特化した制約と自動化</strong>を提供し、すべての決済を検証可能にすることです。',
+  whoTitle:'対象者',
+  who:[
+    {role:'フリーランスデザイナー',need:'要件、修正、実工数、検収ファイルを明確に記録',provide:'タスク詳細、進捗タイムライン、分割工数、検収添付、月次統計'},
+    {role:'デザインサービス責任者',need:'月ごとの作業量、収入、ファイル、決済状況を照合',provide:'ダッシュボード、収入統計、ファイル庫、月報、PDF'},
+    {role:'クライアント / 協力者',need:'最終月報、タスク詳細、納品ファイルのみ閲覧',provide:'<code>/share/:token</code> 読み取り専用リンク'},
+    {role:'引き継ぎ開発者',need:'コード構造、業務ルール、リリース規律を素早く理解',provide:'<code>AGENTS.md</code>、<code>docs/</code>、Releases'},
+  ],
+  whoCols:['役割','主なニーズ','Giverny が提供するもの'],
+  flowTitle:'コアワークフロー',
+  shotsTitle:'実際のプロダクトスクリーンショット',
+  shotsDesc:'以下のスクリーンショットは本番環境の実画面で、現在のレイアウト、コンポーネント密度、ステータス表現、全体のビジュアルを示すためにプロジェクト保守者が提供したものです。',
+  shots:['ダッシュボード','タスク','収入'],
+  flowSteps:[
+    '<strong>タスク作成</strong>：タスク名、デザイン種別、要件、予定開始 / 納期、担当者、決済月を入力。',
+    '<strong>進捗追跡</strong>：進捗を記録、過程ファイルをアップロード、時間区分を追加、ステータスと全体進捗を維持。',
+    '<strong>工蓄積</strong>：すべての統計は<strong>実工数</strong>ベース。予定時間はスケジュール用のみ。',
+    '<strong>納品・検収</strong>：基本情報、進捗、分割工数、検収ファイル、備考を確認。確認後、ステータスは「検収済」、進捗は 100% でロック、工数が決済に計上。',
+    '<strong>月次決済</strong>：決済月ごとに工数、収入、検収状況、年間推移を集計し、クライアント用リンクと PDF を生成。',
+  ],
+  sceneTitle:'2つの典型シナリオ',
+  scene1T:'📋 過去タスクの追加記録',
+  scene1D:'「追加記録」を開き、実際の日付（例：5/20）と決済月（例：2026-06）を設定。追加記録は<strong>公開タグ</strong>で、クライアントが今月の表示理由を理解できるようにします。',
+  scene2T:'👁 クライアントの月末照合',
+  scene2D:'管理者が月次データをロック → 読み取り専用リンクを生成 → クライアントがタスク、工数、ファイル、金額を閲覧。クライアントページに<strong>編集 / 削除の入口はありません</strong>。',
+  modTitle:'モジュール一覧',
+  mods:[
+    {name:'ダッシュボード',desc:'「今月どれだけやったか、いくら請求できるか、何が未検収か」の月次運営概況'},
+    {name:'タスク',desc:'日常のタスク保守：フィルタ / 検索、リスト + 詳細、進捗、工数記録、検収'},
+    {name:'ファイル庫',desc:'ライフサイクルのファイル保管ビュー。誤アップロード/重複のみ削除可能、確認必須、ログ記録'},
+    {name:'収入',desc:'収入推移と税後見積もり'},
+    {name:'月報 / 決済',desc:'月次データをロックし、読み取り専用クライアントリンクと PDF を生成'},
+    {name:'設定',desc:'トークン管理、デザイン種別、時給・税、PDF ヘッダー、アカウントセキュリティ、システム情報'},
+  ],
+  modCols:['モジュール','解決する課題'],
+  ruleTitle:'主要ビジネスルール',
+  ruleIntro:'これらのルールはシステム全体に贯穿しており、理解すれば Giverny の設計思想が分かります：',
+  rule1T:'1. 月の帰属は <code>settlement_month</code> のみ',
+  rule1D:'通常タスクは選択中の月にデフォルト帰属。追加記録タスクは実際の日付と決済月を分離可能。ダッシュボード、タスクリスト、収入統計、月報は<strong>すべて <code>settlement_month</code> で集計</strong>。',
+  rule2T:'2. 実工数が唯一の決済根拠',
+  rule2D:'実工数は分割記録の集計から来て、分析、収入見積もり、月報、年間統計、決済 PDF に使用されます。',
+  rule2Warn:'<b>⚠ 重要：</b>予定開始 / 納期は<strong>スケジュールと通知のみ</strong>に使用され、<strong>工数計算、収入計算、決済月のフォールバックには関与しません</strong>。',
+  rule3T:'3. タスクは直接削除不可',
+  rule3D:'タスクは工数、収入、月報、過去の照合に影響します。直接削除はデータ整合性を壊します。異常タスクは<strong>一時停止 / 終了 / 無効</strong>で監査証跡を保持。',
+  rule4T:'4. ファイルは削除より保管を優先',
+  rule4D:'自動定期クリーンアップはありません。履歴添付は月報、クライアントページ、レビュー、手直しで参照される可能性があります。削除は<strong>誤アップロード / 重複</strong>ファイルのみ。',
+  roleTitle:'ロールと権限',
+  roleCols:['機能','管理者','トークンユーザー','クライアント共有リンク'],
+  roles:[
+    ['ダッシュボード / 月報の閲覧','✅','✅','❌'],
+    ['タスクの作成 / 編集','✅','制限あり','❌'],
+    ['ファイルのアップロード / 削除','✅','制限あり','❌'],
+    ['検収の確認','✅','❌','❌'],
+    ['アクセストークンの生成','✅','❌','❌'],
+    ['管理者専用情報の閲覧','✅','❌','❌'],
+    ['月報と納品ファイルの閲覧','✅','✅','読み取り専用'],
+  ],
+  roleNote:'<strong>ビジュアルルール：</strong>管理者専用情報は茶色の <code>admin-only-data</code>。追加記録は緑色の公開タグ。クライアントページは管理ボタンと内部情報を非表示。',
+  techTitle:'技術アーキテクチャ',
+  tech:[
+    {name:'フロント',tech:'<b>React 19</b> · TypeScript · Vite',desc:'管理アプリ + クライアント共有ページ'},
+    {name:'スタイル',tech:'<code>src/App.css</code>（単一ファイル）',desc:'視覚ルールは docs/DESIGN.md'},
+    {name:'バックエンド',tech:'<b>Cloudflare Worker</b>',desc:'API、認証、AI アシスタント、月報、静的ルーティング'},
+    {name:'DB',tech:'<b>Cloudflare D1</b>',desc:'タスク、進捗、添付、月報、設定、監査ログ'},
+    {name:'ファイル',tech:'<b>Cloudflare R2</b>',desc:'オリジナル、プレビュー、納品物'},
+    {name:'デプロイ',tech:'<b>Wrangler</b>',desc:'本番ドメイン mayeai.com'},
+  ],
+  techEntry:'<strong>主要コード入口：</strong><code>src/App.tsx</code>（メイン）· <code>src/App.css</code>（スタイル）· <code>src/SharedReport.tsx</code>（クライアント）· <code>src/worker.ts</code>（API）',
+  devTitle:'ローカル開発',
+  devComment:'# 開発サーバー起動、デフォルト http://localhost:5173',
+  deployTitle:'デプロイとリリース',
+  deployWarn:'<b>デプロイ前に <code>docs/DEPLOYMENT.md</code> を必ず読んでください。</b>ローカル検証後、本番に直接デプロイ。',
+  deployRes:'<strong>本番リソース：</strong>Worker <code>designer-worklog</code> · D1 <code>designer-worklog-db</code> · R2 <code>designer-worklog-uploads</code>',
+  deployStepsTitle:'本番更新の必須ステップ：',
+  deploySteps:[
+    'バージョン番号を更新（<code>appConfig.ts</code>、<code>package.json</code>）',
+    '<code>CHANGELOG.md</code> と関連ドキュメントを更新',
+    '<code>npm run lint</code> + <code>npm run build</code>',
+    '本番にデプロイ、オンライン版を検証',
+    '<code>git commit</code> + <code>git push</code> + タグをプッシュ',
+    'GitHub Release を作成、UI 変更が大きい場合はスクリーンショットを添付',
+  ],
+  docTitle:'ドキュメント索引',
+  docCols:['ドキュメント','内容'],
+  docs:[
+    ['<code>使用手册.md</code>','日常使用と運用ガイド'],
+    ['<code>CHANGELOG.md</code>','バージョン履歴'],
+    ['<code>docs/DESIGN.md</code>','UI 視覚階層、カラー、コンポーネントルール'],
+    ['<code>docs/UX_OPTIMIZATION_AUDIT.md</code>','インタラクションフローとパス規範'],
+    ['<code>AGENTS.md</code>','AI アシスタントと開発者の必読書'],
+  ],
+},
+
+/* ==================== 한국어 ==================== */
+'ko': {
+  tagline:'프리랜서 디자이너와 소규모 디자인 팀을 위한 작업, 공수, 파일, 검수 및 월간 정산 플랫폼',
+  oneLiner:'<b>한마디로:</b> "요구사항은 위챗, 공수는 엑셀, 파일은 클라우드, 월말에는 수작업 결산"인 프리랜스 디자인 업무를 <strong>추적 가능한 하나의 파이프라인</strong>으로 통합합니다.',
+  what:'이것은 무엇인가',
+  whatDesc:'Giverny는 <strong>프리랜스 디자인 운영 백엔드</strong>입니다. 작업 라이프사이클을 중심으로 요구사항, 진행, 공수, 파일, 검수, 월간 정산을 하나의 시스템으로 연결합니다.',
+  flow:['작업 요구','진행','공수 기록','파일 보관','검수','월간 정산','클라이언트 조회'],
+  whatServes:'정식 사이트 <a href="https://mayeai.com">mayeai.com</a>에서 운영되며, Cloudflare D1에 비즈니스 데이터, R2에 파일을 저장합니다.',
+  whatNot:'<strong>범용 프로젝트 관리 도구가 아닙니다</strong> (Jira / Trello / Feishu 대체 불가). 프리랜스 납품 → 정산 → 대사 체인에 특화된 <strong>"디자인 서비스 정산 워크벤치"</strong>입니다.',
+  whyTitle:'왜 Notion / Feishu / Excel이 아닌가',
+  whyDesc:'이 도구들은 정보를 기록할 수 있지만, "진행, 실제 공수, 첨부파일, 검수, 정산, 클라이언트 조회 링크"를 <strong>하나의 감사 가능한 체인으로 안정적으로 연결</strong>하기는 어렵습니다. 월말이 되면 여전히:',
+  whyList:['채팅 기록에서 요구사항을 찾고','스프레드시트에서 공수를 계산하고','클라우드에서 최종 파일을 찾고','수작업으로 클라이언트에게 금액을 설명해야 합니다'],
+  whyEnd:'Giverny의 가치는 <strong>이 체인에 특화된 제약과 자동화</strong>를 제공하여 모든 정산을 검증 가능하게 만드는 것입니다.',
+  whoTitle:'대상 사용자',
+  who:[
+    {role:'프리랜스 디자이너',need:'요구사항, 수정, 실제 공수, 검수 파일을 명확히 기록',provide:'작업 상세, 진행 타임라인, 분할 공수, 검수 첨부, 월간 통계'},
+    {role:'디자인 서비스 담당자',need:'월별 작업량, 수입, 파일, 정산 상태 대사',provide:'대시보드, 수입 통계, 파일 라이브러리, 월간 보고서, PDF'},
+    {role:'클라이언트 / 협력자',need:'최종 보고서, 작업 상세, 납품 파일만 조회',provide:'<code>/share/:token</code> 읽기 전용 링크'},
+    {role:'인수 개발자',need:'코드 구조, 비즈니스 규칙, 릴리스 규칙을 빠르게 이해',provide:'<code>AGENTS.md</code>, <code>docs/</code>, Releases'},
+  ],
+  whoCols:['역할','주요 니즈','Giverny가 제공하는 것'],
+  flowTitle:'핵심 워크플로우',
+  shotsTitle:'실제 제품 스크린샷',
+  shotsDesc:'아래 스크린샷은 프로덕션 실제 화면이며, 현재 레이아웃, 컴포넌트 밀도, 상태 스타일과 전체 비주얼을 보여주기 위해 프로젝트 관리자가 제공했습니다.',
+  shots:['대시보드','작업','수입'],
+  flowSteps:[
+    '<strong>작업 생성</strong>: 작업명, 디자인 유형, 요구사항, 예정 시작 / 납기, 담당자, 정산 월을 입력.',
+    '<strong>진행 추적</strong>: 진행을 기록, 과정 첨부를 업로드, 시간 구간을 추가, 상태와 전체 진행률을 유지.',
+    '<strong>공수 축적</strong>: 모든 통계는 <strong>실제 공수</strong> 기준. 예정 시간은 스케줄링용만.',
+    '<strong>납품 및 검수</strong>: 기본 정보, 진행, 분할 공수, 검수 파일, 비고를 확인. 확인 후 상태는 "검수 완료", 진행률 100% 잠금, 공수가 정산에 반영.',
+    '<strong>월간 정산</strong>: 정산 월별로 공수, 수입, 검수 현황, 연간 추세를 집계하여 클라이언트 링크와 PDF를 생성.',
+  ],
+  sceneTitle:'두 가지 전형 시나리오',
+  scene1T:'📋 과거 작업 추가 기록',
+  scene1D:'"추가 기록"을 열고 실제 날짜(예: 5/20)와 정산 월(예: 2026-06)을 설정. 추가 기록은 <strong>공개 태그</strong>로, 클라이언트가 이번 달 표시 이유를 이해할 수 있게 합니다.',
+  scene2T:'👁 클라이언트 월말 대사',
+  scene2D:'관리자가 월간 데이터를 잠금 → 읽기 전용 링크 생성 → 클라이언트가 작업, 공수, 파일, 금액을 조회. 클라이언트 페이지에는 <strong>편집 / 삭제 입구가 없습니다</strong>.',
+  modTitle:'모듈 개요',
+  mods:[
+    {name:'대시보드',desc:'"이번 달에 얼마나 했고, 얼마를 청구할 수 있고, 무엇이 미검수인가"의 월간 운영 개요'},
+    {name:'작업',desc:'일일 작업 유지보수: 필터 / 검색, 목록 + 상세, 진행, 공수 기록, 검수'},
+    {name:'파일 라이브러리',desc:'라이프사이클 파일 보관 뷰. 오업로드/중복만 삭제 가능, 확인 필요, 로그 기록'},
+    {name:'수입',desc:'수입 추세와 세후 견적'},
+    {name:'월간 보고서 / 정산',desc:'월간 데이터를 잠그고 읽기 전용 클라이언트 링크와 PDF 생성'},
+    {name:'설정',desc:'토큰 관리, 디자인 유형, 시급 및 세금, PDF 헤더, 계정 보안, 시스템 정보'},
+  ],
+  modCols:['모듈','해결 과제'],
+  ruleTitle:'핵심 비즈니스 규칙',
+  ruleIntro:'이 규칙들은 시스템 전체에贯穿하며, 이해하면 Giverny의 설계 논리를 파악할 수 있습니다:',
+  rule1T:'1. 월 귀속은 <code>settlement_month</code>만',
+  rule1D:'일반 작업은 선택된 월에 기본 귀속. 추가 기록 작업은 실제 날짜와 정산 월을 분리 가능. 대시보드, 작업 목록, 수입 통계, 보고서는 <strong>모두 <code>settlement_month</code>로 집산</strong>.',
+  rule2T:'2. 실제 공수가 유일한 정산 근거',
+  rule2D:'실제 공수는 분할 기록 집계에서 나오며 분석, 수입 견적, 보고서, 연간 통계, 정산 PDF에 사용됩니다.',
+  rule2Warn:'<b>⚠ 중요:</b> 예정 시작 / 납기는 <strong>스케줄링과 알림 전용</strong>이며 <strong>공수 계산, 수입 계산, 정산 월 폴백에 참여하지 않습니다</strong>.',
+  rule3T:'3. 작업은 직접 삭제 불가',
+  rule3D:'작업은 공수, 수입, 보고서, 과거 대사에 영향을 줍니다. 직접 삭제는 데이터 무결성을 훼손합니다. 비정상 작업은 <strong>일시정지 / 종료 / 무효</strong>로 감사 증적을 보존.',
+  rule4T:'4. 파일은 삭제보다 보관 우선',
+  rule4D:'자동 정기 정리가 없습니다. 이력 첨부는 보고서, 클라이언트 페이지, 리뷰, 수정에서 참조될 수 있습니다. 삭제는 <strong>오업로드 / 중복</strong> 파일만.',
+  roleTitle:'역할 및 권한',
+  roleCols:['기능','관리자','토큰 사용자','클라이언트 공유 링크'],
+  roles:[
+    ['대시보드 / 보고서 조회','✅','✅','❌'],
+    ['작업 생성 / 편집','✅','제한','❌'],
+    ['파일 업로드 / 삭제','✅','제한','❌'],
+    ['검수 확인','✅','❌','❌'],
+    ['액세스 토큰 생성','✅','❌','❌'],
+    ['관리자 전용 정보 조회','✅','❌','❌'],
+    ['보고서 및 납품 파일 조회','✅','✅','읽기 전용'],
+  ],
+  roleNote:'<strong>시각 규칙:</strong> 관리자 전용 정보는 갈색 <code>admin-only-data</code>. 추가 기록은 녹색 공개 태그. 클라이언트 페이지는 관리 버튼과 내부 정보를 숨김.',
+  techTitle:'기술 아키텍처',
+  tech:[
+    {name:'프론트엔드',tech:'<b>React 19</b> · TypeScript · Vite',desc:'관리자 앱 + 클라이언트 공유 페이지'},
+    {name:'스타일',tech:'<code>src/App.css</code> (단일 파일)',desc:'시각 규칙은 docs/DESIGN.md'},
+    {name:'백엔드',tech:'<b>Cloudflare Worker</b>',desc:'API, 인증, AI 어시스턴트, 보고서, 정적 라우팅'},
+    {name:'DB',tech:'<b>Cloudflare D1</b>',desc:'작업, 진행, 첨부, 보고서, 설정, 감사 로그'},
+    {name:'파일',tech:'<b>Cloudflare R2</b>',desc:'원본, 미리보기, 납품물'},
+    {name:'배포',tech:'<b>Wrangler</b>',desc:'프로덕션 도메인 mayeai.com'},
+  ],
+  techEntry:'<strong>주요 코드 진입점:</strong> <code>src/App.tsx</code> (메인) · <code>src/App.css</code> (스타일) · <code>src/SharedReport.tsx</code> (클라이언트) · <code>src/worker.ts</code> (API)',
+  devTitle:'로컬 개발',
+  devComment:'# 개발 서버 시작, 기본 http://localhost:5173',
+  deployTitle:'배포 및 릴리스',
+  deployWarn:'<b>배포 전 <code>docs/DEPLOYMENT.md</code>를 필독하세요.</b> 로컬 검증 후 프로덕션에 직접 배포.',
+  deployRes:'<strong>프로덕션 리소스:</strong> Worker <code>designer-worklog</code> · D1 <code>designer-worklog-db</code> · R2 <code>designer-worklog-uploads</code>',
+  deployStepsTitle:'프로덕션 업데이트 필수 단계:',
+  deploySteps:[
+    '버전 번호 업데이트 (<code>appConfig.ts</code>, <code>package.json</code>)',
+    '<code>CHANGELOG.md</code> 및 관련 문서 업데이트',
+    '<code>npm run lint</code> + <code>npm run build</code>',
+    '프로덕션에 배포, 온라인 버전 검증',
+    '<code>git commit</code> + <code>git push</code> + 태그 푸시',
+    'GitHub Release 생성, UI 변경이 크면 스크린샷 첨부',
+  ],
+  docTitle:'문서 색인',
+  docCols:['문서','내용'],
+  docs:[
+    ['<code>使用手册.md</code>','일상 사용 및 운영 가이드'],
+    ['<code>CHANGELOG.md</code>','버전 이력'],
+    ['<code>docs/DESIGN.md</code>','UI 시각 계층, 색상, 컴포넌트 규칙'],
+    ['<code>docs/UX_OPTIMIZATION_AUDIT.md</code>','인터랙션 흐름 및 경로 규범'],
+    ['<code>AGENTS.md</code>','AI 어시스턴트 및 개발자 필독서'],
+  ],
+},
+};
+
+/* ============================================================
+   渲染函数
+   ============================================================ */
+let currentLang = 'zh-CN';
+
+function renderLangBar(){
+  $('lang-bar').innerHTML = LANGS.map(l=>
+    `<button class="lang-btn ${l.code===currentLang?'active':''}" onclick="switchLang('${l.code}')">
+      <span class="lang-flag">${l.flag}</span>${l.name}
+    </button>`
+  ).join('');
+}
+
+function render(){
+  const t = I18N[currentLang];
+  document.documentElement.lang = currentLang;
+  $('content').innerHTML = `
+    <div class="hero">
+      <div class="logo">G</div>
+      <h1>Giverny</h1>
+      <p class="tagline">${t.tagline}</p>
+      <div class="links">
+        <a href="https://mayeai.com">mayeai.com</a>
+        <a href="https://github.com/avalonlucky/Giverny">GitHub</a>
+        <a href="https://github.com/avalonlucky/Giverny/releases">Releases</a>
+      </div>
+      <div class="badges">
+        <span class="badge"><span class="dot"></span> React 19 · TypeScript · Vite</span>
+        <span class="badge"><span class="dot" style="background:#f6821f"></span> Cloudflare · D1 · R2</span>
+      </div>
+    </div>
+
+    <div class="one-liner">${t.oneLiner}</div>
+
+    <h2>${t.shotsTitle}</h2>
+    <p>${t.shotsDesc}</p>
+    <div class="shots">
+      <div class="shot"><h3>${t.shots[0]}</h3><img src="./assets/readme/screenshots/dashboard.png" alt="Giverny dashboard screenshot" /></div>
+      <div class="shot"><h3>${t.shots[1]}</h3><img src="./assets/readme/screenshots/tasks.png" alt="Giverny tasks screenshot" /></div>
+      <div class="shot"><h3>${t.shots[2]}</h3><img src="./assets/readme/screenshots/income.png" alt="Giverny income screenshot" /></div>
+    </div>
+
+    <h2>${t.what}</h2>
+    <p>${t.whatDesc}</p>
+    <div class="flow"><div class="chain">${t.flow.map((n,i)=>`${i>0?'<span class="arr">→</span>':''}<span class="node">${n}</span>`).join('')}</div></div>
+    <p>${t.whatServes}</p>
+    <p>${t.whatNot}</p>
+
+    <h2>${t.whyTitle}</h2>
+    <p>${t.whyDesc}</p>
+    <ul>${t.whyList.map(x=>`<li>${x}</li>`).join('')}</ul>
+    <p>${t.whyEnd}</p>
+
+    <h2>${t.whoTitle}</h2>
+    <div class="table-wrap"><table>
+      <thead><tr>${t.whoCols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${t.who.map(r=>`<tr><td><strong>${r.role}</strong></td><td>${r.need}</td><td>${r.provide}</td></tr>`).join('')}</tbody>
+    </table></div>
+
+    <h2>${t.flowTitle}</h2>
+    <ol>${t.flowSteps.map(s=>`<li>${s}</li>`).join('')}</ol>
+    <h3>${t.sceneTitle}</h3>
+    <div class="scenario"><h4>${t.scene1T}</h4><p style="margin:0">${t.scene1D}</p></div>
+    <div class="scenario"><h4>${t.scene2T}</h4><p style="margin:0">${t.scene2D}</p></div>
+
+    <h2>${t.modTitle}</h2>
+    <div class="table-wrap"><table>
+      <thead><tr>${t.modCols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${t.mods.map(m=>`<tr><td><strong>${m.name}</strong></td><td>${m.desc}</td></tr>`).join('')}</tbody>
+    </table></div>
+
+    <h2>${t.ruleTitle}</h2>
+    <p>${t.ruleIntro}</p>
+    <h3>${t.rule1T}</h3><p>${t.rule1D}</p>
+    <h3>${t.rule2T}</h3><p>${t.rule2D}</p>
+    <blockquote>${t.rule2Warn}</blockquote>
+    <h3>${t.rule3T}</h3><p>${t.rule3D}</p>
+    <h3>${t.rule4T}</h3><p>${t.rule4D}</p>
+
+    <h2>${t.roleTitle}</h2>
+    <div class="table-wrap"><table>
+      <thead><tr>${t.roleCols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${t.roles.map(r=>`<tr><td>${r[0]}</td>${r.slice(1).map(v=>`<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>
+    <p>${t.roleNote}</p>
+
+    <h2>${t.techTitle}</h2>
+    <div class="arch">${t.tech.map(l=>`<div class="layer"><span class="lname">${l.name}</span><span class="ltech">${l.tech}</span><span class="ldesc">${l.desc}</span></div>`).join('')}</div>
+    <p>${t.techEntry}</p>
+
+    <h2>${t.devTitle}</h2>
+    <pre><code>npm install
+npm run dev          <span style="color:var(--text-3)">${t.devComment}</span></code></pre>
+    <pre><code>npm run lint
+npm run build</code></pre>
+
+    <h2>${t.deployTitle}</h2>
+    <blockquote>${t.deployWarn}</blockquote>
+    <pre><code>env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY npm run deploy:worker</code></pre>
+    <p>${t.deployRes}</p>
+    <p>${t.deployStepsTitle}</p>
+    <ol>${t.deploySteps.map(s=>`<li>${s}</li>`).join('')}</ol>
+
+    <h2>${t.docTitle}</h2>
+    <div class="table-wrap"><table>
+      <thead><tr>${t.docCols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${t.docs.map(d=>`<tr><td>${d[0]}</td><td>${d[1]}</td></tr>`).join('')}</tbody>
+    </table></div>
+
+    <div class="footer-note">
+      🌐 Multi-language README preview · <a href="#" onclick="document.getElementById('lang-bar').scrollIntoView();return false">↑ switch language</a>
+    </div>
+  `;
+  window.scrollTo(0,0);
+}
+
+function switchLang(code){ currentLang=code; renderLangBar(); render(); }
+function $(id){ return document.getElementById(id); }
+
+renderLangBar();
+render();
+</script>
+</body>
+</html>

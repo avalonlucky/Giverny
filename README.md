@@ -11,6 +11,8 @@
 <p align="center">
   <a href="https://mayeai.com">正式站 mayeai.com</a>
   ·
+  <a href="./docs/README_MULTILINGUAL.html">多语言版 README</a>
+  ·
   <a href="./使用手册.md">使用手册</a>
   ·
   <a href="./CHANGELOG.md">更新日志</a>
@@ -24,7 +26,7 @@
   <img alt="License" src="https://img.shields.io/github/license/avalonlucky/Giverny" />
 </p>
 
-> English readers: see [English Overview](#english-overview).
+> English readers: see [English Overview](#english-overview). For a richer interactive multi-language version, open [docs/README_MULTILINGUAL.html](./docs/README_MULTILINGUAL.html).
 > 下面截图来自正式站真实界面，由项目维护者提供，用于展示当前产品的真实视觉状态。
 
 ![Giverny 工作台真实截图](./docs/assets/readme/screenshots/dashboard.png)
@@ -32,6 +34,7 @@
 ## 目录
 
 - [项目定位](#项目定位)
+- [多语言版本](#多语言版本)
 - [为什么需要 Giverny](#为什么需要-giverny)
 - [典型使用场景](#典型使用场景)
 - [核心工作流](#核心工作流)
@@ -53,6 +56,12 @@ Giverny 是一个用于管理设计兼职工作的运营后台。它把任务需
 它目前服务于正式站 [mayeai.com](https://mayeai.com)。正式站只放真实运营数据，使用 Cloudflare D1 保存业务数据，使用 Cloudflare R2 保存上传文件。预发布测试站已经下线，后续功能完成本地验证后直接更新正式站。
 
 Giverny 不是泛用项目管理工具。它更偏向一个“设计服务结算工作台”：围绕设计任务的生命周期，把过程、工时、文件、验收和月报串起来。
+
+## 多语言版本
+
+仓库内提供一个交互式多语言 README 页面：[docs/README_MULTILINGUAL.html](./docs/README_MULTILINGUAL.html)。它基于项目维护者提供的多语言版本整理，支持简体中文、繁體中文、English、日本語、한국어，并复用当前真实产品截图。
+
+如果在 GitHub 页面里直接打开 HTML 看到的是源码，可以在本地浏览器打开该文件，或使用支持 HTML 预览的工具查看。
 
 ## 为什么需要 Giverny
 
