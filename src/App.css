@@ -690,9 +690,11 @@ button {
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.task-row:hover {
+.task-row:hover,
+.task-row:focus-visible {
   border-color: rgba(47, 111, 109, 0.16);
   background: #eef2ea;
+  outline: none;
 }
 
 .task-row.selected {
@@ -731,21 +733,32 @@ button {
   min-width: 0;
 }
 
-.task-date span {
+.task-date span:not(.task-date-meta) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-supplement-corner {
-  position: absolute;
-  top: 6px;
-  right: 10px;
+.task-date .task-date-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.task-date .task-date-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-inline-supplement {
+  flex: 0 0 auto;
   color: var(--color-supplement);
   font-size: 10px;
+  font-style: normal;
   font-weight: 800;
-  line-height: 1;
-  pointer-events: none;
 }
 
 .task-main {
@@ -791,6 +804,15 @@ button {
   font-weight: 800;
 }
 
+.task-row-end {
+  position: relative;
+  min-width: 132px;
+  min-height: 44px;
+  display: grid;
+  align-items: center;
+  justify-items: end;
+}
+
 .task-state {
   display: flex;
   min-width: 120px;
@@ -799,16 +821,52 @@ button {
   gap: 7px;
   padding-left: 16px;
   border-left: 1px dashed rgba(47, 111, 109, 0.16);
+  transition: opacity 0.14s ease;
 }
 
 .task-row.supplemental .task-state {
-  padding-top: 10px;
+  padding-top: 0;
 }
 
 .task-state-badges {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.task-row-actions {
+  display: none;
+  align-items: center;
+  gap: 5px;
+}
+
+.task-row-actions .icon-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+}
+
+.task-row-actions .icon-button:hover,
+.task-row-actions .icon-button:focus-visible {
+  color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+
+.task-row-actions .icon-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.task-row:hover .task-state,
+.task-row:focus-within .task-state {
+  display: none;
+}
+
+.task-row:hover .task-row-actions,
+.task-row:focus-within .task-row-actions {
+  display: flex;
 }
 
 .status-badge {
@@ -1210,6 +1268,10 @@ button {
   font-size: 12px;
 }
 
+.detail-activity.compact {
+  padding-top: 10px;
+}
+
 .detail-more {
   width: 100%;
 }
@@ -1218,28 +1280,36 @@ button {
   transform: rotate(-90deg);
 }
 
-.detail-meta {
+.detail-meta,
+.detail-summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin: 0;
 }
 
-.detail-meta div {
+.detail-meta div,
+.detail-summary-grid div {
   padding: 12px;
   border-radius: 8px;
   background: #f1f3ed;
 }
 
-.detail-meta dt {
+.detail-meta dt,
+.detail-summary-grid dt {
   color: #7c8789;
   font-size: 12px;
 }
 
-.detail-meta dd {
+.detail-meta dd,
+.detail-summary-grid dd {
   margin: 4px 0 0;
   color: #17282f;
   font-weight: 800;
+}
+
+.detail-summary-grid dd {
+  font-size: 13px;
 }
 
 .supplement-inline {
@@ -1756,6 +1826,39 @@ button {
 .progress-submenu-panel,
 .type-submenu-panel {
   width: 190px;
+}
+
+.progress-submenu-panel button.selected {
+  color: var(--color-primary);
+  background: var(--color-supplement-bg);
+}
+
+.context-progress-confirm {
+  margin: 6px 2px 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.context-progress-confirm span {
+  color: var(--color-admin-only);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.task-context-menu .context-progress-confirm button {
+  width: auto;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.task-context-menu .context-progress-confirm button.primary {
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
 }
 
 .context-menu-separator {
@@ -5046,6 +5149,32 @@ input::file-selector-button {
   overflow-wrap: anywhere;
 }
 
+.acceptance-basic-grid input,
+.acceptance-basic-grid textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.acceptance-basic-grid textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.acceptance-basic-grid input:focus-visible,
+.acceptance-basic-grid textarea:focus-visible {
+  outline: 2px solid var(--color-supplement-bg);
+  border-color: var(--color-primary);
+}
+
 .acceptance-due-overdue {
   color: var(--color-status-danger) !important;
 }
@@ -8028,6 +8157,7 @@ textarea:focus-visible {
   .new-task-form,
   .new-task-schedule-row,
   .detail-meta,
+  .detail-summary-grid,
   .settings-tool-grid {
     grid-template-columns: 1fr;
   }

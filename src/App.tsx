@@ -243,6 +243,14 @@ function nowStamp() {
 const UPLOAD_HARD_LIMIT = 95 * 1024 * 1024
 const UPLOAD_SOFT_LIMIT = 50 * 1024 * 1024
 
+type AcceptancePayload = {
+  actualHours: number
+  acceptanceNote: string
+  timeEntries: TimeEntry[]
+  acceptanceFiles?: string[]
+  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate'>>
+}
+
 function validateUploadFile(file: File) {
   if (file.size > UPLOAD_HARD_LIMIT) {
     throw new Error(`「${file.name}」超过 ${(UPLOAD_HARD_LIMIT / 1024 / 1024).toFixed(0)}MB，无法上传`)
@@ -1365,8 +1373,6 @@ function App() {
   const [progressModalTaskId, setProgressModalTaskId] = useState(0)
   const [acceptanceModalTaskId, setAcceptanceModalTaskId] = useState(0)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
-  const [isSideUploading, setIsSideUploading] = useState(false)
-  const [sideUploadProgress, setSideUploadProgress] = useState(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
@@ -1733,12 +1739,13 @@ function App() {
 
   const handleConfirmTaskAcceptance = (
     task: Task,
-    payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] },
+    payload: AcceptancePayload,
   ) => {
     if (isAdmin) {
       void handleUpdateTask(task.id, {
+        ...payload.taskChanges,
         status: '已验收',
-        reviewer: task.reviewer || task.requester || '待确认',
+        reviewer: payload.taskChanges?.reviewer || task.reviewer || payload.taskChanges?.requester || task.requester || '待确认',
         actualHours: payload.actualHours,
         acceptanceNote: payload.acceptanceNote,
         timeEntries: payload.timeEntries,
@@ -1784,21 +1791,6 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTask?.id])
-
-  const handleSideUpload = async (fileList: FileList | null) => {
-    const file = fileList?.[0]
-    if (!file || !selectedTask || isSideUploading) {
-      return
-    }
-    setIsSideUploading(true)
-    setSideUploadProgress(0)
-    try {
-      await handleQuickUploadImage(selectedTask.id, file, (ratio) => setSideUploadProgress(Math.round(ratio * 100)))
-    } finally {
-      setIsSideUploading(false)
-      setSideUploadProgress(0)
-    }
-  }
 
   const handleQuickUploadImage = async (taskId: number, file: File, onProgress?: (ratio: number) => void) => {
     try {
@@ -2539,21 +2531,32 @@ function App() {
                 )}
                 {visibleTasks.map((task) => {
                   const dueState = taskDueState(task, today, dueSoonDate)
+                  const canAcceptTask = task.status === '待验收'
                   return (
-                  <button
+                  <article
                     className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
                     key={task.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedTaskId(task.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedTaskId(task.id)
+                      }
+                    }}
                     onContextMenu={(event) => openDashboardContextMenu(event, task)}
                   >
-                    {isSupplementalTask(task) && (
-                      <small className="task-supplement-corner" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
-                        补录
-                      </small>
-                    )}
                     <div className="task-date">
                       <b>{formatMonthDay(task.date)}</b>
-                      <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
+                      <span className="task-date-meta">
+                        <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
+                        {isSupplementalTask(task) && (
+                          <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
+                            补录
+                          </em>
+                        )}
+                      </span>
                     </div>
                     <div className="task-main">
                       <strong>{task.title}</strong>
@@ -2565,19 +2568,39 @@ function App() {
                         实际 <strong>{task.actualHours.toFixed(1)}h</strong>
                       </span>
                     </div>
-                    <div className="task-state">
-                      <div className="task-state-badges">
-                        {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
-                        <StatusBadge status={task.status} />
-                      </div>
-                      <div className="progress-cell">
-                        <div className="mini-meter">
-                          <span style={{ width: `${task.progress}%` }} />
+                    <div className="task-row-end">
+                      <div className="task-state">
+                        <div className="task-state-badges">
+                          {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
+                          <StatusBadge status={task.status} />
                         </div>
-                        <small>{task.progress}%</small>
+                        <div className="progress-cell">
+                          <div className="mini-meter">
+                            <span style={{ width: `${task.progress}%` }} />
+                          </div>
+                          <small>{task.progress}%</small>
+                        </div>
+                      </div>
+                      <div className="task-row-actions" aria-label="任务快捷操作">
+                        <button type="button" className="icon-button" title="查看详情" aria-label="查看详情" onClick={(event) => { event.stopPropagation(); handleOpenTaskDetail(task.id) }}>
+                          <Eye size={15} />
+                        </button>
+                        <button type="button" className="icon-button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
+                          <BarChart3 size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          title={canAcceptTask ? '去验收' : '当前不是待验收'}
+                          aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
+                          disabled={!canAcceptTask}
+                          onClick={(event) => { event.stopPropagation(); handleOpenTaskAcceptance(task.id) }}
+                        >
+                          <ClipboardCheck size={15} />
+                        </button>
                       </div>
                     </div>
-                  </button>
+                  </article>
                   )
                 })}
                 {dashboardContextMenu && (
@@ -2693,16 +2716,17 @@ function App() {
                 <TaskStateBadge task={selectedTask} />
               </div>
 
-              <dl className="detail-meta">
+              <dl className="detail-summary-grid">
                 <div>
-                  <dt>结算月份</dt>
-                  <dd>
-                    {monthLabelOf(taskSettlementMonth(selectedTask))}
-                    {isSupplementalTask(selectedTask) ? <span className="supplement-inline">补录</span> : null}
-                  </dd>
+                  <dt>实际工时</dt>
+                  <dd>{selectedTask.actualHours.toFixed(1)}h</dd>
                 </div>
                 <div>
-                  <dt>预计交付时间</dt>
+                  <dt>整体进度</dt>
+                  <dd>{selectedTask.progress}%</dd>
+                </div>
+                <div>
+                  <dt>交付</dt>
                   <dd className="detail-due">
                     {selectedTask.estimatedDate ? formatPlanDateTime(selectedTask.estimatedDate) : '未设置'}
                     {(() => {
@@ -2712,20 +2736,11 @@ function App() {
                   </dd>
                 </div>
                 <div>
-                  <dt>实际工时</dt>
-                  <dd>{selectedTask.actualHours.toFixed(1)}h</dd>
-                </div>
-                <div>
-                  <dt>需求人</dt>
-                  <dd>{selectedTask.requester || '未填写'}</dd>
-                </div>
-                <div>
-                  <dt>对接人</dt>
-                  <dd>{selectedTask.contact}</dd>
-                </div>
-                <div>
-                  <dt>验收人</dt>
-                  <dd>{selectedTask.reviewer}</dd>
+                  <dt>结算</dt>
+                  <dd>
+                    {monthLabelOf(taskSettlementMonth(selectedTask))}
+                    {isSupplementalTask(selectedTask) ? <span className="supplement-inline">补录</span> : null}
+                  </dd>
                 </div>
               </dl>
 
@@ -2739,32 +2754,14 @@ function App() {
                 </div>
               </div>
 
-              <label className="detail-upload">
-                <UploadCloud size={16} />
-                <em>{isSideUploading ? `上传中 ${sideUploadProgress}%` : '上传附件到该任务'}</em>
-                <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" disabled={isSideUploading} onChange={(event) => void handleSideUpload(event.target.files)} />
-              </label>
-
-              {selectedTask.files.length > 0 && (
-                <div className="file-list">
-                  {selectedTask.files.slice(0, 4).map((file) => (
-                    <span key={file}>
-                      {file.endsWith('.psd') || file.endsWith('.ai') ? <FileArchive size={15} /> : <FileText size={15} />}
-                      {file}
-                    </span>
-                  ))}
-                  {selectedTask.files.length > 4 && <span>+{selectedTask.files.length - 4}</span>}
-                </div>
-              )}
-
-              <div className="detail-activity">
+              <div className="detail-activity compact">
                 <div className="section-heading">
-                  <h3>动态时间轴</h3>
+                  <h3>最近动态</h3>
                   <Clock3 size={15} />
                 </div>
                 {taskActivity.length === 0 && <p className="calendar-empty-hint">暂无操作记录。</p>}
                 <div className="timeline">
-                  {taskActivity.slice(0, 4).map((item) => (
+                  {taskActivity.slice(0, 1).map((item) => (
                     <article className="timeline-item" key={item.id}>
                       <span className="dot" />
                       <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
@@ -2775,7 +2772,7 @@ function App() {
               </div>
 
               <button className="ghost-button detail-more" onClick={() => handleOpenTaskDetail(selectedTask.id)}>
-                查看更多
+                查看完整详情
                 <ChevronDown size={15} />
               </button>
             </section>
@@ -3336,6 +3333,8 @@ function TaskContextMenu({
   currentMonthValue: string
   designTypes: string[]
 }) {
+  const [pendingProgress, setPendingProgress] = useState<{ taskId: number; value: number } | null>(null)
+
   const run = (action: () => void) => {
     action()
     onClose()
@@ -3346,6 +3345,8 @@ function TaskContextMenu({
   const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
   const isVoided = Boolean(menu.task.voidedAt)
   const typeOptions = Array.from(new Set([menu.task.type, ...designTypes])).filter(Boolean).slice(0, 12)
+  const progressOptions = [0, 20, 40, 60, 80, 100]
+  const pendingProgressValue = pendingProgress?.taskId === menu.task.id ? pendingProgress.value : null
 
   return (
     <div className="task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
@@ -3382,12 +3383,24 @@ function TaskContextMenu({
             <ChevronRight size={14} />
           </button>
           <div className="context-submenu-panel progress-submenu-panel" role="menu">
-            {[0, 20, 40, 60, 80, 100].map((progress) => (
-              <button type="button" key={progress} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
-                {menu.task.progress === progress ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
+            {progressOptions.map((progress) => {
+              const active = (pendingProgressValue ?? menu.task.progress) === progress
+              return (
+              <button type="button" key={progress} className={active ? 'selected' : ''} onClick={() => setPendingProgress({ taskId: menu.task.id, value: progress })}>
+                {active ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
                 {progress}%
               </button>
-            ))}
+              )
+            })}
+            {pendingProgressValue !== null && pendingProgressValue !== menu.task.progress && (
+              <div className="context-progress-confirm">
+                <span>暂存为 {pendingProgressValue}%</span>
+                <button type="button" onClick={() => setPendingProgress(null)}>撤销</button>
+                <button type="button" className="primary" onClick={() => run(() => onUpdateTask(menu.task.id, { progress: pendingProgressValue }))}>
+                  确认
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3671,13 +3684,14 @@ function TasksView({
     setProgressTask(task)
   }
 
-  const confirmListAcceptance = (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => {
+  const confirmListAcceptance = (payload: AcceptancePayload) => {
     if (!acceptanceTask) {
       return
     }
     onUpdateTask(acceptanceTask.id, {
+      ...payload.taskChanges,
       status: '已验收',
-      reviewer: acceptanceTask.reviewer || acceptanceTask.requester || '待确认',
+      reviewer: payload.taskChanges?.reviewer || acceptanceTask.reviewer || payload.taskChanges?.requester || acceptanceTask.requester || '待确认',
       actualHours: payload.actualHours,
       acceptanceNote: payload.acceptanceNote,
       timeEntries: payload.timeEntries,
@@ -4368,10 +4382,11 @@ export function TaskEditor({
     setReasonDraft(null)
   }
 
-  const confirmAcceptance = (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => {
+  const confirmAcceptance = (payload: AcceptancePayload) => {
     onUpdateTask(task.id, {
+      ...payload.taskChanges,
       status: '已验收',
-      reviewer: draft.reviewer.trim() || draft.requester.trim() || task.reviewer,
+      reviewer: payload.taskChanges?.reviewer || draft.reviewer.trim() || payload.taskChanges?.requester || draft.requester.trim() || task.reviewer,
       actualHours: payload.actualHours,
       acceptanceNote: payload.acceptanceNote,
       timeEntries: payload.timeEntries,
@@ -4851,10 +4866,21 @@ function AcceptanceModal({
   task: Task
   initialNote: string
   onClose: () => void
-  onConfirm: (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => void
+  onConfirm: (payload: AcceptancePayload) => void
   onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
 }) {
   const [acceptanceNote, setAcceptanceNote] = useState(initialNote)
+  const [basicEditing, setBasicEditing] = useState(false)
+  const [basicDraft, setBasicDraft] = useState({
+    title: task.title,
+    type: task.type,
+    contact: task.contact,
+    requester: task.requester ?? '',
+    reviewer: task.reviewer ?? '',
+    requirement: task.requirement ?? '',
+    date: task.date,
+    estimatedDate: task.estimatedDate || '',
+  })
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(
     task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }],
   )
@@ -4869,9 +4895,27 @@ function AcceptanceModal({
     () => serializeTimeEntries(task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: '', start: '09:00', end: '10:00' }]),
     [task.timeEntries],
   )
+  const initialBasicSignature = useMemo(
+    () => JSON.stringify({
+      title: task.title,
+      type: task.type,
+      contact: task.contact,
+      requester: task.requester ?? '',
+      reviewer: task.reviewer ?? '',
+      requirement: task.requirement ?? '',
+      date: task.date,
+      estimatedDate: task.estimatedDate || '',
+    }),
+    [task.contact, task.date, task.estimatedDate, task.requirement, task.requester, task.reviewer, task.title, task.type],
+  )
+  const basicChanged = JSON.stringify(basicDraft) !== initialBasicSignature
 
   const updateEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
     setTimeEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
+  }
+
+  const updateBasicDraft = (field: keyof typeof basicDraft, value: string) => {
+    setBasicDraft((current) => ({ ...current, [field]: value }))
   }
 
   const deleteTimeEntry = (entryId: string) => {
@@ -4882,11 +4926,24 @@ function AcceptanceModal({
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
   const hasUnsavedChanges =
+    basicChanged ||
     acceptanceNote !== initialNote ||
     serializeTimeEntries(timeEntries) !== initialTimeEntriesSignature ||
     uploadedFiles.length > 0
   const canConfirmAcceptance = computedMinutes > 0 && !isUploading
   const dueState = taskDueState(task, isoDate(), isoDate(3))
+  const trimmedTaskChanges = basicChanged
+    ? {
+        title: basicDraft.title.trim() || task.title,
+        type: basicDraft.type.trim() || task.type,
+        contact: basicDraft.contact.trim() || task.contact,
+        requester: basicDraft.requester.trim() || task.requester,
+        reviewer: basicDraft.reviewer.trim() || task.reviewer,
+        requirement: basicDraft.requirement.trim(),
+        date: basicDraft.date.trim() || task.date,
+        estimatedDate: basicDraft.estimatedDate.trim(),
+      }
+    : undefined
 
   const uploadAcceptanceFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? [])
@@ -4947,34 +5004,70 @@ function AcceptanceModal({
           <div className="acceptance-section-title">
             <span className="acceptance-section-index">1</span>
             <h3>基础信息</h3>
-            <button type="button" className="acceptance-edit-button" onClick={requestClose}>
+            <button type="button" className="acceptance-edit-button" onClick={() => setBasicEditing((current) => !current)}>
               <Pencil size={13} />
-              修改
+              {basicEditing ? '收起' : '修改'}
             </button>
           </div>
           <div className="acceptance-basic-grid">
             <div className="wide">
               <span>任务名称</span>
-              <strong>{task.title}</strong>
+              {basicEditing ? (
+                <input value={basicDraft.title} onChange={(event) => updateBasicDraft('title', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.title}</strong>
+              )}
             </div>
             <div>
               <span>设计类型</span>
-              <strong>{task.type || '未分类'}</strong>
+              {basicEditing ? (
+                <input value={basicDraft.type} onChange={(event) => updateBasicDraft('type', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.type || '未分类'}</strong>
+              )}
             </div>
             <div>
               <span>对接人</span>
-              <strong>{task.contact || '待确认'}</strong>
+              {basicEditing ? (
+                <input value={basicDraft.contact} onChange={(event) => updateBasicDraft('contact', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.contact || '待确认'}</strong>
+              )}
+            </div>
+            <div>
+              <span>需求人</span>
+              {basicEditing ? (
+                <input value={basicDraft.requester} onChange={(event) => updateBasicDraft('requester', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.requester || '待确认'}</strong>
+              )}
+            </div>
+            <div>
+              <span>验收人</span>
+              {basicEditing ? (
+                <input value={basicDraft.reviewer} onChange={(event) => updateBasicDraft('reviewer', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.reviewer || '待确认'}</strong>
+              )}
             </div>
             <div>
               <span>预计开始</span>
-              <strong>{formatPlanDateTime(task.date)}</strong>
+              {basicEditing ? (
+                <input value={basicDraft.date} onChange={(event) => updateBasicDraft('date', event.target.value)} />
+              ) : (
+                <strong>{formatPlanDateTime(basicDraft.date)}</strong>
+              )}
             </div>
             <div>
               <span>预计交付</span>
-              <strong className={dueState === 'overdue' ? 'acceptance-due-overdue' : dueState === 'soon' ? 'acceptance-due-soon' : ''}>
-                {formatPlanDateTime(task.estimatedDate || task.date)}
-                {dueState ? `（${dueState === 'overdue' ? '已逾期' : '临期'}）` : ''}
-              </strong>
+              {basicEditing ? (
+                <input value={basicDraft.estimatedDate} onChange={(event) => updateBasicDraft('estimatedDate', event.target.value)} />
+              ) : (
+                <strong className={dueState === 'overdue' ? 'acceptance-due-overdue' : dueState === 'soon' ? 'acceptance-due-soon' : ''}>
+                  {formatPlanDateTime(basicDraft.estimatedDate || basicDraft.date)}
+                  {dueState ? `（${dueState === 'overdue' ? '已逾期' : '临期'}）` : ''}
+                </strong>
+              )}
             </div>
             {isSupplemental && (
               <div>
@@ -4984,7 +5077,11 @@ function AcceptanceModal({
             )}
             <div className="wide">
               <span>任务需求</span>
-              <strong>{task.requirement || '未填写任务需求'}</strong>
+              {basicEditing ? (
+                <textarea value={basicDraft.requirement} onChange={(event) => updateBasicDraft('requirement', event.target.value)} />
+              ) : (
+                <strong>{basicDraft.requirement || '未填写任务需求'}</strong>
+              )}
             </div>
           </div>
         </section>
@@ -5096,7 +5193,7 @@ function AcceptanceModal({
         <button
           className="primary-button"
           disabled={!canConfirmAcceptance}
-          onClick={() => onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name) })}
+          onClick={() => onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name), taskChanges: trimmedTaskChanges })}
         >
           {isUploading ? '上传中…' : '确认验收'}
         </button>
