@@ -19,6 +19,21 @@
 4. 部署正式站。
 5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
 
+## GitHub 部署记录
+
+仓库提供一个手动触发的 GitHub Actions workflow：`.github/workflows/record-production-deployment.yml`。
+
+这个 workflow 只负责在 GitHub 右侧生成 production deployment 记录，方便查看正式站什么时候完成过部署或线上验证。它不会执行 `wrangler deploy`，不会读取 Cloudflare API Token，也不会改动正式站资源。
+
+使用方式：
+
+1. 在 GitHub 仓库进入 `Actions`。
+2. 选择 `Record production deployment`。
+3. 点击 `Run workflow`。
+4. 在 `description` 里写清楚本次线上部署或验证内容。
+
+如果以后要改成 GitHub Actions 自动部署 Cloudflare Worker，必须单独新增部署 workflow，并在接入前确认触发条件、Cloudflare Token 权限和正式站影响范围。
+
 ## 常用命令
 
 ```bash
