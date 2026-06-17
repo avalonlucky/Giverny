@@ -1733,52 +1733,6 @@ function App() {
     }
   }
 
-  const handleCreateTaskUpdate = async (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => {
-    try {
-      const savedUpdate = await api.createUpdate({
-        id: Date.now(),
-        taskId,
-        date: nowStamp(),
-        title: update.title,
-        body: update.body,
-        hours: update.hours,
-        visible: update.visible,
-        files: [],
-      })
-      setUpdateItems((currentUpdates) => [savedUpdate, ...currentUpdates])
-      await refreshState()
-      await loadTaskActivity(taskId)
-      notify('进展记录已同步到 D1')
-    } catch (error) {
-      notify(error instanceof Error ? `进展记录失败：${error.message}` : '进展记录失败')
-    }
-  }
-
-  const handleDeleteActivity = async (activityId: string, taskId: number) => {
-    try {
-      await api.deleteActivity(activityId)
-      await loadTaskActivity(taskId)
-      notify('动态已删除')
-    } catch (error) {
-      notify(error instanceof Error ? `删除动态失败：${error.message}` : '删除动态失败')
-    }
-  }
-
-  const handleRequestDeleteActivity = (item: ActivityItem, task: Task) => {
-    if (role !== 'admin') {
-      return
-    }
-    setConfirmDialog({
-      eyebrow: '删除动态',
-      title: '确定删除这条任务动态吗？',
-      body: '删除后只会移除时间轴记录，不会回滚任务当前进度、状态、工时或文件数据。',
-      confirmText: '确认删除',
-      tone: 'danger',
-      details: [task.title, describeActivity(item)],
-      onConfirm: () => handleDeleteActivity(item.id, task.id),
-    })
-  }
-
   const handleVoidTask = (taskId: number) => {
     const task = taskItems.find((item) => item.id === taskId)
     if (!task || task.voidedAt) {
@@ -2563,7 +2517,6 @@ function App() {
 
         {activeView === '任务' && (
           <TasksView
-            role={role}
             viewMode={taskViewMode}
             onViewModeChange={setTaskViewMode}
             monthValue={currentMonth.value}
@@ -2580,8 +2533,6 @@ function App() {
             onShowVoidedChange={setShowVoidedTasks}
             onSelectTask={setSelectedTaskId}
             onUpdateTask={handleUpdateTask}
-            onCreateTaskUpdate={handleCreateTaskUpdate}
-            onRequestDeleteActivity={handleRequestDeleteActivity}
             onRequestStatus={handleRequestTaskStatus}
             onVoidTask={handleVoidTask}
             onRestoreTask={handleRestoreTask}
@@ -2593,7 +2544,6 @@ function App() {
               setTaskViewMode('列表')
             }}
             reports={reports}
-            activity={taskActivity}
             onUploadImage={handleQuickUploadImage}
             onCreateTask={() => setIsModalOpen(true)}
           />
@@ -3216,7 +3166,6 @@ function FileContextMenu({
 }
 
 function TasksView({
-  role,
   viewMode,
   onViewModeChange,
   monthValue,
@@ -3233,8 +3182,6 @@ function TasksView({
   onShowVoidedChange,
   onSelectTask,
   onUpdateTask,
-  onCreateTaskUpdate,
-  onRequestDeleteActivity,
   onRequestStatus,
   onVoidTask,
   onRestoreTask,
@@ -3243,11 +3190,9 @@ function TasksView({
   onCopyShareLink,
   onOpenTask,
   reports,
-  activity,
   onUploadImage,
   onCreateTask,
 }: {
-  role: AuthRole
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
   monthValue: string
@@ -3264,8 +3209,6 @@ function TasksView({
   onShowVoidedChange: (value: boolean) => void
   onSelectTask: (id: number) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
-  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
-  onRequestDeleteActivity: (item: ActivityItem, task: Task) => void
   onRequestStatus: (taskId: number, status: TaskStatus) => void
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
@@ -3274,12 +3217,10 @@ function TasksView({
   onCopyShareLink: (token: string) => void
   onOpenTask: (taskId: number) => void
   reports: ReportRecord[]
-  activity: ActivityItem[]
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
-  const [isDetailPaneOpen, setIsDetailPaneOpen] = useState(false)
   const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
   const [uploadingTaskId, setUploadingTaskId] = useState(0)
   const uploadTaskRef = useRef<Task | null>(null)
@@ -3428,7 +3369,7 @@ function TasksView({
         </label>
       </section>
 
-      <section className={`management-grid ${isDetailPaneOpen ? '' : 'detail-collapsed'}`}>
+      <section className="management-grid">
         <div className="panel task-management-list">
           <input
             ref={quickUploadInputRef}
@@ -3490,7 +3431,7 @@ function TasksView({
           {tasks.length === 0 && (
             <div className="empty-state">
               <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
-              <p>{activeMonthTasks.length === 0 ? '新建任务后，右侧会显示信息和进展时间轴。' : '换一个关键词或状态筛选试试。'}</p>
+              <p>{activeMonthTasks.length === 0 ? '新建任务后，可以通过双击、快捷图标或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}</p>
               {activeMonthTasks.length === 0 && (
                 <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
                   <Plus size={15} />
@@ -3518,39 +3459,6 @@ function TasksView({
             />
           )}
         </div>
-
-        {!isDetailPaneOpen && selectedTask ? (
-          <button type="button" className="detail-rail" onClick={() => setIsDetailPaneOpen(true)} title="展开任务详情">
-            <ChevronLeft size={16} />
-            <span>任务详情</span>
-            <strong>{selectedTask.title}</strong>
-            <TaskStateBadge task={selectedTask} />
-          </button>
-        ) : selectedTask ? (
-          <TaskEditor
-            key={`${selectedTask.id}-${selectedTask.status}`}
-            task={selectedTask}
-            role={role}
-            activity={activity}
-            onUpdateTask={onUpdateTask}
-            onCreateTaskUpdate={onCreateTaskUpdate}
-            onRequestDeleteActivity={onRequestDeleteActivity}
-            onUploadAcceptanceFile={onUploadAcceptanceFile}
-            onUploadImage={onUploadImage}
-            onCollapse={() => setIsDetailPaneOpen(false)}
-          />
-        ) : (
-        <aside className="panel task-editor-preview">
-          <div className="empty-state">
-            <strong>还没有任务</strong>
-            <p>点击「新建任务」开始记录这个月的设计工作。</p>
-            <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
-              <Plus size={15} />
-              新建任务
-            </button>
-          </div>
-        </aside>
-        )}
       </section>
       {acceptanceTask && (
         <AcceptanceModal
@@ -3565,7 +3473,7 @@ function TasksView({
   )
 }
 
-function TaskEditor({
+export function TaskEditor({
   task,
   role,
   activity,

@@ -1320,7 +1320,6 @@ button {
   padding-bottom: 14px;
 }
 
-.management-grid,
 .report-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -1328,8 +1327,11 @@ button {
   align-items: start;
 }
 
-.management-grid.detail-collapsed {
-  grid-template-columns: minmax(0, 1fr) 48px;
+.management-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 
 .settings-grid {
@@ -1572,52 +1574,6 @@ button {
 .management-row-actions button:disabled {
   cursor: progress;
   opacity: 0.5;
-}
-
-.detail-rail {
-  position: sticky;
-  top: 82px;
-  min-height: 220px;
-  padding: 10px 8px;
-  border: 0;
-  border-left: 1px solid var(--color-border);
-  border-radius: 0;
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  gap: 8px;
-  text-align: center;
-}
-
-.detail-rail:hover {
-  color: var(--color-primary-strong);
-  background: var(--color-surface-alt);
-}
-
-.detail-rail > span {
-  writing-mode: vertical-rl;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.detail-rail > strong {
-  max-height: 120px;
-  writing-mode: vertical-rl;
-  color: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.detail-rail .status-badge {
-  writing-mode: horizontal-tb;
-  padding: 2px 6px;
-  font-size: 10px;
 }
 
 .task-editor-hero-actions {
@@ -7319,29 +7275,6 @@ textarea:focus-visible {
   .client-grid,
   .calendar-layout {
     grid-template-columns: 1fr;
-  }
-
-  .management-grid.detail-collapsed {
-    grid-template-columns: 1fr;
-  }
-
-  .detail-rail {
-    position: static;
-    min-height: 48px;
-    padding: 10px 12px;
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-    grid-template-columns: auto auto minmax(0, 1fr) auto;
-    align-items: center;
-    justify-items: start;
-    text-align: left;
-  }
-
-  .detail-rail > span,
-  .detail-rail > strong {
-    writing-mode: horizontal-tb;
-    max-height: none;
-    letter-spacing: 0;
   }
 
   .design-type-groups {
