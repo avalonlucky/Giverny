@@ -4386,6 +4386,28 @@ button.file-chip:focus-visible {
   box-shadow: none;
 }
 
+.field.field-saved input,
+.field.field-saved textarea,
+.field.field-saved select,
+.field.field-saved .month-field-trigger,
+.field.field-saved .duration-trigger,
+.field.field-saved .date-input-wrap input,
+.field.field-saved .date-input-wrap button {
+  border-color: var(--color-primary);
+  background: var(--color-supplement-bg);
+  animation: field-saved-pulse 0.9s ease-out;
+}
+
+@keyframes field-saved-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 22%, transparent);
+  }
+
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
 ::selection {
   color: #fff;
   background: var(--color-primary);

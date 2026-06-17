@@ -620,16 +620,18 @@ function SettlementMonthField({
   label,
   value,
   onChange,
+  saved = false,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  saved?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
 
   return (
     <label
-      className="field settlement-month-field"
+      className={`field settlement-month-field ${saved ? 'field-saved' : ''}`}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {
           setIsOpen(false)
@@ -714,6 +716,7 @@ function PlanDateTimeField({
   onChange,
   isActive = false,
   readOnly = false,
+  saved = false,
   control,
 }: {
   label: string
@@ -721,6 +724,7 @@ function PlanDateTimeField({
   onChange: (value: string) => void
   isActive?: boolean
   readOnly?: boolean
+  saved?: boolean
   control?: ReactNode
 }) {
   const [draft, setDraft] = useState(() => formatPlanDateTime(value))
@@ -810,7 +814,7 @@ function PlanDateTimeField({
   }
 
   return (
-    <label className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''}`}>
+    <label className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
       <span className="field-label-row">
         <span>{label}</span>
         {control}
@@ -1869,7 +1873,9 @@ function App() {
         setShowFireworks(true)
         window.setTimeout(() => setShowFireworks(false), 3000)
       }
-      notify('任务已同步到 D1')
+      if (changes.status) {
+        notify('任务已同步到 D1')
+      }
     } catch (error) {
       setBackendStatus('后端异常')
       notify(error instanceof Error ? `任务更新失败：${error.message}` : '任务更新失败')
@@ -4181,8 +4187,30 @@ export function TaskEditor({
   const [progressDraftState, setProgressDraftState] = useState<{ taskId: number; value: number } | null>(null)
   const [progressSavedOverride, setProgressSavedOverride] = useState<{ taskId: number; value: number } | null>(null)
   const [activityCollapsed, setActivityCollapsed] = useState(false)
+  const [savedFields, setSavedFields] = useState<Set<string>>(() => new Set())
+  const savedFieldTimersRef = useRef<Record<string, number>>({})
+
+  useEffect(() => () => {
+    Object.values(savedFieldTimersRef.current).forEach((timer) => window.clearTimeout(timer))
+  }, [])
 
   const setField = (field: keyof typeof draft) => (value: string) => setDraft((current) => ({ ...current, [field]: value }))
+  const markFieldSaved = (field: string) => {
+    setSavedFields((current) => {
+      const next = new Set(current)
+      next.add(field)
+      return next
+    })
+    window.clearTimeout(savedFieldTimersRef.current[field])
+    savedFieldTimersRef.current[field] = window.setTimeout(() => {
+      setSavedFields((current) => {
+        const next = new Set(current)
+        next.delete(field)
+        return next
+      })
+      delete savedFieldTimersRef.current[field]
+    }, 900)
+  }
   const timeEntries = task.timeEntries ?? []
   const trackedMinutes = sumTimeEntries(timeEntries)
   const reviewHours = timeEntries.length > 0 ? hoursFromTimeEntries(timeEntries) : task.actualHours
@@ -4234,8 +4262,10 @@ export function TaskEditor({
       if (field === 'requester' && (!task.reviewer || task.reviewer === '待确认' || task.reviewer === originalValue)) {
         changes.reviewer = value
         setDraft((current) => ({ ...current, reviewer: value }))
+        markFieldSaved('reviewer')
       }
       onUpdateTask(task.id, changes)
+      markFieldSaved(field)
     } else if (!value) {
       setDraft((current) => ({ ...current, [field]: originalValue }))
     }
@@ -4248,6 +4278,8 @@ export function TaskEditor({
     const changes: Partial<Task> = { date: value, estimatedDate }
     setDraft((current) => ({ ...current, date: value, estimatedDate }))
     onUpdateTask(task.id, changes)
+    markFieldSaved('date')
+    markFieldSaved('estimatedDate')
   }
 
   const updatePlannedEndTime = (value: string) => {
@@ -4255,6 +4287,8 @@ export function TaskEditor({
     const changes: Partial<Task> = { date, estimatedDate: value }
     setDraft((current) => ({ ...current, date, estimatedDate: value }))
     onUpdateTask(task.id, changes)
+    markFieldSaved('date')
+    markFieldSaved('estimatedDate')
   }
 
   const updateEstimatedHours = (valueMinutes: number) => {
@@ -4264,11 +4298,15 @@ export function TaskEditor({
       const changes: Partial<Task> = { estimatedHours, date }
       setDraft((current) => ({ ...current, date }))
       onUpdateTask(task.id, changes)
+      markFieldSaved('estimatedHours')
+      markFieldSaved('date')
       return
     }
     const estimatedDate = addMinutesToPlanDateTime(draft.date || task.date, valueMinutes)
     setDraft((current) => ({ ...current, estimatedDate }))
     onUpdateTask(task.id, { estimatedHours, estimatedDate })
+    markFieldSaved('estimatedHours')
+    markFieldSaved('estimatedDate')
   }
 
   const updateSettlementMonth = (value: string) => {
@@ -4276,6 +4314,7 @@ export function TaskEditor({
     setDraft((current) => ({ ...current, settlementMonth: nextValue }))
     if (nextValue !== taskSettlementMonth(task)) {
       onUpdateTask(task.id, { settlementMonth: nextValue })
+      markFieldSaved('settlementMonth')
     }
   }
 
@@ -4434,27 +4473,27 @@ export function TaskEditor({
             </div>
           </div>
           <div className="editor-fields">
-            <label className="field wide">
+            <label className={`field wide ${savedFields.has('title') ? 'field-saved' : ''}`}>
               <span>任务名称</span>
               <input value={draft.title} onChange={(event) => setField('title')(event.target.value)} onBlur={() => commitText('title')} />
             </label>
-            <label className="field">
+            <label className={`field ${savedFields.has('type') ? 'field-saved' : ''}`}>
               <span>设计类型</span>
               <input value={draft.type} onChange={(event) => setField('type')(event.target.value)} onBlur={() => commitText('type')} />
             </label>
-            <label className="field">
+            <label className={`field ${savedFields.has('contact') ? 'field-saved' : ''}`}>
               <span>对接人</span>
               <input value={draft.contact} onChange={(event) => setField('contact')(event.target.value)} onBlur={() => commitText('contact')} />
             </label>
-            <label className="field">
+            <label className={`field ${savedFields.has('requester') ? 'field-saved' : ''}`}>
               <span>需求人</span>
               <input value={draft.requester} onChange={(event) => setField('requester')(event.target.value)} onBlur={() => commitText('requester')} />
             </label>
-            <label className="field">
+            <label className={`field ${savedFields.has('reviewer') ? 'field-saved' : ''}`}>
               <span>验收人</span>
               <input value={draft.reviewer} onChange={(event) => setField('reviewer')(event.target.value)} onBlur={() => commitText('reviewer')} />
             </label>
-            <label className="field wide">
+            <label className={`field wide ${savedFields.has('requirement') ? 'field-saved' : ''}`}>
               <span>任务需求</span>
               <textarea
                 value={draft.requirement}
@@ -4477,6 +4516,7 @@ export function TaskEditor({
               onChange={updatePlannedStartTime}
               isActive={scheduleAnchor === 'start'}
               readOnly={scheduleAnchor !== 'start'}
+              saved={savedFields.has('date')}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
             />
             <PlanDateTimeField
@@ -4485,13 +4525,14 @@ export function TaskEditor({
               onChange={updatePlannedEndTime}
               isActive={scheduleAnchor === 'end'}
               readOnly={scheduleAnchor !== 'end'}
+              saved={savedFields.has('estimatedDate')}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
             />
-            <label className="field">
+            <label className={`field ${savedFields.has('estimatedHours') ? 'field-saved' : ''}`}>
               <span>预估工时</span>
               <DurationPicker valueMinutes={taskEstimatedMinutes} onChange={updateEstimatedHours} />
             </label>
-            <SettlementMonthField label="结算月份" value={draft.settlementMonth} onChange={updateSettlementMonth} />
+            <SettlementMonthField label="结算月份" value={draft.settlementMonth} onChange={updateSettlementMonth} saved={savedFields.has('settlementMonth')} />
           </div>
         </section>
       ) : (
