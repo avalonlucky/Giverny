@@ -23,7 +23,7 @@
 
 仓库提供一个手动触发的 GitHub Actions workflow：`.github/workflows/record-production-deployment.yml`。
 
-这个 workflow 只负责在 GitHub 右侧生成 production deployment 记录，方便查看正式站什么时候完成过部署或线上验证。它不会执行 `wrangler deploy`，不会读取 Cloudflare API Token，也不会改动正式站资源。
+这个 workflow 通过 GitHub Actions 的 `production` environment 在 GitHub 右侧生成 deployment 记录，方便查看正式站什么时候完成过部署或线上验证。它不会执行 `wrangler deploy`，不会读取 Cloudflare API Token，也不会改动正式站资源。
 
 使用方式：
 
