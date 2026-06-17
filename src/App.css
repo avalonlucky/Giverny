@@ -847,6 +847,13 @@ button {
   gap: 5px;
 }
 
+.task-row-due {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
 .task-row-actions .icon-button {
   width: 30px;
   height: 30px;
@@ -1505,44 +1512,38 @@ button {
 
 .table-head,
 .management-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 116px;
-  gap: 16px;
+  /* 继承 .task-row 的 4 列 grid，不单独覆盖列模板 */
   align-items: center;
 }
 
 .table-head {
-  padding: 0 12px 8px;
+  padding: 0 14px 8px;
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
+  display: grid;
+  grid-template-columns: 92px minmax(220px, 1fr) auto auto;
+  gap: 18px;
+  align-items: center;
+}
+
+.table-head span:nth-child(3) {
+  text-align: right;
+}
+
+.table-head span:nth-child(4) {
+  text-align: right;
 }
 
 .table-head span:last-child {
   text-align: right;
 }
 
-.management-row {
-  width: 100%;
-  min-height: 70px;
-  margin-top: 0;
-  padding: 12px 14px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface-alt);
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-
-.management-row:hover {
-  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-alt));
-}
-
+/* .management-row 复用 .task-row 的基础样式（4 列 grid / padding / 背景 / 过渡）。
+   只保留任务导航特有的状态覆盖。 */
+.management-row:hover,
 .management-row.selected {
-  border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
   background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
 }
 
@@ -1552,7 +1553,8 @@ button {
 }
 
 .management-row.voided strong,
-.management-row.voided .management-hours {
+.management-row.voided .task-meta b,
+.management-row.voided .task-main strong {
   color: var(--color-text-secondary);
 }
 
@@ -1564,176 +1566,11 @@ button {
   min-width: 0;
 }
 
-.management-title-line {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
+/* 旧的 management-title-line / inline-meta / row-end / contact / deliver / hours
+   已废弃——任务导航现在复用 task-row 的 task-date / task-main / task-meta / task-row-end 结构。
+   management-row 只保留 voided 状态和 hover/selected 的 token 化覆盖（见上方）。 */
 
-.management-title-line > strong {
-  min-width: 0;
-  max-width: 40%;
-  font-size: 14px;
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.management-title-line > small {
-  min-width: 0;
-  flex: 1;
-  margin-top: 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.management-row em {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  color: var(--color-supplement);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 800;
-}
-
-.management-row em.voided-row-note {
-  margin-top: 5px;
-  padding: 1px 7px;
-  color: var(--color-status-danger);
-  background: rgba(168, 66, 69, 0.08);
-}
-
-.management-contact {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.management-deliver {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.management-deliver > span:first-child {
-  color: var(--color-text-secondary);
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
-.management-hours {
-  color: var(--color-text);
-  font-weight: 800;
-  text-align: right;
-}
-
-.management-inline-meta {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  min-height: 20px;
-  overflow: hidden;
-}
-
-.management-inline-meta em,
-.management-inline-meta span:not(.status-badge):not(.due-tag) {
-  min-height: 18px;
-  color: var(--color-text-muted);
-  font-size: 11px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.management-inline-meta em.supplement {
-  padding: 2px 7px;
-  background: var(--color-supplement-bg);
-}
-
-.management-inline-meta .status-badge {
-  min-height: 18px;
-  padding: 0 8px;
-  font-size: 11px;
-}
-
-.management-inline-meta .due-tag {
-  min-height: 18px;
-  padding: 0 7px;
-  font-size: 11px;
-}
-
-.management-row-end {
-  min-width: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.management-due {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.management-row-actions {
-  display: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
-.management-row:hover .management-due,
-.management-row:focus-visible .management-due {
-  display: none;
-}
-
-.management-row:hover .management-row-actions,
-.management-row:focus-visible .management-row-actions {
-  display: inline-flex;
-}
-
-.management-row-actions button {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  color: var(--color-text-muted);
-  background: transparent;
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.management-row-actions button:hover,
-.management-row-actions button:focus-visible {
-  color: var(--color-primary-strong);
-  background: var(--color-supplement-bg);
-  outline: 0;
-}
-
-.management-row-actions button:disabled {
-  cursor: progress;
-  opacity: 0.5;
-}
-
+/* management-due / management-row-actions 已废弃——任务导航现在用 task-row-due + task-row-actions */
 .task-editor-hero-actions {
   display: flex;
   align-items: center;
@@ -8170,15 +8007,8 @@ textarea:focus-visible {
     display: none;
   }
 
+  .task-row,
   .management-row {
-    grid-template-columns: minmax(0, 1fr) 92px;
-  }
-
-  .management-deliver {
-    display: none;
-  }
-
-  .task-row {
     grid-template-columns: 82px minmax(0, 1fr) auto;
     gap: 12px;
   }

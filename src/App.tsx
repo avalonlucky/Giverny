@@ -3780,58 +3780,93 @@ function TasksView({
             <small>悬停显示快捷操作，右键可打开完整菜单</small>
           </div>
           <div className="table-head">
+            <span>日期</span>
             <span>任务</span>
-            <span>预计交付</span>
+            <span>对接 · 工时</span>
+            <span>状态 · 交付</span>
           </div>
           {tasks.map((task) => {
             const dueState = taskDueState(task, isoDate(), isoDate(3))
             const settlementLabel = isSupplementalTask(task) ? `补录至 ${monthLabelOf(taskSettlementMonth(task))}` : monthLabelOf(taskSettlementMonth(task))
             const dueDateLabel = formatDueDateCompact(task.estimatedDate || task.date)
+            const canAcceptTask = task.status === '待验收'
             return (
-            <button
-              className={`management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''}`}
+            <article
+              className={`task-row management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
               key={task.id}
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 onSelectTask(task.id)
                 onOpenTask(task.id)
               }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelectTask(task.id)
+                  onOpenTask(task.id)
+                }
+              }}
               onContextMenu={(event) => openContextMenu(event, task)}
             >
-              <div className="management-main">
-                <div className="management-title-line">
-                  <strong>{task.title}</strong>
-                  <small>{task.requirement}</small>
-                </div>
-                <div className="management-inline-meta">
-                  <span>{task.type || '未分类'}</span>
-                  <em className={isSupplementalTask(task) ? 'supplement' : ''}>{settlementLabel}</em>
-                  <span>对接 {task.contact || '待确认'}</span>
-                  <span>实际 {task.actualHours.toFixed(1)}h</span>
-                  {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
-                </div>
-                {task.voidedAt && <em className="voided-row-note">已作废{task.voidReason ? `：${task.voidReason}` : ''}</em>}
-              </div>
-              <div className="management-row-end">
-                <span className="management-due">
-                  {dueDateLabel}
-                  <StatusDot status={task.status} />
+              <div className="task-date">
+                <b>{formatMonthDay(task.date)}</b>
+                <span className="task-date-meta">
+                  <span>{[task.type || '未分类', settlementLabel].filter(Boolean).join(' · ')}</span>
+                  {isSupplementalTask(task) && (
+                    <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
+                      补录
+                    </em>
+                  )}
                 </span>
-                <span className="management-row-actions" aria-label="任务快捷操作">
-                  <button type="button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}>
+              </div>
+              <div className="task-main">
+                <strong>{task.title}</strong>
+                <p>{task.requirement}{task.voidedAt ? ` · 已作废${task.voidReason ? `：${task.voidReason}` : ''}` : ''}</p>
+              </div>
+              <div className="task-meta">
+                <b>{task.contact || '待确认'}</b>
+                <span>
+                  实际 <strong>{task.actualHours.toFixed(1)}h</strong>
+                </span>
+              </div>
+              <div className="task-row-end">
+                <div className="task-state">
+                  <div className="task-state-badges">
+                    {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
+                    <StatusBadge status={task.status} />
+                  </div>
+                  <div className="progress-cell">
+                    <div className="mini-meter">
+                      <span style={{ width: `${task.progress}%` }} />
+                    </div>
+                    <small>{task.progress}%</small>
+                  </div>
+                </div>
+                <div className="task-row-actions" aria-label="任务快捷操作">
+                  <span className="task-row-due">{dueDateLabel}</span>
+                  <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}>
                     <Pencil size={15} />
                   </button>
-                  <button type="button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
+                  <button type="button" className="icon-button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
                     <BarChart3 size={15} />
                   </button>
-                  <button type="button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); openFiles(task) }}>
+                  <button type="button" className="icon-button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); openFiles(task) }}>
                     <Paperclip size={15} />
                   </button>
-                  <button type="button" title="交付验收" aria-label="交付验收" onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title={canAcceptTask ? '去验收' : '当前不是待验收'}
+                    aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
+                    disabled={!canAcceptTask}
+                    onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}
+                  >
                     <ClipboardCheck size={15} />
                   </button>
-                </span>
+                </div>
               </div>
-            </button>
+            </article>
             )
           })}
           {tasks.length === 0 && (
