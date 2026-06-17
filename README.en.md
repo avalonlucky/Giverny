@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A task, time-tracking, file, acceptance and monthly settlement platform for freelance designers and lightweight design-service teams.</strong>
+  <strong>A collaborative task workflow, time evidence, delivery acceptance, and monthly settlement platform for companies, freelance teams, and design-service work.</strong>
 </p>
 
 <p align="center">
@@ -30,9 +30,52 @@
   <a href="./README.ko.md">한국어</a>
 </p>
 
-> In one sentence: Giverny turns freelance design work where requirements live in chat, hours live in Excel, files live in cloud drives, and month-end settlement is done by hand into one traceable chain from request intake to acceptance and settlement.
+> **In one sentence:** Giverny is a task workflow and settlement workbench for companies, freelance teams, and design-service collaboration. It turns scattered requirements in chat, hours in Excel, files in cloud drives, verbal acceptance, and manual month-end reconciliation into one traceable business chain.
+
+<p align="center">
+  <a href="https://mayeai.com"><strong>Live Site</strong></a>
+  ·
+  <a href="#why-giverny">Why it exists</a>
+  ·
+  <a href="#core-workflow">Core workflow</a>
+  ·
+  <a href="#real-product-screenshots">Screenshots</a>
+  ·
+  <a href="#local-development">Run locally</a>
+</p>
 
 ![Giverny dashboard screenshot](./docs/assets/readme/screenshots/dashboard.png)
+
+## What This Is
+
+Giverny is not another generic project management tool. It is a lightweight operations back office for “collaborative tasks + time evidence + delivery acceptance + monthly settlement,” built for teams that need a complete trace from request to reconciliation across design, content, operations, outsourcing, or internal collaboration work.
+
+It does not only ask whether a task moved to another board column. It asks whether each piece of work can clearly answer:
+
+- Who requested it, who coordinated it, and when should it be delivered?
+- What progress happened and which files were uploaded along the way?
+- How many actual hours were spent, and which hours can be settled?
+- Who accepted the final result, and what is the acceptance evidence?
+- At month-end, can the team show tasks, hours, files, and amount without digging through chat history?
+
+## Core Capabilities
+
+| Capability | Problem Solved |
+| --- | --- |
+| Task workflow | Track work from planned, in progress, pending acceptance, to accepted |
+| Process collaboration | Record progress, attachments, time segments, and a dynamic timeline on each task |
+| Time management | Use actual hours as the only source for analytics, income, and settlement |
+| Delivery acceptance | Review basic info, progress, segmented hours, files, and notes in a final review panel |
+| Monthly settlement | Summarize hours, income, acceptance status, and annual trends by settlement month |
+| Client reconciliation | Generate read-only links for clients to view reports, task details, and delivery files |
+| File archive | Keep process files, acceptance attachments, and final drafts inside the task lifecycle |
+
+## Suitable Scenarios
+
+- Internal design, content, operations, or marketing tasks that require cross-person collaboration and monthly review.
+- Freelance designers or outsourcing teams that need to record actual hours, delivery files, and settlement evidence.
+- Managers who need to reconcile what was done, how long it took, what was delivered, and how much should be settled.
+- Clients or collaborators who need a read-only page for monthly reports and delivery content instead of searching chat history.
 
 ## Contents
 
