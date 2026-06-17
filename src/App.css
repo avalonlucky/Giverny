@@ -7188,6 +7188,75 @@ textarea:focus-visible {
   gap: 10px;
 }
 
+.task-detail-summary-body {
+  gap: 18px;
+}
+
+.task-detail-summary {
+  padding: 14px 0 2px;
+}
+
+.task-detail-summary dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 34px;
+}
+
+.task-detail-summary dl > div {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.task-detail-summary dl > div.wide {
+  grid-column: 1 / -1;
+}
+
+.task-detail-summary dt {
+  margin: 0 0 5px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-detail-summary dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.task-detail-summary dd .status-badge,
+.task-detail-summary dd .due-tag,
+.task-detail-summary dd .supplement-inline {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.task-detail-progress {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.task-detail-progress .large-meter {
+  flex: 1;
+}
+
+.task-detail-progress strong {
+  min-width: 46px;
+  color: var(--color-primary-strong);
+  font-size: 18px;
+  text-align: right;
+}
+
+.task-detail-log {
+  padding: 0 0 14px;
+}
+
 .task-detail-fields {
   padding: 14px 0 6px;
 }
@@ -7196,6 +7265,16 @@ textarea:focus-visible {
   border: 1px solid var(--color-border-soft);
   border-radius: var(--radius-panel);
   background: #f5f6f1;
+}
+
+.task-detail-section.plain-section {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.task-edit-modal .task-detail-body {
+  gap: 4px;
 }
 
 .task-detail-section summary {
