@@ -1511,11 +1511,6 @@ button {
 }
 
 .table-head,
-.management-row {
-  /* 继承 .task-row 的 4 列 grid，不单独覆盖列模板 */
-  align-items: center;
-}
-
 .table-head {
   padding: 0 14px 8px;
   color: var(--color-text-muted);
@@ -1539,14 +1534,8 @@ button {
   text-align: right;
 }
 
-/* .management-row 复用 .task-row 的基础样式（4 列 grid / padding / 背景 / 过渡）。
-   只保留任务导航特有的状态覆盖。 */
-.management-row:hover,
-.management-row.selected {
-  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
-}
-
+/* .management-row 复用 .task-row 的全部视觉（背景 #f2f4ee / hover #eef2ea /
+   selected 边框 / 过渡 / 4 列 grid）。只保留任务导航特有的作废状态。 */
 .management-row.voided {
   color: var(--color-text-muted);
   background: transparent;
@@ -1556,10 +1545,6 @@ button {
 .management-row.voided .task-meta b,
 .management-row.voided .task-main strong {
   color: var(--color-text-secondary);
-}
-
-.management-row strong {
-  color: var(--color-text);
 }
 
 .management-main {

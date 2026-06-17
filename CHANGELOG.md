@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-18 19:10 · v0.10.93（任务导航行视觉对齐工作台修复）
+
+- 修复任务导航行（management-row）的 hover/selected 背景色与工作台不一致的问题：此前 management-row 用 color-mix 算出一个带绿色调的浅色，与工作台的 #eef2ea 不一致。现在删掉覆盖，完全走 task-row 的配色。
+- 清理残留的 management-row 独立规则块（align-items 覆盖、strong 颜色覆盖），确保两视图视觉零差异。
+
 ## 2026-06-18 18:30 · v0.10.92（任务导航列表行对齐工作台结构）
 
 ### 任务列表一致性
