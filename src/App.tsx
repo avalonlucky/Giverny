@@ -268,13 +268,13 @@ type DonutItem = { label: string; value: number; color: string }
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
 
 const statusDotColors: Record<TaskStatus, string> = {
-  计划中: '#6366f1',
-  进行中: '#305b93',
-  挂起: '#8a6f24',
-  待验收: '#b07412',
-  已验收: '#2f6f6d',
-  终止: '#b84a45',
-  不计费: '#8a9496',
+  计划中: 'var(--color-status-planning)',
+  进行中: 'var(--color-status-active)',
+  挂起: 'var(--color-status-hold)',
+  待验收: 'var(--color-status-pending)',
+  已验收: 'var(--color-status-accepted)',
+  终止: 'var(--color-status-stopped)',
+  不计费: 'var(--color-status-disabled)',
 }
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
@@ -2582,11 +2582,14 @@ function App() {
                         </div>
                       </div>
                       <div className="task-row-actions" aria-label="任务快捷操作">
-                        <button type="button" className="icon-button" title="查看详情" aria-label="查看详情" onClick={(event) => { event.stopPropagation(); handleOpenTaskDetail(task.id) }}>
-                          <Eye size={15} />
+                        <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
+                          <Pencil size={15} />
                         </button>
                         <button type="button" className="icon-button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
                           <BarChart3 size={15} />
+                        </button>
+                        <button type="button" className="icon-button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); handleOpenTaskFiles(task.id) }}>
+                          <Paperclip size={15} />
                         </button>
                         <button
                           type="button"
@@ -2623,7 +2626,6 @@ function App() {
                     onExportTaskCsv={handleExportTaskCsv}
                     reports={taskContextOptions.reports}
                     currentMonthValue={taskContextOptions.currentMonthValue}
-                    designTypes={flattenDesignTypeGroups(designTypeGroups)}
                   />
                 )}
               </div>
@@ -2812,7 +2814,6 @@ function App() {
             reports={reports}
             files={fileItems}
             activity={taskActivity}
-            designTypes={flattenDesignTypeGroups(designTypeGroups)}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onPreviewFile={setPreviewFile}
@@ -3311,7 +3312,6 @@ function TaskContextMenu({
   onExportTaskCsv,
   reports,
   currentMonthValue,
-  designTypes,
 }: {
   menu: { x: number; y: number; task: Task }
   onClose: () => void
@@ -3331,7 +3331,6 @@ function TaskContextMenu({
   onExportTaskCsv: (task: Task) => void
   reports: ReportRecord[]
   currentMonthValue: string
-  designTypes: string[]
 }) {
   const [pendingProgress, setPendingProgress] = useState<{ taskId: number; value: number } | null>(null)
 
@@ -3344,7 +3343,6 @@ function TaskContextMenu({
   const report = reports.find((item) => item.month === taskMonth)
   const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
   const isVoided = Boolean(menu.task.voidedAt)
-  const typeOptions = Array.from(new Set([menu.task.type, ...designTypes])).filter(Boolean).slice(0, 12)
   const progressOptions = [0, 20, 40, 60, 80, 100]
   const pendingProgressValue = pendingProgress?.taskId === menu.task.id ? pendingProgress.value : null
 
@@ -3445,24 +3443,6 @@ function TaskContextMenu({
               <button type="button" key={month} onClick={() => run(() => onUpdateTask(menu.task.id, { settlementMonth: month }))}>
                 {month === taskMonth ? <CheckCircle2 size={15} /> : <CalendarDays size={15} />}
                 {monthLabelOf(month)}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {!isVoided && typeOptions.length > 0 && (
-        <div className="context-submenu">
-          <button type="button" className="context-menu-parent" aria-haspopup="menu">
-            <Tag size={15} />
-            改设计类型
-            <span>{menu.task.type}</span>
-            <ChevronRight size={14} />
-          </button>
-          <div className="context-submenu-panel type-submenu-panel" role="menu">
-            {typeOptions.map((type) => (
-              <button type="button" key={type} onClick={() => run(() => onUpdateTask(menu.task.id, { type }))}>
-                {type === menu.task.type ? <CheckCircle2 size={15} /> : <Tag size={15} />}
-                {type}
               </button>
             ))}
           </div>
@@ -3583,7 +3563,6 @@ function TasksView({
   reports,
   files,
   activity,
-  designTypes,
   onUploadImage,
   onCreateTaskUpdate,
   onPreviewFile,
@@ -3618,7 +3597,6 @@ function TasksView({
   reports: ReportRecord[]
   files: FileAsset[]
   activity: ActivityItem[]
-  designTypes: string[]
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onPreviewFile: (file: FileAsset) => void
@@ -3802,9 +3780,6 @@ function TasksView({
                   <StatusDot status={task.status} />
                 </span>
                 <span className="management-row-actions" aria-label="任务快捷操作">
-                  <button type="button" title="查看详情" aria-label="查看详情" onClick={(event) => { event.stopPropagation(); onOpenTask(task.id) }}>
-                    <Eye size={15} />
-                  </button>
                   <button type="button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}>
                     <Pencil size={15} />
                   </button>
@@ -3854,7 +3829,6 @@ function TasksView({
               onExportTaskCsv={onExportTaskCsv}
               reports={reports}
               currentMonthValue={monthValue}
-              designTypes={designTypes}
             />
           )}
         </div>

@@ -14,6 +14,13 @@
   --color-supplement-bg: rgba(47, 111, 109, 0.1);
   --color-status-danger: #a84245;
   --color-status-warning: #80601c;
+  --color-status-planning: #6b7280;
+  --color-status-active: #2563eb;
+  --color-status-pending: #d97706;
+  --color-status-accepted: #16a34a;
+  --color-status-hold: #7c3aed;
+  --color-status-stopped: #dc2626;
+  --color-status-disabled: #8a9496;
   --color-border: rgba(39, 54, 58, 0.08);
   --color-border-soft: rgba(39, 54, 58, 0.045);
   --radius-control: 8px;
@@ -806,7 +813,7 @@ button {
 
 .task-row-end {
   position: relative;
-  min-width: 132px;
+  min-width: 140px;
   min-height: 44px;
   display: grid;
   align-items: center;
@@ -883,32 +890,32 @@ button {
 }
 
 .status-已验收 {
-  color: #255856;
-  background: rgba(47, 111, 109, 0.12);
+  color: var(--color-status-accepted);
+  background: color-mix(in srgb, var(--color-status-accepted) 12%, transparent);
 }
 
 .status-待验收 {
-  color: #955f12;
-  background: rgba(230, 164, 58, 0.18);
+  color: var(--color-status-pending);
+  background: color-mix(in srgb, var(--color-status-pending) 14%, transparent);
 }
 
 .status-进行中 {
-  color: #305b93;
-  background: rgba(48, 91, 147, 0.13);
+  color: var(--color-status-active);
+  background: color-mix(in srgb, var(--color-status-active) 12%, transparent);
 }
 
 .status-挂起 {
-  color: #76561a;
-  background: rgba(176, 116, 18, 0.13);
+  color: var(--color-status-hold);
+  background: color-mix(in srgb, var(--color-status-hold) 12%, transparent);
 }
 
 .status-终止 {
-  color: #9d3633;
-  background: rgba(184, 74, 69, 0.13);
+  color: var(--color-status-stopped);
+  background: color-mix(in srgb, var(--color-status-stopped) 12%, transparent);
 }
 
 .status-不计费 {
-  color: #6d7377;
+  color: var(--color-status-disabled);
   background: #e8eae5;
 }
 
@@ -935,28 +942,31 @@ button {
 }
 
 .status-dot.status-dot-已验收 {
-  color: var(--color-primary);
+  color: var(--color-status-accepted);
 }
 
 .status-dot.status-dot-待验收 {
-  color: var(--color-status-warning);
+  color: var(--color-status-pending);
 }
 
 .status-dot.status-dot-进行中 {
-  color: var(--color-primary-strong);
+  color: var(--color-status-active);
 }
 
 .status-dot.status-dot-计划中 {
-  color: var(--color-text-muted);
+  color: var(--color-status-planning);
 }
 
 .status-dot.status-dot-挂起 {
-  color: var(--color-status-warning);
+  color: var(--color-status-hold);
 }
 
-.status-dot.status-dot-终止,
+.status-dot.status-dot-终止 {
+  color: var(--color-status-stopped);
+}
+
 .status-dot.status-dot-不计费 {
-  color: var(--color-status-danger);
+  color: var(--color-status-disabled);
 }
 
 .progress-cell {
@@ -968,7 +978,7 @@ button {
 
 .mini-meter {
   flex: 1;
-  height: 7px;
+  height: 6px;
 }
 
 .mini-meter span,
@@ -977,7 +987,7 @@ button {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #2f6f6d;
+  background: var(--color-primary);
 }
 
 .progress-cell small {
@@ -1405,18 +1415,19 @@ button {
 
 .dot {
   position: absolute;
-  left: 0;
-  top: 4px;
-  width: 11px;
-  height: 11px;
+  left: 2px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  background: #e6a43a;
+  background: var(--color-primary);
   box-shadow: none;
 }
 
 .timeline-item time {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .admin-only-data {
@@ -1823,8 +1834,7 @@ button {
   width: 178px;
 }
 
-.progress-submenu-panel,
-.type-submenu-panel {
+.progress-submenu-panel {
   width: 190px;
 }
 
@@ -2137,10 +2147,10 @@ button.file-chip:focus-visible {
 
 .progress-modal-timeline-item .dot {
   position: absolute;
-  left: 0;
-  top: 5px;
-  width: 11px;
-  height: 11px;
+  left: 2px;
+  top: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--radius-pill);
   background: var(--color-primary);
 }
@@ -2158,9 +2168,9 @@ button.file-chip:focus-visible {
 
 .progress-modal-timeline-item time,
 .progress-modal-timeline-item .timeline-stamp {
-  color: var(--color-admin-only);
+  color: var(--color-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .progress-modal-timeline-item p {
@@ -5193,11 +5203,12 @@ input::file-selector-button {
 .acceptance-final-progress strong {
   color: var(--color-primary-strong);
   font-size: 14px;
+  font-weight: 600;
   text-align: right;
 }
 
 .acceptance-progress-track {
-  height: 10px;
+  height: 6px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.08);
   overflow: hidden;
@@ -5938,8 +5949,8 @@ textarea:focus-visible {
 }
 
 .status-计划中 {
-  color: #4f53b8;
-  background: rgba(99, 102, 241, 0.13);
+  color: var(--color-status-planning);
+  background: color-mix(in srgb, var(--color-status-planning) 12%, transparent);
 }
 
 .calendar-layout {
@@ -7613,14 +7624,14 @@ textarea:focus-visible {
 .progress-slider-row strong {
   min-width: 46px;
   color: var(--color-primary-strong);
-  font-size: 18px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 1;
   text-align: right;
 }
 
 .progress-slider-row input[type='range']::-webkit-slider-runnable-track {
-  height: 7px;
+  height: 6px;
   border: 0;
   border-radius: var(--radius-pill);
   background: linear-gradient(
@@ -7633,10 +7644,10 @@ textarea:focus-visible {
 }
 
 .progress-slider-row input[type='range']::-webkit-slider-thumb {
-  width: 18px;
-  height: 18px;
-  margin-top: -5.5px;
-  border: 2.5px solid var(--color-primary);
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 2px solid var(--color-primary);
   border-radius: var(--radius-pill);
   background: var(--color-surface-strong);
   box-shadow: none;
@@ -7653,22 +7664,22 @@ textarea:focus-visible {
 }
 
 .progress-slider-row input[type='range']::-moz-range-track {
-  height: 7px;
+  height: 6px;
   border: 0;
   border-radius: var(--radius-pill);
   background: rgba(39, 54, 58, 0.1);
 }
 
 .progress-slider-row input[type='range']::-moz-range-progress {
-  height: 7px;
+  height: 6px;
   border-radius: var(--radius-pill);
   background: var(--color-primary);
 }
 
 .progress-slider-row input[type='range']::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: 2.5px solid var(--color-primary);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-primary);
   border-radius: var(--radius-pill);
   background: var(--color-surface-strong);
   box-shadow: none;
