@@ -155,6 +155,15 @@ function formatMonthDay(value: string) {
   return `${date.slice(5, 7)}/${date.slice(8, 10)}`
 }
 
+function formatDueDateCompact(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value)
+  const time = formatTimePart(value)
+  return date === isoDate() ? ['今日', time].filter(Boolean).join(' ') : formatMonthDay(value)
+}
+
 function formatTimePart(value: string) {
   return value.includes('T') ? value.slice(11, 16) : ''
 }
@@ -3188,6 +3197,19 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   return <span className={`status-badge status-${status}`}>{status}</span>
 }
 
+function StatusDotLabel({ status }: { status: TaskStatus }) {
+  return (
+    <span className={`status-dot-label status-dot-${status}`}>
+      <StatusDot status={status} />
+      {status}
+    </span>
+  )
+}
+
+function StatusDot({ status }: { status: TaskStatus }) {
+  return <i className={`status-dot status-dot-${status}`} aria-hidden="true" />
+}
+
 function TaskStateBadge({ task }: { task: Task }) {
   if (task.voidedAt) {
     return <span className="status-badge status-voided">已作废</span>
@@ -3730,11 +3752,12 @@ function TasksView({
           </div>
           <div className="table-head">
             <span>任务</span>
-            <span>交付 / 操作</span>
+            <span>预计交付</span>
           </div>
           {tasks.map((task) => {
             const dueState = taskDueState(task, isoDate(), isoDate(3))
             const settlementLabel = isSupplementalTask(task) ? `补录至 ${monthLabelOf(taskSettlementMonth(task))}` : monthLabelOf(taskSettlementMonth(task))
+            const dueDateLabel = formatDueDateCompact(task.estimatedDate || task.date)
             return (
             <button
               className={`management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''}`}
@@ -3746,22 +3769,24 @@ function TasksView({
               onContextMenu={(event) => openContextMenu(event, task)}
             >
               <div className="management-main">
-                <strong>{task.title}</strong>
-                <small>
-                  {task.type} · {task.requirement}
-                </small>
+                <div className="management-title-line">
+                  <strong>{task.title}</strong>
+                  <small>{task.requirement}</small>
+                </div>
                 <div className="management-inline-meta">
+                  <span>{task.type || '未分类'}</span>
                   <em className={isSupplementalTask(task) ? 'supplement' : ''}>{settlementLabel}</em>
                   <span>对接 {task.contact || '待确认'}</span>
-                  <span>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
                   <span>实际 {task.actualHours.toFixed(1)}h</span>
-                  <TaskStateBadge task={task} />
                   {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '逾期' : '临期'}</span>}
                 </div>
                 {task.voidedAt && <em className="voided-row-note">已作废{task.voidReason ? `：${task.voidReason}` : ''}</em>}
               </div>
               <div className="management-row-end">
-                <span className={`management-due ${dueState ? dueState : ''}`}>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
+                <span className={`management-due ${dueState ? dueState : ''}`}>
+                  {dueDateLabel}
+                  <StatusDot status={task.status} />
+                </span>
                 <span className="management-row-actions" aria-label="任务快捷操作">
                   <button type="button" title="查看详情" aria-label="查看详情" onClick={(event) => { event.stopPropagation(); onOpenTask(task.id) }}>
                     <Eye size={15} />
@@ -5196,7 +5221,7 @@ function TaskDetailModal({
             </div>
             <div>
               <dt>任务状态</dt>
-              <dd><StatusBadge status={task.status} /></dd>
+              <dd><StatusDotLabel status={task.status} /></dd>
             </div>
             <div>
               <dt>当前进度</dt>

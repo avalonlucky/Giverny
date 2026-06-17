@@ -859,6 +859,48 @@ button {
   background: rgba(184, 74, 69, 0.12);
 }
 
+.status-dot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.status-dot.status-dot-已验收 {
+  color: var(--color-primary);
+}
+
+.status-dot.status-dot-待验收 {
+  color: var(--color-status-warning);
+}
+
+.status-dot.status-dot-进行中 {
+  color: var(--color-primary-strong);
+}
+
+.status-dot.status-dot-计划中 {
+  color: var(--color-text-muted);
+}
+
+.status-dot.status-dot-挂起 {
+  color: var(--color-status-warning);
+}
+
+.status-dot.status-dot-终止,
+.status-dot.status-dot-不计费 {
+  color: var(--color-status-danger);
+}
+
 .progress-cell {
   display: flex;
   width: 120px;
@@ -1381,7 +1423,7 @@ button {
 .table-head,
 .management-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 148px;
+  grid-template-columns: minmax(0, 1fr) 116px;
   gap: 16px;
   align-items: center;
 }
@@ -1399,9 +1441,9 @@ button {
 
 .management-row {
   width: 100%;
-  min-height: 54px;
+  min-height: 50px;
   margin-top: 0;
-  padding: 8px 12px;
+  padding: 7px 12px;
   border: 0;
   border-radius: 0;
   color: var(--color-text-secondary);
@@ -1439,8 +1481,16 @@ button {
   min-width: 0;
 }
 
-.management-main > strong {
-  display: block;
+.management-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.management-title-line > strong {
+  min-width: 0;
+  max-width: 40%;
   font-size: 14px;
   font-weight: 800;
   overflow: hidden;
@@ -1448,9 +1498,10 @@ button {
   white-space: nowrap;
 }
 
-.management-row small {
-  display: block;
-  margin-top: 3px;
+.management-title-line > small {
+  min-width: 0;
+  flex: 1;
+  margin-top: 0;
   color: var(--color-text-secondary);
   font-size: 12px;
   overflow: hidden;
@@ -1506,11 +1557,12 @@ button {
 
 .management-inline-meta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   margin-top: 4px;
   min-height: 20px;
+  overflow: hidden;
 }
 
 .management-inline-meta em,
@@ -1521,6 +1573,7 @@ button {
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
 }
 
 .management-inline-meta em.supplement {
@@ -1548,6 +1601,10 @@ button {
 }
 
 .management-due {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
   color: var(--color-text-muted);
   font-size: 12px;
   white-space: nowrap;
@@ -1633,6 +1690,7 @@ button {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -1659,6 +1717,11 @@ button {
 
 .context-menu-parent span {
   margin-left: auto;
+  max-width: 96px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 800;
