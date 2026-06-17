@@ -18,9 +18,8 @@ function monthPart(value: string) {
   return datePart(value).slice(0, 7)
 }
 
-function formatPlanDateTime(value: string) {
-  const date = datePart(value).replaceAll('-', '/')
-  return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
+function formatPublicDate(value: string) {
+  return datePart(value).replaceAll('-', '/')
 }
 
 function SharedStatusBadge({ status }: { status: TaskStatus }) {
@@ -172,7 +171,7 @@ export default function SharedReport({ token }: { token: string }) {
                 <div>
                   <strong>{task.title}</strong>
                   <span>
-                    {formatPlanDateTime(task.date)}
+                    {formatPublicDate(task.date)}
                     {task.settlementMonth && task.settlementMonth !== monthPart(task.date) ? ` · 补录至 ${monthLabel(task.settlementMonth)}` : ''}
                     {' · '}
                     {task.requirement}

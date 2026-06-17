@@ -2796,6 +2796,8 @@ function App() {
             viewMode={taskViewMode}
             onViewModeChange={setTaskViewMode}
             monthValue={currentMonth.value}
+            taskMonthValues={taskMonthValues}
+            onMonthChange={setMonthValue}
             activeMonthTasks={activeMonthTasks}
             selectedTask={selectedTask}
             tasks={taskPageTasks}
@@ -3545,6 +3547,8 @@ function TasksView({
   viewMode,
   onViewModeChange,
   monthValue,
+  taskMonthValues,
+  onMonthChange,
   activeMonthTasks,
   selectedTask,
   tasks,
@@ -3579,6 +3583,8 @@ function TasksView({
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
   monthValue: string
+  taskMonthValues: Set<string>
+  onMonthChange: (month: string) => void
   activeMonthTasks: Task[]
   selectedTask: Task | undefined
   tasks: Task[]
@@ -3694,7 +3700,10 @@ function TasksView({
               <h2>任务日历</h2>
               <p>按日期查看已完成与待完成任务，点击日期查看当天安排</p>
             </div>
-            {viewTabs}
+            <div className="panel-tools calendar-toolbar-actions">
+              <MonthPicker value={monthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} />
+              {viewTabs}
+            </div>
           </div>
         </section>
         <CalendarView key={monthValue} monthValue={monthValue} tasks={activeMonthTasks} onOpenTask={onOpenTask} />
