@@ -365,6 +365,14 @@ async function getServiceCompanyName(env: Env) {
   return value || defaultServiceCompanyName
 }
 
+async function isLockedReportMonth(env: Env, month: string | null | undefined) {
+  if (!month) {
+    return false
+  }
+  const row = await env.DB.prepare("SELECT id FROM monthly_reports WHERE month = ? AND status = 'locked'").bind(month).first<{ id: string }>()
+  return Boolean(row)
+}
+
 async function getTaxMode(env: Env): Promise<TaxMode> {
   const row = await env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('taxMode').first<{ value: string }>()
   return row?.value === 'labor' ? 'labor' : 'salary'
@@ -794,6 +802,17 @@ async function updateTask(env: Env, id: string, request: Request) {
   if (!current) {
     return fail('任务不存在', 404)
   }
+  if (await isLockedReportMonth(env, current.settlement_month)) {
+    return fail('该任务所属月份已锁定结算，不能再修改任务明细', 409)
+  }
+  if (current.status === '已验收') {
+    if (changes.status && changes.status !== '已验收') {
+      return fail('已验收任务状态已锁定，不能直接改回其他状态', 409)
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'actualHours') || Object.prototype.hasOwnProperty.call(changes, 'timeEntries')) {
+      return fail('已验收任务的工时已锁定，不能再修改实际工时', 409)
+    }
+  }
 
   const next = {
     title: changes.title ?? current.title,
@@ -877,9 +896,16 @@ async function restoreTask(env: Env, id: string) {
 
 async function deleteTask(env: Env, id: string) {
   // 真删除仅允许作用于已作废任务，避免误删正常任务。
-  const current = await env.DB.prepare('SELECT id, title FROM tasks WHERE id = ? AND voided_at IS NOT NULL').bind(id).first<{ id: string; title: string }>()
+  const current = await env.DB.prepare('SELECT id, title, settlement_month FROM tasks WHERE id = ? AND voided_at IS NOT NULL').bind(id).first<{
+    id: string
+    title: string
+    settlement_month: string | null
+  }>()
   if (!current) {
     return fail('只有已作废的任务才能永久删除', 405)
+  }
+  if (await isLockedReportMonth(env, current.settlement_month)) {
+    return fail('该任务所属月份已锁定结算，不能永久删除', 409)
   }
   await env.DB.prepare('UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
   await audit(env, 'delete', 'task', id, { title: current.title })
@@ -1324,22 +1350,36 @@ async function updateFileMetadata(env: Env, id: string, request: Request) {
 }
 
 async function deleteFile(env: Env, id: string) {
-  const row = await env.DB.prepare('SELECT task_id, file_name, r2_key, preview_r2_key FROM attachments WHERE id = ?').bind(id).first<{
+  const row = await env.DB.prepare(`
+    SELECT attachments.task_id, attachments.file_name, attachments.r2_key, attachments.preview_r2_key, tasks.settlement_month
+    FROM attachments
+    LEFT JOIN tasks ON tasks.id = attachments.task_id
+    WHERE attachments.id = ?
+  `).bind(id).first<{
     task_id: string
     file_name: string
     r2_key: string
     preview_r2_key: string | null
+    settlement_month: string | null
   }>()
   if (!row) {
     return fail('文件不存在', 404)
   }
-  await env.UPLOADS.delete(row.r2_key)
-  if (row.preview_r2_key && row.preview_r2_key !== row.r2_key) {
-    await env.UPLOADS.delete(row.preview_r2_key)
+  if (await isLockedReportMonth(env, row.settlement_month)) {
+    return fail('该文件所属月份已锁定结算，不能删除', 409)
   }
   await env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(id).run()
-  await audit(env, 'delete', 'attachment', id, { taskId: Number(row.task_id), fileName: row.file_name })
-  return ok({ ok: true })
+  const deleteResults = await Promise.allSettled([
+    env.UPLOADS.delete(row.r2_key),
+    ...(row.preview_r2_key && row.preview_r2_key !== row.r2_key ? [env.UPLOADS.delete(row.preview_r2_key)] : []),
+  ])
+  const failedDeletes = deleteResults.filter((result) => result.status === 'rejected').length
+  await audit(env, 'delete', 'attachment', id, {
+    taskId: Number(row.task_id),
+    fileName: row.file_name,
+    storageCleanup: failedDeletes > 0 ? 'failed' : 'ok',
+  })
+  return ok({ ok: true, storageCleanupFailed: failedDeletes > 0 })
 }
 
 async function setHourlyRate(env: Env, request: Request) {
@@ -1569,6 +1609,21 @@ async function generateMonthlyReport(env: Env, request: Request) {
   return ok({ id, month: body.month, totalHours, billableHours, totalAmount, publicToken })
 }
 
+async function rotateMonthlyReportToken(env: Env, reportId: string) {
+  const existing = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ?').bind(reportId).first<DbReport>()
+  if (!existing) {
+    return fail('结算记录不存在', 404)
+  }
+
+  const publicToken = crypto.randomUUID()
+  await env.DB.prepare('UPDATE monthly_reports SET public_token = ?, viewed_at = NULL, view_count = 0 WHERE id = ?')
+    .bind(publicToken, reportId)
+    .run()
+  const updated = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ?').bind(reportId).first<DbReport>()
+  await audit(env, 'rotate_share_token', 'monthly_report', reportId, { month: existing.month })
+  return ok({ report: toReport(updated ?? { ...existing, public_token: publicToken, viewed_at: null, view_count: 0 }) })
+}
+
 async function handleApi(request: Request, env: Env) {
   const url = new URL(request.url)
   const path = url.pathname
@@ -1713,6 +1768,9 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/reports/monthly' && request.method === 'POST') {
     return generateMonthlyReport(env, request)
+  }
+  if (path.startsWith('/api/reports/') && path.endsWith('/token') && request.method === 'POST') {
+    return rotateMonthlyReportToken(env, path.split('/')[3] ?? '')
   }
 
   return fail('接口不存在', 404)

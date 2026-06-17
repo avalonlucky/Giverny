@@ -101,6 +101,18 @@ function viewFromPath(pathname: string): AppView {
   return routeViews[pathname] ?? '工作台'
 }
 
+function taskViewModeFromSearch(search = window.location.search): TaskViewMode {
+  const value = new URLSearchParams(search).get('taskView')
+  return value === 'calendar' || value === '日历' ? '日历' : '列表'
+}
+
+function taskViewRoute(view: AppView, mode: TaskViewMode) {
+  if (view !== '任务' || mode !== '日历') {
+    return viewRoutes[view]
+  }
+  return `${viewRoutes[view]}?taskView=calendar`
+}
+
 const pad = (value: number) => String(value).padStart(2, '0')
 
 function isoDate(offsetDays = 0) {
@@ -320,6 +332,12 @@ function monthSelectOptions(anchorValue: string, extraValue?: string) {
     values.add(extraValue)
   }
   return [...values].sort((a, b) => b.localeCompare(a))
+}
+
+function shiftMonthValue(value: string, offset: number) {
+  const base = localDateFromIsoDate(`${value || isoDate().slice(0, 7)}-01`)
+  base.setMonth(base.getMonth() + offset)
+  return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
 }
 
 function taskSettlementMonth(task: Task) {
@@ -1352,7 +1370,7 @@ function ToastIcon({ tone }: { tone: ToastTone }) {
 
 function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
-  const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>('列表')
+  const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   const [role, setRole] = useState<AuthRole>('member')
   const [accessTokens, setAccessTokens] = useState<AccessToken[]>([])
@@ -1461,9 +1479,9 @@ function App() {
   const navigateView = (view: AppView) => {
     setIsAccountMenuOpen(false)
     setActiveView(view)
-    const nextPath = viewRoutes[view]
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({ view }, '', nextPath)
+    const nextPath = taskViewRoute(view, taskViewMode)
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
+      window.history.pushState({ view, taskViewMode }, '', nextPath)
     }
   }
 
@@ -1496,13 +1514,23 @@ function App() {
 
   useEffect(() => {
     if (window.location.pathname === '/') {
-      window.history.replaceState({ view: activeView }, '', viewRoutes[activeView])
+      window.history.replaceState({ view: activeView, taskViewMode }, '', taskViewRoute(activeView, taskViewMode))
     }
-    const handlePopState = () => setActiveView(viewFromPath(window.location.pathname))
+    const handlePopState = () => {
+      setActiveView(viewFromPath(window.location.pathname))
+      setTaskViewMode(taskViewModeFromSearch(window.location.search))
+    }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const nextPath = taskViewRoute(activeView, taskViewMode)
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
+      window.history.replaceState({ view: activeView, taskViewMode }, '', nextPath)
+    }
+  }, [activeView, taskViewMode])
 
   const refreshState = async () => {
     const state = await api.getState()
@@ -1818,6 +1846,7 @@ function App() {
       notify('图片已上传')
     } catch (error) {
       notify(error instanceof Error ? `上传失败：${error.message}` : '上传失败')
+      throw error
     }
   }
 
@@ -1853,6 +1882,16 @@ function App() {
     const currentTask = taskItems.find((task) => task.id === taskId)
     if (!currentTask) {
       return
+    }
+    if (currentTask.status === '已验收') {
+      if (changes.status && changes.status !== '已验收') {
+        notify('已验收任务状态已锁定，如需调整请先走验收修正流程')
+        return
+      }
+      if ('actualHours' in changes || 'timeEntries' in changes) {
+        notify('已验收任务的工时已锁定，不能再修改实际工时')
+        return
+      }
     }
     const normalizedChanges = { ...changes }
     if (changes.status) {
@@ -1992,6 +2031,27 @@ function App() {
     } catch {
       notify(link)
     }
+  }
+
+  const handleRotateReportToken = (report: ReportRecord) => {
+    setConfirmDialog({
+      eyebrow: '重置甲方链接',
+      title: `确定重置 ${monthLabelOf(report.month)} 的甲方链接吗？`,
+      body: '确认后会生成一个新的只读链接，旧链接将立即失效。结算金额、工时和任务快照不会变化。',
+      confirmText: '重置链接',
+      details: [`当前结算：${report.billableHours.toFixed(1)}h · ¥${report.totalAmount.toLocaleString()}`, '旧链接失效后，需要把新链接重新发给甲方。'],
+      onConfirm: async () => {
+        const result = await api.rotateMonthlyReportToken(report.id)
+        setReports((current) => current.map((item) => (item.id === result.report.id ? result.report : item)))
+        const link = `${window.location.origin}/share/${result.report.publicToken}`
+        try {
+          await window.navigator.clipboard.writeText(link)
+          notify('甲方链接已重置，新链接已复制')
+        } catch {
+          notify(`甲方链接已重置：${link}`)
+        }
+      },
+    })
   }
 
   const handleDownloadFile = (file: FileAsset) => {
@@ -2873,6 +2933,7 @@ function App() {
               reports={reports}
               onClientPreview={() => navigateView('甲方查看')}
               onCopyShareLink={handleCopyShareLink}
+              onRotateReportToken={handleRotateReportToken}
               onLockReport={handleLockMonthlyReport}
             />
           ) : (
@@ -3718,7 +3779,7 @@ function TasksView({
             </div>
           </div>
         </section>
-        <CalendarView key={monthValue} monthValue={monthValue} tasks={activeMonthTasks} onOpenTask={onOpenTask} />
+        <CalendarView key={monthValue} monthValue={monthValue} tasks={activeMonthTasks} onOpenTask={onOpenTask} onMonthChange={onMonthChange} />
       </section>
     )
   }
@@ -3921,7 +3982,11 @@ function TaskFilesModal({
     setUploadProgress(0)
     try {
       for (const file of selectedFiles) {
-        await onUploadImage(task.id, file, (ratio) => setUploadProgress(Math.round(ratio * 100)))
+        try {
+          await onUploadImage(task.id, file, (ratio) => setUploadProgress(Math.round(ratio * 100)))
+        } catch {
+          // 单个文件失败时继续处理后续文件，具体错误由上传函数 toast 提示。
+        }
       }
     } finally {
       setUploading(false)
@@ -4013,6 +4078,7 @@ function TaskProgressModal({
   const [isSaving, setIsSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
+  const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const savedProgress = snapProgress(task.progress)
   const progressDirty = draftProgress !== savedProgress
   const taskActivity = activity
@@ -4023,10 +4089,16 @@ function TaskProgressModal({
       return
     }
     setUploading(true)
+    setUploadErrors([])
     try {
       for (const file of selectedFiles) {
-        await onUploadImage(task.id, file)
-        setUploadedNames((currentNames) => [...currentNames, file.name])
+        try {
+          await onUploadImage(task.id, file)
+          setUploadedNames((currentNames) => [...currentNames, file.name])
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : '上传失败'
+          setUploadErrors((currentErrors) => [...currentErrors, `${file.name}：${reason}`])
+        }
       }
     } finally {
       setUploading(false)
@@ -4112,6 +4184,11 @@ function TaskProgressModal({
           {uploadedNames.length > 0 && (
             <div className="uploaded-chip-row">
               {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
+            </div>
+          )}
+          {uploadErrors.length > 0 && (
+            <div className="upload-error-list" role="alert">
+              {uploadErrors.map((message) => <span key={message}>{message}</span>)}
             </div>
           )}
           <button type="button" className="text-button file-add-button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -4450,6 +4527,8 @@ export function TaskEditor({
       if (task.status === '计划中') {
         onUpdateTask(task.id, { status: '进行中' })
       }
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : '上传失败，请重试')
     } finally {
       setIsUploadingImage(false)
       setPickProgress(0)
@@ -5458,7 +5537,7 @@ function TaskEditModal({
   onClose: () => void
   onSave: (changes: Partial<Task>) => void
 }) {
-  const [draft, setDraft] = useState({
+  const initialDraft = useMemo(() => ({
     title: task.title,
     type: task.type,
     contact: task.contact,
@@ -5470,9 +5549,12 @@ function TaskEditModal({
     estimatedDate: task.estimatedDate,
     estimatedHours: task.estimatedHours,
     settlementMonth: taskSettlementMonth(task),
-  })
+  }), [task])
+  const [draft, setDraft] = useState(initialDraft)
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
   const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>('start')
   const taskEstimatedMinutes = Math.round((Number(draft.estimatedHours) || 0) * 60)
+  const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(initialDraft)
 
   const setField = <Key extends keyof typeof draft>(field: Key, value: (typeof draft)[Key]) => {
     setDraft((current) => ({ ...current, [field]: value }))
@@ -5512,14 +5594,22 @@ function TaskEditModal({
     })
   }
 
+  const requestClose = () => {
+    if (hasUnsavedChanges) {
+      setShowDiscardConfirm(true)
+      return
+    }
+    onClose()
+  }
+
   return (
-    <ModalShell className="task-detail-modal task-edit-modal" labelledBy="task-edit-title" onClose={onClose}>
+    <ModalShell className="task-detail-modal task-edit-modal" labelledBy="task-edit-title" onClose={requestClose}>
       <header className="modal-header">
         <div>
           <p className="eyebrow">任务信息</p>
           <h2 id="task-edit-title">编辑任务</h2>
         </div>
-        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={requestClose}>
           <X size={18} />
         </button>
       </header>
@@ -5607,7 +5697,14 @@ function TaskEditModal({
       </div>
 
       <footer className="modal-footer">
-        <button className="ghost-button" onClick={onClose}>取消</button>
+        {showDiscardConfirm && (
+          <div className="discard-inline" role="alert">
+            <span>有未保存的修改，确定放弃吗？</span>
+            <button type="button" className="ghost-button compact-button" onClick={() => setShowDiscardConfirm(false)}>继续编辑</button>
+            <button type="button" className="danger-button compact-button" onClick={onClose}>放弃修改</button>
+          </div>
+        )}
+        <button className="ghost-button" onClick={requestClose}>取消</button>
         <button className="primary-button" onClick={save}>保存</button>
       </footer>
     </ModalShell>
@@ -5618,10 +5715,12 @@ function CalendarView({
   monthValue,
   tasks,
   onOpenTask,
+  onMonthChange,
 }: {
   monthValue: string
   tasks: Task[]
   onOpenTask: (taskId: number) => void
+  onMonthChange: (value: string) => void
 }) {
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = isoDate()
@@ -5668,6 +5767,15 @@ function CalendarView({
   return (
     <section className="calendar-layout">
       <section className="panel calendar-panel">
+        <div className="calendar-month-toolbar">
+          <button type="button" className="icon-button" aria-label="上个月" title="上个月" onClick={() => onMonthChange(shiftMonthValue(monthValue, -1))}>
+            <ChevronLeft size={17} />
+          </button>
+          <strong>{monthLabelOf(monthValue)}</strong>
+          <button type="button" className="icon-button" aria-label="下个月" title="下个月" onClick={() => onMonthChange(shiftMonthValue(monthValue, 1))}>
+            <ChevronRight size={17} />
+          </button>
+        </div>
         <div className="calendar-weekdays">
           {weekdayLabels.map((label) => (
             <span key={label}>{label}</span>
@@ -5968,7 +6076,7 @@ function FilesView({
                   <div className={`file-thumb-preview ${hasVisualPreview ? 'visual-preview' : ''}`}>
                     <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
                     {thumbUrl ? (
-                      <img src={thumbUrl} alt={file.name} />
+                      <img src={thumbUrl} alt={file.name} loading="lazy" />
                     ) : (
                       <div className="file-thumb-placeholder">
                         {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
@@ -6100,7 +6208,7 @@ function FileInspector({
       <button className="file-inspector-preview" type="button" onClick={() => onPreview(file)}>
         <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
         {inspectorPreviewUrl ? (
-          <img src={inspectorPreviewUrl} alt={file.name} />
+          <img src={inspectorPreviewUrl} alt={file.name} loading="lazy" />
         ) : (
           <div className="file-thumb-placeholder">
             {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
@@ -6349,6 +6457,7 @@ function ReportsView({
   reports,
   onClientPreview,
   onCopyShareLink,
+  onRotateReportToken,
   onLockReport,
 }: {
   stats: {
@@ -6368,6 +6477,7 @@ function ReportsView({
   reports: ReportRecord[]
   onClientPreview: () => void
   onCopyShareLink: (token: string) => void
+  onRotateReportToken: (report: ReportRecord) => void
   onLockReport: () => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
@@ -6495,6 +6605,9 @@ function ReportsView({
                 <div className="report-history-actions">
                   <button className="icon-button" aria-label={`复制 ${report.month} 甲方链接`} onClick={() => onCopyShareLink(report.publicToken)}>
                     <Copy size={15} />
+                  </button>
+                  <button className="icon-button" aria-label={`重置 ${report.month} 甲方链接`} onClick={() => onRotateReportToken(report)}>
+                    <RotateCcw size={15} />
                   </button>
                   <a className="icon-button" aria-label={`打开 ${report.month} 甲方页面`} href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
                     <ExternalLink size={15} />
@@ -7697,7 +7810,7 @@ function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => v
         </header>
         <div className="file-preview-body">
           {(isImage || isRasterPreview) && previewUrl ? (
-            <img src={previewUrl} alt={file.name} />
+            <img src={previewUrl} alt={file.name} loading="lazy" />
           ) : isVideo && sourceUrl ? (
             <video className="file-preview-video" src={sourceUrl} controls preload="metadata" />
           ) : isPdfLike && sourceUrl ? (
@@ -7992,6 +8105,7 @@ function NewTaskModal({
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
   const [aiError, setAiError] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const supplementalMonthOptions = useMemo(() => monthSelectOptions(currentMonthValue, settlementMonth), [currentMonthValue, settlementMonth])
 
   useEffect(() => {
@@ -8032,7 +8146,35 @@ function NewTaskModal({
     setEstimatedDate(addMinutesToPlanDateTime(startDate, value))
   }
 
+  const clearFieldError = (field: string) => {
+    setFormErrors((current) => {
+      if (!current[field]) {
+        return current
+      }
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
   const handleSubmit = () => {
+    const nextErrors: Record<string, string> = {}
+    if (!type.trim()) {
+      nextErrors.type = '请选择设计类型'
+    }
+    if (!title.trim()) {
+      nextErrors.title = '请填写任务名称'
+    }
+    if (!requirement.trim()) {
+      nextErrors.requirement = '请填写任务具体需求'
+    }
+    if (!contact.trim()) {
+      nextErrors.contact = '请填写对接人'
+    }
+    setFormErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) {
+      return
+    }
     const estimated = Math.round((estimatedMinutes / 60) * 100) / 100
     const status: TaskStatus = '计划中'
 
@@ -8041,11 +8183,11 @@ function NewTaskModal({
       date: startDate,
       estimatedDate,
       settlementMonth: isSupplemental ? settlementMonth : currentMonthValue,
-      type,
-      title: title.trim() || '未命名设计任务',
-      requirement: requirement.trim() || `预计于 ${formatPlanDateTime(estimatedDate)} 交付，待补充详细需求。`,
+      type: type.trim(),
+      title: title.trim(),
+      requirement: requirement.trim(),
       requester: requester.trim(),
-      contact: contact.trim() || '待填写',
+      contact: contact.trim(),
       reviewer: requester.trim() || '待确认',
       stage: status,
       estimatedHours: estimated,
@@ -8160,17 +8302,19 @@ function NewTaskModal({
         </header>
 
         <div className="form-grid new-task-form">
-          <label className="field wide new-task-type-field">
-            <span>设计类型</span>
-            <CascadingDesignTypePicker groups={availableDesignTypeGroups} value={type} onChange={setType} />
+          <label className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
+            <span>设计类型 <em className="required-mark">必填</em></span>
+            <CascadingDesignTypePicker groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
+            {formErrors.type && <small className="field-error">{formErrors.type}</small>}
           </label>
-          <label className="field wide">
-            <span>项目 / 任务名称</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：金博会邀请函长图设计" />
+          <label className={`field wide ${formErrors.title ? 'field-invalid' : ''}`}>
+            <span>项目 / 任务名称 <em className="required-mark">必填</em></span>
+            <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder="例如：金博会邀请函长图设计" aria-required="true" />
+            {formErrors.title && <small className="field-error">{formErrors.title}</small>}
           </label>
-          <div className="field wide">
+          <div className={`field wide ${formErrors.requirement ? 'field-invalid' : ''}`}>
             <span className="field-label-row">
-              <span>任务具体需求</span>
+              <span>任务具体需求 <em className="required-mark">必填</em></span>
               <button
                 type="button"
                 className="icon-button ai-assist-button"
@@ -8189,9 +8333,11 @@ function NewTaskModal({
             <textarea
               aria-label="任务具体需求"
               value={requirement}
-              onChange={(event) => setRequirement(event.target.value)}
+              onChange={(event) => { setRequirement(event.target.value); clearFieldError('requirement') }}
               placeholder="记录甲方需求、修改范围、交付规格等"
+              aria-required="true"
             />
+            {formErrors.requirement && <small className="field-error">{formErrors.requirement}</small>}
           </div>
           {(aiSuggestion || aiError || isAiLoading) && (
             <div className="ai-suggestion-panel wide">
@@ -8239,9 +8385,10 @@ function NewTaskModal({
             <span>需求人</span>
             <input value={requester} onChange={(event) => setRequester(event.target.value)} placeholder="提出需求的人" />
           </label>
-          <label className="field">
-            <span>对接人</span>
-            <input value={contact} onChange={(event) => setContact(event.target.value)} placeholder="黄媚" />
+          <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
+            <span>对接人 <em className="required-mark">必填</em></span>
+            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="黄媚" aria-required="true" />
+            {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
           </label>
           <div className="new-task-schedule-row">
             <PlanDateTimeField

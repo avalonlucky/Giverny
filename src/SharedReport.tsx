@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, BarChart3, CheckCircle2, Clock3, Download, Eye, FileArchive, FileText, Paperclip, Sparkles, X } from 'lucide-react'
+import { Archive, BarChart3, CheckCircle2, Clock3, Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, Sparkles, X } from 'lucide-react'
 import { defaultPdfTitle, defaultServiceCompanyName } from './config/appConfig'
 import { api, type SharedReportState } from './lib/api'
 import type { FileAsset, TaskStatus } from './types/domain'
@@ -40,6 +40,8 @@ function SharedStatCard({ label, value, trend, icon }: { label: string; value: s
 }
 
 function SharedFilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
+  const fileType = file.type.toUpperCase()
+  const sourceUrl = file.sourceUrl ?? ''
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -72,12 +74,20 @@ function SharedFilePreviewModal({ file, onClose }: { file: FileAsset; onClose: (
         </header>
         <div className="file-preview-body">
           {file.previewUrl ? (
-            <img src={file.previewUrl} alt={file.name} />
+            <img src={file.previewUrl} alt={file.name} loading="lazy" />
+          ) : sourceUrl && fileType === 'PDF' ? (
+            <iframe className="file-preview-frame" src={sourceUrl} title={file.name} />
           ) : (
             <div className="file-preview-placeholder">
-              {file.type === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
+              {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
               <strong>{file.type}</strong>
-              <span>该文件暂无在线预览图，如需源文件请联系设计师。</span>
+              <span>{sourceUrl ? '该格式暂无在线预览图，可以直接打开源文件。' : '该文件暂无在线预览图，如需源文件请联系设计师。'}</span>
+              {sourceUrl && (
+                <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={15} />
+                  打开源文件
+                </a>
+              )}
             </div>
           )}
         </div>

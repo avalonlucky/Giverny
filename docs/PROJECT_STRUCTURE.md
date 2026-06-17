@@ -69,7 +69,7 @@
 
 - Production data is stored in Cloudflare D1 `designer-worklog-db`.
 - Production files are stored in Cloudflare R2 `designer-worklog-uploads`.
-- Staging uses separate D1/R2 resources and must be used before production deployment.
+- The former staging site and its separate D1/R2 resources have been removed. Validate locally, then deploy the production Worker directly.
 - Static assets are served by Workers Static Assets through the `ASSETS` binding.
 - `binding = "ASSETS"` in `wrangler.toml` must remain, or SPA routes such as `/share/:token` can fail.
 

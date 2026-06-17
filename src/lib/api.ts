@@ -426,4 +426,8 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  rotateMonthlyReportToken: (reportId: string) =>
+    requestJson<{ report: ReportRecord }>(`/api/reports/${reportId}/token`, {
+      method: 'POST',
+    }),
 }
