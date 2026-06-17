@@ -248,6 +248,14 @@ button {
   background: #f2f3ee;
 }
 
+.account-menu-note {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .account-menu-item.danger {
   color: #a84245;
 }
@@ -6147,6 +6155,34 @@ textarea:focus-visible {
 
 .lock-card .primary-button {
   width: 100%;
+}
+
+.admin-login-modal {
+  width: min(460px, calc(100vw - 40px));
+}
+
+.admin-login-modal .modal-header small {
+  display: block;
+  margin-top: 5px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-login-body {
+  padding: 18px 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.read-only-settings-panel {
+  max-width: 680px;
+  display: grid;
+  gap: 16px;
+}
+
+.read-only-settings-panel .primary-button {
+  width: max-content;
 }
 
 .danger-icon {

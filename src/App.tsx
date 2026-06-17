@@ -1267,6 +1267,7 @@ function App() {
   const [accessTokens, setAccessTokens] = useState<AccessToken[]>([])
   const [newTokenId, setNewTokenId] = useState('')
   const [authError, setAuthError] = useState('')
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
   const [taskItems, setTaskItems] = useState<Task[]>([])
@@ -1432,22 +1433,25 @@ function App() {
   }
 
   useEffect(() => {
-    if (!auth) {
-      return
-    }
+    // Initial and credential-change state hydration is the intended effect here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    refreshState().catch((error) => {
+    void refreshState().catch((error) => {
       if (error instanceof ApiError && error.status === 401) {
         clearStoredAuth()
         setAuth(null)
-        setAuthError('登录已失效（口令可能被停用或已过期），请重新登录')
+        setRole('member')
+        setAuthError('登录已失效（口令可能被停用或已过期），已切换为游客只读')
+        void refreshState().catch((publicError) => {
+          setBackendStatus('后端异常')
+          setIsLoaded(true)
+          notify(publicError instanceof Error ? `后端连接失败：${publicError.message}` : '后端连接失败')
+        })
         return
       }
       setBackendStatus('后端异常')
       setIsLoaded(true)
       notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
     })
-     
   }, [auth])
 
   const filterTasks = (tasks: Task[]) =>
@@ -1991,12 +1995,15 @@ function App() {
 
   const handleUnlock = async (email: string, key: string) => {
     try {
-      await api.login(email, key)
+      const result = await api.login(email, key)
       const credentials = { email, key }
       setStoredAuth(credentials)
       setAuthError('')
       setBackendStatus('连接中')
+      setRole(result.role)
       setAuth(credentials)
+      setIsLoginModalOpen(false)
+      notify(result.role === 'admin' ? '管理员已登录' : '访问口令已登录')
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setAuthError('账号或密码不正确')
@@ -2008,7 +2015,13 @@ function App() {
 
   const handleSignOut = () => {
     clearStoredAuth()
-    window.location.reload()
+    setAuth(null)
+    setRole('member')
+    setAccessTokens([])
+    setAuthError('')
+    setIsAccountMenuOpen(false)
+    setIsLoginModalOpen(false)
+    notify('已退出管理员身份，当前为游客只读')
   }
 
   const handleChangeAdminPassword = async (currentPassword: string, newPassword: string) => {
@@ -2168,9 +2181,39 @@ function App() {
     }
   }
 
-  if (!auth) {
-    return <LockScreen error={authError} onSubmit={handleUnlock} />
+  const isAdmin = role === 'admin' && Boolean(auth)
+  const requireAdmin = () => {
+    notify('请先登录管理员身份再编辑')
+    setIsLoginModalOpen(true)
   }
+  const readOnlyUpdateTask = () => requireAdmin()
+  const readOnlyUploadFile = async (): Promise<FileAsset> => {
+    requireAdmin()
+    throw new Error('需要管理员权限')
+  }
+  const readOnlyUploadImage = async () => {
+    requireAdmin()
+    throw new Error('需要管理员权限')
+  }
+  const readOnlyCreateUpdate = async () => {
+    requireAdmin()
+    throw new Error('需要管理员权限')
+  }
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((item) => item.label !== '结算' && item.label !== '收入')
+  const adminOnlyPanel = (
+    <section className="panel read-only-settings-panel">
+      <div className="panel-header compact">
+        <div>
+          <h2>管理员可见</h2>
+          <p>这里包含结算、收入或系统配置，只对管理员开放。游客和甲方成员可以继续查看公开任务、进展和甲方可见文件。</p>
+        </div>
+      </div>
+      <button className="primary-button" onClick={() => setIsLoginModalOpen(true)}>
+        <KeyRound size={17} />
+        登录管理员
+      </button>
+    </section>
+  )
 
   if (!isLoaded) {
     return (
@@ -2207,7 +2250,7 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="主导航">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon
             return (
               <div key={item.label}>
@@ -2230,25 +2273,43 @@ function App() {
               <div className="account-menu-identity">
                 <UserCircle size={18} />
                 <div>
-                  <strong>{auth.email}</strong>
-                  <span>{role === 'admin' ? '最终管理员' : '访问成员'}</span>
+                  <strong>{auth?.email || '游客访问'}</strong>
+                  <span>{isAdmin ? '最终管理员' : auth ? '访问成员（只读）' : '游客只读'}</span>
                 </div>
               </div>
-              <button className="account-menu-item" type="button" role="menuitem" onClick={() => navigateView('设置')}>
-                <Settings size={17} />
-                <span>全站设置</span>
-              </button>
-              <div className="account-menu-storage" title="Cloudflare R2 文件空间">
-                <Archive size={17} />
-                <div>
-                  <span>R2 文件空间</span>
-                  <strong>18.6 GB</strong>
-                </div>
-              </div>
-              <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
-                <LogOut size={17} />
-                <span>退出登录</span>
-              </button>
+              {isAdmin ? (
+                <>
+                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => navigateView('设置')}>
+                    <Settings size={17} />
+                    <span>全站设置</span>
+                  </button>
+                  <div className="account-menu-storage" title="Cloudflare R2 文件空间">
+                    <Archive size={17} />
+                    <div>
+                      <span>R2 文件空间</span>
+                      <strong>18.6 GB</strong>
+                    </div>
+                  </div>
+                  <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
+                    <LogOut size={17} />
+                    <span>退出登录</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="account-menu-note">当前只能查看公开任务、进展和甲方可见文件；编辑、上传、验收和结算需要管理员身份。</p>
+                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); setIsLoginModalOpen(true) }}>
+                    <KeyRound size={17} />
+                    <span>登录管理员</span>
+                  </button>
+                  {auth && (
+                    <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
+                      <LogOut size={17} />
+                      <span>退出访问口令</span>
+                    </button>
+                  )}
+                </>
+              )}
               <div className="account-menu-version" title={`发布于 ${appReleaseDate}`}>v{appVersion}</div>
             </div>
           )}
@@ -2266,7 +2327,7 @@ function App() {
           </div>
           <div className="topbar-actions">
             <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} />
-            <button className="primary-button" onClick={() => setIsModalOpen(true)}>
+            <button className="primary-button" onClick={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}>
               <Plus size={18} />
               新建任务
             </button>
@@ -2283,7 +2344,12 @@ function App() {
             icon={<Clock3 size={20} />}
           />
           <StatCard label="计费工时" value={`${stats.billableHours.toFixed(1)}h`} trend="已排除不计费项" icon={<CheckCircle2 size={20} />} />
-          <StatCard label="预计收入" value={`¥${stats.amount.toLocaleString()}`} trend={`按 ¥${hourlyRate} / 小时`} icon={<BarChart3 size={20} />} />
+          <StatCard
+            label="预计收入"
+            value={isAdmin ? `¥${stats.amount.toLocaleString()}` : '仅管理员'}
+            trend={isAdmin ? `按 ¥${hourlyRate} / 小时` : '游客与甲方不可见'}
+            icon={<BarChart3 size={20} />}
+          />
           <StatCard label="验收情况" value={`${stats.accepted} / ${activeMonthTasks.length}`} trend={`${stats.pending} 个待验收`} icon={<ListChecks size={20} />} />
         </section>
 
@@ -2388,14 +2454,14 @@ function App() {
                     onOpenAcceptance={(task) => handleOpenTaskDetail(task.id)}
                     onOpenFiles={(task) => handleOpenTaskDetail(task.id)}
                     onOpenProgress={(task) => handleOpenTaskDetail(task.id)}
-                    onRequestStatus={handleRequestTaskStatus}
-                    onUpdateTask={handleUpdateTask}
-                    onVoidTask={handleVoidTask}
-                    onRestoreTask={handleRestoreTask}
-                    onDeleteTask={handleDeleteTask}
+                    onRequestStatus={isAdmin ? handleRequestTaskStatus : readOnlyUpdateTask}
+                    onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
+                    onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
+                    onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
+                    onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
                     onCopyTitle={handleCopyTaskTitle}
                     onCopyShareLink={handleCopyShareLink}
-                    onDuplicateTask={(task) => void handleDuplicateTask(task)}
+                    onDuplicateTask={(task) => (isAdmin ? void handleDuplicateTask(task) : requireAdmin())}
                     onExportTaskCsv={handleExportTaskCsv}
                     reports={taskContextOptions.reports}
                     currentMonthValue={taskContextOptions.currentMonthValue}
@@ -2597,16 +2663,16 @@ function App() {
             taskQuery={taskQuery}
             showVoidedTasks={showVoidedTasks}
             voidedTaskCount={voidedMonthTaskCount}
-            onUploadAcceptanceFile={handleAcceptanceFileUpload}
+            onUploadAcceptanceFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
             onFilterChange={setTaskFilter}
             onQueryChange={setTaskQuery}
             onShowVoidedChange={setShowVoidedTasks}
             onSelectTask={setSelectedTaskId}
-            onUpdateTask={handleUpdateTask}
-            onRequestStatus={handleRequestTaskStatus}
-            onVoidTask={handleVoidTask}
-            onRestoreTask={handleRestoreTask}
-            onDeleteTask={handleDeleteTask}
+            onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
+            onRequestStatus={isAdmin ? handleRequestTaskStatus : readOnlyUpdateTask}
+            onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
+            onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
+            onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
             onCopyTitle={handleCopyTaskTitle}
             onCopyShareLink={handleCopyShareLink}
             onOpenTask={handleOpenTaskDetail}
@@ -2614,11 +2680,11 @@ function App() {
             files={fileItems}
             activity={taskActivity}
             designTypes={flattenDesignTypeGroups(designTypeGroups)}
-            onUploadImage={handleQuickUploadImage}
-            onCreateTaskUpdate={handleCreateTaskUpdate}
-            onDuplicateTask={(task) => void handleDuplicateTask(task)}
+            onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
+            onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+            onDuplicateTask={(task) => (isAdmin ? void handleDuplicateTask(task) : requireAdmin())}
             onExportTaskCsv={handleExportTaskCsv}
-            onCreateTask={() => setIsModalOpen(true)}
+            onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
           />
         )}
 
@@ -2628,36 +2694,44 @@ function App() {
             tasks={taskItems}
             currentMonthValue={currentMonth.value}
             onPreviewFile={setPreviewFile}
-            onDeleteFile={handleDeleteFile}
+            onDeleteFile={isAdmin ? handleDeleteFile : readOnlyUpdateTask}
             onDownloadFile={handleDownloadFile}
-            onUpdateFile={handleUpdateFile}
+            onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
           />
         )}
 
         {activeView === '收入' && (
-          <IncomeView
-            annualData={annualData}
-            currentMonth={currentMonth}
-            taxMode={taxMode}
-            onMonthChange={setMonthValue}
-          />
+          isAdmin ? (
+            <IncomeView
+              annualData={annualData}
+              currentMonth={currentMonth}
+              taxMode={taxMode}
+              onMonthChange={setMonthValue}
+            />
+          ) : (
+            adminOnlyPanel
+          )
         )}
 
         {activeView === '结算' && (
-          <ReportsView
-            stats={stats}
-            tasks={activeMonthTasks}
-            updates={monthUpdates}
-            hourlyRate={hourlyRate}
-            importedHours={importedHours}
-            currentMonth={currentMonth}
-            pdfTitle={pdfTitle}
-            serviceCompanyName={serviceCompanyName}
-            reports={reports}
-            onClientPreview={() => navigateView('甲方查看')}
-            onCopyShareLink={handleCopyShareLink}
-            onLockReport={handleLockMonthlyReport}
-          />
+          isAdmin ? (
+            <ReportsView
+              stats={stats}
+              tasks={activeMonthTasks}
+              updates={monthUpdates}
+              hourlyRate={hourlyRate}
+              importedHours={importedHours}
+              currentMonth={currentMonth}
+              pdfTitle={pdfTitle}
+              serviceCompanyName={serviceCompanyName}
+              reports={reports}
+              onClientPreview={() => navigateView('甲方查看')}
+              onCopyShareLink={handleCopyShareLink}
+              onLockReport={handleLockMonthlyReport}
+            />
+          ) : (
+            adminOnlyPanel
+          )
         )}
 
         {activeView === '甲方查看' && (
@@ -2675,28 +2749,43 @@ function App() {
         )}
 
         {activeView === '设置' && (
-          <SettingsView
-            hourlyRate={hourlyRate}
-            pdfTitle={pdfTitle}
-            serviceCompanyName={serviceCompanyName}
-            taxMode={taxMode}
-            designTypeGroups={designTypeGroups}
-            role={role}
-            accessTokens={accessTokens}
-            newTokenId={newTokenId}
-            onRateChange={handleRateChange}
-            onPdfTitleChange={handlePdfTitleChange}
-            onServiceCompanyNameChange={handleServiceCompanyNameChange}
-            onTaxModeChange={handleTaxModeChange}
-            onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
-            onExportBackup={handleExportBackup}
-            onSignOut={handleSignOut}
-            onChangePassword={handleChangeAdminPassword}
-            onCreateToken={handleCreateAccessToken}
-            onToggleToken={handleToggleAccessToken}
-            onDeleteToken={handleDeleteAccessToken}
-            onCopyToken={handleCopyAccessToken}
-          />
+          isAdmin ? (
+            <SettingsView
+              hourlyRate={hourlyRate}
+              pdfTitle={pdfTitle}
+              serviceCompanyName={serviceCompanyName}
+              taxMode={taxMode}
+              designTypeGroups={designTypeGroups}
+              role={role}
+              accessTokens={accessTokens}
+              newTokenId={newTokenId}
+              onRateChange={handleRateChange}
+              onPdfTitleChange={handlePdfTitleChange}
+              onServiceCompanyNameChange={handleServiceCompanyNameChange}
+              onTaxModeChange={handleTaxModeChange}
+              onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
+              onExportBackup={handleExportBackup}
+              onSignOut={handleSignOut}
+              onChangePassword={handleChangeAdminPassword}
+              onCreateToken={handleCreateAccessToken}
+              onToggleToken={handleToggleAccessToken}
+              onDeleteToken={handleDeleteAccessToken}
+              onCopyToken={handleCopyAccessToken}
+            />
+          ) : (
+            <section className="panel read-only-settings-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>只读访问</h2>
+                  <p>游客可以查看任务和公开文件，编辑、上传、验收和结算需要管理员身份。</p>
+                </div>
+              </div>
+              <button className="primary-button" onClick={() => setIsLoginModalOpen(true)}>
+                <KeyRound size={17} />
+                登录管理员
+              </button>
+            </section>
+          )
         )}
       </section>
 
@@ -2705,8 +2794,8 @@ function App() {
           designTypeGroups={designTypeGroups}
           currentMonthValue={currentMonth.value}
           onClose={() => setIsModalOpen(false)}
-          onCreate={handleCreateTask}
-          onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
+          onCreate={isAdmin ? handleCreateTask : async () => requireAdmin()}
+          onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
         />
       )}
       {detailTaskId > 0 && (() => {
@@ -2718,8 +2807,8 @@ function App() {
             role={role}
             activity={taskActivity}
             onClose={() => setDetailTaskId(0)}
-            onUpdateTask={handleUpdateTask}
-            onUploadImage={handleQuickUploadImage}
+            onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
+            onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
           />
         ) : null
       })()}
@@ -2747,6 +2836,16 @@ function App() {
         />
       )}
       {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
+      {isLoginModalOpen && (
+        <AdminLoginModal
+          error={authError}
+          onClose={() => {
+            setIsLoginModalOpen(false)
+            setAuthError('')
+          }}
+          onSubmit={handleUnlock}
+        />
+      )}
       {showFireworks && <Fireworks />}
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">
@@ -2917,144 +3016,71 @@ function Fireworks() {
   )
 }
 
-function LockScreen({ error, onSubmit }: { error: string; onSubmit: (email: string, key: string) => void }) {
-  const resetParams = new URLSearchParams(window.location.search)
-  const initialResetToken = resetParams.get('resetToken') ?? ''
-  const initialResetEmail = resetParams.get('email') ?? ''
-  const [mode, setMode] = useState<'login' | 'forgot' | 'reset'>(initialResetToken ? 'reset' : 'login')
-  const [email, setEmail] = useState(initialResetEmail)
+function AdminLoginModal({
+  error,
+  onClose,
+  onSubmit,
+}: {
+  error: string
+  onClose: () => void
+  onSubmit: (email: string, key: string) => void
+}) {
+  const [email, setEmail] = useState('')
   const [key, setKey] = useState('')
-  const [resetToken, setResetToken] = useState(initialResetToken)
-  const [newPassword, setNewPassword] = useState('')
-  const [localMessage, setLocalMessage] = useState('')
-  const [localError, setLocalError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = async () => {
+  const submit = async () => {
     if (!key.trim() || isSubmitting) {
       return
     }
     setIsSubmitting(true)
-    await Promise.resolve(onSubmit(email.trim(), key.trim()))
-    setIsSubmitting(false)
-  }
-
-  const requestReset = async () => {
-    if (!email.trim() || isSubmitting) {
-      return
-    }
-    setIsSubmitting(true)
-    setLocalError('')
-    setLocalMessage('')
     try {
-      await api.requestPasswordReset(email.trim())
-      setLocalMessage('如果邮箱匹配管理员账号，系统会发送一封密码重置邮件。')
-    } catch (requestError) {
-      setLocalError(requestError instanceof Error ? requestError.message : '重置邮件发送失败')
+      await onSubmit(email.trim(), key.trim())
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  const confirmReset = async () => {
-    if (!email.trim() || !resetToken.trim() || !newPassword.trim() || isSubmitting) {
-      return
-    }
-    setIsSubmitting(true)
-    setLocalError('')
-    setLocalMessage('')
-    try {
-      await api.confirmPasswordReset({ email: email.trim(), token: resetToken.trim(), newPassword })
-      setLocalMessage('密码已重置，正在进入工作台。')
-      window.history.replaceState({}, document.title, window.location.pathname)
-      await Promise.resolve(onSubmit(email.trim(), newPassword))
-    } catch (resetError) {
-      setLocalError(resetError instanceof Error ? resetError.message : '密码重置失败')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter') {
-      void handleSubmit()
     }
   }
 
   return (
-    <main className="lock-screen">
-      <section className="lock-card">
-        <div className="brand-mark">
-          <img className="brand-logo" src="/giverny-logo.png" alt="" />
+    <ModalShell className="admin-login-modal" labelledBy="admin-login-title" onClose={onClose}>
+      <header className="modal-header">
+        <div>
+          <p className="eyebrow">管理员登录</p>
+          <h2 id="admin-login-title">登录后才能编辑</h2>
+          <small>游客可直接浏览；新建、修改、上传、验收和结算需要管理员身份。</small>
         </div>
-        <h1>Giverny</h1>
-        <p>{mode === 'login' ? '管理员使用邮箱和密码登录；访问口令登录时邮箱留空即可。' : '输入管理员邮箱，按邮件中的链接完成密码重置。'}</p>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </header>
+      <div className="admin-login-body">
         <label className="lock-input">
-          <Mail size={16} />
+          <Mail size={17} />
+          <input value={email} placeholder="管理员邮箱（访问口令登录可留空）" onChange={(event) => setEmail(event.target.value)} />
+        </label>
+        <label className="lock-input">
+          <Lock size={17} />
           <input
-            type="email"
-            value={email}
-            placeholder="管理员邮箱（访问口令登录可留空）"
-            autoFocus
-            onChange={(event) => setEmail(event.target.value)}
-            onKeyDown={handleKeyDown}
+            type="password"
+            value={key}
+            placeholder="管理密码或访问口令"
+            onChange={(event) => setKey(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                void submit()
+              }
+            }}
           />
         </label>
-        {mode === 'login' && (
-          <>
-            <label className="lock-input">
-              <Lock size={16} />
-              <input
-                type="password"
-                value={key}
-                placeholder="管理密码或访问口令"
-                onChange={(event) => setKey(event.target.value)}
-                onKeyDown={handleKeyDown}
-              />
-            </label>
-            {error && <p className="lock-error">{error}</p>}
-            <button className="primary-button" onClick={() => void handleSubmit()} disabled={!key.trim() || isSubmitting}>
-              {isSubmitting ? '登录中…' : '进入工作台'}
-            </button>
-            <button className="text-button" onClick={() => { setMode('forgot'); setLocalError(''); setLocalMessage('') }}>
-              忘记密码？
-            </button>
-          </>
-        )}
-        {mode === 'forgot' && (
-          <>
-            {localMessage && <p className="lock-message">{localMessage}</p>}
-            {localError && <p className="lock-error">{localError}</p>}
-            <button className="primary-button" onClick={() => void requestReset()} disabled={!email.trim() || isSubmitting}>
-              {isSubmitting ? '发送中…' : '发送重置邮件'}
-            </button>
-            <button className="text-button" onClick={() => { setMode('login'); setLocalError(''); setLocalMessage('') }}>
-              返回登录
-            </button>
-          </>
-        )}
-        {mode === 'reset' && (
-          <>
-            <label className="lock-input">
-              <KeyRound size={16} />
-              <input value={resetToken} placeholder="重置令牌" onChange={(event) => setResetToken(event.target.value)} />
-            </label>
-            <label className="lock-input">
-              <Lock size={16} />
-              <input type="password" value={newPassword} placeholder="设置新密码（至少 8 位）" onChange={(event) => setNewPassword(event.target.value)} />
-            </label>
-            {localMessage && <p className="lock-message">{localMessage}</p>}
-            {localError && <p className="lock-error">{localError}</p>}
-            <button className="primary-button" onClick={() => void confirmReset()} disabled={!email.trim() || !resetToken.trim() || newPassword.length < 8 || isSubmitting}>
-              {isSubmitting ? '重置中…' : '重置并登录'}
-            </button>
-            <button className="text-button" onClick={() => { setMode('login'); setLocalError(''); setLocalMessage('') }}>
-              返回登录
-            </button>
-          </>
-        )}
-      </section>
-    </main>
+        {error && <p className="lock-error">{error}</p>}
+      </div>
+      <footer className="modal-footer">
+        <button className="ghost-button" onClick={onClose}>取消</button>
+        <button className="primary-button" onClick={() => void submit()} disabled={!key.trim() || isSubmitting}>
+          {isSubmitting ? '登录中…' : '登录管理员'}
+        </button>
+      </footer>
+    </ModalShell>
   )
 }
 

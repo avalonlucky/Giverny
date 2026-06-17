@@ -654,6 +654,7 @@ async function getState(env: Env, role: AuthRole) {
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        LEFT JOIN tasks ON tasks.id = attachments.task_id
+       WHERE tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL AND attachments.visible_to_client = 1'}
        ORDER BY uploaded_at DESC`,
     ).all<DbAttachment>(),
     env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('hourlyRate').first<{ value: string }>(),
@@ -1581,15 +1582,16 @@ async function handleApi(request: Request, env: Env) {
     (isGet && path.startsWith('/api/shared/')) ||
     (isGet && path.startsWith('/api/files/') && (path.endsWith('/preview') || path.endsWith('/source')))
 
-  // 其余接口（包括读取业务数据）一律需要登录：管理员邮箱 + 平台密码，或有效的访问口令
-  let role: AuthRole = 'admin'
+  // 读取接口默认允许游客以只读成员身份访问；写入接口仍需管理员邮箱 + 平台密码。
+  let role: AuthRole = 'member'
   const authEnabled = Boolean(env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING)))
   if (authEnabled && !isPublic) {
     const resolved = await resolveRole(env, request.headers.get('x-auth-key') ?? '', request.headers.get('x-auth-email') ?? '')
-    if (!resolved) {
+    if (resolved) {
+      role = resolved
+    } else if (!isGet) {
       return fail('登录已失效，请重新登录', 401)
     }
-    role = resolved
   }
 
   // 口令管理只对管理员开放
