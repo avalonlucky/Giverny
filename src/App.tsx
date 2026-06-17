@@ -248,7 +248,7 @@ type AcceptancePayload = {
   acceptanceNote: string
   timeEntries: TimeEntry[]
   acceptanceFiles?: string[]
-  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate'>>
+  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'progress'>>
 }
 
 function validateUploadFile(file: File) {
@@ -1574,6 +1574,7 @@ function App() {
   )
 
   const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
+  const taskById = useMemo(() => new Map(taskItems.map((task) => [task.id, task])), [taskItems])
 
   const stats = useMemo(() => {
     const totalHours = activeMonthTasks.reduce((sum, task) => sum + task.actualHours, importedHours)
@@ -1646,7 +1647,9 @@ function App() {
     }
     monthUpdates.forEach((update) => {
       const hours = Number(update.hours) || 0
-      if (hours <= 0 || !update.date.startsWith(currentMonth.value)) {
+      const task = taskById.get(update.taskId)
+      const belongsToCurrentMonth = update.date.startsWith(currentMonth.value) || (task ? taskSettlementMonth(task) === currentMonth.value : false)
+      if (hours <= 0 || !belongsToCurrentMonth) {
         return
       }
       const day = Number(datePart(update.date).slice(8, 10))
@@ -1654,7 +1657,7 @@ function App() {
       weeks[weekIndex].value += hours
     })
     return weeks.map((week) => ({ ...week, value: Number(week.value.toFixed(1)) }))
-  }, [currentMonth.value, monthUpdates])
+  }, [currentMonth.value, monthUpdates, taskById])
 
   const handleCreateTask = async (task: Task) => {
     try {
@@ -4912,6 +4915,8 @@ function AcceptanceModal({
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
+  const [progressEditing, setProgressEditing] = useState(false)
+  const [progressDraft, setProgressDraft] = useState(task.progress)
   const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const isSupplemental = isSupplementalTask(task)
@@ -4951,13 +4956,15 @@ function AcceptanceModal({
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
   const hasUnsavedChanges =
     basicChanged ||
+    progressDraft !== task.progress ||
     acceptanceNote !== initialNote ||
     serializeTimeEntries(timeEntries) !== initialTimeEntriesSignature ||
     uploadedFiles.length > 0
   const canConfirmAcceptance = computedMinutes > 0 && !isUploading
   const dueState = taskDueState(task, isoDate(), isoDate(3))
-  const trimmedTaskChanges = basicChanged
-    ? {
+  const trimmedTaskChanges =
+    basicChanged || progressDraft !== task.progress
+      ? {
         title: basicDraft.title.trim() || task.title,
         type: basicDraft.type.trim() || task.type,
         contact: basicDraft.contact.trim() || task.contact,
@@ -4966,8 +4973,9 @@ function AcceptanceModal({
         requirement: basicDraft.requirement.trim(),
         date: basicDraft.date.trim() || task.date,
         estimatedDate: basicDraft.estimatedDate.trim(),
+        progress: progressDraft,
       }
-    : undefined
+      : undefined
 
   const uploadAcceptanceFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? [])
@@ -4982,14 +4990,23 @@ function AcceptanceModal({
     }
     setIsUploading(true)
     setUploadProgress(0)
+    const failedFiles: string[] = []
     try {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index]
-        const saved = await onUploadFile(task.id, file, (ratio) => {
-          const overall = (index + ratio) / files.length
-          setUploadProgress(Math.round(overall * 100))
-        })
-        setUploadedFiles((current) => [saved, ...current])
+        try {
+          const saved = await onUploadFile(task.id, file, (ratio) => {
+            const overall = (index + ratio) / files.length
+            setUploadProgress(Math.round(overall * 100))
+          })
+          setUploadedFiles((current) => [saved, ...current])
+        } catch (error) {
+          failedFiles.push(`${file.name}：${error instanceof Error ? error.message : '上传失败'}`)
+          setUploadProgress(Math.round(((index + 1) / files.length) * 100))
+        }
+      }
+      if (failedFiles.length > 0) {
+        setUploadError(`以下文件未上传成功：${failedFiles.join('；')}`)
       }
     } finally {
       setIsUploading(false)
@@ -5114,17 +5131,32 @@ function AcceptanceModal({
           <div className="acceptance-section-title">
             <span className="acceptance-section-index">2</span>
             <h3>进度</h3>
-            <button type="button" className="acceptance-edit-button" onClick={requestClose}>
+            <button type="button" className="acceptance-edit-button" onClick={() => setProgressEditing((current) => !current)}>
               <Pencil size={13} />
-              修改
+              {progressEditing ? '收起' : '修改'}
             </button>
           </div>
           <div className="acceptance-final-progress">
-            <div className="acceptance-progress-track" aria-label={`当前进度 ${task.progress}%`}>
-              <span style={{ width: `${task.progress}%` }} />
+            <div className="acceptance-progress-track" aria-label={`当前进度 ${progressDraft}%`}>
+              <span style={{ width: `${progressDraft}%` }} />
             </div>
-            <strong>{task.progress}%</strong>
+            <strong>{progressDraft}%</strong>
           </div>
+          {progressEditing && (
+            <div className="progress-steps acceptance-progress-steps" role="group" aria-label="调整验收前进度">
+              {[0, 20, 40, 60, 80, 100].map((value) => (
+                <button
+                  type="button"
+                  className={progressDraft === value ? 'active' : ''}
+                  key={value}
+                  aria-pressed={progressDraft === value}
+                  onClick={() => setProgressDraft(value)}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          )}
           <p className="acceptance-muted-hint">验收通过后，进度将自动设为 100%</p>
         </section>
 
@@ -5994,6 +6026,14 @@ function FileInspector({
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState(() => parseFileTags(file?.tag))
   const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    // File metadata is editable draft state; reset it when the selected file changes to avoid cross-file overwrites.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraftName(file?.name ?? '')
+    setTagInput('')
+    setTags(parseFileTags(file?.tag))
+  }, [file?.id, file?.name, file?.tag])
 
   useEffect(() => {
     if (!focusField || !file) {
