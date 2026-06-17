@@ -1577,6 +1577,27 @@ function App() {
     }
   }
 
+  const handleCreateTaskUpdate = async (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => {
+    try {
+      const savedUpdate = await api.createUpdate({
+        id: 0,
+        taskId,
+        date: isoDateTime(),
+        title: update.title,
+        body: update.body,
+        hours: update.hours,
+        visible: update.visible,
+        files: [],
+      })
+      setUpdateItems((currentUpdates) => [savedUpdate, ...currentUpdates])
+      await refreshState()
+      await loadTaskActivity(taskId)
+      notify('进展记录已保存')
+    } catch (error) {
+      notify(error instanceof Error ? `进展保存失败：${error.message}` : '进展保存失败')
+    }
+  }
+
   const loadTaskActivity = async (taskId: number) => {
     try {
       const result = await api.getTaskActivity(taskId)
@@ -1621,7 +1642,6 @@ function App() {
   // 选中任务变化时自动加载它的动态时间轴（工作台右侧明细卡用）
   useEffect(() => {
     if (selectedTask) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadTaskActivity(selectedTask.id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1857,6 +1877,52 @@ function App() {
     } catch {
       notify(title, 'info')
     }
+  }
+
+  const handleDuplicateTask = async (task: Task) => {
+    await handleCreateTask({
+      ...task,
+      id: Math.max(0, ...taskItems.map((item) => item.id)) + 1,
+      title: `${task.title}（副本）`,
+      date: isoDateTime(),
+      estimatedDate: task.estimatedDate || isoDateTime(60),
+      status: '计划中',
+      stage: '计划中',
+      progress: 0,
+      actualHours: 0,
+      acceptanceNote: '',
+      acceptanceFiles: [],
+      timeEntries: [],
+      files: [],
+      voidedAt: undefined,
+      voidReason: undefined,
+      suspendReason: undefined,
+      terminateReason: undefined,
+    })
+  }
+
+  const handleExportTaskCsv = (task: Task) => {
+    const rows = [
+      ['任务名称', '设计类型', '对接人', '结算月份', '状态', '进度', '实际工时'],
+      [task.title, task.type, task.contact, taskSettlementMonth(task), task.status, `${task.progress}%`, `${task.actualHours.toFixed(2)}h`],
+      [],
+      ['时间开始', '时间结束', '备注', '分钟', '小时'],
+      ...(task.timeEntries ?? []).map((entry) => {
+        const minutes = minutesBetween(entry.start, entry.end)
+        return [entry.start, entry.end, entry.note ?? '', String(minutes), (minutes / 60).toFixed(2)]
+      }),
+    ]
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${task.title || '任务'}-工时记录.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    notify('工时记录 CSV 已导出')
   }
 
   const handleDeleteFile = async (fileId: number) => {
@@ -2320,7 +2386,8 @@ function App() {
                     onClose={() => setDashboardContextMenu(null)}
                     onOpenTask={handleOpenTaskDetail}
                     onOpenAcceptance={(task) => handleOpenTaskDetail(task.id)}
-                    onUploadTask={(task) => handleOpenTaskDetail(task.id)}
+                    onOpenFiles={(task) => handleOpenTaskDetail(task.id)}
+                    onOpenProgress={(task) => handleOpenTaskDetail(task.id)}
                     onRequestStatus={handleRequestTaskStatus}
                     onUpdateTask={handleUpdateTask}
                     onVoidTask={handleVoidTask}
@@ -2328,8 +2395,11 @@ function App() {
                     onDeleteTask={handleDeleteTask}
                     onCopyTitle={handleCopyTaskTitle}
                     onCopyShareLink={handleCopyShareLink}
+                    onDuplicateTask={(task) => void handleDuplicateTask(task)}
+                    onExportTaskCsv={handleExportTaskCsv}
                     reports={taskContextOptions.reports}
                     currentMonthValue={taskContextOptions.currentMonthValue}
+                    designTypes={flattenDesignTypeGroups(designTypeGroups)}
                   />
                 )}
               </div>
@@ -2539,12 +2609,15 @@ function App() {
             onDeleteTask={handleDeleteTask}
             onCopyTitle={handleCopyTaskTitle}
             onCopyShareLink={handleCopyShareLink}
-            onOpenTask={(taskId) => {
-              setSelectedTaskId(taskId)
-              setTaskViewMode('列表')
-            }}
+            onOpenTask={handleOpenTaskDetail}
             reports={reports}
+            files={fileItems}
+            activity={taskActivity}
+            designTypes={flattenDesignTypeGroups(designTypeGroups)}
             onUploadImage={handleQuickUploadImage}
+            onCreateTaskUpdate={handleCreateTaskUpdate}
+            onDuplicateTask={(task) => void handleDuplicateTask(task)}
+            onExportTaskCsv={handleExportTaskCsv}
             onCreateTask={() => setIsModalOpen(true)}
           />
         )}
@@ -2990,7 +3063,8 @@ function TaskContextMenu({
   onClose,
   onOpenTask,
   onOpenAcceptance,
-  onUploadTask,
+  onOpenFiles,
+  onOpenProgress,
   onRequestStatus,
   onUpdateTask,
   onVoidTask,
@@ -2998,14 +3072,18 @@ function TaskContextMenu({
   onDeleteTask,
   onCopyTitle,
   onCopyShareLink,
+  onDuplicateTask,
+  onExportTaskCsv,
   reports,
   currentMonthValue,
+  designTypes,
 }: {
   menu: { x: number; y: number; task: Task }
   onClose: () => void
   onOpenTask: (taskId: number) => void
   onOpenAcceptance: (task: Task) => void
-  onUploadTask: (task: Task) => void
+  onOpenFiles: (task: Task) => void
+  onOpenProgress: (task: Task) => void
   onRequestStatus: (taskId: number, status: TaskStatus) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onVoidTask: (taskId: number) => void
@@ -3013,8 +3091,11 @@ function TaskContextMenu({
   onDeleteTask: (taskId: number) => void
   onCopyTitle: (title: string) => void
   onCopyShareLink: (token: string) => void
+  onDuplicateTask: (task: Task) => void
+  onExportTaskCsv: (task: Task) => void
   reports: ReportRecord[]
   currentMonthValue: string
+  designTypes: string[]
 }) {
   const run = (action: () => void) => {
     action()
@@ -3025,30 +3106,54 @@ function TaskContextMenu({
   const report = reports.find((item) => item.month === taskMonth)
   const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
   const isVoided = Boolean(menu.task.voidedAt)
+  const typeOptions = Array.from(new Set([menu.task.type, ...designTypes])).filter(Boolean).slice(0, 12)
 
   return (
     <div className="task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
       <button type="button" onClick={() => run(() => onOpenTask(menu.task.id))}>
         <Eye size={15} />
-        查看详情
+        查看任务详情
       </button>
       {!isVoided && (
         <>
-          <button type="button" onClick={() => run(() => onUploadTask(menu.task))}>
-            <Paperclip size={15} />
-            上传过程附件
+          <button type="button" onClick={() => run(() => onOpenProgress(menu.task))}>
+            <BarChart3 size={15} />
+            记录进展
           </button>
-          <button type="button" onClick={() => run(() => onOpenAcceptance(menu.task))}>
+          <button type="button" onClick={() => run(() => onOpenFiles(menu.task))}>
+            <Paperclip size={15} />
+            上传 / 查看文件
+          </button>
+          <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
             <ClipboardCheck size={15} />
-            交付验收
+            {menu.task.status === '待验收' ? '去验收' : '去验收（非待验收）'}
           </button>
         </>
       )}
       {!isVoided && (
         <div className="context-submenu">
           <button type="button" className="context-menu-parent" aria-haspopup="menu">
+            <BarChart3 size={15} />
+            快速改进度
+            <span>{menu.task.progress}%</span>
+            <ChevronRight size={14} />
+          </button>
+          <div className="context-submenu-panel progress-submenu-panel" role="menu">
+            {[0, 20, 40, 60, 80, 100].map((progress) => (
+              <button type="button" key={progress} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
+                {menu.task.progress === progress ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
+                {progress}%
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!isVoided && (
+        <div className="context-submenu">
+          <button type="button" className="context-menu-parent" aria-haspopup="menu">
             <ListChecks size={15} />
-            状态
+            改任务状态
+            <span>{menu.task.status}</span>
             <ChevronRight size={14} />
           </button>
           <div className="context-submenu-panel" role="menu">
@@ -3075,7 +3180,8 @@ function TaskContextMenu({
         <div className="context-submenu">
           <button type="button" className="context-menu-parent" aria-haspopup="menu">
             <CalendarDays size={15} />
-            改归属月份
+            改结算月份
+            <span>{monthLabelOf(taskMonth)}</span>
             <ChevronRight size={14} />
           </button>
           <div className="context-submenu-panel month-submenu-panel" role="menu">
@@ -3088,6 +3194,34 @@ function TaskContextMenu({
           </div>
         </div>
       )}
+      {!isVoided && typeOptions.length > 0 && (
+        <div className="context-submenu">
+          <button type="button" className="context-menu-parent" aria-haspopup="menu">
+            <Tag size={15} />
+            改设计类型
+            <span>{menu.task.type}</span>
+            <ChevronRight size={14} />
+          </button>
+          <div className="context-submenu-panel type-submenu-panel" role="menu">
+            {typeOptions.map((type) => (
+              <button type="button" key={type} onClick={() => run(() => onUpdateTask(menu.task.id, { type }))}>
+                {type === menu.task.type ? <CheckCircle2 size={15} /> : <Tag size={15} />}
+                {type}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!isVoided && (
+        <button type="button" onClick={() => run(() => onDuplicateTask(menu.task))}>
+          <Copy size={15} />
+          复制为本月新任务
+        </button>
+      )}
+      <button type="button" onClick={() => run(() => onExportTaskCsv(menu.task))}>
+        <Download size={15} />
+        导出工时记录
+      </button>
       {isVoided && (
         <button type="button" onClick={() => run(() => onRestoreTask(menu.task.id))}>
           <RotateCcw size={15} />
@@ -3190,7 +3324,13 @@ function TasksView({
   onCopyShareLink,
   onOpenTask,
   reports,
+  files,
+  activity,
+  designTypes,
   onUploadImage,
+  onCreateTaskUpdate,
+  onDuplicateTask,
+  onExportTaskCsv,
   onCreateTask,
 }: {
   viewMode: TaskViewMode
@@ -3217,14 +3357,19 @@ function TasksView({
   onCopyShareLink: (token: string) => void
   onOpenTask: (taskId: number) => void
   reports: ReportRecord[]
+  files: FileAsset[]
+  activity: ActivityItem[]
+  designTypes: string[]
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
+  onDuplicateTask: (task: Task) => void
+  onExportTaskCsv: (task: Task) => void
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
-  const [uploadingTaskId, setUploadingTaskId] = useState(0)
-  const uploadTaskRef = useRef<Task | null>(null)
-  const quickUploadInputRef = useRef<HTMLInputElement | null>(null)
+  const [filesTask, setFilesTask] = useState<Task | null>(null)
+  const [progressTask, setProgressTask] = useState<Task | null>(null)
   const viewTabs = (
     <div className="view-mode-tabs" aria-label="任务视图切换">
       <button className={viewMode === '列表' ? 'active' : ''} onClick={() => onViewModeChange('列表')}>
@@ -3269,31 +3414,14 @@ function TasksView({
     setAcceptanceTask(task)
   }
 
-  const triggerQuickUpload = (task: Task) => {
+  const openFiles = (task: Task) => {
     onSelectTask(task.id)
-    uploadTaskRef.current = task
-    quickUploadInputRef.current?.click()
+    setFilesTask(task)
   }
 
-  const handleQuickUpload = async (fileList: FileList | null) => {
-    const file = fileList?.[0]
-    const task = uploadTaskRef.current
-    if (!file || !task || uploadingTaskId) {
-      return
-    }
-    setUploadingTaskId(task.id)
-    try {
-      await onUploadImage(task.id, file)
-      if (task.status === '计划中') {
-        onUpdateTask(task.id, { status: '进行中' })
-      }
-    } finally {
-      setUploadingTaskId(0)
-      uploadTaskRef.current = null
-      if (quickUploadInputRef.current) {
-        quickUploadInputRef.current.value = ''
-      }
-    }
+  const openProgress = (task: Task) => {
+    onSelectTask(task.id)
+    setProgressTask(task)
   }
 
   const confirmListAcceptance = (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => {
@@ -3371,13 +3499,10 @@ function TasksView({
 
       <section className="management-grid">
         <div className="panel task-management-list">
-          <input
-            ref={quickUploadInputRef}
-            className="task-row-upload-input"
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
-            onChange={(event) => void handleQuickUpload(event.target.files)}
-          />
+          <div className="management-list-toolbar">
+            <span>共 {tasks.length} 条</span>
+            <small>悬停显示快捷操作，右键可打开完整菜单</small>
+          </div>
           <div className="table-head">
             <span>任务</span>
             <span>交付 / 操作</span>
@@ -3389,8 +3514,10 @@ function TasksView({
             <button
               className={`management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''}`}
               key={task.id}
-              onClick={() => onSelectTask(task.id)}
-              onDoubleClick={() => onOpenTask(task.id)}
+              onClick={() => {
+                onSelectTask(task.id)
+                onOpenTask(task.id)
+              }}
               onContextMenu={(event) => openContextMenu(event, task)}
             >
               <div className="management-main">
@@ -3411,14 +3538,14 @@ function TasksView({
               <div className="management-row-end">
                 <span className={`management-due ${dueState ? dueState : ''}`}>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
                 <span className="management-row-actions" aria-label="任务快捷操作">
-                  <button type="button" title="打开详情" aria-label="打开详情" onClick={(event) => { event.stopPropagation(); onOpenTask(task.id) }}>
-                    <Pencil size={15} />
+                  <button type="button" title="查看详情" aria-label="查看详情" onClick={(event) => { event.stopPropagation(); onOpenTask(task.id) }}>
+                    <Eye size={15} />
                   </button>
-                  <button type="button" title="上传附件" aria-label="上传附件" disabled={uploadingTaskId === task.id} onClick={(event) => { event.stopPropagation(); triggerQuickUpload(task) }}>
+                  <button type="button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
+                    <BarChart3 size={15} />
+                  </button>
+                  <button type="button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); openFiles(task) }}>
                     <Paperclip size={15} />
-                  </button>
-                  <button type="button" title="标记待验收" aria-label="标记待验收" onClick={(event) => { event.stopPropagation(); onRequestStatus(task.id, '待验收') }}>
-                    <CheckCircle2 size={15} />
                   </button>
                   <button type="button" title="交付验收" aria-label="交付验收" onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}>
                     <ClipboardCheck size={15} />
@@ -3446,7 +3573,8 @@ function TasksView({
               onClose={() => setContextMenu(null)}
               onOpenTask={onOpenTask}
               onOpenAcceptance={openAcceptance}
-              onUploadTask={triggerQuickUpload}
+              onOpenFiles={openFiles}
+              onOpenProgress={openProgress}
               onRequestStatus={onRequestStatus}
               onUpdateTask={onUpdateTask}
               onVoidTask={onVoidTask}
@@ -3454,8 +3582,11 @@ function TasksView({
               onDeleteTask={onDeleteTask}
               onCopyTitle={onCopyTitle}
               onCopyShareLink={onCopyShareLink}
+              onDuplicateTask={onDuplicateTask}
+              onExportTaskCsv={onExportTaskCsv}
               reports={reports}
               currentMonthValue={monthValue}
+              designTypes={designTypes}
             />
           )}
         </div>
@@ -3469,7 +3600,288 @@ function TasksView({
           onUploadFile={onUploadAcceptanceFile}
         />
       )}
+      {filesTask && (
+        <TaskFilesModal
+          task={tasks.find((task) => task.id === filesTask.id) ?? filesTask}
+          files={files}
+          onClose={() => setFilesTask(null)}
+          onUploadImage={onUploadImage}
+        />
+      )}
+      {progressTask && (
+        <TaskProgressModal
+          task={tasks.find((task) => task.id === progressTask.id) ?? progressTask}
+          activity={activity}
+          onClose={() => setProgressTask(null)}
+          onUpdateTask={onUpdateTask}
+          onCreateTaskUpdate={onCreateTaskUpdate}
+          onUploadImage={onUploadImage}
+        />
+      )}
     </section>
+  )
+}
+
+function TaskFilesModal({
+  task,
+  files,
+  onClose,
+  onUploadImage,
+}: {
+  task: Task
+  files: FileAsset[]
+  onClose: () => void
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const taskFiles = files.filter((file) => file.taskId === task.id)
+  const acceptanceNames = new Set(task.acceptanceFiles ?? [])
+  const acceptanceFiles = taskFiles.filter((file) => file.final || file.tag === '验收文件' || acceptanceNames.has(file.name))
+  const processFiles = taskFiles.filter((file) => !acceptanceFiles.some((acceptanceFile) => acceptanceFile.id === file.id))
+
+  const uploadFiles = async (fileList: FileList | null) => {
+    const selectedFiles = Array.from(fileList ?? [])
+    if (selectedFiles.length === 0 || uploading) {
+      return
+    }
+    setUploading(true)
+    setUploadProgress(0)
+    try {
+      for (const file of selectedFiles) {
+        await onUploadImage(task.id, file, (ratio) => setUploadProgress(Math.round(ratio * 100)))
+      }
+    } finally {
+      setUploading(false)
+      setUploadProgress(0)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const renderFileGroup = (title: string, groupFiles: FileAsset[], emptyText: string) => (
+    <section className="task-file-group">
+      <h3>{title}</h3>
+      {groupFiles.length === 0 ? (
+        <p>{emptyText}</p>
+      ) : (
+        groupFiles.map((file) => (
+          <article className="task-file-row" key={file.id}>
+            <FileText size={16} />
+            <div>
+              <strong>{file.name}</strong>
+              <small>{file.type} · {file.size} · {formatPlanDateTime(file.uploadedAt)}</small>
+            </div>
+            <span>{file.tag || (file.final ? '终稿' : '过程附件')}</span>
+          </article>
+        ))
+      )}
+    </section>
+  )
+
+  return (
+    <ModalShell className="task-action-modal task-files-modal" labelledBy="task-files-title" onClose={onClose}>
+      <header className="modal-header">
+        <div>
+          <p className="eyebrow">任务文件</p>
+          <h2 id="task-files-title">任务文件</h2>
+          <small>{task.title} · {task.type} · 对接 {task.contact || '待确认'}</small>
+        </div>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </header>
+      <div className="task-action-body">
+        <button type="button" className="task-upload-dropzone" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+          <UploadCloud size={22} />
+          <strong>{uploading ? `上传中 ${uploadProgress}%` : '点击上传文件'}</strong>
+          <span>支持 PNG / PDF / PSD / ZIP，也可以上传过程附件和阶段产物</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          className="task-row-upload-input"
+          type="file"
+          multiple
+          accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+          onChange={(event) => void uploadFiles(event.target.files)}
+        />
+        {renderFileGroup('验收文件', acceptanceFiles, '暂无验收文件。确认验收时上传的文件会归在这里。')}
+        {renderFileGroup('过程附件', processFiles, '暂无过程附件。草图、沟通截图和阶段预览可以上传到这里。')}
+      </div>
+      <footer className="modal-footer">
+        <button className="primary-button" onClick={onClose}>完成</button>
+      </footer>
+    </ModalShell>
+  )
+}
+
+function TaskProgressModal({
+  task,
+  activity,
+  onClose,
+  onUpdateTask,
+  onCreateTaskUpdate,
+  onUploadImage,
+}: {
+  task: Task
+  activity: ActivityItem[]
+  onClose: () => void
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
+  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [draftProgress, setDraftProgress] = useState(snapProgress(task.progress))
+  const [note, setNote] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadedNames, setUploadedNames] = useState<string[]>([])
+  const savedProgress = snapProgress(task.progress)
+  const progressDirty = draftProgress !== savedProgress
+  const taskActivity = activity
+
+  const uploadFiles = async (fileList: FileList | null) => {
+    const selectedFiles = Array.from(fileList ?? [])
+    if (selectedFiles.length === 0 || uploading) {
+      return
+    }
+    setUploading(true)
+    try {
+      for (const file of selectedFiles) {
+        await onUploadImage(task.id, file)
+        setUploadedNames((currentNames) => [...currentNames, file.name])
+      }
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const confirmProgress = () => {
+    if (!progressDirty) {
+      return
+    }
+    onUpdateTask(task.id, { progress: draftProgress })
+  }
+
+  const saveProgress = async () => {
+    if (isSaving) {
+      return
+    }
+    setIsSaving(true)
+    try {
+      if (progressDirty) {
+        confirmProgress()
+      }
+      const body = note.trim()
+      if (body || uploadedNames.length > 0) {
+        await onCreateTaskUpdate(task.id, {
+          title: '进展更新',
+          body: body || `上传过程附件：${uploadedNames.join('、')}`,
+          hours: 0,
+          visible: false,
+        })
+      }
+      onClose()
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell className="task-action-modal task-progress-modal" labelledBy="task-progress-title" onClose={onClose}>
+      <header className="modal-header">
+        <div>
+          <p className="eyebrow">进展记录</p>
+          <h2 id="task-progress-title">记录进展</h2>
+          <small>{task.title} · {task.type} · 对接 {task.contact || '待确认'}</small>
+        </div>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </header>
+      <div className="task-action-body">
+        <section className="action-section">
+          <div className="action-section-title">
+            <h3>整体进度</h3>
+            <span className={progressDirty ? 'admin-only-data' : ''}>{progressDirty ? `● 未保存（${draftProgress}%）` : '已保存'}</span>
+          </div>
+          <div className="task-progress-control">
+            <input type="range" min={0} max={100} step={10} value={draftProgress} onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))} />
+            <strong>{draftProgress}%</strong>
+          </div>
+          <div className="task-progress-presets">
+            {[0, 20, 40, 60, 80, 100].map((value) => (
+              <button type="button" className={draftProgress === value ? 'active' : ''} key={value} onClick={() => setDraftProgress(value)}>
+                {value}
+              </button>
+            ))}
+          </div>
+          {progressDirty && (
+            <div className="progress-draft-actions">
+              <button type="button" className="ghost-button compact-button" onClick={() => setDraftProgress(savedProgress)}>撤销</button>
+              <button type="button" className="primary-button compact-button" onClick={confirmProgress}>确认进度</button>
+            </div>
+          )}
+        </section>
+        <section className="action-section">
+          <div className="action-section-title">
+            <h3>新增进展</h3>
+            <span>确认后写入时间轴</span>
+          </div>
+          <textarea className="task-progress-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="写一下目前的进度到哪了，例如：与对接人确认了尺寸，正在出草图。" />
+          {uploadedNames.length > 0 && (
+            <div className="uploaded-chip-row">
+              {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
+            </div>
+          )}
+          <button type="button" className="text-button file-add-button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Plus size={15} />
+            {uploading ? '上传中…' : '添加过程附件'}
+          </button>
+          <input
+            ref={fileInputRef}
+            className="task-row-upload-input"
+            type="file"
+            multiple
+            accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+            onChange={(event) => void uploadFiles(event.target.files)}
+          />
+        </section>
+        <section className="action-section">
+          <div className="action-section-title">
+            <h3>进展时间轴</h3>
+            <span>{taskActivity.length} 条记录</span>
+          </div>
+          <div className="progress-modal-timeline">
+            {taskActivity.length === 0 ? (
+              <p>还没有进展记录。</p>
+            ) : (
+              taskActivity.slice(0, 8).map((item) => (
+                <article className="progress-modal-timeline-item" key={item.id}>
+                  <span className="dot" />
+                  <div>
+                    <strong>任务动态</strong>
+                    <TimelineStamp value={item.createdAt} audience="admin" />
+                    <p>{describeActivity(item)}</p>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+      <footer className="modal-footer">
+        <button className="ghost-button" onClick={onClose}>取消</button>
+        <button className="primary-button" disabled={isSaving || (!progressDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
+          {isSaving ? '保存中…' : '保存进展'}
+        </button>
+      </footer>
+    </ModalShell>
   )
 }
 
