@@ -1169,7 +1169,7 @@ function describeActivity(item: ActivityItem): string {
   }
   if (item.entityType === 'attachment') {
     if (item.action === 'create') {
-      return `上传了文件「${String(payload.fileName ?? '未命名')}」`
+      return '上传了文件'
     }
     if (item.action === 'delete') {
       return `删除了文件「${String(payload.fileName ?? '')}」`
@@ -1178,7 +1178,12 @@ function describeActivity(item: ActivityItem): string {
   if (item.entityType === 'update') {
     if (item.action === 'create') {
       const hours = Number(payload.hours)
-      return `添加进展「${String(payload.title ?? '')}」${hours > 0 ? `（${hours}h）` : ''}`
+      const title = String(payload.title ?? '').trim()
+      const body = String(payload.body ?? '').trim()
+      if (body) {
+        return body.startsWith('上传过程附件') ? '上传过程附件' : body
+      }
+      return `添加进展「${title}」${hours > 0 ? `（${hours}h）` : ''}`
     }
     if (item.action === 'update') {
       return '修改了进展记录'
@@ -1188,6 +1193,64 @@ function describeActivity(item: ActivityItem): string {
     }
   }
   return '其他操作'
+}
+
+function getActivityFileNames(item: ActivityItem) {
+  const payload = item.payload ?? {}
+  const names: string[] = []
+  if (item.entityType === 'attachment' && item.action === 'create' && typeof payload.fileName === 'string') {
+    names.push(payload.fileName)
+  }
+  if (item.entityType === 'task' && Array.isArray(payload.acceptanceFiles)) {
+    names.push(...payload.acceptanceFiles.map(String))
+  }
+  if (item.entityType === 'update' && item.action === 'create') {
+    if (Array.isArray(payload.files)) {
+      names.push(...payload.files.map(String))
+    }
+    const body = typeof payload.body === 'string' ? payload.body.trim() : ''
+    const attachmentText = body.match(/^上传过程附件[:：](.+)$/)?.[1]
+    if (attachmentText) {
+      names.push(...attachmentText.split(/[、,，\n]/).map((name) => name.trim()).filter(Boolean))
+    }
+  }
+  return Array.from(new Set(names.filter(Boolean)))
+}
+
+function ActivityFileChips({
+  item,
+  files = [],
+  onPreviewFile,
+}: {
+  item: ActivityItem
+  files?: FileAsset[]
+  onPreviewFile?: (file: FileAsset) => void
+}) {
+  const fileNames = getActivityFileNames(item)
+  if (fileNames.length === 0) {
+    return null
+  }
+  return (
+    <div className="activity-file-row">
+      {fileNames.map((name) => {
+        const file = files.find((candidate) => candidate.name === name)
+        if (file && onPreviewFile) {
+          return (
+            <button type="button" className="file-chip activity-file-chip" key={name} onClick={() => onPreviewFile(file)}>
+              <Paperclip size={13} />
+              {name}
+            </button>
+          )
+        }
+        return (
+          <span className="file-chip activity-file-chip" key={name}>
+            <Paperclip size={13} />
+            {name}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function timelineTimePart(value: string) {
@@ -2862,7 +2925,9 @@ function App() {
             task={detailTask}
             role={role}
             activity={taskActivity}
+            files={fileItems}
             onClose={() => setDetailTaskId(0)}
+            onPreviewFile={setPreviewFile}
             onOpenEdit={(taskId) => {
               setDetailTaskId(0)
               handleOpenTaskEdit(taskId)
@@ -2906,6 +2971,7 @@ function App() {
           <TaskProgressModal
             task={progressTask}
             activity={taskActivity}
+            files={fileItems}
             onClose={() => setProgressModalTaskId(0)}
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
@@ -3763,6 +3829,7 @@ function TasksView({
         <TaskProgressModal
           task={tasks.find((task) => task.id === progressTask.id) ?? progressTask}
           activity={activity}
+          files={files}
           onClose={() => setProgressTask(null)}
           onUpdateTask={onUpdateTask}
           onCreateTaskUpdate={onCreateTaskUpdate}
@@ -3871,6 +3938,7 @@ function TaskFilesModal({
 function TaskProgressModal({
   task,
   activity,
+  files,
   onClose,
   onUpdateTask,
   onCreateTaskUpdate,
@@ -3878,6 +3946,7 @@ function TaskProgressModal({
 }: {
   task: Task
   activity: ActivityItem[]
+  files: FileAsset[]
   onClose: () => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
@@ -4019,6 +4088,7 @@ function TaskProgressModal({
                     <strong>任务动态</strong>
                     <TimelineStamp value={item.createdAt} audience="admin" />
                     <p>{describeActivity(item)}</p>
+                    <ActivityFileChips item={item} files={files} />
                   </div>
                 </article>
               ))
@@ -5034,7 +5104,9 @@ function TaskDetailModal({
   task,
   role,
   activity,
+  files,
   onClose,
+  onPreviewFile,
   onOpenEdit,
   onOpenFiles,
   onOpenProgress,
@@ -5042,7 +5114,9 @@ function TaskDetailModal({
   task: Task
   role: AuthRole
   activity: ActivityItem[]
+  files: FileAsset[]
   onClose: () => void
+  onPreviewFile: (file: FileAsset) => void
   onOpenEdit: (taskId: number) => void
   onOpenFiles: (taskId: number) => void
   onOpenProgress: (taskId: number) => void
@@ -5146,6 +5220,7 @@ function TaskDetailModal({
                   <span className="dot" />
                   <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
                   <p>{describeActivity(item)}</p>
+                  <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
                 </article>
               ))}
             </div>

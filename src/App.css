@@ -1911,6 +1911,34 @@ button {
   font-size: 12px;
 }
 
+button.file-chip {
+  font: inherit;
+  cursor: pointer;
+}
+
+button.file-chip:hover,
+button.file-chip:focus-visible {
+  border-color: var(--color-primary);
+  color: var(--color-primary-strong);
+  background: var(--color-surface-strong);
+}
+
+.activity-file-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.progress-modal-timeline-item .activity-file-row {
+  grid-column: 1 / -1;
+}
+
+.activity-file-chip {
+  width: fit-content;
+  max-width: 100%;
+}
+
 .file-add-button {
   width: max-content;
 }
