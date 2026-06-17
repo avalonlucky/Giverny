@@ -28,6 +28,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  MoreHorizontal,
   Paperclip,
   Pencil,
   Plus,
@@ -2102,52 +2103,6 @@ function App() {
     }
   }
 
-  const handleDuplicateTask = async (task: Task) => {
-    await handleCreateTask({
-      ...task,
-      id: Math.max(0, ...taskItems.map((item) => item.id)) + 1,
-      title: `${task.title}（副本）`,
-      date: isoDateTime(),
-      estimatedDate: task.estimatedDate || isoDateTime(60),
-      status: '计划中',
-      stage: '计划中',
-      progress: 0,
-      actualHours: 0,
-      acceptanceNote: '',
-      acceptanceFiles: [],
-      timeEntries: [],
-      files: [],
-      voidedAt: undefined,
-      voidReason: undefined,
-      suspendReason: undefined,
-      terminateReason: undefined,
-    })
-  }
-
-  const handleExportTaskCsv = (task: Task) => {
-    const rows = [
-      ['任务名称', '设计类型', '对接人', '结算月份', '状态', '进度', '实际工时'],
-      [task.title, task.type, task.contact, taskSettlementMonth(task), task.status, `${task.progress}%`, `${task.actualHours.toFixed(2)}h`],
-      [],
-      ['时间开始', '时间结束', '备注', '分钟', '小时'],
-      ...(task.timeEntries ?? []).map((entry) => {
-        const minutes = minutesBetween(entry.start, entry.end)
-        return [entry.start, entry.end, entry.note ?? '', String(minutes), (minutes / 60).toFixed(2)]
-      }),
-    ]
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${task.title || '任务'}-工时记录.csv`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-    notify('工时记录 CSV 已导出')
-  }
-
   const handleDeleteFile = async (fileId: number) => {
     const file = fileItems.find((item) => item.id === fileId)
     setConfirmDialog({
@@ -2681,9 +2636,6 @@ function App() {
                         <button type="button" className="icon-button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
                           <BarChart3 size={15} />
                         </button>
-                        <button type="button" className="icon-button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); handleOpenTaskFiles(task.id) }}>
-                          <Paperclip size={15} />
-                        </button>
                         <button
                           type="button"
                           className="icon-button"
@@ -2706,7 +2658,6 @@ function App() {
                     onOpenTask={handleOpenTaskDetail}
                     onOpenEditTask={handleOpenTaskEdit}
                     onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
-                    onOpenFiles={(task) => handleOpenTaskFiles(task.id)}
                     onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
                     onRequestStatus={isAdmin ? handleRequestTaskStatus : readOnlyUpdateTask}
                     onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
@@ -2715,8 +2666,6 @@ function App() {
                     onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
                     onCopyTitle={handleCopyTaskTitle}
                     onCopyShareLink={handleCopyShareLink}
-                    onDuplicateTask={(task) => (isAdmin ? void handleDuplicateTask(task) : requireAdmin())}
-                    onExportTaskCsv={handleExportTaskCsv}
                     reports={taskContextOptions.reports}
                     currentMonthValue={taskContextOptions.currentMonthValue}
                   />
@@ -2837,8 +2786,6 @@ function App() {
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onPreviewFile={setPreviewFile}
-            onDuplicateTask={(task) => (isAdmin ? void handleDuplicateTask(task) : requireAdmin())}
-            onExportTaskCsv={handleExportTaskCsv}
             onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
           />
         )}
@@ -3329,7 +3276,6 @@ function TaskContextMenu({
   onOpenTask,
   onOpenEditTask,
   onOpenAcceptance,
-  onOpenFiles,
   onOpenProgress,
   onRequestStatus,
   onUpdateTask,
@@ -3338,8 +3284,6 @@ function TaskContextMenu({
   onDeleteTask,
   onCopyTitle,
   onCopyShareLink,
-  onDuplicateTask,
-  onExportTaskCsv,
   reports,
   currentMonthValue,
 }: {
@@ -3348,7 +3292,6 @@ function TaskContextMenu({
   onOpenTask: (taskId: number) => void
   onOpenEditTask: (taskId: number) => void
   onOpenAcceptance: (task: Task) => void
-  onOpenFiles: (task: Task) => void
   onOpenProgress: (task: Task) => void
   onRequestStatus: (taskId: number, status: TaskStatus) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
@@ -3357,13 +3300,9 @@ function TaskContextMenu({
   onDeleteTask: (taskId: number) => void
   onCopyTitle: (title: string) => void
   onCopyShareLink: (token: string) => void
-  onDuplicateTask: (task: Task) => void
-  onExportTaskCsv: (task: Task) => void
   reports: ReportRecord[]
   currentMonthValue: string
 }) {
-  const [pendingProgress, setPendingProgress] = useState<{ taskId: number; value: number } | null>(null)
-
   const run = (action: () => void) => {
     action()
     onClose()
@@ -3374,7 +3313,6 @@ function TaskContextMenu({
   const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
   const isVoided = Boolean(menu.task.voidedAt)
   const progressOptions = [0, 20, 40, 60, 80, 100]
-  const pendingProgressValue = pendingProgress?.taskId === menu.task.id ? pendingProgress.value : null
 
   return (
     <div className="task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
@@ -3392,10 +3330,6 @@ function TaskContextMenu({
             <BarChart3 size={15} />
             记录进展
           </button>
-          <button type="button" onClick={() => run(() => onOpenFiles(menu.task))}>
-            <Paperclip size={15} />
-            上传 / 查看文件
-          </button>
           <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
             <ClipboardCheck size={15} />
             {menu.task.status === '待验收' ? '去验收' : '去验收（非待验收）'}
@@ -3412,23 +3346,14 @@ function TaskContextMenu({
           </button>
           <div className="context-submenu-panel progress-submenu-panel" role="menu">
             {progressOptions.map((progress) => {
-              const active = (pendingProgressValue ?? menu.task.progress) === progress
+              const active = menu.task.progress === progress
               return (
-              <button type="button" key={progress} className={active ? 'selected' : ''} onClick={() => setPendingProgress({ taskId: menu.task.id, value: progress })}>
+              <button type="button" key={progress} className={active ? 'selected' : ''} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
                 {active ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
                 {progress}%
               </button>
               )
             })}
-            {pendingProgressValue !== null && pendingProgressValue !== menu.task.progress && (
-              <div className="context-progress-confirm">
-                <span>暂存为 {pendingProgressValue}%</span>
-                <button type="button" onClick={() => setPendingProgress(null)}>撤销</button>
-                <button type="button" className="primary" onClick={() => run(() => onUpdateTask(menu.task.id, { progress: pendingProgressValue }))}>
-                  确认
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -3450,44 +3375,43 @@ function TaskContextMenu({
           </div>
         </div>
       )}
-      <button type="button" onClick={() => run(() => onCopyTitle(menu.task.title))}>
-        <Copy size={15} />
-        复制任务名称
-      </button>
-      {report && (
-        <button type="button" onClick={() => run(() => onCopyShareLink(report.publicToken))}>
-          <Share2 size={15} />
-          复制甲方分享链接
-        </button>
-      )}
       {!isVoided && (
         <div className="context-submenu">
           <button type="button" className="context-menu-parent" aria-haspopup="menu">
-            <CalendarDays size={15} />
-            改结算月份
-            <span>{monthLabelOf(taskMonth)}</span>
+            <MoreHorizontal size={15} />
+            更多操作
             <ChevronRight size={14} />
           </button>
-          <div className="context-submenu-panel month-submenu-panel" role="menu">
-            {monthOptions.map((month) => (
-              <button type="button" key={month} onClick={() => run(() => onUpdateTask(menu.task.id, { settlementMonth: month }))}>
-                {month === taskMonth ? <CheckCircle2 size={15} /> : <CalendarDays size={15} />}
-                {monthLabelOf(month)}
+          <div className="context-submenu-panel" role="menu">
+            <button type="button" onClick={() => run(() => onCopyTitle(menu.task.title))}>
+              <Copy size={15} />
+              复制任务名称
+            </button>
+            {report && (
+              <button type="button" onClick={() => run(() => onCopyShareLink(report.publicToken))}>
+                <Share2 size={15} />
+                复制甲方分享链接
               </button>
-            ))}
+            )}
+            <div className="context-submenu">
+              <button type="button" className="context-menu-parent" aria-haspopup="menu">
+                <CalendarDays size={15} />
+                改结算月份
+                <span>{monthLabelOf(taskMonth)}</span>
+                <ChevronRight size={14} />
+              </button>
+              <div className="context-submenu-panel month-submenu-panel" role="menu">
+                {monthOptions.map((month) => (
+                  <button type="button" key={month} onClick={() => run(() => onUpdateTask(menu.task.id, { settlementMonth: month }))}>
+                    {month === taskMonth ? <CheckCircle2 size={15} /> : <CalendarDays size={15} />}
+                    {monthLabelOf(month)}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
-      {!isVoided && (
-        <button type="button" onClick={() => run(() => onDuplicateTask(menu.task))}>
-          <Copy size={15} />
-          复制为本月新任务
-        </button>
-      )}
-      <button type="button" onClick={() => run(() => onExportTaskCsv(menu.task))}>
-        <Download size={15} />
-        导出工时记录
-      </button>
       {isVoided && (
         <button type="button" onClick={() => run(() => onRestoreTask(menu.task.id))}>
           <RotateCcw size={15} />
@@ -3598,8 +3522,6 @@ function TasksView({
   onUploadImage,
   onCreateTaskUpdate,
   onPreviewFile,
-  onDuplicateTask,
-  onExportTaskCsv,
   onCreateTask,
 }: {
   viewMode: TaskViewMode
@@ -3634,8 +3556,6 @@ function TasksView({
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onPreviewFile: (file: FileAsset) => void
-  onDuplicateTask: (task: Task) => void
-  onExportTaskCsv: (task: Task) => void
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
@@ -3684,11 +3604,6 @@ function TasksView({
   const openAcceptance = (task: Task) => {
     onSelectTask(task.id)
     setAcceptanceTask(task)
-  }
-
-  const openFiles = (task: Task) => {
-    onSelectTask(task.id)
-    setFilesTask(task)
   }
 
   const openProgress = (task: Task) => {
@@ -3851,9 +3766,6 @@ function TasksView({
                   <button type="button" className="icon-button" title="记录进展" aria-label="记录进展" onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
                     <BarChart3 size={15} />
                   </button>
-                  <button type="button" className="icon-button" title="上传 / 查看文件" aria-label="上传 / 查看文件" onClick={(event) => { event.stopPropagation(); openFiles(task) }}>
-                    <Paperclip size={15} />
-                  </button>
                   <button
                     type="button"
                     className="icon-button"
@@ -3888,7 +3800,6 @@ function TasksView({
               onOpenTask={onOpenTask}
               onOpenEditTask={onOpenEditTask}
               onOpenAcceptance={openAcceptance}
-              onOpenFiles={openFiles}
               onOpenProgress={openProgress}
               onRequestStatus={onRequestStatus}
               onUpdateTask={onUpdateTask}
@@ -3897,8 +3808,6 @@ function TasksView({
               onDeleteTask={onDeleteTask}
               onCopyTitle={onCopyTitle}
               onCopyShareLink={onCopyShareLink}
-              onDuplicateTask={onDuplicateTask}
-              onExportTaskCsv={onExportTaskCsv}
               reports={reports}
               currentMonthValue={monthValue}
             />
