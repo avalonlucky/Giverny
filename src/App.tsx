@@ -235,6 +235,30 @@ function appendQueryParam(url: string | undefined, key: string, value: string) {
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
 }
 
+const inlineImageFileTypes = new Set(['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'])
+const inlineDocumentFileTypes = new Set(['PDF', 'AI'])
+const officeFileTypes = new Set(['DOCX', 'XLSX', 'PPTX', 'DOC', 'XLS', 'PPT'])
+
+function isInlineImageFileType(fileType: string) {
+  return inlineImageFileTypes.has(fileType.toUpperCase())
+}
+
+function isInlineDocumentFileType(fileType: string) {
+  return inlineDocumentFileTypes.has(fileType.toUpperCase())
+}
+
+function isOfficeFileType(fileType: string) {
+  return officeFileTypes.has(fileType.toUpperCase())
+}
+
+function fileDocumentPreviewSource(file: FileAsset | undefined) {
+  if (!file) {
+    return undefined
+  }
+  const fileType = file.type.toUpperCase()
+  return authedPreviewUrl(fileType === 'AI' ? appendQueryParam(file.sourceUrl, 'as', 'pdf') : file.sourceUrl)
+}
+
 function parseFileTags(tag: string | undefined) {
   return (tag ?? '')
     .split(/[、,，\n]/)
@@ -2775,81 +2799,6 @@ function App() {
               </div>
             </details>
           </div>
-
-          <aside className="side-column">
-            {selectedTask && (
-            <section className="panel detail-card">
-              <div className="detail-title-row">
-                <div className="detail-title">
-                  <p>{selectedTask.type}</p>
-                  <h2>{selectedTask.title}</h2>
-                </div>
-                <TaskStateBadge task={selectedTask} />
-              </div>
-
-              <dl className="detail-summary-grid">
-                <div>
-                  <dt>实际工时</dt>
-                  <dd>{selectedTask.actualHours.toFixed(1)}h</dd>
-                </div>
-                <div>
-                  <dt>整体进度</dt>
-                  <dd>{selectedTask.progress}%</dd>
-                </div>
-                <div>
-                  <dt>交付</dt>
-                  <dd className="detail-due">
-                    {selectedTask.estimatedDate ? formatPlanDateTime(selectedTask.estimatedDate) : '未设置'}
-                    {(() => {
-                      const dueState = taskDueState(selectedTask, today, dueSoonDate)
-                      return dueState ? <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span> : null
-                    })()}
-                  </dd>
-                </div>
-                <div>
-                  <dt>结算</dt>
-                  <dd>
-                    {monthLabelOf(taskSettlementMonth(selectedTask))}
-                    {isSupplementalTask(selectedTask) ? <span className="supplement-inline">补录</span> : null}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="progress-block">
-                <div>
-                  <span>整体进展</span>
-                  <strong>{selectedTask.progress}%</strong>
-                </div>
-                <div className="large-meter">
-                  <span style={{ width: `${selectedTask.progress}%` }} />
-                </div>
-              </div>
-
-              <div className="detail-activity compact">
-                <div className="section-heading">
-                  <h3>最近动态</h3>
-                  <Clock3 size={15} />
-                </div>
-                {taskActivity.length === 0 && <p className="calendar-empty-hint">暂无操作记录。</p>}
-                <div className="timeline">
-                  {taskActivity.slice(0, 1).map((item) => (
-                    <article className="timeline-item" key={item.id}>
-                      <span className="dot" />
-                      <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
-                      <p>{describeActivity(item)}</p>
-                    </article>
-                  ))}
-                </div>
-              </div>
-
-              <button className="ghost-button detail-more" onClick={() => handleOpenTaskDetail(selectedTask.id)}>
-                查看完整详情
-                <ChevronDown size={15} />
-              </button>
-            </section>
-            )}
-
-          </aside>
         </section>
           </>
         )}
@@ -4073,13 +4022,13 @@ function TaskProgressModal({
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [draftProgress, setDraftProgress] = useState(snapProgress(task.progress))
+  const [draftProgress, setDraftProgress] = useState(task.progress)
   const [note, setNote] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
-  const savedProgress = snapProgress(task.progress)
+  const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
   const taskActivity = activity
 
@@ -4314,7 +4263,7 @@ export function TaskEditor({
   const reviewHours = timeEntries.length > 0 ? hoursFromTimeEntries(timeEntries) : task.actualHours
   const updateActivity = activity.filter((item) => item.entityType === 'update')
   const editorDueState = taskDueState(task, isoDate(), isoDate(3))
-  const savedProgressFromTask = snapProgress(task.progress)
+  const savedProgressFromTask = task.progress
   const savedProgress = progressSavedOverride?.taskId === task.id && progressSavedOverride.value !== savedProgressFromTask
     ? progressSavedOverride.value
     : savedProgressFromTask
@@ -6054,9 +6003,12 @@ function FilesView({
           <div className="grouped-file-grid">
             {selectedFiles.map((file) => {
               const fileType = file.type.toUpperCase()
-              const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
-              const hasVisualPreview = Boolean(file.previewUrl) || isImage
+              const isImage = isInlineImageFileType(fileType)
+              const isDocumentPreview = isInlineDocumentFileType(fileType)
+              const isOfficePreview = isOfficeFileType(fileType)
+              const hasVisualPreview = Boolean(file.previewUrl) || isImage || isDocumentPreview || isOfficePreview
               const thumbUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
+              const documentPreviewUrl = isDocumentPreview ? fileDocumentPreviewSource(file) : undefined
               return (
                 <article
                   className={`file-thumb-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
@@ -6077,6 +6029,14 @@ function FilesView({
                     <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
                     {thumbUrl ? (
                       <img src={thumbUrl} alt={file.name} loading="lazy" />
+                    ) : documentPreviewUrl ? (
+                      <iframe className="file-thumb-frame" src={documentPreviewUrl} title={file.name} loading="lazy" />
+                    ) : isOfficePreview ? (
+                      <div className="file-thumb-document">
+                        <FileText size={42} />
+                        <strong>{fileType}</strong>
+                        <span>可预览</span>
+                      </div>
                     ) : (
                       <div className="file-thumb-placeholder">
                         {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
@@ -6175,8 +6135,11 @@ function FileInspector({
   }
 
   const fileType = file.type.toUpperCase()
-  const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
+  const isImage = isInlineImageFileType(fileType)
+  const isDocumentPreview = isInlineDocumentFileType(fileType)
+  const isOfficePreview = isOfficeFileType(fileType)
   const inspectorPreviewUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
+  const inspectorDocumentUrl = isDocumentPreview ? fileDocumentPreviewSource(file) : undefined
   const sourceUrl = authedPreviewUrl(file.sourceUrl)
   const saveMetadata = async (nextTags = tags) => {
     setIsSaving(true)
@@ -6209,6 +6172,14 @@ function FileInspector({
         <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
         {inspectorPreviewUrl ? (
           <img src={inspectorPreviewUrl} alt={file.name} loading="lazy" />
+        ) : inspectorDocumentUrl ? (
+          <iframe className="file-inspector-frame" src={inspectorDocumentUrl} title={file.name} loading="lazy" />
+        ) : isOfficePreview ? (
+          <div className="file-thumb-document file-thumb-document-large">
+            <FileText size={42} />
+            <strong>{fileType}</strong>
+            <span>双击或空格预览内容</span>
+          </div>
         ) : (
           <div className="file-thumb-placeholder">
             {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
@@ -7789,13 +7760,13 @@ function ModalShell({
 
 function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
   const fileType = file.type.toUpperCase()
-  const sourceUrl = authedPreviewUrl(fileType === 'AI' ? appendQueryParam(file.sourceUrl, 'as', 'pdf') : file.sourceUrl)
+  const sourceUrl = fileDocumentPreviewSource(file)
   const previewUrl = authedPreviewUrl(file.previewUrl ?? file.sourceUrl)
-  const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(fileType)
+  const isImage = isInlineImageFileType(fileType)
   const isRasterPreview = Boolean(file.previewUrl) && ['PSD', 'AI'].includes(fileType)
-  const isPdfLike = ['PDF', 'AI'].includes(fileType)
+  const isPdfLike = isInlineDocumentFileType(fileType)
   const isVideo = ['MP4', 'WEBM', 'MOV'].includes(fileType)
-  const isOffice = ['DOCX', 'XLSX', 'PPTX', 'DOC', 'XLS', 'PPT'].includes(fileType)
+  const isOffice = isOfficeFileType(fileType)
 
   return (
     <ModalShell className="file-preview-modal" labelledBy="file-preview-title" onClose={onClose}>
@@ -7830,24 +7801,6 @@ function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => v
               )}
             </div>
           )}
-          <dl className="preview-meta">
-            <div>
-              <dt>关联任务</dt>
-              <dd>{file.task}</dd>
-            </div>
-            <div>
-              <dt>文件大小</dt>
-              <dd>{file.size}</dd>
-            </div>
-            <div>
-              <dt>版本状态</dt>
-              <dd>{file.final ? '最终稿' : '过程文件'}</dd>
-            </div>
-            <div>
-              <dt>文件标签</dt>
-              <dd>{file.tag || '无'}</dd>
-            </div>
-          </dl>
         </div>
     </ModalShell>
   )
