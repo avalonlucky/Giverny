@@ -2492,9 +2492,9 @@ function App() {
           <button className="due-strip" onClick={() => navigateView('任务')}>
             <AlarmClock size={17} />
             <span>
-              {dueTasks.overdue.length > 0 && <strong className="due-text-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
+              {dueTasks.overdue.length > 0 && <strong className="due-tag overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
               {dueTasks.overdue.length > 0 && dueTasks.soon.length > 0 && ' · '}
-              {dueTasks.soon.length > 0 && <strong className="due-text-soon">{dueTasks.soon.length} 个任务 3 天内交付</strong>}
+              {dueTasks.soon.length > 0 && <strong className="due-tag soon">{dueTasks.soon.length} 个任务 3 天内交付</strong>}
             </span>
             <em>{[...dueTasks.overdue, ...dueTasks.soon].slice(0, 3).map((task) => task.title).join('、')}</em>
             <ChevronDown size={15} className="due-arrow" />
@@ -3126,6 +3126,15 @@ function DonutChart({
 }
 
 function TrendChart({ data }: { data: { label: string; value: number }[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="empty-state trend-empty">
+        <strong>暂无趋势数据</strong>
+        <p>记录任务工时后，这里会按周显示本月投入变化。</p>
+      </div>
+    )
+  }
+
   const width = 560
   const height = 230
   const padding = { top: 24, right: 24, bottom: 36, left: 38 }
@@ -3134,7 +3143,7 @@ function TrendChart({ data }: { data: { label: string; value: number }[] }) {
   const innerWidth = width - padding.left - padding.right
   const innerHeight = height - padding.top - padding.bottom
   const points = data.map((item, index) => {
-    const x = padding.left + (innerWidth / (data.length - 1)) * index
+    const x = data.length === 1 ? padding.left + innerWidth / 2 : padding.left + (innerWidth / (data.length - 1)) * index
     const y = padding.top + innerHeight - (item.value / maxValue) * innerHeight
     return { ...item, x, y }
   })
@@ -3788,12 +3797,12 @@ function TasksView({
                   <em className={isSupplementalTask(task) ? 'supplement' : ''}>{settlementLabel}</em>
                   <span>对接 {task.contact || '待确认'}</span>
                   <span>实际 {task.actualHours.toFixed(1)}h</span>
-                  {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '逾期' : '临期'}</span>}
+                  {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
                 </div>
                 {task.voidedAt && <em className="voided-row-note">已作废{task.voidReason ? `：${task.voidReason}` : ''}</em>}
               </div>
               <div className="management-row-end">
-                <span className={`management-due ${dueState ? dueState : ''}`}>
+                <span className="management-due">
                   {dueDateLabel}
                   <StatusDot status={task.status} />
                 </span>
@@ -5104,9 +5113,9 @@ function AcceptanceModal({
               {basicEditing ? (
                 <input value={basicDraft.estimatedDate} onChange={(event) => updateBasicDraft('estimatedDate', event.target.value)} />
               ) : (
-                <strong className={dueState === 'overdue' ? 'acceptance-due-overdue' : dueState === 'soon' ? 'acceptance-due-soon' : ''}>
+                <strong className="acceptance-due-value">
                   {formatPlanDateTime(basicDraft.estimatedDate || basicDraft.date)}
-                  {dueState ? `（${dueState === 'overdue' ? '已逾期' : '临期'}）` : ''}
+                  {dueState ? <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span> : null}
                 </strong>
               )}
             </div>

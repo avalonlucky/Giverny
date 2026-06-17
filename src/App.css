@@ -1691,16 +1691,6 @@ button {
   white-space: nowrap;
 }
 
-.management-due.overdue {
-  color: var(--color-status-danger);
-  font-weight: 800;
-}
-
-.management-due.soon {
-  color: var(--color-status-warning);
-  font-weight: 800;
-}
-
 .management-row-actions {
   display: none;
   align-items: center;
@@ -4028,11 +4018,18 @@ button.file-chip:focus-visible {
 .task-modal {
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
-  overflow: auto;
-  border-radius: 12px;
-  background: #f8f9f5;
-  box-shadow: none;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-popover);
+  display: flex;
+  flex-direction: column;
   animation: modal-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.task-modal:not(.delete-confirm-modal) > :not(.modal-header):not(.modal-footer) {
+  min-height: 0;
+  overflow: auto;
 }
 
 .new-task-modal {
@@ -4061,6 +4058,7 @@ button.file-chip:focus-visible {
 
 .modal-header {
   padding: 22px 22px 0;
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -5207,12 +5205,10 @@ input::file-selector-button {
   border-color: var(--color-primary);
 }
 
-.acceptance-due-overdue {
-  color: var(--color-status-danger) !important;
-}
-
-.acceptance-due-soon {
-  color: var(--color-status-warning) !important;
+.acceptance-due-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .acceptance-final-progress {
@@ -5819,6 +5815,7 @@ textarea:focus-visible {
 }
 
 .modal-footer {
+  flex: 0 0 auto;
   justify-content: flex-end;
   padding: 0 22px 22px;
 }
@@ -7089,6 +7086,13 @@ textarea:focus-visible {
   background: rgba(230, 164, 58, 0.18);
 }
 
+.due-strip > span {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .due-strip em {
   flex: 1;
   min-width: 0;
@@ -7101,14 +7105,6 @@ textarea:focus-visible {
 
 .due-strip .due-arrow {
   transform: rotate(-90deg);
-}
-
-.due-text-overdue {
-  color: #b3403a;
-}
-
-.due-text-soon {
-  color: #955f12;
 }
 
 .due-tag {
@@ -7124,12 +7120,12 @@ textarea:focus-visible {
 }
 
 .due-tag.overdue {
-  color: #b3403a;
+  color: var(--color-status-danger);
   background: rgba(242, 95, 92, 0.14);
 }
 
 .due-tag.soon {
-  color: #955f12;
+  color: var(--color-status-warning);
   background: rgba(230, 164, 58, 0.18);
 }
 
