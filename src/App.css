@@ -7189,7 +7189,7 @@ textarea:focus-visible {
 
 .task-detail-modal .modal-header h2 {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.35;
 }
 
@@ -7197,7 +7197,7 @@ textarea:focus-visible {
   margin-bottom: 6px;
   color: var(--color-text-secondary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .task-detail-body {
@@ -7241,14 +7241,17 @@ textarea:focus-visible {
   margin: 0;
   color: var(--color-text);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.7;
   word-break: break-word;
 }
 
-.task-detail-summary dl > div:first-child dd,
 .task-detail-summary dd strong {
-  font-weight: 650;
+  font-weight: 600;
+}
+
+.task-detail-summary dl > div:first-child dd {
+  font-weight: 500;
 }
 
 .task-detail-summary dd .status-badge,
@@ -7273,12 +7276,29 @@ textarea:focus-visible {
   min-width: 46px;
   color: var(--color-primary-strong);
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: right;
 }
 
 .task-detail-log {
   padding: 0 0 14px;
+}
+
+.task-detail-log .section-heading h3 {
+  font-weight: 600;
+}
+
+.task-detail-log .timeline-item h3 {
+  font-weight: 600;
+}
+
+.task-detail-log .timeline-item p {
+  font-weight: 400;
+}
+
+.task-detail-modal .modal-footer .primary-button,
+.task-detail-modal .modal-footer .ghost-button {
+  font-weight: 600;
 }
 
 .task-detail-fields {
