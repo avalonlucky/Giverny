@@ -7211,7 +7211,7 @@ textarea:focus-visible {
 }
 
 .task-detail-modal .modal-header {
-  padding-bottom: 16px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--color-border-soft);
 }
 
@@ -7231,15 +7231,15 @@ textarea:focus-visible {
 .task-detail-body {
   padding: 0 22px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .task-detail-summary-body {
-  gap: 22px;
+  gap: 18px;
 }
 
 .task-detail-summary {
-  padding: 16px 0 4px;
+  padding: 12px 0 2px;
 }
 
 .task-detail-summary dl {
@@ -7250,7 +7250,7 @@ textarea:focus-visible {
 }
 
 .task-detail-summary dl > div {
-  padding: 13px 0;
+  padding: 9px 0;
   border-bottom: 1px solid var(--color-border-soft);
 }
 
@@ -7259,7 +7259,7 @@ textarea:focus-visible {
 }
 
 .task-detail-summary dt {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 500;
@@ -7270,7 +7270,7 @@ textarea:focus-visible {
   color: var(--color-text);
   font-size: 14px;
   font-weight: 400;
-  line-height: 1.7;
+  line-height: 1.55;
   word-break: break-word;
 }
 
@@ -7290,7 +7290,7 @@ textarea:focus-visible {
 }
 
 .task-detail-progress {
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   gap: 14px;

@@ -988,6 +988,7 @@ async function getTaskActivity(env: Env, taskId: string) {
     items.push({
       id: row.id,
       action: row.action,
+      entityId: row.entity_id,
       entityType: row.entity_type,
       payload,
       createdAt: formatBeijing(row.created_at),

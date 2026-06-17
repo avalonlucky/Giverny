@@ -17,6 +17,7 @@ export type ReportRecord = {
 export type ActivityItem = {
   id: string
   action: string
+  entityId: string
   entityType: string
   payload: Record<string, unknown> | null
   createdAt: string

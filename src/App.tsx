@@ -1197,24 +1197,32 @@ function describeActivity(item: ActivityItem): string {
 
 function getActivityFileNames(item: ActivityItem) {
   const payload = item.payload ?? {}
-  const names: string[] = []
+  const entries: Array<{ id?: number; name: string }> = []
   if (item.entityType === 'attachment' && item.action === 'create' && typeof payload.fileName === 'string') {
-    names.push(payload.fileName)
+    entries.push({ id: Number(item.entityId) || undefined, name: payload.fileName })
   }
   if (item.entityType === 'task' && Array.isArray(payload.acceptanceFiles)) {
-    names.push(...payload.acceptanceFiles.map(String))
+    entries.push(...payload.acceptanceFiles.map((name) => ({ name: String(name) })))
   }
   if (item.entityType === 'update' && item.action === 'create') {
     if (Array.isArray(payload.files)) {
-      names.push(...payload.files.map(String))
+      entries.push(...payload.files.map((name) => ({ name: String(name) })))
     }
     const body = typeof payload.body === 'string' ? payload.body.trim() : ''
     const attachmentText = body.match(/^上传过程附件[:：](.+)$/)?.[1]
     if (attachmentText) {
-      names.push(...attachmentText.split(/[、,，\n]/).map((name) => name.trim()).filter(Boolean))
+      entries.push(...attachmentText.split(/[、,，\n]/).map((name) => ({ name: name.trim() })).filter((entry) => entry.name))
     }
   }
-  return Array.from(new Set(names.filter(Boolean)))
+  const seen = new Set<string>()
+  return entries.filter((entry) => {
+    const key = `${entry.id ?? ''}:${entry.name}`
+    if (!entry.name || seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
 }
 
 function ActivityFileChips({
@@ -1226,26 +1234,26 @@ function ActivityFileChips({
   files?: FileAsset[]
   onPreviewFile?: (file: FileAsset) => void
 }) {
-  const fileNames = getActivityFileNames(item)
-  if (fileNames.length === 0) {
+  const fileEntries = getActivityFileNames(item)
+  if (fileEntries.length === 0) {
     return null
   }
   return (
     <div className="activity-file-row">
-      {fileNames.map((name) => {
-        const file = files.find((candidate) => candidate.name === name)
+      {fileEntries.map((entry) => {
+        const file = files.find((candidate) => candidate.id === entry.id) ?? files.find((candidate) => candidate.name === entry.name)
         if (file && onPreviewFile) {
           return (
-            <button type="button" className="file-chip activity-file-chip" key={name} onClick={() => onPreviewFile(file)}>
+            <button type="button" className="file-chip activity-file-chip" key={`${entry.id ?? ''}-${entry.name}`} onClick={() => onPreviewFile(file)}>
               <Paperclip size={13} />
-              {name}
+              {entry.name}
             </button>
           )
         }
         return (
-          <span className="file-chip activity-file-chip" key={name}>
+          <span className="file-chip activity-file-chip" key={`${entry.id ?? ''}-${entry.name}`}>
             <Paperclip size={13} />
-            {name}
+            {entry.name}
           </span>
         )
       })}
@@ -2801,6 +2809,7 @@ function App() {
             designTypes={flattenDesignTypeGroups(designTypeGroups)}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+            onPreviewFile={setPreviewFile}
             onDuplicateTask={(task) => (isAdmin ? void handleDuplicateTask(task) : requireAdmin())}
             onExportTaskCsv={handleExportTaskCsv}
             onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
@@ -2973,6 +2982,7 @@ function App() {
             activity={taskActivity}
             files={fileItems}
             onClose={() => setProgressModalTaskId(0)}
+            onPreviewFile={setPreviewFile}
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
@@ -3541,6 +3551,7 @@ function TasksView({
   designTypes,
   onUploadImage,
   onCreateTaskUpdate,
+  onPreviewFile,
   onDuplicateTask,
   onExportTaskCsv,
   onCreateTask,
@@ -3575,6 +3586,7 @@ function TasksView({
   designTypes: string[]
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
+  onPreviewFile: (file: FileAsset) => void
   onDuplicateTask: (task: Task) => void
   onExportTaskCsv: (task: Task) => void
   onCreateTask: () => void
@@ -3831,6 +3843,7 @@ function TasksView({
           activity={activity}
           files={files}
           onClose={() => setProgressTask(null)}
+          onPreviewFile={onPreviewFile}
           onUpdateTask={onUpdateTask}
           onCreateTaskUpdate={onCreateTaskUpdate}
           onUploadImage={onUploadImage}
@@ -3940,6 +3953,7 @@ function TaskProgressModal({
   activity,
   files,
   onClose,
+  onPreviewFile,
   onUpdateTask,
   onCreateTaskUpdate,
   onUploadImage,
@@ -3948,6 +3962,7 @@ function TaskProgressModal({
   activity: ActivityItem[]
   files: FileAsset[]
   onClose: () => void
+  onPreviewFile: (file: FileAsset) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
@@ -4088,7 +4103,7 @@ function TaskProgressModal({
                     <strong>任务动态</strong>
                     <TimelineStamp value={item.createdAt} audience="admin" />
                     <p>{describeActivity(item)}</p>
-                    <ActivityFileChips item={item} files={files} />
+                    <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
                   </div>
                 </article>
               ))
