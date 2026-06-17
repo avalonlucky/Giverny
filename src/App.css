@@ -19,6 +19,7 @@
   --radius-control: 8px;
   --radius-panel: 10px;
   --radius-pill: 999px;
+  --shadow-popover: 0 12px 28px rgba(39, 54, 58, 0.14);
   --z-base: 1;
   --z-sticky: 20;
   --z-floating: 40;
@@ -1327,6 +1328,10 @@ button {
   align-items: start;
 }
 
+.management-grid.detail-collapsed {
+  grid-template-columns: minmax(0, 1fr) 48px;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1338,94 +1343,112 @@ button {
   position: relative;
 }
 
+.task-row-upload-input {
+  display: none;
+}
+
 .table-head,
 .management-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 80px 116px 74px 80px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  gap: 16px;
   align-items: center;
 }
 
 .table-head {
-  padding: 0 12px 10px;
-  color: #7a8587;
+  padding: 0 12px 8px;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
 }
 
+.table-head span:last-child {
+  text-align: right;
+}
+
 .management-row {
   width: 100%;
-  min-height: 72px;
-  margin-top: 8px;
-  padding: 12px 14px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: #405056;
-  background: #f2f4ee;
+  min-height: 54px;
+  margin-top: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
 }
 
 .management-row:hover {
-  background: #eef2ea;
-  border-color: rgba(47, 111, 109, 0.16);
+  background: var(--color-surface-alt);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .management-row.selected {
-  background: #eef2ea;
-  border-color: rgba(47, 111, 109, 0.34);
-  box-shadow: none;
+  background: var(--color-surface-alt);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .management-row.voided {
-  color: #798487;
-  background: #f5f6f2;
+  color: var(--color-text-muted);
+  background: transparent;
 }
 
 .management-row.voided strong,
 .management-row.voided .management-hours {
-  color: #536064;
+  color: var(--color-text-secondary);
 }
 
 .management-row strong {
-  color: #17282f;
+  color: var(--color-text);
 }
 
-.management-row > div:first-child {
+.management-main {
   min-width: 0;
+}
+
+.management-main > strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .management-row small {
   display: block;
-  margin-top: 4px;
-  color: #778284;
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .management-row em {
-  display: inline-block;
-  margin-top: 5px;
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
   color: var(--color-supplement);
-  background: var(--color-supplement-bg);
   font-size: 11px;
   font-style: normal;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .management-row em.voided-row-note {
-  color: #9d3633;
-  background: rgba(184, 74, 69, 0.08);
+  margin-top: 5px;
+  padding: 1px 7px;
+  color: var(--color-status-danger);
+  background: rgba(168, 66, 69, 0.08);
 }
 
 .management-contact {
   min-width: 0;
   overflow: hidden;
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1440,25 +1463,178 @@ button {
 }
 
 .management-deliver > span:first-child {
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 12.5px;
   white-space: nowrap;
 }
 
 .management-hours {
-  color: #17282f;
+  color: var(--color-text);
   font-weight: 800;
   text-align: right;
+}
+
+.management-inline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  min-height: 20px;
+}
+
+.management-inline-meta em,
+.management-inline-meta span:not(.status-badge):not(.due-tag) {
+  min-height: 18px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.management-inline-meta em.supplement {
+  padding: 2px 7px;
+  background: var(--color-supplement-bg);
+}
+
+.management-inline-meta .status-badge {
+  min-height: 18px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.management-inline-meta .due-tag {
+  min-height: 18px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.management-row-end {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.management-due {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.management-due.overdue {
+  color: var(--color-status-danger);
+  font-weight: 800;
+}
+
+.management-due.soon {
+  color: var(--color-status-warning);
+  font-weight: 800;
+}
+
+.management-row-actions {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.management-row:hover .management-due,
+.management-row:focus-visible .management-due {
+  display: none;
+}
+
+.management-row:hover .management-row-actions,
+.management-row:focus-visible .management-row-actions {
+  display: inline-flex;
+}
+
+.management-row-actions button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.management-row-actions button:hover,
+.management-row-actions button:focus-visible {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+  outline: 0;
+}
+
+.management-row-actions button:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+
+.detail-rail {
+  position: sticky;
+  top: 82px;
+  min-height: 220px;
+  padding: 10px 8px;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.detail-rail:hover {
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+}
+
+.detail-rail > span {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.detail-rail > strong {
+  max-height: 120px;
+  writing-mode: vertical-rl;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-rail .status-badge {
+  writing-mode: horizontal-tb;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.task-editor-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-context-menu {
   position: fixed;
   z-index: var(--z-floating);
-  width: 176px;
+  width: 212px;
   padding: 6px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
-  border-radius: 10px;
-  background: #f8f9f5;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-popover);
 }
 
 .task-context-menu button {
@@ -1466,8 +1642,8 @@ button {
   min-height: 36px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
-  color: #263b42;
+  border-radius: var(--radius-control);
+  color: var(--color-text);
   background: transparent;
   display: flex;
   align-items: center;
@@ -1480,7 +1656,7 @@ button {
 .task-context-menu button:focus-visible,
 .context-submenu:focus-within > .context-menu-parent,
 .context-submenu:hover > .context-menu-parent {
-  background: #edf1e9;
+  background: var(--color-surface-alt);
 }
 
 .context-submenu {
@@ -1497,9 +1673,10 @@ button {
   left: calc(100% + 6px);
   width: 150px;
   padding: 6px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
-  border-radius: 10px;
-  background: #f8f9f5;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-popover);
   display: none;
 }
 
@@ -1515,11 +1692,11 @@ button {
 .context-menu-separator {
   height: 1px;
   margin: 6px 4px;
-  background: rgba(39, 54, 58, 0.08);
+  background: var(--color-border);
 }
 
 .task-context-menu button.danger {
-  color: #a4393c;
+  color: var(--color-status-danger);
 }
 
 .task-editor-preview {
@@ -7142,6 +7319,29 @@ textarea:focus-visible {
   .client-grid,
   .calendar-layout {
     grid-template-columns: 1fr;
+  }
+
+  .management-grid.detail-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-rail {
+    position: static;
+    min-height: 48px;
+    padding: 10px 12px;
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .detail-rail > span,
+  .detail-rail > strong {
+    writing-mode: horizontal-tb;
+    max-height: none;
+    letter-spacing: 0;
   }
 
   .design-type-groups {

@@ -2365,6 +2365,8 @@ function App() {
                     menu={dashboardContextMenu}
                     onClose={() => setDashboardContextMenu(null)}
                     onOpenTask={handleOpenTaskDetail}
+                    onOpenAcceptance={(task) => handleOpenTaskDetail(task.id)}
+                    onUploadTask={(task) => handleOpenTaskDetail(task.id)}
                     onRequestStatus={handleRequestTaskStatus}
                     onUpdateTask={handleUpdateTask}
                     onVoidTask={handleVoidTask}
@@ -3037,6 +3039,8 @@ function TaskContextMenu({
   menu,
   onClose,
   onOpenTask,
+  onOpenAcceptance,
+  onUploadTask,
   onRequestStatus,
   onUpdateTask,
   onVoidTask,
@@ -3050,6 +3054,8 @@ function TaskContextMenu({
   menu: { x: number; y: number; task: Task }
   onClose: () => void
   onOpenTask: (taskId: number) => void
+  onOpenAcceptance: (task: Task) => void
+  onUploadTask: (task: Task) => void
   onRequestStatus: (taskId: number, status: TaskStatus) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onVoidTask: (taskId: number) => void
@@ -3076,6 +3082,18 @@ function TaskContextMenu({
         <Eye size={15} />
         查看详情
       </button>
+      {!isVoided && (
+        <>
+          <button type="button" onClick={() => run(() => onUploadTask(menu.task))}>
+            <Paperclip size={15} />
+            上传过程附件
+          </button>
+          <button type="button" onClick={() => run(() => onOpenAcceptance(menu.task))}>
+            <ClipboardCheck size={15} />
+            交付验收
+          </button>
+        </>
+      )}
       {!isVoided && (
         <div className="context-submenu">
           <button type="button" className="context-menu-parent" aria-haspopup="menu">
@@ -3261,6 +3279,11 @@ function TasksView({
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
+  const [isDetailPaneOpen, setIsDetailPaneOpen] = useState(false)
+  const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
+  const [uploadingTaskId, setUploadingTaskId] = useState(0)
+  const uploadTaskRef = useRef<Task | null>(null)
+  const quickUploadInputRef = useRef<HTMLInputElement | null>(null)
   const viewTabs = (
     <div className="view-mode-tabs" aria-label="任务视图切换">
       <button className={viewMode === '列表' ? 'active' : ''} onClick={() => onViewModeChange('列表')}>
@@ -3298,6 +3321,54 @@ function TasksView({
     event.preventDefault()
     onSelectTask(task.id)
     setContextMenu({ x: event.clientX, y: event.clientY, task })
+  }
+
+  const openAcceptance = (task: Task) => {
+    onSelectTask(task.id)
+    setAcceptanceTask(task)
+  }
+
+  const triggerQuickUpload = (task: Task) => {
+    onSelectTask(task.id)
+    uploadTaskRef.current = task
+    quickUploadInputRef.current?.click()
+  }
+
+  const handleQuickUpload = async (fileList: FileList | null) => {
+    const file = fileList?.[0]
+    const task = uploadTaskRef.current
+    if (!file || !task || uploadingTaskId) {
+      return
+    }
+    setUploadingTaskId(task.id)
+    try {
+      await onUploadImage(task.id, file)
+      if (task.status === '计划中') {
+        onUpdateTask(task.id, { status: '进行中' })
+      }
+    } finally {
+      setUploadingTaskId(0)
+      uploadTaskRef.current = null
+      if (quickUploadInputRef.current) {
+        quickUploadInputRef.current.value = ''
+      }
+    }
+  }
+
+  const confirmListAcceptance = (payload: { actualHours: number; acceptanceNote: string; timeEntries: TimeEntry[]; acceptanceFiles?: string[] }) => {
+    if (!acceptanceTask) {
+      return
+    }
+    onUpdateTask(acceptanceTask.id, {
+      status: '已验收',
+      reviewer: acceptanceTask.reviewer || acceptanceTask.requester || '待确认',
+      actualHours: payload.actualHours,
+      acceptanceNote: payload.acceptanceNote,
+      timeEntries: payload.timeEntries,
+      acceptanceFiles: payload.acceptanceFiles,
+      progress: 100,
+    })
+    setAcceptanceTask(null)
   }
 
   if (viewMode === '日历') {
@@ -3357,39 +3428,62 @@ function TasksView({
         </label>
       </section>
 
-      <section className="management-grid">
+      <section className={`management-grid ${isDetailPaneOpen ? '' : 'detail-collapsed'}`}>
         <div className="panel task-management-list">
+          <input
+            ref={quickUploadInputRef}
+            className="task-row-upload-input"
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+            onChange={(event) => void handleQuickUpload(event.target.files)}
+          />
           <div className="table-head">
             <span>任务</span>
-            <span>对接</span>
-            <span>交付</span>
-            <span>工时</span>
-            <span>状态</span>
+            <span>交付 / 操作</span>
           </div>
           {tasks.map((task) => {
             const dueState = taskDueState(task, isoDate(), isoDate(3))
+            const settlementLabel = isSupplementalTask(task) ? `补录至 ${monthLabelOf(taskSettlementMonth(task))}` : monthLabelOf(taskSettlementMonth(task))
             return (
             <button
               className={`management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''}`}
               key={task.id}
               onClick={() => onSelectTask(task.id)}
+              onDoubleClick={() => onOpenTask(task.id)}
               onContextMenu={(event) => openContextMenu(event, task)}
             >
-              <div>
+              <div className="management-main">
                 <strong>{task.title}</strong>
                 <small>
                   {task.type} · {task.requirement}
                 </small>
-                {isSupplementalTask(task) && <em>补录至 {monthLabelOf(taskSettlementMonth(task))}</em>}
+                <div className="management-inline-meta">
+                  <em className={isSupplementalTask(task) ? 'supplement' : ''}>{settlementLabel}</em>
+                  <span>对接 {task.contact || '待确认'}</span>
+                  <span>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
+                  <span>实际 {task.actualHours.toFixed(1)}h</span>
+                  <TaskStateBadge task={task} />
+                  {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '逾期' : '临期'}</span>}
+                </div>
                 {task.voidedAt && <em className="voided-row-note">已作废{task.voidReason ? `：${task.voidReason}` : ''}</em>}
               </div>
-              <span className="management-contact">{task.contact}</span>
-              <div className="management-deliver">
-                <span>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
-                {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '逾期' : '临期'}</span>}
+              <div className="management-row-end">
+                <span className={`management-due ${dueState ? dueState : ''}`}>{formatPlanDateTime(task.estimatedDate || task.date)}</span>
+                <span className="management-row-actions" aria-label="任务快捷操作">
+                  <button type="button" title="打开详情" aria-label="打开详情" onClick={(event) => { event.stopPropagation(); onOpenTask(task.id) }}>
+                    <Pencil size={15} />
+                  </button>
+                  <button type="button" title="上传附件" aria-label="上传附件" disabled={uploadingTaskId === task.id} onClick={(event) => { event.stopPropagation(); triggerQuickUpload(task) }}>
+                    <Paperclip size={15} />
+                  </button>
+                  <button type="button" title="标记待验收" aria-label="标记待验收" onClick={(event) => { event.stopPropagation(); onRequestStatus(task.id, '待验收') }}>
+                    <CheckCircle2 size={15} />
+                  </button>
+                  <button type="button" title="交付验收" aria-label="交付验收" onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}>
+                    <ClipboardCheck size={15} />
+                  </button>
+                </span>
               </div>
-              <strong className="management-hours">{task.actualHours.toFixed(1)}h</strong>
-              <TaskStateBadge task={task} />
             </button>
             )
           })}
@@ -3410,6 +3504,8 @@ function TasksView({
               menu={contextMenu}
               onClose={() => setContextMenu(null)}
               onOpenTask={onOpenTask}
+              onOpenAcceptance={openAcceptance}
+              onUploadTask={triggerQuickUpload}
               onRequestStatus={onRequestStatus}
               onUpdateTask={onUpdateTask}
               onVoidTask={onVoidTask}
@@ -3423,7 +3519,14 @@ function TasksView({
           )}
         </div>
 
-        {selectedTask ? (
+        {!isDetailPaneOpen && selectedTask ? (
+          <button type="button" className="detail-rail" onClick={() => setIsDetailPaneOpen(true)} title="展开任务详情">
+            <ChevronLeft size={16} />
+            <span>任务详情</span>
+            <strong>{selectedTask.title}</strong>
+            <TaskStateBadge task={selectedTask} />
+          </button>
+        ) : selectedTask ? (
           <TaskEditor
             key={`${selectedTask.id}-${selectedTask.status}`}
             task={selectedTask}
@@ -3434,6 +3537,7 @@ function TasksView({
             onRequestDeleteActivity={onRequestDeleteActivity}
             onUploadAcceptanceFile={onUploadAcceptanceFile}
             onUploadImage={onUploadImage}
+            onCollapse={() => setIsDetailPaneOpen(false)}
           />
         ) : (
         <aside className="panel task-editor-preview">
@@ -3448,6 +3552,15 @@ function TasksView({
         </aside>
         )}
       </section>
+      {acceptanceTask && (
+        <AcceptanceModal
+          task={acceptanceTask}
+          initialNote={acceptanceTask.acceptanceNote ?? ''}
+          onClose={() => setAcceptanceTask(null)}
+          onConfirm={confirmListAcceptance}
+          onUploadFile={onUploadAcceptanceFile}
+        />
+      )}
     </section>
   )
 }
@@ -3461,6 +3574,7 @@ function TaskEditor({
   onRequestDeleteActivity,
   onUploadAcceptanceFile,
   onUploadImage,
+  onCollapse,
 }: {
   task: Task
   role: AuthRole
@@ -3470,6 +3584,7 @@ function TaskEditor({
   onRequestDeleteActivity: (item: ActivityItem, task: Task) => void
   onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onCollapse?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<'信息' | '进展'>(() => (task.status === '待验收' ? '进展' : '信息'))
   const [draft, setDraft] = useState({
@@ -3721,7 +3836,14 @@ function TaskEditor({
             {datePart(task.date).replaceAll('-', '/')} · {task.type} · 对接 {task.contact}
           </small>
         </div>
-        <TaskStateBadge task={task} />
+        <div className="task-editor-hero-actions">
+          <TaskStateBadge task={task} />
+          {onCollapse && (
+            <button className="icon-button" type="button" aria-label="收起任务详情" title="收起任务详情" onClick={onCollapse}>
+              <ChevronRight size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="task-editor-tabs" aria-label="任务详情页签">
