@@ -1376,11 +1376,15 @@ function getActivityFileNames(item: ActivityItem) {
   })
 }
 
+function fileTypeFromName(name: string) {
+  const extension = name.split('.').pop()?.trim().toUpperCase() ?? ''
+  return extension === 'JPEG' ? 'JPG' : extension
+}
+
 function getActivityFileTypeTags(item: ActivityItem) {
   const tags = getActivityFileNames(item)
-    .map((entry) => entry.name.split('.').pop()?.trim().toUpperCase() ?? '')
+    .map((entry) => fileTypeFromName(entry.name))
     .filter(Boolean)
-    .map((extension) => (extension === 'JPEG' ? 'JPG' : extension))
   return Array.from(new Set(tags)).slice(0, 3)
 }
 
@@ -1482,18 +1486,44 @@ function ActivityFileChips({
     <div className="activity-file-row">
       {fileEntries.map((entry) => {
         const file = files.find((candidate) => candidate.id === entry.id) ?? files.find((candidate) => candidate.name === entry.name)
+        const fileType = (file?.type || fileTypeFromName(entry.name) || 'FILE').toUpperCase()
+        const isImage = isInlineImageFileType(fileType)
+        const isDesignFile = ['PSD', 'PSB', 'AI'].includes(fileType)
+        const thumbUrl = file ? authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined)) : undefined
+        const documentPreviewUrl = file && isInlineDocumentFileType(fileType) ? fileDocumentPreviewSource(file) : undefined
+        const isOfficePreview = isOfficeFileType(fileType)
+        const previewCard = (
+          <>
+            <span className={`activity-file-preview-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
+            {thumbUrl ? (
+              <img src={thumbUrl} alt={entry.name} loading="lazy" />
+            ) : documentPreviewUrl ? (
+              <iframe className="activity-file-preview-frame" src={documentPreviewUrl} title={entry.name} loading="lazy" />
+            ) : (
+              <div className="activity-file-preview-placeholder">
+                {isImage || isDesignFile ? <FileImage size={24} /> : isOfficePreview || fileType === 'PDF' ? <FileText size={24} /> : <FileArchive size={24} />}
+                <strong>{fileType}</strong>
+                <span>{isOfficePreview ? '可预览' : '文件'}</span>
+              </div>
+            )}
+          </>
+        )
         if (file && onPreviewFile) {
           return (
-            <button type="button" className="file-chip activity-file-chip" key={`${entry.id ?? ''}-${entry.name}`} onClick={() => onPreviewFile(file)}>
-              <Paperclip size={13} />
-              {entry.name}
+            <button type="button" className="activity-file-preview-card clickable" key={`${entry.id ?? ''}-${entry.name}`} onClick={() => onPreviewFile(file)} title="点击预览附件">
+              <span className={`activity-file-preview-thumb ${thumbUrl || documentPreviewUrl ? 'visual-preview' : ''}`}>
+                {previewCard}
+              </span>
+              <span className="activity-file-preview-name">{entry.name}</span>
             </button>
           )
         }
         return (
-          <span className="file-chip activity-file-chip" key={`${entry.id ?? ''}-${entry.name}`}>
-            <Paperclip size={13} />
-            {entry.name}
+          <span className="activity-file-preview-card" key={`${entry.id ?? ''}-${entry.name}`}>
+            <span className={`activity-file-preview-thumb ${thumbUrl || documentPreviewUrl ? 'visual-preview' : ''}`}>
+              {previewCard}
+            </span>
+            <span className="activity-file-preview-name">{entry.name}</span>
           </span>
         )
       })}

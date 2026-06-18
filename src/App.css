@@ -2010,7 +2010,7 @@ button.file-chip:focus-visible {
   margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .progress-modal-timeline-item .activity-file-row {
@@ -2020,6 +2020,129 @@ button.file-chip:focus-visible {
 .activity-file-chip {
   width: fit-content;
   max-width: 100%;
+}
+
+.activity-file-preview-card {
+  width: 108px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  gap: 5px;
+  text-align: left;
+}
+
+.activity-file-preview-card.clickable {
+  cursor: pointer;
+}
+
+.activity-file-preview-thumb {
+  position: relative;
+  width: 108px;
+  height: 72px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 8px;
+  background: var(--color-surface-strong);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.activity-file-preview-card.clickable:hover .activity-file-preview-thumb,
+.activity-file-preview-card.clickable:focus-visible .activity-file-preview-thumb {
+  border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border-soft));
+  background: var(--color-surface-alt);
+}
+
+.activity-file-preview-card.clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.activity-file-preview-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.activity-file-preview-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--color-surface);
+  pointer-events: none;
+}
+
+.activity-file-preview-badge {
+  position: absolute;
+  z-index: var(--z-base);
+  top: 5px;
+  left: 5px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.activity-file-preview-badge.type-pdf {
+  background: var(--color-status-danger);
+}
+
+.activity-file-preview-badge.type-doc,
+.activity-file-preview-badge.type-docx,
+.activity-file-preview-badge.type-ppt,
+.activity-file-preview-badge.type-pptx {
+  background: var(--color-primary-strong);
+}
+
+.activity-file-preview-badge.type-xls,
+.activity-file-preview-badge.type-xlsx {
+  background: var(--color-primary);
+}
+
+.activity-file-preview-badge.type-ai,
+.activity-file-preview-badge.type-psd,
+.activity-file-preview-badge.type-psb {
+  background: var(--color-admin-only);
+}
+
+.activity-file-preview-placeholder {
+  color: var(--color-primary-strong);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.activity-file-preview-placeholder strong {
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.activity-file-preview-placeholder span {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.activity-file-preview-name {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
 }
 
 .file-add-button {
