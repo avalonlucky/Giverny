@@ -1488,7 +1488,6 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
-  const [filesModalTaskId, setFilesModalTaskId] = useState(0)
   const [progressModalTaskId, setProgressModalTaskId] = useState(0)
   const [acceptanceModalTaskId, setAcceptanceModalTaskId] = useState(0)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
@@ -1840,12 +1839,6 @@ function App() {
   const handleOpenTaskEdit = (taskId: number) => {
     setSelectedTaskId(taskId)
     setEditTaskId(taskId)
-  }
-
-  const handleOpenTaskFiles = (taskId: number) => {
-    setSelectedTaskId(taskId)
-    setFilesModalTaskId(taskId)
-    void loadTaskActivity(taskId)
   }
 
   const handleOpenTaskProgress = (taskId: number) => {
@@ -2973,13 +2966,10 @@ function App() {
             files={fileItems}
             onClose={() => setDetailTaskId(0)}
             onPreviewFile={setPreviewFile}
+            onOpenAcceptance={handleOpenTaskAcceptance}
             onOpenEdit={(taskId) => {
               setDetailTaskId(0)
               handleOpenTaskEdit(taskId)
-            }}
-            onOpenFiles={(taskId) => {
-              setDetailTaskId(0)
-              handleOpenTaskFiles(taskId)
             }}
             onOpenProgress={(taskId) => {
               setDetailTaskId(0)
@@ -2996,17 +2986,6 @@ function App() {
             task={editTask}
             onClose={() => setEditTaskId(0)}
             onSave={(changes) => handleSaveTaskEdit(editTask.id, changes)}
-          />
-        ) : null
-      })()}
-      {filesModalTaskId > 0 && (() => {
-        const filesTask = taskItems.find((task) => task.id === filesModalTaskId)
-        return filesTask ? (
-          <TaskFilesModal
-            task={filesTask}
-            files={fileItems}
-            onClose={() => setFilesModalTaskId(0)}
-            onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
           />
         ) : null
       })()}
@@ -3594,7 +3573,6 @@ function TasksView({
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
-  const [filesTask, setFilesTask] = useState<Task | null>(null)
   const [progressTask, setProgressTask] = useState<Task | null>(null)
   const viewTabs = (
     <div className="view-mode-tabs" aria-label="任务视图切换">
@@ -3875,14 +3853,6 @@ function TasksView({
           onUploadFile={onUploadAcceptanceFile}
         />
       )}
-      {filesTask && (
-        <TaskFilesModal
-          task={tasks.find((task) => task.id === filesTask.id) ?? filesTask}
-          files={files}
-          onClose={() => setFilesTask(null)}
-          onUploadImage={onUploadImage}
-        />
-      )}
       {progressTask && (
         <TaskProgressModal
           task={tasks.find((task) => task.id === progressTask.id) ?? progressTask}
@@ -3896,105 +3866,6 @@ function TasksView({
         />
       )}
     </section>
-  )
-}
-
-function TaskFilesModal({
-  task,
-  files,
-  onClose,
-  onUploadImage,
-}: {
-  task: Task
-  files: FileAsset[]
-  onClose: () => void
-  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
-}) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const taskFiles = files.filter((file) => file.taskId === task.id)
-  const acceptanceNames = new Set(task.acceptanceFiles ?? [])
-  const acceptanceFiles = taskFiles.filter((file) => file.final || file.tag === '验收文件' || acceptanceNames.has(file.name))
-  const processFiles = taskFiles.filter((file) => !acceptanceFiles.some((acceptanceFile) => acceptanceFile.id === file.id))
-
-  const uploadFiles = async (fileList: FileList | null) => {
-    const selectedFiles = Array.from(fileList ?? [])
-    if (selectedFiles.length === 0 || uploading) {
-      return
-    }
-    setUploading(true)
-    setUploadProgress(0)
-    try {
-      for (const file of selectedFiles) {
-        try {
-          await onUploadImage(task.id, file, (ratio) => setUploadProgress(Math.round(ratio * 100)))
-        } catch {
-          // 单个文件失败时继续处理后续文件，具体错误由上传函数 toast 提示。
-        }
-      }
-    } finally {
-      setUploading(false)
-      setUploadProgress(0)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-    }
-  }
-
-  const renderFileGroup = (title: string, groupFiles: FileAsset[], emptyText: string) => (
-    <section className="task-file-group">
-      <h3>{title}</h3>
-      {groupFiles.length === 0 ? (
-        <p>{emptyText}</p>
-      ) : (
-        groupFiles.map((file) => (
-          <article className="task-file-row" key={file.id}>
-            <FileText size={16} />
-            <div>
-              <strong>{file.name}</strong>
-              <small>{file.type} · {file.size} · {formatPlanDateTime(file.uploadedAt)}</small>
-            </div>
-            <span>{file.tag || (file.final ? '终稿' : '过程附件')}</span>
-          </article>
-        ))
-      )}
-    </section>
-  )
-
-  return (
-    <ModalShell className="task-action-modal task-files-modal" labelledBy="task-files-title" onClose={onClose}>
-      <header className="modal-header">
-        <div>
-          <p className="eyebrow">任务文件</p>
-          <h2 id="task-files-title">任务文件</h2>
-          <small>{task.title} · {task.type} · 对接 {task.contact || '待确认'}</small>
-        </div>
-        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
-          <X size={18} />
-        </button>
-      </header>
-      <div className="task-action-body">
-        <button type="button" className="task-upload-dropzone" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          <UploadCloud size={22} />
-          <strong>{uploading ? `上传中 ${uploadProgress}%` : '点击上传文件'}</strong>
-          <span>支持 PNG / PDF / PSD / ZIP，也可以上传过程附件和阶段产物</span>
-        </button>
-        <input
-          ref={fileInputRef}
-          className="task-row-upload-input"
-          type="file"
-          multiple
-          accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
-          onChange={(event) => void uploadFiles(event.target.files)}
-        />
-        {renderFileGroup('验收文件', acceptanceFiles, '暂无验收文件。确认验收时上传的文件会归在这里。')}
-        {renderFileGroup('过程附件', processFiles, '暂无过程附件。草图、沟通截图和阶段预览可以上传到这里。')}
-      </div>
-      <footer className="modal-footer">
-        <button className="primary-button" onClick={onClose}>完成</button>
-      </footer>
-    </ModalShell>
   )
 }
 
@@ -5363,8 +5234,8 @@ function TaskDetailModal({
   files,
   onClose,
   onPreviewFile,
+  onOpenAcceptance,
   onOpenEdit,
-  onOpenFiles,
   onOpenProgress,
 }: {
   task: Task
@@ -5373,8 +5244,8 @@ function TaskDetailModal({
   files: FileAsset[]
   onClose: () => void
   onPreviewFile: (file: FileAsset) => void
+  onOpenAcceptance: (taskId: number) => void
   onOpenEdit: (taskId: number) => void
-  onOpenFiles: (taskId: number) => void
   onOpenProgress: (taskId: number) => void
 }) {
   const dueState = taskDueState(task, isoDate(), isoDate(3))
@@ -5390,7 +5261,20 @@ function TaskDetailModal({
           <h2 id="task-detail-title">{task.title}</h2>
         </div>
         <div className="modal-header-actions">
-          <StatusBadge status={task.status} />
+          {task.status === '待验收' ? (
+            <button
+              type="button"
+              className="status-badge status-待验收 detail-acceptance-status-button"
+              aria-label="去验收"
+              title="去验收"
+              onClick={() => onOpenAcceptance(task.id)}
+            >
+              <span className="status-label-default">待验收</span>
+              <span className="status-label-hover">去验收</span>
+            </button>
+          ) : (
+            <StatusBadge status={task.status} />
+          )}
           <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
             <X size={18} />
           </button>
@@ -5485,15 +5369,10 @@ function TaskDetailModal({
       </div>
 
       <footer className="modal-footer">
-        <button className="ghost-button" onClick={() => onOpenFiles(task.id)}>
-          <Paperclip size={15} />
-          文件
-        </button>
         <button className="ghost-button" onClick={() => onOpenProgress(task.id)}>
           <BarChart3 size={15} />
           进展
         </button>
-        <button className="ghost-button" onClick={onClose}>关闭</button>
         <button className="primary-button" onClick={() => onOpenEdit(task.id)}>
           <Pencil size={15} />
           去编辑

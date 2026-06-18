@@ -1871,43 +1871,6 @@ button {
   gap: 18px;
 }
 
-.task-upload-dropzone {
-  min-height: 96px;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-panel);
-  color: var(--color-text-secondary);
-  background: transparent;
-  display: grid;
-  place-items: center;
-  gap: 5px;
-  cursor: pointer;
-  font: inherit;
-}
-
-.task-upload-dropzone:hover,
-.task-upload-dropzone:focus-visible {
-  color: var(--color-primary-strong);
-  background: var(--color-surface-alt);
-  border-color: var(--color-primary);
-  outline: 0;
-}
-
-.task-upload-dropzone strong {
-  color: var(--color-text);
-  font-size: 14px;
-}
-
-.task-upload-dropzone span {
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.task-file-group {
-  display: grid;
-  gap: 8px;
-}
-
-.task-file-group h3,
 .action-section-title h3 {
   margin: 0;
   color: var(--color-text);
@@ -1915,44 +1878,10 @@ button {
   font-weight: 800;
 }
 
-.task-file-group p,
 .progress-modal-timeline > p {
   margin: 0;
   color: var(--color-text-muted);
   font-size: 13px;
-}
-
-.task-file-row {
-  min-height: 46px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border-soft);
-  color: var(--color-text-secondary);
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.task-file-row strong {
-  display: block;
-  overflow: hidden;
-  color: var(--color-text);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-file-row small {
-  display: block;
-  margin-top: 2px;
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.task-file-row span {
-  color: var(--color-text-muted);
-  font-size: 11px;
-  font-weight: 800;
 }
 
 .action-section {
@@ -7614,6 +7543,35 @@ textarea:focus-visible {
 .task-detail-summary dd .supplement-inline {
   margin-left: 8px;
   vertical-align: middle;
+}
+
+.detail-acceptance-status-button {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.detail-acceptance-status-button .status-label-hover {
+  display: none;
+}
+
+.detail-acceptance-status-button:hover,
+.detail-acceptance-status-button:focus-visible {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.detail-acceptance-status-button:hover .status-label-default,
+.detail-acceptance-status-button:focus-visible .status-label-default {
+  display: none;
+}
+
+.detail-acceptance-status-button:hover .status-label-hover,
+.detail-acceptance-status-button:focus-visible .status-label-hover {
+  display: inline;
 }
 
 .task-detail-progress {
