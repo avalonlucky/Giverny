@@ -1811,6 +1811,8 @@ function App() {
         timeEntries: payload.timeEntries,
         acceptanceFiles: payload.acceptanceFiles,
         progress: 100,
+        // 非补录任务：结算月份自动跟随验收时间（当前年月）
+        settlementMonth: isSupplementalTask(task) ? taskSettlementMonth(task) : monthPart(isoDate()),
       })
     } else {
       requireAdmin()
@@ -3393,6 +3395,7 @@ function TaskContextMenu({
                 复制甲方分享链接
               </button>
             )}
+            {isSupplementalTask(menu.task) && (
             <div className="context-submenu">
               <button type="button" className="context-menu-parent" aria-haspopup="menu">
                 <CalendarDays size={15} />
@@ -3409,6 +3412,7 @@ function TaskContextMenu({
                 ))}
               </div>
             </div>
+            )}
           </div>
         </div>
       )}
@@ -3624,6 +3628,8 @@ function TasksView({
       timeEntries: payload.timeEntries,
       acceptanceFiles: payload.acceptanceFiles,
       progress: 100,
+      // 非补录任务：结算月份自动跟随验收时间（当前年月）
+      settlementMonth: isSupplementalTask(acceptanceTask) ? taskSettlementMonth(acceptanceTask) : monthPart(isoDate()),
     })
     setAcceptanceTask(null)
   }
@@ -4525,7 +4531,14 @@ export function TaskEditor({
               <span>预估工时</span>
               <DurationPicker valueMinutes={taskEstimatedMinutes} onChange={updateEstimatedHours} />
             </label>
-            <SettlementMonthField label="结算月份" value={draft.settlementMonth} onChange={updateSettlementMonth} saved={savedFields.has('settlementMonth')} />
+            {isSupplementalTask(task) ? (
+              <SettlementMonthField label="结算月份（补录）" value={draft.settlementMonth} onChange={updateSettlementMonth} saved={savedFields.has('settlementMonth')} />
+            ) : (
+              <label className="field field-locked">
+                <span>结算月份 <small>验收时自动归属</small></span>
+                <div className="field-locked-value">{monthLabelOf(taskSettlementMonth(task)) || '待验收时确定'}</div>
+              </label>
+            )}
           </div>
         </section>
       ) : (
@@ -8079,7 +8092,7 @@ function NewTaskModal({
       id: Date.now(),
       date: startDate,
       estimatedDate,
-      settlementMonth: isSupplemental ? settlementMonth : currentMonthValue,
+      settlementMonth: isSupplemental ? settlementMonth : '',
       type: type.trim(),
       title: title.trim(),
       requirement: requirement.trim(),

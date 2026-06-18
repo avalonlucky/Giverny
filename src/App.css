@@ -4284,6 +4284,28 @@ textarea::placeholder {
   animation: field-saved-pulse 0.9s ease-out;
 }
 
+.field.field-locked {
+  opacity: 0.85;
+}
+
+.field.field-locked span small {
+  margin-left: 4px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.field-locked-value {
+  min-height: 42px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
 @keyframes field-saved-pulse {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 22%, transparent);
