@@ -159,6 +159,18 @@ function formatPlanDateTime(value: string) {
   return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
 }
 
+function formatTimelineDateTime(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value)
+  const year = Number(date.slice(0, 4))
+  const month = Number(date.slice(5, 7))
+  const day = Number(date.slice(8, 10))
+  const time = timelineTimePart(value)
+  return `${year}年${month}月${day}日${time ? ` ${time}` : ''}`
+}
+
 function formatMonthDayTime(value: string) {
   if (!value) {
     return ''
@@ -1363,6 +1375,14 @@ function getActivityFileNames(item: ActivityItem) {
     seen.add(key)
     return true
   })
+}
+
+function getActivityFileTypeTags(item: ActivityItem) {
+  const tags = getActivityFileNames(item)
+    .map((entry) => entry.name.split('.').pop()?.trim().toUpperCase() ?? '')
+    .filter(Boolean)
+    .map((extension) => (extension === 'JPEG' ? 'JPG' : extension))
+  return Array.from(new Set(tags)).slice(0, 3)
 }
 
 function taskAssistantFiles(task: Task, files: FileAsset[], uploadedFiles: Array<FileAsset | string> = []) {
@@ -4294,33 +4314,39 @@ function TaskProgressModal({
             {taskActivity.length === 0 ? (
               <p>还没有进展记录。</p>
             ) : (
-              taskActivity.slice(0, 8).map((item) => (
-                <article
-                  className={`progress-modal-timeline-item ${canDeleteActivity ? 'can-delete' : ''}`}
-                  key={item.id}
-                  onContextMenu={(event) => {
-                    if (!onRequestDeleteActivity) {
-                      return
-                    }
-                    event.preventDefault()
-                    onRequestDeleteActivity(item, task)
-                  }}
-                >
-                  <span className="dot" />
-                  <div>
-                    <p>{describeActivity(item)}</p>
-                    <span className="progress-modal-timeline-meta">
-                      <span className="progress-modal-timeline-type">任务动态</span>
-                      {onRequestDeleteActivity && (
-                        <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => onRequestDeleteActivity(item, task)}>
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </span>
-                    <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
-                  </div>
-                </article>
-              ))
+              taskActivity.slice(0, 8).map((item) => {
+                const fileTypeTags = getActivityFileTypeTags(item)
+                return (
+                  <article
+                    className={`progress-modal-timeline-item ${canDeleteActivity ? 'can-delete' : ''}`}
+                    key={item.id}
+                    onContextMenu={(event) => {
+                      if (!onRequestDeleteActivity) {
+                        return
+                      }
+                      event.preventDefault()
+                      onRequestDeleteActivity(item, task)
+                    }}
+                  >
+                    <span className="dot" />
+                    <div>
+                      <strong>{formatTimelineDateTime(item.createdAt)}</strong>
+                      <span className="progress-modal-timeline-meta">
+                        {fileTypeTags.map((tag) => (
+                          <span className="progress-modal-file-type" key={`${item.id}-${tag}`}>{tag}</span>
+                        ))}
+                        {onRequestDeleteActivity && (
+                          <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => onRequestDeleteActivity(item, task)}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </span>
+                      <p>{describeActivity(item)}</p>
+                      <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
+                    </div>
+                  </article>
+                )
+              })
             )}
           </div>
         </section>

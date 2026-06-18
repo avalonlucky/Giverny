@@ -2103,6 +2103,12 @@ button.file-chip:focus-visible {
   background: color-mix(in srgb, var(--color-status-danger) 8%, transparent);
 }
 
+.progress-modal-timeline-item strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .progress-modal-timeline-item time,
 .progress-modal-timeline-item .timeline-stamp {
   color: var(--color-text-secondary);
@@ -2110,10 +2116,14 @@ button.file-chip:focus-visible {
   font-weight: 500;
 }
 
-.progress-modal-timeline-type {
-  color: var(--color-text);
-  font-size: 13px;
+.progress-modal-file-type {
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1.4;
   white-space: nowrap;
 }
 
