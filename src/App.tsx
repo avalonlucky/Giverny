@@ -159,7 +159,7 @@ function formatPlanDateTime(value: string) {
   return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
 }
 
-function formatTimelineDateTime(value: string) {
+function formatTimelineDate(value: string) {
   if (!value) {
     return ''
   }
@@ -167,8 +167,7 @@ function formatTimelineDateTime(value: string) {
   const year = Number(date.slice(0, 4))
   const month = Number(date.slice(5, 7))
   const day = Number(date.slice(8, 10))
-  const time = timelineTimePart(value)
-  return `${year}年${month}月${day}日${time ? ` ${time}` : ''}`
+  return `${year}年${month}月${day}日`
 }
 
 function formatMonthDayTime(value: string) {
@@ -1519,6 +1518,16 @@ function TimelineStamp({ value, audience }: { value: string; audience: 'admin' |
       {datePart(value)}
       {privateTime && <span className="admin-only-data"> {privateTime}</span>}
     </time>
+  )
+}
+
+function TimelineDateLabel({ value }: { value: string }) {
+  const privateTime = timelineTimePart(value)
+  return (
+    <strong>
+      {formatTimelineDate(value)}
+      {privateTime && <span className="admin-only-data"> {privateTime}</span>}
+    </strong>
   )
 }
 
@@ -4330,7 +4339,7 @@ function TaskProgressModal({
                   >
                     <span className="dot" />
                     <div>
-                      <strong>{formatTimelineDateTime(item.createdAt)}</strong>
+                      <TimelineDateLabel value={item.createdAt} />
                       <span className="progress-modal-timeline-meta">
                         {fileTypeTags.map((tag) => (
                           <span className="progress-modal-file-type" key={`${item.id}-${tag}`}>{tag}</span>
