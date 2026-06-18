@@ -2032,6 +2032,40 @@ button.file-chip:focus-visible {
   gap: 0;
 }
 
+.progress-timeline-title-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.progress-timeline-toggle {
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 4px 8px;
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.progress-timeline-toggle svg {
+  transition: transform 0.16s ease;
+}
+
+.progress-timeline-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.progress-timeline-toggle:hover {
+  color: var(--color-primary);
+  background: var(--color-surface-strong);
+}
+
 .progress-modal-timeline-item {
   position: relative;
   padding: 0 0 16px 20px;

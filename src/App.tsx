@@ -4120,10 +4120,14 @@ function TaskProgressModal({
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
+  const [activityExpansion, setActivityExpansion] = useState({ taskId: task.id, showAll: false })
   const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
   const taskActivity = activity
   const canDeleteActivity = Boolean(onRequestDeleteActivity)
+  const showAllActivity = activityExpansion.taskId === task.id ? activityExpansion.showAll : false
+  const visibleTaskActivity = showAllActivity ? taskActivity : taskActivity.slice(0, 5)
+  const hiddenActivityCount = Math.max(0, taskActivity.length - 5)
 
   useEffect(() => {
     writeDraftCache(progressDraftKey, { draftProgress, note })
@@ -4317,13 +4321,26 @@ function TaskProgressModal({
         <section className="action-section">
           <div className="action-section-title">
             <h3>进展时间轴</h3>
-            <span>{taskActivity.length} 条记录</span>
+            <div className="progress-timeline-title-actions">
+              <span>{taskActivity.length} 条记录</span>
+              {hiddenActivityCount > 0 && (
+                <button
+                  type="button"
+                  className="progress-timeline-toggle"
+                  onClick={() => setActivityExpansion({ taskId: task.id, showAll: !showAllActivity })}
+                  aria-expanded={showAllActivity}
+                >
+                  <ChevronDown size={14} />
+                  {showAllActivity ? '收起' : `展开 ${hiddenActivityCount} 条`}
+                </button>
+              )}
+            </div>
           </div>
           <div className="progress-modal-timeline">
             {taskActivity.length === 0 ? (
               <p>还没有进展记录。</p>
             ) : (
-              taskActivity.slice(0, 8).map((item) => {
+              visibleTaskActivity.map((item) => {
                 const fileTypeTags = getActivityFileTypeTags(item)
                 return (
                   <article
