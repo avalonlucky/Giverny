@@ -1727,6 +1727,10 @@ button {
   box-shadow: var(--shadow-popover);
 }
 
+.create-task-context-menu {
+  width: 148px;
+}
+
 .task-context-menu button {
   width: 100%;
   min-height: 36px;
@@ -4290,6 +4294,20 @@ button.file-chip:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.task-text-ai-panel {
+  margin-top: 2px;
+}
+
+.action-section-title-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .field input,

@@ -415,6 +415,11 @@ type TaskAssistantToolArgs = {
   reason?: string
 }
 
+type TextAssistantToolArgs = {
+  optimizedText?: string
+  summary?: string
+}
+
 function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTypeGroup[]) {
   const parent = String(args.suggestedParentType ?? '').trim()
   const child = String(args.suggestedChildType ?? '').trim()
@@ -447,6 +452,20 @@ function parseToolArguments(value: unknown): TaskAssistantToolArgs {
     }
   }
   return typeof value === 'object' ? (value as TaskAssistantToolArgs) : {}
+}
+
+function parseTextToolArguments(value: unknown): TextAssistantToolArgs {
+  if (!value) {
+    return {}
+  }
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as TextAssistantToolArgs
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' ? (value as TextAssistantToolArgs) : {}
 }
 
 async function getDesignTypeGroups(env: Env) {
@@ -1570,6 +1589,116 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   return ok(suggestion)
 }
 
+async function optimizeTaskTextWithAi(env: Env, request: Request) {
+  if (!env.DEEPSEEK_API_KEY) {
+    return fail('DeepSeek API Key 尚未配置，请先在 Cloudflare Secret 中设置 DEEPSEEK_API_KEY。', 503)
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    mode?: string
+    text?: string
+    task?: Record<string, unknown>
+    files?: Array<Record<string, unknown>>
+    activity?: Array<{ createdAt?: string; summary?: string }>
+    uploadedFileNames?: string[]
+  }
+  const mode = body.mode === 'acceptance' ? 'acceptance' : 'progress'
+  const text = String(body.text ?? '').trim()
+  const files = Array.isArray(body.files) ? body.files.slice(0, 40) : []
+  const uploadedFileNames = Array.isArray(body.uploadedFileNames) ? body.uploadedFileNames.slice(0, 20).map(String) : []
+  const activity = Array.isArray(body.activity) ? body.activity.slice(0, 12) : []
+  const taskTitle = String(body.task?.title ?? '').trim()
+
+  if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0) {
+    return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
+  }
+
+  const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+  const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
+  const toolName = 'optimize_task_worklog_text'
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content:
+            '你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\nprogress 模式：输出 1-3 句进展记录，说明当前完成到哪一步、已上传哪些过程附件、下一步如有明确事实可写。不要写成正式验收结论。\nacceptance 模式：输出验收备注，说明交付/补传文件、关键进展和结算/补录说明。不要改变验收状态，不要凭空说客户已确认。\n\n只返回优化后的文本和一句简短摘要。',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            mode,
+            currentText: text,
+            task: body.task ?? {},
+            relatedFiles: files,
+            currentUploadedFileNames: uploadedFileNames,
+            recentActivity: activity,
+          }),
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: toolName,
+            description: '返回优化后的任务进展或验收备注',
+            parameters: {
+              type: 'object',
+              properties: {
+                optimizedText: {
+                  type: 'string',
+                  description: '优化后的中文文本。必须可直接写入进展记录或验收备注；保留事实，不编造文件内容、交付物、客户确认或验收结果。',
+                },
+                summary: {
+                  type: 'string',
+                  description: '一句话说明本次优化依据，例如结合了备注、文件名和进展记录。',
+                },
+              },
+              required: ['optimizedText', 'summary'],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: 'function', function: { name: toolName } },
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    return fail(`AI 助手请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
+  }
+
+  const data = (await response.json().catch(() => null)) as {
+    choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>; content?: string } }>
+  } | null
+  const message = data?.choices?.[0]?.message
+  const toolCall = message?.tool_calls?.find((item) => item.function?.name === toolName)
+  let parsed = parseTextToolArguments(toolCall?.function?.arguments)
+  if (!parsed.optimizedText && message?.content) {
+    parsed = parseTextToolArguments(message.content)
+  }
+
+  const optimizedText = String(parsed.optimizedText ?? '').trim()
+  if (!optimizedText) {
+    return fail('AI 助手没有返回有效建议，请稍后重试。', 502)
+  }
+
+  await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
+    mode,
+    taskTitle,
+    fileCount: files.length,
+    uploadedFileCount: uploadedFileNames.length,
+  })
+  return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })
+}
+
 async function generateMonthlyReport(env: Env, request: Request) {
   const body = (await request.json()) as { month: string; hourlyRate: number; importedHours?: number }
   const rows = await env.DB.prepare("SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL").bind(body.month).all<DbTask>()
@@ -1747,6 +1876,9 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/ai/task-assistant' && request.method === 'POST') {
     return suggestTaskWithAi(env, request)
+  }
+  if (path === '/api/ai/text-assistant' && request.method === 'POST') {
+    return optimizeTaskTextWithAi(env, request)
   }
   if (path === '/api/settings/hourly-rate' && request.method === 'PATCH') {
     return setHourlyRate(env, request)

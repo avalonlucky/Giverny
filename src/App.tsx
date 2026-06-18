@@ -69,6 +69,7 @@ import {
   type ReportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
+  type TextAssistantSuggestion,
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
@@ -112,6 +113,13 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
     return viewRoutes[view]
   }
   return `${viewRoutes[view]}?taskView=calendar`
+}
+
+function isTaskListBlankContextTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return !target.closest('.task-row, .task-context-menu, button, a, input, textarea, select, [role="button"]')
 }
 
 const pad = (value: number) => String(value).padStart(2, '0')
@@ -1361,6 +1369,61 @@ function getActivityFileNames(item: ActivityItem) {
   })
 }
 
+function taskAssistantFiles(task: Task, files: FileAsset[], uploadedFiles: Array<FileAsset | string> = []) {
+  const taskFileNames = new Set([...(task.files ?? []), ...(task.acceptanceFiles ?? [])].map((name) => name.trim()).filter(Boolean))
+  const uploadedNames = uploadedFiles
+    .map((file) => (typeof file === 'string' ? file : file.name))
+    .map((name) => name.trim())
+    .filter(Boolean)
+  uploadedNames.forEach((name) => taskFileNames.add(name))
+
+  const relatedFiles = files.filter((file) => file.taskId === task.id || taskFileNames.has(file.name))
+  const fallbackFiles = [...taskFileNames].map((name) => ({
+    name,
+    type: '',
+    tag: task.acceptanceFiles?.includes(name) ? '验收文件' : '',
+    final: task.acceptanceFiles?.includes(name) ?? false,
+    visible: true,
+    uploadedAt: '',
+  }))
+
+  const seen = new Set<string>()
+  return [...relatedFiles, ...fallbackFiles]
+    .filter((file) => {
+      if (!file.name || seen.has(file.name)) {
+        return false
+      }
+      seen.add(file.name)
+      return true
+    })
+    .slice(0, 40)
+    .map((file) => ({
+      name: file.name,
+      type: file.type,
+      tag: file.tag,
+      final: file.final,
+      visible: file.visible,
+      uploadedAt: file.uploadedAt,
+    }))
+}
+
+function taskAssistantActivity(activity: ActivityItem[]) {
+  return activity.slice(0, 12).map((item) => ({
+    createdAt: item.createdAt,
+    summary: describeActivity(item),
+  }))
+}
+
+function renderTextAssistantBody(text: string) {
+  return text.split('\n').map((line, index) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      return null
+    }
+    return <span className="ai-suggestion-line" key={index}>{trimmed}</span>
+  })
+}
+
 function ActivityFileChips({
   item,
   files = [],
@@ -1500,6 +1563,7 @@ function App() {
   const [statusReasonTarget, setStatusReasonTarget] = useState<StatusReasonTarget>(null)
   const [showVoidedTasks, setShowVoidedTasks] = useState(false)
   const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
+  const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [showFireworks, setShowFireworks] = useState(false)
   const [toastQueue, setToastQueue] = useState<ToastState[]>([])
   const toastTimersRef = useRef<number[]>([])
@@ -1885,10 +1949,13 @@ function App() {
   }
 
   useEffect(() => {
-    if (!dashboardContextMenu) {
+    if (!dashboardContextMenu && !dashboardCreateMenu) {
       return
     }
-    const closeMenu = () => setDashboardContextMenu(null)
+    const closeMenu = () => {
+      setDashboardContextMenu(null)
+      setDashboardCreateMenu(null)
+    }
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         closeMenu()
@@ -1902,12 +1969,31 @@ function App() {
       window.removeEventListener('scroll', closeMenu, true)
       window.removeEventListener('keydown', handleKeydown)
     }
-  }, [dashboardContextMenu])
+  }, [dashboardContextMenu, dashboardCreateMenu])
 
   const openDashboardContextMenu = (event: React.MouseEvent, task: Task) => {
     event.preventDefault()
+    setDashboardCreateMenu(null)
     setSelectedTaskId(task.id)
     setDashboardContextMenu({ x: event.clientX, y: event.clientY, task })
+  }
+
+  const openDashboardCreateMenu = (event: React.MouseEvent) => {
+    if (!isTaskListBlankContextTarget(event.target)) {
+      return
+    }
+    event.preventDefault()
+    setDashboardContextMenu(null)
+    setDashboardCreateMenu({ x: event.clientX, y: event.clientY })
+  }
+
+  const openNewTaskFromDashboardMenu = () => {
+    setDashboardCreateMenu(null)
+    if (isAdmin) {
+      setIsModalOpen(true)
+    } else {
+      requireAdmin()
+    }
   }
 
   // 选中任务变化时自动加载它的动态时间轴（工作台右侧明细卡用）
@@ -2621,7 +2707,7 @@ function App() {
                 ))}
               </div>
 
-              <div className="task-list">
+              <div className="task-list" onContextMenu={openDashboardCreateMenu}>
                 {visibleTasks.length === 0 && (
                   <div className="empty-state">
                     <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
@@ -2723,6 +2809,12 @@ function App() {
                     onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
                     onCopyShareLink={handleCopyShareLink}
                     reports={taskContextOptions.reports}
+                  />
+                )}
+                {dashboardCreateMenu && (
+                  <CreateTaskContextMenu
+                    menu={dashboardCreateMenu}
+                    onCreate={openNewTaskFromDashboardMenu}
                   />
                 )}
               </div>
@@ -3010,6 +3102,7 @@ function App() {
           <AcceptanceModal
             task={acceptanceTask}
             initialNote={acceptanceTask.acceptanceNote ?? ''}
+            files={fileItems}
             onClose={() => setAcceptanceModalTaskId(0)}
             onConfirm={(payload) => handleConfirmTaskAcceptance(acceptanceTask, payload)}
             onUploadFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
@@ -3310,6 +3403,23 @@ function AdminLoginModal({
   )
 }
 
+function CreateTaskContextMenu({
+  menu,
+  onCreate,
+}: {
+  menu: { x: number; y: number }
+  onCreate: () => void
+}) {
+  return (
+    <div className="task-context-menu create-task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+      <button type="button" onClick={onCreate}>
+        <Plus size={15} />
+        新建任务
+      </button>
+    </div>
+  )
+}
+
 function TaskContextMenu({
   menu,
   onClose,
@@ -3572,6 +3682,7 @@ function TasksView({
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
+  const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
   const [progressTask, setProgressTask] = useState<Task | null>(null)
   const viewTabs = (
@@ -3588,10 +3699,13 @@ function TasksView({
   )
 
   useEffect(() => {
-    if (!contextMenu) {
+    if (!contextMenu && !createMenu) {
       return
     }
-    const closeMenu = () => setContextMenu(null)
+    const closeMenu = () => {
+      setContextMenu(null)
+      setCreateMenu(null)
+    }
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         closeMenu()
@@ -3605,12 +3719,27 @@ function TasksView({
       window.removeEventListener('scroll', closeMenu, true)
       window.removeEventListener('keydown', handleKeydown)
     }
-  }, [contextMenu])
+  }, [contextMenu, createMenu])
 
   const openContextMenu = (event: React.MouseEvent, task: Task) => {
     event.preventDefault()
+    setCreateMenu(null)
     onSelectTask(task.id)
     setContextMenu({ x: event.clientX, y: event.clientY, task })
+  }
+
+  const openCreateMenu = (event: React.MouseEvent) => {
+    if (!isTaskListBlankContextTarget(event.target)) {
+      return
+    }
+    event.preventDefault()
+    setContextMenu(null)
+    setCreateMenu({ x: event.clientX, y: event.clientY })
+  }
+
+  const createTaskFromMenu = () => {
+    setCreateMenu(null)
+    onCreateTask()
   }
 
   const openAcceptance = (task: Task) => {
@@ -3703,7 +3832,7 @@ function TasksView({
       </section>
 
       <section className="management-grid">
-        <div className="panel task-management-list">
+        <div className="panel task-management-list" onContextMenu={openCreateMenu}>
           <div className="management-list-toolbar">
             <span>共 {tasks.length} 条</span>
             <small>悬停显示快捷操作，右键可打开完整菜单</small>
@@ -3842,12 +3971,19 @@ function TasksView({
               reports={reports}
             />
           )}
+          {createMenu && (
+            <CreateTaskContextMenu
+              menu={createMenu}
+              onCreate={createTaskFromMenu}
+            />
+          )}
         </div>
       </section>
       {acceptanceTask && (
         <AcceptanceModal
           task={acceptanceTask}
           initialNote={acceptanceTask.acceptanceNote ?? ''}
+          files={files}
           onClose={() => setAcceptanceTask(null)}
           onConfirm={confirmListAcceptance}
           onUploadFile={onUploadAcceptanceFile}
@@ -3895,6 +4031,9 @@ function TaskProgressModal({
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
+  const [progressAiError, setProgressAiError] = useState('')
+  const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
   const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
   const taskActivity = activity
@@ -3955,6 +4094,27 @@ function TaskProgressModal({
     }
   }
 
+  const requestProgressAiSuggestion = async () => {
+    setProgressAiError('')
+    setProgressAiSuggestion(null)
+    setIsProgressAiLoading(true)
+    try {
+      const suggestion = await api.optimizeTaskTextAssistant({
+        mode: 'progress',
+        text: note,
+        task,
+        files: taskAssistantFiles(task, files, uploadedNames),
+        activity: taskAssistantActivity(taskActivity),
+        uploadedFileNames: uploadedNames,
+      })
+      setProgressAiSuggestion(suggestion)
+    } catch (error) {
+      setProgressAiError(error instanceof Error ? error.message : 'AI 助手暂时不可用')
+    } finally {
+      setIsProgressAiLoading(false)
+    }
+  }
+
   return (
     <ModalShell className="task-action-modal task-progress-modal" labelledBy="task-progress-title" onClose={onClose}>
       <header className="modal-header">
@@ -4002,9 +4162,43 @@ function TaskProgressModal({
         <section className="action-section">
           <div className="action-section-title">
             <h3>新增进展</h3>
-            <span>确认后写入时间轴</span>
+            <div className="action-section-title-actions">
+              <span>确认后写入时间轴</span>
+              <button
+                type="button"
+                className="icon-button ai-assist-button"
+                aria-label="AI 优化进展内容"
+                title="AI 优化进展内容"
+                onClick={() => void requestProgressAiSuggestion()}
+                disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
+              >
+                <Sparkles size={16} />
+              </button>
+            </div>
           </div>
           <textarea className="task-progress-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="写一下目前的进度到哪了，例如：与对接人确认了尺寸，正在出草图。" />
+          {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
+            <div className="ai-suggestion-panel task-text-ai-panel">
+              <div className="ai-suggestion-head">
+                <span>{isProgressAiLoading ? 'AI 正在整理进展' : 'AI 建议'}</span>
+              </div>
+              {isProgressAiLoading && <p>正在结合当前输入、任务附件和最近进展优化文案...</p>}
+              {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
+              {progressAiSuggestion && (
+                <>
+                  <div className="ai-suggestion-body">
+                    {renderTextAssistantBody(progressAiSuggestion.optimizedText)}
+                  </div>
+                  {progressAiSuggestion.summary && <small>{progressAiSuggestion.summary}</small>}
+                  <div className="ai-suggestion-actions">
+                    <button type="button" className="ghost-button compact-button" onClick={() => setNote(progressAiSuggestion.optimizedText)}>
+                      采用建议
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {uploadedNames.length > 0 && (
             <div className="uploaded-chip-row">
               {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
@@ -4066,6 +4260,7 @@ export function TaskEditor({
   task,
   role,
   activity,
+  files = [],
   onUpdateTask,
   onCreateTaskUpdate,
   onRequestDeleteActivity,
@@ -4076,6 +4271,7 @@ export function TaskEditor({
   task: Task
   role: AuthRole
   activity: ActivityItem[]
+  files?: FileAsset[]
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onRequestDeleteActivity: (item: ActivityItem, task: Task) => void
@@ -4771,6 +4967,7 @@ export function TaskEditor({
         <AcceptanceModal
           task={task}
           initialNote={task.acceptanceNote ?? ''}
+          files={files}
           onClose={() => setAcceptanceOpen(false)}
           onConfirm={confirmAcceptance}
           onUploadFile={onUploadAcceptanceFile}
@@ -4805,12 +5002,14 @@ export function TaskEditor({
 function AcceptanceModal({
   task,
   initialNote,
+  files = [],
   onClose,
   onConfirm,
   onUploadFile,
 }: {
   task: Task
   initialNote: string
+  files?: FileAsset[]
   onClose: () => void
   onConfirm: (payload: AcceptancePayload) => void
   onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
@@ -4838,6 +5037,9 @@ function AcceptanceModal({
   const [progressDraft, setProgressDraft] = useState(task.progress)
   const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const [acceptanceAiSuggestion, setAcceptanceAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
+  const [acceptanceAiError, setAcceptanceAiError] = useState('')
+  const [isAcceptanceAiLoading, setIsAcceptanceAiLoading] = useState(false)
   const isSupplemental = isSupplementalTask(task)
   const initialTimeEntriesSignature = useMemo(
     () => serializeTimeEntries(task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: '', start: '09:00', end: '10:00' }]),
@@ -4939,6 +5141,27 @@ function AcceptanceModal({
       return
     }
     onClose()
+  }
+
+  const requestAcceptanceAiSuggestion = async () => {
+    setAcceptanceAiError('')
+    setAcceptanceAiSuggestion(null)
+    setIsAcceptanceAiLoading(true)
+    try {
+      const suggestion = await api.optimizeTaskTextAssistant({
+        mode: 'acceptance',
+        text: acceptanceNote,
+        task,
+        files: taskAssistantFiles(task, files, uploadedFiles),
+        activity: [],
+        uploadedFileNames: uploadedFiles.map((file) => file.name),
+      })
+      setAcceptanceAiSuggestion(suggestion)
+    } catch (error) {
+      setAcceptanceAiError(error instanceof Error ? error.message : 'AI 助手暂时不可用')
+    } finally {
+      setIsAcceptanceAiLoading(false)
+    }
   }
 
   return (
@@ -5158,7 +5381,19 @@ function AcceptanceModal({
           <div className="acceptance-section-title">
             <span className="acceptance-section-index">5</span>
             <h3>验收备注</h3>
-            <small>可选</small>
+            <div className="action-section-title-actions">
+              <small>可选</small>
+              <button
+                type="button"
+                className="icon-button ai-assist-button"
+                aria-label="AI 优化验收备注"
+                title="AI 优化验收备注"
+                onClick={() => void requestAcceptanceAiSuggestion()}
+                disabled={isAcceptanceAiLoading || (!acceptanceNote.trim() && uploadedFiles.length === 0 && taskAssistantFiles(task, files).length === 0)}
+              >
+                <Sparkles size={16} />
+              </button>
+            </div>
           </div>
           <label className="acceptance-note-field">
             <textarea
@@ -5167,6 +5402,28 @@ function AcceptanceModal({
               placeholder={isSupplemental ? '例如：该任务已于 5 月完成，本次补录到 6 月结算；验收文件已补充上传。' : '例如：完成 3 项主视觉修改，输出 PNG / PDF / 源文件，附件已上传。'}
             />
           </label>
+          {(acceptanceAiSuggestion || acceptanceAiError || isAcceptanceAiLoading) && (
+            <div className="ai-suggestion-panel task-text-ai-panel">
+              <div className="ai-suggestion-head">
+                <span>{isAcceptanceAiLoading ? 'AI 正在整理验收备注' : 'AI 建议'}</span>
+              </div>
+              {isAcceptanceAiLoading && <p>正在结合任务需求、已上传文件和当前备注优化文案...</p>}
+              {acceptanceAiError && <p className="ai-suggestion-error">{acceptanceAiError}</p>}
+              {acceptanceAiSuggestion && (
+                <>
+                  <div className="ai-suggestion-body">
+                    {renderTextAssistantBody(acceptanceAiSuggestion.optimizedText)}
+                  </div>
+                  {acceptanceAiSuggestion.summary && <small>{acceptanceAiSuggestion.summary}</small>}
+                  <div className="ai-suggestion-actions">
+                    <button type="button" className="ghost-button compact-button" onClick={() => setAcceptanceNote(acceptanceAiSuggestion.optimizedText)}>
+                      采用建议
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </section>
       </div>
 

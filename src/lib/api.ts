@@ -77,6 +77,22 @@ export type TaskAssistantSuggestion = {
   }
 }
 
+export type TextAssistantMode = 'acceptance' | 'progress'
+
+export type TextAssistantSuggestion = {
+  optimizedText: string
+  summary: string
+}
+
+export type TextAssistantPayload = {
+  mode: TextAssistantMode
+  text: string
+  task: Pick<Task, 'id' | 'title' | 'type' | 'requirement' | 'contact' | 'requester' | 'reviewer' | 'date' | 'estimatedDate' | 'status' | 'progress' | 'actualHours' | 'acceptanceNote' | 'acceptanceFiles' | 'files'>
+  files: Array<Pick<FileAsset, 'name' | 'type' | 'tag' | 'final' | 'visible' | 'uploadedAt'>>
+  activity?: Array<{ createdAt: string; summary: string }>
+  uploadedFileNames?: string[]
+}
+
 const authStorageKey = 'designer-worklog-auth'
 const legacyTokenStorageKey = 'designer-worklog-admin-token'
 
@@ -413,6 +429,12 @@ export const api = {
     }),
   suggestTaskAssistant: (payload: { title: string; requirement: string; selectedType: string; designTypeGroups: DesignTypeGroup[] }) =>
     requestJson<TaskAssistantSuggestion>('/api/ai/task-assistant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  optimizeTaskTextAssistant: (payload: TextAssistantPayload) =>
+    requestJson<TextAssistantSuggestion>('/api/ai/text-assistant', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
