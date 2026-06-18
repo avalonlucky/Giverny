@@ -66,6 +66,7 @@ import {
   type AccessToken,
   type ActivityItem,
   type AuthRole,
+  type HourEstimateSuggestion,
   type ReportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
@@ -8398,6 +8399,9 @@ function NewTaskModal({
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
   const [aiError, setAiError] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
+  const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
+  const [hourSuggestionError, setHourSuggestionError] = useState('')
+  const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const supplementalMonthOptions = useMemo(() => monthSelectOptions(currentMonthValue, settlementMonth), [currentMonthValue, settlementMonth])
 
@@ -8555,6 +8559,33 @@ function NewTaskModal({
     setAiSuggestion({ ...aiSuggestion, categoryExists: true, missingCategory: undefined })
   }
 
+  const requestHourSuggestion = async () => {
+    setHourSuggestionError('')
+    setHourSuggestion(null)
+    setIsHourSuggestionLoading(true)
+    try {
+      const suggestion = await api.suggestHourEstimate({
+        title,
+        requirement,
+        selectedType: type,
+        startDate,
+        estimatedDate,
+      })
+      setHourSuggestion(suggestion)
+    } catch (error) {
+      setHourSuggestionError(error instanceof Error ? error.message : 'AI 工时建议暂时不可用')
+    } finally {
+      setIsHourSuggestionLoading(false)
+    }
+  }
+
+  const applyHourSuggestion = () => {
+    if (!hourSuggestion) {
+      return
+    }
+    updateEstimatedMinutes(Math.max(30, Math.round(hourSuggestion.suggestedHours * 60)))
+  }
+
   return (
     <ModalShell className="new-task-modal" labelledBy="new-task-title" onClose={onClose} closeOnBackdrop={false} closeOnEscape={false}>
         <header className="modal-header">
@@ -8706,6 +8737,57 @@ function NewTaskModal({
               readOnly={scheduleAnchor !== 'end'}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
             />
+          </div>
+          <div className="hour-estimate-panel wide">
+            <div className="hour-estimate-head">
+              <div>
+                <strong>工时建议</strong>
+                <span>基于同类型历史任务、实际工时和验收备注分析</span>
+              </div>
+              <button
+                type="button"
+                className="ghost-button compact-button"
+                onClick={() => void requestHourSuggestion()}
+                disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
+              >
+                <Sparkles size={14} />
+                {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
+              </button>
+            </div>
+            {isHourSuggestionLoading && <p>正在读取历史任务并生成工时建议...</p>}
+            {hourSuggestionError && <p className="ai-suggestion-error">{hourSuggestionError}</p>}
+            {!isHourSuggestionLoading && !hourSuggestion && !hourSuggestionError && (
+              <p>填写任务类型和需求后，可以让 AI 参考过往同类任务，给出更稳的预估工时。</p>
+            )}
+            {hourSuggestion && (
+              <div className="hour-estimate-result">
+                <div className="hour-estimate-main">
+                  <span>建议预估</span>
+                  <strong>{hourSuggestion.suggestedHours.toFixed(1)} h</strong>
+                  <em className={`hour-confidence confidence-${hourSuggestion.confidence}`}>{hourSuggestion.confidence}置信度</em>
+                </div>
+                <div className="hour-estimate-stats">
+                  <span>{hourSuggestion.sampleCount} 条样本</span>
+                  <span>平均 {hourSuggestion.averageHours.toFixed(1)} h</span>
+                  <span>中位 {hourSuggestion.medianHours.toFixed(1)} h</span>
+                  {hourSuggestion.averageDeliveryDays > 0 && <span>平均周期 {hourSuggestion.averageDeliveryDays.toFixed(1)} 天</span>}
+                </div>
+                <p>{hourSuggestion.historicalSummary}</p>
+                {hourSuggestion.basis.length > 0 && (
+                  <ul>
+                    {hourSuggestion.basis.map((item, index) => (
+                      <li key={`${item}-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="hour-estimate-actions">
+                  {hourSuggestion.usedFallback && <small>同类型样本不足，已参考相近类型任务。</small>}
+                  <button type="button" className="primary-button compact-button" onClick={applyHourSuggestion}>
+                    采用建议
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           {isSupplemental && (
             <label className="field wide">

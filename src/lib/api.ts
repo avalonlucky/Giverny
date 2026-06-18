@@ -93,6 +93,29 @@ export type TextAssistantPayload = {
   uploadedFileNames?: string[]
 }
 
+export type HourEstimateSuggestion = {
+  suggestedHours: number
+  confidence: '低' | '中' | '高'
+  basis: string[]
+  historicalSummary: string
+  sampleCount: number
+  averageHours: number
+  medianHours: number
+  minHours: number
+  maxHours: number
+  averageDeliveryDays: number
+  matchedType: string
+  usedFallback: boolean
+}
+
+export type HourEstimatePayload = {
+  title: string
+  requirement: string
+  selectedType: string
+  startDate: string
+  estimatedDate: string
+}
+
 const authStorageKey = 'designer-worklog-auth'
 const legacyTokenStorageKey = 'designer-worklog-admin-token'
 
@@ -435,6 +458,12 @@ export const api = {
     }),
   optimizeTaskTextAssistant: (payload: TextAssistantPayload) =>
     requestJson<TextAssistantSuggestion>('/api/ai/text-assistant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  suggestHourEstimate: (payload: HourEstimatePayload) =>
+    requestJson<HourEstimateSuggestion>('/api/ai/hour-estimate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

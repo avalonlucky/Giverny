@@ -420,6 +420,27 @@ type TextAssistantToolArgs = {
   summary?: string
 }
 
+type HourEstimateToolArgs = {
+  suggestedHours?: number
+  confidence?: string
+  basis?: string[]
+  historicalSummary?: string
+}
+
+type HourEstimateSample = {
+  title: string
+  requirement: string
+  designType: string
+  estimatedHours: number
+  actualHours: number
+  startDate: string
+  estimatedDeliveryDate: string
+  actualDeliveryDate: string
+  acceptanceNote: string
+  status: string
+  deliveryCycleHours: number
+}
+
 function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTypeGroup[]) {
   const parent = String(args.suggestedParentType ?? '').trim()
   const child = String(args.suggestedChildType ?? '').trim()
@@ -466,6 +487,68 @@ function parseTextToolArguments(value: unknown): TextAssistantToolArgs {
     }
   }
   return typeof value === 'object' ? (value as TextAssistantToolArgs) : {}
+}
+
+function parseHourEstimateToolArguments(value: unknown): HourEstimateToolArgs {
+  if (!value) {
+    return {}
+  }
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as HourEstimateToolArgs
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' ? (value as HourEstimateToolArgs) : {}
+}
+
+function numberListMedian(values: number[]) {
+  if (values.length === 0) {
+    return 0
+  }
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
+function roundToHalfHour(value: number) {
+  return Math.max(0.5, Math.round(value * 2) / 2)
+}
+
+function hoursBetweenDates(startValue: string | null, endValue: string | null) {
+  if (!startValue || !endValue) {
+    return 0
+  }
+  const start = new Date(startValue).getTime()
+  const end = new Date(endValue).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0
+  }
+  return Math.round(((end - start) / 3_600_000) * 100) / 100
+}
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return 0
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function toHourEstimateSample(task: DbTask): HourEstimateSample {
+  return {
+    title: task.title,
+    requirement: task.requirement ?? '',
+    designType: task.design_type ?? '',
+    estimatedHours: Number(task.estimated_hours) || 0,
+    actualHours: Number(task.actual_hours) || 0,
+    startDate: task.start_date ?? '',
+    estimatedDeliveryDate: task.estimated_delivery_date ?? '',
+    actualDeliveryDate: task.actual_delivery_date ?? '',
+    acceptanceNote: task.acceptance_note ?? '',
+    status: task.status,
+    deliveryCycleHours: hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date),
+  }
 }
 
 async function getDesignTypeGroups(env: Env) {
@@ -1699,6 +1782,223 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })
 }
 
+async function suggestHourEstimateWithAi(env: Env, request: Request) {
+  if (!env.DEEPSEEK_API_KEY) {
+    return fail('DeepSeek API Key 尚未配置，请先在 Cloudflare Secret 中设置 DEEPSEEK_API_KEY。', 503)
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    title?: string
+    requirement?: string
+    selectedType?: string
+    startDate?: string
+    estimatedDate?: string
+  }
+  const title = String(body.title ?? '').trim()
+  const requirement = String(body.requirement ?? '').trim()
+  const selectedType = String(body.selectedType ?? '').trim()
+  if (!selectedType && !title && !requirement) {
+    return fail('请先填写设计类型、项目名称或任务具体需求')
+  }
+
+  const exactRows = selectedType
+    ? await env.DB.prepare(
+        `SELECT * FROM tasks
+         WHERE deleted_at IS NULL AND voided_at IS NULL
+           AND actual_hours > 0
+           AND design_type = ?
+         ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
+         LIMIT 24`,
+      )
+        .bind(selectedType)
+        .all<DbTask>()
+    : { results: [] as DbTask[], success: true }
+
+  let tasks = exactRows.results ?? []
+  let usedFallback = false
+  const parentType = selectedType.split('/')[0]?.trim()
+  if (tasks.length < 3 && parentType) {
+    const fallbackRows = await env.DB.prepare(
+      `SELECT * FROM tasks
+       WHERE deleted_at IS NULL AND voided_at IS NULL
+         AND actual_hours > 0
+         AND design_type LIKE ?
+       ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
+       LIMIT 24`,
+    )
+      .bind(`${parentType}%`)
+      .all<DbTask>()
+    const knownIds = new Set(tasks.map((task) => task.id))
+    tasks = [...tasks, ...((fallbackRows.results ?? []).filter((task) => !knownIds.has(task.id)))]
+    usedFallback = tasks.some((task) => task.design_type !== selectedType)
+  }
+
+  if (tasks.length === 0) {
+    const fallbackRows = await env.DB.prepare(
+      `SELECT * FROM tasks
+       WHERE deleted_at IS NULL AND voided_at IS NULL
+         AND actual_hours > 0
+       ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
+       LIMIT 12`,
+    ).all<DbTask>()
+    tasks = fallbackRows.results ?? []
+    usedFallback = true
+  }
+
+  const samples = tasks.map(toHourEstimateSample).filter((sample) => sample.actualHours > 0)
+  const actualHours = samples.map((sample) => sample.actualHours)
+  const deliveryCycles = samples.map((sample) => sample.deliveryCycleHours).filter((value) => value > 0)
+  const sampleCount = samples.length
+  const averageHours = Math.round(average(actualHours) * 100) / 100
+  const medianHours = Math.round(numberListMedian(actualHours) * 100) / 100
+  const minHours = actualHours.length ? Math.min(...actualHours) : 0
+  const maxHours = actualHours.length ? Math.max(...actualHours) : 0
+  const averageDeliveryDays = Math.round((average(deliveryCycles) / 24) * 10) / 10
+  const currentPlanHours = roundToHalfHour(hoursBetweenDates(String(body.startDate ?? ''), String(body.estimatedDate ?? '')) || 2)
+  const deterministicSuggestion = roundToHalfHour(sampleCount ? (medianHours * 0.6 + averageHours * 0.4) : currentPlanHours)
+
+  if (sampleCount === 0) {
+    return ok({
+      suggestedHours: currentPlanHours,
+      confidence: '低',
+      basis: ['暂无可用历史实际工时，暂按当前预计开始与交付时间推算。'],
+      historicalSummary: '还没有可用于同类工时分析的已记录实际工时。',
+      sampleCount,
+      averageHours,
+      medianHours,
+      minHours,
+      maxHours,
+      averageDeliveryDays,
+      matchedType: selectedType,
+      usedFallback,
+    })
+  }
+
+  const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+  const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
+  const toolName = 'suggest_task_hour_estimate'
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.15,
+      messages: [
+        {
+          role: 'system',
+          content:
+            '你是一个设计兼职任务的工时分析助理。请只基于系统提供的历史任务样本、实际工时、交付周期、验收备注和当前任务需求，给出新任务的预估工时建议。\n\n要求：不要编造不存在的历史数据；样本少于 3 条时必须降低置信度；需要结合验收备注判断返工、补传、尺寸/交付物复杂度；建议工时用小时数，优先参考历史实际工时的平均数和中位数，可以根据当前任务复杂度微调；依据要短、具体、可解释。',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            currentTask: {
+              title,
+              requirement,
+              selectedType,
+              startDate: body.startDate ?? '',
+              estimatedDate: body.estimatedDate ?? '',
+              currentPlanHours,
+            },
+            statistics: {
+              sampleCount,
+              averageHours,
+              medianHours,
+              minHours,
+              maxHours,
+              averageDeliveryDays,
+              deterministicSuggestion,
+              usedFallback,
+            },
+            historicalSamples: samples.slice(0, 12),
+          }),
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: toolName,
+            description: '返回基于历史任务数据的工时建议',
+            parameters: {
+              type: 'object',
+              properties: {
+                suggestedHours: {
+                  type: 'number',
+                  description: '建议预估工时，单位小时。必须基于历史实际工时和当前任务复杂度。',
+                },
+                confidence: {
+                  type: 'string',
+                  enum: ['低', '中', '高'],
+                  description: '置信度。样本少于 3 条时只能为低。',
+                },
+                basis: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: '2-5 条中文依据，说明参考了哪些历史工时、交付周期、验收备注或当前需求因素。',
+                },
+                historicalSummary: {
+                  type: 'string',
+                  description: '一句中文总结历史同类任务表现。',
+                },
+              },
+              required: ['suggestedHours', 'confidence', 'basis', 'historicalSummary'],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: 'function', function: { name: toolName } },
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    return fail(`AI 工时建议请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
+  }
+
+  const data = (await response.json().catch(() => null)) as {
+    choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>; content?: string } }>
+  } | null
+  const message = data?.choices?.[0]?.message
+  const toolCall = message?.tool_calls?.find((item) => item.function?.name === toolName)
+  let parsed = parseHourEstimateToolArguments(toolCall?.function?.arguments)
+  if (!parsed.suggestedHours && message?.content) {
+    parsed = parseHourEstimateToolArguments(message.content)
+  }
+
+  const parsedHours = Number(parsed.suggestedHours)
+  const suggestedHours = roundToHalfHour(Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion)
+  const confidence = sampleCount < 3 ? '低' : parsed.confidence === '高' || parsed.confidence === '中' || parsed.confidence === '低' ? parsed.confidence : '中'
+  const basis = Array.isArray(parsed.basis) ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
+  const historicalSummary = String(parsed.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
+
+  await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
+    selectedType,
+    sampleCount,
+    suggestedHours,
+    confidence,
+    usedFallback,
+  })
+
+  return ok({
+    suggestedHours,
+    confidence,
+    basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
+    historicalSummary,
+    sampleCount,
+    averageHours,
+    medianHours,
+    minHours,
+    maxHours,
+    averageDeliveryDays,
+    matchedType: selectedType,
+    usedFallback,
+  })
+}
+
 async function generateMonthlyReport(env: Env, request: Request) {
   const body = (await request.json()) as { month: string; hourlyRate: number; importedHours?: number }
   const rows = await env.DB.prepare("SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL").bind(body.month).all<DbTask>()
@@ -1879,6 +2179,9 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)
+  }
+  if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
+    return suggestHourEstimateWithAi(env, request)
   }
   if (path === '/api/settings/hourly-rate' && request.method === 'PATCH') {
     return setHourlyRate(env, request)
