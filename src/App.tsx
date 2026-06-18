@@ -4308,16 +4308,15 @@ function TaskProgressModal({
                 >
                   <span className="dot" />
                   <div>
-                    <strong>任务动态</strong>
+                    <p>{describeActivity(item)}</p>
                     <span className="progress-modal-timeline-meta">
-                      <TimelineStamp value={item.createdAt} audience="admin" />
+                      <span className="progress-modal-timeline-type">任务动态</span>
                       {onRequestDeleteActivity && (
                         <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => onRequestDeleteActivity(item, task)}>
                           <Trash2 size={13} />
                         </button>
                       )}
                     </span>
-                    <p>{describeActivity(item)}</p>
                     <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
                   </div>
                 </article>
