@@ -2189,6 +2189,20 @@ button.file-chip:focus-visible {
   background: var(--color-surface-strong);
 }
 
+.progress-timeline-more {
+  padding: 0 0 4px 20px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.progress-timeline-more > span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .progress-modal-timeline-item {
   position: relative;
   padding: 0 0 16px 20px;

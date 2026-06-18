@@ -4156,8 +4156,10 @@ function TaskProgressModal({
   const taskActivity = activity
   const canDeleteActivity = Boolean(onRequestDeleteActivity)
   const showAllActivity = activityExpansion.taskId === task.id ? activityExpansion.showAll : false
+  const hiddenTaskActivity = taskActivity.slice(5)
   const visibleTaskActivity = showAllActivity ? taskActivity : taskActivity.slice(0, 5)
   const hiddenActivityCount = Math.max(0, taskActivity.length - 5)
+  const hiddenActivityHasFiles = hiddenTaskActivity.some((item) => getActivityFileNames(item).length > 0)
 
   useEffect(() => {
     writeDraftCache(progressDraftKey, { draftProgress, note })
@@ -4353,17 +4355,6 @@ function TaskProgressModal({
             <h3>进展时间轴</h3>
             <div className="progress-timeline-title-actions">
               <span>{taskActivity.length} 条记录</span>
-              {hiddenActivityCount > 0 && (
-                <button
-                  type="button"
-                  className="progress-timeline-toggle"
-                  onClick={() => setActivityExpansion({ taskId: task.id, showAll: !showAllActivity })}
-                  aria-expanded={showAllActivity}
-                >
-                  <ChevronDown size={14} />
-                  {showAllActivity ? '收起' : `展开 ${hiddenActivityCount} 条`}
-                </button>
-              )}
             </div>
           </div>
           <div className="progress-modal-timeline">
@@ -4403,6 +4394,22 @@ function TaskProgressModal({
                   </article>
                 )
               })
+            )}
+            {hiddenActivityCount > 0 && (
+              <div className="progress-timeline-more">
+                <button
+                  type="button"
+                  className="progress-timeline-toggle"
+                  onClick={() => setActivityExpansion({ taskId: task.id, showAll: !showAllActivity })}
+                  aria-expanded={showAllActivity}
+                >
+                  <ChevronDown size={14} />
+                  {showAllActivity ? '收起' : `展开 ${hiddenActivityCount} 条`}
+                </button>
+                {!showAllActivity && hiddenActivityHasFiles && (
+                  <span>隐藏记录含附件，展开查看</span>
+                )}
+              </div>
             )}
           </div>
         </section>
