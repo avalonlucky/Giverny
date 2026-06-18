@@ -5053,7 +5053,7 @@ function AcceptanceModal({
             </button>
           </div>
           <div className="acceptance-basic-grid">
-            <div className="wide">
+            <div className="wide acceptance-basic-task-title">
               <span>任务名称</span>
               {basicEditing ? (
                 <input value={basicDraft.title} onChange={(event) => updateBasicDraft('title', event.target.value)} />
@@ -5118,7 +5118,7 @@ function AcceptanceModal({
                 <strong>{monthLabelOf(taskSettlementMonth(task))}</strong>
               </div>
             )}
-            <div className="wide">
+            <div className="wide acceptance-basic-requirement">
               <span>任务需求</span>
               {basicEditing ? (
                 <textarea value={basicDraft.requirement} onChange={(event) => updateBasicDraft('requirement', event.target.value)} />
