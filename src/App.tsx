@@ -3841,6 +3841,12 @@ function TasksView({
               )}
             </div>
           )}
+          <div className="task-schedule-legend" aria-label="排期状态说明">
+            <span><i className="imminent" />临期：今日 / 明日到期</span>
+            <span><i className="overdue" />逾期：超过交付日</span>
+            <span><i className="started" />进行中：距交付倒计时</span>
+            <span><i className="normal" />正常 / 已验收：灰显</span>
+          </div>
           {contextMenu && (
             <TaskContextMenu
               menu={contextMenu}

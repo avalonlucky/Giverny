@@ -715,7 +715,8 @@ button {
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
   align-items: center;
-  gap: 18px;
+  column-gap: 34px;
+  row-gap: 10px;
   text-align: left;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
@@ -935,6 +936,52 @@ button {
   padding-left: 16px;
   border-left: 1px dashed rgba(47, 111, 109, 0.16);
   transition: opacity 0.14s ease;
+}
+
+.task-schedule-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  padding: 4px 16px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.task-schedule-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.task-schedule-legend i {
+  width: 11px;
+  height: 11px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.task-schedule-legend .imminent {
+  color: var(--color-status-warning);
+  background: color-mix(in srgb, var(--color-status-warning) 14%, transparent);
+}
+
+.task-schedule-legend .overdue {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 10%, transparent);
+}
+
+.task-schedule-legend .started {
+  color: var(--color-status-active);
+  background: color-mix(in srgb, var(--color-status-active) 10%, transparent);
+}
+
+.task-schedule-legend .normal {
+  color: var(--color-text-muted);
+  background: var(--color-surface-strong);
 }
 
 .task-row.supplemental .task-state {
@@ -1624,7 +1671,8 @@ button {
   font-weight: 800;
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
-  gap: 18px;
+  column-gap: 34px;
+  row-gap: 10px;
   align-items: center;
 }
 
@@ -8073,7 +8121,8 @@ textarea:focus-visible {
 
   .task-row {
     grid-template-columns: 86px minmax(0, 1fr) auto auto;
-    gap: 12px;
+    column-gap: 22px;
+    row-gap: 10px;
   }
 
   .task-state {
@@ -8155,7 +8204,8 @@ textarea:focus-visible {
   .task-row,
   .management-row {
     grid-template-columns: 82px minmax(0, 1fr) auto;
-    gap: 12px;
+    column-gap: 18px;
+    row-gap: 10px;
   }
 
   .task-meta,
