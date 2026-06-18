@@ -4056,8 +4056,16 @@ function TaskProgressModal({
             <h3>整体进度</h3>
             <span className={progressDirty ? 'admin-only-data' : ''}>{progressDirty ? `● 未保存（${draftProgress}%）` : '已保存'}</span>
           </div>
-          <div className="task-progress-control">
-            <input type="range" min={0} max={100} step={10} value={draftProgress} onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))} />
+          <div className="task-progress-control progress-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={draftProgress}
+              style={{ '--progress-value': `${draftProgress}%` } as CSSProperties}
+              onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))}
+            />
             <strong>{draftProgress}%</strong>
           </div>
           <div className="task-progress-presets">

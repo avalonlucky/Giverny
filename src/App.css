@@ -2461,7 +2461,7 @@ button.file-chip:focus-visible {
   gap: 4px;
   color: var(--color-primary-strong);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -2492,7 +2492,7 @@ button.file-chip:focus-visible {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .acceptance-inline-head h4 svg {
@@ -2505,7 +2505,7 @@ button.file-chip:focus-visible {
   color: var(--color-text-muted);
   font: inherit;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -2535,14 +2535,14 @@ button.file-chip:focus-visible {
 .acceptance-review-grid span {
   color: var(--color-text-secondary);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .acceptance-review-grid strong {
   min-width: 0;
   color: var(--color-text);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2564,7 +2564,7 @@ button.file-chip:focus-visible {
   color: var(--color-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .acceptance-review-meta {
@@ -2583,7 +2583,7 @@ button.file-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   font-size: 10.5px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .acceptance-inline-card p {
@@ -4972,7 +4972,7 @@ input::file-selector-button {
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .acceptance-final-header h2 {
@@ -5027,14 +5027,14 @@ input::file-selector-button {
   margin: 0;
   color: var(--color-text);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .acceptance-section-title small {
   margin-left: 2px;
   color: var(--color-text-muted);
   font-size: 10.5px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .acceptance-edit-button {
