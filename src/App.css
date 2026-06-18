@@ -2068,6 +2068,41 @@ button.file-chip:focus-visible {
   gap: 3px 10px;
 }
 
+.progress-modal-timeline-item.can-delete {
+  cursor: context-menu;
+}
+
+.progress-modal-timeline-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.progress-modal-timeline-meta button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.progress-modal-timeline-item:hover .progress-modal-timeline-meta button,
+.progress-modal-timeline-meta button:focus-visible {
+  opacity: 1;
+}
+
+.progress-modal-timeline-meta button:hover {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 8%, transparent);
+}
+
 .progress-modal-timeline-item strong {
   color: var(--color-text);
   font-size: 13px;
@@ -4375,8 +4410,9 @@ textarea::placeholder {
 .required-mark {
   color: var(--color-status-danger);
   font-style: normal;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .field.field-saved input,
@@ -5093,7 +5129,7 @@ input::file-selector-button {
   display: block;
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .acceptance-modal-body {
@@ -5110,8 +5146,8 @@ input::file-selector-button {
 }
 
 .acceptance-section-title {
-  min-height: 26px;
-  padding-bottom: 7px;
+  min-height: 32px;
+  padding-bottom: 8px;
   border-bottom: 1px solid rgba(39, 54, 58, 0.08);
   display: flex;
   align-items: center;
@@ -5119,36 +5155,36 @@ input::file-selector-button {
 }
 
 .acceptance-section-index {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   background: var(--color-primary);
   color: var(--color-surface-strong);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .acceptance-section-title h3 {
   margin: 0;
   color: var(--color-text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .acceptance-section-title small {
   margin-left: 2px;
   color: var(--color-text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .acceptance-edit-button {
-  min-height: 24px;
+  min-height: 30px;
   margin-left: auto;
-  padding: 0 8px;
+  padding: 0 10px;
   border: 0;
   border-radius: 5px;
   background: rgba(47, 111, 109, 0.1);
@@ -5158,7 +5194,7 @@ input::file-selector-button {
   gap: 4px;
   cursor: pointer;
   font: inherit;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -5175,7 +5211,7 @@ input::file-selector-button {
 .acceptance-basic-grid > div {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 5px;
 }
 
 .acceptance-basic-grid .wide {
@@ -5184,14 +5220,14 @@ input::file-selector-button {
 
 .acceptance-basic-grid span {
   color: var(--color-text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .acceptance-basic-grid strong {
   min-width: 0;
   color: var(--color-text);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.45;
   font-weight: 500;
   overflow-wrap: anywhere;
@@ -5199,14 +5235,14 @@ input::file-selector-button {
 
 .acceptance-basic-grid .acceptance-basic-task-title strong {
   color: var(--color-text);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.45;
   font-weight: 580;
 }
 
 .acceptance-basic-grid .acceptance-basic-requirement strong {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.65;
   font-weight: 450;
 }
@@ -5221,7 +5257,7 @@ input::file-selector-button {
   color: var(--color-text);
   background: var(--color-surface-strong);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -5252,7 +5288,7 @@ input::file-selector-button {
 
 .acceptance-final-progress strong {
   color: var(--color-primary-strong);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   text-align: right;
 }
@@ -5287,7 +5323,7 @@ input::file-selector-button {
 .acceptance-muted-hint {
   margin: -4px 0 0;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .acceptance-time-list {
@@ -5311,7 +5347,7 @@ input::file-selector-button {
 
 .acceptance-time-range > span {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .acceptance-time-row input {
@@ -5322,12 +5358,12 @@ input::file-selector-button {
   background: var(--color-surface-strong);
   color: var(--color-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .acceptance-time-row > strong {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-align: right;
   white-space: nowrap;
@@ -5347,7 +5383,7 @@ input::file-selector-button {
 }
 
 .acceptance-hours-total strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .acceptance-upload-box {
@@ -5372,14 +5408,14 @@ input::file-selector-button {
 
 .acceptance-upload-box strong {
   color: var(--color-primary-strong);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .acceptance-upload-box em {
   color: var(--color-text-muted);
   font-style: normal;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .acceptance-upload-box input {
@@ -5405,7 +5441,7 @@ input::file-selector-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -5416,7 +5452,7 @@ input::file-selector-button {
 
 .acceptance-note-field span {
   color: var(--color-text-secondary);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -5429,7 +5465,7 @@ input::file-selector-button {
   background: var(--color-surface-strong);
   color: var(--color-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   resize: vertical;
 }

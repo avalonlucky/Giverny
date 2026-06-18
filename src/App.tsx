@@ -499,10 +499,6 @@ function sumTimeEntries(entries: TimeEntry[]) {
   return entries.reduce((sum, entry) => sum + minutesBetween(entry.start, entry.end), 0)
 }
 
-function serializeTimeEntries(entries: TimeEntry[]) {
-  return JSON.stringify(entries.map((entry) => ({ start: entry.start, end: entry.end, note: entry.note ?? '' })))
-}
-
 function hoursFromTimeEntries(entries: TimeEntry[]) {
   return Math.round((sumTimeEntries(entries) / 60) * 100) / 100
 }
@@ -1424,6 +1420,32 @@ function renderTextAssistantBody(text: string) {
   })
 }
 
+const readDraftCache = <T,>(key: string, fallback: T): T => {
+  if (typeof window === 'undefined') {
+    return fallback
+  }
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<T>) } : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeDraftCache = (key: string, value: unknown) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(key, JSON.stringify(value))
+}
+
+const clearDraftCache = (key: string) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.removeItem(key)
+}
+
 function ActivityFileChips({
   item,
   files = [],
@@ -1883,6 +1905,29 @@ function App() {
     } catch (error) {
       notify(error instanceof Error ? `进展保存失败：${error.message}` : '进展保存失败')
     }
+  }
+
+  const handleRequestDeleteActivity = (item: ActivityItem, task: Task) => {
+    setConfirmDialog({
+      eyebrow: '删除任务动态',
+      title: '确定删除这条任务动态吗？',
+      body: '删除后只会从当前任务时间轴移除这条记录，不会回滚任务字段、文件或工时数据。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      details: [task.title, describeActivity(item)],
+      onConfirm: async () => {
+        try {
+          await api.deleteActivity(item.id)
+          setTaskActivity((currentItems) => currentItems.filter((activityItem) => activityItem.id !== item.id))
+          await loadTaskActivity(task.id)
+          notify('任务动态已删除')
+        } catch (error) {
+          setBackendStatus('后端异常')
+          notify(error instanceof Error ? `动态删除失败：${error.message}` : '动态删除失败')
+          throw error
+        }
+      },
+    })
   }
 
   const loadTaskActivity = async (taskId: number) => {
@@ -2933,6 +2978,7 @@ function App() {
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onPreviewFile={setPreviewFile}
             onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
+            onRequestDeleteActivity={isAdmin ? handleRequestDeleteActivity : undefined}
           />
         )}
 
@@ -3093,6 +3139,7 @@ function App() {
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
+            onRequestDeleteActivity={isAdmin ? handleRequestDeleteActivity : undefined}
           />
         ) : null
       })()}
@@ -3647,6 +3694,7 @@ function TasksView({
   onCreateTaskUpdate,
   onPreviewFile,
   onCreateTask,
+  onRequestDeleteActivity,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -3680,6 +3728,7 @@ function TasksView({
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onPreviewFile: (file: FileAsset) => void
   onCreateTask: () => void
+  onRequestDeleteActivity?: (item: ActivityItem, task: Task) => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -3999,6 +4048,7 @@ function TasksView({
           onUpdateTask={onUpdateTask}
           onCreateTaskUpdate={onCreateTaskUpdate}
           onUploadImage={onUploadImage}
+          onRequestDeleteActivity={onRequestDeleteActivity}
         />
       )}
     </section>
@@ -4014,6 +4064,7 @@ function TaskProgressModal({
   onUpdateTask,
   onCreateTaskUpdate,
   onUploadImage,
+  onRequestDeleteActivity,
 }: {
   task: Task
   activity: ActivityItem[]
@@ -4023,10 +4074,16 @@ function TaskProgressModal({
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onRequestDeleteActivity?: (item: ActivityItem, task: Task) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [draftProgress, setDraftProgress] = useState(task.progress)
-  const [note, setNote] = useState('')
+  const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
+  const initialProgressDraft = useMemo(
+    () => readDraftCache(progressDraftKey, { draftProgress: task.progress, note: '' }),
+    [progressDraftKey, task.progress],
+  )
+  const [draftProgress, setDraftProgress] = useState(initialProgressDraft.draftProgress)
+  const [note, setNote] = useState(initialProgressDraft.note)
   const [isSaving, setIsSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
@@ -4037,6 +4094,11 @@ function TaskProgressModal({
   const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
   const taskActivity = activity
+  const canDeleteActivity = Boolean(onRequestDeleteActivity)
+
+  useEffect(() => {
+    writeDraftCache(progressDraftKey, { draftProgress, note })
+  }, [draftProgress, note, progressDraftKey])
 
   const uploadFiles = async (fileList: FileList | null) => {
     const selectedFiles = Array.from(fileList ?? [])
@@ -4088,6 +4150,7 @@ function TaskProgressModal({
           visible: false,
         })
       }
+      clearDraftCache(progressDraftKey)
       onClose()
     } finally {
       setIsSaving(false)
@@ -4232,11 +4295,28 @@ function TaskProgressModal({
               <p>还没有进展记录。</p>
             ) : (
               taskActivity.slice(0, 8).map((item) => (
-                <article className="progress-modal-timeline-item" key={item.id}>
+                <article
+                  className={`progress-modal-timeline-item ${canDeleteActivity ? 'can-delete' : ''}`}
+                  key={item.id}
+                  onContextMenu={(event) => {
+                    if (!onRequestDeleteActivity) {
+                      return
+                    }
+                    event.preventDefault()
+                    onRequestDeleteActivity(item, task)
+                  }}
+                >
                   <span className="dot" />
                   <div>
                     <strong>任务动态</strong>
-                    <TimelineStamp value={item.createdAt} audience="admin" />
+                    <span className="progress-modal-timeline-meta">
+                      <TimelineStamp value={item.createdAt} audience="admin" />
+                      {onRequestDeleteActivity && (
+                        <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => onRequestDeleteActivity(item, task)}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </span>
                     <p>{describeActivity(item)}</p>
                     <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
                   </div>
@@ -5014,9 +5094,8 @@ function AcceptanceModal({
   onConfirm: (payload: AcceptancePayload) => void
   onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
 }) {
-  const [acceptanceNote, setAcceptanceNote] = useState(initialNote)
-  const [basicEditing, setBasicEditing] = useState(false)
-  const [basicDraft, setBasicDraft] = useState({
+  const acceptanceDraftKey = `giverny:acceptance-draft:${task.id}:v1`
+  const fallbackBasicDraft = {
     title: task.title,
     type: task.type,
     contact: task.contact,
@@ -5025,26 +5104,33 @@ function AcceptanceModal({
     requirement: task.requirement ?? '',
     date: task.date,
     estimatedDate: task.estimatedDate || '',
-  })
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(
-    task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }],
+  }
+  const fallbackTimeEntries = task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }]
+  const [initialAcceptanceDraft] = useState(() =>
+    readDraftCache(acceptanceDraftKey, {
+      acceptanceNote: initialNote,
+      basicDraft: fallbackBasicDraft,
+      timeEntries: fallbackTimeEntries,
+      progressDraft: task.progress,
+      uploadedFiles: [] as FileAsset[],
+    }),
   )
-  const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>([])
+  const [acceptanceNote, setAcceptanceNote] = useState(initialAcceptanceDraft.acceptanceNote)
+  const [basicEditing, setBasicEditing] = useState(false)
+  const [basicDraft, setBasicDraft] = useState(initialAcceptanceDraft.basicDraft)
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(initialAcceptanceDraft.timeEntries)
+  const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>(initialAcceptanceDraft.uploadedFiles)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
   const [progressEditing, setProgressEditing] = useState(false)
-  const [progressDraft, setProgressDraft] = useState(task.progress)
+  const [progressDraft, setProgressDraft] = useState(initialAcceptanceDraft.progressDraft)
   const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [acceptanceAiSuggestion, setAcceptanceAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [acceptanceAiError, setAcceptanceAiError] = useState('')
   const [isAcceptanceAiLoading, setIsAcceptanceAiLoading] = useState(false)
   const isSupplemental = isSupplementalTask(task)
-  const initialTimeEntriesSignature = useMemo(
-    () => serializeTimeEntries(task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: '', start: '09:00', end: '10:00' }]),
-    [task.timeEntries],
-  )
   const initialBasicSignature = useMemo(
     () => JSON.stringify({
       title: task.title,
@@ -5059,6 +5145,16 @@ function AcceptanceModal({
     [task.contact, task.date, task.estimatedDate, task.requirement, task.requester, task.reviewer, task.title, task.type],
   )
   const basicChanged = JSON.stringify(basicDraft) !== initialBasicSignature
+
+  useEffect(() => {
+    writeDraftCache(acceptanceDraftKey, {
+      acceptanceNote,
+      basicDraft,
+      timeEntries,
+      progressDraft,
+      uploadedFiles,
+    })
+  }, [acceptanceDraftKey, acceptanceNote, basicDraft, progressDraft, timeEntries, uploadedFiles])
 
   const updateEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
     setTimeEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
@@ -5075,12 +5171,6 @@ function AcceptanceModal({
 
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
-  const hasUnsavedChanges =
-    basicChanged ||
-    progressDraft !== task.progress ||
-    acceptanceNote !== initialNote ||
-    serializeTimeEntries(timeEntries) !== initialTimeEntriesSignature ||
-    uploadedFiles.length > 0
   const canConfirmAcceptance = computedMinutes > 0 && !isUploading
   const dueState = taskDueState(task, isoDate(), isoDate(3))
   const trimmedTaskChanges =
@@ -5136,7 +5226,7 @@ function AcceptanceModal({
   }
 
   const requestClose = () => {
-    if (isUploading || hasUnsavedChanges) {
+    if (isUploading) {
       setCloseConfirmOpen(true)
       return
     }
@@ -5169,7 +5259,6 @@ function AcceptanceModal({
       className="acceptance-modal"
       labelledBy="acceptance-title"
       onClose={requestClose}
-      closeOnEscape={!closeConfirmOpen && !timeEntryToDelete}
     >
       <header className="modal-header acceptance-final-header">
         <div>
@@ -5440,7 +5529,10 @@ function AcceptanceModal({
         <button
           className="primary-button"
           disabled={!canConfirmAcceptance}
-          onClick={() => onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name), taskChanges: trimmedTaskChanges })}
+          onClick={() => {
+            clearDraftCache(acceptanceDraftKey)
+            onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name), taskChanges: trimmedTaskChanges })
+          }}
         >
           {isUploading ? '上传中…' : '确认验收'}
         </button>
@@ -7882,8 +7974,8 @@ function ModalShell({
   className,
   labelledBy,
   onClose,
-  closeOnBackdrop = true,
-  closeOnEscape = true,
+  closeOnBackdrop = false,
+  closeOnEscape = false,
   children,
 }: {
   className?: string
@@ -8418,18 +8510,18 @@ function NewTaskModal({
 
         <div className="form-grid new-task-form">
           <label className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
-            <span>设计类型 <em className="required-mark">必填</em></span>
+            <span>设计类型 <em className="required-mark" aria-label="必填">*</em></span>
             <CascadingDesignTypePicker groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
             {formErrors.type && <small className="field-error">{formErrors.type}</small>}
           </label>
           <label className={`field wide ${formErrors.title ? 'field-invalid' : ''}`}>
-            <span>项目 / 任务名称 <em className="required-mark">必填</em></span>
+            <span>项目 / 任务名称 <em className="required-mark" aria-label="必填">*</em></span>
             <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder="例如：金博会邀请函长图设计" aria-required="true" />
             {formErrors.title && <small className="field-error">{formErrors.title}</small>}
           </label>
           <div className={`field wide ${formErrors.requirement ? 'field-invalid' : ''}`}>
             <span className="field-label-row">
-              <span>任务具体需求 <em className="required-mark">必填</em></span>
+              <span>任务具体需求 <em className="required-mark" aria-label="必填">*</em></span>
               <button
                 type="button"
                 className="icon-button ai-assist-button"
@@ -8501,7 +8593,7 @@ function NewTaskModal({
             <input value={requester} onChange={(event) => setRequester(event.target.value)} placeholder="提出需求的人" />
           </label>
           <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
-            <span>对接人 <em className="required-mark">必填</em></span>
+            <span>对接人 <em className="required-mark" aria-label="必填">*</em></span>
             <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="黄媚" aria-required="true" />
             {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
           </label>
