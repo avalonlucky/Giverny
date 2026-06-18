@@ -5145,18 +5145,33 @@ function AcceptanceModal({
             <strong>{progressDraft}%</strong>
           </div>
           {progressEditing && (
-            <div className="progress-steps acceptance-progress-steps" role="group" aria-label="调整验收前进度">
-              {[0, 20, 40, 60, 80, 100].map((value) => (
-                <button
-                  type="button"
-                  className={progressDraft === value ? 'active' : ''}
-                  key={value}
-                  aria-pressed={progressDraft === value}
-                  onClick={() => setProgressDraft(value)}
-                >
-                  {value}
-                </button>
-              ))}
+            <div className="acceptance-progress-editor">
+              <div className="progress-slider-row">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={10}
+                  value={progressDraft}
+                  style={{ '--progress-value': `${progressDraft}%` } as CSSProperties}
+                  onChange={(event) => setProgressDraft(snapProgress(Number(event.target.value)))}
+                  aria-label="调整验收前进度"
+                />
+                <strong>{progressDraft}%</strong>
+              </div>
+              <div className="progress-quick-options" role="group" aria-label="进度档位快选">
+                {[0, 20, 40, 60, 80, 100].map((value) => (
+                  <button
+                    type="button"
+                    className={progressDraft === value ? 'active' : ''}
+                    key={value}
+                    aria-pressed={progressDraft === value}
+                    onClick={() => setProgressDraft(value)}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <p className="acceptance-muted-hint">验收通过后，进度将自动设为 100%</p>

@@ -5164,6 +5164,19 @@ input::file-selector-button {
   background: var(--color-primary);
 }
 
+.acceptance-progress-editor {
+  display: grid;
+  gap: 7px;
+}
+
+.acceptance-progress-editor .progress-slider-row {
+  max-width: 100%;
+}
+
+.acceptance-progress-editor .progress-quick-options {
+  gap: 6px;
+}
+
 .acceptance-muted-hint {
   margin: -4px 0 0;
   color: var(--color-text-muted);
