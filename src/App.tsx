@@ -181,6 +181,78 @@ function formatTimePart(value: string) {
   return value.includes('T') ? value.slice(11, 16) : ''
 }
 
+function formatTaskRowDateTime(value: string) {
+  if (!value) {
+    return '未设置'
+  }
+  const date = datePart(value)
+  const monthDay = `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
+  const time = formatTimePart(value)
+  return time ? `${monthDay} ${time}` : monthDay
+}
+
+function parsePlanDateTime(value: string) {
+  const normalized = toDateTimeInputValue(value)
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatRemainingTime(minutes: number) {
+  const safeMinutes = Math.max(0, minutes)
+  const days = Math.floor(safeMinutes / 1440)
+  const hours = Math.floor((safeMinutes % 1440) / 60)
+  if (days > 0 && hours > 0) {
+    return `${days} 天 ${hours} 小时`
+  }
+  if (days > 0) {
+    return `${days} 天`
+  }
+  if (hours > 0) {
+    return `${hours} 小时`
+  }
+  return '1 小时内'
+}
+
+function formatTaskScheduleSignal(task: Task) {
+  if (task.status === '已验收') {
+    return { tone: 'done', label: '已验收' }
+  }
+  if (task.status === '终止' || task.status === '不计费') {
+    return { tone: 'normal', label: task.status }
+  }
+
+  const now = new Date()
+  const start = parsePlanDateTime(task.date)
+  const due = parsePlanDateTime(task.estimatedDate || task.date)
+  if (!start || !due) {
+    return { tone: 'normal', label: '时间待确认' }
+  }
+
+  if (now < start) {
+    const minutes = Math.ceil((start.getTime() - now.getTime()) / 60000)
+    return { tone: 'normal', label: `距开始还剩 ${formatRemainingTime(minutes)}` }
+  }
+
+  if (now > due) {
+    const days = Math.max(1, Math.floor((now.getTime() - due.getTime()) / 86400000))
+    return { tone: 'overdue', label: `已逾期 ${days} 天` }
+  }
+
+  const minutesToDue = Math.ceil((due.getTime() - now.getTime()) / 60000)
+  const today = isoDate()
+  const tomorrow = isoDate(1)
+  const dueDate = datePart(task.estimatedDate || task.date)
+  const dueTime = formatTimePart(task.estimatedDate || task.date)
+  if (dueDate === today) {
+    return { tone: 'imminent', label: `今日${dueTime ? ` ${dueTime}` : ''} 到期` }
+  }
+  if (dueDate === tomorrow) {
+    return { tone: 'imminent', label: `明日${dueTime ? ` ${dueTime}` : ''} 到期` }
+  }
+
+  return { tone: 'started', label: `距交付还剩 ${formatRemainingTime(minutesToDue)}` }
+}
+
 function addMinutesToPlanDateTime(value: string, minutes: number) {
   const normalized = toDateTimeInputValue(value)
   const date = new Date(normalized)
@@ -1620,10 +1692,9 @@ function App() {
 
   const taskContextOptions = useMemo(
     () => ({
-      currentMonthValue: currentMonth.value,
       reports,
     }),
-    [currentMonth.value, reports],
+    [reports],
   )
 
   const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
@@ -2094,15 +2165,6 @@ function App() {
     document.body.appendChild(link)
     link.click()
     link.remove()
-  }
-
-  const handleCopyTaskTitle = async (title: string) => {
-    try {
-      await window.navigator.clipboard.writeText(title)
-      notify('任务名称已复制')
-    } catch {
-      notify(title, 'info')
-    }
   }
 
   const handleDeleteFile = async (fileId: number) => {
@@ -2666,10 +2728,8 @@ function App() {
                     onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
                     onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
                     onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
-                    onCopyTitle={handleCopyTaskTitle}
                     onCopyShareLink={handleCopyShareLink}
                     reports={taskContextOptions.reports}
-                    currentMonthValue={taskContextOptions.currentMonthValue}
                   />
                 )}
               </div>
@@ -2778,7 +2838,6 @@ function App() {
             onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
             onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
             onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
-            onCopyTitle={handleCopyTaskTitle}
             onCopyShareLink={handleCopyShareLink}
             onOpenTask={handleOpenTaskDetail}
             onOpenEditTask={handleOpenTaskEdit}
@@ -3284,10 +3343,8 @@ function TaskContextMenu({
   onVoidTask,
   onRestoreTask,
   onDeleteTask,
-  onCopyTitle,
   onCopyShareLink,
   reports,
-  currentMonthValue,
 }: {
   menu: { x: number; y: number; task: Task }
   onClose: () => void
@@ -3300,10 +3357,8 @@ function TaskContextMenu({
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
-  onCopyTitle: (title: string) => void
   onCopyShareLink: (token: string) => void
   reports: ReportRecord[]
-  currentMonthValue: string
 }) {
   const run = (action: () => void) => {
     action()
@@ -3312,7 +3367,6 @@ function TaskContextMenu({
 
   const taskMonth = taskSettlementMonth(menu.task)
   const report = reports.find((item) => item.month === taskMonth)
-  const monthOptions = monthSelectOptions(currentMonthValue, taskMonth).slice(0, 8)
   const isVoided = Boolean(menu.task.voidedAt)
   const progressOptions = [0, 20, 40, 60, 80, 100]
 
@@ -3385,33 +3439,11 @@ function TaskContextMenu({
             <ChevronRight size={14} />
           </button>
           <div className="context-submenu-panel" role="menu">
-            <button type="button" onClick={() => run(() => onCopyTitle(menu.task.title))}>
-              <Copy size={15} />
-              复制任务名称
-            </button>
             {report && (
               <button type="button" onClick={() => run(() => onCopyShareLink(report.publicToken))}>
                 <Share2 size={15} />
                 复制甲方分享链接
               </button>
-            )}
-            {isSupplementalTask(menu.task) && (
-            <div className="context-submenu">
-              <button type="button" className="context-menu-parent" aria-haspopup="menu">
-                <CalendarDays size={15} />
-                改结算月份
-                <span>{monthLabelOf(taskMonth)}</span>
-                <ChevronRight size={14} />
-              </button>
-              <div className="context-submenu-panel month-submenu-panel" role="menu">
-                {monthOptions.map((month) => (
-                  <button type="button" key={month} onClick={() => run(() => onUpdateTask(menu.task.id, { settlementMonth: month }))}>
-                    {month === taskMonth ? <CheckCircle2 size={15} /> : <CalendarDays size={15} />}
-                    {monthLabelOf(month)}
-                  </button>
-                ))}
-              </div>
-            </div>
             )}
           </div>
         </div>
@@ -3516,7 +3548,6 @@ function TasksView({
   onVoidTask,
   onRestoreTask,
   onDeleteTask,
-  onCopyTitle,
   onCopyShareLink,
   onOpenTask,
   onOpenEditTask,
@@ -3550,7 +3581,6 @@ function TasksView({
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
-  onCopyTitle: (title: string) => void
   onCopyShareLink: (token: string) => void
   onOpenTask: (taskId: number) => void
   onOpenEditTask: (taskId: number) => void
@@ -3657,11 +3687,15 @@ function TasksView({
   return (
     <section className="view-stack">
       <section className="panel view-toolbar">
-        <div className="panel-header compact">
+        <div className="panel-header compact task-panel-header">
           <div>
             <h2>任务管理</h2>
             <p>集中维护任务字段、验收状态、工时与交付文件</p>
           </div>
+          <label className="search-box task-search-inline">
+            <Search size={16} />
+            <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、对接人" />
+          </label>
           {viewTabs}
         </div>
         <div className="task-toolbar-row">
@@ -3688,10 +3722,6 @@ function TasksView({
             {showVoidedTasks ? '隐藏作废' : `显示作废${voidedTaskCount ? ` ${voidedTaskCount}` : ''}`}
           </button>
         </div>
-        <label className="search-box wide-search">
-          <Search size={16} />
-          <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、对接人" />
-        </label>
       </section>
 
       <section className="management-grid">
@@ -3702,14 +3732,14 @@ function TasksView({
           </div>
           <div className="table-head">
             <span>日期</span>
-            <span>任务</span>
+            <span>任务 · 预计时间</span>
             <span>对接 · 工时</span>
             <span>状态 · 交付</span>
           </div>
           {tasks.map((task) => {
             const dueState = taskDueState(task, isoDate(), isoDate(3))
-            const settlementLabel = isSupplementalTask(task) ? `补录至 ${monthLabelOf(taskSettlementMonth(task))}` : monthLabelOf(taskSettlementMonth(task))
             const dueDateLabel = formatDueDateCompact(task.estimatedDate || task.date)
+            const scheduleSignal = formatTaskScheduleSignal(task)
             const canAcceptTask = task.status === '待验收'
             return (
             <article
@@ -3733,7 +3763,8 @@ function TasksView({
               <div className="task-date">
                 <b>{formatMonthDay(task.date)}</b>
                 <span className="task-date-meta">
-                  <span>{[task.type || '未分类', settlementLabel].filter(Boolean).join(' · ')}</span>
+                  {formatTimePart(task.date) && <span>{formatTimePart(task.date)}</span>}
+                  <em>{task.type || '未分类'}</em>
                   {isSupplementalTask(task) && (
                     <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
                       补录
@@ -3744,6 +3775,17 @@ function TasksView({
               <div className="task-main">
                 <strong>{task.title}</strong>
                 <p>{task.requirement}{task.voidedAt ? ` · 已作废${task.voidReason ? `：${task.voidReason}` : ''}` : ''}</p>
+                <div className={`task-schedule-row ${task.status === '已验收' ? 'done' : ''}`}>
+                  <span className="time-chip">
+                    <span>开始</span>
+                    <strong>{formatTaskRowDateTime(task.date)}</strong>
+                  </span>
+                  <span className="time-chip">
+                    <span>交付</span>
+                    <strong>{formatTaskRowDateTime(task.estimatedDate || task.date)}</strong>
+                  </span>
+                  <span className={`schedule-countdown ${scheduleSignal.tone}`}>{scheduleSignal.label}</span>
+                </div>
               </div>
               <div className="task-meta">
                 <b>{task.contact || '待确认'}</b>
@@ -3812,10 +3854,8 @@ function TasksView({
               onVoidTask={onVoidTask}
               onRestoreTask={onRestoreTask}
               onDeleteTask={onDeleteTask}
-              onCopyTitle={onCopyTitle}
               onCopyShareLink={onCopyShareLink}
               reports={reports}
-              currentMonthValue={monthValue}
             />
           )}
         </div>
