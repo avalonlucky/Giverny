@@ -307,6 +307,11 @@ button {
   padding: 28px;
 }
 
+.dashboard-context-surface,
+.task-create-context-surface {
+  min-height: calc(100vh - 128px);
+}
+
 .topbar {
   display: flex;
   align-items: flex-start;
@@ -1605,6 +1610,7 @@ button {
 .view-stack {
   display: grid;
   gap: 16px;
+  align-content: start;
 }
 
 .view-toolbar {

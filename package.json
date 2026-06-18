@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.10.102",
+  "version": "0.10.103",
   "type": "module",
   "scripts": {
     "dev": "vite",

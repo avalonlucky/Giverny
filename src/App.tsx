@@ -2652,7 +2652,7 @@ function App() {
         </header>
 
         {activeView === '工作台' && (
-          <>
+          <div className="dashboard-context-surface" onContextMenu={openDashboardCreateMenu}>
         <section className="stats-grid" aria-label="本月统计">
           <StatCard
             label="本月总工时"
@@ -2896,7 +2896,7 @@ function App() {
             </details>
           </div>
         </section>
-          </>
+          </div>
         )}
 
         {activeView === '任务' && (
@@ -3792,7 +3792,7 @@ function TasksView({
   }
 
   return (
-    <section className="view-stack">
+    <section className="view-stack task-create-context-surface" onContextMenu={openCreateMenu}>
       <section className="panel view-toolbar">
         <div className="panel-header compact task-panel-header">
           <div>
@@ -3832,7 +3832,7 @@ function TasksView({
       </section>
 
       <section className="management-grid">
-        <div className="panel task-management-list" onContextMenu={openCreateMenu}>
+        <div className="panel task-management-list">
           <div className="management-list-toolbar">
             <span>共 {tasks.length} 条</span>
             <small>悬停显示快捷操作，右键可打开完整菜单</small>
