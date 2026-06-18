@@ -2162,12 +2162,24 @@ button.file-chip:focus-visible {
   gap: 10px;
 }
 
+.progress-timeline-attachment-badge {
+  min-height: 24px;
+  border-radius: var(--radius-pill);
+  padding: 0 9px;
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .progress-timeline-toggle {
   border: 0;
   border-radius: var(--radius-pill);
   padding: 4px 8px;
-  color: var(--color-primary-strong);
-  background: var(--color-surface-alt);
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 10%, var(--color-surface-strong));
   font-size: 12px;
   font-weight: 700;
   display: inline-flex;
@@ -2185,8 +2197,8 @@ button.file-chip:focus-visible {
 }
 
 .progress-timeline-toggle:hover {
-  color: var(--color-primary);
-  background: var(--color-surface-strong);
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 16%, var(--color-surface-strong));
 }
 
 .progress-timeline-more {
@@ -2195,12 +2207,6 @@ button.file-chip:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.progress-timeline-more > span {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .progress-modal-timeline-item {

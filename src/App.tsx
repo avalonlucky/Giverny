@@ -4354,6 +4354,7 @@ function TaskProgressModal({
           <div className="action-section-title">
             <h3>进展时间轴</h3>
             <div className="progress-timeline-title-actions">
+              {hiddenActivityHasFiles && <span className="progress-timeline-attachment-badge">附件</span>}
               <span>{taskActivity.length} 条记录</span>
             </div>
           </div>
@@ -4406,9 +4407,6 @@ function TaskProgressModal({
                   <ChevronDown size={14} />
                   {showAllActivity ? '收起' : `展开 ${hiddenActivityCount} 条`}
                 </button>
-                {!showAllActivity && hiddenActivityHasFiles && (
-                  <span>隐藏记录含附件，展开查看</span>
-                )}
               </div>
             )}
           </div>
