@@ -15,7 +15,7 @@ Giverny —— 设计兼职任务管理与结算工具。
 - 改任何 UI / 布局 / 样式前 → **必读 [`docs/DESIGN.md`](./docs/DESIGN.md)**（视觉排版规范）
 - 改交互流程 / 操作路径前 → 必读 [`docs/UX_OPTIMIZATION_AUDIT.md`](./docs/UX_OPTIMIZATION_AUDIT.md)
 - 改项目结构 / 新增模块前 → 必读 [`docs/PROJECT_STRUCTURE.md`](./docs/PROJECT_STRUCTURE.md)
-- 部署 / 数据迁移相关 → 必读 [`docs/STAGING_WORKFLOW.md`](./docs/STAGING_WORKFLOW.md)
+- 部署 / 数据迁移相关 → 必读 [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)
 
 ## UI 修改铁律（详见 docs/DESIGN.md）
 

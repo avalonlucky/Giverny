@@ -12,7 +12,7 @@ Giverny 是任务、工时、文件、验收和月度结算工作台。正式域
 2. `docs/DESIGN.md`：UI/布局/组件复用规范，改 UI 前必读。
 3. `docs/UX_OPTIMIZATION_AUDIT.md`：交互流程和 UX 审查方向。
 4. `docs/PROJECT_STRUCTURE.md`：新增模块或调整结构前必读。
-5. `docs/STAGING_WORKFLOW.md` / `docs/DEPLOYMENT.md`：部署和正式站规则。
+5. `docs/DEPLOYMENT.md`：部署和正式站规则。
 6. `CHANGELOG.md`：最近版本历史。
 
 ## 2. 当前状态
