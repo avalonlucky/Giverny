@@ -826,7 +826,46 @@ button {
 }
 
 .dashboard-task-panel .segment-tabs {
-  margin-bottom: 16px;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  gap: 34px;
+  overflow-x: auto;
+}
+
+.dashboard-task-panel .segment-tabs button {
+  position: relative;
+  height: 36px;
+  padding: 0;
+  border-radius: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.dashboard-task-panel .segment-tabs button:hover {
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.dashboard-task-panel .segment-tabs button.active {
+  color: var(--color-text);
+  background: transparent;
+  font-weight: 800;
+}
+
+.dashboard-task-panel .segment-tabs button.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  background: var(--color-primary);
+  content: "";
 }
 
 .task-row {

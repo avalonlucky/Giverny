@@ -429,6 +429,7 @@ const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
 ]
 
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
+const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
 const taskFeedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
 
@@ -2011,9 +2012,11 @@ function App() {
     })
   }, [auth])
 
-  const filterTasks = (tasks: Task[]) =>
+  const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
+
+  const filterTasks = (tasks: Task[], filter: TaskFilter = taskFilter) =>
     tasks.filter((task) => {
-      const matchesFilter = taskFilter === '全部' || (!task.voidedAt && task.status === taskFilter)
+      const matchesFilter = filter === '全部' || (!task.voidedAt && task.status === filter)
       const query = taskQuery.trim().toLowerCase()
       const matchesQuery =
         !query ||
@@ -2024,7 +2027,7 @@ function App() {
       return matchesFilter && matchesQuery
     })
 
-  const visibleTasks = filterTasks(activeMonthTasks)
+  const visibleTasks = filterTasks(activeMonthTasks, dashboardTaskFilter)
   const taskPageTasks = filterTasks(taskPageSourceTasks)
 
   const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
@@ -3066,8 +3069,8 @@ function App() {
               </div>
 
               <div className="segment-tabs">
-                {taskFilters.map((filter) => (
-                  <button className={taskFilter === filter ? 'active' : ''} key={filter} onClick={() => setTaskFilter(filter)}>
+                {dashboardTaskFilters.map((filter) => (
+                  <button className={dashboardTaskFilter === filter ? 'active' : ''} key={filter} onClick={() => setTaskFilter(filter)}>
                     {filter}
                   </button>
                 ))}
