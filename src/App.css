@@ -3285,77 +3285,81 @@ button {
   background: var(--color-supplement-bg);
 }
 
-.progress-lite-note {
+.task-progress-note.progress-lite-note {
   min-height: 96px;
   padding: 18px;
   border: 0;
   border-radius: var(--radius-control);
-  background: var(--color-surface);
+  background: var(--color-surface-alt);
   font-size: 14px;
   line-height: 1.7;
 }
 
-.progress-lite-note:focus {
+.task-progress-note.progress-lite-note:focus {
   outline: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
 }
 
 .progress-lite-time-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 28px;
+  gap: 12px 28px;
 }
 
-.progress-lite-time-field {
-  display: grid;
-  gap: 12px;
+.progress-lite-time-grid .field {
+  gap: 10px;
 }
 
-.progress-lite-time-field > span {
+.progress-lite-time-grid .field > span {
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
 }
 
-.progress-lite-datetime-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px auto;
-  align-items: center;
-  gap: 8px;
+.progress-lite-time-grid .date-input-wrap input[type='text'] {
+  height: 44px;
+  padding: 0 4px;
+  border: 0;
   border-bottom: 1px solid var(--color-border);
-  padding-bottom: 8px;
-}
-
-.progress-lite-datetime-control input {
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text);
-  outline: 0;
-  font: inherit;
-  font-size: 18px;
-}
-
-.progress-lite-datetime-control .time-text-input {
-  width: 58px;
-  height: auto;
-  padding: 0;
-  border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 18px;
+  font-size: 16px;
 }
 
-.progress-lite-datetime-control svg {
-  color: var(--color-text);
+.progress-lite-time-grid .date-input-wrap > button {
+  width: 42px;
+  height: 44px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.progress-lite-time-grid .date-input-wrap:focus-within input[type='text'],
+.progress-lite-time-grid .date-input-wrap:focus-within > button {
+  border-color: var(--color-primary);
+  box-shadow: none;
+}
+
+.progress-lite-duration {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.progress-lite-duration.invalid {
+  color: var(--color-status-danger);
 }
 
 .progress-lite-upload-box {
   width: 100%;
-  min-height: 90px;
+  min-height: 104px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-control);
   color: var(--color-text-muted);
-  background: var(--color-surface);
+  background: var(--color-surface-alt);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -10419,6 +10423,7 @@ textarea:focus-visible {
   .form-grid,
   .new-task-form,
   .new-task-schedule-row,
+  .progress-lite-time-grid,
   .detail-meta,
   .detail-summary-grid,
   .settings-tool-grid {

@@ -677,8 +677,11 @@ function formatSignedHours(minutes: number) {
   return `+${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`
 }
 
-function formatEntryDate(task: Task, entry: TimeEntry) {
-  return formatMonthDay(entry.date ?? datePart(task.date))
+function formatEntryDateTimeRange(task: Task, entry: TimeEntry) {
+  const startDate = entry.date || datePart(task.date)
+  const endDate = entry.endDate || startDate
+  const startLabel = `${formatMonthDay(startDate)} ${entry.start}`
+  return startDate === endDate ? `${startLabel}-${entry.end}` : `${startLabel} - ${formatMonthDay(endDate)} ${entry.end}`
 }
 
 function minutesBetween(start: string, end: string) {
@@ -691,6 +694,41 @@ function minutesBetween(start: string, end: string) {
     return 0
   }
   return Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute))
+}
+
+function dateTimeMinuteStamp(date: string, time: string) {
+  const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const normalizedTime = normalizeClockInput(time)
+  if (!dateMatch || !normalizedTime) {
+    return Number.NaN
+  }
+  const [, year, month, day] = dateMatch.map(Number)
+  const [hour, minute] = normalizedTime.split(':').map(Number)
+  const value = new Date(year, month - 1, day, hour, minute)
+  if (
+    value.getFullYear() !== year
+    || value.getMonth() + 1 !== month
+    || value.getDate() !== day
+    || value.getHours() !== hour
+    || value.getMinutes() !== minute
+  ) {
+    return Number.NaN
+  }
+  return Math.round(value.getTime() / 60000)
+}
+
+function minutesForTimeEntry(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
+  const startDate = entry.date
+  const endDate = entry.endDate || startDate
+  if (!startDate || !endDate) {
+    return minutesBetween(entry.start, entry.end)
+  }
+  const startStamp = dateTimeMinuteStamp(startDate, entry.start)
+  const endStamp = dateTimeMinuteStamp(endDate, entry.end)
+  if (!Number.isFinite(startStamp) || !Number.isFinite(endStamp)) {
+    return 0
+  }
+  return Math.max(0, endStamp - startStamp)
 }
 
 function normalizeClockInput(value: string) {
@@ -706,7 +744,7 @@ function normalizeClockInput(value: string) {
 }
 
 function sumTimeEntries(entries: TimeEntry[]) {
-  return entries.reduce((sum, entry) => sum + minutesBetween(entry.start, entry.end), 0)
+  return entries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
 }
 
 function defaultTimeEntryDraft() {
@@ -715,6 +753,7 @@ function defaultTimeEntryDraft() {
   const endHour = Math.min(23, startHour + 1)
   return {
     date: isoDate(),
+    endDate: isoDate(),
     start: `${pad(startHour)}:00`,
     end: `${pad(endHour)}:00`,
     note: '',
@@ -993,52 +1032,6 @@ function SettlementMonthField({
         </div>
       )}
     </label>
-  )
-}
-
-function TimeTextInput({
-  value,
-  ariaLabel,
-  onChange,
-}: {
-  value: string
-  ariaLabel: string
-  onChange: (value: string) => void
-}) {
-  const [draft, setDraft] = useState(value)
-  const [syncedValue, setSyncedValue] = useState(value)
-
-  if (value !== syncedValue) {
-    setSyncedValue(value)
-    setDraft(value)
-  }
-
-  const commit = () => {
-    const normalized = normalizeClockInput(draft)
-    if (!normalized) {
-      setDraft(value)
-      return
-    }
-    onChange(normalized)
-    setDraft(normalized)
-  }
-
-  return (
-    <input
-      className="time-text-input"
-      type="text"
-      inputMode="numeric"
-      value={draft}
-      placeholder="HH:mm"
-      aria-label={ariaLabel}
-      onChange={(event) => setDraft(event.target.value.replace(/[^\d:]/g, '').slice(0, 5))}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.currentTarget.blur()
-        }
-      }}
-    />
   )
 }
 
@@ -4131,11 +4124,11 @@ function DashboardTaskSidebar({
             ) : (
               <div className="dashboard-side-timeline">
                 {timeEntries.map((entry) => {
-                  const minutes = minutesBetween(entry.start, entry.end)
+                  const minutes = minutesForTimeEntry(entry)
                   return (
                     <article className="dashboard-side-time-item" key={entry.id}>
                       <span className="dot" />
-                      <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                      <time>{formatEntryDateTimeRange(task, entry)}</time>
                       <p>{entry.note || '未填写具体内容'}</p>
                       <em>计时 {formatSignedHours(minutes)}</em>
                     </article>
@@ -4158,10 +4151,10 @@ function DashboardTaskSidebar({
             ) : (
               <div className="dashboard-side-waiting-list">
                 {waitingEntries.map((entry) => {
-                  const minutes = minutesBetween(entry.start, entry.end)
+                  const minutes = minutesForTimeEntry(entry)
                   return (
                     <article className="dashboard-side-waiting-item" key={entry.id}>
-                      <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                      <time>{formatEntryDateTimeRange(task, entry)}</time>
                       <p>{entry.note || '等待甲方确认'}</p>
                       <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
                     </article>
@@ -4628,7 +4621,15 @@ function TaskProgressModal({
     }
     setTimeDraft(updater)
   }
-  const draftEntryMinutes = minutesBetween(activeDraft.start, activeDraft.end)
+  const activeStartDate = /^\d{4}-\d{2}-\d{2}$/.test(activeDraft.date || '') ? activeDraft.date : isoDate()
+  const activeEndDate = /^\d{4}-\d{2}-\d{2}$/.test(activeDraft.endDate || '') ? activeDraft.endDate : activeStartDate
+  const draftEntry = {
+    date: activeStartDate,
+    endDate: activeEndDate,
+    start: activeDraft.start,
+    end: activeDraft.end,
+  }
+  const draftEntryMinutes = minutesForTimeEntry(draftEntry)
   const hasDraftTimeEntry = activeDraft.start.trim() !== '' && activeDraft.end.trim() !== '' && draftEntryMinutes > 0
 
   useEffect(() => {
@@ -4639,10 +4640,10 @@ function TaskProgressModal({
     const start = activeDraft.start.trim()
     const end = activeDraft.end.trim()
     const noteText = activeDraft.note?.trim() ?? ''
-    if (!start || !end || minutesBetween(start, end) <= 0) {
+    if (!start || !end || draftEntryMinutes <= 0) {
       return null
     }
-    return { id: crypto.randomUUID(), date: activeDraft.date || isoDate(), start, end, note: noteText }
+    return { id: crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
   }
 
   const uploadFiles = async (fileList: FileList | null) => {
@@ -4723,22 +4724,6 @@ function TaskProgressModal({
     }
   }
 
-  const normalizeDraftDate = (value: string) => {
-    const match = value.trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
-    if (!match) {
-      return activeDraft.date || isoDate()
-    }
-    const [, year, month, day] = match
-    const monthNumber = Number(month)
-    const dayNumber = Number(day)
-    if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31) {
-      return activeDraft.date || isoDate()
-    }
-    return `${year}-${pad(monthNumber)}-${pad(dayNumber)}`
-  }
-
-  const displayDraftDate = (value: string | undefined) => (value || isoDate()).replaceAll('-', '/')
-
   return (
     <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
       <header className="progress-lite-header">
@@ -4808,36 +4793,21 @@ function TaskProgressModal({
         </section>
 
         <section className="progress-lite-time-grid">
-          <label className="progress-lite-time-field">
-            <span>开始时间</span>
-            <div className="progress-lite-datetime-control">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={displayDraftDate(activeDraft.date)}
-                aria-label="计时开始日期"
-                onChange={(event) => updateActiveDraft((current) => ({ ...current, date: event.target.value }))}
-                onBlur={() => updateActiveDraft((current) => ({ ...current, date: normalizeDraftDate(current.date || '') }))}
-              />
-              <TimeTextInput value={activeDraft.start} ariaLabel="计时开始时间" onChange={(value) => updateActiveDraft((current) => ({ ...current, start: value }))} />
-              <CalendarDays size={16} />
-            </div>
-          </label>
-          <label className="progress-lite-time-field">
-            <span>结束时间</span>
-            <div className="progress-lite-datetime-control">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={displayDraftDate(activeDraft.date)}
-                aria-label="计时结束日期"
-                onChange={(event) => updateActiveDraft((current) => ({ ...current, date: event.target.value }))}
-                onBlur={() => updateActiveDraft((current) => ({ ...current, date: normalizeDraftDate(current.date || '') }))}
-              />
-              <TimeTextInput value={activeDraft.end} ariaLabel="计时结束时间" onChange={(value) => updateActiveDraft((current) => ({ ...current, end: value }))} />
-              <CalendarDays size={16} />
-            </div>
-          </label>
+          <PlanDateTimeField
+            label="开始时间"
+            value={`${activeStartDate}T${normalizeClockInput(activeDraft.start) || '09:00'}`}
+            onChange={(value) => updateActiveDraft((current) => ({ ...current, date: datePart(value), start: value.slice(11, 16) }))}
+          />
+          <PlanDateTimeField
+            label="结束时间"
+            value={`${activeEndDate}T${normalizeClockInput(activeDraft.end) || '10:00'}`}
+            onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: datePart(value), end: value.slice(11, 16) }))}
+          />
+          <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
+            {hasDraftTimeEntry
+              ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
+              : '结束时间需晚于开始时间'}
+          </p>
         </section>
 
         <section className="progress-lite-field">
@@ -4868,7 +4838,7 @@ function TaskProgressModal({
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || (!(isWaitingMode ? waitingDirty : timeDirty) && !hasDraftTimeEntry && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
+        <button className="primary-button" disabled={isSaving || !hasDraftTimeEntry} onClick={() => void saveProgress()}>
           {isSaving ? '保存中…' : isWaitingMode ? '记录等待' : '记录进展'}
         </button>
       </footer>
@@ -5184,10 +5154,10 @@ function AcceptanceModal({
               {timeEntries.map((entry) => (
                 <div className="acceptance-readonly-time-row" key={entry.id}>
                   <div>
-                    <strong>{entry.start} - {entry.end}</strong>
+                    <strong>{formatEntryDateTimeRange(task, entry)}</strong>
                     <span>{entry.note || '未填写具体内容'}</span>
                   </div>
-                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                  <em>{formatDuration(minutesForTimeEntry(entry))}</em>
                 </div>
               ))}
             </div>
@@ -5208,10 +5178,10 @@ function AcceptanceModal({
                 {waitingEntries.map((entry) => (
                   <div className="acceptance-readonly-time-row" key={entry.id}>
                     <div>
-                      <strong>{entry.start} - {entry.end}</strong>
+                      <strong>{formatEntryDateTimeRange(task, entry)}</strong>
                       <span>{entry.note || '等待甲方确认'}</span>
                     </div>
-                    <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                    <em>{formatDuration(minutesForTimeEntry(entry))}</em>
                   </div>
                 ))}
               </div>

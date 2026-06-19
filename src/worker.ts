@@ -1977,6 +1977,8 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
       ? parsed
           .map((entry) => ({
             id: String((entry as TimeEntry).id ?? crypto.randomUUID()),
+            date: String((entry as TimeEntry).date ?? ''),
+            endDate: String((entry as TimeEntry).endDate ?? (entry as TimeEntry).date ?? ''),
             start: String((entry as TimeEntry).start ?? ''),
             end: String((entry as TimeEntry).end ?? ''),
             note: String((entry as TimeEntry).note ?? ''),
