@@ -594,6 +594,12 @@ button {
   align-items: start;
 }
 
+.dashboard-content-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  gap: 28px;
+  align-items: start;
+}
+
 .main-column,
 .side-column {
   min-width: 0;
@@ -866,6 +872,313 @@ button {
   height: 3px;
   background: var(--color-primary);
   content: "";
+}
+
+.dashboard-task-sidebar {
+  position: sticky;
+  top: 28px;
+  min-width: 0;
+  max-height: calc(100vh - 56px);
+  padding: 22px 24px 26px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  overflow-y: auto;
+}
+
+.dashboard-task-sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dashboard-task-sidebar-header h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.dashboard-task-sidebar-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-side-section {
+  padding: 18px 0 0;
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-side-section + .dashboard-side-section {
+  margin-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.dashboard-side-section-title,
+.dashboard-side-subsection-title,
+.dashboard-side-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dashboard-side-section-title h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.dashboard-side-action {
+  min-height: 28px;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dashboard-side-info {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.dashboard-side-info div {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  padding-bottom: 10px;
+}
+
+.dashboard-side-info dt {
+  margin: 0 0 5px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-side-info dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dashboard-side-progress {
+  display: grid;
+  gap: 14px;
+  padding: 4px 0 6px;
+}
+
+.dashboard-side-progress-head span {
+  color: var(--color-text-muted);
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dashboard-side-progress-head strong {
+  color: var(--color-text);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.dashboard-side-progress-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-soft);
+  overflow: hidden;
+}
+
+.dashboard-side-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.dashboard-side-progress-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.dashboard-side-progress-scale span {
+  min-width: 0;
+  border-radius: 7px;
+  padding: 5px 7px;
+}
+
+.dashboard-side-progress-scale span.active {
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
+  font-weight: 800;
+}
+
+.dashboard-side-subsection {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.dashboard-side-subsection + .dashboard-side-subsection {
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.dashboard-side-subsection-title > span {
+  color: var(--color-text-muted);
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dashboard-side-subsection-title > em {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dashboard-side-muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.dashboard-side-timeline {
+  display: grid;
+  gap: 18px;
+}
+
+.dashboard-side-time-item {
+  position: relative;
+  padding-left: 20px;
+}
+
+.dashboard-side-time-item::before {
+  position: absolute;
+  top: 18px;
+  bottom: -19px;
+  left: 5px;
+  width: 1px;
+  background: var(--color-border);
+  content: "";
+}
+
+.dashboard-side-time-item:last-child::before {
+  display: none;
+}
+
+.dashboard-side-time-item time,
+.dashboard-side-waiting-item time,
+.dashboard-side-activity-item .timeline-stamp {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dashboard-side-time-item p,
+.dashboard-side-waiting-item p,
+.dashboard-side-activity-item p {
+  margin: 6px 0 0;
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.dashboard-side-time-item em {
+  display: block;
+  margin-top: 5px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-style: normal;
+}
+
+.dashboard-side-activity {
+  display: grid;
+  gap: 14px;
+}
+
+.dashboard-side-activity-item {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-side-activity-item p {
+  margin-top: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.dashboard-side-activity .activity-file-row {
+  margin-top: 0;
+}
+
+.dashboard-side-activity .activity-file-preview-card {
+  width: 104px;
+}
+
+.dashboard-side-activity .activity-file-preview-thumb {
+  height: 76px;
+}
+
+.dashboard-side-waiting-list {
+  display: grid;
+  gap: 0;
+}
+
+.dashboard-side-waiting-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dashboard-side-waiting-item:first-child {
+  padding-top: 0;
+}
+
+.dashboard-side-waiting-item em,
+.dashboard-side-waiting-total {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-admin-only);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dashboard-side-waiting-total {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.dashboard-task-sidebar-empty {
+  display: grid;
+  gap: 8px;
+  padding: 20px 0;
+}
+
+.dashboard-task-sidebar-empty strong {
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.dashboard-task-sidebar-empty p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .task-row {
@@ -9634,6 +9947,15 @@ textarea:focus-visible {
 
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-task-sidebar {
+    position: static;
+    max-height: none;
   }
 
   .side-column {

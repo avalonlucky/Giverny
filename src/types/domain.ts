@@ -42,6 +42,7 @@ export type Task = {
 
 export type TimeEntry = {
   id: string
+  date?: string
   start: string
   end: string
   note?: string

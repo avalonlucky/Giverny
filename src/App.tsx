@@ -674,6 +674,16 @@ function formatDuration(minutes: number) {
   return `${hours} h ${restMinutes} min`
 }
 
+function formatSignedHours(minutes: number) {
+  const safeMinutes = Math.max(0, minutes)
+  const hours = safeMinutes / 60
+  return `+${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`
+}
+
+function formatEntryDate(task: Task, entry: TimeEntry) {
+  return formatMonthDay(entry.date ?? datePart(task.date))
+}
+
 function minutesBetween(start: string, end: string) {
   if (!start || !end) {
     return 0
@@ -3054,7 +3064,7 @@ function App() {
           </button>
         )}
 
-        <section className="content-grid">
+        <section className="content-grid dashboard-content-grid">
           <div className="main-column">
             <section className="panel task-panel dashboard-task-panel">
               <div className="dashboard-task-header">
@@ -3266,6 +3276,16 @@ function App() {
               </div>
             </details>
           </div>
+          <DashboardTaskSidebar
+            task={selectedTask}
+            files={selectedTask ? fileItems.filter((file) => file.taskId === selectedTask.id) : []}
+            activity={taskActivity}
+            role={role}
+            onOpenProgress={(taskId) => handleOpenTaskProgress(taskId)}
+            onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
+            onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
+            onPreviewFile={setPreviewFile}
+          />
         </section>
           </div>
         )}
@@ -4013,6 +4033,191 @@ function FileContextMenu({
   )
 }
 
+function DashboardTaskSidebar({
+  task,
+  files,
+  activity,
+  role,
+  onOpenProgress,
+  onOpenEdit,
+  onOpenAcceptance,
+  onPreviewFile,
+}: {
+  task: Task | undefined
+  files: FileAsset[]
+  activity: ActivityItem[]
+  role: AuthRole
+  onOpenProgress: (taskId: number) => void
+  onOpenEdit: (taskId: number) => void
+  onOpenAcceptance: (taskId: number) => void
+  onPreviewFile: (file: FileAsset) => void
+}) {
+  if (!task) {
+    return (
+      <aside className="dashboard-task-sidebar">
+        <div className="dashboard-task-sidebar-empty">
+          <strong>选择一条任务</strong>
+          <p>右侧会显示任务信息、进度、分段计时和等待记录。</p>
+        </div>
+      </aside>
+    )
+  }
+
+  const timeEntries = task.timeEntries ?? []
+  const waitingEntries = task.waitingEntries ?? []
+  const actualMinutes = sumTimeEntries(timeEntries)
+  const billableHours = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
+  const waitingMinutes = sumTimeEntries(waitingEntries)
+  const recentActivity = activity.slice(0, 4)
+  const canAcceptTask = task.status === '待验收'
+
+  return (
+    <aside className="dashboard-task-sidebar">
+      <header className="dashboard-task-sidebar-header">
+        <h2>{task.title}</h2>
+        <div className="dashboard-task-sidebar-actions">
+          {canAcceptTask && (
+            <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
+              去验收
+            </button>
+          )}
+          <button type="button" className="icon-button" aria-label="编辑任务" title="编辑任务" onClick={() => onOpenEdit(task.id)}>
+            <Pencil size={15} />
+          </button>
+        </div>
+      </header>
+
+      <section className="dashboard-side-section">
+        <div className="dashboard-side-section-title">
+          <h3>信息</h3>
+        </div>
+        <dl className="dashboard-side-info">
+          <div>
+            <dt>计划开始</dt>
+            <dd>{task.date ? formatPlanDateTime(task.date) : '未设置'}</dd>
+          </div>
+          <div>
+            <dt>预计交付</dt>
+            <dd>{task.estimatedDate ? formatPlanDateTime(task.estimatedDate) : '未设置'}</dd>
+          </div>
+          <div>
+            <dt>类型</dt>
+            <dd>{task.type || '未填写'}</dd>
+          </div>
+          <div>
+            <dt>对接人</dt>
+            <dd>{task.contact || '待确认'}</dd>
+          </div>
+          <div>
+            <dt>状态</dt>
+            <dd><StatusDotLabel status={task.status} /></dd>
+          </div>
+          <div>
+            <dt>结算</dt>
+            <dd>
+              {monthLabelOf(taskSettlementMonth(task))}
+              {isSupplementalTask(task) ? <span className="supplement-inline">补录</span> : null}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="dashboard-side-section dashboard-side-progress-section">
+        <div className="dashboard-side-section-title">
+          <h3>进展</h3>
+          <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+            <Plus size={15} />
+            记录进展
+          </button>
+        </div>
+        <div className="dashboard-side-progress">
+          <div className="dashboard-side-progress-head">
+            <span>整体进度</span>
+            <strong>{task.progress}%</strong>
+          </div>
+          <div className="dashboard-side-progress-track">
+            <span style={{ width: `${task.progress}%` }} />
+          </div>
+          <div className="dashboard-side-progress-scale">
+            {[0, 20, 40, 60, 80, 100].map((value) => (
+              <span className={task.progress === value ? 'active' : ''} key={value}>{value}%</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="dashboard-side-subsection">
+          <div className="dashboard-side-subsection-title">
+            <span>进展 · 分段计时</span>
+            <em>可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</em>
+          </div>
+          {timeEntries.length === 0 ? (
+            <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
+          ) : (
+            <div className="dashboard-side-timeline">
+              {timeEntries.map((entry) => {
+                const minutes = minutesBetween(entry.start, entry.end)
+                return (
+                  <article className="dashboard-side-time-item" key={entry.id}>
+                    <span className="dot" />
+                    <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                    <p>{entry.note || '未填写具体内容'}</p>
+                    <em>计时 {formatSignedHours(minutes)}</em>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {recentActivity.length > 0 && (
+          <div className="dashboard-side-subsection">
+            <div className="dashboard-side-subsection-title">
+              <span>附件与动态</span>
+              <em>{recentActivity.length} 条</em>
+            </div>
+            <div className="dashboard-side-activity">
+              {recentActivity.map((item) => (
+                <article className="dashboard-side-activity-item" key={item.id}>
+                  <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
+                  <p>{describeActivity(item)}</p>
+                  <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="dashboard-side-subsection dashboard-side-waiting">
+          <div className="dashboard-side-subsection-title">
+            <span>等待记录 · 不计结算</span>
+            <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+              <Plus size={15} />
+              记录等待
+            </button>
+          </div>
+          {waitingEntries.length === 0 ? (
+            <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
+          ) : (
+            <div className="dashboard-side-waiting-list">
+              {waitingEntries.map((entry) => {
+                const minutes = minutesBetween(entry.start, entry.end)
+                return (
+                  <article className="dashboard-side-waiting-item" key={entry.id}>
+                    <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                    <p>{entry.note || '等待甲方确认'}</p>
+                    <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+          {waitingMinutes > 0 && <p className="dashboard-side-waiting-total">等待合计 {(waitingMinutes / 60).toFixed(1)}h，进入洞察分析，不进入结算工时。</p>}
+        </div>
+      </section>
+    </aside>
+  )
+}
+
 function TasksView({
   viewMode,
   onViewModeChange,
@@ -4490,7 +4695,7 @@ function TaskProgressModal({
     if (!start || !end || minutesBetween(start, end) <= 0) {
       return
     }
-    setDraftTimeEntries((current) => [...current, { id: crypto.randomUUID(), start, end, note: noteText }])
+    setDraftTimeEntries((current) => [...current, { id: crypto.randomUUID(), date: isoDate(), start, end, note: noteText }])
     setTimeDraft(defaultTimeEntryDraft())
   }
 
@@ -4505,7 +4710,7 @@ function TaskProgressModal({
     if (!start || !end || minutesBetween(start, end) <= 0) {
       return
     }
-    setDraftWaitingEntries((current) => [...current, { id: crypto.randomUUID(), start, end, note: noteText }])
+    setDraftWaitingEntries((current) => [...current, { id: crypto.randomUUID(), date: isoDate(), start, end, note: noteText }])
     setWaitingDraft(defaultTimeEntryDraft())
   }
 
