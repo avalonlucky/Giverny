@@ -322,11 +322,11 @@ button {
 
 @media (min-width: 901px) {
   .dashboard-layout .sidebar {
-    gap: 46px;
+    gap: 70px;
   }
 
   .dashboard-layout .topbar {
-    margin-bottom: 28px;
+    margin-bottom: 52px;
   }
 }
 
