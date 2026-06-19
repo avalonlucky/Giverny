@@ -49,7 +49,11 @@ export type TimeEntry = {
   note?: string
 }
 
-export type WaitingEntry = TimeEntry
+export type WaitingReason = '等待甲方意见' | '等待补充资料' | '等待排期' | '其他'
+
+export type WaitingEntry = TimeEntry & {
+  reason?: WaitingReason
+}
 
 export type FileAsset = {
   id: number

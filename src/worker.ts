@@ -1,6 +1,6 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
 import JSZip from 'jszip'
-import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskUpdate, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -1982,6 +1982,7 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
             start: String((entry as TimeEntry).start ?? ''),
             end: String((entry as TimeEntry).end ?? ''),
             note: String((entry as TimeEntry).note ?? ''),
+            reason: String((entry as WaitingEntry).reason ?? '') as WaitingReason,
           }))
           .filter((entry) => entry.start && entry.end)
       : []

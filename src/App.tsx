@@ -77,7 +77,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -757,6 +757,7 @@ function defaultTimeEntryDraft() {
     start: `${pad(startHour)}:00`,
     end: `${pad(endHour)}:00`,
     note: '',
+    reason: '等待甲方意见' as WaitingReason,
   }
 }
 
@@ -779,6 +780,8 @@ const laborTaxBrackets = [
 type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
 
 type ProgressRecordMode = 'progress' | 'waiting'
+
+const waitingReasonOptions: WaitingReason[] = ['等待甲方意见', '等待补充资料', '等待排期', '其他']
 
 type AnnualIncomeRow = {
   month: string
@@ -3237,7 +3240,7 @@ function App() {
           <DashboardTaskSidebar
             task={selectedTask}
             onUpdateTask={handleUpdateTask}
-            onOpenProgress={(taskId) => handleOpenTaskProgress(taskId)}
+            onOpenProgress={handleOpenTaskProgress}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
           />
@@ -4155,7 +4158,7 @@ function DashboardTaskSidebar({
                   return (
                     <article className="dashboard-side-waiting-item" key={entry.id}>
                       <time>{formatEntryDateTimeRange(task, entry)}</time>
-                      <p>{entry.note || '等待甲方确认'}</p>
+                      <p>{entry.note || entry.reason || '等待甲方确认'}</p>
                       <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
                     </article>
                   )
@@ -4643,7 +4646,8 @@ function TaskProgressModal({
     if (!start || !end || draftEntryMinutes <= 0) {
       return null
     }
-    return { id: crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
+    const entry = { id: crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
+    return isWaitingMode ? { ...entry, reason: activeDraft.reason } : entry
   }
 
   const uploadFiles = async (fileList: FileList | null) => {
@@ -4724,117 +4728,157 @@ function TaskProgressModal({
     }
   }
 
+  const timeFields = (
+    <section className="progress-lite-time-grid">
+      <PlanDateTimeField
+        label="开始时间"
+        value={`${activeStartDate}T${normalizeClockInput(activeDraft.start) || '09:00'}`}
+        onChange={(value) => updateActiveDraft((current) => ({ ...current, date: datePart(value), start: value.slice(11, 16) }))}
+      />
+      <PlanDateTimeField
+        label="结束时间"
+        value={`${activeEndDate}T${normalizeClockInput(activeDraft.end) || '10:00'}`}
+        onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: datePart(value), end: value.slice(11, 16) }))}
+      />
+      <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
+        {hasDraftTimeEntry
+          ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
+          : '结束时间需晚于开始时间'}
+      </p>
+    </section>
+  )
+
   return (
     <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
       <header className="progress-lite-header">
         <div>
           <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : '记录进展'}</h2>
-          <small>{task.title} · {isWaitingMode ? '等待时间不计入结算，但进入洞察分析' : '按时间段计时，工时自动累计并计入结算'}</small>
+          <small>{isWaitingMode ? '记录非工作的等待时间段，仅用于洞察分析，不计入结算工时' : `${task.title} · 按时间段计时，工时自动累计并计入结算`}</small>
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
           <X size={18} />
         </button>
       </header>
-      <div className="progress-lite-body">
-        <section className="progress-lite-field">
-          <div className="progress-lite-label-row">
-            <label htmlFor="progress-lite-note">{isWaitingMode ? '等待内容' : '进展内容'}</label>
-            <button
-              type="button"
-              className="icon-button ai-assist-button"
-              aria-label="AI 优化进展内容"
-              title="AI 优化进展内容"
-              onClick={() => void requestProgressAiSuggestion()}
-              disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
-            >
-              <Sparkles size={16} />
-            </button>
-          </div>
-          <textarea
-            id="progress-lite-note"
-            className="task-progress-note progress-lite-note"
-            value={note}
-            onChange={(event) => {
-              const value = event.target.value
-              setNote(value)
-              updateActiveDraft((current) => ({ ...current, note: value }))
-            }}
-            placeholder={isWaitingMode ? '例如：等待甲方确认主色方案，暂不计入结算' : '例如：按甲方反馈调整封面配色，导出终稿'}
-          />
-          {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
-            <div className="ai-suggestion-panel task-text-ai-panel">
-              <div className="ai-suggestion-head">
-                <span>{isProgressAiLoading ? 'AI 正在整理进展' : 'AI 建议'}</span>
+      <div className={`progress-lite-body ${isWaitingMode ? 'waiting-mode' : ''}`}>
+        {isWaitingMode ? (
+          <>
+            {timeFields}
+            <section className="progress-lite-field">
+              <span className="progress-lite-label">等待原因</span>
+              <div className="progress-lite-reason-options" role="group" aria-label="等待原因">
+                {waitingReasonOptions.map((reason) => (
+                  <button
+                    type="button"
+                    className={activeDraft.reason === reason ? 'active' : ''}
+                    aria-pressed={activeDraft.reason === reason}
+                    key={reason}
+                    onClick={() => updateActiveDraft((current) => ({ ...current, reason }))}
+                  >
+                    {reason}
+                  </button>
+                ))}
               </div>
-              {isProgressAiLoading && <p>正在结合当前输入、任务附件和最近进展优化文案...</p>}
-              {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
-              {progressAiSuggestion && (
-                <>
-                  <div className="ai-suggestion-body">
-                    {renderTextAssistantBody(progressAiSuggestion.optimizedText)}
+            </section>
+            <section className="progress-lite-field">
+              <label className="progress-lite-label" htmlFor="progress-lite-waiting-note">备注</label>
+              <textarea
+                id="progress-lite-waiting-note"
+                className="task-progress-note progress-lite-note"
+                value={note}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setNote(value)
+                  updateActiveDraft((current) => ({ ...current, note: value }))
+                }}
+                placeholder="选填，补充等待的具体原因"
+              />
+            </section>
+          </>
+        ) : (
+          <>
+            <section className="progress-lite-field">
+              <div className="progress-lite-label-row">
+                <label htmlFor="progress-lite-note">进展内容</label>
+                <button
+                  type="button"
+                  className="icon-button ai-assist-button"
+                  aria-label="AI 优化进展内容"
+                  title="AI 优化进展内容"
+                  onClick={() => void requestProgressAiSuggestion()}
+                  disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
+                >
+                  <Sparkles size={16} />
+                </button>
+              </div>
+              <textarea
+                id="progress-lite-note"
+                className="task-progress-note progress-lite-note"
+                value={note}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setNote(value)
+                  updateActiveDraft((current) => ({ ...current, note: value }))
+                }}
+                placeholder="例如：按甲方反馈调整封面配色，导出终稿"
+              />
+              {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
+                <div className="ai-suggestion-panel task-text-ai-panel">
+                  <div className="ai-suggestion-head">
+                    <span>{isProgressAiLoading ? 'AI 正在整理进展' : 'AI 建议'}</span>
                   </div>
-                  {progressAiSuggestion.summary && <small>{progressAiSuggestion.summary}</small>}
-                  <div className="ai-suggestion-actions">
-                    <button
-                      type="button"
-                      className="ghost-button compact-button"
-                      onClick={() => {
-                        setNote(progressAiSuggestion.optimizedText)
-                        updateActiveDraft((current) => ({ ...current, note: progressAiSuggestion.optimizedText }))
-                      }}
-                    >
-                      采用建议
-                    </button>
-                  </div>
-                </>
+                  {isProgressAiLoading && <p>正在结合当前输入、任务附件和最近进展优化文案...</p>}
+                  {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
+                  {progressAiSuggestion && (
+                    <>
+                      <div className="ai-suggestion-body">
+                        {renderTextAssistantBody(progressAiSuggestion.optimizedText)}
+                      </div>
+                      {progressAiSuggestion.summary && <small>{progressAiSuggestion.summary}</small>}
+                      <div className="ai-suggestion-actions">
+                        <button
+                          type="button"
+                          className="ghost-button compact-button"
+                          onClick={() => {
+                            setNote(progressAiSuggestion.optimizedText)
+                            updateActiveDraft((current) => ({ ...current, note: progressAiSuggestion.optimizedText }))
+                          }}
+                        >
+                          采用建议
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
-            </div>
-          )}
-        </section>
-
-        <section className="progress-lite-time-grid">
-          <PlanDateTimeField
-            label="开始时间"
-            value={`${activeStartDate}T${normalizeClockInput(activeDraft.start) || '09:00'}`}
-            onChange={(value) => updateActiveDraft((current) => ({ ...current, date: datePart(value), start: value.slice(11, 16) }))}
-          />
-          <PlanDateTimeField
-            label="结束时间"
-            value={`${activeEndDate}T${normalizeClockInput(activeDraft.end) || '10:00'}`}
-            onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: datePart(value), end: value.slice(11, 16) }))}
-          />
-          <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
-            {hasDraftTimeEntry
-              ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
-              : '结束时间需晚于开始时间'}
-          </p>
-        </section>
-
-        <section className="progress-lite-field">
-          <span className="progress-lite-label">附件（选填）</span>
-          {uploadedNames.length > 0 && (
-            <div className="uploaded-chip-row">
-              {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
-            </div>
-          )}
-          {uploadErrors.length > 0 && (
-            <div className="upload-error-list" role="alert">
-              {uploadErrors.map((message) => <span key={message}>{message}</span>)}
-            </div>
-          )}
-          <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            <Plus size={15} />
-            {uploading ? '上传中…' : '添加过程截图 / 文件'}
-          </button>
-          <input
-            ref={fileInputRef}
-            className="task-row-upload-input"
-            type="file"
-            multiple
-            accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
-            onChange={(event) => void uploadFiles(event.target.files)}
-          />
-        </section>
+            </section>
+            {timeFields}
+            <section className="progress-lite-field">
+              <span className="progress-lite-label">附件（选填）</span>
+              {uploadedNames.length > 0 && (
+                <div className="uploaded-chip-row">
+                  {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
+                </div>
+              )}
+              {uploadErrors.length > 0 && (
+                <div className="upload-error-list" role="alert">
+                  {uploadErrors.map((message) => <span key={message}>{message}</span>)}
+                </div>
+              )}
+              <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                <Plus size={15} />
+                {uploading ? '上传中…' : '添加过程截图 / 文件'}
+              </button>
+              <input
+                ref={fileInputRef}
+                className="task-row-upload-input"
+                type="file"
+                multiple
+                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+                onChange={(event) => void uploadFiles(event.target.files)}
+              />
+            </section>
+          </>
+        )}
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
@@ -5179,7 +5223,7 @@ function AcceptanceModal({
                   <div className="acceptance-readonly-time-row" key={entry.id}>
                     <div>
                       <strong>{formatEntryDateTimeRange(task, entry)}</strong>
-                      <span>{entry.note || '等待甲方确认'}</span>
+                      <span>{entry.note || entry.reason || '等待甲方确认'}</span>
                     </div>
                     <em>{formatDuration(minutesForTimeEntry(entry))}</em>
                   </div>
