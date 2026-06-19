@@ -4052,6 +4052,8 @@ function DashboardTaskSidebar({
   onOpenAcceptance: (taskId: number) => void
   onPreviewFile: (file: FileAsset) => void
 }) {
+  const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
+
   if (!task) {
     return (
       <aside className="dashboard-task-sidebar">
@@ -4075,145 +4077,151 @@ function DashboardTaskSidebar({
     <aside className="dashboard-task-sidebar">
       <header className="dashboard-task-sidebar-header">
         <h2>{task.title}</h2>
-        <div className="dashboard-task-sidebar-actions">
-          {canAcceptTask && (
-            <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
-              去验收
-            </button>
-          )}
-          <button type="button" className="icon-button" aria-label="编辑任务" title="编辑任务" onClick={() => onOpenEdit(task.id)}>
-            <Pencil size={15} />
-          </button>
-        </div>
       </header>
 
-      <section className="dashboard-side-section">
-        <div className="dashboard-side-section-title">
-          <h3>信息</h3>
-        </div>
-        <dl className="dashboard-side-info">
-          <div>
-            <dt>计划开始</dt>
-            <dd>{task.date ? formatPlanDateTime(task.date) : '未设置'}</dd>
-          </div>
-          <div>
-            <dt>预计交付</dt>
-            <dd>{task.estimatedDate ? formatPlanDateTime(task.estimatedDate) : '未设置'}</dd>
-          </div>
-          <div>
-            <dt>类型</dt>
-            <dd>{task.type || '未填写'}</dd>
-          </div>
-          <div>
-            <dt>对接人</dt>
-            <dd>{task.contact || '待确认'}</dd>
-          </div>
-          <div>
-            <dt>状态</dt>
-            <dd><StatusDotLabel status={task.status} /></dd>
-          </div>
-          <div>
-            <dt>结算</dt>
-            <dd>
-              {monthLabelOf(taskSettlementMonth(task))}
-              {isSupplementalTask(task) ? <span className="supplement-inline">补录</span> : null}
-            </dd>
-          </div>
-        </dl>
-      </section>
+      <div className="dashboard-side-tabs" role="tablist" aria-label="任务侧栏">
+        <button type="button" className={activeTab === 'info' ? 'active' : ''} onClick={() => setActiveTab('info')} role="tab" aria-selected={activeTab === 'info'}>
+          信息
+        </button>
+        <button type="button" className={activeTab === 'progress' ? 'active' : ''} onClick={() => setActiveTab('progress')} role="tab" aria-selected={activeTab === 'progress'}>
+          进展
+        </button>
+      </div>
 
-      <section className="dashboard-side-section dashboard-side-progress-section">
-        <div className="dashboard-side-section-title">
-          <h3>进展</h3>
-          <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
-            <Plus size={15} />
-            记录进展
-          </button>
-        </div>
-        <div className="dashboard-side-progress">
-          <div className="dashboard-side-progress-head">
-            <span>整体进度</span>
-            <strong>{task.progress}%</strong>
-          </div>
-          <div className="dashboard-side-progress-track">
-            <span style={{ width: `${task.progress}%` }} />
-          </div>
-          <div className="dashboard-side-progress-scale">
-            {[0, 20, 40, 60, 80, 100].map((value) => (
-              <span className={task.progress === value ? 'active' : ''} key={value}>{value}%</span>
-            ))}
-          </div>
-        </div>
-
-        <div className="dashboard-side-subsection">
-          <div className="dashboard-side-subsection-title">
-            <span>进展 · 分段计时</span>
-            <em>可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</em>
-          </div>
-          {timeEntries.length === 0 ? (
-            <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
-          ) : (
-            <div className="dashboard-side-timeline">
-              {timeEntries.map((entry) => {
-                const minutes = minutesBetween(entry.start, entry.end)
-                return (
-                  <article className="dashboard-side-time-item" key={entry.id}>
-                    <span className="dot" />
-                    <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
-                    <p>{entry.note || '未填写具体内容'}</p>
-                    <em>计时 {formatSignedHours(minutes)}</em>
-                  </article>
-                )
-              })}
+      {activeTab === 'info' ? (
+        <section className="dashboard-side-section" role="tabpanel">
+          <dl className="dashboard-side-info">
+            <div>
+              <dt>计划开始</dt>
+              <dd>{task.date ? formatPlanDateTime(task.date) : '未设置'}</dd>
             </div>
-          )}
-        </div>
-
-        {recentActivity.length > 0 && (
-          <div className="dashboard-side-subsection">
-            <div className="dashboard-side-subsection-title">
-              <span>附件与动态</span>
-              <em>{recentActivity.length} 条</em>
+            <div>
+              <dt>预计交付</dt>
+              <dd>{task.estimatedDate ? formatPlanDateTime(task.estimatedDate) : '未设置'}</dd>
             </div>
-            <div className="dashboard-side-activity">
-              {recentActivity.map((item) => (
-                <article className="dashboard-side-activity-item" key={item.id}>
-                  <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
-                  <p>{describeActivity(item)}</p>
-                  <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
-                </article>
+            <div>
+              <dt>类型</dt>
+              <dd>{task.type || '未填写'}</dd>
+            </div>
+            <div>
+              <dt>对接人</dt>
+              <dd>{task.contact || '待确认'}</dd>
+            </div>
+            <div>
+              <dt>状态</dt>
+              <dd><StatusDotLabel status={task.status} /></dd>
+            </div>
+            <div>
+              <dt>结算</dt>
+              <dd>
+                {monthLabelOf(taskSettlementMonth(task))}
+                {isSupplementalTask(task) ? <span className="supplement-inline">补录</span> : null}
+              </dd>
+            </div>
+          </dl>
+          <div className="dashboard-side-info-actions">
+            {canAcceptTask && (
+              <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
+                去验收
+              </button>
+            )}
+            <button type="button" className="ghost-button compact-button" onClick={() => onOpenEdit(task.id)}>
+              <Pencil size={15} />
+              编辑信息
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="dashboard-side-section dashboard-side-progress-section" role="tabpanel">
+          <div className="dashboard-side-progress">
+            <div className="dashboard-side-progress-head">
+              <span>整体进度</span>
+              <strong>{task.progress}%</strong>
+            </div>
+            <div className="dashboard-side-progress-track">
+              <span style={{ width: `${task.progress}%` }} />
+            </div>
+            <div className="dashboard-side-progress-scale">
+              {[0, 20, 40, 60, 80, 100].map((value) => (
+                <span className={task.progress === value ? 'active' : ''} key={value}>{value}%</span>
               ))}
             </div>
           </div>
-        )}
 
-        <div className="dashboard-side-subsection dashboard-side-waiting">
-          <div className="dashboard-side-subsection-title">
-            <span>等待记录 · 不计结算</span>
-            <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
-              <Plus size={15} />
-              记录等待
-            </button>
+          <div className="dashboard-side-subsection">
+            <div className="dashboard-side-subsection-title">
+              <span>进展 · 分段计时</span>
+              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+                <Plus size={15} />
+                记录进展
+              </button>
+            </div>
+            <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</p>
+            {timeEntries.length === 0 ? (
+              <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
+            ) : (
+              <div className="dashboard-side-timeline">
+                {timeEntries.map((entry) => {
+                  const minutes = minutesBetween(entry.start, entry.end)
+                  return (
+                    <article className="dashboard-side-time-item" key={entry.id}>
+                      <span className="dot" />
+                      <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                      <p>{entry.note || '未填写具体内容'}</p>
+                      <em>计时 {formatSignedHours(minutes)}</em>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
           </div>
-          {waitingEntries.length === 0 ? (
-            <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
-          ) : (
-            <div className="dashboard-side-waiting-list">
-              {waitingEntries.map((entry) => {
-                const minutes = minutesBetween(entry.start, entry.end)
-                return (
-                  <article className="dashboard-side-waiting-item" key={entry.id}>
-                    <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
-                    <p>{entry.note || '等待甲方确认'}</p>
-                    <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
+
+          {recentActivity.length > 0 && (
+            <div className="dashboard-side-subsection">
+              <div className="dashboard-side-subsection-title">
+                <span>附件与动态</span>
+                <em>{recentActivity.length} 条</em>
+              </div>
+              <div className="dashboard-side-activity">
+                {recentActivity.map((item) => (
+                  <article className="dashboard-side-activity-item" key={item.id}>
+                    <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
+                    <p>{describeActivity(item)}</p>
+                    <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
                   </article>
-                )
-              })}
+                ))}
+              </div>
             </div>
           )}
-          {waitingMinutes > 0 && <p className="dashboard-side-waiting-total">等待合计 {(waitingMinutes / 60).toFixed(1)}h，进入洞察分析，不进入结算工时。</p>}
-        </div>
-      </section>
+
+          <div className="dashboard-side-subsection dashboard-side-waiting">
+            <div className="dashboard-side-subsection-title">
+              <span>等待记录 · 不计结算</span>
+              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+                <Plus size={15} />
+                记录等待
+              </button>
+            </div>
+            {waitingEntries.length === 0 ? (
+              <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
+            ) : (
+              <div className="dashboard-side-waiting-list">
+                {waitingEntries.map((entry) => {
+                  const minutes = minutesBetween(entry.start, entry.end)
+                  return (
+                    <article className="dashboard-side-waiting-item" key={entry.id}>
+                      <time>{formatEntryDate(task, entry)} {entry.start}-{entry.end}</time>
+                      <p>{entry.note || '等待甲方确认'}</p>
+                      <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+            {waitingMinutes > 0 && <p className="dashboard-side-waiting-total">等待合计 {(waitingMinutes / 60).toFixed(1)}h，进入洞察分析，不进入结算工时。</p>}
+          </div>
+        </section>
+      )}
     </aside>
   )
 }

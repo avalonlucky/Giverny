@@ -3,8 +3,8 @@ export const importedMonthlyHours = 0
 // 试运营后统计只读取 D1 正式任务数据；历史线下工时不再硬编码进前端。
 export const importedHoursMonth = '2026-05'
 
-export const appVersion = '0.11.18'
-export const appReleaseDate = '2026-06-19 23:56'
+export const appVersion = '0.11.19'
+export const appReleaseDate = '2026-06-20 00:11'
 export const appReleaseStage = '试运营'
 
 export const defaultHourlyRate = 300
