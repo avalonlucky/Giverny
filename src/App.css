@@ -320,6 +320,16 @@ button {
   margin-bottom: 22px;
 }
 
+@media (min-width: 901px) {
+  .dashboard-layout .sidebar {
+    gap: 46px;
+  }
+
+  .dashboard-layout .topbar {
+    margin-bottom: 28px;
+  }
+}
+
 .eyebrow {
   margin: 0 0 7px;
   color: #607075;

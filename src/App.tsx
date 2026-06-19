@@ -2907,7 +2907,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${activeView === '工作台' ? 'dashboard-layout' : ''}`.trim()}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
