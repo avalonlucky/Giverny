@@ -1,6 +1,6 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
 import JSZip from 'jszip'
-import type { AttachmentAnalysis, FileAsset, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -204,6 +204,15 @@ type DbAttachmentAnalysis = {
   error_message: string | null
   requested_at: string
   completed_at: string | null
+}
+
+type DbInsightDiagnosis = {
+  id: string
+  period_key: string
+  period_type: InsightPeriodType
+  data_fingerprint: string
+  result_json: string
+  created_at: string
 }
 
 type DbReport = {
@@ -513,7 +522,7 @@ function extractOpenAiText(data: { choices?: Array<{ message?: { content?: strin
   return data?.choices?.[0]?.message?.content?.trim() || ''
 }
 
-async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string) {
+async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string, maxOutputTokens = 64) {
   if (!endpoint.apiKey) {
     throw new Error('模型 API Key 未配置')
   }
@@ -526,7 +535,7 @@ async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiE
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 64 },
+        generationConfig: { maxOutputTokens },
       }),
     })
     const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
@@ -545,7 +554,7 @@ async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiE
     body: JSON.stringify({
       model: endpoint.model,
       temperature: kimiTemperature(endpoint.provider, endpoint.model),
-      max_tokens: 64,
+      max_tokens: maxOutputTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
   })
@@ -1080,6 +1089,230 @@ async function processPendingAttachmentAnalyses(env: Env, limit = 2) {
   for (const row of rows.results ?? []) {
     await processAttachmentAnalysis(env, row.attachment_id)
   }
+}
+
+type InsightTypeMetrics = {
+  type: string
+  taskCount: number
+  acceptedCount: number
+  actualHours: number
+  estimatedHours: number
+  estimateVariancePercent: number | null
+  revisionSignals: number
+  revisionSignalsPerTask: number | null
+  weightedHourlyRate: number | null
+  averageCycleDays: number | null
+  deliveryRiskCount: number
+  attachmentQualityIssueCount: number
+}
+
+type InsightDiagnosisResult = Omit<InsightDiagnosis, 'generatedAt'>
+
+function dateKey(value: Date) {
+  return `${value.getUTCFullYear()}-${pad2(value.getUTCMonth() + 1)}-${pad2(value.getUTCDate())}`
+}
+
+function beijingNowDate() {
+  return new Date(Date.now() + 8 * 3_600_000)
+}
+
+function insightDateRange(period: InsightPeriodType, month: string) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  const now = beijingNowDate()
+  const anchorYear = Number.isFinite(year) ? year : now.getUTCFullYear()
+  const anchorMonth = Number.isFinite(monthNumber) ? monthNumber - 1 : now.getUTCMonth()
+  let start: Date
+  let end: Date
+  if (period === 'day') {
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    end = new Date(start.getTime() + 86400000 - 1)
+  } else if (period === 'week') {
+    const mondayOffset = (now.getUTCDay() + 6) % 7
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - mondayOffset))
+    end = new Date(start.getTime() + 7 * 86400000 - 1)
+  } else if (period === 'month') {
+    start = new Date(Date.UTC(anchorYear, anchorMonth, 1))
+    end = new Date(Date.UTC(anchorYear, anchorMonth + 1, 0, 23, 59, 59, 999))
+  } else if (period === 'quarter') {
+    const quarterMonth = Math.floor(anchorMonth / 3) * 3
+    start = new Date(Date.UTC(anchorYear, quarterMonth, 1))
+    end = new Date(Date.UTC(anchorYear, quarterMonth + 3, 0, 23, 59, 59, 999))
+  } else if (period === 'half') {
+    const halfMonth = anchorMonth < 6 ? 0 : 6
+    start = new Date(Date.UTC(anchorYear, halfMonth, 1))
+    end = new Date(Date.UTC(anchorYear, halfMonth + 6, 0, 23, 59, 59, 999))
+  } else {
+    start = new Date(Date.UTC(anchorYear, 0, 1))
+    end = new Date(Date.UTC(anchorYear, 11, 31, 23, 59, 59, 999))
+  }
+  const previousEnd = new Date(start.getTime() - 1)
+  const previousStart = new Date(previousEnd.getTime() - (end.getTime() - start.getTime()))
+  return {
+    current: { start: dateKey(start), end: dateKey(end) },
+    previous: { start: dateKey(previousStart), end: dateKey(previousEnd) },
+  }
+}
+
+function inDateRange(value: string | null | undefined, range: { start: string; end: string }) {
+  const date = String(value || '').slice(0, 10)
+  return Boolean(date && date >= range.start && date <= range.end)
+}
+
+function taskInsightDate(task: DbTask) {
+  return task.actual_delivery_date || task.start_date || (task.settlement_month ? `${task.settlement_month}-01` : '')
+}
+
+function taskCycleDays(task: DbTask) {
+  const start = task.start_date ? new Date(task.start_date).getTime() : 0
+  const endValue = task.actual_delivery_date || task.estimated_delivery_date
+  const end = endValue ? new Date(endValue).getTime() : 0
+  if (!start || !end || end < start) {
+    return null
+  }
+  return Math.max(1, Math.round((end - start) / 86400000))
+}
+
+function parseAnalysisItems(value: string | null) {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+async function fingerprintInsightData(value: unknown) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(JSON.stringify(value)))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function normalizeInsightDiagnosis(value: Record<string, unknown>, periodKey: string, periodType: InsightPeriodType, comparedWith: string): InsightDiagnosisResult {
+  const rawInsights = Array.isArray(value.insights) ? value.insights : []
+  const insights = rawInsights
+    .map((item, index) => {
+      const record = typeof item === 'object' && item ? item as Record<string, unknown> : {}
+      const signal = String(record.signal || '').trim()
+      const evidence = String(record.evidence || '').trim()
+      const action = String(record.action || '').trim()
+      const key = String(record.key || `signal-${index + 1}`).trim().slice(0, 80)
+      const state = record.state === 'persisting' || record.state === 'improved' ? record.state : 'new'
+      return signal && evidence && action ? { key, signal, evidence, action, state } : null
+    })
+    .filter((item): item is InsightDiagnosis['insights'][number] => Boolean(item))
+    .slice(0, 5)
+  const dataNotes = Array.isArray(value.dataNotes) ? value.dataNotes.map(String).filter(Boolean).slice(0, 4) : []
+  return { periodKey, periodType, status: insights.length > 0 ? 'anomalies' : 'clear', comparedWith, insights, dataNotes }
+}
+
+async function diagnoseInsights(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { month?: string; period?: InsightPeriodType }
+  const period: InsightPeriodType = ['day', 'week', 'month', 'quarter', 'half', 'year'].includes(String(body.period)) ? body.period as InsightPeriodType : 'month'
+  const month = /^\d{4}-\d{2}$/.test(String(body.month)) ? String(body.month) : monthPart(nowIso())
+  const ranges = insightDateRange(period, month)
+  const periodKey = `${ranges.current.start}_${ranges.current.end}`
+  const comparedWith = `${ranges.previous.start} 至 ${ranges.previous.end}`
+  const [taskRows, updateRows, analysisRows, previousRows] = await Promise.all([
+    env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND status <> '不计费'").all<DbTask>(),
+    env.DB.prepare(`SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL`).all<DbUpdate>(),
+    env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
+    env.DB.prepare('SELECT * FROM insight_diagnoses WHERE period_type = ? ORDER BY created_at DESC LIMIT 6').bind(period).all<DbInsightDiagnosis>(),
+  ])
+  const tasks = taskRows.results ?? []
+  const updatesByTask = new Map<string, DbUpdate[]>()
+  for (const update of updateRows.results ?? []) {
+    updatesByTask.set(update.task_id, [...(updatesByTask.get(update.task_id) ?? []), update])
+  }
+  const analysesByTask = new Map<string, DbAttachmentAnalysis[]>()
+  for (const analysis of analysisRows.results ?? []) {
+    analysesByTask.set(analysis.task_id, [...(analysesByTask.get(analysis.task_id) ?? []), analysis])
+  }
+  const aggregate = (source: DbTask[]): InsightTypeMetrics[] => {
+    const groups = new Map<string, DbTask[]>()
+    for (const task of source) {
+      const type = task.design_type || '未分类'
+      groups.set(type, [...(groups.get(type) ?? []), task])
+    }
+    return [...groups.entries()].map(([type, items]) => {
+      const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
+      const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
+      const revisionSignals = items.reduce((sum, task) => sum + (updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length, 0)
+      const cycles = items.map(taskCycleDays).filter((value): value is number => value !== null)
+      const analyses = items.flatMap((task) => analysesByTask.get(task.id) ?? [])
+      const attachmentQualityIssueCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.quality_issues_json).length, 0)
+      const deliveryRiskCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.risks_json).length, 0) + items.filter((task) => task.status !== '已验收' && Boolean(task.estimated_delivery_date) && task.estimated_delivery_date! < nowIso()).length
+      return {
+        type,
+        taskCount: items.length,
+        acceptedCount: items.filter((task) => task.status === '已验收').length,
+        actualHours: Number(actualHours.toFixed(1)),
+        estimatedHours: Number(estimatedHours.toFixed(1)),
+        estimateVariancePercent: estimatedHours > 0 ? Math.round(((actualHours - estimatedHours) / estimatedHours) * 100) : null,
+        revisionSignals,
+        revisionSignalsPerTask: items.length > 0 ? Number((revisionSignals / items.length).toFixed(2)) : null,
+        weightedHourlyRate: actualHours > 0 ? Number((items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) / actualHours).toFixed(2)) : null,
+        averageCycleDays: cycles.length > 0 ? Number(average(cycles).toFixed(1)) : null,
+        deliveryRiskCount,
+        attachmentQualityIssueCount,
+      }
+    }).sort((left, right) => right.actualHours - left.actualHours || right.taskCount - left.taskCount)
+  }
+  const currentTasks = tasks.filter((task) => inDateRange(taskInsightDate(task), ranges.current))
+  const previousTasks = tasks.filter((task) => inDateRange(taskInsightDate(task), ranges.previous))
+  const currentIds = new Set(currentTasks.map((task) => task.id))
+  const metricPayload = {
+    currentPeriod: { key: periodKey, range: ranges.current, byType: aggregate(currentTasks) },
+    previousPeriod: { range: ranges.previous, byType: aggregate(previousTasks) },
+    historicalBaseline: { byType: aggregate(tasks.filter((task) => !currentIds.has(task.id))) },
+    definitions: {
+      revisionSignals: '进展记录标题或内容含修改、调整、改稿、反馈、返工或 revision 的次数；这是可追溯代理指标，不等于人工确认的精确修改轮次。',
+      weightedHourlyRate: '按任务实际工时加权的任务结算时薪；若任务均使用同一费率，该指标不会产生可用差异。',
+    },
+  }
+  const fingerprint = await fingerprintInsightData(metricPayload)
+  const latest = previousRows.results?.[0]
+  if (latest?.period_key === periodKey && latest.data_fingerprint === fingerprint) {
+    try {
+      const saved = JSON.parse(latest.result_json) as InsightDiagnosisResult
+      return ok({ ...saved, generatedAt: formatBeijing(latest.created_at) })
+    } catch {
+      // Rebuild a corrupt historical response instead of returning a partial diagnosis.
+    }
+  }
+  const previousAdvice = (previousRows.results ?? []).flatMap((row) => {
+    try {
+      const result = JSON.parse(row.result_json) as InsightDiagnosisResult
+      return result.insights.map((insight) => ({ periodKey: row.period_key, key: insight.key, signal: insight.signal, action: insight.action, state: insight.state }))
+    } catch {
+      return []
+    }
+  }).slice(0, 18)
+  const prompt = [
+    '你是 Giverny 的经营与交付数据侦探，不是汇报员。你的任务是找异常、找矛盾、找被忽略且可行动的问题。',
+    '硬规则：1. 禁止“整体表现良好”“继续保持”等正面总结，直接进入异常；没有明显异常时只返回 status 为 clear 和 dataNotes，不要凑字数。',
+    '2. 每条 insight 必须同时包含异常信号、明确数据证据和一个可执行动作；没有三者不得输出。',
+    '3. 只能引用输入数据中的数值和事实，不能编造客户反馈、利润、修改轮次或附件内容。',
+    '4. 修改信号是进展文案代理指标，不得写成精确人工修改轮次。',
+    '5. 不得重复历史诊断记忆里已经出现的建议，除非当前数据证明该问题仍未解决；此时 state 必须为 persisting。若数据表明改善，state 为 improved 且动作改为巩固或停止措施。',
+    '6. 最多输出 5 条，优先输出变化幅度大、与历史基线矛盾、交付风险或质量风险。',
+    '只返回 JSON：{"status":"anomalies|clear","insights":[{"key":"稳定短键","signal":"异常信号","evidence":"含当前/上期/历史对照的具体数据","action":"一个可执行动作","state":"new|persisting|improved"}],"dataNotes":["数据不足或口径提醒"]}',
+    `当前对照数据：${JSON.stringify(metricPayload)}`,
+    `历史诊断记忆：${JSON.stringify(previousAdvice)}`,
+  ].join('\n\n')
+  let output: string
+  try {
+    output = await callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, 1800)
+  } catch {
+    try {
+      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, 1800)
+    } catch (error) {
+      return fail(error instanceof Error ? `洞察诊断暂不可用：${error.message}` : '洞察诊断暂不可用', 502)
+    }
+  }
+  const diagnosis = normalizeInsightDiagnosis(parseLooseJsonObject(output), periodKey, period, comparedWith)
+  await env.DB.prepare('INSERT INTO insight_diagnoses (id, period_key, period_type, data_fingerprint, result_json) VALUES (?, ?, ?, ?, ?)')
+    .bind(crypto.randomUUID(), periodKey, period, fingerprint, JSON.stringify(diagnosis)).run()
+  await audit(env, 'create', 'insight_diagnosis', periodKey, { period, insightCount: diagnosis.insights.length, fingerprint })
+  return ok({ ...diagnosis, generatedAt: formatBeijing(nowIso()) })
 }
 
 function maskApiKey(value: string) {
@@ -3388,6 +3621,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/ai-model' ||
       path === '/api/ai/model-test' ||
       path === '/api/insights/attachment-analyses/backfill' ||
+      path === '/api/insights/diagnose' ||
       path.endsWith('/analysis/retry')
     ) &&
     role !== 'admin'
@@ -3499,6 +3733,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/insights/attachment-analyses/backfill' && request.method === 'POST') {
     return backfillAttachmentAnalyses(env, ctx)
+  }
+  if (path === '/api/insights/diagnose' && request.method === 'POST') {
+    return diagnoseInsights(env, request)
   }
   if (path === '/api/settings/ai-model' && request.method === 'GET') {
     return getAiModelConfig(env)

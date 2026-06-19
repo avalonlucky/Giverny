@@ -77,7 +77,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, AttachmentAnalysis, FileAsset, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -399,7 +399,7 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 
 type DonutItem = { label: string; value: number; color: string }
 
-type InsightPeriod = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
+type InsightPeriod = InsightPeriodType
 type InsightTab = 'period' | 'deliverable' | 'capability' | 'advisor'
 
 const insightPeriods: { value: InsightPeriod; label: string }[] = [
@@ -515,22 +515,6 @@ function isTaskInAnalysisRange(task: Task, range: { start: Date; end: Date }) {
   return inAnalysisMonth || isDateInRange(task.date, range) || isDateInRange(task.estimatedDate, range)
 }
 
-function previousInsightRange(range: { start: Date; end: Date }) {
-  const duration = range.end.getTime() - range.start.getTime()
-  const end = new Date(range.start.getTime() - 1)
-  const start = new Date(end.getTime() - duration)
-  return { start, end }
-}
-
-function median(values: number[]) {
-  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
-  if (sorted.length === 0) {
-    return 0
-  }
-  const middle = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
-}
-
 function insightPeriodRange(period: InsightPeriod, monthValue: string) {
   const today = localDateFromIsoDate(isoDate())
   const [anchorYear, anchorMonth] = monthValue.split('-').map(Number)
@@ -568,15 +552,6 @@ function formatInsightRange(range: { start: Date; end: Date }) {
   const start = isoDateFromLocalDate(range.start).replaceAll('-', '/')
   const end = isoDateFromLocalDate(range.end).replaceAll('-', '/')
   return start === end ? start : `${start} - ${end}`
-}
-
-function daysBetween(startValue: string | undefined, endValue: string | undefined) {
-  const start = dateFromValue(startValue)
-  const end = dateFromValue(endValue)
-  if (!start || !end || end < start) {
-    return null
-  }
-  return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000))
 }
 
 function isVisualReviewReady(file: FileAsset) {
@@ -6819,6 +6794,9 @@ function InsightsView({
   const [period, setPeriod] = useState<InsightPeriod>('month')
   const [activeTab, setActiveTab] = useState<InsightTab>('period')
   const [analysisActionId, setAnalysisActionId] = useState<number | 'backfill' | null>(null)
+  const [diagnosis, setDiagnosis] = useState<InsightDiagnosis | null>(null)
+  const [isDiagnosisLoading, setIsDiagnosisLoading] = useState(false)
+  const [diagnosisError, setDiagnosisError] = useState('')
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
 
@@ -6827,8 +6805,6 @@ function InsightsView({
       tasks.filter((task) => isTaskInAnalysisRange(task, range)),
     [range, tasks],
   )
-  const previousRange = useMemo(() => previousInsightRange(range), [range])
-  const previousPeriodTasks = useMemo(() => tasks.filter((task) => isTaskInAnalysisRange(task, previousRange)), [previousRange, tasks])
   const periodTaskIds = useMemo(() => new Set(periodTasks.map((task) => task.id)), [periodTasks])
   const periodUpdates = useMemo(
     () => updates.filter((update) => periodTaskIds.has(update.taskId) || isDateInRange(update.date, range)),
@@ -6872,9 +6848,6 @@ function InsightsView({
   const billableTasks = periodTasks.filter((task) => task.status !== '不计费')
   const totalHours = Number(billableTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1))
   const estimatedHours = Number(billableTasks.reduce((sum, task) => sum + task.estimatedHours, 0).toFixed(1))
-  const previousHours = Number(previousPeriodTasks.filter((task) => task.status !== '不计费').reduce((sum, task) => sum + task.actualHours, 0).toFixed(1))
-  const previousAccepted = previousPeriodTasks.filter((task) => task.status === '已验收').length
-  const previousAcceptedRate = previousPeriodTasks.length > 0 ? Math.round((previousAccepted / previousPeriodTasks.length) * 100) : 0
   const acceptedRate = periodTasks.length > 0 ? Math.round((acceptedTasks.length / periodTasks.length) * 100) : 0
   const visualReadyCount = periodFiles.filter(isVisualReviewReady).length
   const lockedReports = reports.filter((report) => {
@@ -6956,7 +6929,6 @@ function InsightsView({
     return buckets.map((bucket) => ({ ...bucket, value: Number(bucket.value.toFixed(1)) }))
   }, [period, periodUpdates, range])
 
-  const topType = typeDistribution.items[0]
   const hourAccuracySamples = billableTasks.filter((task) => task.actualHours > 0 && task.estimatedHours > 0)
   const hourAccuracy =
     hourAccuracySamples.length > 0
@@ -6979,58 +6951,6 @@ function InsightsView({
       name,
       pct: periodTasks.length > 0 ? Math.round((count / periodTasks.length) * 100) : 0,
     }))
-  const allFilesByTask = useMemo(() => {
-    const map = new Map<number, FileAsset[]>()
-    files.forEach((file) => {
-      map.set(file.taskId, [...(map.get(file.taskId) ?? []), file])
-    })
-    return map
-  }, [files])
-  const allUpdatesByTask = useMemo(() => {
-    const map = new Map<number, TaskUpdate[]>()
-    updates.forEach((update) => {
-      map.set(update.taskId, [...(map.get(update.taskId) ?? []), update])
-    })
-    return map
-  }, [updates])
-  const historicalTypeRows = useMemo(() => {
-    const map = new Map<string, Task[]>()
-    tasks.forEach((task) => {
-      if (task.status === '不计费') {
-        return
-      }
-      map.set(task.type, [...(map.get(task.type) ?? []), task])
-    })
-    return [...map.entries()]
-      .map(([type, items]) => {
-        const accepted = items.filter((task) => task.status === '已验收')
-        const actualHours = items.map((task) => task.actualHours).filter((value) => value > 0)
-        const estimatedPairs = items.filter((task) => task.actualHours > 0 && task.estimatedHours > 0)
-        const cycles = accepted
-          .map((task) => daysBetween(task.date, allUpdatesByTask.get(task.id)?.[0]?.date ?? task.estimatedDate))
-          .filter((value): value is number => typeof value === 'number')
-        const fileCount = items.reduce((sum, task) => sum + (allFilesByTask.get(task.id)?.length ?? 0), 0)
-        const accuracy =
-          estimatedPairs.length > 0
-            ? Math.round(
-                estimatedPairs.reduce((sum, task) => sum + Math.max(0, 100 - (Math.abs(task.actualHours - task.estimatedHours) / task.estimatedHours) * 100), 0) /
-                  estimatedPairs.length,
-              )
-            : 0
-        return {
-          type,
-          count: items.length,
-          accepted: accepted.length,
-          avgHours: actualHours.length > 0 ? actualHours.reduce((sum, value) => sum + value, 0) / actualHours.length : 0,
-          medianHours: median(actualHours),
-          avgCycle: cycles.length > 0 ? cycles.reduce((sum, value) => sum + value, 0) / cycles.length : 0,
-          accuracy,
-          fileRate: items.length > 0 ? Math.round((items.filter((task) => (allFilesByTask.get(task.id)?.length ?? 0) > 0).length / items.length) * 100) : 0,
-          fileCount,
-        }
-      })
-      .sort((a, b) => b.count - a.count || b.avgHours - a.avgHours)
-  }, [allFilesByTask, allUpdatesByTask, tasks])
   const riskRows = useMemo(() => {
     const todayValue = isoDate()
     return periodTasks.flatMap((task) => {
@@ -7072,20 +6992,20 @@ function InsightsView({
       return risks
     }).slice(0, 10)
   }, [filesByTask, periodTasks, updatesByTask])
-  const suggestions = [
-    previousPeriodTasks.length > 0
-      ? `本周期实际工时 ${totalHours.toFixed(1)}h，上一对照周期 ${previousHours.toFixed(1)}h，变化 ${previousHours > 0 ? `${Math.round(((totalHours - previousHours) / previousHours) * 100)}%` : '暂无可比比例'}。`
-      : '上一对照周期样本不足，当前先以本周期任务结构作为基线。',
-    acceptedRate !== previousAcceptedRate && previousPeriodTasks.length > 0
-      ? `验收率从上一周期 ${previousAcceptedRate}% 变为 ${acceptedRate}%，需要结合待验收和逾期任务看是否存在收尾堆积。`
-      : `本周期验收率 ${acceptedRate}%，共 ${acceptedTasks.length}/${periodTasks.length} 个任务完成闭环。`,
-    topType
-      ? `当前最高工时类型是 ${topType.label}，占 ${Math.round((topType.value / Math.max(typeDistribution.total, 1)) * 100)}%；该类型历史样本为 ${historicalTypeRows.find((row) => row.type === topType.label)?.count ?? 0} 个。`
-      : '当前周期还没有形成主要工时类型。',
-    riskRows.length > 0
-      ? `当前发现 ${riskRows.length} 条可复盘异常，优先处理工时超预估、交付逾期、缺少进展或缺少交付附件的任务。`
-      : '当前周期暂未发现明显异常任务，后续可继续提高进展记录和交付附件完整度。',
-  ].filter(Boolean)
+  const runDiagnosis = async () => {
+    if (isDiagnosisLoading) {
+      return
+    }
+    setIsDiagnosisLoading(true)
+    setDiagnosisError('')
+    try {
+      setDiagnosis(await api.diagnoseInsights({ month: currentMonth.value, period }))
+    } catch (error) {
+      setDiagnosisError(error instanceof Error ? error.message : '洞察诊断失败，请稍后重试')
+    } finally {
+      setIsDiagnosisLoading(false)
+    }
+  }
 
   return (
     <section className="insights-view">
@@ -7295,18 +7215,32 @@ function InsightsView({
           <section className="panel insights-advisor-panel">
             <div className="panel-header compact">
               <div>
-                <h2>数据结论</h2>
-                <p>只输出能被当前站内数据支撑的判断</p>
+                <h2>异常侦查</h2>
+                <p>当前周期、上一对照周期、同类历史基线与上次建议共同参与判断</p>
               </div>
+              <button className="primary-button compact-button" type="button" disabled={isDiagnosisLoading} onClick={() => void runDiagnosis()}>
+                <Sparkles size={15} />
+                {isDiagnosisLoading ? '正在查找异常' : '运行 AI 诊断'}
+              </button>
             </div>
-            <ul className="insights-suggestion-list">
-              {suggestions.map((suggestion) => (
-                <li key={suggestion}>
-                  <Sparkles size={15} />
-                  <span>{suggestion}</span>
-                </li>
-              ))}
-            </ul>
+            {!diagnosis && !diagnosisError && <div className="empty-state"><strong>尚未运行本期诊断</strong><p>系统会优先寻找变化、矛盾、交付风险和持续未解决的问题，不输出静态成绩单。</p></div>}
+            {diagnosisError && <p className="insight-diagnosis-error">{diagnosisError}</p>}
+            {diagnosis?.status === 'clear' && <div className="insight-clear-state"><CheckCircle2 size={18} /><div><strong>本期无明显异常</strong><p>当前数据未出现足以形成可执行诊断的变化信号。</p></div></div>}
+            {diagnosis && diagnosis.insights.length > 0 && (
+              <div className="insight-diagnosis-list">
+                {diagnosis.insights.map((item) => (
+                  <article className={`insight-diagnosis-row ${item.state}`} key={`${item.key}-${item.evidence}`}>
+                    <header>
+                      <strong>{item.signal}</strong>
+                      <span>{item.state === 'persisting' ? '持续问题' : item.state === 'improved' ? '已有改善' : '新发现'}</span>
+                    </header>
+                    <p><b>证据</b>{item.evidence}</p>
+                    <p><b>动作</b>{item.action}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+            {diagnosis?.dataNotes && diagnosis.dataNotes.length > 0 && <div className="insight-data-notes">{diagnosis.dataNotes.map((note) => <span key={note}>{note}</span>)}</div>}
           </section>
 
           <aside className="panel insights-chat-preview">
@@ -7328,7 +7262,7 @@ function InsightsView({
             </div>
             <div className="insights-ai-note">
               <Eye size={16} />
-              <span>已完成 {completedAnalyses.length} 个交付件内容分析；数据结论会逐步接入这些真实结果，不再只依赖附件数量。</span>
+              <span>已完成 {completedAnalyses.length} 个交付件内容分析。诊断会读取附件质量问题与风险，并记住上次建议，避免反复说同一句话。</span>
             </div>
           </aside>
         </section>

@@ -1808,6 +1808,117 @@ button {
   color: var(--color-primary);
 }
 
+.insight-diagnosis-list {
+  display: grid;
+  gap: 10px;
+}
+
+.insight-diagnosis-row {
+  padding: 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  gap: 8px;
+}
+
+.insight-diagnosis-row header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.insight-diagnosis-row strong {
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.insight-diagnosis-row header span {
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  color: var(--color-status-warning);
+  background: color-mix(in srgb, var(--color-status-warning) 11%, transparent);
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.insight-diagnosis-row.persisting header span {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 9%, transparent);
+}
+
+.insight-diagnosis-row.improved header span {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+}
+
+.insight-diagnosis-row p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.insight-diagnosis-row b {
+  margin-right: 8px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.insight-data-notes {
+  display: grid;
+  gap: 6px;
+}
+
+.insight-data-notes span,
+.insight-diagnosis-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.insight-diagnosis-error {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 8%, var(--color-surface-strong));
+}
+
+.insight-clear-state {
+  padding: 14px;
+  border-radius: var(--radius-control);
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.insight-clear-state strong,
+.insight-clear-state p {
+  margin: 0;
+}
+
+.insight-clear-state strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.insight-clear-state p {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .insights-ai-note {
   margin-top: auto;
   padding: 12px;

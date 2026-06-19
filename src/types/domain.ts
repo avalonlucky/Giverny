@@ -82,6 +82,24 @@ export type AttachmentAnalysis = {
   completedAt: string
 }
 
+export type InsightPeriodType = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
+
+export type InsightDiagnosis = {
+  periodKey: string
+  periodType: InsightPeriodType
+  status: 'anomalies' | 'clear'
+  generatedAt: string
+  comparedWith: string
+  insights: Array<{
+    key: string
+    signal: string
+    evidence: string
+    action: string
+    state: 'new' | 'persisting' | 'improved'
+  }>
+  dataNotes: string[]
+}
+
 export type TaskUpdate = {
   id: number
   taskId: number

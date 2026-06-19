@@ -95,6 +95,15 @@ CREATE TABLE IF NOT EXISTS attachment_analyses (
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
+CREATE TABLE IF NOT EXISTS insight_diagnoses (
+  id TEXT PRIMARY KEY,
+  period_key TEXT NOT NULL,
+  period_type TEXT NOT NULL,
+  data_fingerprint TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -143,6 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_task_updates_task_id ON task_updates(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_task_id ON attachment_analyses(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_status ON attachment_analyses(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_insight_diagnoses_period ON insight_diagnoses(period_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_month ON monthly_reports(month);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);

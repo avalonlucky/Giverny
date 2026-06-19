@@ -1,4 +1,4 @@
-import type { AttachmentAnalysis, FileAsset, Task, TaskUpdate, TaxMode } from '../types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
 
 export type ReportRecord = {
@@ -455,6 +455,12 @@ export const api = {
   backfillAttachmentAnalyses: () =>
     requestJson<{ ok: true; created: number }>('/api/insights/attachment-analyses/backfill', {
       method: 'POST',
+    }),
+  diagnoseInsights: (payload: { month: string; period: InsightPeriodType }) =>
+    requestJson<InsightDiagnosis>('/api/insights/diagnose', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   setHourlyRate: (hourlyRate: number) =>
     requestJson<{ hourlyRate: number }>('/api/settings/hourly-rate', {
