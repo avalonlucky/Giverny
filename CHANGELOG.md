@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-06-19 12:57 · v0.10.114（BAML 工程接入与多模型路由预备）
+
+### AI 架构
+- 引入 BAML 工程结构，新增 `baml_src/ai_assistants.baml`，将任务需求优化、进展 / 验收文案优化、工时建议三类 AI 能力整理为结构化函数契约。
+- 新增 BAML TypeScript 生成客户端目录 `src/baml_client/baml_client/`，并新增 `npm run baml:generate` 脚本；正式构建会先自动生成 BAML client。
+- 新增 `docs/AI_MODEL_ROUTING.md`，记录当前 DeepSeek 生产适配器、BAML 契约层和后续多租户模型选择路线。
+
+### 兼容性
+- Wrangler dry-run 验证当前 BAML TypeScript runtime 会依赖 Node 原生 `.node` 模块，无法直接打包进 Cloudflare Worker；因此正式 Worker 暂不 import BAML runtime，继续使用现有 DeepSeek 直连适配器，保证线上稳定。
+- 后续多租户版本建议将 BAML runtime 放在独立 Node AI Runtime / AI Gateway 中运行，由 Worker 负责鉴权、租户配置和数据查询。
+
+### 发布
+- 已同步版本号、CHANGELOG、项目结构文档和使用手册；本次不改变数据库结构、权限或结算口径。
+
 ## 2026-06-19 00:30 · v0.10.113（新建任务 AI 工时建议）
 
 ### 新建任务

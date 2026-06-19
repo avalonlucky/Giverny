@@ -37,6 +37,7 @@ type Env = {
   DEEPSEEK_API_KEY?: string
   DEEPSEEK_BASE_URL?: string
   DEEPSEEK_MODEL?: string
+  AI_PROVIDER?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
 }
@@ -1581,6 +1582,13 @@ async function suggestTaskWithAi(env: Env, request: Request) {
 
   const storedGroups = await getDesignTypeGroups(env)
   const designTypeGroups = normalizeDesignTypeGroups(body.designTypeGroups?.length ? body.designTypeGroups : storedGroups)
+  const aiPayload = {
+    taskTitle: title,
+    rawRequirement: requirement,
+    selectedType: body.selectedType ?? '',
+    availableDesignTypeGroups: designTypeGroups,
+  }
+
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'suggest_task_requirement_and_design_type'
@@ -1601,12 +1609,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
         },
         {
           role: 'user',
-          content: JSON.stringify({
-            taskTitle: title,
-            rawRequirement: requirement,
-            selectedType: body.selectedType ?? '',
-            availableDesignTypeGroups: designTypeGroups,
-          }),
+          content: JSON.stringify(aiPayload),
         },
       ],
       tools: [
@@ -1668,6 +1671,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     title,
     suggestedType: suggestion.suggestedType,
     categoryExists: suggestion.categoryExists,
+    provider: 'deepseek-direct',
   })
   return ok(suggestion)
 }
@@ -1696,6 +1700,15 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
   }
 
+  const aiPayload = {
+    mode,
+    currentText: text,
+    task: body.task ?? {},
+    relatedFiles: files,
+    currentUploadedFileNames: uploadedFileNames,
+    recentActivity: activity,
+  }
+
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'optimize_task_worklog_text'
@@ -1716,14 +1729,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
         },
         {
           role: 'user',
-          content: JSON.stringify({
-            mode,
-            currentText: text,
-            task: body.task ?? {},
-            relatedFiles: files,
-            currentUploadedFileNames: uploadedFileNames,
-            recentActivity: activity,
-          }),
+          content: JSON.stringify(aiPayload),
         },
       ],
       tools: [
@@ -1778,6 +1784,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     taskTitle,
     fileCount: files.length,
     uploadedFileCount: uploadedFileNames.length,
+    provider: 'deepseek-direct',
   })
   return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })
 }
@@ -1874,6 +1881,28 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     })
   }
 
+  const aiPayload = {
+    currentTask: {
+      title,
+      requirement,
+      selectedType,
+      startDate: body.startDate ?? '',
+      estimatedDate: body.estimatedDate ?? '',
+      currentPlanHours,
+    },
+    statistics: {
+      sampleCount,
+      averageHours,
+      medianHours,
+      minHours,
+      maxHours,
+      averageDeliveryDays,
+      deterministicSuggestion,
+      usedFallback,
+    },
+    historicalSamples: samples.slice(0, 12),
+  }
+
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'suggest_task_hour_estimate'
@@ -1894,27 +1923,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
         },
         {
           role: 'user',
-          content: JSON.stringify({
-            currentTask: {
-              title,
-              requirement,
-              selectedType,
-              startDate: body.startDate ?? '',
-              estimatedDate: body.estimatedDate ?? '',
-              currentPlanHours,
-            },
-            statistics: {
-              sampleCount,
-              averageHours,
-              medianHours,
-              minHours,
-              maxHours,
-              averageDeliveryDays,
-              deterministicSuggestion,
-              usedFallback,
-            },
-            historicalSamples: samples.slice(0, 12),
-          }),
+          content: JSON.stringify(aiPayload),
         },
       ],
       tools: [
@@ -1981,6 +1990,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     suggestedHours,
     confidence,
     usedFallback,
+    provider: 'deepseek-direct',
   })
 
   return ok({

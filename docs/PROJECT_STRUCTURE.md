@@ -5,7 +5,10 @@
 ├── db/
 │   ├── schema.sql
 │   └── migrations/
+├── baml_src/
+│   └── ai_assistants.baml
 ├── docs/
+│   ├── AI_MODEL_ROUTING.md
 │   ├── OPERATION_POLICIES.md
 │   ├── PROJECT_STRUCTURE.md
 │   ├── DEPLOYMENT.md
@@ -23,6 +26,8 @@
 │   ├── giverny-logo.png
 │   └── icons.svg
 ├── src/
+│   ├── baml_client/
+│   │   └── baml_client/
 │   ├── config/
 │   │   └── appConfig.ts
 │   ├── data/
@@ -57,6 +62,9 @@
 - Frontend API client and auth headers: `src/lib/api.ts`
 - PSD preview helper: `src/lib/psdPreview.ts`
 - Worker API backend: `src/worker.ts`
+- BAML AI function contracts: `baml_src/ai_assistants.baml`
+- Generated BAML TypeScript client: `src/baml_client/baml_client/`
+- AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - Domain types: `src/types/domain.ts`
 - App version and defaults: `src/config/appConfig.ts`
 - D1 full schema: `db/schema.sql`
@@ -72,6 +80,7 @@
 - The former staging site and its separate D1/R2 resources have been removed. Validate locally, then deploy the production Worker directly.
 - Static assets are served by Workers Static Assets through the `ASSETS` binding.
 - `binding = "ASSETS"` in `wrangler.toml` must remain, or SPA routes such as `/share/:token` can fail.
+- BAML is currently used as the AI prompt/schema contract and code-generation layer. The production Cloudflare Worker still calls DeepSeek directly because the current BAML TypeScript runtime depends on native Node modules that cannot be bundled into Workers.
 
 ## Auth Notes
 
