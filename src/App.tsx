@@ -399,6 +399,13 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 
 type DonutItem = { label: string; value: number; color: string }
 
+type TaskContextInsight = {
+  tone: 'warning' | 'info'
+  label: string
+  detail: string
+  evidence: string
+}
+
 type InsightPeriod = InsightPeriodType
 type InsightTab = 'period' | 'deliverable' | 'capability' | 'advisor'
 
@@ -513,6 +520,90 @@ function isTaskInAnalysisRange(task: Task, range: { start: Date; end: Date }) {
   const analysisMonth = dateFromValue(`${taskAnalysisMonth(task)}-01`)
   const inAnalysisMonth = analysisMonth ? analysisMonth >= range.start && analysisMonth <= range.end : false
   return inAnalysisMonth || isDateInRange(task.date, range) || isDateInRange(task.estimatedDate, range)
+}
+
+function averageNumber(values: number[]) {
+  if (values.length === 0) {
+    return 0
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function buildTaskContextInsights(tasks: Task[], updates: TaskUpdate[]) {
+  const updatesByTask = new Map<number, TaskUpdate[]>()
+  updates.forEach((update) => {
+    updatesByTask.set(update.taskId, [...(updatesByTask.get(update.taskId) ?? []), update])
+  })
+  const activeTasks = tasks.filter((task) => !task.voidedAt && task.status !== '不计费')
+  const byType = new Map<string, Task[]>()
+  activeTasks.forEach((task) => {
+    const type = task.type || '未分类'
+    byType.set(type, [...(byType.get(type) ?? []), task])
+  })
+  const insights = new Map<number, TaskContextInsight>()
+
+  activeTasks.forEach((task) => {
+    if (['已验收', '终止', '不计费'].includes(task.status)) {
+      return
+    }
+    const type = task.type || '未分类'
+    const samples = (byType.get(type) ?? []).filter((item) => item.id !== task.id && item.actualHours > 0)
+    if (samples.length < 2) {
+      return
+    }
+    const estimateSamples = samples.filter((item) => item.estimatedHours > 0)
+    const avgActualHours = averageNumber(samples.map((item) => item.actualHours))
+    const avgEstimateVariance = estimateSamples.length >= 2
+      ? averageNumber(estimateSamples.map((item) => (item.actualHours - item.estimatedHours) / item.estimatedHours))
+      : 0
+    const revisionSignals = samples.reduce(
+      (sum, item) => sum + (updatesByTask.get(item.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
+      0,
+    )
+    const revisionSignalsPerTask = revisionSignals / samples.length
+    const candidates: Array<TaskContextInsight & { priority: number }> = []
+
+    if (avgEstimateVariance >= 0.15) {
+      const percent = Math.round(avgEstimateVariance * 100)
+      candidates.push({
+        tone: 'warning',
+        label: `同类历史平均超时 ${percent}%`,
+        detail: `这个任务类型过去 ${samples.length} 个样本平均实际工时高于预估 ${percent}%，建议今天预留缓冲时间。`,
+        evidence: `${type} · ${samples.length} 个历史样本 · 平均实际 ${avgActualHours.toFixed(1)}h`,
+        priority: 90 + percent,
+      })
+    }
+    if (task.estimatedHours > 0 && avgActualHours > task.estimatedHours * 1.25) {
+      const gap = Number((avgActualHours - task.estimatedHours).toFixed(1))
+      candidates.push({
+        tone: 'warning',
+        label: `预估低于同类均值 ${gap.toFixed(1)}h`,
+        detail: `同类历史平均实际 ${avgActualHours.toFixed(1)}h，当前预估 ${task.estimatedHours.toFixed(1)}h，建议提前确认范围或补缓冲。`,
+        evidence: `${type} · ${samples.length} 个历史样本`,
+        priority: 85 + gap,
+      })
+    }
+    if (revisionSignalsPerTask >= 1.5) {
+      candidates.push({
+        tone: 'info',
+        label: '同类修改信号偏高',
+        detail: `同类历史平均每个任务出现 ${revisionSignalsPerTask.toFixed(1)} 次修改信号，建议先锁定尺寸、文案和色板。`,
+        evidence: `${type} · ${revisionSignals} 次修改信号 / ${samples.length} 个样本`,
+        priority: 70 + revisionSignalsPerTask,
+      })
+    }
+    const strongest = candidates.sort((left, right) => right.priority - left.priority)[0]
+    if (strongest) {
+      insights.set(task.id, {
+        tone: strongest.tone,
+        label: strongest.label,
+        detail: strongest.detail,
+        evidence: strongest.evidence,
+      })
+    }
+  })
+
+  return insights
 }
 
 function insightPeriodRange(period: InsightPeriod, monthValue: string) {
@@ -1941,6 +2032,10 @@ function App() {
   )
 
   const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
+  const taskContextInsights = useMemo(
+    () => buildTaskContextInsights(activeTaskItems, updateItems),
+    [activeTaskItems, updateItems],
+  )
   const taskById = useMemo(() => new Map(taskItems.map((task) => [task.id, task])), [taskItems])
 
   const stats = useMemo(() => {
@@ -2958,6 +3053,7 @@ function App() {
                 {visibleTasks.map((task) => {
                   const dueState = taskDueState(task, today, dueSoonDate)
                   const canAcceptTask = task.status === '待验收'
+                  const contextInsight = taskContextInsights.get(task.id)
                   return (
                   <article
                     className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
@@ -2987,6 +3083,7 @@ function App() {
                     <div className="task-main">
                       <strong>{task.title}</strong>
                       <p>{task.requirement}</p>
+                      <TaskContextInsightBadge insight={contextInsight} />
                     </div>
                     <div className="task-meta">
                       <b>{task.contact}</b>
@@ -3144,6 +3241,7 @@ function App() {
             activeMonthTasks={activeMonthTasks}
             selectedTask={selectedTask}
             tasks={taskPageTasks}
+            contextInsights={taskContextInsights}
             taskFilter={taskFilter}
             taskQuery={taskQuery}
             showVoidedTasks={showVoidedTasks}
@@ -3582,6 +3680,18 @@ function TaskStateBadge({ task }: { task: Task }) {
   return <StatusBadge status={task.status} />
 }
 
+function TaskContextInsightBadge({ insight }: { insight?: TaskContextInsight }) {
+  if (!insight) {
+    return null
+  }
+  return (
+    <span className={`task-context-insight admin-only-data ${insight.tone}`} title={`${insight.detail}｜依据：${insight.evidence}`}>
+      <Info size={12} />
+      {insight.label}
+    </span>
+  )
+}
+
 function Fireworks() {
   return (
     <div className="fireworks" aria-hidden="true">
@@ -3880,6 +3990,7 @@ function TasksView({
   activeMonthTasks,
   selectedTask,
   tasks,
+  contextInsights,
   taskFilter,
   taskQuery,
   showVoidedTasks,
@@ -3914,6 +4025,7 @@ function TasksView({
   activeMonthTasks: Task[]
   selectedTask: Task | undefined
   tasks: Task[]
+  contextInsights: Map<number, TaskContextInsight>
   taskFilter: TaskFilter
   taskQuery: string
   showVoidedTasks: boolean
@@ -4107,6 +4219,7 @@ function TasksView({
             const dueDateLabel = formatDueDateCompact(task.estimatedDate || task.date)
             const scheduleSignal = formatTaskScheduleSignal(task)
             const canAcceptTask = task.status === '待验收'
+            const contextInsight = contextInsights.get(task.id)
             return (
             <article
               className={`task-row management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
@@ -4151,6 +4264,7 @@ function TasksView({
                     <strong>{formatTaskRowDateTime(task.estimatedDate || task.date)}</strong>
                   </span>
                   <span className={`schedule-countdown ${scheduleSignal.tone}`}>{scheduleSignal.label}</span>
+                  <TaskContextInsightBadge insight={contextInsight} />
                 </div>
               </div>
               <div className="task-meta">

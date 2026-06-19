@@ -828,6 +828,37 @@ button {
   white-space: nowrap;
 }
 
+.task-context-insight {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  margin-top: 7px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-admin-only) 18%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-admin-only) 8%, var(--color-surface-strong));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--color-admin-only);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-context-insight.info {
+  border-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+}
+
+.task-context-insight svg {
+  flex: 0 0 auto;
+}
+
 .task-schedule-row {
   display: flex;
   align-items: center;
