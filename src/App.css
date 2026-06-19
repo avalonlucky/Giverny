@@ -7525,6 +7525,90 @@ textarea:focus-visible {
   padding-bottom: 10px;
 }
 
+.settings-ai-routes {
+  padding: 0 22px 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-ai-route-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  gap: 12px;
+}
+
+.settings-ai-route-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-ai-route-head div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-ai-route-head strong {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.settings-ai-route-head span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-ai-route-head em {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.settings-ai-route-head em.ready {
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.settings-ai-route-form {
+  padding: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-ai-route-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-ai-route-actions > div {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.settings-test-ok {
+  margin: 0;
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .settings-ai-meta {
   padding: 0 22px 20px;
   display: grid;
@@ -9009,6 +9093,10 @@ textarea:focus-visible {
     grid-template-columns: 1fr 1fr;
   }
 
+  .settings-ai-routes {
+    grid-template-columns: 1fr;
+  }
+
   .new-task-schedule-row {
     grid-template-columns: 1fr;
   }
@@ -9111,6 +9199,16 @@ textarea:focus-visible {
 
   .settings-form {
     grid-template-columns: 1fr;
+  }
+
+  .settings-ai-route-form,
+  .settings-ai-route-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-ai-route-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .settings-security-body,

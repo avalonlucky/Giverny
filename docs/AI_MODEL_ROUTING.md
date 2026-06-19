@@ -19,6 +19,7 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 2. 独立 `ai-runtime/` 在 Node.js 环境里运行 BAML client。
 3. Cloudflare Worker 负责鉴权、模型设置、密钥解密、历史数据查询和请求转发。
 4. 如果 BAML Runtime 未配置或请求失败，Worker 会回退 DeepSeek 直连，继续通过 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` 保证线上可用。
+5. 文字和识图模型已拆成主 / 备用两组：文字主路默认 DeepSeek，文字备用默认 Kimi K2.6；识图主路默认 Gemini 3 Flash，识图备用默认 Kimi K2.6。
 
 ## 为什么现在仍然要引入 BAML
 
@@ -58,6 +59,9 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - Base URL
 - 模型名称
 - 每个租户自己的 API Key
+- 文字主模型 / 文字备用模型
+- 识图主模型 / 识图备用模型
+- 每一路模型的测试按钮
 
 当前仍存放在全站 `app_settings.aiModelConfig`。多租户上线时，把这个配置移动到 tenant-scoped setting 即可。
 
@@ -71,9 +75,10 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 
 | 功能 | BAML 函数 | 当前生产适配器 |
 |------|-----------|----------------|
-| 新建任务需求优化 | `SuggestTaskAssistant` | BAML Runtime 优先，失败回退 DeepSeek direct |
-| 进展 / 验收文案优化 | `OptimizeTaskText` | BAML Runtime 优先，失败回退 DeepSeek direct |
-| 工时建议 | `SuggestHourEstimate` | BAML Runtime 优先，失败回退 DeepSeek direct |
+| 新建任务需求优化 | `SuggestTaskAssistant` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
+| 进展 / 验收文案优化 | `OptimizeTaskText` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
+| 工时建议 | `SuggestHourEstimate` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
+| 交付件识图 | 后续新增 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；当前先完成模型配置和测试入口 |
 
 ## 密钥与安全
 
@@ -81,6 +86,7 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - 前端只显示 `hasApiKey` 和 `apiKeyPreview`，不会返回明文 API Key。
 - Runtime 与 Worker 之间使用 `AI_RUNTIME_KEY` 请求头鉴权。
 - 生产环境保存租户 API Key 前必须配置 `AI_SETTINGS_SECRET`。
+- 平台默认 Gemini / Kimi Key 应优先写入 Cloudflare Secret：`GEMINI_API_KEY`、`KIMI_API_KEY`，避免进入前端或 Git 仓库。
 
 ## 注意事项
 

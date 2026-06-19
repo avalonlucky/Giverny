@@ -37,6 +37,12 @@ type Env = {
   DEEPSEEK_API_KEY?: string
   DEEPSEEK_BASE_URL?: string
   DEEPSEEK_MODEL?: string
+  GEMINI_API_KEY?: string
+  GEMINI_BASE_URL?: string
+  GEMINI_VISION_MODEL?: string
+  KIMI_API_KEY?: string
+  KIMI_BASE_URL?: string
+  KIMI_MODEL?: string
   AI_PROVIDER?: string
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
@@ -52,9 +58,28 @@ const ADMIN_RESET_SETTING = 'adminPasswordReset'
 const AI_MODEL_SETTING = 'aiModelConfig'
 const PASSWORD_ITERATIONS = 100000
 
-type AiModelProvider = 'deepseek' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 type AiModelMode = 'deepseek-direct' | 'baml-runtime'
+
+type AiModelRouteKey = 'textPrimary' | 'textFallback' | 'visionPrimary' | 'visionFallback'
+
+type StoredAiModelEndpointConfig = {
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  apiKeyEncrypted?: string
+  apiKeyPreview?: string
+}
+
+type PublicAiModelEndpointConfig = {
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  apiKeyPreview?: string
+  hasApiKey: boolean
+  keySource: 'environment' | 'setting' | 'missing'
+}
 
 type StoredAiModelConfig = {
   mode: AiModelMode
@@ -65,12 +90,24 @@ type StoredAiModelConfig = {
   apiKeyEncrypted?: string
   apiKeyPreview?: string
   updatedAt?: string
+  routes?: Partial<Record<AiModelRouteKey, StoredAiModelEndpointConfig>>
 }
 
-type PublicAiModelConfig = Omit<StoredAiModelConfig, 'apiKeyEncrypted'> & {
+type PublicAiModelConfig = {
+  mode: AiModelMode
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  runtimeUrl: string
+  apiKeyPreview?: string
+  updatedAt?: string
   hasApiKey: boolean
   encryptionReady: boolean
   runtimeConfigured: boolean
+  textPrimary: PublicAiModelEndpointConfig
+  textFallback: PublicAiModelEndpointConfig
+  visionPrimary: PublicAiModelEndpointConfig
+  visionFallback: PublicAiModelEndpointConfig
 }
 
 type AuthRole = 'admin' | 'member'
@@ -244,18 +281,99 @@ function defaultAiModelConfig(env: Env): StoredAiModelConfig {
     baseUrl: (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
     model: env.DEEPSEEK_MODEL || 'deepseek-chat',
     runtimeUrl: (env.AI_RUNTIME_URL || '').replace(/\/$/, ''),
+    routes: defaultAiModelRoutes(env),
   }
 }
 
 function normalizeAiProvider(value: unknown): AiModelProvider {
-  return value === 'openai' || value === 'openrouter' || value === 'anthropic' || value === 'custom-openai' ? value : 'deepseek'
+  return value === 'deepseek' ||
+    value === 'gemini' ||
+    value === 'kimi' ||
+    value === 'openai' ||
+    value === 'openrouter' ||
+    value === 'anthropic' ||
+    value === 'custom-openai'
+    ? value
+    : 'deepseek'
 }
 
 function normalizeAiMode(value: unknown): AiModelMode {
   return value === 'baml-runtime' ? 'baml-runtime' : 'deepseek-direct'
 }
 
+function defaultAiModelRoutes(env: Env): Record<AiModelRouteKey, StoredAiModelEndpointConfig> {
+  return {
+    textPrimary: {
+      provider: 'deepseek',
+      baseUrl: (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+      model: env.DEEPSEEK_MODEL || 'deepseek-chat',
+    },
+    textFallback: {
+      provider: 'kimi',
+      baseUrl: (env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1').replace(/\/$/, ''),
+      model: env.KIMI_MODEL || 'kimi-k2.6',
+    },
+    visionPrimary: {
+      provider: 'gemini',
+      baseUrl: (env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, ''),
+      model: env.GEMINI_VISION_MODEL || 'gemini-3-flash-preview',
+    },
+    visionFallback: {
+      provider: 'kimi',
+      baseUrl: (env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1').replace(/\/$/, ''),
+      model: env.KIMI_MODEL || 'kimi-k2.6',
+    },
+  }
+}
+
+function normalizeAiEndpoint(route: AiModelRouteKey, value: Partial<StoredAiModelEndpointConfig> | undefined, env: Env): StoredAiModelEndpointConfig {
+  const fallback = defaultAiModelRoutes(env)[route]
+  return {
+    ...fallback,
+    ...value,
+    provider: normalizeAiProvider(value?.provider ?? fallback.provider),
+    baseUrl: String(value?.baseUrl || fallback.baseUrl).trim().replace(/\/$/, ''),
+    model: String(value?.model || fallback.model).trim(),
+    apiKeyEncrypted: value?.apiKeyEncrypted,
+    apiKeyPreview: value?.apiKeyPreview,
+  }
+}
+
+function providerEnvironmentKey(env: Env, provider: AiModelProvider) {
+  if (provider === 'gemini') {
+    return env.GEMINI_API_KEY || ''
+  }
+  if (provider === 'kimi') {
+    return env.KIMI_API_KEY || ''
+  }
+  if (provider === 'deepseek') {
+    return env.DEEPSEEK_API_KEY || ''
+  }
+  return ''
+}
+
+function publicAiEndpointConfig(env: Env, endpoint: StoredAiModelEndpointConfig): PublicAiModelEndpointConfig {
+  const hasSettingKey = Boolean(endpoint.apiKeyEncrypted)
+  const hasEnvironmentKey = Boolean(providerEnvironmentKey(env, endpoint.provider))
+  return {
+    provider: endpoint.provider,
+    baseUrl: endpoint.baseUrl,
+    model: endpoint.model,
+    apiKeyPreview: endpoint.apiKeyPreview || (hasEnvironmentKey ? '环境变量' : undefined),
+    hasApiKey: hasSettingKey || hasEnvironmentKey,
+    keySource: hasSettingKey ? 'setting' : hasEnvironmentKey ? 'environment' : 'missing',
+  }
+}
+
 function publicAiModelConfig(env: Env, config: StoredAiModelConfig): PublicAiModelConfig {
+  const routes = {
+    ...defaultAiModelRoutes(env),
+    ...(config.routes ?? {}),
+  }
+  const textPrimary = normalizeAiEndpoint('textPrimary', routes.textPrimary, env)
+  const textFallback = normalizeAiEndpoint('textFallback', routes.textFallback, env)
+  const visionPrimary = normalizeAiEndpoint('visionPrimary', routes.visionPrimary, env)
+  const visionFallback = normalizeAiEndpoint('visionFallback', routes.visionFallback, env)
   return {
     mode: config.mode,
     provider: config.provider,
@@ -267,6 +385,10 @@ function publicAiModelConfig(env: Env, config: StoredAiModelConfig): PublicAiMod
     hasApiKey: Boolean(config.apiKeyEncrypted),
     encryptionReady: Boolean(env.AI_SETTINGS_SECRET),
     runtimeConfigured: Boolean(config.runtimeUrl || env.AI_RUNTIME_URL),
+    textPrimary: publicAiEndpointConfig(env, textPrimary),
+    textFallback: publicAiEndpointConfig(env, textFallback),
+    visionPrimary: publicAiEndpointConfig(env, visionPrimary),
+    visionFallback: publicAiEndpointConfig(env, visionFallback),
   }
 }
 
@@ -278,6 +400,7 @@ async function getStoredAiModelConfig(env: Env) {
   }
   try {
     const parsed = JSON.parse(raw) as Partial<StoredAiModelConfig>
+    const parsedRoutes = parsed.routes ?? {}
     return {
       ...fallback,
       ...parsed,
@@ -286,6 +409,12 @@ async function getStoredAiModelConfig(env: Env) {
       baseUrl: String(parsed.baseUrl || fallback.baseUrl).replace(/\/$/, ''),
       model: String(parsed.model || fallback.model),
       runtimeUrl: String(parsed.runtimeUrl || fallback.runtimeUrl).replace(/\/$/, ''),
+      routes: {
+        textPrimary: normalizeAiEndpoint('textPrimary', parsedRoutes.textPrimary, env),
+        textFallback: normalizeAiEndpoint('textFallback', parsedRoutes.textFallback, env),
+        visionPrimary: normalizeAiEndpoint('visionPrimary', parsedRoutes.visionPrimary, env),
+        visionFallback: normalizeAiEndpoint('visionFallback', parsedRoutes.visionFallback, env),
+      },
     }
   } catch {
     return fallback
@@ -324,6 +453,145 @@ async function decryptSettingSecret(env: Env, value: string | undefined) {
   }
 }
 
+async function resolveAiEndpoint(env: Env, route: AiModelRouteKey) {
+  const config = await getStoredAiModelConfig(env)
+  const endpoint = normalizeAiEndpoint(route, config.routes?.[route], env)
+  const settingKey = await decryptSettingSecret(env, endpoint.apiKeyEncrypted)
+  const apiKey = settingKey || providerEnvironmentKey(env, endpoint.provider)
+  return { ...endpoint, apiKey, keySource: settingKey ? 'setting' : apiKey ? 'environment' : 'missing' as const }
+}
+
+function parseAiRouteKey(value: unknown): AiModelRouteKey | null {
+  return value === 'textPrimary' || value === 'textFallback' || value === 'visionPrimary' || value === 'visionFallback' ? value : null
+}
+
+function kimiTemperature(provider: AiModelProvider, model: string) {
+  return provider === 'kimi' && model.includes('k2.6') ? 1 : 0.2
+}
+
+function extractGeminiText(data: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null) {
+  return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || ''
+}
+
+function extractOpenAiText(data: { choices?: Array<{ message?: { content?: string } }> } | null) {
+  return data?.choices?.[0]?.message?.content?.trim() || ''
+}
+
+async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string) {
+  if (!endpoint.apiKey) {
+    throw new Error('模型 API Key 未配置')
+  }
+  if (endpoint.provider === 'gemini') {
+    const response = await fetch(`${endpoint.baseUrl}/models/${endpoint.model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': endpoint.apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 64 },
+      }),
+    })
+    const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
+    if (!response.ok || data?.error) {
+      throw new Error(data?.error?.message || `模型请求失败：${response.status}`)
+    }
+    return extractGeminiText(data)
+  }
+
+  const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${endpoint.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: endpoint.model,
+      temperature: kimiTemperature(endpoint.provider, endpoint.model),
+      max_tokens: 64,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+  const data = (await response.json().catch(() => null)) as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> } | null
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error?.message || `模型请求失败：${response.status}`)
+  }
+  return extractOpenAiText(data)
+}
+
+async function callTextFallbackJson<T extends object>(env: Env, systemPrompt: string, payload: unknown, outputShape: string): Promise<T | null> {
+  const endpoint = await resolveAiEndpoint(env, 'textFallback')
+  if (!endpoint.apiKey) {
+    return null
+  }
+  const prompt = `${systemPrompt}
+
+请只返回一个 JSON 对象，不要解释，不要使用 Markdown 代码块。
+JSON 字段要求：${outputShape}
+
+输入数据：
+${JSON.stringify(payload)}`
+  try {
+    const output = await callAiEndpointText(endpoint, prompt)
+    const parsed = parseLooseJsonObject(output)
+    return Object.keys(parsed).length > 0 ? (parsed as T) : null
+  } catch {
+    return null
+  }
+}
+
+async function callAiEndpointVision(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string, imageBase64: string, mimeType = 'image/png') {
+  if (!endpoint.apiKey) {
+    throw new Error('模型 API Key 未配置')
+  }
+  if (endpoint.provider === 'gemini') {
+    const response = await fetch(`${endpoint.baseUrl}/models/${endpoint.model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': endpoint.apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
+        generationConfig: { maxOutputTokens: 64 },
+      }),
+    })
+    const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
+    if (!response.ok || data?.error) {
+      throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
+    }
+    return extractGeminiText(data)
+  }
+
+  const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${endpoint.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: endpoint.model,
+      temperature: kimiTemperature(endpoint.provider, endpoint.model),
+      max_tokens: 96,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+          ],
+        },
+      ],
+    }),
+  })
+  const data = (await response.json().catch(() => null)) as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> } | null
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
+  }
+  return extractOpenAiText(data)
+}
+
 function maskApiKey(value: string) {
   const trimmed = value.trim()
   if (trimmed.length <= 8) {
@@ -336,6 +604,44 @@ async function getAiModelConfig(env: Env) {
   return ok(publicAiModelConfig(env, await getStoredAiModelConfig(env)))
 }
 
+async function testAiModelRoute(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { route?: string; capability?: string }
+  const route = parseAiRouteKey(body.route)
+  if (!route) {
+    return fail('未知的模型路由')
+  }
+  const capability = body.capability === 'vision' ? 'vision' : 'text'
+  if (capability === 'vision' && route !== 'visionPrimary' && route !== 'visionFallback') {
+    return fail('请选择识图模型路由')
+  }
+  if (capability === 'text' && route !== 'textPrimary' && route !== 'textFallback') {
+    return fail('请选择文字模型路由')
+  }
+  const endpoint = await resolveAiEndpoint(env, route)
+  try {
+    const output =
+      capability === 'vision'
+        ? await callAiEndpointVision(
+            endpoint,
+            '这张图片主要是什么颜色？只回复颜色。',
+            'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZklEQVR4nO3PQQ3AIADAwDFT/53UBoM4ICgm5O5cttV7vQGeTQ/AaAQYjUaD0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQaDcbxAHy3AUGOk0s8AAAAAElFTkSuQmCC',
+          )
+        : await callAiEndpointText(endpoint, '请只回复：OK')
+    if (!output) {
+      return fail('模型已响应，但没有返回可读文本', 502)
+    }
+    await audit(env, 'test', 'ai_model_route', route, {
+      capability,
+      provider: endpoint.provider,
+      model: endpoint.model,
+      keySource: endpoint.keySource,
+    })
+    return ok({ ok: true, route, provider: endpoint.provider, model: endpoint.model, output })
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '模型测试失败', 502)
+  }
+}
+
 async function setAiModelConfig(env: Env, request: Request) {
   const existing = await getStoredAiModelConfig(env)
   const body = (await request.json().catch(() => ({}))) as {
@@ -346,7 +652,22 @@ async function setAiModelConfig(env: Env, request: Request) {
     runtimeUrl?: string
     apiKey?: string
     clearApiKey?: boolean
+    routes?: Partial<Record<AiModelRouteKey, Partial<StoredAiModelEndpointConfig>>>
+    routeApiKeys?: Partial<Record<AiModelRouteKey, string>>
+    clearRouteApiKeys?: AiModelRouteKey[]
   }
+  const routeKeys: AiModelRouteKey[] = ['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback']
+  const existingRoutes = {
+    ...defaultAiModelRoutes(env),
+    ...(existing.routes ?? {}),
+  }
+  const nextRoutes = routeKeys.reduce(
+    (map, route) => ({
+      ...map,
+      [route]: normalizeAiEndpoint(route, { ...existingRoutes[route], ...(body.routes?.[route] ?? {}) }, env),
+    }),
+    {} as Record<AiModelRouteKey, StoredAiModelEndpointConfig>,
+  )
   const next: StoredAiModelConfig = {
     ...existing,
     mode: normalizeAiMode(body.mode),
@@ -355,6 +676,7 @@ async function setAiModelConfig(env: Env, request: Request) {
     model: String(body.model ?? existing.model).trim(),
     runtimeUrl: String(body.runtimeUrl ?? existing.runtimeUrl).trim().replace(/\/$/, ''),
     updatedAt: nowIso(),
+    routes: nextRoutes,
   }
 
   if (!next.model) {
@@ -372,6 +694,24 @@ async function setAiModelConfig(env: Env, request: Request) {
     }
   }
 
+  const clearRouteApiKeys = new Set(body.clearRouteApiKeys ?? [])
+  for (const route of routeKeys) {
+    if (clearRouteApiKeys.has(route)) {
+      delete nextRoutes[route].apiKeyEncrypted
+      delete nextRoutes[route].apiKeyPreview
+      continue
+    }
+    const routeApiKey = body.routeApiKeys?.[route]
+    if (typeof routeApiKey === 'string' && routeApiKey.trim()) {
+      try {
+        nextRoutes[route].apiKeyEncrypted = await encryptSettingSecret(env, routeApiKey.trim())
+        nextRoutes[route].apiKeyPreview = maskApiKey(routeApiKey)
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : '模型 API Key 保存失败', 503)
+      }
+    }
+  }
+
   await setSettingValue(env, AI_MODEL_SETTING, JSON.stringify(next))
   await audit(env, 'update', 'setting', AI_MODEL_SETTING, {
     mode: next.mode,
@@ -379,6 +719,17 @@ async function setAiModelConfig(env: Env, request: Request) {
     model: next.model,
     runtimeConfigured: Boolean(next.runtimeUrl || env.AI_RUNTIME_URL),
     hasApiKey: Boolean(next.apiKeyEncrypted),
+    routes: routeKeys.reduce(
+      (map, route) => ({
+        ...map,
+        [route]: {
+          provider: nextRoutes[route].provider,
+          model: nextRoutes[route].model,
+          hasApiKey: Boolean(nextRoutes[route].apiKeyEncrypted) || Boolean(providerEnvironmentKey(env, nextRoutes[route].provider)),
+        },
+      }),
+      {},
+    ),
   })
   return ok(publicAiModelConfig(env, next))
 }
@@ -645,6 +996,24 @@ function parseToolArguments(value: unknown): TaskAssistantToolArgs {
     }
   }
   return typeof value === 'object' ? (value as TaskAssistantToolArgs) : {}
+}
+
+function parseLooseJsonObject(value: string) {
+  const raw = value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>
+      } catch {
+        return {}
+      }
+    }
+    return {}
+  }
 }
 
 function parseTextToolArguments(value: unknown): TextAssistantToolArgs {
@@ -1816,8 +2185,29 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     }
   }
 
+  const callFallback = async () => {
+    const fallbackParsed = await callTextFallbackJson<TaskAssistantToolArgs>(
+      env,
+      '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。不要编造用户没有提供的事实。',
+      aiPayload,
+      'optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
+    )
+    const suggestion = toTaskAssistantSuggestion(fallbackParsed ?? {}, designTypeGroups)
+    if (!suggestion.optimizedRequirement) {
+      return null
+    }
+    await audit(env, 'suggest', 'ai_task_assistant', title || 'untitled', {
+      title,
+      suggestedType: suggestion.suggestedType,
+      categoryExists: suggestion.categoryExists,
+      provider: 'text-fallback',
+    })
+    return ok(suggestion)
+  }
+
   if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
+    const fallback = await callFallback()
+    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -1879,6 +2269,10 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   })
 
   if (!response.ok) {
+    const fallback = await callFallback()
+    if (fallback) {
+      return fallback
+    }
     const errorText = await response.text().catch(() => '')
     return fail(`AI 助手请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
   }
@@ -1895,7 +2289,8 @@ async function suggestTaskWithAi(env: Env, request: Request) {
 
   const suggestion = toTaskAssistantSuggestion(parsed, designTypeGroups)
   if (!suggestion.optimizedRequirement) {
-    return fail('AI 助手没有返回有效建议，请稍后重试。', 502)
+    const fallback = await callFallback()
+    return fallback ?? fail('AI 助手没有返回有效建议，请稍后重试。', 502)
   }
 
   await audit(env, 'suggest', 'ai_task_assistant', title || 'untitled', {
@@ -1951,8 +2346,30 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     })
   }
 
+  const callFallback = async () => {
+    const fallbackParsed = await callTextFallbackJson<TextAssistantToolArgs>(
+      env,
+      '你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。保留事实，不要编造文件内容、交付物、客户确认或验收结果。',
+      aiPayload,
+      'optimizedText:string, summary:string',
+    )
+    const optimizedText = String(fallbackParsed?.optimizedText ?? '').trim()
+    if (!optimizedText) {
+      return null
+    }
+    await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
+      mode,
+      taskTitle,
+      fileCount: files.length,
+      uploadedFileCount: uploadedFileNames.length,
+      provider: 'text-fallback',
+    })
+    return ok({ optimizedText, summary: String(fallbackParsed?.summary ?? '').trim() })
+  }
+
   if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
+    const fallback = await callFallback()
+    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -2006,6 +2423,10 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   })
 
   if (!response.ok) {
+    const fallback = await callFallback()
+    if (fallback) {
+      return fallback
+    }
     const errorText = await response.text().catch(() => '')
     return fail(`AI 助手请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
   }
@@ -2022,7 +2443,8 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
 
   const optimizedText = String(parsed.optimizedText ?? '').trim()
   if (!optimizedText) {
-    return fail('AI 助手没有返回有效建议，请稍后重试。', 502)
+    const fallback = await callFallback()
+    return fallback ?? fail('AI 助手没有返回有效建议，请稍后重试。', 502)
   }
 
   await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
@@ -2176,8 +2598,56 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     })
   }
 
+  const normalizeHourSuggestion = async (parsed: HourEstimateToolArgs | null, provider: string) => {
+    if (!parsed) {
+      return null
+    }
+    const parsedHours = Number(parsed.suggestedHours)
+    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+      return null
+    }
+    const suggestedHours = roundToHalfHour(parsedHours)
+    const confidence = sampleCount < 3 ? '低' : parsed.confidence === '高' || parsed.confidence === '中' || parsed.confidence === '低' ? parsed.confidence : '中'
+    const basis = Array.isArray(parsed.basis) ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
+    const historicalSummary = String(parsed.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
+    await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
+      selectedType,
+      sampleCount,
+      suggestedHours,
+      confidence,
+      usedFallback,
+      provider,
+    })
+    return ok({
+      suggestedHours,
+      confidence,
+      basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
+      historicalSummary,
+      sampleCount,
+      averageHours,
+      medianHours,
+      minHours,
+      maxHours,
+      averageDeliveryDays,
+      matchedType: selectedType,
+      usedFallback,
+    })
+  }
+
+  const callFallback = async () =>
+    normalizeHourSuggestion(
+      await callTextFallbackJson<HourEstimateToolArgs>(
+        env,
+        '你是一个设计兼职任务的工时分析助理。请只基于系统提供的历史任务样本、实际工时、交付周期、验收备注和当前任务需求，给出新任务的预估工时建议。不要编造不存在的历史数据；样本少于 3 条时必须降低置信度。',
+        aiPayload,
+        'suggestedHours:number, confidence:"低"|"中"|"高", basis:string[], historicalSummary:string',
+      ),
+      'text-fallback',
+    )
+
   if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
+    const fallback = await callFallback()
+    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -2241,6 +2711,10 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   })
 
   if (!response.ok) {
+    const fallback = await callFallback()
+    if (fallback) {
+      return fallback
+    }
     const errorText = await response.text().catch(() => '')
     return fail(`AI 工时建议请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
   }
@@ -2253,6 +2727,10 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   let parsed = parseHourEstimateToolArguments(toolCall?.function?.arguments)
   if (!parsed.suggestedHours && message?.content) {
     parsed = parseHourEstimateToolArguments(message.content)
+  }
+  const fallbackResult = !parsed.suggestedHours ? await callFallback() : null
+  if (fallbackResult) {
+    return fallbackResult
   }
 
   const parsedHours = Number(parsed.suggestedHours)
@@ -2370,7 +2848,7 @@ async function handleApi(request: Request, env: Env) {
   if (path.startsWith('/api/tokens') && role !== 'admin') {
     return fail('需要管理员权限', 403)
   }
-  if ((path === '/api/settings/design-types' || path === '/api/settings/design-type-groups' || path === '/api/settings/ai-model') && role !== 'admin') {
+  if ((path === '/api/settings/design-types' || path === '/api/settings/design-type-groups' || path === '/api/settings/ai-model' || path === '/api/ai/model-test') && role !== 'admin') {
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
@@ -2469,6 +2947,9 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
     return suggestHourEstimateWithAi(env, request)
+  }
+  if (path === '/api/ai/model-test' && request.method === 'POST') {
+    return testAiModelRoute(env, request)
   }
   if (path === '/api/settings/ai-model' && request.method === 'GET') {
     return getAiModelConfig(env)

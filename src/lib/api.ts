@@ -36,9 +36,20 @@ export type AccessToken = {
   lastUsedAt: string
 }
 
-export type AiModelProvider = 'deepseek' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+export type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 export type AiModelMode = 'deepseek-direct' | 'baml-runtime'
+
+export type AiModelRouteKey = 'textPrimary' | 'textFallback' | 'visionPrimary' | 'visionFallback'
+
+export type AiModelEndpointConfig = {
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  apiKeyPreview?: string
+  hasApiKey: boolean
+  keySource: 'environment' | 'setting' | 'missing'
+}
 
 export type AiModelConfig = {
   mode: AiModelMode
@@ -51,6 +62,10 @@ export type AiModelConfig = {
   hasApiKey: boolean
   encryptionReady: boolean
   runtimeConfigured: boolean
+  textPrimary: AiModelEndpointConfig
+  textFallback: AiModelEndpointConfig
+  visionPrimary: AiModelEndpointConfig
+  visionFallback: AiModelEndpointConfig
 }
 
 export type BackendState = {
@@ -468,9 +483,23 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ designTypeGroups }),
     }),
-  setAiModelConfig: (payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean }) =>
+  setAiModelConfig: (
+    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & {
+      apiKey?: string
+      clearApiKey?: boolean
+      routes?: Partial<Record<AiModelRouteKey, Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>>>
+      routeApiKeys?: Partial<Record<AiModelRouteKey, string>>
+      clearRouteApiKeys?: AiModelRouteKey[]
+    },
+  ) =>
     requestJson<AiModelConfig>('/api/settings/ai-model', {
       method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  testAiModelRoute: (payload: { route: AiModelRouteKey; capability: 'text' | 'vision' }) =>
+    requestJson<{ ok: boolean; route: AiModelRouteKey; provider: AiModelProvider; model: string; output: string; fallbackUsed?: boolean }>('/api/ai/model-test', {
+      method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),

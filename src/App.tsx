@@ -66,6 +66,8 @@ import {
   type AccessToken,
   type ActivityItem,
   type AiModelConfig,
+  type AiModelEndpointConfig,
+  type AiModelRouteKey,
   type AuthRole,
   type HourEstimateSuggestion,
   type ReportRecord,
@@ -2706,7 +2708,13 @@ function App() {
   }
 
   const handleAiModelConfigChange = async (
-    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean },
+    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & {
+      apiKey?: string
+      clearApiKey?: boolean
+      routes?: Partial<Record<AiModelRouteKey, Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>>>
+      routeApiKeys?: Partial<Record<AiModelRouteKey, string>>
+      clearRouteApiKeys?: AiModelRouteKey[]
+    },
   ) => {
     try {
       const saved = await api.setAiModelConfig(payload)
@@ -7874,6 +7882,34 @@ function ClientReportView({
   )
 }
 
+const aiRouteMeta: Array<{ key: AiModelRouteKey; title: string; description: string; capability: 'text' | 'vision' }> = [
+  { key: 'textPrimary', title: '文字主模型', description: '任务文案、进展、验收和工时建议优先使用', capability: 'text' },
+  { key: 'textFallback', title: '文字备用模型', description: 'DeepSeek 不可用或返回无效时自动兜底', capability: 'text' },
+  { key: 'visionPrimary', title: '识图主模型', description: '交付件图片、PDF 页面和 PPT 预览优先识别', capability: 'vision' },
+  { key: 'visionFallback', title: '识图备用模型', description: 'Gemini 额度不足或识别失败时自动兜底', capability: 'vision' },
+]
+
+const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> = {
+  textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  textFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
+  visionPrimary: { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3-flash-preview' },
+  visionFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
+}
+
+function aiRoutesFromConfig(config: AiModelConfig | null): Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> {
+  return aiRouteMeta.reduce((map, route) => {
+    const item = config?.[route.key] ?? aiRouteDefaults[route.key]
+    return {
+      ...map,
+      [route.key]: {
+        provider: item.provider,
+        baseUrl: item.baseUrl,
+        model: item.model,
+      },
+    }
+  }, {} as Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>)
+}
+
 function SettingsView({
   hourlyRate,
   pdfTitle,
@@ -7912,7 +7948,15 @@ function SettingsView({
   onServiceCompanyNameChange: (name: string) => void
   onTaxModeChange: (mode: TaxMode) => void
   onDesignTypeGroupsChange: (groups: DesignTypeGroup[]) => void | Promise<void>
-  onAiModelConfigChange: (payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean }) => void | Promise<void>
+  onAiModelConfigChange: (
+    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & {
+      apiKey?: string
+      clearApiKey?: boolean
+      routes?: Partial<Record<AiModelRouteKey, Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>>>
+      routeApiKeys?: Partial<Record<AiModelRouteKey, string>>
+      clearRouteApiKeys?: AiModelRouteKey[]
+    },
+  ) => void | Promise<void>
   onExportBackup: () => void
   onSignOut: () => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -7934,6 +7978,10 @@ function SettingsView({
   const [aiModelDraft, setAiModelDraft] = useState(aiModelConfig?.model ?? 'deepseek-chat')
   const [aiRuntimeUrlDraft, setAiRuntimeUrlDraft] = useState(aiModelConfig?.runtimeUrl ?? '')
   const [aiApiKeyDraft, setAiApiKeyDraft] = useState('')
+  const [aiRouteDrafts, setAiRouteDrafts] = useState(aiRoutesFromConfig(aiModelConfig))
+  const [aiRouteKeyDrafts, setAiRouteKeyDrafts] = useState<Partial<Record<AiModelRouteKey, string>>>({})
+  const [testingAiRoute, setTestingAiRoute] = useState<AiModelRouteKey | null>(null)
+  const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
   const [isAiModelSaving, setIsAiModelSaving] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [draggingGroupName, setDraggingGroupName] = useState('')
@@ -8104,9 +8152,21 @@ function SettingsView({
     setAiModelDraft(aiModelConfig?.model ?? 'deepseek-chat')
     setAiRuntimeUrlDraft(aiModelConfig?.runtimeUrl ?? '')
     setAiApiKeyDraft('')
+    setAiRouteDrafts(aiRoutesFromConfig(aiModelConfig))
+    setAiRouteKeyDrafts({})
   }, [aiModelConfig])
 
-  const saveAiModelConfig = async (clearApiKey = false) => {
+  const updateAiRouteDraft = (route: AiModelRouteKey, changes: Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>) => {
+    setAiRouteDrafts((current) => ({
+      ...current,
+      [route]: {
+        ...current[route],
+        ...changes,
+      },
+    }))
+  }
+
+  const saveAiModelConfig = async (clearApiKey = false, clearRouteApiKey?: AiModelRouteKey) => {
     if (isAiModelSaving) {
       return
     }
@@ -8120,10 +8180,36 @@ function SettingsView({
         runtimeUrl: aiRuntimeUrlDraft.trim(),
         apiKey: clearApiKey ? undefined : aiApiKeyDraft.trim() || undefined,
         clearApiKey,
+        routes: aiRouteDrafts,
+        routeApiKeys: Object.fromEntries(Object.entries(aiRouteKeyDrafts).filter(([, value]) => value?.trim())) as Partial<Record<AiModelRouteKey, string>>,
+        clearRouteApiKeys: clearRouteApiKey ? [clearRouteApiKey] : undefined,
       })
       setAiApiKeyDraft('')
+      setAiRouteKeyDrafts({})
     } finally {
       setIsAiModelSaving(false)
+    }
+  }
+
+  const testAiRoute = async (route: AiModelRouteKey, capability: 'text' | 'vision') => {
+    if (testingAiRoute) {
+      return
+    }
+    setTestingAiRoute(route)
+    setAiRouteTestResults((current) => ({ ...current, [route]: { ok: false, message: '测试中…' } }))
+    try {
+      const result = await api.testAiModelRoute({ route, capability })
+      setAiRouteTestResults((current) => ({
+        ...current,
+        [route]: { ok: true, message: `${result.provider} / ${result.model} 可用：${result.output}` },
+      }))
+    } catch (error) {
+      setAiRouteTestResults((current) => ({
+        ...current,
+        [route]: { ok: false, message: error instanceof Error ? error.message : '模型测试失败' },
+      }))
+    } finally {
+      setTestingAiRoute(null)
     }
   }
 
@@ -8260,7 +8346,7 @@ function SettingsView({
               <div className="panel-header compact">
                 <div>
                   <h2>AI 模型设置</h2>
-                  <p>DeepSeek 可继续直连；BAML Runtime 用于后续多租户自带模型 Key</p>
+                  <p>文字和识图都保留主模型与备用模型，后续多租户可自行替换 Key</p>
                 </div>
               </div>
               <div className="form-grid settings-form settings-ai-form">
@@ -8275,6 +8361,8 @@ function SettingsView({
                   <span>模型供应商</span>
                   <select value={aiProviderDraft} onChange={(event) => setAiProviderDraft(event.target.value as AiModelConfig['provider'])}>
                     <option value="deepseek">DeepSeek</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="kimi">Kimi</option>
                     <option value="openai">OpenAI</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="anthropic">Anthropic Claude</option>
@@ -8302,20 +8390,84 @@ function SettingsView({
                   />
                 </label>
                 <label className="field wide">
-                  <span>租户模型 API Key</span>
+                  <span>BAML Runtime 模型 Key</span>
                   <input
                     type="password"
                     value={aiApiKeyDraft}
-                    placeholder={aiModelConfig?.hasApiKey ? `已保存：${aiModelConfig.apiKeyPreview ?? '已保存'}` : '输入后加密保存'}
+                    placeholder={aiModelConfig?.hasApiKey ? `已保存：${aiModelConfig.apiKeyPreview ?? '已保存'}` : '可选，输入后加密保存'}
                     onChange={(event) => setAiApiKeyDraft(event.target.value)}
                   />
                 </label>
               </div>
+              <div className="settings-ai-routes">
+                {aiRouteMeta.map((route) => {
+                  const draft = aiRouteDrafts[route.key]
+                  const saved = aiModelConfig?.[route.key]
+                  const testResult = aiRouteTestResults[route.key]
+                  return (
+                    <article className="settings-ai-route-card" key={route.key}>
+                      <div className="settings-ai-route-head">
+                        <div>
+                          <strong>{route.title}</strong>
+                          <span>{route.description}</span>
+                        </div>
+                        <em className={saved?.hasApiKey ? 'ready' : ''}>
+                          {saved?.hasApiKey ? (saved.keySource === 'environment' ? '环境 Key' : '已保存 Key') : '未配置 Key'}
+                        </em>
+                      </div>
+                      <div className="form-grid settings-form settings-ai-route-form">
+                        <label className="field">
+                          <span>供应商</span>
+                          <select value={draft.provider} onChange={(event) => updateAiRouteDraft(route.key, { provider: event.target.value as AiModelConfig['provider'] })}>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="gemini">Gemini</option>
+                            <option value="kimi">Kimi</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="anthropic">Anthropic Claude</option>
+                            <option value="custom-openai">OpenAI 兼容网关</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Base URL</span>
+                          <input value={draft.baseUrl} onChange={(event) => updateAiRouteDraft(route.key, { baseUrl: event.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>模型</span>
+                          <input value={draft.model} onChange={(event) => updateAiRouteDraft(route.key, { model: event.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>API Key</span>
+                          <input
+                            type="password"
+                            value={aiRouteKeyDrafts[route.key] ?? ''}
+                            placeholder={saved?.hasApiKey ? `已配置：${saved.apiKeyPreview ?? '已保存'}` : '输入后加密保存'}
+                            onChange={(event) => setAiRouteKeyDrafts((current) => ({ ...current, [route.key]: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                      <div className="settings-ai-route-actions">
+                        {testResult && <p className={testResult.ok ? 'settings-test-ok' : 'settings-inline-error'}>{testResult.message}</p>}
+                        <div>
+                          {saved?.keySource === 'setting' && (
+                            <button className="ghost-button compact-button" type="button" onClick={() => void saveAiModelConfig(false, route.key)} disabled={isAiModelSaving}>
+                              清除 Key
+                            </button>
+                          )}
+                          <button className="ghost-button compact-button" type="button" onClick={() => void testAiRoute(route.key, route.capability)} disabled={testingAiRoute === route.key}>
+                            {testingAiRoute === route.key ? '测试中…' : '测试'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
               <div className="settings-ai-meta">
                 <p className="settings-tool-note">
                   {aiModelConfig?.encryptionReady
-                    ? 'API Key 会加密保存在 D1；前端只显示保存状态，不返回明文。'
-                    : '生产环境还没有配置 AI_SETTINGS_SECRET，暂不能安全保存租户 API Key。'}
+                    ? '设置页填写的 API Key 会加密保存在 D1；平台默认 Key 优先放在 Cloudflare Secret，前端只显示保存状态。'
+                    : '生产环境还没有配置 AI_SETTINGS_SECRET，暂不能安全保存租户自带 API Key。'}
                 </p>
                 {aiModeDraft === 'baml-runtime' && !aiModelConfig?.runtimeConfigured && (
                   <p className="settings-inline-error">启用 BAML Runtime 前，需要配置 Runtime URL 或部署环境变量 AI_RUNTIME_URL。</p>
