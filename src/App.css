@@ -988,19 +988,23 @@ button {
   font-weight: 800;
 }
 
-.dashboard-side-action {
+.text-button.dashboard-side-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   min-height: 24px;
   color: var(--color-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1.2;
 }
 
-.dashboard-side-action svg {
-  width: 13px;
-  height: 13px;
+.text-button.dashboard-side-action svg {
+  width: 12px;
+  height: 12px;
 }
 
-.dashboard-side-action:hover {
+.text-button.dashboard-side-action:hover {
   color: var(--color-primary-strong);
 }
 
