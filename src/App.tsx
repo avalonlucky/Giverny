@@ -814,10 +814,12 @@ function MonthPicker({
   value,
   taskMonthValues,
   onChange,
+  minimal = false,
 }: {
   value: string
   taskMonthValues: Set<string>
   onChange: (value: string) => void
+  minimal?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [displayYear, setDisplayYear] = useState(() => Number(value.slice(0, 4)))
@@ -840,7 +842,7 @@ function MonthPicker({
     >
       <button
         type="button"
-        className={`select-button month-trigger ${isOpen ? 'active' : ''}`}
+        className={`select-button month-trigger ${minimal ? 'minimal' : ''} ${isOpen ? 'active' : ''}`.trim()}
         aria-label="选择年份和月份"
         aria-expanded={isOpen}
         onClick={() => {
@@ -850,7 +852,7 @@ function MonthPicker({
           setIsOpen((open) => !open)
         }}
       >
-        <CalendarDays size={17} />
+        {!minimal && <CalendarDays size={17} />}
         <span>{monthLabelOf(value)}</span>
         <ChevronDown size={16} />
       </button>
@@ -2839,6 +2841,24 @@ function App() {
     notify('请先登录管理员身份再编辑')
     setIsLoginModalOpen(true)
   }
+  const openCreateTask = () => {
+    if (isAdmin) {
+      setIsModalOpen(true)
+      return
+    }
+    requireAdmin()
+  }
+  useEffect(() => {
+    const handleCreateTaskShortcut = (event: KeyboardEvent) => {
+      if (event.repeat || event.key.toLowerCase() !== 'k' || (!event.metaKey && !event.ctrlKey)) {
+        return
+      }
+      event.preventDefault()
+      openCreateTask()
+    }
+    window.addEventListener('keydown', handleCreateTaskShortcut)
+    return () => window.removeEventListener('keydown', handleCreateTaskShortcut)
+  })
   const readOnlyUpdateTask = () => requireAdmin()
   const readOnlyUploadFile = async (): Promise<FileAsset> => {
     requireAdmin()
@@ -2984,11 +3004,18 @@ function App() {
             )}
           </div>
           <div className="topbar-actions">
-            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} />
-            <button className="primary-button" onClick={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}>
-              <Plus size={18} />
-              新建任务
+            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} minimal />
+            <button
+              type="button"
+              className="topbar-shortcut"
+              title="新建任务（Command + K）"
+              aria-label="使用快捷键新建任务"
+              aria-keyshortcuts="Meta+K Control+K"
+              onClick={openCreateTask}
+            >
+              <kbd>⌘K</kbd>
             </button>
+            <button className="primary-button topbar-create-button" onClick={openCreateTask}>新建任务</button>
           </div>
         </header>
 

@@ -355,6 +355,32 @@ button {
   gap: 10px;
 }
 
+.topbar-actions {
+  gap: 18px;
+}
+
+.topbar-shortcut {
+  min-height: 42px;
+  padding: 0 4px;
+  border: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.topbar-shortcut kbd {
+  font: inherit;
+  font-size: 15px;
+}
+
+.topbar-shortcut:hover {
+  color: var(--color-text);
+}
+
+.topbar-create-button {
+  min-width: 108px;
+}
+
 .panel-tools {
   margin-left: auto;
   justify-content: flex-end;
@@ -7222,6 +7248,22 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+.month-trigger.minimal {
+  padding: 0 4px;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  background: transparent;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.month-trigger.minimal:hover,
+.month-trigger.minimal.active {
+  border-color: transparent;
+  color: var(--color-text);
+  background: transparent;
+}
+
 .month-trigger.active {
   border-color: rgba(47, 111, 109, 0.34);
   background: #fdfdfb;
@@ -9779,6 +9821,10 @@ textarea:focus-visible {
   .search-box {
     width: 100%;
     min-width: 0;
+  }
+
+  .topbar-shortcut {
+    display: none;
   }
 
   .task-row {
