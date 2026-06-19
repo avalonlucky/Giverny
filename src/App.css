@@ -7049,6 +7049,10 @@ textarea:focus-visible {
   grid-column: 1 / -1;
 }
 
+.settings-ai-panel {
+  grid-column: 1 / -1;
+}
+
 .settings-settlement-panel .panel-header {
   margin-bottom: 4px;
 }
@@ -7067,6 +7071,23 @@ textarea:focus-visible {
 .settings-form .field input,
 .settings-form .field select {
   min-height: 40px;
+}
+
+.settings-ai-form {
+  padding-bottom: 10px;
+}
+
+.settings-ai-meta {
+  padding: 0 22px 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.settings-ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .settings-design-panel {

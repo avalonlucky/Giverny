@@ -36,6 +36,23 @@ export type AccessToken = {
   lastUsedAt: string
 }
 
+export type AiModelProvider = 'deepseek' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+
+export type AiModelMode = 'deepseek-direct' | 'baml-runtime'
+
+export type AiModelConfig = {
+  mode: AiModelMode
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  runtimeUrl: string
+  apiKeyPreview?: string
+  updatedAt?: string
+  hasApiKey: boolean
+  encryptionReady: boolean
+  runtimeConfigured: boolean
+}
+
 export type BackendState = {
   role: AuthRole
   tasks: Task[]
@@ -48,6 +65,7 @@ export type BackendState = {
     taxMode: TaxMode
     designTypes: string[]
     designTypeGroups: DesignTypeGroup[]
+    aiModel?: AiModelConfig
   }
   reports: ReportRecord[]
   accessTokens?: AccessToken[]
@@ -449,6 +467,12 @@ export const api = {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ designTypeGroups }),
+    }),
+  setAiModelConfig: (payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean }) =>
+    requestJson<AiModelConfig>('/api/settings/ai-model', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   suggestTaskAssistant: (payload: { title: string; requirement: string; selectedType: string; designTypeGroups: DesignTypeGroup[] }) =>
     requestJson<TaskAssistantSuggestion>('/api/ai/task-assistant', {

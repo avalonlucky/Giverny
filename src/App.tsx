@@ -65,6 +65,7 @@ import {
   setStoredAuth,
   type AccessToken,
   type ActivityItem,
+  type AiModelConfig,
   type AuthRole,
   type HourEstimateSuggestion,
   type ReportRecord,
@@ -1630,6 +1631,7 @@ function App() {
   const [serviceCompanyName, setServiceCompanyName] = useState(defaultServiceCompanyName)
   const [taxMode, setTaxMode] = useState<TaxMode>('salary')
   const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
+  const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
@@ -1787,6 +1789,7 @@ function App() {
     setServiceCompanyName(state.settings.serviceCompanyName || defaultServiceCompanyName)
     setTaxMode(state.settings.taxMode ?? 'salary')
     setDesignTypeGroups(normalizeDesignTypeGroups(state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }]))
+    setAiModelConfig(state.settings.aiModel ?? null)
     setSelectedTaskId((currentId) => {
       const activeTasks = state.tasks.filter((task) => !task.voidedAt)
       return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? state.tasks[0]?.id ?? 0
@@ -2586,6 +2589,20 @@ function App() {
     }
   }
 
+  const handleAiModelConfigChange = async (
+    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean },
+  ) => {
+    try {
+      const saved = await api.setAiModelConfig(payload)
+      setAiModelConfig(saved)
+      setBackendStatus('已接入 D1/R2')
+      notify(saved.mode === 'baml-runtime' ? 'BAML Runtime 模型配置已保存' : 'AI 模型配置已保存')
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `AI 模型配置保存失败：${error.message}` : 'AI 模型配置保存失败')
+    }
+  }
+
   const handleLockMonthlyReport = async () => {
     try {
       const report = await api.lockMonthlyReport({ month: currentMonth.value, hourlyRate, importedHours })
@@ -3111,6 +3128,7 @@ function App() {
               serviceCompanyName={serviceCompanyName}
               taxMode={taxMode}
               designTypeGroups={designTypeGroups}
+              aiModelConfig={aiModelConfig}
               role={role}
               accessTokens={accessTokens}
               newTokenId={newTokenId}
@@ -3119,6 +3137,7 @@ function App() {
               onServiceCompanyNameChange={handleServiceCompanyNameChange}
               onTaxModeChange={handleTaxModeChange}
               onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
+              onAiModelConfigChange={handleAiModelConfigChange}
               onExportBackup={handleExportBackup}
               onSignOut={handleSignOut}
               onChangePassword={handleChangeAdminPassword}
@@ -7249,6 +7268,7 @@ function SettingsView({
   serviceCompanyName,
   taxMode,
   designTypeGroups,
+  aiModelConfig,
   role,
   accessTokens,
   newTokenId,
@@ -7257,6 +7277,7 @@ function SettingsView({
   onServiceCompanyNameChange,
   onTaxModeChange,
   onDesignTypeGroupsChange,
+  onAiModelConfigChange,
   onExportBackup,
   onSignOut,
   onChangePassword,
@@ -7270,6 +7291,7 @@ function SettingsView({
   serviceCompanyName: string
   taxMode: TaxMode
   designTypeGroups: DesignTypeGroup[]
+  aiModelConfig: AiModelConfig | null
   role: AuthRole
   accessTokens: AccessToken[]
   newTokenId: string
@@ -7278,6 +7300,7 @@ function SettingsView({
   onServiceCompanyNameChange: (name: string) => void
   onTaxModeChange: (mode: TaxMode) => void
   onDesignTypeGroupsChange: (groups: DesignTypeGroup[]) => void | Promise<void>
+  onAiModelConfigChange: (payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & { apiKey?: string; clearApiKey?: boolean }) => void | Promise<void>
   onExportBackup: () => void
   onSignOut: () => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -7293,6 +7316,13 @@ function SettingsView({
   const [groupNameDrafts, setGroupNameDrafts] = useState<Record<string, string>>({})
   const [serviceCompanyDraft, setServiceCompanyDraft] = useState(serviceCompanyName)
   const [pdfTitleDraft, setPdfTitleDraft] = useState(pdfTitle)
+  const [aiModeDraft, setAiModeDraft] = useState<AiModelConfig['mode']>(aiModelConfig?.mode ?? 'deepseek-direct')
+  const [aiProviderDraft, setAiProviderDraft] = useState<AiModelConfig['provider']>(aiModelConfig?.provider ?? 'deepseek')
+  const [aiBaseUrlDraft, setAiBaseUrlDraft] = useState(aiModelConfig?.baseUrl ?? 'https://api.deepseek.com')
+  const [aiModelDraft, setAiModelDraft] = useState(aiModelConfig?.model ?? 'deepseek-chat')
+  const [aiRuntimeUrlDraft, setAiRuntimeUrlDraft] = useState(aiModelConfig?.runtimeUrl ?? '')
+  const [aiApiKeyDraft, setAiApiKeyDraft] = useState('')
+  const [isAiModelSaving, setIsAiModelSaving] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [draggingGroupName, setDraggingGroupName] = useState('')
   const [draggingItem, setDraggingItem] = useState<{ groupName: string; item: string } | null>(null)
@@ -7455,6 +7485,36 @@ function SettingsView({
     }
   }
 
+  useEffect(() => {
+    setAiModeDraft(aiModelConfig?.mode ?? 'deepseek-direct')
+    setAiProviderDraft(aiModelConfig?.provider ?? 'deepseek')
+    setAiBaseUrlDraft(aiModelConfig?.baseUrl ?? 'https://api.deepseek.com')
+    setAiModelDraft(aiModelConfig?.model ?? 'deepseek-chat')
+    setAiRuntimeUrlDraft(aiModelConfig?.runtimeUrl ?? '')
+    setAiApiKeyDraft('')
+  }, [aiModelConfig])
+
+  const saveAiModelConfig = async (clearApiKey = false) => {
+    if (isAiModelSaving) {
+      return
+    }
+    setIsAiModelSaving(true)
+    try {
+      await onAiModelConfigChange({
+        mode: aiModeDraft,
+        provider: aiProviderDraft,
+        baseUrl: aiBaseUrlDraft.trim(),
+        model: aiModelDraft.trim(),
+        runtimeUrl: aiRuntimeUrlDraft.trim(),
+        apiKey: clearApiKey ? undefined : aiApiKeyDraft.trim() || undefined,
+        clearApiKey,
+      })
+      setAiApiKeyDraft('')
+    } finally {
+      setIsAiModelSaving(false)
+    }
+  }
+
   const submitPasswordChange = async () => {
     if (isPasswordSaving) {
       return
@@ -7583,6 +7643,85 @@ function SettingsView({
               </label>
             </div>
           </section>
+          {role === 'admin' && (
+            <section className="panel settings-ai-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>AI 模型设置</h2>
+                  <p>DeepSeek 可继续直连；BAML Runtime 用于后续多租户自带模型 Key</p>
+                </div>
+              </div>
+              <div className="form-grid settings-form settings-ai-form">
+                <label className="field">
+                  <span>运行模式</span>
+                  <select value={aiModeDraft} onChange={(event) => setAiModeDraft(event.target.value as AiModelConfig['mode'])}>
+                    <option value="deepseek-direct">DeepSeek 直连</option>
+                    <option value="baml-runtime">BAML Runtime</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>模型供应商</span>
+                  <select value={aiProviderDraft} onChange={(event) => setAiProviderDraft(event.target.value as AiModelConfig['provider'])}>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="custom-openai">OpenAI 兼容网关</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Base URL</span>
+                  <input
+                    value={aiBaseUrlDraft}
+                    placeholder="https://api.deepseek.com"
+                    onChange={(event) => setAiBaseUrlDraft(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>模型名称</span>
+                  <input value={aiModelDraft} placeholder="deepseek-chat" onChange={(event) => setAiModelDraft(event.target.value)} />
+                </label>
+                <label className="field wide">
+                  <span>BAML Runtime URL</span>
+                  <input
+                    value={aiRuntimeUrlDraft}
+                    placeholder="例如：https://ai-runtime.example.com"
+                    onChange={(event) => setAiRuntimeUrlDraft(event.target.value)}
+                  />
+                </label>
+                <label className="field wide">
+                  <span>租户模型 API Key</span>
+                  <input
+                    type="password"
+                    value={aiApiKeyDraft}
+                    placeholder={aiModelConfig?.hasApiKey ? `已保存：${aiModelConfig.apiKeyPreview ?? '已保存'}` : '输入后加密保存'}
+                    onChange={(event) => setAiApiKeyDraft(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="settings-ai-meta">
+                <p className="settings-tool-note">
+                  {aiModelConfig?.encryptionReady
+                    ? 'API Key 会加密保存在 D1；前端只显示保存状态，不返回明文。'
+                    : '生产环境还没有配置 AI_SETTINGS_SECRET，暂不能安全保存租户 API Key。'}
+                </p>
+                {aiModeDraft === 'baml-runtime' && !aiModelConfig?.runtimeConfigured && (
+                  <p className="settings-inline-error">启用 BAML Runtime 前，需要配置 Runtime URL 或部署环境变量 AI_RUNTIME_URL。</p>
+                )}
+                <div className="settings-ai-actions">
+                  {aiModelConfig?.hasApiKey && (
+                    <button className="ghost-button compact-button" type="button" onClick={() => void saveAiModelConfig(true)} disabled={isAiModelSaving}>
+                      清除 Key
+                    </button>
+                  )}
+                  <button className="primary-button" type="button" onClick={() => void saveAiModelConfig()} disabled={isAiModelSaving || !aiModelDraft.trim()}>
+                    <Sparkles size={17} />
+                    {isAiModelSaving ? '保存中…' : '保存 AI 设置'}
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
           {role === 'admin' && (
             <section className="panel settings-design-panel">
               <div className="panel-header compact">

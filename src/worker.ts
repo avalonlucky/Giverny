@@ -38,6 +38,9 @@ type Env = {
   DEEPSEEK_BASE_URL?: string
   DEEPSEEK_MODEL?: string
   AI_PROVIDER?: string
+  AI_RUNTIME_URL?: string
+  AI_RUNTIME_KEY?: string
+  AI_SETTINGS_SECRET?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
 }
@@ -46,7 +49,29 @@ type Env = {
 const ADMIN_EMAIL = 'bh141425@gmail.com'
 const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
 const ADMIN_RESET_SETTING = 'adminPasswordReset'
+const AI_MODEL_SETTING = 'aiModelConfig'
 const PASSWORD_ITERATIONS = 100000
+
+type AiModelProvider = 'deepseek' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+
+type AiModelMode = 'deepseek-direct' | 'baml-runtime'
+
+type StoredAiModelConfig = {
+  mode: AiModelMode
+  provider: AiModelProvider
+  baseUrl: string
+  model: string
+  runtimeUrl: string
+  apiKeyEncrypted?: string
+  apiKeyPreview?: string
+  updatedAt?: string
+}
+
+type PublicAiModelConfig = Omit<StoredAiModelConfig, 'apiKeyEncrypted'> & {
+  hasApiKey: boolean
+  encryptionReady: boolean
+  runtimeConfigured: boolean
+}
 
 type AuthRole = 'admin' | 'member'
 
@@ -210,6 +235,152 @@ async function setSettingValue(env: Env, key: string, value: string) {
 
 async function deleteSettingValue(env: Env, key: string) {
   await env.DB.prepare('DELETE FROM app_settings WHERE key = ?').bind(key).run()
+}
+
+function defaultAiModelConfig(env: Env): StoredAiModelConfig {
+  return {
+    mode: 'deepseek-direct',
+    provider: 'deepseek',
+    baseUrl: (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+    model: env.DEEPSEEK_MODEL || 'deepseek-chat',
+    runtimeUrl: (env.AI_RUNTIME_URL || '').replace(/\/$/, ''),
+  }
+}
+
+function normalizeAiProvider(value: unknown): AiModelProvider {
+  return value === 'openai' || value === 'openrouter' || value === 'anthropic' || value === 'custom-openai' ? value : 'deepseek'
+}
+
+function normalizeAiMode(value: unknown): AiModelMode {
+  return value === 'baml-runtime' ? 'baml-runtime' : 'deepseek-direct'
+}
+
+function publicAiModelConfig(env: Env, config: StoredAiModelConfig): PublicAiModelConfig {
+  return {
+    mode: config.mode,
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    model: config.model,
+    runtimeUrl: config.runtimeUrl || (env.AI_RUNTIME_URL || '').replace(/\/$/, ''),
+    apiKeyPreview: config.apiKeyPreview,
+    updatedAt: config.updatedAt,
+    hasApiKey: Boolean(config.apiKeyEncrypted),
+    encryptionReady: Boolean(env.AI_SETTINGS_SECRET),
+    runtimeConfigured: Boolean(config.runtimeUrl || env.AI_RUNTIME_URL),
+  }
+}
+
+async function getStoredAiModelConfig(env: Env) {
+  const fallback = defaultAiModelConfig(env)
+  const raw = await getSettingValue(env, AI_MODEL_SETTING)
+  if (!raw) {
+    return fallback
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredAiModelConfig>
+    return {
+      ...fallback,
+      ...parsed,
+      mode: normalizeAiMode(parsed.mode),
+      provider: normalizeAiProvider(parsed.provider),
+      baseUrl: String(parsed.baseUrl || fallback.baseUrl).replace(/\/$/, ''),
+      model: String(parsed.model || fallback.model),
+      runtimeUrl: String(parsed.runtimeUrl || fallback.runtimeUrl).replace(/\/$/, ''),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+async function importSecretAesKey(secret: string) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(secret))
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+}
+
+async function encryptSettingSecret(env: Env, value: string) {
+  if (!env.AI_SETTINGS_SECRET) {
+    throw new Error('AI_SETTINGS_SECRET 尚未配置，无法安全保存模型 API Key。')
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const key = await importSecretAesKey(env.AI_SETTINGS_SECRET)
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(value))
+  return `v1.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(encrypted))}`
+}
+
+async function decryptSettingSecret(env: Env, value: string | undefined) {
+  if (!value || !env.AI_SETTINGS_SECRET) {
+    return ''
+  }
+  const [version, ivRaw, encryptedRaw] = value.split('.')
+  if (version !== 'v1' || !ivRaw || !encryptedRaw) {
+    return ''
+  }
+  try {
+    const key = await importSecretAesKey(env.AI_SETTINGS_SECRET)
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(ivRaw) }, key, base64ToBytes(encryptedRaw))
+    return new TextDecoder().decode(decrypted)
+  } catch {
+    return ''
+  }
+}
+
+function maskApiKey(value: string) {
+  const trimmed = value.trim()
+  if (trimmed.length <= 8) {
+    return '已保存'
+  }
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`
+}
+
+async function getAiModelConfig(env: Env) {
+  return ok(publicAiModelConfig(env, await getStoredAiModelConfig(env)))
+}
+
+async function setAiModelConfig(env: Env, request: Request) {
+  const existing = await getStoredAiModelConfig(env)
+  const body = (await request.json().catch(() => ({}))) as {
+    mode?: string
+    provider?: string
+    baseUrl?: string
+    model?: string
+    runtimeUrl?: string
+    apiKey?: string
+    clearApiKey?: boolean
+  }
+  const next: StoredAiModelConfig = {
+    ...existing,
+    mode: normalizeAiMode(body.mode),
+    provider: normalizeAiProvider(body.provider),
+    baseUrl: String(body.baseUrl ?? existing.baseUrl).trim().replace(/\/$/, ''),
+    model: String(body.model ?? existing.model).trim(),
+    runtimeUrl: String(body.runtimeUrl ?? existing.runtimeUrl).trim().replace(/\/$/, ''),
+    updatedAt: nowIso(),
+  }
+
+  if (!next.model) {
+    return fail('模型名称不能为空')
+  }
+  if (body.clearApiKey) {
+    delete next.apiKeyEncrypted
+    delete next.apiKeyPreview
+  } else if (typeof body.apiKey === 'string' && body.apiKey.trim()) {
+    try {
+      next.apiKeyEncrypted = await encryptSettingSecret(env, body.apiKey.trim())
+      next.apiKeyPreview = maskApiKey(body.apiKey)
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : '模型 API Key 保存失败', 503)
+    }
+  }
+
+  await setSettingValue(env, AI_MODEL_SETTING, JSON.stringify(next))
+  await audit(env, 'update', 'setting', AI_MODEL_SETTING, {
+    mode: next.mode,
+    provider: next.provider,
+    model: next.model,
+    runtimeConfigured: Boolean(next.runtimeUrl || env.AI_RUNTIME_URL),
+    hasApiKey: Boolean(next.apiKeyEncrypted),
+  })
+  return ok(publicAiModelConfig(env, next))
 }
 
 async function getAdminPasswordHash(env: Env) {
@@ -752,7 +923,7 @@ async function ensureSeedData(env: Env) {
 async function getState(env: Env, role: AuthRole) {
   await ensureSeedData(env)
 
-  const [taskRows, updateRows, fileRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, reportRows] = await Promise.all([
+  const [taskRows, updateRows, fileRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig, reportRows] = await Promise.all([
     env.DB.prepare(`SELECT * FROM tasks WHERE deleted_at IS NULL ${role === 'admin' ? '' : 'AND voided_at IS NULL'} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.*
@@ -773,6 +944,7 @@ async function getState(env: Env, role: AuthRole) {
     getServiceCompanyName(env),
     getTaxMode(env),
     getDesignTypeGroups(env),
+    getStoredAiModelConfig(env),
     env.DB.prepare('SELECT * FROM monthly_reports ORDER BY month DESC').all<DbReport>(),
   ])
 
@@ -786,7 +958,15 @@ async function getState(env: Env, role: AuthRole) {
     tasks: (taskRows.results ?? []).map((task) => toTask(task, filesByTask.get(task.id) ?? [])),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
     files: (fileRows.results ?? []).map(toFile),
-    settings: { hourlyRate: Number(rateRow?.value) || defaultHourlyRate, pdfTitle, serviceCompanyName, taxMode, designTypes: flattenDesignTypeGroups(designTypeGroups), designTypeGroups },
+    settings: {
+      hourlyRate: Number(rateRow?.value) || defaultHourlyRate,
+      pdfTitle,
+      serviceCompanyName,
+      taxMode,
+      designTypes: flattenDesignTypeGroups(designTypeGroups),
+      designTypeGroups,
+      aiModel: role === 'admin' ? publicAiModelConfig(env, aiModelConfig) : undefined,
+    },
     reports: (reportRows.results ?? []).map(toReport),
     accessTokens: role === 'admin' ? await listAccessTokens(env) : undefined,
   })
@@ -1563,11 +1743,44 @@ async function setDesignTypeGroups(env: Env, request: Request) {
   return ok({ designTypes: flattenDesignTypeGroups(designTypeGroups), designTypeGroups })
 }
 
-async function suggestTaskWithAi(env: Env, request: Request) {
-  if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置，请先在 Cloudflare Secret 中设置 DEEPSEEK_API_KEY。', 503)
+async function callBamlRuntime<T>(env: Env, endpoint: 'suggest-task' | 'optimize-text' | 'suggest-hours', input: unknown): Promise<T | null> {
+  const config = await getStoredAiModelConfig(env)
+  if (config.mode !== 'baml-runtime') {
+    return null
+  }
+  const runtimeUrl = (config.runtimeUrl || env.AI_RUNTIME_URL || '').replace(/\/$/, '')
+  if (!runtimeUrl) {
+    return null
+  }
+  const apiKey = await decryptSettingSecret(env, config.apiKeyEncrypted)
+  if (!apiKey) {
+    return null
   }
 
+  const response = await fetch(`${runtimeUrl}/v1/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(env.AI_RUNTIME_KEY ? { 'x-ai-runtime-key': env.AI_RUNTIME_KEY } : {}),
+    },
+    body: JSON.stringify({
+      input,
+      model: {
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        apiKey,
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    return null
+  }
+  return (await response.json().catch(() => null)) as T | null
+}
+
+async function suggestTaskWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
     requirement?: string
@@ -1587,6 +1800,24 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     rawRequirement: requirement,
     selectedType: body.selectedType ?? '',
     availableDesignTypeGroups: designTypeGroups,
+  }
+
+  const runtimeSuggestion = await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
+  if (runtimeSuggestion) {
+    const suggestion = toTaskAssistantSuggestion(runtimeSuggestion, designTypeGroups)
+    if (suggestion.optimizedRequirement) {
+      await audit(env, 'suggest', 'ai_task_assistant', title || 'untitled', {
+        title,
+        suggestedType: suggestion.suggestedType,
+        categoryExists: suggestion.categoryExists,
+        provider: 'baml-runtime',
+      })
+      return ok(suggestion)
+    }
+  }
+
+  if (!env.DEEPSEEK_API_KEY) {
+    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -1677,10 +1908,6 @@ async function suggestTaskWithAi(env: Env, request: Request) {
 }
 
 async function optimizeTaskTextWithAi(env: Env, request: Request) {
-  if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置，请先在 Cloudflare Secret 中设置 DEEPSEEK_API_KEY。', 503)
-  }
-
   const body = (await request.json().catch(() => ({}))) as {
     mode?: string
     text?: string
@@ -1707,6 +1934,25 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     relatedFiles: files,
     currentUploadedFileNames: uploadedFileNames,
     recentActivity: activity,
+  }
+
+  const runtimeSuggestion = await callBamlRuntime<TextAssistantToolArgs>(env, 'optimize-text', aiPayload)
+  if (runtimeSuggestion?.optimizedText) {
+    await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
+      mode,
+      taskTitle,
+      fileCount: files.length,
+      uploadedFileCount: uploadedFileNames.length,
+      provider: 'baml-runtime',
+    })
+    return ok({
+      optimizedText: String(runtimeSuggestion.optimizedText).trim(),
+      summary: String(runtimeSuggestion.summary ?? '').trim(),
+    })
+  }
+
+  if (!env.DEEPSEEK_API_KEY) {
+    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -1790,10 +2036,6 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
 }
 
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
-  if (!env.DEEPSEEK_API_KEY) {
-    return fail('DeepSeek API Key 尚未配置，请先在 Cloudflare Secret 中设置 DEEPSEEK_API_KEY。', 503)
-  }
-
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
     requirement?: string
@@ -1901,6 +2143,41 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       usedFallback,
     },
     historicalSamples: samples.slice(0, 12),
+  }
+
+  const runtimeSuggestion = await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
+  if (runtimeSuggestion) {
+    const parsedHours = Number(runtimeSuggestion.suggestedHours)
+    const suggestedHours = roundToHalfHour(Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion)
+    const confidence = sampleCount < 3 ? '低' : runtimeSuggestion.confidence === '高' || runtimeSuggestion.confidence === '中' || runtimeSuggestion.confidence === '低' ? runtimeSuggestion.confidence : '中'
+    const basis = Array.isArray(runtimeSuggestion.basis) ? runtimeSuggestion.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
+    const historicalSummary = String(runtimeSuggestion.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
+    await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
+      selectedType,
+      sampleCount,
+      suggestedHours,
+      confidence,
+      usedFallback,
+      provider: 'baml-runtime',
+    })
+    return ok({
+      suggestedHours,
+      confidence,
+      basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
+      historicalSummary,
+      sampleCount,
+      averageHours,
+      medianHours,
+      minHours,
+      maxHours,
+      averageDeliveryDays,
+      matchedType: selectedType,
+      usedFallback,
+    })
+  }
+
+  if (!env.DEEPSEEK_API_KEY) {
+    return fail('DeepSeek API Key 尚未配置；如果要使用 BAML Runtime，请先在设置页保存模型 API Key，并配置 AI_RUNTIME_URL。', 503)
   }
 
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
@@ -2093,7 +2370,7 @@ async function handleApi(request: Request, env: Env) {
   if (path.startsWith('/api/tokens') && role !== 'admin') {
     return fail('需要管理员权限', 403)
   }
-  if ((path === '/api/settings/design-types' || path === '/api/settings/design-type-groups') && role !== 'admin') {
+  if ((path === '/api/settings/design-types' || path === '/api/settings/design-type-groups' || path === '/api/settings/ai-model') && role !== 'admin') {
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
@@ -2192,6 +2469,12 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
     return suggestHourEstimateWithAi(env, request)
+  }
+  if (path === '/api/settings/ai-model' && request.method === 'GET') {
+    return getAiModelConfig(env)
+  }
+  if (path === '/api/settings/ai-model' && request.method === 'PATCH') {
+    return setAiModelConfig(env, request)
   }
   if (path === '/api/settings/hourly-rate' && request.method === 'PATCH') {
     return setHourlyRate(env, request)

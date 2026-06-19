@@ -1,0 +1,17 @@
+{
+  "name": "designer-worklog-ai-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "start": "tsx src/server.ts",
+    "baml:generate": "cd .. && npm run baml:generate"
+  },
+  "dependencies": {
+    "@boundaryml/baml": "^0.222.0",
+    "@hono/node-server": "^1.19.8",
+    "hono": "^4.11.2",
+    "tsx": "^4.21.0"
+  }
+}

@@ -5,6 +5,13 @@ generator typescript {
   module_format "esm"
 }
 
+generator runtime_typescript {
+  version "0.222.0"
+  output_type "typescript"
+  output_dir "../ai-runtime/src/baml_client"
+  module_format "esm"
+}
+
 client<llm> DeepSeekDefault {
   provider "openai-generic"
   options {

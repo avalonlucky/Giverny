@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-06-19 13:55 · v0.10.115（独立 BAML Runtime 与租户模型设置）
+
+### AI 架构
+- 新增 `ai-runtime/` 独立 Node.js 服务，用于真正运行 BAML client；主站 Cloudflare Worker 不再尝试直接加载 BAML runtime，避免原生 Node 模块导致 Worker 打包失败。
+- BAML 生成流程现在会同时生成主站契约 client 和 `ai-runtime` 专用 client，保证提示词、输入输出结构和 runtime 执行口径一致。
+- Worker 的三类 AI 能力（新建任务需求优化、进展 / 验收文案优化、工时建议）现在会优先尝试调用 BAML Runtime，失败或未配置时自动回退现有 DeepSeek 直连。
+
+### 模型设置
+- 设置页新增「AI 模型设置」，可配置运行模式、模型供应商、Base URL、模型名称、BAML Runtime URL 和租户模型 API Key。
+- 模型 API Key 通过 `AI_SETTINGS_SECRET` 加密后写入 D1，前端只显示是否已保存和掩码预览，不返回明文。
+- 新增 `AI_RUNTIME_URL`、`AI_RUNTIME_KEY`、`AI_SETTINGS_SECRET` 环境变量预留位，为后续多租户自带模型 Key 和模型路由打基础。
+
+### 文档与发布
+- 更新 `docs/AI_MODEL_ROUTING.md`、项目结构文档和版本规范，明确 BAML Runtime、密钥保存和多租户迁移路线。
+
 ## 2026-06-19 12:57 · v0.10.114（BAML 工程接入与多模型路由预备）
 
 ### AI 架构
