@@ -1,4 +1,4 @@
-import type { FileAsset, Task, TaskUpdate, TaxMode } from '../types/domain'
+import type { AttachmentAnalysis, FileAsset, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
 
 export type ReportRecord = {
@@ -73,6 +73,7 @@ export type BackendState = {
   tasks: Task[]
   updates: TaskUpdate[]
   files: FileAsset[]
+  attachmentAnalyses: AttachmentAnalysis[]
   settings: {
     hourlyRate: number
     pdfTitle: string
@@ -446,6 +447,14 @@ export const api = {
   deleteFile: (fileId: number) =>
     requestJson<{ ok: true }>(`/api/files/${fileId}`, {
       method: 'DELETE',
+    }),
+  retryAttachmentAnalysis: (fileId: number) =>
+    requestJson<{ ok: true; attachmentId: number }>(`/api/files/${fileId}/analysis/retry`, {
+      method: 'POST',
+    }),
+  backfillAttachmentAnalyses: () =>
+    requestJson<{ ok: true; created: number }>('/api/insights/attachment-analyses/backfill', {
+      method: 'POST',
     }),
   setHourlyRate: (hourlyRate: number) =>
     requestJson<{ hourlyRate: number }>('/api/settings/hourly-rate', {

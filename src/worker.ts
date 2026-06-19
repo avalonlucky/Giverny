@@ -1,7 +1,8 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
-import type { FileAsset, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
+import JSZip from 'jszip'
+import type { AttachmentAnalysis, FileAsset, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
 
-type D1Result<T = unknown> = { results?: T[]; success: boolean }
+type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
   bind: (...values: unknown[]) => D1PreparedStatement
   first: <T = unknown>() => Promise<T | null>
@@ -49,6 +50,10 @@ type Env = {
   AI_SETTINGS_SECRET?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
+}
+
+type WorkerExecutionContext = {
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 // 管理员账号：该邮箱 + 平台密码拥有最高权限（含口令管理）
@@ -177,6 +182,30 @@ type DbAttachment = {
   task_title: string | null
 }
 
+type DbAttachmentAnalysis = {
+  attachment_id: string
+  task_id: string
+  file_name: string
+  file_type: string | null
+  status: AttachmentAnalysis['status']
+  attempt_count: number
+  parser_kind: string | null
+  provider: string | null
+  model: string | null
+  summary: string | null
+  content_type: string | null
+  extracted_text: string | null
+  findings_json: string | null
+  quality_issues_json: string | null
+  requirement_matches_json: string | null
+  risks_json: string | null
+  suggestions_json: string | null
+  confidence: AttachmentAnalysis['confidence'] | null
+  error_message: string | null
+  requested_at: string
+  completed_at: string | null
+}
+
 type DbReport = {
   id: string
   month: string
@@ -198,7 +227,14 @@ const fail = (message: string, status = 400) => ok({ error: message }, status)
 
 const encoder = new TextEncoder()
 
-const bytesToBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes))
+const bytesToBase64 = (bytes: Uint8Array) => {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+  return btoa(binary)
+}
 
 const base64ToBytes = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
 
@@ -590,6 +626,460 @@ async function callAiEndpointVision(endpoint: Awaited<ReturnType<typeof resolveA
     throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
   }
   return extractOpenAiText(data)
+}
+
+type MultimodalAsset = {
+  base64: string
+  mimeType: string
+}
+
+async function callAiEndpointMultimodal(
+  endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>,
+  prompt: string,
+  assets: MultimodalAsset[],
+) {
+  if (!endpoint.apiKey) {
+    throw new Error('模型 API Key 未配置')
+  }
+  if (assets.length === 0) {
+    return callAiEndpointText(endpoint, prompt)
+  }
+  if (endpoint.provider === 'gemini') {
+    const response = await fetch(`${endpoint.baseUrl}/models/${endpoint.model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': endpoint.apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            ...assets.map((asset) => ({ inline_data: { mime_type: asset.mimeType, data: asset.base64 } })),
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 1800, temperature: 0.2 },
+      }),
+    })
+    const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
+    if (!response.ok || data?.error) {
+      throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
+    }
+    return extractGeminiText(data)
+  }
+
+  const imageAssets = assets.filter((asset) => asset.mimeType.startsWith('image/'))
+  if (imageAssets.length === 0) {
+    throw new Error('备用模型需要图片预览，当前文件没有可用预览')
+  }
+  const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${endpoint.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: endpoint.model,
+      temperature: kimiTemperature(endpoint.provider, endpoint.model),
+      max_tokens: 1800,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          ...imageAssets.map((asset) => ({ type: 'image_url', image_url: { url: `data:${asset.mimeType};base64,${asset.base64}` } })),
+        ],
+      }],
+    }),
+  })
+  const data = (await response.json().catch(() => null)) as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> } | null
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
+  }
+  return extractOpenAiText(data)
+}
+
+const analysisJsonArray = (value: string | null) => {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+const toAttachmentAnalysis = (row: DbAttachmentAnalysis): AttachmentAnalysis => ({
+  attachmentId: Number(row.attachment_id),
+  taskId: Number(row.task_id),
+  fileName: row.file_name,
+  fileType: row.file_type || 'FILE',
+  status: row.status,
+  attemptCount: Number(row.attempt_count) || 0,
+  parserKind: row.parser_kind || '',
+  provider: row.provider || '',
+  model: row.model || '',
+  summary: row.summary || '',
+  contentType: row.content_type || '',
+  extractedText: row.extracted_text || '',
+  findings: analysisJsonArray(row.findings_json),
+  qualityIssues: analysisJsonArray(row.quality_issues_json),
+  requirementMatches: analysisJsonArray(row.requirement_matches_json),
+  risks: analysisJsonArray(row.risks_json),
+  suggestions: analysisJsonArray(row.suggestions_json),
+  confidence: row.confidence || '',
+  errorMessage: row.error_message || '',
+  requestedAt: formatBeijing(row.requested_at),
+  completedAt: formatBeijing(row.completed_at),
+})
+
+type AnalysisPayload = {
+  summary: string
+  contentType: string
+  extractedText: string
+  findings: string[]
+  qualityIssues: string[]
+  requirementMatches: string[]
+  risks: string[]
+  suggestions: string[]
+  confidence: '低' | '中' | '高'
+}
+
+type AnalysisSource = {
+  parserKind: string
+  extractedText: string
+  assets: MultimodalAsset[]
+}
+
+const imageMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const officeExtensions = new Set(['pptx', 'docx', 'xlsx'])
+const maxDirectAnalysisBytes = 18 * 1024 * 1024
+const maxOfficeAnalysisBytes = 35 * 1024 * 1024
+
+function decodeXmlText(value: string) {
+  return value
+    .replace(/<a:br\s*\/>/g, '\n')
+    .replace(/<w:tab\s*\/>/g, '\t')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+async function extractOfficeSource(buffer: ArrayBuffer, extension: string): Promise<AnalysisSource> {
+  const zip = await JSZip.loadAsync(buffer)
+  const textPatterns =
+    extension === 'pptx'
+      ? [/^ppt\/slides\/slide\d+\.xml$/]
+      : extension === 'docx'
+        ? [/^word\/document\.xml$/, /^word\/header\d+\.xml$/, /^word\/footer\d+\.xml$/]
+        : [/^xl\/sharedStrings\.xml$/, /^xl\/worksheets\/sheet\d+\.xml$/]
+  const mediaPrefix = extension === 'pptx' ? 'ppt/media/' : extension === 'docx' ? 'word/media/' : 'xl/media/'
+  const textEntries = Object.values(zip.files)
+    .filter((entry) => !entry.dir && textPatterns.some((pattern) => pattern.test(entry.name)))
+    .slice(0, 60)
+  const textParts: string[] = []
+  for (const entry of textEntries) {
+    const text = decodeXmlText(await entry.async('text'))
+    if (text) {
+      textParts.push(text)
+    }
+  }
+
+  const assets: MultimodalAsset[] = []
+  const mediaEntries = Object.values(zip.files)
+    .filter((entry) => !entry.dir && entry.name.startsWith(mediaPrefix) && /\.(png|jpe?g|webp|gif)$/i.test(entry.name))
+    .slice(0, 6)
+  for (const entry of mediaEntries) {
+    const bytes = await entry.async('uint8array')
+    if (bytes.byteLength > 4 * 1024 * 1024) {
+      continue
+    }
+    const extensionName = entry.name.split('.').pop()?.toLowerCase()
+    const mimeType = extensionName === 'jpg' || extensionName === 'jpeg' ? 'image/jpeg' : `image/${extensionName || 'png'}`
+    assets.push({ base64: bytesToBase64(bytes), mimeType })
+  }
+  return {
+    parserKind: `${extension}-xml-media`,
+    extractedText: textParts.join('\n').slice(0, 24000),
+    assets,
+  }
+}
+
+async function r2ObjectBytes(env: Env, key: string) {
+  const object = await env.UPLOADS.get(key)
+  if (!object) {
+    throw new Error('R2 文件不存在')
+  }
+  return new Uint8Array(await new Response(object.body).arrayBuffer())
+}
+
+async function buildAnalysisSource(env: Env, row: DbAttachment & { requirement: string | null }) {
+  const extension = (row.file_name.split('.').pop() || row.file_type || '').toLowerCase()
+  const mimeType = row.mime_type || ''
+  const originalSize = Number(row.file_size) || 0
+
+  if (imageMimeTypes.has(mimeType) || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension)) {
+    if (originalSize > maxDirectAnalysisBytes) {
+      throw new Error('图片超过 18MB，暂不进入自动识别')
+    }
+    const bytes = await r2ObjectBytes(env, row.r2_key)
+    return {
+      parserKind: 'image-direct',
+      extractedText: '',
+      assets: [{ base64: bytesToBase64(bytes), mimeType: mimeType || (extension === 'jpg' ? 'image/jpeg' : `image/${extension}`) }],
+    } satisfies AnalysisSource
+  }
+
+  if (mimeType === 'application/pdf' || extension === 'pdf') {
+    if (originalSize > maxDirectAnalysisBytes) {
+      throw new Error('PDF 超过 18MB，暂不进入自动识别')
+    }
+    const bytes = await r2ObjectBytes(env, row.r2_key)
+    return {
+      parserKind: 'pdf-native',
+      extractedText: '',
+      assets: [{ base64: bytesToBase64(bytes), mimeType: 'application/pdf' }],
+    } satisfies AnalysisSource
+  }
+
+  if (officeExtensions.has(extension)) {
+    if (originalSize > maxOfficeAnalysisBytes) {
+      throw new Error(`${extension.toUpperCase()} 超过 35MB，暂不进入自动识别`)
+    }
+    const bytes = await r2ObjectBytes(env, row.r2_key)
+    return extractOfficeSource(bytes.buffer, extension)
+  }
+
+  if (row.preview_r2_key) {
+    const previewBytes = await r2ObjectBytes(env, row.preview_r2_key)
+    return {
+      parserKind: 'uploaded-preview',
+      extractedText: '',
+      assets: [{ base64: bytesToBase64(previewBytes), mimeType: 'image/png' }],
+    } satisfies AnalysisSource
+  }
+
+  return null
+}
+
+function normalizeAnalysisPayload(value: Record<string, unknown>): AnalysisPayload {
+  const list = (key: string) => (Array.isArray(value[key]) ? (value[key] as unknown[]).map(String).filter(Boolean).slice(0, 8) : [])
+  const confidence = value.confidence === '高' || value.confidence === '中' || value.confidence === '低' ? value.confidence : '中'
+  return {
+    summary: String(value.summary || '').trim(),
+    contentType: String(value.contentType || '').trim(),
+    extractedText: String(value.extractedText || '').trim().slice(0, 12000),
+    findings: list('findings'),
+    qualityIssues: list('qualityIssues'),
+    requirementMatches: list('requirementMatches'),
+    risks: list('risks'),
+    suggestions: list('suggestions'),
+    confidence,
+  }
+}
+
+function attachmentAnalysisPrompt(row: DbAttachment & { requirement: string | null; acceptance_note: string | null }, source: AnalysisSource) {
+  return `你是 Giverny 的资深设计交付件审查与工作复盘助手。请基于文件内容和站内任务事实做分析，不要编造客户反馈、交付结果或文件中不存在的信息。
+
+任务名称：${row.task_title || '未命名任务'}
+设计类型：${row.file_tag || row.file_type || '未分类'}
+原始任务需求：${row.requirement || '未填写'}
+验收备注：${row.acceptance_note || '未填写'}
+文件名：${row.file_name}
+是否终稿：${row.is_final ? '是' : '否'}
+解析出的文档文字：
+${source.extractedText || '无，需直接读取文件视觉内容'}
+
+请检查：
+1. 文件是什么交付件，主要内容和信息结构是什么。
+2. 与原始任务需求、验收备注是否吻合，只写有依据的匹配点。
+3. 版式、可读性、层级、清晰度、素材完整性、明显错漏等质量问题。
+4. 对进度、交付、复用和后续效率的风险与建议。
+
+只返回 JSON 对象，不要 Markdown：
+{
+  "summary": "80-160字中文总结",
+  "contentType": "交付件类型",
+  "extractedText": "关键文字/OCR摘要，最多1000字",
+  "findings": ["内容与视觉发现"],
+  "qualityIssues": ["明确质量问题，没有则空数组"],
+  "requirementMatches": ["与需求吻合或不吻合的依据"],
+  "risks": ["风险，没有则空数组"],
+  "suggestions": ["可执行建议"],
+  "confidence": "低|中|高"
+}`
+}
+
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+function isRetryableVisionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /(high demand|temporar|429|500|502|503|504|overloaded|quota)/i.test(message)
+}
+
+async function createAttachmentAnalysisJob(env: Env, attachmentId: string, taskId: string, reset = false) {
+  await env.DB.prepare(
+    `INSERT INTO attachment_analyses (attachment_id, task_id, status, requested_at, updated_at)
+     VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(attachment_id) DO UPDATE SET
+       status = CASE WHEN ? THEN 'pending' ELSE attachment_analyses.status END,
+       attempt_count = CASE WHEN ? THEN 0 ELSE attachment_analyses.attempt_count END,
+       error_message = CASE WHEN ? THEN NULL ELSE attachment_analyses.error_message END,
+       parser_kind = CASE WHEN ? THEN NULL ELSE attachment_analyses.parser_kind END,
+       provider = CASE WHEN ? THEN NULL ELSE attachment_analyses.provider END,
+       model = CASE WHEN ? THEN NULL ELSE attachment_analyses.model END,
+       summary = CASE WHEN ? THEN NULL ELSE attachment_analyses.summary END,
+       content_type = CASE WHEN ? THEN NULL ELSE attachment_analyses.content_type END,
+       extracted_text = CASE WHEN ? THEN NULL ELSE attachment_analyses.extracted_text END,
+       findings_json = CASE WHEN ? THEN NULL ELSE attachment_analyses.findings_json END,
+       quality_issues_json = CASE WHEN ? THEN NULL ELSE attachment_analyses.quality_issues_json END,
+       requirement_matches_json = CASE WHEN ? THEN NULL ELSE attachment_analyses.requirement_matches_json END,
+       risks_json = CASE WHEN ? THEN NULL ELSE attachment_analyses.risks_json END,
+       suggestions_json = CASE WHEN ? THEN NULL ELSE attachment_analyses.suggestions_json END,
+       confidence = CASE WHEN ? THEN NULL ELSE attachment_analyses.confidence END,
+       completed_at = CASE WHEN ? THEN NULL ELSE attachment_analyses.completed_at END,
+       requested_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE attachment_analyses.requested_at END,
+       updated_at = CURRENT_TIMESTAMP`,
+  ).bind(
+    attachmentId,
+    taskId,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+  ).run()
+}
+
+async function markAnalysisFailure(env: Env, attachmentId: string, error: unknown, unsupported = false) {
+  const message = error instanceof Error ? error.message : '附件分析失败'
+  await env.DB.prepare(
+    `UPDATE attachment_analyses
+     SET status = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE attachment_id = ?`,
+  ).bind(unsupported ? 'unsupported' : 'failed', message.slice(0, 500), attachmentId).run()
+}
+
+async function processAttachmentAnalysis(env: Env, attachmentId: string) {
+  const claimed = await env.DB.prepare(
+    `UPDATE attachment_analyses
+     SET status = 'processing', attempt_count = attempt_count + 1, started_at = CURRENT_TIMESTAMP, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE attachment_id = ? AND (
+       status = 'pending'
+       OR (status = 'failed' AND attempt_count < 3)
+       OR (status = 'processing' AND updated_at < datetime('now', '-20 minutes'))
+     )`,
+  ).bind(attachmentId).run()
+  if (!claimed.success || !claimed.meta?.changes) {
+    return
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.acceptance_note
+     FROM attachments
+     INNER JOIN tasks ON tasks.id = attachments.task_id
+     WHERE attachments.id = ? AND tasks.deleted_at IS NULL`,
+  ).bind(attachmentId).first<DbAttachment & { requirement: string | null; acceptance_note: string | null }>()
+  if (!row) {
+    await markAnalysisFailure(env, attachmentId, new Error('附件或关联任务不存在'), true)
+    return
+  }
+
+  try {
+    const source = await buildAnalysisSource(env, row)
+    if (!source) {
+      await markAnalysisFailure(env, attachmentId, new Error(`暂不支持自动解析 ${row.file_type || '该'} 格式，上传 PNG/JPG 预览后可重新分析`), true)
+      return
+    }
+    const prompt = attachmentAnalysisPrompt(row, source)
+    let endpoint = await resolveAiEndpoint(env, 'visionPrimary')
+    let output = ''
+    try {
+      output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+    } catch (primaryError) {
+      if (isRetryableVisionError(primaryError)) {
+        await wait(1500)
+        try {
+          output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+        } catch {
+          output = ''
+        }
+      }
+      if (!output) {
+        endpoint = await resolveAiEndpoint(env, 'visionFallback')
+        try {
+          output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+        } catch (fallbackError) {
+          const primaryMessage = primaryError instanceof Error ? primaryError.message : '主模型失败'
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '备用模型失败'
+          throw new Error(`主模型：${primaryMessage}；备用模型：${fallbackMessage}`, { cause: fallbackError })
+        }
+      }
+    }
+    const payload = normalizeAnalysisPayload(parseLooseJsonObject(output))
+    if (!payload.summary) {
+      throw new Error('模型返回内容缺少有效摘要')
+    }
+    await env.DB.prepare(
+      `UPDATE attachment_analyses SET
+        status = 'completed', parser_kind = ?, provider = ?, model = ?, summary = ?, content_type = ?,
+        extracted_text = ?, findings_json = ?, quality_issues_json = ?, requirement_matches_json = ?,
+        risks_json = ?, suggestions_json = ?, confidence = ?, error_message = NULL,
+        completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE attachment_id = ?`,
+    ).bind(
+      source.parserKind,
+      endpoint.provider,
+      endpoint.model,
+      payload.summary,
+      payload.contentType,
+      payload.extractedText,
+      JSON.stringify(payload.findings),
+      JSON.stringify(payload.qualityIssues),
+      JSON.stringify(payload.requirementMatches),
+      JSON.stringify(payload.risks),
+      JSON.stringify(payload.suggestions),
+      payload.confidence,
+      attachmentId,
+    ).run()
+    await audit(env, 'complete', 'attachment_analysis', attachmentId, {
+      provider: endpoint.provider,
+      model: endpoint.model,
+      parserKind: source.parserKind,
+      confidence: payload.confidence,
+    })
+  } catch (error) {
+    await markAnalysisFailure(env, attachmentId, error)
+  }
+}
+
+async function processPendingAttachmentAnalyses(env: Env, limit = 2) {
+  const rows = await env.DB.prepare(
+    `SELECT attachment_id FROM attachment_analyses
+     WHERE status = 'pending'
+        OR (status = 'failed' AND attempt_count < 3)
+        OR (status = 'processing' AND updated_at < datetime('now', '-20 minutes'))
+     ORDER BY requested_at ASC
+     LIMIT ?`,
+  ).bind(limit).all<{ attachment_id: string }>()
+  for (const row of rows.results ?? []) {
+    await processAttachmentAnalysis(env, row.attachment_id)
+  }
 }
 
 function maskApiKey(value: string) {
@@ -1292,7 +1782,7 @@ async function ensureSeedData(env: Env) {
 async function getState(env: Env, role: AuthRole) {
   await ensureSeedData(env)
 
-  const [taskRows, updateRows, fileRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig, reportRows] = await Promise.all([
+  const [taskRows, updateRows, fileRows, analysisRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig, reportRows] = await Promise.all([
     env.DB.prepare(`SELECT * FROM tasks WHERE deleted_at IS NULL ${role === 'admin' ? '' : 'AND voided_at IS NULL'} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.*
@@ -1308,6 +1798,16 @@ async function getState(env: Env, role: AuthRole) {
        WHERE tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL AND attachments.visible_to_client = 1'}
        ORDER BY uploaded_at DESC`,
     ).all<DbAttachment>(),
+    role === 'admin'
+      ? env.DB.prepare(
+          `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
+           FROM attachment_analyses
+           INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
+           INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
+           WHERE tasks.deleted_at IS NULL
+           ORDER BY attachment_analyses.requested_at DESC`,
+        ).all<DbAttachmentAnalysis>()
+      : Promise.resolve({ success: true, results: [] } as D1Result<DbAttachmentAnalysis>),
     env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('hourlyRate').first<{ value: string }>(),
     getPdfTitle(env),
     getServiceCompanyName(env),
@@ -1327,6 +1827,7 @@ async function getState(env: Env, role: AuthRole) {
     tasks: (taskRows.results ?? []).map((task) => toTask(task, filesByTask.get(task.id) ?? [])),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
     files: (fileRows.results ?? []).map(toFile),
+    attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
     settings: {
       hourlyRate: Number(rateRow?.value) || defaultHourlyRate,
       pdfTitle,
@@ -1687,7 +2188,7 @@ async function deleteActivity(env: Env, id: string) {
   return ok({ ok: true })
 }
 
-async function createFile(env: Env, request: Request) {
+async function createFile(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const form = await request.formData()
   const file = form.get('file')
   const preview = form.get('preview')
@@ -1730,6 +2231,7 @@ async function createFile(env: Env, request: Request) {
   if (saved instanceof Response) {
     return saved
   }
+  ctx?.waitUntil(processAttachmentAnalysis(env, id))
   return ok(saved, 201)
 }
 
@@ -1787,6 +2289,7 @@ async function insertAttachment(
     visible: payload.visible,
     tag: payload.tag ?? '',
   })
+  await createAttachmentAnalysisJob(env, payload.id, payload.taskId)
 
   return {
     id: Number(payload.id),
@@ -1835,7 +2338,7 @@ async function uploadMultipartPart(env: Env, request: Request) {
   return ok(part)
 }
 
-async function completeMultipartUpload(env: Env, request: Request) {
+async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const form = await request.formData()
   const key = String(form.get('key') ?? '')
   const uploadId = String(form.get('uploadId') ?? '')
@@ -1878,6 +2381,7 @@ async function completeMultipartUpload(env: Env, request: Request) {
   if (saved instanceof Response) {
     return saved
   }
+  ctx?.waitUntil(processAttachmentAnalysis(env, fileId))
   return ok(saved, 201)
 }
 
@@ -2020,7 +2524,10 @@ async function deleteFile(env: Env, id: string) {
   if (await isLockedReportMonth(env, row.settlement_month)) {
     return fail('该文件所属月份已锁定结算，不能删除', 409)
   }
-  await env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(id).run()
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM attachment_analyses WHERE attachment_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(id),
+  ])
   const deleteResults = await Promise.allSettled([
     env.UPLOADS.delete(row.r2_key),
     ...(row.preview_r2_key && row.preview_r2_key !== row.r2_key ? [env.UPLOADS.delete(row.preview_r2_key)] : []),
@@ -2032,6 +2539,32 @@ async function deleteFile(env: Env, id: string) {
     storageCleanup: failedDeletes > 0 ? 'failed' : 'ok',
   })
   return ok({ ok: true, storageCleanupFailed: failedDeletes > 0 })
+}
+
+async function retryAttachmentAnalysis(env: Env, attachmentId: string, ctx?: WorkerExecutionContext) {
+  const row = await env.DB.prepare('SELECT task_id FROM attachments WHERE id = ?').bind(attachmentId).first<{ task_id: string }>()
+  if (!row) {
+    return fail('附件不存在', 404)
+  }
+  await createAttachmentAnalysisJob(env, attachmentId, row.task_id, true)
+  ctx?.waitUntil(processAttachmentAnalysis(env, attachmentId))
+  return ok({ ok: true, attachmentId: Number(attachmentId) })
+}
+
+async function backfillAttachmentAnalyses(env: Env, ctx?: WorkerExecutionContext) {
+  const rows = await env.DB.prepare(
+    `SELECT attachments.id, attachments.task_id
+     FROM attachments
+     LEFT JOIN attachment_analyses ON attachment_analyses.attachment_id = attachments.id
+     INNER JOIN tasks ON tasks.id = attachments.task_id
+     WHERE attachment_analyses.attachment_id IS NULL AND tasks.deleted_at IS NULL
+     ORDER BY attachments.uploaded_at DESC`,
+  ).all<{ id: string; task_id: string }>()
+  for (const row of rows.results ?? []) {
+    await createAttachmentAnalysisJob(env, row.id, row.task_id)
+  }
+  ctx?.waitUntil(processPendingAttachmentAnalyses(env, 2))
+  return ok({ ok: true, created: rows.results?.length ?? 0 })
 }
 
 async function setHourlyRate(env: Env, request: Request) {
@@ -2818,7 +3351,7 @@ async function rotateMonthlyReportToken(env: Env, reportId: string) {
   return ok({ report: toReport(updated ?? { ...existing, public_token: publicToken, viewed_at: null, view_count: 0 }) })
 }
 
-async function handleApi(request: Request, env: Env) {
+async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContext) {
   const url = new URL(request.url)
   const path = url.pathname
   const isGet = request.method === 'GET' || request.method === 'HEAD'
@@ -2848,7 +3381,17 @@ async function handleApi(request: Request, env: Env) {
   if (path.startsWith('/api/tokens') && role !== 'admin') {
     return fail('需要管理员权限', 403)
   }
-  if ((path === '/api/settings/design-types' || path === '/api/settings/design-type-groups' || path === '/api/settings/ai-model' || path === '/api/ai/model-test') && role !== 'admin') {
+  if (
+    (
+      path === '/api/settings/design-types' ||
+      path === '/api/settings/design-type-groups' ||
+      path === '/api/settings/ai-model' ||
+      path === '/api/ai/model-test' ||
+      path === '/api/insights/attachment-analyses/backfill' ||
+      path.endsWith('/analysis/retry')
+    ) &&
+    role !== 'admin'
+  ) {
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
@@ -2922,10 +3465,13 @@ async function handleApi(request: Request, env: Env) {
     return uploadMultipartPart(env, request)
   }
   if (path === '/api/files/multipart/complete' && request.method === 'POST') {
-    return completeMultipartUpload(env, request)
+    return completeMultipartUpload(env, request, ctx)
   }
   if (path === '/api/files' && request.method === 'POST') {
-    return createFile(env, request)
+    return createFile(env, request, ctx)
+  }
+  if (path.startsWith('/api/files/') && path.endsWith('/analysis/retry') && request.method === 'POST') {
+    return retryAttachmentAnalysis(env, path.split('/')[3], ctx)
   }
   if (path.startsWith('/api/files/') && path.endsWith('/preview') && request.method === 'GET') {
     return getFilePreview(env, path.split('/')[3], request)
@@ -2950,6 +3496,9 @@ async function handleApi(request: Request, env: Env) {
   }
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)
+  }
+  if (path === '/api/insights/attachment-analyses/backfill' && request.method === 'POST') {
+    return backfillAttachmentAnalyses(env, ctx)
   }
   if (path === '/api/settings/ai-model' && request.method === 'GET') {
     return getAiModelConfig(env)
@@ -2986,7 +3535,7 @@ async function handleApi(request: Request, env: Env) {
 }
 
 export default {
-  async fetch(request: Request, env: Env) {
+  async fetch(request: Request, env: Env, ctx: WorkerExecutionContext) {
     const url = new URL(request.url)
     if (url.protocol === 'http:') {
       url.protocol = 'https:'
@@ -3001,7 +3550,7 @@ export default {
 
     if (url.pathname.startsWith('/api/')) {
       try {
-        return withSecurityHeaders(await handleApi(request, env))
+        return withSecurityHeaders(await handleApi(request, env, ctx))
       } catch (error) {
         const message = error instanceof Error ? error.message : '后端服务异常'
         return withSecurityHeaders(fail(message, 500))
@@ -3009,5 +3558,8 @@ export default {
     }
 
     return withSecurityHeaders(await env.ASSETS.fetch(request))
+  },
+  async scheduled(_controller: unknown, env: Env) {
+    await processPendingAttachmentAnalyses(env, 1)
   },
 }

@@ -77,7 +77,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, FileAsset, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -413,7 +413,7 @@ const insightPeriods: { value: InsightPeriod; label: string }[] = [
 
 const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
   { value: 'period', label: '周期复盘', icon: <BarChart3 size={16} /> },
-  { value: 'deliverable', label: '历史样本', icon: <Archive size={16} /> },
+  { value: 'deliverable', label: '交付件理解', icon: <Archive size={16} /> },
   { value: 'capability', label: '异常诊断', icon: <AlertTriangle size={16} /> },
   { value: 'advisor', label: '数据结论', icon: <Sparkles size={16} /> },
 ]
@@ -1743,6 +1743,7 @@ function App() {
   const [taskItems, setTaskItems] = useState<Task[]>([])
   const [updateItems, setUpdateItems] = useState<TaskUpdate[]>([])
   const [fileItems, setFileItems] = useState<FileAsset[]>([])
+  const [attachmentAnalyses, setAttachmentAnalyses] = useState<AttachmentAnalysis[]>([])
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [hourlyRate, setHourlyRate] = useState(defaultHourlyRate)
   const [pdfTitle, setPdfTitle] = useState(defaultPdfTitle)
@@ -1899,6 +1900,7 @@ function App() {
     setTaskItems(state.tasks)
     setUpdateItems(state.updates)
     setFileItems(state.files)
+    setAttachmentAnalyses(state.attachmentAnalyses ?? [])
     setReports(state.reports ?? [])
     setRole(state.role)
     setAccessTokens(state.accessTokens ?? [])
@@ -2065,6 +2067,18 @@ function App() {
       setBackendStatus('后端异常')
       notify(error instanceof Error ? `任务保存失败：${error.message}` : '任务保存失败')
     }
+  }
+
+  const handleBackfillAttachmentAnalyses = async () => {
+    const result = await api.backfillAttachmentAnalyses()
+    notify(result.created > 0 ? `已为 ${result.created} 个历史附件创建分析任务` : '历史附件都已进入分析链路')
+    await refreshState()
+  }
+
+  const handleRetryAttachmentAnalysis = async (attachmentId: number) => {
+    await api.retryAttachmentAnalysis(attachmentId)
+    notify('已重新创建附件分析任务')
+    await refreshState()
   }
 
   const handleCreateTaskUpdate = async (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => {
@@ -3201,9 +3215,12 @@ function App() {
               tasks={activeTaskItems}
               updates={updateItems}
               files={fileItems}
+              attachmentAnalyses={attachmentAnalyses}
               reports={reports}
               currentMonth={currentMonth}
               hourlyRate={hourlyRate}
+              onBackfillAnalyses={handleBackfillAttachmentAnalyses}
+              onRetryAnalysis={handleRetryAttachmentAnalysis}
             />
           ) : (
             adminOnlyPanel
@@ -6763,23 +6780,45 @@ function FileInspector({
   )
 }
 
+function AnalysisList({ title, items, emptyText }: { title: string; items: string[]; emptyText: string }) {
+  return (
+    <section>
+      <h3>{title}</h3>
+      {items.length > 0 ? (
+        <ul>
+          {items.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      ) : (
+        <p>{emptyText}</p>
+      )}
+    </section>
+  )
+}
+
 function InsightsView({
   tasks,
   updates,
   files,
+  attachmentAnalyses,
   reports,
   currentMonth,
   hourlyRate,
+  onBackfillAnalyses,
+  onRetryAnalysis,
 }: {
   tasks: Task[]
   updates: TaskUpdate[]
   files: FileAsset[]
+  attachmentAnalyses: AttachmentAnalysis[]
   reports: ReportRecord[]
   currentMonth: { label: string; value: string }
   hourlyRate: number
+  onBackfillAnalyses: () => Promise<void>
+  onRetryAnalysis: (attachmentId: number) => Promise<void>
 }) {
   const [period, setPeriod] = useState<InsightPeriod>('month')
   const [activeTab, setActiveTab] = useState<InsightTab>('period')
+  const [analysisActionId, setAnalysisActionId] = useState<number | 'backfill' | null>(null)
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
 
@@ -6799,6 +6838,18 @@ function InsightsView({
     () => files.filter((file) => periodTaskIds.has(file.taskId) || isDateInRange(file.uploadedAt, range)),
     [files, periodTaskIds, range],
   )
+  const analysisByAttachment = useMemo(
+    () => new Map(attachmentAnalyses.map((analysis) => [analysis.attachmentId, analysis])),
+    [attachmentAnalyses],
+  )
+  const periodAnalyses = useMemo(
+    () => periodFiles.map((file) => analysisByAttachment.get(file.id)).filter((analysis): analysis is AttachmentAnalysis => Boolean(analysis)),
+    [analysisByAttachment, periodFiles],
+  )
+  const completedAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'completed')
+  const pendingAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'pending' || analysis.status === 'processing')
+  const problemAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'failed' || analysis.status === 'unsupported')
+  const unanalyzedCount = Math.max(0, periodFiles.length - periodAnalyses.length)
   const filesByTask = useMemo(() => {
     const map = new Map<number, FileAsset[]>()
     periodFiles.forEach((file) => {
@@ -7098,51 +7149,93 @@ function InsightsView({
       )}
 
       {activeTab === 'deliverable' && (
-        <section className="panel insights-chain-panel">
+        <section className="panel insights-chain-panel attachment-analysis-panel">
           <div className="panel-header compact">
             <div>
-              <h2>历史类型样本</h2>
-              <p>按站内全部历史任务统计同类型样本，不包含交付件内容识别</p>
+              <h2>交付件内容理解</h2>
+              <p>读取 R2 附件，经 PDF / Office / 图片解析后由视觉模型分析，结果保存到 D1</p>
             </div>
-            <span className="insights-chip">{historicalTypeRows.length} 个类型</span>
+            <button
+              type="button"
+              className="ghost-button compact-button"
+              disabled={analysisActionId !== null}
+              onClick={() => {
+                setAnalysisActionId('backfill')
+                void onBackfillAnalyses().finally(() => setAnalysisActionId(null))
+              }}
+            >
+              <RotateCcw size={14} />
+              {analysisActionId === 'backfill' ? '正在创建任务' : '补分析历史附件'}
+            </button>
           </div>
-          <div className="insights-history-table">
-            {historicalTypeRows.length === 0 && (
+          <div className="attachment-analysis-stats" aria-label="附件分析状态">
+            <div><strong>{completedAnalyses.length}</strong><span>已读懂</span></div>
+            <div><strong>{pendingAnalyses.length}</strong><span>分析中</span></div>
+            <div><strong>{problemAnalyses.length}</strong><span>需处理</span></div>
+            <div><strong>{unanalyzedCount}</strong><span>待建任务</span></div>
+          </div>
+          <div className="attachment-analysis-list">
+            {periodFiles.length === 0 && (
               <div className="empty-state">
-                <strong>暂无历史样本</strong>
-                <p>完成更多任务后，这里会按类型形成真实的报价和排期依据。</p>
+                <strong>当前周期暂无附件</strong>
+                <p>上传 PDF、PPTX、DOCX、XLSX 或图片后，系统会自动创建分析任务。</p>
               </div>
             )}
-            {historicalTypeRows.map((row) => (
-              <article className="insights-history-row" key={row.type}>
-                <div>
-                  <strong>{row.type}</strong>
-                  <span>{row.count} 个任务 · {row.accepted} 个已验收 · {row.fileCount} 个附件</span>
-                </div>
-                <dl>
-                  <div>
-                    <dt>均值</dt>
-                    <dd>{row.avgHours.toFixed(1)}h</dd>
-                  </div>
-                  <div>
-                    <dt>中位</dt>
-                    <dd>{row.medianHours.toFixed(1)}h</dd>
-                  </div>
-                  <div>
-                    <dt>周期</dt>
-                    <dd>{row.avgCycle > 0 ? `${row.avgCycle.toFixed(1)} 天` : '—'}</dd>
-                  </div>
-                  <div>
-                    <dt>估算</dt>
-                    <dd>{row.accuracy > 0 ? `${row.accuracy}%` : '—'}</dd>
-                  </div>
-                  <div>
-                    <dt>附件率</dt>
-                    <dd>{row.fileRate}%</dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
+            {periodFiles.map((file) => {
+              const analysis = analysisByAttachment.get(file.id)
+              const task = tasks.find((item) => item.id === file.taskId)
+              const isProblem = analysis?.status === 'failed' || analysis?.status === 'unsupported'
+              return (
+                <article className="attachment-analysis-row" key={file.id}>
+                  <header>
+                    <div>
+                      <strong>{file.name}</strong>
+                      <span>{task?.title || file.task} · {file.type} · {file.uploadedAt}</span>
+                    </div>
+                    <span className={`analysis-status status-${analysis?.status || 'pending'}`}>
+                      {!analysis ? '待建任务' : analysis.status === 'completed' ? '已分析' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : analysis.status === 'unsupported' ? '需预览图' : '分析失败'}
+                    </span>
+                  </header>
+                  {analysis?.status === 'completed' && (
+                    <>
+                      <p className="attachment-analysis-summary">{analysis.summary}</p>
+                      <div className="attachment-analysis-meta">
+                        <span>{analysis.contentType || file.type}</span>
+                        <span>{analysis.parserKind}</span>
+                        <span>{analysis.provider} / {analysis.model}</span>
+                        <span>置信度 {analysis.confidence || '中'}</span>
+                      </div>
+                      <div className="attachment-analysis-columns">
+                        <AnalysisList title="需求匹配" items={analysis.requirementMatches} emptyText="暂无明确匹配结论" />
+                        <AnalysisList title="质量问题" items={analysis.qualityIssues} emptyText="未发现明确质量问题" />
+                        <AnalysisList title="风险与建议" items={[...analysis.risks, ...analysis.suggestions]} emptyText="暂无额外风险或建议" />
+                      </div>
+                    </>
+                  )}
+                  {(analysis?.status === 'pending' || analysis?.status === 'processing') && (
+                    <p className="attachment-analysis-message">后台正在解析文件并调用视觉模型，完成后结果会自动写回 D1。</p>
+                  )}
+                  {isProblem && (
+                    <div className="attachment-analysis-error">
+                      <p>{analysis.errorMessage || '附件分析未完成'}</p>
+                      <button
+                        type="button"
+                        className="ghost-button compact-button"
+                        disabled={analysisActionId !== null}
+                        onClick={() => {
+                          setAnalysisActionId(file.id)
+                          void onRetryAnalysis(file.id).finally(() => setAnalysisActionId(null))
+                        }}
+                      >
+                        <RotateCcw size={14} />
+                        {analysisActionId === file.id ? '重试中' : '重新分析'}
+                      </button>
+                    </div>
+                  )}
+                  {!analysis && <p className="attachment-analysis-message">点击“补分析历史附件”后会为该文件创建后台任务。</p>}
+                </article>
+              )
+            })}
           </div>
         </section>
       )}
@@ -7235,7 +7328,7 @@ function InsightsView({
             </div>
             <div className="insights-ai-note">
               <Eye size={16} />
-              <span>交付件内容识别尚未接入；当前结论不会声称读懂 PDF、PPT 或图片内容。</span>
+              <span>已完成 {completedAnalyses.length} 个交付件内容分析；数据结论会逐步接入这些真实结果，不再只依赖附件数量。</span>
             </div>
           </aside>
         </section>

@@ -20,6 +20,8 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 3. Cloudflare Worker 负责鉴权、模型设置、密钥解密、历史数据查询和请求转发。
 4. 如果 BAML Runtime 未配置或请求失败，Worker 会回退 DeepSeek 直连，继续通过 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` 保证线上可用。
 5. 文字和识图模型已拆成主 / 备用两组：文字主路默认 DeepSeek，文字备用默认 Kimi K2.6；识图主路默认 Gemini 3 Flash，识图备用默认 Kimi K2.6。
+6. 附件上传后会在 D1 创建分析任务；Worker 从 R2 读取源文件，图片和 PDF 直接送入视觉模型，PPTX / DOCX / XLSX 先提取文字和内嵌图片，再把结构化结果写回 `attachment_analyses`。
+7. 上传请求会立即尝试后台分析；每 5 分钟运行的 Cron 会继续处理待处理、失败未满 3 次以及长时间卡住的任务。
 
 ## 为什么现在仍然要引入 BAML
 
@@ -78,7 +80,15 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 | 新建任务需求优化 | `SuggestTaskAssistant` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 进展 / 验收文案优化 | `OptimizeTaskText` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 工时建议 | `SuggestHourEstimate` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
-| 交付件识图 | 后续新增 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；当前先完成模型配置和测试入口 |
+| 交付件识图 | Worker 附件分析任务 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；结果写入 D1 并供洞察页读取 |
+
+## 附件解析边界
+
+- PNG / JPG / WEBP / GIF：读取 R2 源文件并直接进行视觉分析。
+- PDF：18MB 以内使用 Gemini 原生 PDF 理解。当前 Kimi 备用路由只接受图片，因此 PDF 主模型失败且没有图片预览时会保留失败状态并等待重试。
+- PPTX / DOCX / XLSX：35MB 以内在 Worker 中解压，提取 XML 文字和最多 6 张内嵌图片。当前能理解内容和素材，但不等同于完整渲染每一页 / 每一张幻灯片的最终版式。
+- PSD / AI：有上传预览图时分析预览图；没有预览图时标记为暂不支持，提示补充 PNG / JPG 预览后重试。
+- ZIP / RAR / 7Z、旧版 PPT / DOC / XLS 等格式当前不自动解包，不会生成没有依据的分析结论。
 
 ## 密钥与安全
 

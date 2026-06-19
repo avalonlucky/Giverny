@@ -56,6 +56,32 @@ export type FileAsset = {
   sourceUrl?: string
 }
 
+export type AttachmentAnalysisStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'unsupported'
+
+export type AttachmentAnalysis = {
+  attachmentId: number
+  taskId: number
+  fileName: string
+  fileType: string
+  status: AttachmentAnalysisStatus
+  attemptCount: number
+  parserKind: string
+  provider: string
+  model: string
+  summary: string
+  contentType: string
+  extractedText: string
+  findings: string[]
+  qualityIssues: string[]
+  requirementMatches: string[]
+  risks: string[]
+  suggestions: string[]
+  confidence: '低' | '中' | '高' | ''
+  errorMessage: string
+  requestedAt: string
+  completedAt: string
+}
+
 export type TaskUpdate = {
   id: number
   taskId: number

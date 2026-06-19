@@ -1377,6 +1377,167 @@ button {
   font-weight: 800;
 }
 
+.attachment-analysis-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.attachment-analysis-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.attachment-analysis-stats > div {
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  gap: 3px;
+}
+
+.attachment-analysis-stats strong {
+  color: var(--color-text);
+  font-size: 22px;
+}
+
+.attachment-analysis-stats span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.attachment-analysis-list {
+  display: grid;
+  gap: 10px;
+}
+
+.attachment-analysis-row {
+  padding: 16px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  gap: 12px;
+}
+
+.attachment-analysis-row header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.attachment-analysis-row header > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.attachment-analysis-row header strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-analysis-row header span,
+.attachment-analysis-message,
+.attachment-analysis-error p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.analysis-status {
+  flex: none;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.analysis-status.status-completed {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+}
+
+.analysis-status.status-pending,
+.analysis-status.status-processing {
+  color: var(--color-status-warning);
+  background: color-mix(in srgb, var(--color-status-warning) 11%, transparent);
+}
+
+.analysis-status.status-failed,
+.analysis-status.status-unsupported {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 9%, transparent);
+}
+
+.attachment-analysis-summary {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.attachment-analysis-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.attachment-analysis-meta span {
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+  font-size: 11px;
+}
+
+.attachment-analysis-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.attachment-analysis-columns section {
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+}
+
+.attachment-analysis-columns h3 {
+  margin: 0 0 8px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.attachment-analysis-columns ul {
+  margin: 0;
+  padding-left: 17px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.attachment-analysis-columns p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.attachment-analysis-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .insights-chain-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 150px;
@@ -9120,6 +9281,10 @@ textarea:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .attachment-analysis-columns {
+    grid-template-columns: 1fr;
+  }
+
   .insights-file-strip,
   .insights-chain-state {
     justify-content: flex-start;
@@ -9140,6 +9305,16 @@ textarea:focus-visible {
 
   .nav-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .attachment-analysis-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .attachment-analysis-row header,
+  .attachment-analysis-error {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .brand div:last-child,
