@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS insight_diagnoses (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS insights_history (
+  id TEXT PRIMARY KEY,
+  generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  insight_type TEXT NOT NULL,
+  finding TEXT NOT NULL,
+  recommendation TEXT NOT NULL,
+  data_snapshot TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  trigger_key TEXT,
+  trigger_fingerprint TEXT
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -153,6 +165,8 @@ CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_task_id ON attachment_analyses(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_status ON attachment_analyses(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_insight_diagnoses_period ON insight_diagnoses(period_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_insights_history_status ON insights_history(status, generated_at);
+CREATE INDEX IF NOT EXISTS idx_insights_history_trigger ON insights_history(trigger_key, generated_at);
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_month ON monthly_reports(month);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);

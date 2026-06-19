@@ -77,7 +77,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -6797,6 +6797,8 @@ function InsightsView({
   const [diagnosis, setDiagnosis] = useState<InsightDiagnosis | null>(null)
   const [isDiagnosisLoading, setIsDiagnosisLoading] = useState(false)
   const [diagnosisError, setDiagnosisError] = useState('')
+  const [insightHistory, setInsightHistory] = useState<InsightHistoryItem[]>([])
+  const [historyError, setHistoryError] = useState('')
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
 
@@ -7000,12 +7002,35 @@ function InsightsView({
     setDiagnosisError('')
     try {
       setDiagnosis(await api.diagnoseInsights({ month: currentMonth.value, period }))
+      setInsightHistory(await api.getInsightHistory())
     } catch (error) {
       setDiagnosisError(error instanceof Error ? error.message : '洞察诊断失败，请稍后重试')
     } finally {
       setIsDiagnosisLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (activeTab !== 'advisor') {
+      return
+    }
+    let ignore = false
+    api.getInsightHistory()
+      .then((items) => {
+        if (!ignore) {
+          setInsightHistory(items)
+          setHistoryError('')
+        }
+      })
+      .catch((error) => {
+        if (!ignore) {
+          setHistoryError(error instanceof Error ? error.message : '洞察追踪记录读取失败')
+        }
+      })
+    return () => {
+      ignore = true
+    }
+  }, [activeTab])
 
   return (
     <section className="insights-view">
@@ -7263,6 +7288,28 @@ function InsightsView({
             <div className="insights-ai-note">
               <Eye size={16} />
               <span>已完成 {completedAnalyses.length} 个交付件内容分析。诊断会读取附件质量问题与风险，并记住上次建议，避免反复说同一句话。</span>
+            </div>
+            <div className="insight-history-panel">
+              <header>
+                <strong>追踪中的洞察</strong>
+                <span>{insightHistory.filter((item) => item.status === 'open' || item.status === 'improved').length} 条</span>
+              </header>
+              {historyError && <p className="insight-diagnosis-error">{historyError}</p>}
+              {!historyError && insightHistory.length === 0 && <p className="calendar-empty-hint">暂无历史洞察。运行诊断或后台命中异常后会自动生成。</p>}
+              {insightHistory.slice(0, 6).map((item) => (
+                <article className={`insight-history-row ${item.status}`} key={item.id}>
+                  <div>
+                    <strong>{item.finding}</strong>
+                    <span>
+                      {item.insightType === 'efficiency' ? '效率' : item.insightType === 'pricing' ? '报价' : item.insightType === 'gap' ? '空缺' : '客户'}
+                      {' · '}
+                      {item.status === 'open' ? '追踪中' : item.status === 'improved' ? '已有改善' : item.status === 'resolved' ? '已解决' : '已忽略'}
+                    </span>
+                  </div>
+                  <p>{item.recommendation}</p>
+                  <em>{item.generatedAt}</em>
+                </article>
+              ))}
             </div>
           </aside>
         </section>

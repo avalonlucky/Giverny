@@ -1,4 +1,4 @@
-import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
 
 export type ReportRecord = {
@@ -462,6 +462,7 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  getInsightHistory: () => requestJson<InsightHistoryItem[]>('/api/insights/history'),
   setHourlyRate: (hourlyRate: number) =>
     requestJson<{ hourlyRate: number }>('/api/settings/hourly-rate', {
       method: 'PATCH',

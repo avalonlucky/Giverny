@@ -81,7 +81,8 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 | 进展 / 验收文案优化 | `OptimizeTaskText` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 工时建议 | `SuggestHourEstimate` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 交付件识图 | Worker 附件分析任务 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；结果写入 D1 并供洞察页读取 |
-| 异常侦查 | Worker 洞察诊断 | 文字主模型 DeepSeek，失败回退 Kimi K2.6；对比当前、上期、历史基线与上次建议，结构化结果写入 D1 |
+| 异常侦查 | Worker 洞察诊断 | 文字主模型 DeepSeek，失败回退 Kimi K2.6；对比当前、上期、历史基线与历史洞察，结构化结果写入 D1 |
+| 事件洞察 | Worker Cron | 先用 D1 规则判断异常，命中后再调用文字模型生成专项建议，并写入 `insights_history` |
 
 ## 对照式洞察
 
@@ -89,6 +90,8 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - 数据包括实际 / 预估工时、预估偏差、加权结算时薪、交付周期、附件质量问题、交付风险及修改信号。
 - 修改信号来自进展记录中的“修改、调整、改稿、反馈、返工”等文字，是代理指标，不等同于用户手工确认的修改轮次。
 - 每次诊断保存到 `insight_diagnoses`，包含数据指纹与结构化异常键。同一数据会直接复用已保存结果；新诊断会拿历史建议做去重，仅在问题未解决时继续提示。
+- 每条可追踪建议会写入 `insights_history`，字段包括 `insight_type`、`finding`、`recommendation`、`data_snapshot` 和 `status`。后台事件触发器也写入同一张表。
+- 当前事件触发器包括：同类任务修改信号偏高、月工时下降超过 20%、对接人综合时薪连续低于均值、设计类型超过 3 个月空缺。触发器先由 D1 数据规则判定，只有命中异常时才调用模型。
 
 ## 附件解析边界
 

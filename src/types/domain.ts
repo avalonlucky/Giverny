@@ -100,6 +100,19 @@ export type InsightDiagnosis = {
   dataNotes: string[]
 }
 
+export type InsightHistoryStatus = 'open' | 'improved' | 'resolved' | 'ignored'
+
+export type InsightHistoryItem = {
+  id: string
+  generatedAt: string
+  insightType: 'efficiency' | 'pricing' | 'gap' | 'client'
+  finding: string
+  recommendation: string
+  dataSnapshot: Record<string, unknown>
+  status: InsightHistoryStatus
+  triggerKey: string
+}
+
 export type TaskUpdate = {
   id: number
   taskId: number

@@ -1,6 +1,6 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
 import JSZip from 'jszip'
-import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightPeriodType, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -213,6 +213,18 @@ type DbInsightDiagnosis = {
   data_fingerprint: string
   result_json: string
   created_at: string
+}
+
+type DbInsightHistory = {
+  id: string
+  generated_at: string
+  insight_type: InsightHistoryItem['insightType']
+  finding: string
+  recommendation: string
+  data_snapshot: string
+  status: InsightHistoryStatus
+  trigger_key: string | null
+  trigger_fingerprint: string | null
 }
 
 type DbReport = {
@@ -1108,12 +1120,40 @@ type InsightTypeMetrics = {
 
 type InsightDiagnosisResult = Omit<InsightDiagnosis, 'generatedAt'>
 
+type InsightEventTrigger = {
+  insightType: InsightHistoryItem['insightType']
+  triggerKey: string
+  finding: string
+  recommendationHint: string
+  dataSnapshot: Record<string, unknown>
+  severity: 'low' | 'medium' | 'high'
+}
+
+type InsightDataSet = {
+  tasks: DbTask[]
+  updatesByTask: Map<string, DbUpdate[]>
+  analysesByTask: Map<string, DbAttachmentAnalysis[]>
+}
+
 function dateKey(value: Date) {
   return `${value.getUTCFullYear()}-${pad2(value.getUTCMonth() + 1)}-${pad2(value.getUTCDate())}`
 }
 
 function beijingNowDate() {
   return new Date(Date.now() + 8 * 3_600_000)
+}
+
+function monthRange(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  const start = new Date(Date.UTC(year, monthNumber - 1, 1))
+  const end = new Date(Date.UTC(year, monthNumber, 0, 23, 59, 59, 999))
+  return { start: dateKey(start), end: dateKey(end) }
+}
+
+function monthOffset(month: string, offset: number) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  const date = new Date(Date.UTC(year, monthNumber - 1 + offset, 1))
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}`
 }
 
 function insightDateRange(period: InsightPeriodType, month: string) {
@@ -1181,6 +1221,59 @@ function parseAnalysisItems(value: string | null) {
   }
 }
 
+async function loadInsightData(env: Env): Promise<InsightDataSet> {
+  const [taskRows, updateRows, analysisRows] = await Promise.all([
+    env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND status <> '不计费'").all<DbTask>(),
+    env.DB.prepare(`SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL`).all<DbUpdate>(),
+    env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
+  ])
+  const updatesByTask = new Map<string, DbUpdate[]>()
+  for (const update of updateRows.results ?? []) {
+    updatesByTask.set(update.task_id, [...(updatesByTask.get(update.task_id) ?? []), update])
+  }
+  const analysesByTask = new Map<string, DbAttachmentAnalysis[]>()
+  for (const analysis of analysisRows.results ?? []) {
+    analysesByTask.set(analysis.task_id, [...(analysesByTask.get(analysis.task_id) ?? []), analysis])
+  }
+  return { tasks: taskRows.results ?? [], updatesByTask, analysesByTask }
+}
+
+function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet, 'updatesByTask' | 'analysesByTask'>): InsightTypeMetrics[] {
+  const groups = new Map<string, DbTask[]>()
+  for (const task of source) {
+    const type = task.design_type || '未分类'
+    groups.set(type, [...(groups.get(type) ?? []), task])
+  }
+  return [...groups.entries()].map(([type, items]) => {
+    const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
+    const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
+    const revisionSignals = items.reduce(
+      (sum, task) => sum + (dataSet.updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
+      0,
+    )
+    const cycles = items.map(taskCycleDays).filter((value): value is number => value !== null)
+    const analyses = items.flatMap((task) => dataSet.analysesByTask.get(task.id) ?? [])
+    const attachmentQualityIssueCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.quality_issues_json).length, 0)
+    const deliveryRiskCount =
+      analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.risks_json).length, 0) +
+      items.filter((task) => task.status !== '已验收' && Boolean(task.estimated_delivery_date) && task.estimated_delivery_date! < nowIso()).length
+    return {
+      type,
+      taskCount: items.length,
+      acceptedCount: items.filter((task) => task.status === '已验收').length,
+      actualHours: Number(actualHours.toFixed(1)),
+      estimatedHours: Number(estimatedHours.toFixed(1)),
+      estimateVariancePercent: estimatedHours > 0 ? Math.round(((actualHours - estimatedHours) / estimatedHours) * 100) : null,
+      revisionSignals,
+      revisionSignalsPerTask: items.length > 0 ? Number((revisionSignals / items.length).toFixed(2)) : null,
+      weightedHourlyRate: actualHours > 0 ? Number((items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) / actualHours).toFixed(2)) : null,
+      averageCycleDays: cycles.length > 0 ? Number(average(cycles).toFixed(1)) : null,
+      deliveryRiskCount,
+      attachmentQualityIssueCount,
+    }
+  }).sort((left, right) => right.actualHours - left.actualHours || right.taskCount - left.taskCount)
+}
+
 async function fingerprintInsightData(value: unknown) {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(JSON.stringify(value)))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -1204,6 +1297,281 @@ function normalizeInsightDiagnosis(value: Record<string, unknown>, periodKey: st
   return { periodKey, periodType, status: insights.length > 0 ? 'anomalies' : 'clear', comparedWith, insights, dataNotes }
 }
 
+function normalizeInsightHistoryStatus(value: unknown): InsightHistoryStatus {
+  return value === 'improved' || value === 'resolved' || value === 'ignored' ? value : 'open'
+}
+
+function toInsightHistoryItem(row: DbInsightHistory): InsightHistoryItem {
+  try {
+    const parsed = JSON.parse(row.data_snapshot || '{}')
+    const dataSnapshot = typeof parsed === 'object' && parsed ? parsed as Record<string, unknown> : {}
+    return {
+      id: row.id,
+      generatedAt: formatBeijing(row.generated_at),
+      insightType: row.insight_type,
+      finding: row.finding,
+      recommendation: row.recommendation,
+      dataSnapshot,
+      status: normalizeInsightHistoryStatus(row.status),
+      triggerKey: row.trigger_key ?? '',
+    }
+  } catch {
+    return {
+      id: row.id,
+      generatedAt: formatBeijing(row.generated_at),
+      insightType: row.insight_type,
+      finding: row.finding,
+      recommendation: row.recommendation,
+      dataSnapshot: {},
+      status: normalizeInsightHistoryStatus(row.status),
+      triggerKey: row.trigger_key ?? '',
+    }
+  }
+}
+
+function classifyInsightType(signal: string, action: string): InsightHistoryItem['insightType'] {
+  const text = `${signal} ${action}`
+  if (/时薪|价格|报价|低于均值|客户价值|对接人/.test(text)) {
+    return 'pricing'
+  }
+  if (/空缺|缺少|拓展|闲置|类型/.test(text)) {
+    return 'gap'
+  }
+  if (/客户|对接人|沟通|修改|反馈|返工/.test(text)) {
+    return 'client'
+  }
+  return 'efficiency'
+}
+
+async function insertInsightHistory(env: Env, item: Omit<InsightHistoryItem, 'id' | 'generatedAt'> & { triggerFingerprint?: string }) {
+  await env.DB.prepare(
+    `INSERT INTO insights_history (id, insight_type, finding, recommendation, data_snapshot, status, trigger_key, trigger_fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      item.insightType,
+      item.finding.slice(0, 240),
+      item.recommendation.slice(0, 500),
+      JSON.stringify(item.dataSnapshot),
+      item.status,
+      item.triggerKey,
+      item.triggerFingerprint ?? '',
+    )
+    .run()
+}
+
+async function saveDiagnosisToHistory(env: Env, diagnosis: InsightDiagnosisResult, metricPayload: Record<string, unknown>, fingerprint: string) {
+  if (diagnosis.insights.length === 0) {
+    return
+  }
+  const existingRows = await env.DB.prepare('SELECT * FROM insights_history WHERE trigger_key LIKE ? ORDER BY generated_at DESC LIMIT 20')
+    .bind(`manual:${diagnosis.periodType}:${diagnosis.periodKey}:%`)
+    .all<DbInsightHistory>()
+  const existingKeys = new Set((existingRows.results ?? []).map((row) => row.trigger_key))
+  await Promise.all(diagnosis.insights.map(async (insight) => {
+    const triggerKey = `manual:${diagnosis.periodType}:${diagnosis.periodKey}:${insight.key}`
+    if (existingKeys.has(triggerKey)) {
+      return
+    }
+    await insertInsightHistory(env, {
+      insightType: classifyInsightType(insight.signal, insight.action),
+      finding: insight.signal,
+      recommendation: insight.action,
+      dataSnapshot: {
+        evidence: insight.evidence,
+        state: insight.state,
+        periodKey: diagnosis.periodKey,
+        periodType: diagnosis.periodType,
+        comparedWith: diagnosis.comparedWith,
+        metrics: metricPayload,
+      },
+      status: insight.state === 'improved' ? 'improved' : 'open',
+      triggerKey,
+      triggerFingerprint: fingerprint,
+    })
+  }))
+}
+
+async function getInsightHistory(env: Env) {
+  const rows = await env.DB.prepare('SELECT * FROM insights_history ORDER BY generated_at DESC LIMIT 40').all<DbInsightHistory>()
+  return ok((rows.results ?? []).map(toInsightHistoryItem))
+}
+
+function findMetric(metrics: InsightTypeMetrics[], type: string) {
+  return metrics.find((item) => item.type === type)
+}
+
+function monthTasks(dataSet: InsightDataSet, month: string) {
+  const range = monthRange(month)
+  return dataSet.tasks.filter((task) => inDateRange(taskInsightDate(task), range))
+}
+
+function taskMonthValue(task: DbTask) {
+  return monthPart(taskInsightDate(task))
+}
+
+function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): InsightEventTrigger[] {
+  const currentMonth = month
+  const previousMonth = monthOffset(month, -1)
+  const currentTasks = monthTasks(dataSet, currentMonth)
+  const previousTasks = monthTasks(dataSet, previousMonth)
+  const currentMetrics = aggregateInsightMetrics(currentTasks, dataSet)
+  const previousMetrics = aggregateInsightMetrics(previousTasks, dataSet)
+  const historicalMetrics = aggregateInsightMetrics(dataSet.tasks.filter((task) => taskMonthValue(task) < currentMonth), dataSet)
+  const triggers: InsightEventTrigger[] = []
+
+  for (const current of currentMetrics) {
+    const previous = findMetric(previousMetrics, current.type)
+    const baseline = findMetric(historicalMetrics, current.type)
+    if (current.taskCount >= 3 && (current.revisionSignalsPerTask ?? 0) > 2 && (!baseline || (current.revisionSignalsPerTask ?? 0) > (baseline.revisionSignalsPerTask ?? 0) * 1.25)) {
+      triggers.push({
+        insightType: 'client',
+        triggerKey: `revision:${current.type}`,
+        finding: `${current.type} 修改信号偏高`,
+        recommendationHint: '检查接单前需求锁定、尺寸确认、色板确认或客户反馈入口是否前置。',
+        severity: (current.revisionSignalsPerTask ?? 0) >= 3 ? 'high' : 'medium',
+        dataSnapshot: { currentMonth, previousMonth, current, previous, historicalBaseline: baseline ?? null },
+      })
+    }
+  }
+
+  const currentHours = currentMetrics.reduce((sum, item) => sum + item.actualHours, 0)
+  const previousHours = previousMetrics.reduce((sum, item) => sum + item.actualHours, 0)
+  if (previousHours >= 8 && currentHours < previousHours * 0.8) {
+    triggers.push({
+      insightType: 'efficiency',
+      triggerKey: 'hours-drop',
+      finding: '本月实际工时较上月明显下降',
+      recommendationHint: '判断是接单量减少、任务未及时记录，还是任务类型结构变化导致投入下降。',
+      severity: currentHours < previousHours * 0.65 ? 'high' : 'medium',
+      dataSnapshot: { currentMonth, previousMonth, currentHours: Number(currentHours.toFixed(1)), previousHours: Number(previousHours.toFixed(1)), dropPercent: Math.round((1 - currentHours / previousHours) * 100), currentByType: currentMetrics, previousByType: previousMetrics },
+    })
+  }
+
+  const contacts = [...new Set(dataSet.tasks.map((task) => task.contact_person || '').filter(Boolean))]
+  const historicalRatedTasks = dataSet.tasks.filter((task) => (Number(task.actual_hours) || 0) > 0 && (Number(task.hourly_rate) || 0) > 0)
+  const globalHourlyRate =
+    historicalRatedTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) /
+    Math.max(1, historicalRatedTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
+  for (const contact of contacts) {
+    const rateForMonth = (targetMonth: string) => {
+      const items = monthTasks(dataSet, targetMonth).filter((task) => (task.contact_person || '') === contact && (Number(task.actual_hours) || 0) > 0)
+      const hours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
+      const rate = hours > 0 ? items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) / hours : null
+      return { taskCount: items.length, hours: Number(hours.toFixed(1)), rate: rate === null ? null : Number(rate.toFixed(2)) }
+    }
+    const current = rateForMonth(currentMonth)
+    const previous = rateForMonth(previousMonth)
+    if ((current.rate ?? globalHourlyRate) < globalHourlyRate * 0.9 && (previous.rate ?? globalHourlyRate) < globalHourlyRate * 0.9 && current.taskCount > 0 && previous.taskCount > 0) {
+      triggers.push({
+        insightType: 'pricing',
+        triggerKey: `contact-rate:${contact}`,
+        finding: `${contact} 的任务综合时薪连续低于均值`,
+        recommendationHint: '评估该对接人的需求沟通成本、修改风险和报价结构，必要时提高报价或限制低价值任务占比。',
+        severity: (current.rate ?? 0) < globalHourlyRate * 0.75 ? 'high' : 'medium',
+        dataSnapshot: { currentMonth, previousMonth, contact, current, previous, baselineHourlyRate: Number(globalHourlyRate.toFixed(2)) },
+      })
+    }
+  }
+
+  const typeLastMonths = new Map<string, string>()
+  for (const task of dataSet.tasks) {
+    const type = task.design_type || '未分类'
+    const value = taskMonthValue(task)
+    if (value && (!typeLastMonths.has(type) || value > typeLastMonths.get(type)!)) {
+      typeLastMonths.set(type, value)
+    }
+  }
+  const threeMonthsAgo = monthOffset(currentMonth, -3)
+  for (const [type, lastMonth] of typeLastMonths.entries()) {
+    const historical = findMetric(historicalMetrics, type)
+    if (lastMonth <= threeMonthsAgo && historical && historical.taskCount >= 2) {
+      triggers.push({
+        insightType: 'gap',
+        triggerKey: `type-gap:${type}`,
+        finding: `${type} 已超过 3 个月没有新任务`,
+        recommendationHint: '判断这是自然淡季、客户需求断层，还是该能力没有被主动展示；必要时补作品样例或主动推荐。',
+        severity: 'low',
+        dataSnapshot: { currentMonth, type, lastTaskMonth: lastMonth, historicalBaseline: historical },
+      })
+    }
+  }
+
+  return triggers.sort((left, right) => {
+    const weight = { high: 3, medium: 2, low: 1 }
+    return weight[right.severity] - weight[left.severity]
+  }).slice(0, 6)
+}
+
+function normalizeEventInsight(value: Record<string, unknown>, trigger: InsightEventTrigger): Pick<InsightHistoryItem, 'finding' | 'recommendation' | 'status'> {
+  const finding = String(value.finding || trigger.finding).trim().slice(0, 240)
+  const recommendation = String(value.recommendation || trigger.recommendationHint).trim().slice(0, 500)
+  return {
+    finding: finding || trigger.finding,
+    recommendation: recommendation || trigger.recommendationHint,
+    status: normalizeInsightHistoryStatus(value.status),
+  }
+}
+
+async function runEventDrivenInsights(env: Env, limit = 2) {
+  const dataSet = await loadInsightData(env)
+  const currentMonth = dateKey(beijingNowDate()).slice(0, 7)
+  const triggers = buildInsightEventTriggers(dataSet, currentMonth)
+  let created = 0
+  for (const trigger of triggers) {
+    if (created >= limit) {
+      break
+    }
+    const fingerprint = await fingerprintInsightData(trigger.dataSnapshot)
+    const previousRows = await env.DB.prepare('SELECT * FROM insights_history WHERE trigger_key = ? ORDER BY generated_at DESC LIMIT 3')
+      .bind(trigger.triggerKey)
+      .all<DbInsightHistory>()
+    const latest = previousRows.results?.[0]
+    if (latest?.trigger_fingerprint === fingerprint) {
+      continue
+    }
+    const previousAdvice = (previousRows.results ?? []).map((row) => ({
+      generatedAt: row.generated_at,
+      finding: row.finding,
+      recommendation: row.recommendation,
+      status: row.status,
+      dataSnapshot: row.data_snapshot,
+    }))
+    const prompt = [
+      '你是 Giverny 的事件型洞察顾问。当前 SQL 规则已经确认出现异常，你只负责基于数据变化生成专项洞察。',
+      '硬规则：1. 不写正面总结；2. 不重复上次建议，而是评估上次建议是否改善；3. 只能引用输入数据；4. 返回一个简短 finding 和一个具体 recommendation。',
+      'status 规则：仍未改善为 open；轻微改善但未回到基线为 improved；已经回到基线或异常消失为 resolved。',
+      '只返回 JSON：{"finding":"本次发现","recommendation":"具体动作","status":"open|improved|resolved"}',
+      `事件触发：${JSON.stringify(trigger)}`,
+      `历史追踪：${JSON.stringify(previousAdvice)}`,
+    ].join('\n\n')
+    let output: string
+    try {
+      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, 900)
+    } catch {
+      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, 900)
+    }
+    const insight = normalizeEventInsight(parseLooseJsonObject(output), trigger)
+    if (insight.status === 'resolved') {
+      await env.DB.prepare("UPDATE insights_history SET status = 'resolved' WHERE trigger_key = ? AND status IN ('open', 'improved')")
+        .bind(trigger.triggerKey)
+        .run()
+    }
+    await insertInsightHistory(env, {
+      insightType: trigger.insightType,
+      finding: insight.finding,
+      recommendation: insight.recommendation,
+      dataSnapshot: trigger.dataSnapshot,
+      status: insight.status,
+      triggerKey: trigger.triggerKey,
+      triggerFingerprint: fingerprint,
+    })
+    created += 1
+  }
+  return created
+}
+
 async function diagnoseInsights(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as { month?: string; period?: InsightPeriodType }
   const period: InsightPeriodType = ['day', 'week', 'month', 'quarter', 'half', 'year'].includes(String(body.period)) ? body.period as InsightPeriodType : 'month'
@@ -1211,58 +1579,19 @@ async function diagnoseInsights(env: Env, request: Request) {
   const ranges = insightDateRange(period, month)
   const periodKey = `${ranges.current.start}_${ranges.current.end}`
   const comparedWith = `${ranges.previous.start} 至 ${ranges.previous.end}`
-  const [taskRows, updateRows, analysisRows, previousRows] = await Promise.all([
-    env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND status <> '不计费'").all<DbTask>(),
-    env.DB.prepare(`SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL`).all<DbUpdate>(),
-    env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
+  const [dataSet, previousRows, historyRows] = await Promise.all([
+    loadInsightData(env),
     env.DB.prepare('SELECT * FROM insight_diagnoses WHERE period_type = ? ORDER BY created_at DESC LIMIT 6').bind(period).all<DbInsightDiagnosis>(),
+    env.DB.prepare("SELECT * FROM insights_history WHERE status IN ('open', 'improved') ORDER BY generated_at DESC LIMIT 16").all<DbInsightHistory>(),
   ])
-  const tasks = taskRows.results ?? []
-  const updatesByTask = new Map<string, DbUpdate[]>()
-  for (const update of updateRows.results ?? []) {
-    updatesByTask.set(update.task_id, [...(updatesByTask.get(update.task_id) ?? []), update])
-  }
-  const analysesByTask = new Map<string, DbAttachmentAnalysis[]>()
-  for (const analysis of analysisRows.results ?? []) {
-    analysesByTask.set(analysis.task_id, [...(analysesByTask.get(analysis.task_id) ?? []), analysis])
-  }
-  const aggregate = (source: DbTask[]): InsightTypeMetrics[] => {
-    const groups = new Map<string, DbTask[]>()
-    for (const task of source) {
-      const type = task.design_type || '未分类'
-      groups.set(type, [...(groups.get(type) ?? []), task])
-    }
-    return [...groups.entries()].map(([type, items]) => {
-      const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
-      const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
-      const revisionSignals = items.reduce((sum, task) => sum + (updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length, 0)
-      const cycles = items.map(taskCycleDays).filter((value): value is number => value !== null)
-      const analyses = items.flatMap((task) => analysesByTask.get(task.id) ?? [])
-      const attachmentQualityIssueCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.quality_issues_json).length, 0)
-      const deliveryRiskCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.risks_json).length, 0) + items.filter((task) => task.status !== '已验收' && Boolean(task.estimated_delivery_date) && task.estimated_delivery_date! < nowIso()).length
-      return {
-        type,
-        taskCount: items.length,
-        acceptedCount: items.filter((task) => task.status === '已验收').length,
-        actualHours: Number(actualHours.toFixed(1)),
-        estimatedHours: Number(estimatedHours.toFixed(1)),
-        estimateVariancePercent: estimatedHours > 0 ? Math.round(((actualHours - estimatedHours) / estimatedHours) * 100) : null,
-        revisionSignals,
-        revisionSignalsPerTask: items.length > 0 ? Number((revisionSignals / items.length).toFixed(2)) : null,
-        weightedHourlyRate: actualHours > 0 ? Number((items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) / actualHours).toFixed(2)) : null,
-        averageCycleDays: cycles.length > 0 ? Number(average(cycles).toFixed(1)) : null,
-        deliveryRiskCount,
-        attachmentQualityIssueCount,
-      }
-    }).sort((left, right) => right.actualHours - left.actualHours || right.taskCount - left.taskCount)
-  }
+  const tasks = dataSet.tasks
   const currentTasks = tasks.filter((task) => inDateRange(taskInsightDate(task), ranges.current))
   const previousTasks = tasks.filter((task) => inDateRange(taskInsightDate(task), ranges.previous))
   const currentIds = new Set(currentTasks.map((task) => task.id))
   const metricPayload = {
-    currentPeriod: { key: periodKey, range: ranges.current, byType: aggregate(currentTasks) },
-    previousPeriod: { range: ranges.previous, byType: aggregate(previousTasks) },
-    historicalBaseline: { byType: aggregate(tasks.filter((task) => !currentIds.has(task.id))) },
+    currentPeriod: { key: periodKey, range: ranges.current, byType: aggregateInsightMetrics(currentTasks, dataSet) },
+    previousPeriod: { range: ranges.previous, byType: aggregateInsightMetrics(previousTasks, dataSet) },
+    historicalBaseline: { byType: aggregateInsightMetrics(tasks.filter((task) => !currentIds.has(task.id)), dataSet) },
     definitions: {
       revisionSignals: '进展记录标题或内容含修改、调整、改稿、反馈、返工或 revision 的次数；这是可追溯代理指标，不等于人工确认的精确修改轮次。',
       weightedHourlyRate: '按任务实际工时加权的任务结算时薪；若任务均使用同一费率，该指标不会产生可用差异。',
@@ -1278,7 +1607,7 @@ async function diagnoseInsights(env: Env, request: Request) {
       // Rebuild a corrupt historical response instead of returning a partial diagnosis.
     }
   }
-  const previousAdvice = (previousRows.results ?? []).flatMap((row) => {
+  const diagnosisAdvice = (previousRows.results ?? []).flatMap((row) => {
     try {
       const result = JSON.parse(row.result_json) as InsightDiagnosisResult
       return result.insights.map((insight) => ({ periodKey: row.period_key, key: insight.key, signal: insight.signal, action: insight.action, state: insight.state }))
@@ -1286,6 +1615,15 @@ async function diagnoseInsights(env: Env, request: Request) {
       return []
     }
   }).slice(0, 18)
+  const trackedAdvice = (historyRows.results ?? []).map((row) => ({
+    generatedAt: row.generated_at,
+    insightType: row.insight_type,
+    finding: row.finding,
+    recommendation: row.recommendation,
+    status: row.status,
+    dataSnapshot: row.data_snapshot,
+  }))
+  const previousAdvice = { trackedHistory: trackedAdvice, recentDiagnoses: diagnosisAdvice }
   const prompt = [
     '你是 Giverny 的经营与交付数据侦探，不是汇报员。你的任务是找异常、找矛盾、找被忽略且可行动的问题。',
     '硬规则：1. 禁止“整体表现良好”“继续保持”等正面总结，直接进入异常；没有明显异常时只返回 status 为 clear 和 dataNotes，不要凑字数。',
@@ -1311,6 +1649,7 @@ async function diagnoseInsights(env: Env, request: Request) {
   const diagnosis = normalizeInsightDiagnosis(parseLooseJsonObject(output), periodKey, period, comparedWith)
   await env.DB.prepare('INSERT INTO insight_diagnoses (id, period_key, period_type, data_fingerprint, result_json) VALUES (?, ?, ?, ?, ?)')
     .bind(crypto.randomUUID(), periodKey, period, fingerprint, JSON.stringify(diagnosis)).run()
+  await saveDiagnosisToHistory(env, diagnosis, metricPayload, fingerprint)
   await audit(env, 'create', 'insight_diagnosis', periodKey, { period, insightCount: diagnosis.insights.length, fingerprint })
   return ok({ ...diagnosis, generatedAt: formatBeijing(nowIso()) })
 }
@@ -3622,6 +3961,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/model-test' ||
       path === '/api/insights/attachment-analyses/backfill' ||
       path === '/api/insights/diagnose' ||
+      path === '/api/insights/history' ||
       path.endsWith('/analysis/retry')
     ) &&
     role !== 'admin'
@@ -3737,6 +4077,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/insights/diagnose' && request.method === 'POST') {
     return diagnoseInsights(env, request)
   }
+  if (path === '/api/insights/history' && request.method === 'GET') {
+    return getInsightHistory(env)
+  }
   if (path === '/api/settings/ai-model' && request.method === 'GET') {
     return getAiModelConfig(env)
   }
@@ -3798,5 +4141,8 @@ export default {
   },
   async scheduled(_controller: unknown, env: Env) {
     await processPendingAttachmentAnalyses(env, 1)
+    await runEventDrivenInsights(env, 1).catch((error) => {
+      console.error('insight event trigger failed', error)
+    })
   },
 }
