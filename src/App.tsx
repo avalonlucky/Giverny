@@ -2077,10 +2077,10 @@ function App() {
   const today = isoDate()
   const dueSoonDate = isoDate(3)
   const dueTasks = useMemo(() => {
-    const overdue = activeTaskItems.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue')
-    const soon = activeTaskItems.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon')
+    const overdue = activeMonthTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue')
+    const soon = activeMonthTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon')
     return { overdue, soon }
-  }, [activeTaskItems, dueSoonDate, today])
+  }, [activeMonthTasks, dueSoonDate, today])
 
   const annualData = useMemo(() => {
     const year = currentMonth.value.slice(0, 4)
