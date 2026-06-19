@@ -82,6 +82,7 @@ const navItems = [
   { label: '工作台', icon: LayoutDashboard },
   { label: '任务', icon: FolderKanban },
   { label: '文件库', icon: Archive },
+  { label: '洞察', icon: Sparkles },
   { label: '结算', icon: FileText },
   { label: '收入', icon: BarChart3 },
 ]
@@ -90,6 +91,7 @@ const viewRoutes: Record<AppView, string> = {
   工作台: '/dashboard',
   任务: '/tasks',
   文件库: '/files',
+  洞察: '/insights',
   收入: '/income',
   结算: '/reports',
   甲方查看: '/client-preview',
@@ -395,6 +397,17 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 
 type DonutItem = { label: string; value: number; color: string }
 
+type InsightPeriod = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
+
+const insightPeriods: { value: InsightPeriod; label: string }[] = [
+  { value: 'day', label: '日' },
+  { value: 'week', label: '周' },
+  { value: 'month', label: '月' },
+  { value: 'quarter', label: '季度' },
+  { value: 'half', label: '半年' },
+  { value: 'year', label: '年度' },
+]
+
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
 
 const statusDotColors: Record<TaskStatus, string> = {
@@ -458,12 +471,90 @@ function shiftMonthValue(value: string, offset: number) {
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
 }
 
+function taskAnalysisMonth(task: Task) {
+  return task.settlementMonth || monthPart(task.date)
+}
+
 function taskSettlementMonth(task: Task) {
   return task.settlementMonth || ''
 }
 
 function isSupplementalTask(task: Task) {
   return Boolean(task.settlementMonth) && task.settlementMonth !== monthPart(task.date)
+}
+
+function dateFromValue(value: string | undefined) {
+  if (!value) {
+    return null
+  }
+  const date = new Date(toDateTimeInputValue(value))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isDateInRange(value: string | undefined, range: { start: Date; end: Date }) {
+  const date = dateFromValue(value)
+  if (!date) {
+    return false
+  }
+  return date >= range.start && date <= range.end
+}
+
+function insightPeriodRange(period: InsightPeriod, monthValue: string) {
+  const today = localDateFromIsoDate(isoDate())
+  const [anchorYear, anchorMonth] = monthValue.split('-').map(Number)
+  const anchor = new Date(anchorYear, anchorMonth - 1, 1)
+  let start: Date
+  let end: Date
+
+  if (period === 'day') {
+    start = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+  } else if (period === 'week') {
+    const mondayOffset = (today.getDay() + 6) % 7
+    start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - mondayOffset)
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 23, 59, 59, 999)
+  } else if (period === 'month') {
+    start = new Date(anchorYear, anchorMonth - 1, 1)
+    end = new Date(anchorYear, anchorMonth, 0, 23, 59, 59, 999)
+  } else if (period === 'quarter') {
+    const quarterStartMonth = Math.floor(anchor.getMonth() / 3) * 3
+    start = new Date(anchorYear, quarterStartMonth, 1)
+    end = new Date(anchorYear, quarterStartMonth + 3, 0, 23, 59, 59, 999)
+  } else if (period === 'half') {
+    const halfStartMonth = anchor.getMonth() < 6 ? 0 : 6
+    start = new Date(anchorYear, halfStartMonth, 1)
+    end = new Date(anchorYear, halfStartMonth + 6, 0, 23, 59, 59, 999)
+  } else {
+    start = new Date(anchorYear, 0, 1)
+    end = new Date(anchorYear, 11, 31, 23, 59, 59, 999)
+  }
+
+  return { start, end }
+}
+
+function formatInsightRange(range: { start: Date; end: Date }) {
+  const start = isoDateFromLocalDate(range.start).replaceAll('-', '/')
+  const end = isoDateFromLocalDate(range.end).replaceAll('-', '/')
+  return start === end ? start : `${start} - ${end}`
+}
+
+function daysBetween(startValue: string | undefined, endValue: string | undefined) {
+  const start = dateFromValue(startValue)
+  const end = dateFromValue(endValue)
+  if (!start || !end || end < start) {
+    return null
+  }
+  return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000))
+}
+
+function fileTypeLabel(file: FileAsset) {
+  const type = file.type.toUpperCase()
+  return type === 'JPEG' ? 'JPG' : type
+}
+
+function isVisualReviewReady(file: FileAsset) {
+  const type = file.type.toUpperCase()
+  return Boolean(file.previewUrl) || isInlineImageFileType(type) || isInlineDocumentFileType(type) || isOfficeFileType(type)
 }
 
 const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
@@ -2638,13 +2729,13 @@ function App() {
     requireAdmin()
     throw new Error('需要管理员权限')
   }
-  const visibleNavItems = isAdmin ? navItems : navItems.filter((item) => item.label !== '结算' && item.label !== '收入')
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((item) => !['结算', '收入', '洞察'].includes(item.label))
   const adminOnlyPanel = (
     <section className="panel read-only-settings-panel">
       <div className="panel-header compact">
         <div>
           <h2>管理员可见</h2>
-          <p>这里包含结算、收入或系统配置，只对管理员开放。游客和甲方成员可以继续查看公开任务、进展和甲方可见文件。</p>
+          <p>这里包含洞察、结算、收入或系统配置，只对管理员开放。游客和甲方成员可以继续查看公开任务、进展和甲方可见文件。</p>
         </div>
       </div>
       <button className="primary-button" onClick={() => setIsLoginModalOpen(true)}>
@@ -3069,6 +3160,22 @@ function App() {
             onDownloadFile={handleDownloadFile}
             onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
           />
+        )}
+
+        {activeView === '洞察' && (
+          isAdmin ? (
+            <InsightsView
+              tasks={activeTaskItems}
+              updates={updateItems}
+              files={fileItems}
+              reports={reports}
+              currentMonth={currentMonth}
+              hourlyRate={hourlyRate}
+              onPreviewFile={setPreviewFile}
+            />
+          ) : (
+            adminOnlyPanel
+          )
         )}
 
         {activeView === '收入' && (
@@ -6621,6 +6728,312 @@ function FileInspector({
         </button>
       </div>
     </aside>
+  )
+}
+
+function InsightsView({
+  tasks,
+  updates,
+  files,
+  reports,
+  currentMonth,
+  hourlyRate,
+  onPreviewFile,
+}: {
+  tasks: Task[]
+  updates: TaskUpdate[]
+  files: FileAsset[]
+  reports: ReportRecord[]
+  currentMonth: { label: string; value: string }
+  hourlyRate: number
+  onPreviewFile: (file: FileAsset) => void
+}) {
+  const [period, setPeriod] = useState<InsightPeriod>('month')
+  const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
+  const rangeLabel = formatInsightRange(range)
+
+  const periodTasks = useMemo(
+    () =>
+      tasks.filter((task) => {
+        const analysisMonth = dateFromValue(`${taskAnalysisMonth(task)}-01`)
+        const inAnalysisMonth = analysisMonth ? analysisMonth >= range.start && analysisMonth <= range.end : false
+        return inAnalysisMonth || isDateInRange(task.date, range) || isDateInRange(task.estimatedDate, range)
+      }),
+    [range, tasks],
+  )
+  const periodTaskIds = useMemo(() => new Set(periodTasks.map((task) => task.id)), [periodTasks])
+  const periodUpdates = useMemo(
+    () => updates.filter((update) => periodTaskIds.has(update.taskId) || isDateInRange(update.date, range)),
+    [periodTaskIds, range, updates],
+  )
+  const periodFiles = useMemo(
+    () => files.filter((file) => periodTaskIds.has(file.taskId) || isDateInRange(file.uploadedAt, range)),
+    [files, periodTaskIds, range],
+  )
+  const filesByTask = useMemo(() => {
+    const map = new Map<number, FileAsset[]>()
+    periodFiles.forEach((file) => {
+      map.set(file.taskId, [...(map.get(file.taskId) ?? []), file])
+    })
+    return map
+  }, [periodFiles])
+  const updatesByTask = useMemo(() => {
+    const map = new Map<number, TaskUpdate[]>()
+    periodUpdates
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .forEach((update) => {
+        map.set(update.taskId, [...(map.get(update.taskId) ?? []), update])
+      })
+    return map
+  }, [periodUpdates])
+
+  const acceptedTasks = periodTasks.filter((task) => task.status === '已验收')
+  const billableTasks = periodTasks.filter((task) => task.status !== '不计费')
+  const totalHours = Number(billableTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1))
+  const estimatedHours = Number(billableTasks.reduce((sum, task) => sum + task.estimatedHours, 0).toFixed(1))
+  const acceptedRate = periodTasks.length > 0 ? Math.round((acceptedTasks.length / periodTasks.length) * 100) : 0
+  const hourGap = Number((totalHours - estimatedHours).toFixed(1))
+  const visualReadyCount = periodFiles.filter(isVisualReviewReady).length
+  const lockedReports = reports.filter((report) => {
+    const reportDate = dateFromValue(`${report.month}-01`)
+    return reportDate ? reportDate >= range.start && reportDate <= range.end : false
+  }).length
+
+  const durationSamples = acceptedTasks
+    .map((task) => daysBetween(task.date, updatesByTask.get(task.id)?.[0]?.date ?? task.estimatedDate))
+    .filter((value): value is number => typeof value === 'number')
+  const averageDuration = durationSamples.length > 0 ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length : 0
+
+  const typeDistribution = useMemo(() => {
+    const hoursByType = new Map<string, number>()
+    billableTasks.forEach((task) => {
+      if (task.actualHours <= 0) {
+        return
+      }
+      hoursByType.set(task.type, Number(((hoursByType.get(task.type) ?? 0) + task.actualHours).toFixed(1)))
+    })
+    const items: DonutItem[] = [...hoursByType.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], index) => ({ label, value, color: donutPalette[index % donutPalette.length] }))
+    return { items, total: Number(items.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
+  }, [billableTasks])
+
+  const trendData = useMemo(() => {
+    const bucketCount = period === 'year' ? 12 : period === 'half' ? 6 : period === 'quarter' ? 3 : period === 'month' ? 4 : period === 'week' ? 7 : 6
+    const buckets = Array.from({ length: bucketCount }, () => ({ label: '', value: 0 }))
+    if (period === 'year' || period === 'half' || period === 'quarter') {
+      const startMonth = range.start.getMonth()
+      buckets.forEach((bucket, index) => {
+        bucket.label = `${startMonth + index + 1}月`
+      })
+      periodUpdates.forEach((update) => {
+        const date = dateFromValue(update.date)
+        if (!date) {
+          return
+        }
+        const index = date.getMonth() - startMonth
+        if (buckets[index]) {
+          buckets[index].value += Number(update.hours) || 0
+        }
+      })
+    } else if (period === 'month') {
+      buckets.forEach((bucket, index) => {
+        const startDay = index * 7 + 1
+        const endDay = Math.min(startDay + 6, range.end.getDate())
+        bucket.label = `${startDay}-${endDay}`
+      })
+      periodUpdates.forEach((update) => {
+        const date = dateFromValue(update.date)
+        if (!date) {
+          return
+        }
+        const index = Math.min(Math.floor((date.getDate() - 1) / 7), buckets.length - 1)
+        buckets[index].value += Number(update.hours) || 0
+      })
+    } else if (period === 'week') {
+      buckets.forEach((bucket, index) => {
+        bucket.label = `周${weekdayLabels[index]}`
+      })
+      periodUpdates.forEach((update) => {
+        const date = dateFromValue(update.date)
+        if (!date) {
+          return
+        }
+        const index = (date.getDay() + 6) % 7
+        buckets[index].value += Number(update.hours) || 0
+      })
+    } else {
+      buckets.forEach((bucket, index) => {
+        bucket.label = `${index * 4}:00`
+      })
+      periodUpdates.forEach((update) => {
+        const date = dateFromValue(update.date)
+        if (!date) {
+          return
+        }
+        const index = Math.min(Math.floor(date.getHours() / 4), buckets.length - 1)
+        buckets[index].value += Number(update.hours) || 0
+      })
+    }
+    return buckets.map((bucket) => ({ ...bucket, value: Number(bucket.value.toFixed(1)) }))
+  }, [period, periodUpdates, range])
+
+  const deliveryRows = useMemo(
+    () =>
+      periodTasks
+        .filter((task) => task.status !== '计划中' || (filesByTask.get(task.id)?.length ?? 0) > 0)
+        .map((task) => {
+          const taskFiles = filesByTask.get(task.id) ?? []
+          const latestUpdate = updatesByTask.get(task.id)?.[0]
+          return {
+            task,
+            taskFiles,
+            latestUpdate,
+            sortValue: latestUpdate?.date ?? task.estimatedDate ?? task.date,
+          }
+        })
+        .sort((a, b) => b.sortValue.localeCompare(a.sortValue))
+        .slice(0, 8),
+    [filesByTask, periodTasks, updatesByTask],
+  )
+
+  const topType = typeDistribution.items[0]
+  const missingCategories = ['视频类', '剪辑类', '动效类', '包装类', '短视频物料'].filter(
+    (category) => !tasks.some((task) => task.type.includes(category.replace('类', ''))),
+  )
+  const suggestions = [
+    topType
+      ? `当前 ${topType.label} 占用 ${Math.round((topType.value / Math.max(typeDistribution.total, 1)) * 100)}% 工时，后续报价和排期可以优先参考这类任务的真实耗时。`
+      : '先积累更多已验收任务，洞察页会逐步形成可复用的报价和排期依据。',
+    hourGap > Math.max(2, estimatedHours * 0.15)
+      ? `本周期实际工时比预估多 ${hourGap.toFixed(1)}h，建议同类型任务预留修改沟通和验收缓冲。`
+      : '本周期预估与实际投入比较接近，可以继续沿用当前排期口径。',
+    periodFiles.length > 0
+      ? `${visualReadyCount}/${periodFiles.length} 个交付件具备在线预览或基础质量检查条件，适合后续接入 DeepSeek 视觉或 BAML Runtime 做细分评审。`
+      : '本周期交付件偏少，建议在进展或验收阶段补齐最终稿，方便后续做全链路复盘。',
+    missingCategories.length > 0
+      ? `可考虑拓展 ${missingCategories.slice(0, 3).join('、')} 等分类，让收入来源和能力结构更稳。`
+      : '当前分类覆盖较完整，后续可重点沉淀高复购类型的模板和验收标准。',
+  ]
+
+  return (
+    <section className="insights-view">
+      <section className="panel insights-hero">
+        <div>
+          <p className="eyebrow">数据洞察</p>
+          <h2>周期复盘与交付链路分析</h2>
+          <span>{rangeLabel} · 基于任务、进展、文件与结算记录自动汇总</span>
+        </div>
+        <div className="segment-tabs insights-period-tabs" aria-label="洞察周期">
+          {insightPeriods.map((item) => (
+            <button className={period === item.value ? 'active' : ''} key={item.value} onClick={() => setPeriod(item.value)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="stats-grid" aria-label="洞察统计">
+        <StatCard label="周期任务" value={`${periodTasks.length} 个`} trend={`${acceptedTasks.length} 个已验收 · ${lockedReports} 期已锁定`} icon={<ListChecks size={20} />} />
+        <StatCard label="验收率" value={`${acceptedRate}%`} trend={periodTasks.length > 0 ? `${acceptedTasks.length}/${periodTasks.length} 个完成闭环` : '暂无可统计任务'} icon={<ClipboardCheck size={20} />} />
+        <StatCard label="实际工时" value={`${totalHours.toFixed(1)}h`} trend={`预估 ${estimatedHours.toFixed(1)}h · ¥${Math.round(totalHours * hourlyRate).toLocaleString()}`} icon={<Clock3 size={20} />} />
+        <StatCard label="交付件" value={`${periodFiles.length} 个`} trend={`${visualReadyCount} 个可预览 / 基础检查`} icon={<Archive size={20} />} />
+      </section>
+
+      <section className="insights-grid">
+        <section className="panel distribution-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>类型工时结构</h2>
+              <p>按实际工时查看当前周期最主要的任务类型</p>
+            </div>
+          </div>
+          <DonutChart items={typeDistribution.items} total={typeDistribution.total} />
+        </section>
+
+        <section className="panel trend-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>进展投入趋势 <span>小时</span></h2>
+              <p>来自进展记录中的工时变化，用于观察节奏和峰值</p>
+            </div>
+          </div>
+          <TrendChart data={trendData} />
+        </section>
+      </section>
+
+      <section className="insights-grid wide">
+        <section className="panel insights-chain-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>交付件全链路</h2>
+              <p>从接收、进展、上传到验收，先做基础链路检查；视觉质量分析入口已预留</p>
+            </div>
+            <span className="insights-chip">{periodFiles.length} 个交付件</span>
+          </div>
+          <div className="insights-chain-list">
+            {deliveryRows.length === 0 && (
+              <div className="empty-state">
+                <strong>暂无可分析链路</strong>
+                <p>任务进入进行中并上传交付件后，这里会展示完整流程。</p>
+              </div>
+            )}
+            {deliveryRows.map(({ task, taskFiles, latestUpdate }) => {
+              const duration = daysBetween(task.date, latestUpdate?.date ?? task.estimatedDate)
+              return (
+                <article className="insights-chain-row" key={task.id}>
+                  <div className="insights-chain-main">
+                    <strong>{task.title}</strong>
+                    <p>{task.type} · {task.contact} · {duration ? `${duration} 天链路` : '链路待补齐'} · 实际 {task.actualHours.toFixed(1)}h</p>
+                    <span>{latestUpdate?.body || task.requirement}</span>
+                  </div>
+                  <div className="insights-file-strip">
+                    {taskFiles.length === 0 && <em>暂无附件</em>}
+                    {taskFiles.slice(0, 4).map((file) => (
+                      <button className="insights-file-chip" type="button" key={file.id} onClick={() => onPreviewFile(file)}>
+                        {isInlineImageFileType(file.type) ? <FileImage size={15} /> : <FileText size={15} />}
+                        <span>{fileTypeLabel(file)}</span>
+                      </button>
+                    ))}
+                    {taskFiles.length > 4 && <span className="insights-file-more">+{taskFiles.length - 4}</span>}
+                  </div>
+                  <div className="insights-chain-state">
+                    <TaskStateBadge task={task} />
+                    <span>{taskFiles.some(isVisualReviewReady) ? '可做质量复核' : '等待可预览文件'}</span>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+
+        <aside className="panel insights-advisor-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>洞察建议</h2>
+              <p>当前先由站内数据规则生成，后续可接 DeepSeek 深度总结</p>
+            </div>
+          </div>
+          <div className="insights-score-card">
+            <strong>{averageDuration > 0 ? `${averageDuration.toFixed(1)} 天` : '待积累'}</strong>
+            <span>平均交付周期</span>
+          </div>
+          <ul className="insights-suggestion-list">
+            {suggestions.map((suggestion) => (
+              <li key={suggestion}>
+                <Sparkles size={15} />
+                <span>{suggestion}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="insights-ai-note">
+            <Eye size={16} />
+            <span>识图与质量查看会优先复用现有 DeepSeek 通道；BAML Runtime 作为多租户模型路由预留，不影响当前使用。</span>
+          </div>
+        </aside>
+      </section>
+    </section>
   )
 }
 
