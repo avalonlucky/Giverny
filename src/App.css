@@ -1133,9 +1133,9 @@ button {
 
 .dashboard-side-subsection-meta {
   margin: -6px 0 0;
-  color: var(--color-text-muted);
+  color: var(--color-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .dashboard-side-muted {
