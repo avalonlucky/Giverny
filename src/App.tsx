@@ -398,6 +398,7 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 type DonutItem = { label: string; value: number; color: string }
 
 type InsightPeriod = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'
+type InsightTab = 'period' | 'deliverable' | 'capability' | 'advisor'
 
 const insightPeriods: { value: InsightPeriod; label: string }[] = [
   { value: 'day', label: '日' },
@@ -406,6 +407,13 @@ const insightPeriods: { value: InsightPeriod; label: string }[] = [
   { value: 'quarter', label: '季度' },
   { value: 'half', label: '半年' },
   { value: 'year', label: '年度' },
+]
+
+const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
+  { value: 'period', label: '周期分析', icon: <BarChart3 size={16} /> },
+  { value: 'deliverable', label: '交付件分析', icon: <Archive size={16} /> },
+  { value: 'capability', label: '能力画像', icon: <Eye size={16} /> },
+  { value: 'advisor', label: 'AI 洞察', icon: <Sparkles size={16} /> },
 ]
 
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
@@ -6749,6 +6757,7 @@ function InsightsView({
   onPreviewFile: (file: FileAsset) => void
 }) {
   const [period, setPeriod] = useState<InsightPeriod>('month')
+  const [activeTab, setActiveTab] = useState<InsightTab>('period')
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
 
@@ -6893,12 +6902,37 @@ function InsightsView({
             sortValue: latestUpdate?.date ?? task.estimatedDate ?? task.date,
           }
         })
-        .sort((a, b) => b.sortValue.localeCompare(a.sortValue))
-        .slice(0, 8),
+        .sort((a, b) => b.sortValue.localeCompare(a.sortValue)),
     [filesByTask, periodTasks, updatesByTask],
   )
 
   const topType = typeDistribution.items[0]
+  const hourAccuracySamples = billableTasks.filter((task) => task.actualHours > 0 && task.estimatedHours > 0)
+  const hourAccuracy =
+    hourAccuracySamples.length > 0
+      ? Math.max(
+          0,
+          Math.round(
+            hourAccuracySamples.reduce((sum, task) => sum + Math.max(0, 100 - (Math.abs(task.actualHours - task.estimatedHours) / task.estimatedHours) * 100), 0) /
+              hourAccuracySamples.length,
+          ),
+        )
+      : 0
+  const coverageItems = defaultDesignTypes.map((type) => ({
+    type,
+    count: tasks.filter((task) => task.type.includes(type)).length,
+  }))
+  const contactRows = [...periodTasks.reduce((map, task) => {
+    const name = task.contact || '未填写'
+    map.set(name, (map.get(name) ?? 0) + 1)
+    return map
+  }, new Map<string, number>()).entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, count]) => ({
+      name,
+      pct: periodTasks.length > 0 ? Math.round((count / periodTasks.length) * 100) : 0,
+    }))
   const missingCategories = ['视频类', '剪辑类', '动效类', '包装类', '短视频物料'].filter(
     (category) => !tasks.some((task) => task.type.includes(category.replace('类', ''))),
   )
@@ -6925,45 +6959,60 @@ function InsightsView({
           <h2>周期复盘与交付链路分析</h2>
           <span>{rangeLabel} · 基于任务、进展、文件与结算记录自动汇总</span>
         </div>
-        <div className="segment-tabs insights-period-tabs" aria-label="洞察周期">
-          {insightPeriods.map((item) => (
-            <button className={period === item.value ? 'active' : ''} key={item.value} onClick={() => setPeriod(item.value)}>
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <span className="admin-only-data insights-admin-badge">设计师专属</span>
       </section>
 
-      <section className="stats-grid" aria-label="洞察统计">
-        <StatCard label="周期任务" value={`${periodTasks.length} 个`} trend={`${acceptedTasks.length} 个已验收 · ${lockedReports} 期已锁定`} icon={<ListChecks size={20} />} />
-        <StatCard label="验收率" value={`${acceptedRate}%`} trend={periodTasks.length > 0 ? `${acceptedTasks.length}/${periodTasks.length} 个完成闭环` : '暂无可统计任务'} icon={<ClipboardCheck size={20} />} />
-        <StatCard label="实际工时" value={`${totalHours.toFixed(1)}h`} trend={`预估 ${estimatedHours.toFixed(1)}h · ¥${Math.round(totalHours * hourlyRate).toLocaleString()}`} icon={<Clock3 size={20} />} />
-        <StatCard label="交付件" value={`${periodFiles.length} 个`} trend={`${visualReadyCount} 个可预览 / 基础检查`} icon={<Archive size={20} />} />
-      </section>
+      <div className="segment-tabs insights-tabs" role="tablist" aria-label="洞察模块">
+        {insightTabs.map((tab) => (
+          <button className={activeTab === tab.value ? 'active' : ''} key={tab.value} role="tab" aria-selected={activeTab === tab.value} onClick={() => setActiveTab(tab.value)}>
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      <section className="insights-grid">
-        <section className="panel distribution-panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>类型工时结构</h2>
-              <p>按实际工时查看当前周期最主要的任务类型</p>
-            </div>
+      {activeTab === 'period' && (
+        <>
+          <div className="segment-tabs insights-period-tabs" aria-label="洞察周期">
+            {insightPeriods.map((item) => (
+              <button className={period === item.value ? 'active' : ''} key={item.value} onClick={() => setPeriod(item.value)}>
+                {item.label}
+              </button>
+            ))}
           </div>
-          <DonutChart items={typeDistribution.items} total={typeDistribution.total} />
-        </section>
 
-        <section className="panel trend-panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>进展投入趋势 <span>小时</span></h2>
-              <p>来自进展记录中的工时变化，用于观察节奏和峰值</p>
-            </div>
-          </div>
-          <TrendChart data={trendData} />
-        </section>
-      </section>
+          <section className="stats-grid" aria-label="洞察统计">
+            <StatCard label="周期任务" value={`${periodTasks.length} 个`} trend={`${acceptedTasks.length} 个已验收 · ${lockedReports} 期已锁定`} icon={<ListChecks size={20} />} />
+            <StatCard label="验收率" value={`${acceptedRate}%`} trend={periodTasks.length > 0 ? `${acceptedTasks.length}/${periodTasks.length} 个完成闭环` : '暂无可统计任务'} icon={<ClipboardCheck size={20} />} />
+            <StatCard label="实际工时" value={`${totalHours.toFixed(1)}h`} trend={`预估 ${estimatedHours.toFixed(1)}h · ¥${Math.round(totalHours * hourlyRate).toLocaleString()}`} icon={<Clock3 size={20} />} />
+            <StatCard label="交付件" value={`${periodFiles.length} 个`} trend={`${visualReadyCount} 个可预览 / 基础检查`} icon={<Archive size={20} />} />
+          </section>
 
-      <section className="insights-grid wide">
+          <section className="insights-grid">
+            <section className="panel distribution-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>类型工时结构</h2>
+                  <p>按实际工时查看当前周期最主要的任务类型</p>
+                </div>
+              </div>
+              <DonutChart items={typeDistribution.items} total={typeDistribution.total} />
+            </section>
+
+            <section className="panel trend-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>进展投入趋势 <span>小时</span></h2>
+                  <p>来自进展记录中的工时变化，用于观察节奏和峰值</p>
+                </div>
+              </div>
+              <TrendChart data={trendData} />
+            </section>
+          </section>
+        </>
+      )}
+
+      {activeTab === 'deliverable' && (
         <section className="panel insights-chain-panel">
           <div className="panel-header compact">
             <div>
@@ -6982,7 +7031,7 @@ function InsightsView({
             {deliveryRows.map(({ task, taskFiles, latestUpdate }) => {
               const duration = daysBetween(task.date, latestUpdate?.date ?? task.estimatedDate)
               return (
-                <article className="insights-chain-row" key={task.id}>
+                <article className="insights-chain-row deliverable-focus-row" key={task.id}>
                   <div className="insights-chain-main">
                     <strong>{task.title}</strong>
                     <p>{task.type} · {task.contact} · {duration ? `${duration} 天链路` : '链路待补齐'} · 实际 {task.actualHours.toFixed(1)}h</p>
@@ -6990,13 +7039,13 @@ function InsightsView({
                   </div>
                   <div className="insights-file-strip">
                     {taskFiles.length === 0 && <em>暂无附件</em>}
-                    {taskFiles.slice(0, 4).map((file) => (
+                    {taskFiles.slice(0, 5).map((file) => (
                       <button className="insights-file-chip" type="button" key={file.id} onClick={() => onPreviewFile(file)}>
                         {isInlineImageFileType(file.type) ? <FileImage size={15} /> : <FileText size={15} />}
                         <span>{fileTypeLabel(file)}</span>
                       </button>
                     ))}
-                    {taskFiles.length > 4 && <span className="insights-file-more">+{taskFiles.length - 4}</span>}
+                    {taskFiles.length > 5 && <span className="insights-file-more">+{taskFiles.length - 5}</span>}
                   </div>
                   <div className="insights-chain-state">
                     <TaskStateBadge task={task} />
@@ -7007,32 +7056,102 @@ function InsightsView({
             })}
           </div>
         </section>
+      )}
 
-        <aside className="panel insights-advisor-panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>洞察建议</h2>
-              <p>当前先由站内数据规则生成，后续可接 DeepSeek 深度总结</p>
+      {activeTab === 'capability' && (
+        <section className="insights-grid wide">
+          <section className="panel insights-capability-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>能力画像</h2>
+                <p>设计类型覆盖、工时估算准确率和对接人集中度</p>
+              </div>
             </div>
-          </div>
-          <div className="insights-score-card">
-            <strong>{averageDuration > 0 ? `${averageDuration.toFixed(1)} 天` : '待积累'}</strong>
-            <span>平均交付周期</span>
-          </div>
-          <ul className="insights-suggestion-list">
-            {suggestions.map((suggestion) => (
-              <li key={suggestion}>
-                <Sparkles size={15} />
-                <span>{suggestion}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="insights-ai-note">
-            <Eye size={16} />
-            <span>识图与质量查看会优先复用现有 DeepSeek 通道；BAML Runtime 作为多租户模型路由预留，不影响当前使用。</span>
-          </div>
-        </aside>
-      </section>
+            <div className="insights-capability-grid">
+              <div className="insights-score-card">
+                <strong>{hourAccuracy > 0 ? `${hourAccuracy}%` : '待积累'}</strong>
+                <span>工时估算准确率</span>
+              </div>
+              <div className="insights-score-card">
+                <strong>{averageDuration > 0 ? `${averageDuration.toFixed(1)} 天` : '待积累'}</strong>
+                <span>平均交付周期</span>
+              </div>
+            </div>
+            <div className="insights-coverage-grid">
+              {coverageItems.map((item) => (
+                <span className={`insights-coverage-chip ${item.count > 0 ? 'covered' : 'missing'}`} key={item.type}>
+                  {item.count > 0 ? '✓' : '+'}
+                  {item.type}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <aside className="panel insights-advisor-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>对接人集中度</h2>
+                <p>观察工作量是否过度集中</p>
+              </div>
+            </div>
+            <div className="insights-concentration-list">
+              {contactRows.length === 0 && <p className="calendar-empty-hint">暂无对接人数据。</p>}
+              {contactRows.map((row) => (
+                <div className="insights-concentration-row" key={row.name}>
+                  <span>{row.name}</span>
+                  <div><i style={{ width: `${row.pct}%` }} /></div>
+                  <strong>{row.pct}%</strong>
+                </div>
+              ))}
+            </div>
+            {contactRows[0] && contactRows[0].pct >= 60 && (
+              <div className="insights-ai-note">
+                <AlertTriangle size={16} />
+                <span>单一对接人占比超过 60%，后续可以有意识拓展新的客户来源。</span>
+              </div>
+            )}
+          </aside>
+        </section>
+      )}
+
+      {activeTab === 'advisor' && (
+        <section className="insights-grid wide">
+          <section className="panel insights-advisor-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>洞察师建议</h2>
+                <p>当前先由站内数据规则生成，后续可接 DeepSeek 对话式洞察</p>
+              </div>
+            </div>
+            <ul className="insights-suggestion-list">
+              {suggestions.map((suggestion) => (
+                <li key={suggestion}>
+                  <Sparkles size={15} />
+                  <span>{suggestion}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <aside className="panel insights-chat-preview">
+            <div className="panel-header compact">
+              <div>
+                <h2>AI 洞察对话</h2>
+                <p>下一步接入后，可直接询问效率、定价和承接方向</p>
+              </div>
+            </div>
+            <div className="insights-quick-prompts">
+              {['分析我最近三个月的效率趋势', '我的定价合理吗？', '哪类任务交付周期最不稳定？', '我适合拓展哪些新品类？'].map((prompt) => (
+                <span key={prompt}>{prompt}</span>
+              ))}
+            </div>
+            <div className="insights-ai-note">
+              <Eye size={16} />
+              <span>这部分会复用现有 DeepSeek 通道；BAML Runtime 继续作为后续多租户模型路由预留。</span>
+            </div>
+          </aside>
+        </section>
+      )}
     </section>
   )
 }

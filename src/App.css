@@ -1266,6 +1266,30 @@ button {
   flex-shrink: 0;
 }
 
+.insights-tabs,
+.insights-period-tabs {
+  width: fit-content;
+}
+
+.insights-tabs button {
+  min-width: 128px;
+  justify-content: center;
+  gap: 7px;
+}
+
+.insights-admin-badge {
+  align-self: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-admin-only) 9%, var(--color-surface-strong));
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .insights-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.95fr);
@@ -1378,11 +1402,26 @@ button {
   text-align: right;
 }
 
+.deliverable-focus-row {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto) 150px;
+}
+
 .insights-advisor-panel {
   align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.insights-capability-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.insights-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .insights-score-card {
@@ -1402,6 +1441,74 @@ button {
 .insights-score-card span {
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.insights-coverage-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.insights-coverage-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.insights-coverage-chip.covered {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+}
+
+.insights-coverage-chip.missing {
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  background: color-mix(in srgb, var(--color-text-muted) 7%, transparent);
+}
+
+.insights-concentration-list {
+  display: grid;
+  gap: 11px;
+}
+
+.insights-concentration-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.insights-concentration-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insights-concentration-row div {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  overflow: hidden;
+}
+
+.insights-concentration-row i {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  display: block;
+}
+
+.insights-concentration-row strong {
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: right;
 }
 
 .insights-suggestion-list {
@@ -1437,6 +1544,31 @@ button {
   gap: 8px;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.insights-chat-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.insights-quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.insights-quick-prompts span {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .donut-layout {
