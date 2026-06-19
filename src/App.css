@@ -3219,8 +3219,13 @@ button {
 
 .progress-lite-modal {
   width: min(560px, calc(100vw - 48px));
+  overflow: visible;
   border-radius: 0;
   background: var(--color-surface-strong);
+}
+
+.task-modal.progress-lite-modal > .progress-lite-body {
+  overflow: visible;
 }
 
 .progress-lite-header {
@@ -6395,35 +6400,84 @@ input::file-selector-button {
   right: 0;
   top: calc(100% + 8px);
   z-index: var(--z-popover);
-  width: 292px;
-  padding: 12px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
-  border-radius: 10px;
-  background: #fdfdfb;
-  box-shadow: none;
+  width: min(396px, calc(100vw - 48px));
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-popover);
 }
 
 .date-time-popover-header {
-  display: grid;
-  grid-template-columns: 34px 1fr 34px;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 4px;
 }
 
-.date-time-popover-header strong {
-  color: #17282f;
-  font-size: 14px;
-  text-align: center;
+.date-input-wrap .date-time-popover-header button {
+  width: 38px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-primary);
+  background: transparent;
 }
 
-.date-input-wrap .date-time-popover-header button,
-.date-time-popover-actions button {
+.date-input-wrap .date-time-popover-header button:hover {
+  background: var(--color-supplement-bg);
+}
+
+.date-input-wrap .date-time-popover-header .date-time-month-trigger {
   width: auto;
-  height: 34px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
-  border-radius: 8px;
-  color: #2f6f6d;
-  background: #f6f8f3;
+  min-width: 132px;
+  margin-right: auto;
+  padding: 0 8px;
+  color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.date-time-month-trigger strong {
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.date-time-picker-main {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) 42px 42px;
+  gap: 6px;
+  min-height: 182px;
+}
+
+.date-time-calendar-pane {
+  min-width: 0;
+}
+
+.date-time-calendar-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-items: center;
+}
+
+.date-input-wrap .date-time-calendar-navigation button {
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-primary);
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.date-input-wrap .date-time-calendar-navigation button:hover {
+  background: var(--color-supplement-bg);
 }
 
 .date-time-weekdays,
@@ -6434,84 +6488,156 @@ input::file-selector-button {
 }
 
 .date-time-weekdays {
-  margin-top: 12px;
+  margin-top: 2px;
 }
 
 .date-time-weekdays span {
-  color: #7a8587;
-  font-size: 12px;
+  color: var(--color-text-muted);
+  font-size: 11px;
   font-weight: 800;
   text-align: center;
 }
 
 .date-time-days {
-  margin-top: 6px;
+  margin-top: 3px;
 }
 
 .date-input-wrap .date-time-days button {
-  width: 34px;
-  height: 32px;
+  width: 100%;
+  height: 23px;
   border: 0;
-  border-radius: 8px;
-  color: #243840;
+  border-radius: var(--radius-control);
+  color: var(--color-text);
   background: transparent;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .date-input-wrap .date-time-days button:hover {
-  background: #eef2ea;
+  background: var(--color-surface-alt);
 }
 
 .date-input-wrap .date-time-days button.active {
-  background: #2f6f6d;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-surface-strong);
   font-weight: 800;
 }
 
 .date-input-wrap .date-time-days button.muted {
-  color: #a8b0ad;
+  color: var(--color-text-muted);
 }
 
-.date-time-clock {
-  margin-top: 12px;
+.date-time-scroll-column {
+  height: 182px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-left: 1px solid var(--color-border-soft);
   display: grid;
-  grid-template-columns: 1fr 54px 10px 54px;
-  align-items: center;
-  gap: 8px;
+  align-content: start;
 }
 
-.date-time-clock span {
-  color: #4c5a5f;
-  font-size: 12px;
+.date-input-wrap .date-time-scroll-column button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.date-input-wrap .date-time-scroll-column button:hover {
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+}
+
+.date-input-wrap .date-time-scroll-column button.active {
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
   font-weight: 800;
 }
 
-.date-time-clock b {
-  color: #4c5a5f;
-  text-align: center;
+.date-time-month-panel {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 182px;
 }
 
-.date-time-clock input {
-  height: 34px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
-  border-radius: 8px;
-  text-align: center;
+.date-time-year-list {
+  max-height: 182px;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  border-right: 1px solid var(--color-border);
 }
 
-.date-time-clock input:focus {
-  border-color: #2f6f6d;
+.date-input-wrap .date-time-year-list button,
+.date-input-wrap .date-time-month-grid button {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.date-input-wrap .date-time-year-list button:hover,
+.date-input-wrap .date-time-month-grid button:hover {
+  color: var(--color-primary-strong);
+  background: var(--color-surface-alt);
+}
+
+.date-input-wrap .date-time-year-list button.active,
+.date-input-wrap .date-time-month-grid button.active {
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
+  font-weight: 800;
+}
+
+.date-time-month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
+  gap: 5px;
 }
 
 .date-time-popover-actions {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.date-time-popover-actions button:last-child {
-  background: #2f6f6d;
-  color: #fff;
+.date-input-wrap .date-time-popover-actions button {
+  width: auto;
+  min-width: 58px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-primary);
+  background: transparent;
+  font-weight: 800;
+}
+
+.date-input-wrap .date-time-popover-actions button:hover {
+  background: var(--color-supplement-bg);
+}
+
+.progress-lite-time-grid .field:first-child .date-time-popover {
+  right: auto;
+  left: 0;
+}
+
+/* The lightweight record dialogs keep their picker above the footer instead of clipping it. */
+.task-modal.progress-lite-modal > .progress-lite-body {
+  overflow: visible;
 }
 
 .supplemental-switch-wrap {
@@ -10471,6 +10597,25 @@ textarea:focus-visible {
 
   .settings-form {
     grid-template-columns: 1fr;
+  }
+
+  .date-time-popover {
+    width: calc(100vw - 32px);
+    padding: 12px;
+  }
+
+  .date-time-picker-main {
+    grid-template-columns: minmax(0, 1fr) 48px 48px;
+    gap: 6px;
+  }
+
+  .date-time-month-panel {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .date-time-month-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .settings-ai-route-form,

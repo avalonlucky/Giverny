@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ClipboardCheck,
   Clock3,
   Copy,
@@ -1056,8 +1057,18 @@ function PlanDateTimeField({
   control?: ReactNode
 }) {
   const [draft, setDraft] = useState(() => formatPlanDateTime(value))
+  const [syncedValue, setSyncedValue] = useState(value)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
+  const [pickerView, setPickerView] = useState<'calendar' | 'month'>('calendar')
+  const hourListRef = useRef<HTMLDivElement | null>(null)
+  const minuteListRef = useRef<HTMLDivElement | null>(null)
+  const yearListRef = useRef<HTMLDivElement | null>(null)
+
+  if (value !== syncedValue) {
+    setSyncedValue(value)
+    setDraft(formatPlanDateTime(value))
+  }
 
   const normalizeDateTimeInput = (input: string) => {
     const match = input.trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$/)
@@ -1099,6 +1110,24 @@ function PlanDateTimeField({
   const selectedHour = selectedValue.slice(11, 13)
   const selectedMinute = selectedValue.slice(14, 16)
   const calendarDays = calendarDaysForMonth(calendarMonth)
+  const calendarYear = Number(calendarMonth.slice(0, 4))
+  const selectedMonth = Number(calendarMonth.slice(5, 7))
+  const yearOptions = Array.from({ length: 11 }, (_, index) => calendarYear - 5 + index)
+
+  useEffect(() => {
+    if (!isPickerOpen) {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (pickerView === 'calendar') {
+        hourListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
+        minuteListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
+      } else {
+        yearListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear])
 
   const shiftMonth = (offset: number) => {
     const current = localDateFromIsoDate(`${calendarMonth}-01`)
@@ -1141,6 +1170,20 @@ function PlanDateTimeField({
     setCalendarMonth(monthPart(now))
   }
 
+  const applyClear = () => {
+    if (readOnly) {
+      return
+    }
+    onChange('')
+    setDraft('')
+    setIsPickerOpen(false)
+  }
+
+  const chooseMonth = (year: number, month: number) => {
+    setCalendarMonth(`${year}-${pad(month)}`)
+    setPickerView('calendar')
+  }
+
   return (
     <label className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
       <span className="field-label-row">
@@ -1169,6 +1212,10 @@ function PlanDateTimeField({
           disabled={readOnly}
           onClick={() => {
             if (!readOnly) {
+              if (!isPickerOpen) {
+                setCalendarMonth(monthPart(value || isoDate()))
+                setPickerView('calendar')
+              }
               setIsPickerOpen((current) => !current)
             }
           }}
@@ -1177,53 +1224,121 @@ function PlanDateTimeField({
         </button>
         {isPickerOpen && (
           <div className="date-time-popover" role="dialog" aria-label={`${label}选择器`}>
-            <div className="date-time-popover-header">
-              <button type="button" aria-label="上个月" title="上个月" onClick={() => shiftMonth(-1)}>
-                <ChevronLeft size={15} />
-              </button>
-              <strong>{monthLabelOf(calendarMonth)}</strong>
-              <button type="button" aria-label="下个月" title="下个月" onClick={() => shiftMonth(1)}>
-                <ChevronRight size={15} />
-              </button>
-            </div>
-            <div className="date-time-weekdays">
-              {weekdayLabels.map((day) => (
-                <span key={day}>{day}</span>
-              ))}
-            </div>
-            <div className="date-time-days">
-              {calendarDays.map((day) => (
-                <button
-                  type="button"
-                  key={day.value}
-                  className={`${day.inMonth ? '' : 'muted'} ${day.value === selectedDate ? 'active' : ''}`}
-                  onClick={() => applyDatePart(day.value)}
-                >
-                  {day.day}
-                </button>
-              ))}
-            </div>
-            <div className="date-time-clock">
-              <span>时间</span>
-              <input
-                value={selectedHour}
-                inputMode="numeric"
-                maxLength={2}
-                aria-label="小时"
-                onChange={(event) => applyTimePart('hour', event.target.value)}
-              />
-              <b>:</b>
-              <input
-                value={selectedMinute}
-                inputMode="numeric"
-                maxLength={2}
-                aria-label="分钟"
-                onChange={(event) => applyTimePart('minute', event.target.value)}
-              />
-            </div>
+            {pickerView === 'month' ? (
+              <>
+                <div className="date-time-popover-header">
+                  <button
+                    type="button"
+                    className="date-time-month-trigger"
+                    aria-label="选择年份和月份"
+                    aria-expanded="true"
+                    onClick={() => setPickerView('calendar')}
+                  >
+                    <strong>{monthLabelOf(calendarMonth)}</strong>
+                    <ChevronDown size={14} />
+                  </button>
+                </div>
+                <div className="date-time-month-panel">
+                  <div className="date-time-year-list" ref={yearListRef} aria-label="选择年份">
+                    {yearOptions.map((year) => (
+                      <button
+                        type="button"
+                        className={year === calendarYear ? 'active' : ''}
+                        aria-pressed={year === calendarYear}
+                        key={year}
+                        onClick={() => setCalendarMonth(`${year}-${pad(selectedMonth)}`)}
+                      >
+                        {year}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="date-time-month-grid" aria-label="选择月份">
+                    {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                      <button
+                        type="button"
+                        className={month === selectedMonth ? 'active' : ''}
+                        aria-pressed={month === selectedMonth}
+                        key={month}
+                        onClick={() => chooseMonth(calendarYear, month)}
+                      >
+                        {month}月
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="date-time-picker-main">
+                <div className="date-time-calendar-pane">
+                  <div className="date-time-popover-header">
+                    <button
+                      type="button"
+                      className="date-time-month-trigger"
+                      aria-label="选择年份和月份"
+                      aria-expanded="false"
+                      onClick={() => setPickerView('month')}
+                    >
+                      <strong>{monthLabelOf(calendarMonth)}</strong>
+                      <ChevronDown size={14} />
+                    </button>
+                    <div className="date-time-calendar-navigation" aria-label="切换月份">
+                      <button type="button" aria-label="上个月" title="上个月" onClick={() => shiftMonth(-1)}>
+                        <ChevronUp size={16} />
+                      </button>
+                      <button type="button" aria-label="下个月" title="下个月" onClick={() => shiftMonth(1)}>
+                        <ChevronDown size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="date-time-weekdays">
+                    {weekdayLabels.map((day) => (
+                      <span key={day}>{day}</span>
+                    ))}
+                  </div>
+                  <div className="date-time-days">
+                    {calendarDays.map((day) => (
+                      <button
+                        type="button"
+                        key={day.value}
+                        className={`${day.inMonth ? '' : 'muted'} ${day.value === selectedDate ? 'active' : ''}`}
+                        onClick={() => applyDatePart(day.value)}
+                      >
+                        {day.day}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="date-time-scroll-column" ref={hourListRef} aria-label="选择小时">
+                  {Array.from({ length: 24 }, (_, hour) => pad(hour)).map((hour) => (
+                    <button
+                      type="button"
+                      className={hour === selectedHour ? 'active' : ''}
+                      aria-pressed={hour === selectedHour}
+                      key={hour}
+                      onClick={() => applyTimePart('hour', hour)}
+                    >
+                      {hour}
+                    </button>
+                  ))}
+                </div>
+                <div className="date-time-scroll-column" ref={minuteListRef} aria-label="选择分钟">
+                  {Array.from({ length: 60 }, (_, minute) => pad(minute)).map((minute) => (
+                    <button
+                      type="button"
+                      className={minute === selectedMinute ? 'active' : ''}
+                      aria-pressed={minute === selectedMinute}
+                      key={minute}
+                      onClick={() => applyTimePart('minute', minute)}
+                    >
+                      {minute}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="date-time-popover-actions">
+              <button type="button" onClick={applyClear}>清除</button>
               <button type="button" onClick={applyToday}>今天</button>
-              <button type="button" onClick={() => setIsPickerOpen(false)}>完成</button>
             </div>
           </div>
         )}
@@ -4732,13 +4847,13 @@ function TaskProgressModal({
     <section className="progress-lite-time-grid">
       <PlanDateTimeField
         label="开始时间"
-        value={`${activeStartDate}T${normalizeClockInput(activeDraft.start) || '09:00'}`}
-        onChange={(value) => updateActiveDraft((current) => ({ ...current, date: datePart(value), start: value.slice(11, 16) }))}
+        value={activeDraft.date && normalizeClockInput(activeDraft.start) ? `${activeDraft.date}T${normalizeClockInput(activeDraft.start)}` : ''}
+        onChange={(value) => updateActiveDraft((current) => ({ ...current, date: value ? datePart(value) : '', start: value ? value.slice(11, 16) : '' }))}
       />
       <PlanDateTimeField
         label="结束时间"
-        value={`${activeEndDate}T${normalizeClockInput(activeDraft.end) || '10:00'}`}
-        onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: datePart(value), end: value.slice(11, 16) }))}
+        value={activeDraft.endDate && normalizeClockInput(activeDraft.end) ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}` : ''}
+        onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: value ? datePart(value) : '', end: value ? value.slice(11, 16) : '' }))}
       />
       <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
         {hasDraftTimeEntry
