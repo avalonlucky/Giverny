@@ -2975,8 +2975,13 @@ function App() {
 
       <section className="workspace">
         <header className="topbar">
-          <div>
+          <div className="topbar-heading">
             <h1>{viewTitle}</h1>
+            {activeView === '工作台' && (
+              <p className="topbar-summary">
+                本月 {activeMonthTasks.length} 条任务 · {stats.pending} 个待验收
+              </p>
+            )}
           </div>
           <div className="topbar-actions">
             <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} />

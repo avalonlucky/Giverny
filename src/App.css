@@ -335,6 +335,17 @@ button {
   font-weight: 800;
 }
 
+.topbar-heading {
+  min-width: 0;
+}
+
+.topbar-summary {
+  margin: 7px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .topbar-actions,
 .panel-tools,
 .segment-tabs,
