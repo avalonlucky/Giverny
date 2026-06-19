@@ -3041,10 +3041,10 @@ function App() {
         {(dueTasks.overdue.length > 0 || dueTasks.soon.length > 0) && (
           <button className="due-strip" onClick={() => navigateView('任务')}>
             <AlarmClock size={17} />
-            <span>
-              {dueTasks.overdue.length > 0 && <strong className="due-tag overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
+            <span className="due-summary">
+              {dueTasks.overdue.length > 0 && <strong className="due-summary-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
               {dueTasks.overdue.length > 0 && dueTasks.soon.length > 0 && ' · '}
-              {dueTasks.soon.length > 0 && <strong className="due-tag soon">{dueTasks.soon.length} 个任务 3 天内交付</strong>}
+              {dueTasks.soon.length > 0 && <span className="due-summary-soon">{dueTasks.soon.length} 个任务 3 天内交付</span>}
             </span>
             <em>{[...dueTasks.overdue, ...dueTasks.soon].slice(0, 3).map((task) => task.title).join('、')}</em>
             <ChevronDown size={15} className="due-arrow" />

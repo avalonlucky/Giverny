@@ -21,6 +21,8 @@
   --color-status-hold: #7c3aed;
   --color-status-stopped: #dc2626;
   --color-status-disabled: #8a9496;
+  --color-alert-surface: #f7eee2;
+  --color-alert-accent: #a9702b;
   --color-border: rgba(39, 54, 58, 0.08);
   --color-border-soft: rgba(39, 54, 58, 0.045);
   --radius-control: 8px;
@@ -8552,38 +8554,49 @@ textarea:focus-visible {
 
 .due-strip {
   width: 100%;
-  min-height: 46px;
-  margin-bottom: 16px;
-  padding: 0 14px;
-  border: 1px solid rgba(230, 164, 58, 0.4);
-  border-radius: 10px;
-  background: rgba(230, 164, 58, 0.1);
-  color: #6b5012;
+  min-height: 56px;
+  margin-bottom: 18px;
+  padding: 0 18px;
+  border: 0;
+  border-left: 3px solid var(--color-alert-accent);
+  border-radius: 0;
+  background: var(--color-alert-surface);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   cursor: pointer;
   text-align: left;
   font-size: 13px;
-  transition: background 0.16s ease, border-color 0.16s ease;
+  transition: background 0.16s ease;
 }
 
 .due-strip:hover {
-  background: rgba(230, 164, 58, 0.18);
+  background: var(--color-surface-alt);
 }
 
-.due-strip > span {
+.due-strip .due-summary {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+.due-summary-overdue {
+  color: var(--color-alert-accent);
+  font-weight: 800;
+}
+
+.due-summary-soon {
+  color: var(--color-text-secondary);
+  font-weight: 700;
 }
 
 .due-strip em {
   flex: 1;
   min-width: 0;
   font-style: normal;
-  color: #8a6d28;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9902,8 +9915,8 @@ textarea:focus-visible {
 
   .due-strip {
     height: auto;
-    min-height: 46px;
-    padding-block: 10px;
+    min-height: 56px;
+    padding-block: 12px;
     align-items: flex-start;
   }
 
