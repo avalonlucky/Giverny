@@ -732,6 +732,8 @@ const laborTaxBrackets = [
   { limit: Number.POSITIVE_INFINITY, rate: 0.4, quick: 7000 },
 ]
 
+type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
+
 type AnnualIncomeRow = {
   month: string
   hours: number
@@ -4414,11 +4416,13 @@ function TaskProgressModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
   const initialProgressDraft = useMemo(
-    () => readDraftCache(progressDraftKey, { draftProgress: task.progress, note: '' }),
-    [progressDraftKey, task.progress],
+    () => readDraftCache(progressDraftKey, { draftProgress: task.progress, note: '', waitingDraft: defaultTimeEntryDraft(), waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[] }),
+    [progressDraftKey, task.progress, task.waitingEntries],
   )
   const [draftProgress, setDraftProgress] = useState(initialProgressDraft.draftProgress)
   const [note, setNote] = useState(initialProgressDraft.note)
+  const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
+  const [draftWaitingEntries, setDraftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
   const [isSaving, setIsSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
@@ -4429,6 +4433,9 @@ function TaskProgressModal({
   const [activityExpansion, setActivityExpansion] = useState({ taskId: task.id, showAll: false })
   const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
+  const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
+  const waitingDirty = JSON.stringify(draftWaitingEntries) !== savedWaitingSignature
+  const waitingMinutes = sumTimeEntries(draftWaitingEntries)
   const taskActivity = activity
   const canDeleteActivity = Boolean(onRequestDeleteActivity)
   const showAllActivity = activityExpansion.taskId === task.id ? activityExpansion.showAll : false
@@ -4438,8 +4445,23 @@ function TaskProgressModal({
   const hiddenActivityHasFiles = hiddenTaskActivity.some((item) => getActivityFileNames(item).length > 0)
 
   useEffect(() => {
-    writeDraftCache(progressDraftKey, { draftProgress, note })
-  }, [draftProgress, note, progressDraftKey])
+    writeDraftCache(progressDraftKey, { draftProgress, note, waitingDraft, waitingEntries: draftWaitingEntries })
+  }, [draftProgress, draftWaitingEntries, note, progressDraftKey, waitingDraft])
+
+  const addWaitingEntry = () => {
+    const start = waitingDraft.start.trim()
+    const end = waitingDraft.end.trim()
+    const noteText = waitingDraft.note?.trim() ?? ''
+    if (!start || !end || minutesBetween(start, end) <= 0) {
+      return
+    }
+    setDraftWaitingEntries((current) => [...current, { id: crypto.randomUUID(), start, end, note: noteText }])
+    setWaitingDraft(defaultTimeEntryDraft())
+  }
+
+  const deleteWaitingEntry = (entryId: string) => {
+    setDraftWaitingEntries((current) => current.filter((entry) => entry.id !== entryId))
+  }
 
   const uploadFiles = async (fileList: FileList | null) => {
     const selectedFiles = Array.from(fileList ?? [])
@@ -4481,6 +4503,9 @@ function TaskProgressModal({
     try {
       if (progressDirty) {
         confirmProgress()
+      }
+      if (waitingDirty) {
+        onUpdateTask(task.id, { waitingEntries: draftWaitingEntries })
       }
       const body = note.trim()
       if (body || uploadedNames.length > 0) {
@@ -4532,6 +4557,48 @@ function TaskProgressModal({
         </button>
       </header>
       <div className="task-action-body">
+        <section className="action-section progress-waiting-section">
+          <div className="action-section-title">
+            <h3>等待记录</h3>
+            <span>不计费 · {draftWaitingEntries.length} 段 · {formatDuration(waitingMinutes)}</span>
+          </div>
+          <p className="progress-waiting-hint">用于记录等待甲方意见、补资料、等确认等占用时间；不会进入结算工时，但会进入洞察分析。</p>
+          {draftWaitingEntries.length > 0 && (
+            <div className="progress-waiting-list">
+              {draftWaitingEntries.map((entry) => (
+                <div className="progress-waiting-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.start} - {entry.end}</strong>
+                    <span>{entry.note || '等待甲方确认'}</span>
+                  </div>
+                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                  <button type="button" className="icon-button danger-icon" aria-label="删除等待记录" title="删除等待记录" onClick={() => deleteWaitingEntry(entry.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="progress-waiting-create">
+            <TimeTextInput value={waitingDraft.start} ariaLabel="等待开始时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, start: value }))} />
+            <span>至</span>
+            <TimeTextInput value={waitingDraft.end} ariaLabel="等待结束时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, end: value }))} />
+            <input
+              value={waitingDraft.note ?? ''}
+              placeholder="例如：等待甲方意见 / 等待补资料"
+              onChange={(event) => setWaitingDraft((current) => ({ ...current, note: event.target.value }))}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  addWaitingEntry()
+                }
+              }}
+            />
+            <button type="button" className="ghost-button compact-button" disabled={minutesBetween(waitingDraft.start, waitingDraft.end) <= 0} onClick={addWaitingEntry}>
+              <Plus size={15} />
+              添加等待
+            </button>
+          </div>
+        </section>
         <section className="action-section">
           <div className="action-section-title">
             <h3>整体进度</h3>
@@ -4690,7 +4757,7 @@ function TaskProgressModal({
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || (!progressDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
+        <button className="primary-button" disabled={isSaving || (!progressDirty && !waitingDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
           {isSaving ? '保存中…' : '保存进展'}
         </button>
       </footer>

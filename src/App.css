@@ -2802,6 +2802,82 @@ button {
   font: inherit;
 }
 
+.progress-waiting-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.progress-waiting-hint {
+  margin: -2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.progress-waiting-list {
+  display: grid;
+  gap: 7px;
+}
+
+.progress-waiting-row {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-waiting-row strong,
+.progress-waiting-row span {
+  display: block;
+}
+
+.progress-waiting-row strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.progress-waiting-row span {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.progress-waiting-row em {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.progress-waiting-create {
+  display: grid;
+  grid-template-columns: 76px auto 76px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.progress-waiting-create input {
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  outline: 0;
+  font: inherit;
+}
+
+.progress-waiting-create span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
 .uploaded-chip-row {
   display: flex;
   flex-wrap: wrap;
