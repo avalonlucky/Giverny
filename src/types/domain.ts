@@ -8,6 +8,9 @@ export type TaskViewMode = '列表' | '日历'
 
 export type TaxMode = 'salary' | 'labor'
 
+export type TaskFeedbackRating = '顺利' | '一般' | '有问题'
+export type TaskFeedbackTag = '需求不清晰' | '沟通成本高' | '定价偏低' | '技术挑战大'
+
 export type Task = {
   id: number
   date: string
@@ -27,8 +30,11 @@ export type Task = {
   suspendReason?: string
   terminateReason?: string
   acceptanceNote?: string
+  feedbackRating?: TaskFeedbackRating | ''
+  feedbackTags?: TaskFeedbackTag[]
   acceptanceFiles?: string[]
   timeEntries?: TimeEntry[]
+  waitingEntries?: WaitingEntry[]
   voidedAt?: string
   voidReason?: string
   files: string[]
@@ -40,6 +46,8 @@ export type TimeEntry = {
   end: string
   note?: string
 }
+
+export type WaitingEntry = TimeEntry
 
 export type FileAsset = {
   id: number

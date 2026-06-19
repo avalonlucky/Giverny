@@ -77,7 +77,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -380,7 +380,10 @@ const UPLOAD_SOFT_LIMIT = 50 * 1024 * 1024
 type AcceptancePayload = {
   actualHours: number
   acceptanceNote: string
+  feedbackRating?: TaskFeedbackRating | ''
+  feedbackTags?: TaskFeedbackTag[]
   timeEntries: TimeEntry[]
+  waitingEntries?: WaitingEntry[]
   acceptanceFiles?: string[]
   taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'progress'>>
 }
@@ -426,6 +429,8 @@ const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
 ]
 
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
+const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
+const taskFeedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
 
 const statusDotColors: Record<TaskStatus, string> = {
   计划中: 'var(--color-status-planning)',
@@ -2246,7 +2251,10 @@ function App() {
         reviewer: payload.taskChanges?.reviewer || task.reviewer || payload.taskChanges?.requester || task.requester || '待确认',
         actualHours: payload.actualHours,
         acceptanceNote: payload.acceptanceNote,
+        feedbackRating: payload.feedbackRating,
+        feedbackTags: payload.feedbackTags,
         timeEntries: payload.timeEntries,
+        waitingEntries: payload.waitingEntries,
         acceptanceFiles: payload.acceptanceFiles,
         progress: 100,
         // 非补录任务：结算月份自动跟随验收时间（当前年月）
@@ -4133,7 +4141,10 @@ function TasksView({
       reviewer: payload.taskChanges?.reviewer || acceptanceTask.reviewer || payload.taskChanges?.requester || acceptanceTask.requester || '待确认',
       actualHours: payload.actualHours,
       acceptanceNote: payload.acceptanceNote,
+      feedbackRating: payload.feedbackRating,
+      feedbackTags: payload.feedbackTags,
       timeEntries: payload.timeEntries,
+      waitingEntries: payload.waitingEntries,
       acceptanceFiles: payload.acceptanceFiles,
       progress: 100,
       // 非补录任务：结算月份自动跟随验收时间（当前年月）
@@ -4730,6 +4741,8 @@ export function TaskEditor({
   const [pickProgress, setPickProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
   const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
+  const [waitingDraft, setWaitingDraft] = useState(defaultTimeEntryDraft)
+  const [waitingEntryToDelete, setWaitingEntryToDelete] = useState<WaitingEntry | null>(null)
   const [acceptancePanelOpen, setAcceptancePanelOpen] = useState(false)
   const [progressNote, setProgressNote] = useState('')
   const [isSavingProgressNote, setIsSavingProgressNote] = useState(false)
@@ -4761,7 +4774,9 @@ export function TaskEditor({
     }, 900)
   }
   const timeEntries = task.timeEntries ?? []
+  const waitingEntries = task.waitingEntries ?? []
   const trackedMinutes = sumTimeEntries(timeEntries)
+  const waitingMinutes = sumTimeEntries(waitingEntries)
   const reviewHours = timeEntries.length > 0 ? hoursFromTimeEntries(timeEntries) : task.actualHours
   const updateActivity = activity.filter((item) => item.entityType === 'update')
   const editorDueState = taskDueState(task, isoDate(), isoDate(3))
@@ -4801,6 +4816,28 @@ export function TaskEditor({
 
   const requestDeleteTimeEntry = (entry: TimeEntry) => {
     setTimeEntryToDelete(entry)
+  }
+
+  const saveWaitingEntries = (entries: WaitingEntry[]) => {
+    onUpdateTask(task.id, {
+      waitingEntries: entries,
+      status: task.status === '计划中' ? '进行中' : task.status,
+    })
+  }
+
+  const addWaitingEntry = () => {
+    const start = waitingDraft.start.trim()
+    const end = waitingDraft.end.trim()
+    const note = waitingDraft.note.trim()
+    if (!start || !end || minutesBetween(start, end) <= 0) {
+      return
+    }
+    saveWaitingEntries([...waitingEntries, { id: crypto.randomUUID(), start, end, note }])
+    setWaitingDraft(defaultTimeEntryDraft())
+  }
+
+  const deleteWaitingEntry = (entryId: string) => {
+    saveWaitingEntries(waitingEntries.filter((entry) => entry.id !== entryId))
   }
 
   const commitText = (field: 'title' | 'type' | 'date' | 'estimatedDate' | 'settlementMonth' | 'requester' | 'contact' | 'reviewer' | 'requirement') => {
@@ -4951,6 +4988,8 @@ export function TaskEditor({
       reviewer: payload.taskChanges?.reviewer || draft.reviewer.trim() || payload.taskChanges?.requester || draft.requester.trim() || task.reviewer,
       actualHours: payload.actualHours,
       acceptanceNote: payload.acceptanceNote,
+      feedbackRating: payload.feedbackRating,
+      feedbackTags: payload.feedbackTags,
       timeEntries: payload.timeEntries,
       acceptanceFiles: payload.acceptanceFiles,
       progress: 100,
@@ -5325,6 +5364,48 @@ export function TaskEditor({
             </div>
           </section>
 
+          <section className="task-time-panel task-waiting-panel">
+            <div className="workflow-section-title">
+              <h3>等待记录</h3>
+              <span>不计费 · {waitingEntries.length} 段 · {formatDuration(waitingMinutes)}</span>
+            </div>
+            <p className="calendar-empty-hint">记录等待甲方意见、补资料、等确认等非计费占用，用于后续计算等待占比，不进入结算工时。</p>
+            <div className="task-time-list">
+              {waitingEntries.length === 0 && <p className="calendar-empty-hint">还没有等待记录。</p>}
+              {waitingEntries.map((entry) => (
+                <div className="task-time-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.start} - {entry.end}</strong>
+                    <span>{entry.note || '等待甲方确认'}</span>
+                  </div>
+                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                  <button className="icon-button danger-icon" aria-label="删除等待记录" title="删除等待记录" onClick={() => setWaitingEntryToDelete(entry)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="time-entry-create">
+              <TimeTextInput value={waitingDraft.start} ariaLabel="等待开始时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, start: value }))} />
+              <span>至</span>
+              <TimeTextInput value={waitingDraft.end} ariaLabel="等待结束时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, end: value }))} />
+              <input
+                value={waitingDraft.note}
+                placeholder="例如：等待甲方意见 / 等待补充资料"
+                onChange={(event) => setWaitingDraft((current) => ({ ...current, note: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    addWaitingEntry()
+                  }
+                }}
+              />
+              <button className="ghost-button compact-button" disabled={minutesBetween(waitingDraft.start, waitingDraft.end) <= 0} onClick={addWaitingEntry}>
+                <Plus size={15} />
+                添加等待
+              </button>
+            </div>
+          </section>
+
           <section className="acceptance-collapse-panel">
             <div className="workflow-section-title acceptance-workflow-title">
               <h3>交付验收</h3>
@@ -5384,6 +5465,7 @@ export function TaskEditor({
                   <span>{updateActivity.length} 条进展记录</span>
                   <span>{(task.files ?? []).length} 个任务附件</span>
                   <span>{trackedMinutes > 0 ? formatDuration(trackedMinutes) : '未记录分段工时'}</span>
+                  <span>{waitingMinutes > 0 ? `等待 ${formatDuration(waitingMinutes)}` : '未记录等待'}</span>
                 </div>
                 <p>点击“去验收”打开终审弹窗，核对基础信息、进度、分段工时、验收附件和备注；确认后状态变为已验收，工时锁定计入结算，本次项目结束。</p>
                 <button type="button" className="primary-button acceptance-go-button" onClick={() => setAcceptanceOpen(true)}>
@@ -5426,6 +5508,28 @@ export function TaskEditor({
           }}
         />
       )}
+      {waitingEntryToDelete && (
+        <ConfirmDialogModal
+          dialog={{
+            eyebrow: '删除等待记录',
+            title: `确定删除 ${waitingEntryToDelete.start} - ${waitingEntryToDelete.end} 吗？`,
+            body: '等待记录不会计入结算工时，但会用于后续分析任务等待占比和机会成本。',
+            confirmText: '确认删除',
+            tone: 'danger',
+            details: [waitingEntryToDelete.note || '等待甲方确认', formatDuration(minutesBetween(waitingEntryToDelete.start, waitingEntryToDelete.end))],
+            onConfirm: () => {
+              deleteWaitingEntry(waitingEntryToDelete.id)
+              setWaitingEntryToDelete(null)
+            },
+          }}
+          isBusy={false}
+          onClose={() => setWaitingEntryToDelete(null)}
+          onConfirm={() => {
+            deleteWaitingEntry(waitingEntryToDelete.id)
+            setWaitingEntryToDelete(null)
+          }}
+        />
+      )}
     </aside>
   )
 }
@@ -5457,19 +5561,26 @@ function AcceptanceModal({
     estimatedDate: task.estimatedDate || '',
   }
   const fallbackTimeEntries = task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }]
+  const fallbackWaitingEntries = task.waitingEntries ?? []
   const [initialAcceptanceDraft] = useState(() =>
     readDraftCache(acceptanceDraftKey, {
       acceptanceNote: initialNote,
       basicDraft: fallbackBasicDraft,
       timeEntries: fallbackTimeEntries,
+      waitingEntries: fallbackWaitingEntries,
       progressDraft: task.progress,
       uploadedFiles: [] as FileAsset[],
+      feedbackRating: task.feedbackRating ?? '' as TaskFeedbackRating | '',
+      feedbackTags: task.feedbackTags ?? [] as TaskFeedbackTag[],
     }),
   )
   const [acceptanceNote, setAcceptanceNote] = useState(initialAcceptanceDraft.acceptanceNote)
+  const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialAcceptanceDraft.feedbackRating)
+  const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialAcceptanceDraft.feedbackTags)
   const [basicEditing, setBasicEditing] = useState(false)
   const [basicDraft, setBasicDraft] = useState(initialAcceptanceDraft.basicDraft)
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(initialAcceptanceDraft.timeEntries)
+  const [waitingEntries, setWaitingEntries] = useState<WaitingEntry[]>(initialAcceptanceDraft.waitingEntries)
   const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>(initialAcceptanceDraft.uploadedFiles)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -5502,13 +5613,20 @@ function AcceptanceModal({
       acceptanceNote,
       basicDraft,
       timeEntries,
+      waitingEntries,
       progressDraft,
       uploadedFiles,
+      feedbackRating,
+      feedbackTags,
     })
-  }, [acceptanceDraftKey, acceptanceNote, basicDraft, progressDraft, timeEntries, uploadedFiles])
+  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackRating, feedbackTags, progressDraft, timeEntries, uploadedFiles, waitingEntries])
 
   const updateEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
     setTimeEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
+  }
+
+  const updateWaitingEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
+    setWaitingEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
   }
 
   const updateBasicDraft = (field: keyof typeof basicDraft, value: string) => {
@@ -5522,6 +5640,7 @@ function AcceptanceModal({
 
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
+  const waitingMinutes = sumTimeEntries(waitingEntries)
   const canConfirmAcceptance = computedMinutes > 0 && !isUploading
   const dueState = taskDueState(task, isoDate(), isoDate(3))
   const trimmedTaskChanges =
@@ -5603,6 +5722,10 @@ function AcceptanceModal({
     } finally {
       setIsAcceptanceAiLoading(false)
     }
+  }
+
+  const toggleFeedbackTag = (tag: TaskFeedbackTag) => {
+    setFeedbackTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])
   }
 
   return (
@@ -5790,6 +5913,32 @@ function AcceptanceModal({
             <span>实际工时合计</span>
             <strong>{computedHours.toFixed(2)} h</strong>
           </div>
+          <div className="acceptance-waiting-summary">
+            <div className="acceptance-section-title compact-title">
+              <h4>等待记录</h4>
+              <small>不计费 · {waitingEntries.length} 段 · {formatDuration(waitingMinutes)}</small>
+            </div>
+            {waitingEntries.length === 0 ? (
+              <p className="acceptance-muted-hint">暂无等待记录；等待甲方意见、资料或确认时，可在任务进展里单独记录。</p>
+            ) : (
+              <div className="acceptance-time-list compact-list">
+                {waitingEntries.map((entry) => (
+                  <div className="acceptance-time-row" key={entry.id}>
+                    <div className="acceptance-time-range">
+                      <TimeTextInput value={entry.start} ariaLabel="等待开始时间" onChange={(value) => updateWaitingEntry(entry.id, 'start', value)} />
+                      <span>至</span>
+                      <TimeTextInput value={entry.end} ariaLabel="等待结束时间" onChange={(value) => updateWaitingEntry(entry.id, 'end', value)} />
+                    </div>
+                    <input value={entry.note ?? ''} aria-label="等待说明" placeholder="例如：等待甲方意见 / 等待资料" onChange={(event) => updateWaitingEntry(entry.id, 'note', event.target.value)} />
+                    <strong>{formatDuration(minutesBetween(entry.start, entry.end))}</strong>
+                    <button className="icon-button danger-icon" aria-label="删除等待记录" title="删除等待记录" onClick={() => setWaitingEntries((current) => current.filter((item) => item.id !== entry.id))}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="acceptance-final-section">
@@ -5865,6 +6014,50 @@ function AcceptanceModal({
             </div>
           )}
         </section>
+
+        <section className="acceptance-final-section">
+          <div className="acceptance-section-title">
+            <span className="acceptance-section-index">6</span>
+            <h3>任务体感</h3>
+            <small>可选 · 只给设计师自己看</small>
+          </div>
+          <div className="task-feedback-box">
+            <div className="task-feedback-options" role="group" aria-label="任务体感">
+              {taskFeedbackRatings.map((rating) => (
+                <button
+                  type="button"
+                  className={feedbackRating === rating ? 'active' : ''}
+                  key={rating}
+                  aria-pressed={feedbackRating === rating}
+                  onClick={() => {
+                    setFeedbackRating((current) => current === rating ? '' : rating)
+                    if (rating === '顺利') {
+                      setFeedbackTags([])
+                    }
+                  }}
+                >
+                  {rating}
+                </button>
+              ))}
+            </div>
+            {feedbackRating && feedbackRating !== '顺利' && (
+              <div className="task-feedback-tags" aria-label="体感原因标签">
+                {taskFeedbackTags.map((tag) => (
+                  <button
+                    type="button"
+                    className={feedbackTags.includes(tag) ? 'active' : ''}
+                    key={tag}
+                    aria-pressed={feedbackTags.includes(tag)}
+                    onClick={() => toggleFeedbackTag(tag)}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!feedbackRating && <p>不填也可以验收；这项用于后续识别“做得痛苦但数据正常”的任务。</p>}
+          </div>
+        </section>
       </div>
 
       <footer className="modal-footer acceptance-final-footer">
@@ -5882,7 +6075,16 @@ function AcceptanceModal({
           disabled={!canConfirmAcceptance}
           onClick={() => {
             clearDraftCache(acceptanceDraftKey)
-            onConfirm({ actualHours: computedHours, acceptanceNote: acceptanceNote.trim(), timeEntries, acceptanceFiles: uploadedFiles.map((file) => file.name), taskChanges: trimmedTaskChanges })
+            onConfirm({
+              actualHours: computedHours,
+              acceptanceNote: acceptanceNote.trim(),
+              feedbackRating,
+              feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
+              timeEntries,
+              waitingEntries,
+              acceptanceFiles: uploadedFiles.map((file) => file.name),
+              taskChanges: trimmedTaskChanges,
+            })
           }}
         >
           {isUploading ? '上传中…' : '确认验收'}
@@ -5950,7 +6152,9 @@ function TaskDetailModal({
 }) {
   const dueState = taskDueState(task, isoDate(), isoDate(3))
   const actualMinutes = sumTimeEntries(task.timeEntries ?? [])
+  const waitingMinutes = sumTimeEntries(task.waitingEntries ?? [])
   const actualHoursText = actualMinutes > 0 ? `${(actualMinutes / 60).toFixed(2)} h（共 ${(task.timeEntries ?? []).length} 段）` : `${task.actualHours.toFixed(2)} h`
+  const waitingHoursText = `${(waitingMinutes / 60).toFixed(2)} h（共 ${(task.waitingEntries ?? []).length} 段）`
   const recentActivity = activity.slice(0, 4)
 
   return (
@@ -6031,6 +6235,21 @@ function TaskDetailModal({
               <dt>实际工时</dt>
               <dd>{actualHoursText}</dd>
             </div>
+            {waitingMinutes > 0 && (
+              <div>
+                <dt>等待记录</dt>
+                <dd className="admin-only-data">{waitingHoursText}</dd>
+              </div>
+            )}
+            {task.feedbackRating && (
+              <div>
+                <dt>任务体感</dt>
+                <dd className="task-feedback-detail admin-only-data">
+                  <span>{task.feedbackRating}</span>
+                  {(task.feedbackTags ?? []).map((tag) => <em key={tag}>{tag}</em>)}
+                </dd>
+              </div>
+            )}
             <div>
               <dt>结算月份</dt>
               <dd>

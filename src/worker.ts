@@ -1,6 +1,6 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
 import JSZip from 'jszip'
-import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskUpdate, TaxMode, TimeEntry } from './types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskUpdate, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -148,7 +148,10 @@ type DbTask = {
   suspend_reason: string | null
   terminate_reason: string | null
   acceptance_note: string | null
+  feedback_rating: TaskFeedbackRating | null
+  feedback_tags_json: string | null
   time_entries_json: string | null
+  waiting_entries_json: string | null
   is_billable: number
   deleted_at?: string | null
   voided_at?: string | null
@@ -1109,6 +1112,10 @@ type InsightTypeMetrics = {
   acceptedCount: number
   actualHours: number
   estimatedHours: number
+  cycleHours: number
+  opportunityWaitHours: number
+  explicitWaitingHours: number
+  waitingRatioPercent: number | null
   estimateVariancePercent: number | null
   revisionSignals: number
   revisionSignalsPerTask: number | null
@@ -1116,6 +1123,9 @@ type InsightTypeMetrics = {
   averageCycleDays: number | null
   deliveryRiskCount: number
   attachmentQualityIssueCount: number
+  feedbackIssueCount: number
+  feedbackRatings: Record<string, number>
+  feedbackTags: Record<string, number>
 }
 
 type InsightDiagnosisResult = Omit<InsightDiagnosis, 'generatedAt'>
@@ -1212,6 +1222,20 @@ function taskCycleDays(task: DbTask) {
   return Math.max(1, Math.round((end - start) / 86400000))
 }
 
+function entryMinutesBetween(start: string, end: string) {
+  const [startHour, startMinute] = start.split(':').map(Number)
+  const [endHour, endMinute] = end.split(':').map(Number)
+  if ([startHour, startMinute, endHour, endMinute].some((value) => !Number.isFinite(value))) {
+    return 0
+  }
+  return Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute))
+}
+
+function entriesHours(entries: TimeEntry[]) {
+  const minutes = entries.reduce((sum, entry) => sum + entryMinutesBetween(entry.start, entry.end), 0)
+  return Math.round((minutes / 60) * 100) / 100
+}
+
 function parseAnalysisItems(value: string | null) {
   try {
     const parsed = JSON.parse(value || '[]')
@@ -1247,6 +1271,12 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
   return [...groups.entries()].map(([type, items]) => {
     const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
     const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
+    const cycleHours = items.reduce((sum, task) => sum + hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date), 0)
+    const explicitWaitingHours = items.reduce((sum, task) => sum + entriesHours(parseWaitingEntries(task.waiting_entries_json)), 0)
+    const opportunityWaitHours = items.reduce((sum, task) => {
+      const cycle = hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date)
+      return sum + Math.max(0, cycle - (Number(task.actual_hours) || 0))
+    }, 0)
     const revisionSignals = items.reduce(
       (sum, task) => sum + (dataSet.updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
       0,
@@ -1254,6 +1284,19 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
     const cycles = items.map(taskCycleDays).filter((value): value is number => value !== null)
     const analyses = items.flatMap((task) => dataSet.analysesByTask.get(task.id) ?? [])
     const attachmentQualityIssueCount = analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.quality_issues_json).length, 0)
+    const feedbackRatings = items.reduce<Record<string, number>>((map, task) => {
+      const rating = normalizeFeedbackRating(task.feedback_rating)
+      if (rating) {
+        map[rating] = (map[rating] ?? 0) + 1
+      }
+      return map
+    }, {})
+    const feedbackTagsByType = items.reduce<Record<string, number>>((map, task) => {
+      parseFeedbackTags(task.feedback_tags_json).forEach((tag) => {
+        map[tag] = (map[tag] ?? 0) + 1
+      })
+      return map
+    }, {})
     const deliveryRiskCount =
       analyses.reduce((sum, analysis) => sum + parseAnalysisItems(analysis.risks_json).length, 0) +
       items.filter((task) => task.status !== '已验收' && Boolean(task.estimated_delivery_date) && task.estimated_delivery_date! < nowIso()).length
@@ -1263,6 +1306,10 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
       acceptedCount: items.filter((task) => task.status === '已验收').length,
       actualHours: Number(actualHours.toFixed(1)),
       estimatedHours: Number(estimatedHours.toFixed(1)),
+      cycleHours: Number(cycleHours.toFixed(1)),
+      opportunityWaitHours: Number(opportunityWaitHours.toFixed(1)),
+      explicitWaitingHours: Number(explicitWaitingHours.toFixed(1)),
+      waitingRatioPercent: cycleHours > 0 ? Math.round((opportunityWaitHours / cycleHours) * 100) : null,
       estimateVariancePercent: estimatedHours > 0 ? Math.round(((actualHours - estimatedHours) / estimatedHours) * 100) : null,
       revisionSignals,
       revisionSignalsPerTask: items.length > 0 ? Number((revisionSignals / items.length).toFixed(2)) : null,
@@ -1270,6 +1317,9 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
       averageCycleDays: cycles.length > 0 ? Number(average(cycles).toFixed(1)) : null,
       deliveryRiskCount,
       attachmentQualityIssueCount,
+      feedbackIssueCount: (feedbackRatings['一般'] ?? 0) + (feedbackRatings['有问题'] ?? 0),
+      feedbackRatings,
+      feedbackTags: feedbackTagsByType,
     }
   }).sort((left, right) => right.actualHours - left.actualHours || right.taskCount - left.taskCount)
 }
@@ -1434,6 +1484,21 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
         dataSnapshot: { currentMonth, previousMonth, current, previous, historicalBaseline: baseline ?? null },
       })
     }
+    if (
+      current.acceptedCount >= 2 &&
+      (current.waitingRatioPercent ?? 0) >= 70 &&
+      current.opportunityWaitHours >= 12 &&
+      (!baseline || (current.waitingRatioPercent ?? 0) > ((baseline.waitingRatioPercent ?? 0) + 10))
+    ) {
+      triggers.push({
+        insightType: 'efficiency',
+        triggerKey: `waiting-ratio:${current.type}`,
+        finding: `${current.type} 等待占比偏高`,
+        recommendationHint: '复盘该类型任务是否经常等待甲方确认、资料补齐或反馈排期；下次接单时提前约定反馈时限，或把长等待任务拆成阶段交付。',
+        severity: (current.waitingRatioPercent ?? 0) >= 85 ? 'high' : 'medium',
+        dataSnapshot: { currentMonth, previousMonth, current, previous, historicalBaseline: baseline ?? null },
+      })
+    }
   }
 
   const currentHours = currentMetrics.reduce((sum, item) => sum + item.actualHours, 0)
@@ -1471,6 +1536,26 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
         recommendationHint: '评估该对接人的需求沟通成本、修改风险和报价结构，必要时提高报价或限制低价值任务占比。',
         severity: (current.rate ?? 0) < globalHourlyRate * 0.75 ? 'high' : 'medium',
         dataSnapshot: { currentMonth, previousMonth, contact, current, previous, baselineHourlyRate: Number(globalHourlyRate.toFixed(2)) },
+      })
+    }
+    const currentContactTasks = monthTasks(dataSet, currentMonth).filter((task) => (task.contact_person || '') === contact)
+    const subjectiveIssues = currentContactTasks
+      .filter((task) => normalizeFeedbackRating(task.feedback_rating) === '一般' || normalizeFeedbackRating(task.feedback_rating) === '有问题')
+    const tagCounts = subjectiveIssues.reduce<Record<string, number>>((map, task) => {
+      parseFeedbackTags(task.feedback_tags_json).forEach((tag) => {
+        map[tag] = (map[tag] ?? 0) + 1
+      })
+      return map
+    }, {})
+    const dominantTag = Object.entries(tagCounts).sort((left, right) => right[1] - left[1])[0]
+    if (subjectiveIssues.length >= 2 && dominantTag) {
+      triggers.push({
+        insightType: 'client',
+        triggerKey: `feedback-contact:${contact}:${dominantTag[0]}`,
+        finding: `${contact} 的任务主观反馈集中在「${dominantTag[0]}」`,
+        recommendationHint: '复盘该对接人的需求输入、反馈路径和报价边界，把体感问题转成下次接单前的明确约束。',
+        severity: subjectiveIssues.length >= 3 || dominantTag[1] >= 3 ? 'high' : 'medium',
+        dataSnapshot: { currentMonth, contact, issueTaskCount: subjectiveIssues.length, tagCounts, tasks: subjectiveIssues.map((task) => ({ id: task.id, title: task.title, type: task.design_type, rating: task.feedback_rating, tags: parseFeedbackTags(task.feedback_tags_json) })) },
       })
     }
   }
@@ -1595,6 +1680,12 @@ async function diagnoseInsights(env: Env, request: Request) {
     definitions: {
       revisionSignals: '进展记录标题或内容含修改、调整、改稿、反馈、返工或 revision 的次数；这是可追溯代理指标，不等于人工确认的精确修改轮次。',
       weightedHourlyRate: '按任务实际工时加权的任务结算时薪；若任务均使用同一费率，该指标不会产生可用差异。',
+      feedbackRatings: '验收时设计师主观体感：顺利、一般、有问题；这是客观工时无法覆盖的痛苦度信号。',
+      feedbackTags: '验收时设计师可选原因标签：需求不清晰、沟通成本高、定价偏低、技术挑战大。',
+      cycleHours: '任务从预计/接受开始到实际验收的总占用周期小时；首次验收时系统写入 actual_delivery_date。',
+      opportunityWaitHours: '周期占用等待 = 任务总周期小时 - 实际计费工时。用于识别“被项目占着但没有收入”的机会成本。',
+      explicitWaitingHours: '设计师手动记录的等待/非计费时间段，例如等待甲方意见、等待资料、等待确认；不进入结算工时。',
+      waitingRatioPercent: '周期占用等待占总周期的百分比。该值高说明任务拖得久但计费少，可能挤占其他接单时间。',
     },
   }
   const fingerprint = await fingerprintInsightData(metricPayload)
@@ -1867,7 +1958,10 @@ const toTask = (row: DbTask, files: string[] = []): Task => ({
   suspendReason: row.suspend_reason ?? '',
   terminateReason: row.terminate_reason ?? '',
   acceptanceNote: row.acceptance_note ?? '',
+  feedbackRating: normalizeFeedbackRating(row.feedback_rating),
+  feedbackTags: parseFeedbackTags(row.feedback_tags_json),
   timeEntries: parseTimeEntries(row.time_entries_json),
+  waitingEntries: parseWaitingEntries(row.waiting_entries_json),
   voidedAt: row.voided_at ?? '',
   voidReason: row.void_reason ?? '',
   files,
@@ -1889,6 +1983,28 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
           }))
           .filter((entry) => entry.start && entry.end)
       : []
+  } catch {
+    return []
+  }
+}
+
+const parseWaitingEntries = (value: string | null): WaitingEntry[] => parseTimeEntries(value)
+
+const feedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
+const feedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
+
+function normalizeFeedbackRating(value: unknown): TaskFeedbackRating | '' {
+  return feedbackRatings.includes(value as TaskFeedbackRating) ? value as TaskFeedbackRating : ''
+}
+
+function normalizeFeedbackTags(value: unknown): TaskFeedbackTag[] {
+  const list = Array.isArray(value) ? value : []
+  return Array.from(new Set(list.filter((item): item is TaskFeedbackTag => feedbackTags.includes(item as TaskFeedbackTag))))
+}
+
+function parseFeedbackTags(value: string | null): TaskFeedbackTag[] {
+  try {
+    return normalizeFeedbackTags(JSON.parse(value || '[]'))
   } catch {
     return []
   }
@@ -2474,8 +2590,8 @@ async function createTask(env: Env, request: Request) {
     `INSERT INTO tasks (
       id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month,
       estimated_hours, actual_hours, hourly_rate, requester, contact_person, reviewer, stage, status, progress,
-      suspend_reason, terminate_reason, acceptance_note, time_entries_json, is_billable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      suspend_reason, terminate_reason, acceptance_note, feedback_rating, feedback_tags_json, time_entries_json, waiting_entries_json, is_billable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
@@ -2498,7 +2614,10 @@ async function createTask(env: Env, request: Request) {
       task.suspendReason ?? '',
       task.terminateReason ?? '',
       task.acceptanceNote ?? '',
+      normalizeFeedbackRating(task.feedbackRating),
+      JSON.stringify(normalizeFeedbackTags(task.feedbackTags)),
       JSON.stringify(task.timeEntries ?? []),
+      JSON.stringify(task.waitingEntries ?? []),
       task.status === '不计费' ? 0 : 1,
     )
     .run()
@@ -2557,14 +2676,20 @@ async function updateTask(env: Env, id: string, request: Request) {
     suspendReason: changes.suspendReason ?? current.suspend_reason ?? '',
     terminateReason: changes.terminateReason ?? current.terminate_reason ?? '',
     acceptanceNote: changes.acceptanceNote ?? current.acceptance_note ?? '',
+    feedbackRating: Object.prototype.hasOwnProperty.call(changes, 'feedbackRating') ? normalizeFeedbackRating(changes.feedbackRating) : normalizeFeedbackRating(current.feedback_rating),
+    feedbackTags: Object.prototype.hasOwnProperty.call(changes, 'feedbackTags') ? normalizeFeedbackTags(changes.feedbackTags) : parseFeedbackTags(current.feedback_tags_json),
     timeEntries: changes.timeEntries ?? parseTimeEntries(current.time_entries_json),
+    waitingEntries: changes.waitingEntries ?? parseWaitingEntries(current.waiting_entries_json),
+    actualDeliveryDate: changes.status === '已验收' && current.status !== '已验收'
+      ? nowIso()
+      : current.actual_delivery_date,
   }
 
   await env.DB.prepare(
     `UPDATE tasks SET
-      title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, settlement_month = ?, estimated_hours = ?, actual_hours = ?,
+      title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, actual_delivery_date = ?, settlement_month = ?, estimated_hours = ?, actual_hours = ?,
       requester = ?, contact_person = ?, reviewer = ?, stage = ?, status = ?, progress = ?,
-      suspend_reason = ?, terminate_reason = ?, acceptance_note = ?, time_entries_json = ?, is_billable = ?, updated_at = CURRENT_TIMESTAMP
+      suspend_reason = ?, terminate_reason = ?, acceptance_note = ?, feedback_rating = ?, feedback_tags_json = ?, time_entries_json = ?, waiting_entries_json = ?, is_billable = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
   )
     .bind(
@@ -2573,6 +2698,7 @@ async function updateTask(env: Env, id: string, request: Request) {
       next.type,
       next.date,
       next.estimatedDate || null,
+      next.actualDeliveryDate,
       next.settlementMonth || monthPart(nowIso()),
       next.estimatedHours,
       next.actualHours,
@@ -2585,7 +2711,10 @@ async function updateTask(env: Env, id: string, request: Request) {
       next.suspendReason,
       next.terminateReason,
       next.acceptanceNote,
+      next.feedbackRating,
+      JSON.stringify(next.feedbackTags),
       JSON.stringify(next.timeEntries),
+      JSON.stringify(next.waitingEntries),
       next.status === '不计费' ? 0 : 1,
       id,
     )
