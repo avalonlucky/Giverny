@@ -1157,16 +1157,14 @@ button {
 }
 
 .dashboard-side-time-item time,
-.dashboard-side-waiting-item time,
-.dashboard-side-activity-item .timeline-stamp {
+.dashboard-side-waiting-item time {
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 500;
 }
 
 .dashboard-side-time-item p,
-.dashboard-side-waiting-item p,
-.dashboard-side-activity-item p {
+.dashboard-side-waiting-item p {
   margin: 6px 0 0;
   color: var(--color-text);
   font-size: 15px;
@@ -1179,34 +1177,6 @@ button {
   color: var(--color-text-muted);
   font-size: 13px;
   font-style: normal;
-}
-
-.dashboard-side-activity {
-  display: grid;
-  gap: 14px;
-}
-
-.dashboard-side-activity-item {
-  display: grid;
-  gap: 8px;
-}
-
-.dashboard-side-activity-item p {
-  margin-top: 0;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-
-.dashboard-side-activity .activity-file-row {
-  margin-top: 0;
-}
-
-.dashboard-side-activity .activity-file-preview-card {
-  width: 104px;
-}
-
-.dashboard-side-activity .activity-file-preview-thumb {
-  height: 76px;
 }
 
 .dashboard-side-waiting-list {

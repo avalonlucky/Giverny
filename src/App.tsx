@@ -3289,14 +3289,10 @@ function App() {
           </div>
           <DashboardTaskSidebar
             task={selectedTask}
-            files={selectedTask ? fileItems.filter((file) => file.taskId === selectedTask.id) : []}
-            activity={taskActivity}
-            role={role}
             onUpdateTask={handleUpdateTask}
             onOpenProgress={(taskId) => handleOpenTaskProgress(taskId)}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
-            onPreviewFile={setPreviewFile}
           />
         </section>
           </div>
@@ -4048,24 +4044,16 @@ function FileContextMenu({
 
 function DashboardTaskSidebar({
   task,
-  files,
-  activity,
-  role,
   onUpdateTask,
   onOpenProgress,
   onOpenEdit,
   onOpenAcceptance,
-  onPreviewFile,
 }: {
   task: Task | undefined
-  files: FileAsset[]
-  activity: ActivityItem[]
-  role: AuthRole
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onOpenProgress: (taskId: number) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
-  onPreviewFile: (file: FileAsset) => void
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
 
@@ -4085,7 +4073,6 @@ function DashboardTaskSidebar({
   const actualMinutes = sumTimeEntries(timeEntries)
   const billableHours = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
   const waitingMinutes = sumTimeEntries(waitingEntries)
-  const recentActivity = activity.slice(0, 4)
   const canAcceptTask = task.status === '待验收'
   const demandPerson = task.requester || task.contact || '待确认'
   const snappedProgress = snapProgress(task.progress)
@@ -4206,24 +4193,6 @@ function DashboardTaskSidebar({
               </div>
             )}
           </div>
-
-          {recentActivity.length > 0 && (
-            <div className="dashboard-side-subsection">
-              <div className="dashboard-side-subsection-title">
-                <span>附件与动态</span>
-                <em>{recentActivity.length} 条</em>
-              </div>
-              <div className="dashboard-side-activity">
-                {recentActivity.map((item) => (
-                  <article className="dashboard-side-activity-item" key={item.id}>
-                    <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
-                    <p>{describeActivity(item)}</p>
-                    <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
-                  </article>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="dashboard-side-subsection dashboard-side-waiting">
             <div className="dashboard-side-subsection-title">
