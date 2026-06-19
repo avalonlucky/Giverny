@@ -165,17 +165,6 @@ function formatPlanDateTime(value: string) {
   return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
 }
 
-function formatTimelineDate(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = datePart(value)
-  const year = Number(date.slice(0, 4))
-  const month = Number(date.slice(5, 7))
-  const day = Number(date.slice(8, 10))
-  return `${year}年${month}月${day}日`
-}
-
 function formatMonthDayTime(value: string) {
   if (!value) {
     return ''
@@ -725,6 +714,7 @@ function defaultTimeEntryDraft() {
   const startHour = Math.min(22, now.getHours())
   const endHour = Math.min(23, startHour + 1)
   return {
+    date: isoDate(),
     start: `${pad(startHour)}:00`,
     end: `${pad(endHour)}:00`,
     note: '',
@@ -748,6 +738,8 @@ const laborTaxBrackets = [
 ]
 
 type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
+
+type ProgressRecordMode = 'progress' | 'waiting'
 
 type AnnualIncomeRow = {
   month: string
@@ -1591,13 +1583,6 @@ function fileTypeFromName(name: string) {
   return extension === 'JPEG' ? 'JPG' : extension
 }
 
-function getActivityFileTypeTags(item: ActivityItem) {
-  const tags = getActivityFileNames(item)
-    .map((entry) => fileTypeFromName(entry.name))
-    .filter(Boolean)
-  return Array.from(new Set(tags)).slice(0, 3)
-}
-
 function taskAssistantFiles(task: Task, files: FileAsset[], uploadedFiles: Array<FileAsset | string> = []) {
   const taskFileNames = new Set([...(task.files ?? []), ...(task.acceptanceFiles ?? [])].map((name) => name.trim()).filter(Boolean))
   const uploadedNames = uploadedFiles
@@ -1761,16 +1746,6 @@ function TimelineStamp({ value, audience }: { value: string; audience: 'admin' |
   )
 }
 
-function TimelineDateLabel({ value }: { value: string }) {
-  const privateTime = timelineTimePart(value)
-  return (
-    <strong>
-      {formatTimelineDate(value)}
-      {privateTime && <span className="admin-only-data"> {privateTime}</span>}
-    </strong>
-  )
-}
-
 function snapProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value / 20) * 20))
 }
@@ -1845,6 +1820,7 @@ function App() {
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTaskId, setProgressModalTaskId] = useState(0)
+  const [progressModalMode, setProgressModalMode] = useState<ProgressRecordMode>('progress')
   const [acceptanceModalTaskId, setAcceptanceModalTaskId] = useState(0)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -2198,29 +2174,6 @@ function App() {
     }
   }
 
-  const handleRequestDeleteActivity = (item: ActivityItem, task: Task) => {
-    setConfirmDialog({
-      eyebrow: '删除任务动态',
-      title: '确定删除这条任务动态吗？',
-      body: '删除后只会从当前任务时间轴移除这条记录，不会回滚任务字段、文件或工时数据。',
-      confirmText: '确认删除',
-      tone: 'danger',
-      details: [task.title, describeActivity(item)],
-      onConfirm: async () => {
-        try {
-          await api.deleteActivity(item.id)
-          setTaskActivity((currentItems) => currentItems.filter((activityItem) => activityItem.id !== item.id))
-          await loadTaskActivity(task.id)
-          notify('任务动态已删除')
-        } catch (error) {
-          setBackendStatus('后端异常')
-          notify(error instanceof Error ? `动态删除失败：${error.message}` : '动态删除失败')
-          throw error
-        }
-      },
-    })
-  }
-
   const loadTaskActivity = async (taskId: number) => {
     try {
       const result = await api.getTaskActivity(taskId)
@@ -2241,8 +2194,9 @@ function App() {
     setEditTaskId(taskId)
   }
 
-  const handleOpenTaskProgress = (taskId: number) => {
+  const handleOpenTaskProgress = (taskId: number, mode: ProgressRecordMode = 'progress') => {
     setSelectedTaskId(taskId)
+    setProgressModalMode(mode)
     setProgressModalTaskId(taskId)
     void loadTaskActivity(taskId)
   }
@@ -3331,9 +3285,7 @@ function App() {
             activity={taskActivity}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
-            onPreviewFile={setPreviewFile}
             onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
-            onRequestDeleteActivity={isAdmin ? handleRequestDeleteActivity : undefined}
           />
         )}
 
@@ -3507,14 +3459,13 @@ function App() {
         return progressTask ? (
           <TaskProgressModal
             task={progressTask}
-            activity={taskActivity}
+            mode={progressModalMode}
             files={fileItems}
+            activity={taskActivity}
             onClose={() => setProgressModalTaskId(0)}
-            onPreviewFile={setPreviewFile}
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
-            onRequestDeleteActivity={isAdmin ? handleRequestDeleteActivity : undefined}
           />
         ) : null
       })()}
@@ -4051,7 +4002,7 @@ function DashboardTaskSidebar({
 }: {
   task: Task | undefined
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
-  onOpenProgress: (taskId: number) => void
+  onOpenProgress: (taskId: number, mode?: ProgressRecordMode) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
 }) {
@@ -4169,7 +4120,7 @@ function DashboardTaskSidebar({
           <div className="dashboard-side-subsection">
             <div className="dashboard-side-subsection-title">
               <span>进展 · 分段计时</span>
-              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'progress')}>
                 <Plus size={15} />
                 记录进展
               </button>
@@ -4197,7 +4148,7 @@ function DashboardTaskSidebar({
           <div className="dashboard-side-subsection dashboard-side-waiting">
             <div className="dashboard-side-subsection-title">
               <span>等待记录 · 不计结算</span>
-              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id)}>
+              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'waiting')}>
                 <Plus size={15} />
                 记录等待
               </button>
@@ -4258,9 +4209,7 @@ function TasksView({
   activity,
   onUploadImage,
   onCreateTaskUpdate,
-  onPreviewFile,
   onCreateTask,
-  onRequestDeleteActivity,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -4293,9 +4242,7 @@ function TasksView({
   activity: ActivityItem[]
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
-  onPreviewFile: (file: FileAsset) => void
   onCreateTask: () => void
-  onRequestDeleteActivity?: (item: ActivityItem, task: Task) => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -4613,14 +4560,12 @@ function TasksView({
       {progressTask && (
         <TaskProgressModal
           task={tasks.find((task) => task.id === progressTask.id) ?? progressTask}
-          activity={activity}
           files={files}
+          activity={activity}
           onClose={() => setProgressTask(null)}
-          onPreviewFile={onPreviewFile}
           onUpdateTask={onUpdateTask}
           onCreateTaskUpdate={onCreateTaskUpdate}
           onUploadImage={onUploadImage}
-          onRequestDeleteActivity={onRequestDeleteActivity}
         />
       )}
     </section>
@@ -4629,44 +4574,40 @@ function TasksView({
 
 function TaskProgressModal({
   task,
-  activity,
+  mode = 'progress',
   files,
+  activity,
   onClose,
-  onPreviewFile,
   onUpdateTask,
   onCreateTaskUpdate,
   onUploadImage,
-  onRequestDeleteActivity,
 }: {
   task: Task
-  activity: ActivityItem[]
+  mode?: ProgressRecordMode
   files: FileAsset[]
+  activity: ActivityItem[]
   onClose: () => void
-  onPreviewFile: (file: FileAsset) => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
-  onRequestDeleteActivity?: (item: ActivityItem, task: Task) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
   const initialProgressDraft = useMemo(
     () => readDraftCache(progressDraftKey, {
-      draftProgress: snapProgress(task.progress),
       note: '',
       timeDraft: defaultTimeEntryDraft(),
       timeEntries: (task.timeEntries ?? []) as TimeEntry[],
       waitingDraft: defaultTimeEntryDraft(),
       waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
     }),
-    [progressDraftKey, task.progress, task.timeEntries, task.waitingEntries],
+    [progressDraftKey, task.timeEntries, task.waitingEntries],
   )
-  const [draftProgress, setDraftProgress] = useState(snapProgress(initialProgressDraft.draftProgress))
   const [note, setNote] = useState(initialProgressDraft.note)
   const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
-  const [draftTimeEntries, setDraftTimeEntries] = useState<TimeEntry[]>(initialProgressDraft.timeEntries)
+  const [draftTimeEntries] = useState<TimeEntry[]>(initialProgressDraft.timeEntries)
   const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
-  const [draftWaitingEntries, setDraftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
+  const [draftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
   const [isSaving, setIsSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
@@ -4674,56 +4615,34 @@ function TaskProgressModal({
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
-  const [activityExpansion, setActivityExpansion] = useState({ taskId: task.id, showAll: false })
-  const savedProgress = snapProgress(task.progress)
-  const progressDirty = draftProgress !== savedProgress
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
-  const timeMinutes = sumTimeEntries(draftTimeEntries)
-  const computedActualHours = Math.round((timeMinutes / 60) * 100) / 100
   const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
   const waitingDirty = JSON.stringify(draftWaitingEntries) !== savedWaitingSignature
-  const waitingMinutes = sumTimeEntries(draftWaitingEntries)
-  const taskActivity = activity
-  const canDeleteActivity = Boolean(onRequestDeleteActivity)
-  const showAllActivity = activityExpansion.taskId === task.id ? activityExpansion.showAll : false
-  const hiddenTaskActivity = taskActivity.slice(5)
-  const visibleTaskActivity = showAllActivity ? taskActivity : taskActivity.slice(0, 5)
-  const hiddenActivityCount = Math.max(0, taskActivity.length - 5)
-  const hiddenActivityHasFiles = hiddenTaskActivity.some((item) => getActivityFileNames(item).length > 0)
+  const isWaitingMode = mode === 'waiting'
+  const activeDraft = isWaitingMode ? waitingDraft : timeDraft
+  const updateActiveDraft = (updater: (current: TimeEntryDraft) => TimeEntryDraft) => {
+    if (isWaitingMode) {
+      setWaitingDraft(updater)
+      return
+    }
+    setTimeDraft(updater)
+  }
+  const draftEntryMinutes = minutesBetween(activeDraft.start, activeDraft.end)
+  const hasDraftTimeEntry = activeDraft.start.trim() !== '' && activeDraft.end.trim() !== '' && draftEntryMinutes > 0
 
   useEffect(() => {
-    writeDraftCache(progressDraftKey, { draftProgress, note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
-  }, [draftProgress, draftTimeEntries, draftWaitingEntries, note, progressDraftKey, timeDraft, waitingDraft])
+    writeDraftCache(progressDraftKey, { note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
+  }, [draftTimeEntries, draftWaitingEntries, note, progressDraftKey, timeDraft, waitingDraft])
 
-  const addTimeEntry = () => {
-    const start = timeDraft.start.trim()
-    const end = timeDraft.end.trim()
-    const noteText = timeDraft.note?.trim() ?? ''
+  const buildDraftTimeEntry = () => {
+    const start = activeDraft.start.trim()
+    const end = activeDraft.end.trim()
+    const noteText = activeDraft.note?.trim() ?? ''
     if (!start || !end || minutesBetween(start, end) <= 0) {
-      return
+      return null
     }
-    setDraftTimeEntries((current) => [...current, { id: crypto.randomUUID(), date: isoDate(), start, end, note: noteText }])
-    setTimeDraft(defaultTimeEntryDraft())
-  }
-
-  const deleteTimeEntry = (entryId: string) => {
-    setDraftTimeEntries((current) => current.filter((entry) => entry.id !== entryId))
-  }
-
-  const addWaitingEntry = () => {
-    const start = waitingDraft.start.trim()
-    const end = waitingDraft.end.trim()
-    const noteText = waitingDraft.note?.trim() ?? ''
-    if (!start || !end || minutesBetween(start, end) <= 0) {
-      return
-    }
-    setDraftWaitingEntries((current) => [...current, { id: crypto.randomUUID(), date: isoDate(), start, end, note: noteText }])
-    setWaitingDraft(defaultTimeEntryDraft())
-  }
-
-  const deleteWaitingEntry = (entryId: string) => {
-    setDraftWaitingEntries((current) => current.filter((entry) => entry.id !== entryId))
+    return { id: crypto.randomUUID(), date: activeDraft.date || isoDate(), start, end, note: noteText }
   }
 
   const uploadFiles = async (fileList: FileList | null) => {
@@ -4751,32 +4670,26 @@ function TaskProgressModal({
     }
   }
 
-  const confirmProgress = () => {
-    if (!progressDirty) {
-      return
-    }
-    onUpdateTask(task.id, { progress: draftProgress })
-  }
-
   const saveProgress = async () => {
     if (isSaving) {
       return
     }
     setIsSaving(true)
     try {
-      if (progressDirty) {
-        confirmProgress()
+      const nextEntry = buildDraftTimeEntry()
+      const nextTimeEntries = !isWaitingMode && nextEntry ? [...draftTimeEntries, nextEntry] : draftTimeEntries
+      const nextWaitingEntries = isWaitingMode && nextEntry ? [...draftWaitingEntries, nextEntry] : draftWaitingEntries
+      if (!isWaitingMode && (timeDirty || nextEntry)) {
+        const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
+        onUpdateTask(task.id, { timeEntries: nextTimeEntries, actualHours: nextActualHours })
       }
-      if (timeDirty) {
-        onUpdateTask(task.id, { timeEntries: draftTimeEntries, actualHours: computedActualHours })
+      if (isWaitingMode && (waitingDirty || nextEntry)) {
+        onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
       }
-      if (waitingDirty) {
-        onUpdateTask(task.id, { waitingEntries: draftWaitingEntries })
-      }
-      const body = note.trim()
+      const body = note.trim() || nextEntry?.note?.trim() || ''
       if (body || uploadedNames.length > 0) {
         await onCreateTaskUpdate(task.id, {
-          title: '进展更新',
+          title: isWaitingMode ? '等待记录' : '进展更新',
           body: body || `上传过程附件：${uploadedNames.join('、')}`,
           hours: 0,
           visible: false,
@@ -4799,7 +4712,7 @@ function TaskProgressModal({
         text: note,
         task,
         files: taskAssistantFiles(task, files, uploadedNames),
-        activity: taskAssistantActivity(taskActivity),
+        activity: taskAssistantActivity(activity),
         uploadedFileNames: uploadedNames,
       })
       setProgressAiSuggestion(suggestion)
@@ -4810,152 +4723,59 @@ function TaskProgressModal({
     }
   }
 
+  const normalizeDraftDate = (value: string) => {
+    const match = value.trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
+    if (!match) {
+      return activeDraft.date || isoDate()
+    }
+    const [, year, month, day] = match
+    const monthNumber = Number(month)
+    const dayNumber = Number(day)
+    if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31) {
+      return activeDraft.date || isoDate()
+    }
+    return `${year}-${pad(monthNumber)}-${pad(dayNumber)}`
+  }
+
+  const displayDraftDate = (value: string | undefined) => (value || isoDate()).replaceAll('-', '/')
+
   return (
-    <ModalShell className="task-action-modal task-progress-modal" labelledBy="task-progress-title" onClose={onClose}>
-      <header className="modal-header">
+    <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
+      <header className="progress-lite-header">
         <div>
-          <p className="eyebrow">进展记录</p>
-          <h2 id="task-progress-title">记录进展</h2>
-          <small>{task.title} · {task.type} · 需求人 {task.requester || task.contact || '待确认'}</small>
+          <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : '记录进展'}</h2>
+          <small>{task.title} · {isWaitingMode ? '等待时间不计入结算，但进入洞察分析' : '按时间段计时，工时自动累计并计入结算'}</small>
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
           <X size={18} />
         </button>
       </header>
-      <div className="task-action-body">
-        <section className="action-section">
-          <div className="action-section-title">
-            <h3>整体进度</h3>
-            <span className={progressDirty ? 'admin-only-data' : ''}>{progressDirty ? `● 未保存（${draftProgress}%）` : '已保存'}</span>
-          </div>
-          <div className="task-progress-control progress-slider-row">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={20}
-              value={draftProgress}
-              style={{ '--progress-value': `${draftProgress}%` } as CSSProperties}
-              onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))}
-            />
-            <strong>{draftProgress}%</strong>
-          </div>
-          <div className="task-progress-presets">
-            {[0, 20, 40, 60, 80, 100].map((value) => (
-              <button type="button" className={draftProgress === value ? 'active' : ''} key={value} onClick={() => setDraftProgress(value)}>
-                {value}
-              </button>
-            ))}
-          </div>
-          {progressDirty && (
-            <div className="progress-draft-actions">
-              <button type="button" className="ghost-button compact-button" onClick={() => setDraftProgress(savedProgress)}>撤销</button>
-              <button type="button" className="primary-button compact-button" onClick={confirmProgress}>确认进度</button>
-            </div>
-          )}
-        </section>
-        <section className="action-section progress-time-section">
-          <div className="action-section-title">
-            <h3>分段计时</h3>
-            <span>可结算 · {draftTimeEntries.length} 段 · {computedActualHours.toFixed(2)} h</span>
-          </div>
-          <p className="progress-waiting-hint">记录真实投入的可结算工作时间，保存后会更新任务实际工时，验收时只做核对。</p>
-          {draftTimeEntries.length > 0 && (
-            <div className="progress-waiting-list">
-              {draftTimeEntries.map((entry) => (
-                <div className="progress-waiting-row" key={entry.id}>
-                  <div>
-                    <strong>{entry.start} - {entry.end}</strong>
-                    <span>{entry.note || '未填写具体内容'}</span>
-                  </div>
-                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
-                  <button type="button" className="icon-button danger-icon" aria-label="删除分段计时" title="删除分段计时" onClick={() => deleteTimeEntry(entry.id)}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="progress-waiting-create">
-            <TimeTextInput value={timeDraft.start} ariaLabel="计时开始时间" onChange={(value) => setTimeDraft((current) => ({ ...current, start: value }))} />
-            <span>至</span>
-            <TimeTextInput value={timeDraft.end} ariaLabel="计时结束时间" onChange={(value) => setTimeDraft((current) => ({ ...current, end: value }))} />
-            <input
-              value={timeDraft.note ?? ''}
-              placeholder="例如：初稿 / 终稿 / 修改"
-              onChange={(event) => setTimeDraft((current) => ({ ...current, note: event.target.value }))}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  addTimeEntry()
-                }
-              }}
-            />
-            <button type="button" className="primary-button compact-button" disabled={minutesBetween(timeDraft.start, timeDraft.end) <= 0} onClick={addTimeEntry}>
-              <Plus size={15} />
-              添加计时
+      <div className="progress-lite-body">
+        <section className="progress-lite-field">
+          <div className="progress-lite-label-row">
+            <label htmlFor="progress-lite-note">{isWaitingMode ? '等待内容' : '进展内容'}</label>
+            <button
+              type="button"
+              className="icon-button ai-assist-button"
+              aria-label="AI 优化进展内容"
+              title="AI 优化进展内容"
+              onClick={() => void requestProgressAiSuggestion()}
+              disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
+            >
+              <Sparkles size={16} />
             </button>
           </div>
-        </section>
-        <section className="action-section progress-waiting-section">
-          <div className="action-section-title">
-            <h3>等待记录</h3>
-            <span>不计费 · {draftWaitingEntries.length} 段 · {formatDuration(waitingMinutes)}</span>
-          </div>
-          <p className="progress-waiting-hint">用于记录等待甲方意见、补资料、等确认等占用时间；不会进入结算工时，但会进入洞察分析。</p>
-          {draftWaitingEntries.length > 0 && (
-            <div className="progress-waiting-list">
-              {draftWaitingEntries.map((entry) => (
-                <div className="progress-waiting-row" key={entry.id}>
-                  <div>
-                    <strong>{entry.start} - {entry.end}</strong>
-                    <span>{entry.note || '等待甲方确认'}</span>
-                  </div>
-                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
-                  <button type="button" className="icon-button danger-icon" aria-label="删除等待记录" title="删除等待记录" onClick={() => deleteWaitingEntry(entry.id)}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="progress-waiting-create">
-            <TimeTextInput value={waitingDraft.start} ariaLabel="等待开始时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, start: value }))} />
-            <span>至</span>
-            <TimeTextInput value={waitingDraft.end} ariaLabel="等待结束时间" onChange={(value) => setWaitingDraft((current) => ({ ...current, end: value }))} />
-            <input
-              value={waitingDraft.note ?? ''}
-              placeholder="例如：等待甲方意见 / 等待补资料"
-              onChange={(event) => setWaitingDraft((current) => ({ ...current, note: event.target.value }))}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  addWaitingEntry()
-                }
-              }}
-            />
-            <button type="button" className="ghost-button compact-button" disabled={minutesBetween(waitingDraft.start, waitingDraft.end) <= 0} onClick={addWaitingEntry}>
-              <Plus size={15} />
-              添加等待
-            </button>
-          </div>
-        </section>
-        <section className="action-section">
-          <div className="action-section-title">
-            <h3>新增进展</h3>
-            <div className="action-section-title-actions">
-              <span>确认后写入时间轴</span>
-              <button
-                type="button"
-                className="icon-button ai-assist-button"
-                aria-label="AI 优化进展内容"
-                title="AI 优化进展内容"
-                onClick={() => void requestProgressAiSuggestion()}
-                disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
-              >
-                <Sparkles size={16} />
-              </button>
-            </div>
-          </div>
-          <textarea className="task-progress-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="写一下目前的进度到哪了，例如：与需求人确认了尺寸，正在出草图。" />
+          <textarea
+            id="progress-lite-note"
+            className="task-progress-note progress-lite-note"
+            value={note}
+            onChange={(event) => {
+              const value = event.target.value
+              setNote(value)
+              updateActiveDraft((current) => ({ ...current, note: value }))
+            }}
+            placeholder={isWaitingMode ? '例如：等待甲方确认主色方案，暂不计入结算' : '例如：按甲方反馈调整封面配色，导出终稿'}
+          />
           {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
             <div className="ai-suggestion-panel task-text-ai-panel">
               <div className="ai-suggestion-head">
@@ -4970,7 +4790,14 @@ function TaskProgressModal({
                   </div>
                   {progressAiSuggestion.summary && <small>{progressAiSuggestion.summary}</small>}
                   <div className="ai-suggestion-actions">
-                    <button type="button" className="ghost-button compact-button" onClick={() => setNote(progressAiSuggestion.optimizedText)}>
+                    <button
+                      type="button"
+                      className="ghost-button compact-button"
+                      onClick={() => {
+                        setNote(progressAiSuggestion.optimizedText)
+                        updateActiveDraft((current) => ({ ...current, note: progressAiSuggestion.optimizedText }))
+                      }}
+                    >
                       采用建议
                     </button>
                   </div>
@@ -4978,6 +4805,43 @@ function TaskProgressModal({
               )}
             </div>
           )}
+        </section>
+
+        <section className="progress-lite-time-grid">
+          <label className="progress-lite-time-field">
+            <span>开始时间</span>
+            <div className="progress-lite-datetime-control">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={displayDraftDate(activeDraft.date)}
+                aria-label="计时开始日期"
+                onChange={(event) => updateActiveDraft((current) => ({ ...current, date: event.target.value }))}
+                onBlur={() => updateActiveDraft((current) => ({ ...current, date: normalizeDraftDate(current.date || '') }))}
+              />
+              <TimeTextInput value={activeDraft.start} ariaLabel="计时开始时间" onChange={(value) => updateActiveDraft((current) => ({ ...current, start: value }))} />
+              <CalendarDays size={16} />
+            </div>
+          </label>
+          <label className="progress-lite-time-field">
+            <span>结束时间</span>
+            <div className="progress-lite-datetime-control">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={displayDraftDate(activeDraft.date)}
+                aria-label="计时结束日期"
+                onChange={(event) => updateActiveDraft((current) => ({ ...current, date: event.target.value }))}
+                onBlur={() => updateActiveDraft((current) => ({ ...current, date: normalizeDraftDate(current.date || '') }))}
+              />
+              <TimeTextInput value={activeDraft.end} ariaLabel="计时结束时间" onChange={(value) => updateActiveDraft((current) => ({ ...current, end: value }))} />
+              <CalendarDays size={16} />
+            </div>
+          </label>
+        </section>
+
+        <section className="progress-lite-field">
+          <span className="progress-lite-label">附件（选填）</span>
           {uploadedNames.length > 0 && (
             <div className="uploaded-chip-row">
               {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
@@ -4988,9 +4852,9 @@ function TaskProgressModal({
               {uploadErrors.map((message) => <span key={message}>{message}</span>)}
             </div>
           )}
-          <button type="button" className="text-button file-add-button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+          <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             <Plus size={15} />
-            {uploading ? '上传中…' : '添加过程附件'}
+            {uploading ? '上传中…' : '添加过程截图 / 文件'}
           </button>
           <input
             ref={fileInputRef}
@@ -5001,72 +4865,11 @@ function TaskProgressModal({
             onChange={(event) => void uploadFiles(event.target.files)}
           />
         </section>
-        <section className="action-section">
-          <div className="action-section-title">
-            <h3>进展时间轴</h3>
-            <div className="progress-timeline-title-actions">
-              {hiddenActivityHasFiles && <span className="progress-timeline-attachment-badge">附件</span>}
-              <span>{taskActivity.length} 条记录</span>
-            </div>
-          </div>
-          <div className="progress-modal-timeline">
-            {taskActivity.length === 0 ? (
-              <p>还没有进展记录。</p>
-            ) : (
-              visibleTaskActivity.map((item) => {
-                const fileTypeTags = getActivityFileTypeTags(item)
-                return (
-                  <article
-                    className={`progress-modal-timeline-item ${canDeleteActivity ? 'can-delete' : ''}`}
-                    key={item.id}
-                    onContextMenu={(event) => {
-                      if (!onRequestDeleteActivity) {
-                        return
-                      }
-                      event.preventDefault()
-                      onRequestDeleteActivity(item, task)
-                    }}
-                  >
-                    <span className="dot" />
-                    <div>
-                      <TimelineDateLabel value={item.createdAt} />
-                      <span className="progress-modal-timeline-meta">
-                        {fileTypeTags.map((tag) => (
-                          <span className="progress-modal-file-type" key={`${item.id}-${tag}`}>{tag}</span>
-                        ))}
-                        {onRequestDeleteActivity && (
-                          <button type="button" aria-label="删除任务动态" title="删除任务动态" onClick={() => onRequestDeleteActivity(item, task)}>
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </span>
-                      <p>{describeActivity(item)}</p>
-                      <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
-                    </div>
-                  </article>
-                )
-              })
-            )}
-            {hiddenActivityCount > 0 && (
-              <div className="progress-timeline-more">
-                <button
-                  type="button"
-                  className="progress-timeline-toggle"
-                  onClick={() => setActivityExpansion({ taskId: task.id, showAll: !showAllActivity })}
-                  aria-expanded={showAllActivity}
-                >
-                  <ChevronDown size={14} />
-                  {showAllActivity ? '收起' : `展开 ${hiddenActivityCount} 条`}
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || (!progressDirty && !timeDirty && !waitingDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
-          {isSaving ? '保存中…' : '保存进展'}
+        <button className="primary-button" disabled={isSaving || (!(isWaitingMode ? waitingDirty : timeDirty) && !hasDraftTimeEntry && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
+          {isSaving ? '保存中…' : isWaitingMode ? '记录等待' : '记录进展'}
         </button>
       </footer>
     </ModalShell>

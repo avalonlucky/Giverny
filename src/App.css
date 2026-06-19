@@ -3217,6 +3217,165 @@ button {
   flex-direction: column;
 }
 
+.progress-lite-modal {
+  width: min(560px, calc(100vw - 48px));
+  border-radius: 0;
+  background: var(--color-surface-strong);
+}
+
+.progress-lite-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 36px 36px 18px;
+}
+
+.progress-lite-header h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.progress-lite-header small {
+  display: block;
+  margin-top: 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.progress-lite-body {
+  display: grid;
+  gap: 28px;
+  padding: 12px 36px 30px;
+  overflow: auto;
+}
+
+.progress-lite-field {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-lite-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-lite-label-row label,
+.progress-lite-label {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.progress-lite-label-row .ai-assist-button {
+  width: 28px;
+  min-height: 28px;
+  color: var(--color-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.progress-lite-label-row .ai-assist-button:hover {
+  background: var(--color-supplement-bg);
+}
+
+.progress-lite-note {
+  min-height: 96px;
+  padding: 18px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.progress-lite-note:focus {
+  outline: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+
+.progress-lite-time-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+}
+
+.progress-lite-time-field {
+  display: grid;
+  gap: 12px;
+}
+
+.progress-lite-time-field > span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.progress-lite-datetime-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.progress-lite-datetime-control input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  outline: 0;
+  font: inherit;
+  font-size: 18px;
+}
+
+.progress-lite-datetime-control .time-text-input {
+  width: 58px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 18px;
+}
+
+.progress-lite-datetime-control svg {
+  color: var(--color-text);
+}
+
+.progress-lite-upload-box {
+  width: 100%;
+  min-height: 90px;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.progress-lite-upload-box:hover {
+  color: var(--color-primary);
+  background: var(--color-supplement-bg);
+}
+
+.progress-lite-modal .modal-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 18px 36px 28px;
+}
+
 .task-action-modal .modal-header small {
   display: block;
   margin-top: 5px;
