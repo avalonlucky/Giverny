@@ -1073,13 +1073,22 @@ button {
   font-size: 12px;
 }
 
-.dashboard-side-progress-scale span {
+.dashboard-side-progress-scale button {
   min-width: 0;
   border-radius: 7px;
+  border: 0;
   padding: 5px 7px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
 }
 
-.dashboard-side-progress-scale span.active {
+.dashboard-side-progress-scale button:hover {
+  color: var(--color-text);
+}
+
+.dashboard-side-progress-scale button.active {
   color: var(--color-surface-strong);
   background: var(--color-primary);
   font-weight: 800;

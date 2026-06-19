@@ -1772,7 +1772,7 @@ function TimelineDateLabel({ value }: { value: string }) {
 }
 
 function snapProgress(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+  return Math.max(0, Math.min(100, Math.round(value / 20) * 20))
 }
 
 type ConfirmDialogState = {
@@ -2410,9 +2410,12 @@ function App() {
       }
     }
     const normalizedChanges = { ...changes }
+    if (normalizedChanges.progress !== undefined) {
+      normalizedChanges.progress = snapProgress(Number(normalizedChanges.progress))
+    }
     if (changes.status) {
       normalizedChanges.stage = changes.status === '已验收' ? '完成' : changes.status
-      normalizedChanges.progress = changes.status === '已验收' ? 100 : changes.status === '待验收' ? Math.max(currentTask.progress, 88) : currentTask.progress
+      normalizedChanges.progress = changes.status === '已验收' ? 100 : changes.status === '待验收' ? snapProgress(Math.max(currentTask.progress, 80)) : snapProgress(currentTask.progress)
       notify('正在保存…', 'info')
     }
 
@@ -2464,7 +2467,7 @@ function App() {
       setStatusReasonTarget({ task, status })
       return
     }
-    const changes: Partial<Task> = status === '待验收' ? { status, progress: Math.max(task.progress, 88) } : { status }
+    const changes: Partial<Task> = status === '待验收' ? { status, progress: snapProgress(Math.max(task.progress, 80)) } : { status }
     void handleUpdateTask(taskId, changes)
   }
 
@@ -2478,8 +2481,8 @@ function App() {
     }
     const changes: Partial<Task> =
       statusReasonTarget.status === '挂起'
-        ? { status: '挂起', suspendReason: trimmedReason, progress: statusReasonTarget.task.progress }
-        : { status: '终止', terminateReason: trimmedReason, progress: statusReasonTarget.task.progress }
+        ? { status: '挂起', suspendReason: trimmedReason, progress: snapProgress(statusReasonTarget.task.progress) }
+        : { status: '终止', terminateReason: trimmedReason, progress: snapProgress(statusReasonTarget.task.progress) }
     await handleUpdateTask(statusReasonTarget.task.id, changes)
     setStatusReasonTarget(null)
   }
@@ -3156,9 +3159,9 @@ function App() {
                         </div>
                         <div className="progress-cell">
                           <div className="mini-meter">
-                            <span style={{ width: `${task.progress}%` }} />
+                            <span style={{ width: `${snapProgress(task.progress)}%` }} />
                           </div>
-                          <small>{task.progress}%</small>
+                          <small>{snapProgress(task.progress)}%</small>
                         </div>
                       </div>
                       <div className="task-row-actions" aria-label="任务快捷操作">
@@ -3289,6 +3292,7 @@ function App() {
             files={selectedTask ? fileItems.filter((file) => file.taskId === selectedTask.id) : []}
             activity={taskActivity}
             role={role}
+            onUpdateTask={handleUpdateTask}
             onOpenProgress={(taskId) => handleOpenTaskProgress(taskId)}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
@@ -3885,6 +3889,7 @@ function TaskContextMenu({
   const report = reports.find((item) => item.month === taskMonth)
   const isVoided = Boolean(menu.task.voidedAt)
   const progressOptions = [0, 20, 40, 60, 80, 100]
+  const snappedProgress = snapProgress(menu.task.progress)
 
   return (
     <div className="task-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
@@ -3913,12 +3918,12 @@ function TaskContextMenu({
           <button type="button" className="context-menu-parent" aria-haspopup="menu">
             <BarChart3 size={15} />
             快速改进度
-            <span>{menu.task.progress}%</span>
+            <span>{snappedProgress}%</span>
             <ChevronRight size={14} />
           </button>
           <div className="context-submenu-panel progress-submenu-panel" role="menu">
             {progressOptions.map((progress) => {
-              const active = menu.task.progress === progress
+              const active = snappedProgress === progress
               return (
               <button type="button" key={progress} className={active ? 'selected' : ''} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
                 {active ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
@@ -4046,6 +4051,7 @@ function DashboardTaskSidebar({
   files,
   activity,
   role,
+  onUpdateTask,
   onOpenProgress,
   onOpenEdit,
   onOpenAcceptance,
@@ -4055,6 +4061,7 @@ function DashboardTaskSidebar({
   files: FileAsset[]
   activity: ActivityItem[]
   role: AuthRole
+  onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onOpenProgress: (taskId: number) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
@@ -4081,6 +4088,7 @@ function DashboardTaskSidebar({
   const recentActivity = activity.slice(0, 4)
   const canAcceptTask = task.status === '待验收'
   const demandPerson = task.requester || task.contact || '待确认'
+  const snappedProgress = snapProgress(task.progress)
 
   return (
     <aside className="dashboard-task-sidebar">
@@ -4150,14 +4158,23 @@ function DashboardTaskSidebar({
           <div className="dashboard-side-progress">
             <div className="dashboard-side-progress-head">
               <span>整体进度</span>
-              <strong>{task.progress}%</strong>
+              <strong>{snappedProgress}%</strong>
             </div>
             <div className="dashboard-side-progress-track">
-              <span style={{ width: `${task.progress}%` }} />
+              <span style={{ width: `${snappedProgress}%` }} />
             </div>
             <div className="dashboard-side-progress-scale">
               {[0, 20, 40, 60, 80, 100].map((value) => (
-                <span className={task.progress === value ? 'active' : ''} key={value}>{value}%</span>
+                <button
+                  type="button"
+                  className={snappedProgress === value ? 'active' : ''}
+                  key={value}
+                  aria-label={`设置进度为 ${value}%`}
+                  aria-pressed={snappedProgress === value}
+                  onClick={() => onUpdateTask(task.id, { progress: value })}
+                >
+                  {value}%
+                </button>
               ))}
             </div>
           </div>
@@ -4543,9 +4560,9 @@ function TasksView({
                   </div>
                   <div className="progress-cell">
                     <div className="mini-meter">
-                      <span style={{ width: `${task.progress}%` }} />
+                      <span style={{ width: `${snapProgress(task.progress)}%` }} />
                     </div>
-                    <small>{task.progress}%</small>
+                    <small>{snapProgress(task.progress)}%</small>
                   </div>
                 </div>
                 <div className="task-row-actions" aria-label="任务快捷操作">
@@ -4666,7 +4683,7 @@ function TaskProgressModal({
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
   const initialProgressDraft = useMemo(
     () => readDraftCache(progressDraftKey, {
-      draftProgress: task.progress,
+      draftProgress: snapProgress(task.progress),
       note: '',
       timeDraft: defaultTimeEntryDraft(),
       timeEntries: (task.timeEntries ?? []) as TimeEntry[],
@@ -4675,7 +4692,7 @@ function TaskProgressModal({
     }),
     [progressDraftKey, task.progress, task.timeEntries, task.waitingEntries],
   )
-  const [draftProgress, setDraftProgress] = useState(initialProgressDraft.draftProgress)
+  const [draftProgress, setDraftProgress] = useState(snapProgress(initialProgressDraft.draftProgress))
   const [note, setNote] = useState(initialProgressDraft.note)
   const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
   const [draftTimeEntries, setDraftTimeEntries] = useState<TimeEntry[]>(initialProgressDraft.timeEntries)
@@ -4689,7 +4706,7 @@ function TaskProgressModal({
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
   const [activityExpansion, setActivityExpansion] = useState({ taskId: task.id, showAll: false })
-  const savedProgress = task.progress
+  const savedProgress = snapProgress(task.progress)
   const progressDirty = draftProgress !== savedProgress
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
@@ -4847,7 +4864,7 @@ function TaskProgressModal({
               type="range"
               min={0}
               max={100}
-              step={10}
+              step={20}
               value={draftProgress}
               style={{ '--progress-value': `${draftProgress}%` } as CSSProperties}
               onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))}
@@ -5374,10 +5391,10 @@ function AcceptanceModal({
             <small>来自记录进展</small>
           </div>
           <div className="acceptance-final-progress">
-            <div className="acceptance-progress-track" aria-label={`当前进度 ${task.progress}%`}>
-              <span style={{ width: `${task.progress}%` }} />
+            <div className="acceptance-progress-track" aria-label={`当前进度 ${snapProgress(task.progress)}%`}>
+              <span style={{ width: `${snapProgress(task.progress)}%` }} />
             </div>
-            <strong>{task.progress}%</strong>
+            <strong>{snapProgress(task.progress)}%</strong>
           </div>
           <p className="acceptance-muted-hint">验收只核对当前进度；确认通过后，进度将自动设为 100%。如需调整，请先在「记录进展」中修改。</p>
         </section>
@@ -5702,7 +5719,7 @@ function TaskDetailModal({
             </div>
             <div>
               <dt>当前进度</dt>
-              <dd>{task.progress}%</dd>
+              <dd>{snapProgress(task.progress)}%</dd>
             </div>
             <div>
               <dt>实际工时</dt>
@@ -5733,9 +5750,9 @@ function TaskDetailModal({
           </dl>
           <div className="task-detail-progress">
             <div className="large-meter">
-              <span style={{ width: `${task.progress}%` }} />
+              <span style={{ width: `${snapProgress(task.progress)}%` }} />
             </div>
-            <strong>{task.progress}%</strong>
+            <strong>{snapProgress(task.progress)}%</strong>
           </div>
         </section>
 
@@ -5933,9 +5950,9 @@ function TaskEditModal({
               <span>当前进度</span>
               <div className="progress-block inline-progress readonly-progress">
                 <div className="large-meter">
-                  <span style={{ width: `${task.progress}%` }} />
+                  <span style={{ width: `${snapProgress(task.progress)}%` }} />
                 </div>
-                <strong>{task.progress}%</strong>
+                <strong>{snapProgress(task.progress)}%</strong>
               </div>
             </div>
           </div>
@@ -7362,7 +7379,7 @@ function ReportsView({
       parts.push(`验收文件：${task.acceptanceFiles.slice(0, 3).join('、')}${task.acceptanceFiles.length > 3 ? ` 等 ${task.acceptanceFiles.length} 个` : ''}`)
     }
     if (parts.length === 0) {
-      parts.push(`${task.status}，进度 ${task.progress}%`)
+      parts.push(`${task.status}，进度 ${snapProgress(task.progress)}%`)
     }
     return parts.join('；')
   }
