@@ -989,10 +989,19 @@ button {
 }
 
 .dashboard-side-action {
-  min-height: 28px;
+  min-height: 24px;
   color: var(--color-primary);
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-side-action svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dashboard-side-action:hover {
+  color: var(--color-primary-strong);
 }
 
 .dashboard-side-info {
