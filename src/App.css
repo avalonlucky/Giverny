@@ -758,6 +758,63 @@ button {
   gap: 8px;
 }
 
+.dashboard-task-panel {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.dashboard-task-header {
+  margin-bottom: 24px;
+}
+
+.dashboard-task-heading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.dashboard-task-heading-row h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.dashboard-task-heading-row p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.dashboard-task-search {
+  width: min(580px, 100%);
+  min-width: 0;
+  height: 48px;
+  margin-top: 34px;
+  padding: 0 3px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  font-size: 18px;
+}
+
+.dashboard-task-search:focus-within {
+  border-bottom-color: var(--color-primary);
+  background: transparent;
+}
+
+.dashboard-task-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.dashboard-task-panel .segment-tabs {
+  margin-bottom: 16px;
+}
+
 .task-row {
   position: relative;
   width: 100%;
@@ -9848,6 +9905,21 @@ textarea:focus-visible {
 
   .topbar-shortcut {
     display: none;
+  }
+
+  .dashboard-task-heading-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .dashboard-task-heading-row h2 {
+    font-size: 21px;
+  }
+
+  .dashboard-task-search {
+    width: 100%;
+    margin-top: 22px;
   }
 
   .task-row {

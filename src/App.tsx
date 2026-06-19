@@ -3053,18 +3053,16 @@ function App() {
 
         <section className="content-grid">
           <div className="main-column">
-            <section className="panel task-panel">
-              <div className="panel-header">
-                <div>
+            <section className="panel task-panel dashboard-task-panel">
+              <div className="dashboard-task-header">
+                <div className="dashboard-task-heading-row">
                   <h2>任务明细</h2>
-                  <p>按月份汇总工作内容、工时和验收状态</p>
+                  <p>按月份汇总工作内容、工时与验收</p>
                 </div>
-                <div className="panel-tools">
-                  <label className="search-box">
-                    <Search size={16} />
-                    <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、对接人" />
-                  </label>
-                </div>
+                <label className="search-box dashboard-task-search">
+                  <Search size={20} />
+                  <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、对接人（/）" />
+                </label>
               </div>
 
               <div className="segment-tabs">
