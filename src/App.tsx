@@ -410,10 +410,10 @@ const insightPeriods: { value: InsightPeriod; label: string }[] = [
 ]
 
 const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
-  { value: 'period', label: '周期分析', icon: <BarChart3 size={16} /> },
-  { value: 'deliverable', label: '交付件分析', icon: <Archive size={16} /> },
-  { value: 'capability', label: '能力画像', icon: <Eye size={16} /> },
-  { value: 'advisor', label: 'AI 洞察', icon: <Sparkles size={16} /> },
+  { value: 'period', label: '周期复盘', icon: <BarChart3 size={16} /> },
+  { value: 'deliverable', label: '历史样本', icon: <Archive size={16} /> },
+  { value: 'capability', label: '异常诊断', icon: <AlertTriangle size={16} /> },
+  { value: 'advisor', label: '数据结论', icon: <Sparkles size={16} /> },
 ]
 
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '挂起', '待验收', '已验收', '终止']
@@ -507,6 +507,28 @@ function isDateInRange(value: string | undefined, range: { start: Date; end: Dat
   return date >= range.start && date <= range.end
 }
 
+function isTaskInAnalysisRange(task: Task, range: { start: Date; end: Date }) {
+  const analysisMonth = dateFromValue(`${taskAnalysisMonth(task)}-01`)
+  const inAnalysisMonth = analysisMonth ? analysisMonth >= range.start && analysisMonth <= range.end : false
+  return inAnalysisMonth || isDateInRange(task.date, range) || isDateInRange(task.estimatedDate, range)
+}
+
+function previousInsightRange(range: { start: Date; end: Date }) {
+  const duration = range.end.getTime() - range.start.getTime()
+  const end = new Date(range.start.getTime() - 1)
+  const start = new Date(end.getTime() - duration)
+  return { start, end }
+}
+
+function median(values: number[]) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
+  if (sorted.length === 0) {
+    return 0
+  }
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
 function insightPeriodRange(period: InsightPeriod, monthValue: string) {
   const today = localDateFromIsoDate(isoDate())
   const [anchorYear, anchorMonth] = monthValue.split('-').map(Number)
@@ -553,11 +575,6 @@ function daysBetween(startValue: string | undefined, endValue: string | undefine
     return null
   }
   return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000))
-}
-
-function fileTypeLabel(file: FileAsset) {
-  const type = file.type.toUpperCase()
-  return type === 'JPEG' ? 'JPG' : type
 }
 
 function isVisualReviewReady(file: FileAsset) {
@@ -3179,7 +3196,6 @@ function App() {
               reports={reports}
               currentMonth={currentMonth}
               hourlyRate={hourlyRate}
-              onPreviewFile={setPreviewFile}
             />
           ) : (
             adminOnlyPanel
@@ -6746,7 +6762,6 @@ function InsightsView({
   reports,
   currentMonth,
   hourlyRate,
-  onPreviewFile,
 }: {
   tasks: Task[]
   updates: TaskUpdate[]
@@ -6754,7 +6769,6 @@ function InsightsView({
   reports: ReportRecord[]
   currentMonth: { label: string; value: string }
   hourlyRate: number
-  onPreviewFile: (file: FileAsset) => void
 }) {
   const [period, setPeriod] = useState<InsightPeriod>('month')
   const [activeTab, setActiveTab] = useState<InsightTab>('period')
@@ -6763,13 +6777,11 @@ function InsightsView({
 
   const periodTasks = useMemo(
     () =>
-      tasks.filter((task) => {
-        const analysisMonth = dateFromValue(`${taskAnalysisMonth(task)}-01`)
-        const inAnalysisMonth = analysisMonth ? analysisMonth >= range.start && analysisMonth <= range.end : false
-        return inAnalysisMonth || isDateInRange(task.date, range) || isDateInRange(task.estimatedDate, range)
-      }),
+      tasks.filter((task) => isTaskInAnalysisRange(task, range)),
     [range, tasks],
   )
+  const previousRange = useMemo(() => previousInsightRange(range), [range])
+  const previousPeriodTasks = useMemo(() => tasks.filter((task) => isTaskInAnalysisRange(task, previousRange)), [previousRange, tasks])
   const periodTaskIds = useMemo(() => new Set(periodTasks.map((task) => task.id)), [periodTasks])
   const periodUpdates = useMemo(
     () => updates.filter((update) => periodTaskIds.has(update.taskId) || isDateInRange(update.date, range)),
@@ -6801,18 +6813,15 @@ function InsightsView({
   const billableTasks = periodTasks.filter((task) => task.status !== '不计费')
   const totalHours = Number(billableTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1))
   const estimatedHours = Number(billableTasks.reduce((sum, task) => sum + task.estimatedHours, 0).toFixed(1))
+  const previousHours = Number(previousPeriodTasks.filter((task) => task.status !== '不计费').reduce((sum, task) => sum + task.actualHours, 0).toFixed(1))
+  const previousAccepted = previousPeriodTasks.filter((task) => task.status === '已验收').length
+  const previousAcceptedRate = previousPeriodTasks.length > 0 ? Math.round((previousAccepted / previousPeriodTasks.length) * 100) : 0
   const acceptedRate = periodTasks.length > 0 ? Math.round((acceptedTasks.length / periodTasks.length) * 100) : 0
-  const hourGap = Number((totalHours - estimatedHours).toFixed(1))
   const visualReadyCount = periodFiles.filter(isVisualReviewReady).length
   const lockedReports = reports.filter((report) => {
     const reportDate = dateFromValue(`${report.month}-01`)
     return reportDate ? reportDate >= range.start && reportDate <= range.end : false
   }).length
-
-  const durationSamples = acceptedTasks
-    .map((task) => daysBetween(task.date, updatesByTask.get(task.id)?.[0]?.date ?? task.estimatedDate))
-    .filter((value): value is number => typeof value === 'number')
-  const averageDuration = durationSamples.length > 0 ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length : 0
 
   const typeDistribution = useMemo(() => {
     const hoursByType = new Map<string, number>()
@@ -6888,24 +6897,6 @@ function InsightsView({
     return buckets.map((bucket) => ({ ...bucket, value: Number(bucket.value.toFixed(1)) }))
   }, [period, periodUpdates, range])
 
-  const deliveryRows = useMemo(
-    () =>
-      periodTasks
-        .filter((task) => task.status !== '计划中' || (filesByTask.get(task.id)?.length ?? 0) > 0)
-        .map((task) => {
-          const taskFiles = filesByTask.get(task.id) ?? []
-          const latestUpdate = updatesByTask.get(task.id)?.[0]
-          return {
-            task,
-            taskFiles,
-            latestUpdate,
-            sortValue: latestUpdate?.date ?? task.estimatedDate ?? task.date,
-          }
-        })
-        .sort((a, b) => b.sortValue.localeCompare(a.sortValue)),
-    [filesByTask, periodTasks, updatesByTask],
-  )
-
   const topType = typeDistribution.items[0]
   const hourAccuracySamples = billableTasks.filter((task) => task.actualHours > 0 && task.estimatedHours > 0)
   const hourAccuracy =
@@ -6918,10 +6909,6 @@ function InsightsView({
           ),
         )
       : 0
-  const coverageItems = defaultDesignTypes.map((type) => ({
-    type,
-    count: tasks.filter((task) => task.type.includes(type)).length,
-  }))
   const contactRows = [...periodTasks.reduce((map, task) => {
     const name = task.contact || '未填写'
     map.set(name, (map.get(name) ?? 0) + 1)
@@ -6933,23 +6920,113 @@ function InsightsView({
       name,
       pct: periodTasks.length > 0 ? Math.round((count / periodTasks.length) * 100) : 0,
     }))
-  const missingCategories = ['视频类', '剪辑类', '动效类', '包装类', '短视频物料'].filter(
-    (category) => !tasks.some((task) => task.type.includes(category.replace('类', ''))),
-  )
+  const allFilesByTask = useMemo(() => {
+    const map = new Map<number, FileAsset[]>()
+    files.forEach((file) => {
+      map.set(file.taskId, [...(map.get(file.taskId) ?? []), file])
+    })
+    return map
+  }, [files])
+  const allUpdatesByTask = useMemo(() => {
+    const map = new Map<number, TaskUpdate[]>()
+    updates.forEach((update) => {
+      map.set(update.taskId, [...(map.get(update.taskId) ?? []), update])
+    })
+    return map
+  }, [updates])
+  const historicalTypeRows = useMemo(() => {
+    const map = new Map<string, Task[]>()
+    tasks.forEach((task) => {
+      if (task.status === '不计费') {
+        return
+      }
+      map.set(task.type, [...(map.get(task.type) ?? []), task])
+    })
+    return [...map.entries()]
+      .map(([type, items]) => {
+        const accepted = items.filter((task) => task.status === '已验收')
+        const actualHours = items.map((task) => task.actualHours).filter((value) => value > 0)
+        const estimatedPairs = items.filter((task) => task.actualHours > 0 && task.estimatedHours > 0)
+        const cycles = accepted
+          .map((task) => daysBetween(task.date, allUpdatesByTask.get(task.id)?.[0]?.date ?? task.estimatedDate))
+          .filter((value): value is number => typeof value === 'number')
+        const fileCount = items.reduce((sum, task) => sum + (allFilesByTask.get(task.id)?.length ?? 0), 0)
+        const accuracy =
+          estimatedPairs.length > 0
+            ? Math.round(
+                estimatedPairs.reduce((sum, task) => sum + Math.max(0, 100 - (Math.abs(task.actualHours - task.estimatedHours) / task.estimatedHours) * 100), 0) /
+                  estimatedPairs.length,
+              )
+            : 0
+        return {
+          type,
+          count: items.length,
+          accepted: accepted.length,
+          avgHours: actualHours.length > 0 ? actualHours.reduce((sum, value) => sum + value, 0) / actualHours.length : 0,
+          medianHours: median(actualHours),
+          avgCycle: cycles.length > 0 ? cycles.reduce((sum, value) => sum + value, 0) / cycles.length : 0,
+          accuracy,
+          fileRate: items.length > 0 ? Math.round((items.filter((task) => (allFilesByTask.get(task.id)?.length ?? 0) > 0).length / items.length) * 100) : 0,
+          fileCount,
+        }
+      })
+      .sort((a, b) => b.count - a.count || b.avgHours - a.avgHours)
+  }, [allFilesByTask, allUpdatesByTask, tasks])
+  const riskRows = useMemo(() => {
+    const todayValue = isoDate()
+    return periodTasks.flatMap((task) => {
+      const taskFiles = filesByTask.get(task.id) ?? []
+      const taskUpdates = updatesByTask.get(task.id) ?? []
+      const risks: { task: Task; tone: 'danger' | 'warning' | 'info'; label: string; detail: string }[] = []
+      if (task.estimatedHours > 0 && task.actualHours > task.estimatedHours * 1.3) {
+        risks.push({
+          task,
+          tone: 'danger',
+          label: '工时超预估',
+          detail: `实际 ${task.actualHours.toFixed(1)}h，预估 ${task.estimatedHours.toFixed(1)}h，超出 ${Math.round((task.actualHours / task.estimatedHours - 1) * 100)}%。`,
+        })
+      }
+      if (!['已验收', '终止', '不计费'].includes(task.status) && datePart(task.estimatedDate || task.date) < todayValue) {
+        risks.push({
+          task,
+          tone: 'danger',
+          label: '交付逾期',
+          detail: `预计交付 ${formatPlanDateTime(task.estimatedDate || task.date)}，当前状态为 ${task.status}。`,
+        })
+      }
+      if (['进行中', '待验收'].includes(task.status) && taskUpdates.length === 0) {
+        risks.push({
+          task,
+          tone: 'warning',
+          label: '缺少进展记录',
+          detail: '当前周期内没有进展记录，后续复盘会缺少过程依据。',
+        })
+      }
+      if (['待验收', '已验收'].includes(task.status) && taskFiles.length === 0 && (task.acceptanceFiles?.length ?? 0) === 0) {
+        risks.push({
+          task,
+          tone: 'warning',
+          label: '缺少交付附件',
+          detail: '任务已到验收阶段，但没有关联交付件，后续无法做文件级复盘。',
+        })
+      }
+      return risks
+    }).slice(0, 10)
+  }, [filesByTask, periodTasks, updatesByTask])
   const suggestions = [
+    previousPeriodTasks.length > 0
+      ? `本周期实际工时 ${totalHours.toFixed(1)}h，上一对照周期 ${previousHours.toFixed(1)}h，变化 ${previousHours > 0 ? `${Math.round(((totalHours - previousHours) / previousHours) * 100)}%` : '暂无可比比例'}。`
+      : '上一对照周期样本不足，当前先以本周期任务结构作为基线。',
+    acceptedRate !== previousAcceptedRate && previousPeriodTasks.length > 0
+      ? `验收率从上一周期 ${previousAcceptedRate}% 变为 ${acceptedRate}%，需要结合待验收和逾期任务看是否存在收尾堆积。`
+      : `本周期验收率 ${acceptedRate}%，共 ${acceptedTasks.length}/${periodTasks.length} 个任务完成闭环。`,
     topType
-      ? `当前 ${topType.label} 占用 ${Math.round((topType.value / Math.max(typeDistribution.total, 1)) * 100)}% 工时，后续报价和排期可以优先参考这类任务的真实耗时。`
-      : '先积累更多已验收任务，洞察页会逐步形成可复用的报价和排期依据。',
-    hourGap > Math.max(2, estimatedHours * 0.15)
-      ? `本周期实际工时比预估多 ${hourGap.toFixed(1)}h，建议同类型任务预留修改沟通和验收缓冲。`
-      : '本周期预估与实际投入比较接近，可以继续沿用当前排期口径。',
-    periodFiles.length > 0
-      ? `${visualReadyCount}/${periodFiles.length} 个交付件具备在线预览或基础质量检查条件，适合后续接入 DeepSeek 视觉或 BAML Runtime 做细分评审。`
-      : '本周期交付件偏少，建议在进展或验收阶段补齐最终稿，方便后续做全链路复盘。',
-    missingCategories.length > 0
-      ? `可考虑拓展 ${missingCategories.slice(0, 3).join('、')} 等分类，让收入来源和能力结构更稳。`
-      : '当前分类覆盖较完整，后续可重点沉淀高复购类型的模板和验收标准。',
-  ]
+      ? `当前最高工时类型是 ${topType.label}，占 ${Math.round((topType.value / Math.max(typeDistribution.total, 1)) * 100)}%；该类型历史样本为 ${historicalTypeRows.find((row) => row.type === topType.label)?.count ?? 0} 个。`
+      : '当前周期还没有形成主要工时类型。',
+    riskRows.length > 0
+      ? `当前发现 ${riskRows.length} 条可复盘异常，优先处理工时超预估、交付逾期、缺少进展或缺少交付附件的任务。`
+      : '当前周期暂未发现明显异常任务，后续可继续提高进展记录和交付附件完整度。',
+  ].filter(Boolean)
 
   return (
     <section className="insights-view">
@@ -6957,7 +7034,7 @@ function InsightsView({
         <div>
           <p className="eyebrow">数据洞察</p>
           <h2>周期复盘与交付链路分析</h2>
-          <span>{rangeLabel} · 基于任务、进展、文件与结算记录自动汇总</span>
+          <span>{rangeLabel} · 基于历史任务、当前周期、进展、验收和附件完整度自动复盘</span>
         </div>
         <span className="admin-only-data insights-admin-badge">设计师专属</span>
       </section>
@@ -7016,44 +7093,48 @@ function InsightsView({
         <section className="panel insights-chain-panel">
           <div className="panel-header compact">
             <div>
-              <h2>交付件全链路</h2>
-              <p>从接收、进展、上传到验收，先做基础链路检查；视觉质量分析入口已预留</p>
+              <h2>历史类型样本</h2>
+              <p>按站内全部历史任务统计同类型样本，不包含交付件内容识别</p>
             </div>
-            <span className="insights-chip">{periodFiles.length} 个交付件</span>
+            <span className="insights-chip">{historicalTypeRows.length} 个类型</span>
           </div>
-          <div className="insights-chain-list">
-            {deliveryRows.length === 0 && (
+          <div className="insights-history-table">
+            {historicalTypeRows.length === 0 && (
               <div className="empty-state">
-                <strong>暂无可分析链路</strong>
-                <p>任务进入进行中并上传交付件后，这里会展示完整流程。</p>
+                <strong>暂无历史样本</strong>
+                <p>完成更多任务后，这里会按类型形成真实的报价和排期依据。</p>
               </div>
             )}
-            {deliveryRows.map(({ task, taskFiles, latestUpdate }) => {
-              const duration = daysBetween(task.date, latestUpdate?.date ?? task.estimatedDate)
-              return (
-                <article className="insights-chain-row deliverable-focus-row" key={task.id}>
-                  <div className="insights-chain-main">
-                    <strong>{task.title}</strong>
-                    <p>{task.type} · {task.contact} · {duration ? `${duration} 天链路` : '链路待补齐'} · 实际 {task.actualHours.toFixed(1)}h</p>
-                    <span>{latestUpdate?.body || task.requirement}</span>
+            {historicalTypeRows.map((row) => (
+              <article className="insights-history-row" key={row.type}>
+                <div>
+                  <strong>{row.type}</strong>
+                  <span>{row.count} 个任务 · {row.accepted} 个已验收 · {row.fileCount} 个附件</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>均值</dt>
+                    <dd>{row.avgHours.toFixed(1)}h</dd>
                   </div>
-                  <div className="insights-file-strip">
-                    {taskFiles.length === 0 && <em>暂无附件</em>}
-                    {taskFiles.slice(0, 5).map((file) => (
-                      <button className="insights-file-chip" type="button" key={file.id} onClick={() => onPreviewFile(file)}>
-                        {isInlineImageFileType(file.type) ? <FileImage size={15} /> : <FileText size={15} />}
-                        <span>{fileTypeLabel(file)}</span>
-                      </button>
-                    ))}
-                    {taskFiles.length > 5 && <span className="insights-file-more">+{taskFiles.length - 5}</span>}
+                  <div>
+                    <dt>中位</dt>
+                    <dd>{row.medianHours.toFixed(1)}h</dd>
                   </div>
-                  <div className="insights-chain-state">
-                    <TaskStateBadge task={task} />
-                    <span>{taskFiles.some(isVisualReviewReady) ? '可做质量复核' : '等待可预览文件'}</span>
+                  <div>
+                    <dt>周期</dt>
+                    <dd>{row.avgCycle > 0 ? `${row.avgCycle.toFixed(1)} 天` : '—'}</dd>
                   </div>
-                </article>
-              )
-            })}
+                  <div>
+                    <dt>估算</dt>
+                    <dd>{row.accuracy > 0 ? `${row.accuracy}%` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>附件率</dt>
+                    <dd>{row.fileRate}%</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
           </div>
         </section>
       )}
@@ -7063,31 +7144,71 @@ function InsightsView({
           <section className="panel insights-capability-panel">
             <div className="panel-header compact">
               <div>
-                <h2>能力画像</h2>
-                <p>设计类型覆盖、工时估算准确率和对接人集中度</p>
+                <h2>异常任务诊断</h2>
+                <p>只基于当前周期字段判断，不做文件内容识别</p>
               </div>
             </div>
-            <div className="insights-capability-grid">
-              <div className="insights-score-card">
-                <strong>{hourAccuracy > 0 ? `${hourAccuracy}%` : '待积累'}</strong>
-                <span>工时估算准确率</span>
-              </div>
-              <div className="insights-score-card">
-                <strong>{averageDuration > 0 ? `${averageDuration.toFixed(1)} 天` : '待积累'}</strong>
-                <span>平均交付周期</span>
-              </div>
-            </div>
-            <div className="insights-coverage-grid">
-              {coverageItems.map((item) => (
-                <span className={`insights-coverage-chip ${item.count > 0 ? 'covered' : 'missing'}`} key={item.type}>
-                  {item.count > 0 ? '✓' : '+'}
-                  {item.type}
-                </span>
+            <div className="insights-risk-list">
+              {riskRows.length === 0 && (
+                <div className="empty-state">
+                  <strong>当前没有明显异常</strong>
+                  <p>没有发现工时超预估、交付逾期、缺少进展或缺少附件的任务。</p>
+                </div>
+              )}
+              {riskRows.map((risk, index) => (
+                <article className={`insights-risk-row ${risk.tone}`} key={`${risk.task.id}-${risk.label}-${index}`}>
+                  <div>
+                    <strong>{risk.task.title}</strong>
+                    <span>{risk.task.type} · {risk.task.contact} · {risk.task.status}</span>
+                  </div>
+                  <em>{risk.label}</em>
+                  <p>{risk.detail}</p>
+                </article>
               ))}
             </div>
           </section>
 
           <aside className="panel insights-advisor-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>基础健康度</h2>
+                <p>用于判断当前周期复盘质量</p>
+              </div>
+            </div>
+            <div className="insights-capability-grid single">
+              <div className="insights-score-card">
+                <strong>{hourAccuracy > 0 ? `${hourAccuracy}%` : '待积累'}</strong>
+                <span>工时估算准确率</span>
+              </div>
+              <div className="insights-score-card">
+                <strong>{periodFiles.length > 0 ? `${Math.round((visualReadyCount / periodFiles.length) * 100)}%` : '待积累'}</strong>
+                <span>附件可预览率</span>
+              </div>
+            </div>
+          </aside>
+        </section>
+      )}
+
+      {activeTab === 'advisor' && (
+        <section className="insights-grid wide">
+          <section className="panel insights-advisor-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>数据结论</h2>
+                <p>只输出能被当前站内数据支撑的判断</p>
+              </div>
+            </div>
+            <ul className="insights-suggestion-list">
+              {suggestions.map((suggestion) => (
+                <li key={suggestion}>
+                  <Sparkles size={15} />
+                  <span>{suggestion}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <aside className="panel insights-chat-preview">
             <div className="panel-header compact">
               <div>
                 <h2>对接人集中度</h2>
@@ -7104,50 +7225,9 @@ function InsightsView({
                 </div>
               ))}
             </div>
-            {contactRows[0] && contactRows[0].pct >= 60 && (
-              <div className="insights-ai-note">
-                <AlertTriangle size={16} />
-                <span>单一对接人占比超过 60%，后续可以有意识拓展新的客户来源。</span>
-              </div>
-            )}
-          </aside>
-        </section>
-      )}
-
-      {activeTab === 'advisor' && (
-        <section className="insights-grid wide">
-          <section className="panel insights-advisor-panel">
-            <div className="panel-header compact">
-              <div>
-                <h2>洞察师建议</h2>
-                <p>当前先由站内数据规则生成，后续可接 DeepSeek 对话式洞察</p>
-              </div>
-            </div>
-            <ul className="insights-suggestion-list">
-              {suggestions.map((suggestion) => (
-                <li key={suggestion}>
-                  <Sparkles size={15} />
-                  <span>{suggestion}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <aside className="panel insights-chat-preview">
-            <div className="panel-header compact">
-              <div>
-                <h2>AI 洞察对话</h2>
-                <p>下一步接入后，可直接询问效率、定价和承接方向</p>
-              </div>
-            </div>
-            <div className="insights-quick-prompts">
-              {['分析我最近三个月的效率趋势', '我的定价合理吗？', '哪类任务交付周期最不稳定？', '我适合拓展哪些新品类？'].map((prompt) => (
-                <span key={prompt}>{prompt}</span>
-              ))}
-            </div>
             <div className="insights-ai-note">
               <Eye size={16} />
-              <span>这部分会复用现有 DeepSeek 通道；BAML Runtime 继续作为后续多租户模型路由预留。</span>
+              <span>交付件内容识别尚未接入；当前结论不会声称读懂 PDF、PPT 或图片内容。</span>
             </div>
           </aside>
         </section>
