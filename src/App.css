@@ -2543,12 +2543,6 @@ button {
    management-row 只保留 voided 状态和 hover/selected 的 token 化覆盖（见上方）。 */
 
 /* management-due / management-row-actions 已废弃——任务导航现在用 task-row-due + task-row-actions */
-.task-editor-hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .task-context-menu {
   position: fixed;
   z-index: var(--z-floating);
@@ -3213,102 +3207,6 @@ button.file-chip:focus-visible {
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.5;
-}
-
-.task-editor-preview {
-  display: grid;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.task-editor-hero {
-  padding: 18px 18px 16px;
-  border-bottom: 1px solid var(--color-border-soft);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px;
-}
-
-.task-editor-hero p {
-  margin: 0 0 8px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.task-editor-hero h2 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 17px;
-  line-height: 1.28;
-  font-weight: 800;
-}
-
-.task-editor-hero small {
-  display: block;
-  margin-top: 8px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.task-editor-tabs {
-  width: 100%;
-  min-height: 46px;
-  padding: 0;
-  border-radius: 0;
-  border-bottom: 1px solid var(--color-border-soft);
-  background: transparent;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-}
-
-.task-editor-tabs button {
-  position: relative;
-  height: 46px;
-  border: 0;
-  border-radius: 0;
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.task-editor-tabs button.active {
-  color: var(--color-primary-strong);
-  background: transparent;
-  font-weight: 800;
-}
-
-.task-editor-tabs button.active::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--color-primary);
-}
-
-.task-editor-tabs button span {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: 4px;
-  border-radius: var(--radius-pill);
-  background: var(--color-admin-only);
-  vertical-align: 1px;
-}
-
-.task-editor-pane {
-  display: grid;
-  gap: 12px;
-  padding: 16px 18px 18px;
 }
 
 .editor-section-title {
@@ -9143,17 +9041,9 @@ textarea:focus-visible {
   transform: rotate(180deg);
 }
 
-.task-detail-section .task-detail-fields,
-.task-editor-section .editor-fields,
-.task-detail-section .image-upload-field,
+.task-detail-section .task-detail-fields,.task-detail-section .image-upload-field,
 .task-detail-section .task-activity {
   padding: 0 14px 14px;
-}
-
-.task-editor-section .status-reason-panel,
-.task-editor-section .progress-block,
-.task-editor-section .quick-actions {
-  margin: 0 14px 14px;
 }
 
 .progress-slider-row {
