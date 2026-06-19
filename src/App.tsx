@@ -193,6 +193,14 @@ function formatMonthDay(value: string) {
   return `${date.slice(5, 7)}/${date.slice(8, 10)}`
 }
 
+function formatMonthDayDash(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value)
+  return `${date.slice(5, 7)}-${date.slice(8, 10)}`
+}
+
 function formatDueDateCompact(value: string) {
   if (!value) {
     return ''
@@ -1459,7 +1467,7 @@ const taskFieldLabels: Record<string, string> = {
   date: '预计开始时间',
   estimatedDate: '预计交付时间',
   requester: '需求人',
-  contact: '对接人',
+  contact: '需求人',
   reviewer: '验收人',
   requirement: '需求描述',
 }
@@ -3074,7 +3082,7 @@ function App() {
                 </div>
                 <label className="search-box dashboard-task-search">
                   <Search size={20} />
-                  <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、对接人（/）" />
+                  <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、需求人（/）" />
                 </label>
               </div>
 
@@ -4072,11 +4080,17 @@ function DashboardTaskSidebar({
   const waitingMinutes = sumTimeEntries(waitingEntries)
   const recentActivity = activity.slice(0, 4)
   const canAcceptTask = task.status === '待验收'
+  const demandPerson = task.requester || task.contact || '待确认'
 
   return (
     <aside className="dashboard-task-sidebar">
       <header className="dashboard-task-sidebar-header">
         <h2>{task.title}</h2>
+        <p className="dashboard-task-sidebar-meta">
+          <span>{formatMonthDayDash(task.date)}</span>
+          <span>{task.type || '未分类'}</span>
+          <span>需求人 {demandPerson}</span>
+        </p>
       </header>
 
       <div className="dashboard-side-tabs" role="tablist" aria-label="任务侧栏">
@@ -4104,8 +4118,8 @@ function DashboardTaskSidebar({
               <dd>{task.type || '未填写'}</dd>
             </div>
             <div>
-              <dt>对接人</dt>
-              <dd>{task.contact || '待确认'}</dd>
+              <dt>需求人</dt>
+              <dd>{demandPerson}</dd>
             </div>
             <div>
               <dt>状态</dt>
@@ -4420,7 +4434,7 @@ function TasksView({
           </div>
           <label className="search-box task-search-inline">
             <Search size={16} />
-            <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、对接人" />
+            <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、需求人" />
           </label>
           {viewTabs}
         </div>
@@ -4816,7 +4830,7 @@ function TaskProgressModal({
         <div>
           <p className="eyebrow">进展记录</p>
           <h2 id="task-progress-title">记录进展</h2>
-          <small>{task.title} · {task.type} · 对接 {task.contact || '待确认'}</small>
+          <small>{task.title} · {task.type} · 需求人 {task.requester || task.contact || '待确认'}</small>
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
           <X size={18} />
@@ -4955,7 +4969,7 @@ function TaskProgressModal({
               </button>
             </div>
           </div>
-          <textarea className="task-progress-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="写一下目前的进度到哪了，例如：与对接人确认了尺寸，正在出草图。" />
+          <textarea className="task-progress-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="写一下目前的进度到哪了，例如：与需求人确认了尺寸，正在出草图。" />
           {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
             <div className="ai-suggestion-panel task-text-ai-panel">
               <div className="ai-suggestion-head">
@@ -7063,12 +7077,12 @@ function InsightsView({
           <aside className="panel insights-chat-preview">
             <div className="panel-header compact">
               <div>
-                <h2>对接人集中度</h2>
+                <h2>需求人集中度</h2>
                 <p>观察工作量是否过度集中</p>
               </div>
             </div>
             <div className="insights-concentration-list">
-              {contactRows.length === 0 && <p className="calendar-empty-hint">暂无对接人数据。</p>}
+              {contactRows.length === 0 && <p className="calendar-empty-hint">暂无需求人数据。</p>}
               {contactRows.map((row) => (
                 <div className="insights-concentration-row" key={row.name}>
                   <span>{row.name}</span>
@@ -7541,7 +7555,7 @@ function ReportsView({
                   <th>设计类型</th>
                   <th>项目/任务名称</th>
                   <th>具体任务需求</th>
-                  <th>对接人</th>
+                  <th>需求人</th>
                   <th>工作阶段</th>
                   <th className="num">参考预估工时</th>
                   <th className="num">实际工时</th>
@@ -9162,7 +9176,7 @@ function NewTaskModal({
   const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
   const [isSupplemental, setIsSupplemental] = useState(initialDraft.isSupplemental)
   const [settlementMonth, setSettlementMonth] = useState(initialDraft.settlementMonth)
-  const [requester, setRequester] = useState(initialDraft.requester)
+  const [requester] = useState(initialDraft.requester)
   const [contact, setContact] = useState(initialDraft.contact)
   const [supplementalNote, setSupplementalNote] = useState(initialDraft.supplementalNote)
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
@@ -9235,7 +9249,7 @@ function NewTaskModal({
       nextErrors.requirement = '请填写任务具体需求'
     }
     if (!contact.trim()) {
-      nextErrors.contact = '请填写对接人'
+      nextErrors.contact = '请填写需求人'
     }
     setFormErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
@@ -9252,9 +9266,9 @@ function NewTaskModal({
       type: type.trim(),
       title: title.trim(),
       requirement: requirement.trim(),
-      requester: requester.trim(),
+      requester: contact.trim() || requester.trim(),
       contact: contact.trim(),
-      reviewer: requester.trim() || '待确认',
+      reviewer: contact.trim() || requester.trim() || '待确认',
       stage: status,
       estimatedHours: estimated,
       actualHours: 0,
@@ -9474,13 +9488,9 @@ function NewTaskModal({
               )}
             </div>
           )}
-          <label className="field">
-            <span>需求人</span>
-            <input value={requester} onChange={(event) => setRequester(event.target.value)} placeholder="提出需求的人" />
-          </label>
           <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
-            <span>对接人 <em className="required-mark" aria-label="必填">*</em></span>
-            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="黄媚" aria-required="true" />
+            <span>需求人 <em className="required-mark" aria-label="必填">*</em></span>
+            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="提出需求的人" aria-required="true" />
             {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
           </label>
           <div className="new-task-schedule-row">

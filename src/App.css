@@ -898,6 +898,23 @@ button {
   font-weight: 800;
 }
 
+.dashboard-task-sidebar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dashboard-task-sidebar-meta span + span::before {
+  margin-right: 7px;
+  color: var(--color-text-muted);
+  content: "·";
+}
+
 .dashboard-task-sidebar-actions {
   display: flex;
   flex-shrink: 0;
