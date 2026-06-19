@@ -4405,11 +4405,20 @@ function TaskProgressModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
   const initialProgressDraft = useMemo(
-    () => readDraftCache(progressDraftKey, { draftProgress: task.progress, note: '', waitingDraft: defaultTimeEntryDraft(), waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[] }),
-    [progressDraftKey, task.progress, task.waitingEntries],
+    () => readDraftCache(progressDraftKey, {
+      draftProgress: task.progress,
+      note: '',
+      timeDraft: defaultTimeEntryDraft(),
+      timeEntries: (task.timeEntries ?? []) as TimeEntry[],
+      waitingDraft: defaultTimeEntryDraft(),
+      waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
+    }),
+    [progressDraftKey, task.progress, task.timeEntries, task.waitingEntries],
   )
   const [draftProgress, setDraftProgress] = useState(initialProgressDraft.draftProgress)
   const [note, setNote] = useState(initialProgressDraft.note)
+  const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
+  const [draftTimeEntries, setDraftTimeEntries] = useState<TimeEntry[]>(initialProgressDraft.timeEntries)
   const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
   const [draftWaitingEntries, setDraftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
   const [isSaving, setIsSaving] = useState(false)
@@ -4422,6 +4431,10 @@ function TaskProgressModal({
   const [activityExpansion, setActivityExpansion] = useState({ taskId: task.id, showAll: false })
   const savedProgress = task.progress
   const progressDirty = draftProgress !== savedProgress
+  const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
+  const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
+  const timeMinutes = sumTimeEntries(draftTimeEntries)
+  const computedActualHours = Math.round((timeMinutes / 60) * 100) / 100
   const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
   const waitingDirty = JSON.stringify(draftWaitingEntries) !== savedWaitingSignature
   const waitingMinutes = sumTimeEntries(draftWaitingEntries)
@@ -4434,8 +4447,23 @@ function TaskProgressModal({
   const hiddenActivityHasFiles = hiddenTaskActivity.some((item) => getActivityFileNames(item).length > 0)
 
   useEffect(() => {
-    writeDraftCache(progressDraftKey, { draftProgress, note, waitingDraft, waitingEntries: draftWaitingEntries })
-  }, [draftProgress, draftWaitingEntries, note, progressDraftKey, waitingDraft])
+    writeDraftCache(progressDraftKey, { draftProgress, note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
+  }, [draftProgress, draftTimeEntries, draftWaitingEntries, note, progressDraftKey, timeDraft, waitingDraft])
+
+  const addTimeEntry = () => {
+    const start = timeDraft.start.trim()
+    const end = timeDraft.end.trim()
+    const noteText = timeDraft.note?.trim() ?? ''
+    if (!start || !end || minutesBetween(start, end) <= 0) {
+      return
+    }
+    setDraftTimeEntries((current) => [...current, { id: crypto.randomUUID(), start, end, note: noteText }])
+    setTimeDraft(defaultTimeEntryDraft())
+  }
+
+  const deleteTimeEntry = (entryId: string) => {
+    setDraftTimeEntries((current) => current.filter((entry) => entry.id !== entryId))
+  }
 
   const addWaitingEntry = () => {
     const start = waitingDraft.start.trim()
@@ -4493,6 +4521,9 @@ function TaskProgressModal({
       if (progressDirty) {
         confirmProgress()
       }
+      if (timeDirty) {
+        onUpdateTask(task.id, { timeEntries: draftTimeEntries, actualHours: computedActualHours })
+      }
       if (waitingDirty) {
         onUpdateTask(task.id, { waitingEntries: draftWaitingEntries })
       }
@@ -4546,6 +4577,79 @@ function TaskProgressModal({
         </button>
       </header>
       <div className="task-action-body">
+        <section className="action-section">
+          <div className="action-section-title">
+            <h3>整体进度</h3>
+            <span className={progressDirty ? 'admin-only-data' : ''}>{progressDirty ? `● 未保存（${draftProgress}%）` : '已保存'}</span>
+          </div>
+          <div className="task-progress-control progress-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={draftProgress}
+              style={{ '--progress-value': `${draftProgress}%` } as CSSProperties}
+              onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))}
+            />
+            <strong>{draftProgress}%</strong>
+          </div>
+          <div className="task-progress-presets">
+            {[0, 20, 40, 60, 80, 100].map((value) => (
+              <button type="button" className={draftProgress === value ? 'active' : ''} key={value} onClick={() => setDraftProgress(value)}>
+                {value}
+              </button>
+            ))}
+          </div>
+          {progressDirty && (
+            <div className="progress-draft-actions">
+              <button type="button" className="ghost-button compact-button" onClick={() => setDraftProgress(savedProgress)}>撤销</button>
+              <button type="button" className="primary-button compact-button" onClick={confirmProgress}>确认进度</button>
+            </div>
+          )}
+        </section>
+        <section className="action-section progress-time-section">
+          <div className="action-section-title">
+            <h3>分段计时</h3>
+            <span>可结算 · {draftTimeEntries.length} 段 · {computedActualHours.toFixed(2)} h</span>
+          </div>
+          <p className="progress-waiting-hint">记录真实投入的可结算工作时间，保存后会更新任务实际工时，验收时只做核对。</p>
+          {draftTimeEntries.length > 0 && (
+            <div className="progress-waiting-list">
+              {draftTimeEntries.map((entry) => (
+                <div className="progress-waiting-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.start} - {entry.end}</strong>
+                    <span>{entry.note || '未填写具体内容'}</span>
+                  </div>
+                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
+                  <button type="button" className="icon-button danger-icon" aria-label="删除分段计时" title="删除分段计时" onClick={() => deleteTimeEntry(entry.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="progress-waiting-create">
+            <TimeTextInput value={timeDraft.start} ariaLabel="计时开始时间" onChange={(value) => setTimeDraft((current) => ({ ...current, start: value }))} />
+            <span>至</span>
+            <TimeTextInput value={timeDraft.end} ariaLabel="计时结束时间" onChange={(value) => setTimeDraft((current) => ({ ...current, end: value }))} />
+            <input
+              value={timeDraft.note ?? ''}
+              placeholder="例如：初稿 / 终稿 / 修改"
+              onChange={(event) => setTimeDraft((current) => ({ ...current, note: event.target.value }))}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  addTimeEntry()
+                }
+              }}
+            />
+            <button type="button" className="primary-button compact-button" disabled={minutesBetween(timeDraft.start, timeDraft.end) <= 0} onClick={addTimeEntry}>
+              <Plus size={15} />
+              添加计时
+            </button>
+          </div>
+        </section>
         <section className="action-section progress-waiting-section">
           <div className="action-section-title">
             <h3>等待记录</h3>
@@ -4587,37 +4691,6 @@ function TaskProgressModal({
               添加等待
             </button>
           </div>
-        </section>
-        <section className="action-section">
-          <div className="action-section-title">
-            <h3>整体进度</h3>
-            <span className={progressDirty ? 'admin-only-data' : ''}>{progressDirty ? `● 未保存（${draftProgress}%）` : '已保存'}</span>
-          </div>
-          <div className="task-progress-control progress-slider-row">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={10}
-              value={draftProgress}
-              style={{ '--progress-value': `${draftProgress}%` } as CSSProperties}
-              onChange={(event) => setDraftProgress(snapProgress(Number(event.target.value)))}
-            />
-            <strong>{draftProgress}%</strong>
-          </div>
-          <div className="task-progress-presets">
-            {[0, 20, 40, 60, 80, 100].map((value) => (
-              <button type="button" className={draftProgress === value ? 'active' : ''} key={value} onClick={() => setDraftProgress(value)}>
-                {value}
-              </button>
-            ))}
-          </div>
-          {progressDirty && (
-            <div className="progress-draft-actions">
-              <button type="button" className="ghost-button compact-button" onClick={() => setDraftProgress(savedProgress)}>撤销</button>
-              <button type="button" className="primary-button compact-button" onClick={confirmProgress}>确认进度</button>
-            </div>
-          )}
         </section>
         <section className="action-section">
           <div className="action-section-title">
@@ -4746,7 +4819,7 @@ function TaskProgressModal({
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || (!progressDirty && !waitingDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
+        <button className="primary-button" disabled={isSaving || (!progressDirty && !timeDirty && !waitingDirty && !note.trim() && uploadedNames.length === 0)} onClick={() => void saveProgress()}>
           {isSaving ? '保存中…' : '保存进展'}
         </button>
       </footer>
@@ -4780,7 +4853,7 @@ function AcceptanceModal({
     date: task.date,
     estimatedDate: task.estimatedDate || '',
   }
-  const fallbackTimeEntries = task.timeEntries && task.timeEntries.length > 0 ? task.timeEntries : [{ id: crypto.randomUUID(), start: '09:00', end: '10:00' }]
+  const fallbackTimeEntries = task.timeEntries ?? []
   const fallbackWaitingEntries = task.waitingEntries ?? []
   const [initialAcceptanceDraft] = useState(() =>
     readDraftCache(acceptanceDraftKey, {
@@ -4788,7 +4861,6 @@ function AcceptanceModal({
       basicDraft: fallbackBasicDraft,
       timeEntries: fallbackTimeEntries,
       waitingEntries: fallbackWaitingEntries,
-      progressDraft: task.progress,
       uploadedFiles: [] as FileAsset[],
       feedbackRating: task.feedbackRating ?? '' as TaskFeedbackRating | '',
       feedbackTags: task.feedbackTags ?? [] as TaskFeedbackTag[],
@@ -4799,15 +4871,12 @@ function AcceptanceModal({
   const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialAcceptanceDraft.feedbackTags)
   const [basicEditing, setBasicEditing] = useState(false)
   const [basicDraft, setBasicDraft] = useState(initialAcceptanceDraft.basicDraft)
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(initialAcceptanceDraft.timeEntries)
-  const [waitingEntries, setWaitingEntries] = useState<WaitingEntry[]>(initialAcceptanceDraft.waitingEntries)
+  const timeEntries = initialAcceptanceDraft.timeEntries
+  const waitingEntries = initialAcceptanceDraft.waitingEntries
   const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>(initialAcceptanceDraft.uploadedFiles)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
-  const [progressEditing, setProgressEditing] = useState(false)
-  const [progressDraft, setProgressDraft] = useState(initialAcceptanceDraft.progressDraft)
-  const [timeEntryToDelete, setTimeEntryToDelete] = useState<TimeEntry | null>(null)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [acceptanceAiSuggestion, setAcceptanceAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [acceptanceAiError, setAcceptanceAiError] = useState('')
@@ -4834,37 +4903,24 @@ function AcceptanceModal({
       basicDraft,
       timeEntries,
       waitingEntries,
-      progressDraft,
       uploadedFiles,
       feedbackRating,
       feedbackTags,
     })
-  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackRating, feedbackTags, progressDraft, timeEntries, uploadedFiles, waitingEntries])
-
-  const updateEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
-    setTimeEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
-  }
-
-  const updateWaitingEntry = (entryId: string, field: 'start' | 'end' | 'note', value: string) => {
-    setWaitingEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)))
-  }
+  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackRating, feedbackTags, timeEntries, uploadedFiles, waitingEntries])
 
   const updateBasicDraft = (field: keyof typeof basicDraft, value: string) => {
     setBasicDraft((current) => ({ ...current, [field]: value }))
   }
 
-  const deleteTimeEntry = (entryId: string) => {
-    setTimeEntries((current) => current.filter((item) => item.id !== entryId))
-    setTimeEntryToDelete(null)
-  }
-
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
+  const lockedActualHours = computedHours > 0 ? computedHours : task.actualHours
   const waitingMinutes = sumTimeEntries(waitingEntries)
-  const canConfirmAcceptance = computedMinutes > 0 && !isUploading
+  const canConfirmAcceptance = lockedActualHours > 0 && !isUploading
   const dueState = taskDueState(task, isoDate(), isoDate(3))
   const trimmedTaskChanges =
-    basicChanged || progressDraft !== task.progress
+    basicChanged
       ? {
         title: basicDraft.title.trim() || task.title,
         type: basicDraft.type.trim() || task.type,
@@ -4874,7 +4930,6 @@ function AcceptanceModal({
         requirement: basicDraft.requirement.trim(),
         date: basicDraft.date.trim() || task.date,
         estimatedDate: basicDraft.estimatedDate.trim(),
-        progress: progressDraft,
       }
       : undefined
 
@@ -5056,82 +5111,41 @@ function AcceptanceModal({
           <div className="acceptance-section-title">
             <span className="acceptance-section-index">2</span>
             <h3>进度</h3>
-            <button type="button" className="acceptance-edit-button" onClick={() => setProgressEditing((current) => !current)}>
-              <Pencil size={13} />
-              {progressEditing ? '收起' : '修改'}
-            </button>
+            <small>来自记录进展</small>
           </div>
           <div className="acceptance-final-progress">
-            <div className="acceptance-progress-track" aria-label={`当前进度 ${progressDraft}%`}>
-              <span style={{ width: `${progressDraft}%` }} />
+            <div className="acceptance-progress-track" aria-label={`当前进度 ${task.progress}%`}>
+              <span style={{ width: `${task.progress}%` }} />
             </div>
-            <strong>{progressDraft}%</strong>
+            <strong>{task.progress}%</strong>
           </div>
-          {progressEditing && (
-            <div className="acceptance-progress-editor">
-              <div className="progress-slider-row">
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={10}
-                  value={progressDraft}
-                  style={{ '--progress-value': `${progressDraft}%` } as CSSProperties}
-                  onChange={(event) => setProgressDraft(snapProgress(Number(event.target.value)))}
-                  aria-label="调整验收前进度"
-                />
-                <strong>{progressDraft}%</strong>
-              </div>
-              <div className="progress-quick-options" role="group" aria-label="进度档位快选">
-                {[0, 20, 40, 60, 80, 100].map((value) => (
-                  <button
-                    type="button"
-                    className={progressDraft === value ? 'active' : ''}
-                    key={value}
-                    aria-pressed={progressDraft === value}
-                    onClick={() => setProgressDraft(value)}
-                  >
-                    {value}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <p className="acceptance-muted-hint">验收通过后，进度将自动设为 100%</p>
+          <p className="acceptance-muted-hint">验收只核对当前进度；确认通过后，进度将自动设为 100%。如需调整，请先在「记录进展」中修改。</p>
         </section>
 
         <section className="acceptance-final-section">
           <div className="acceptance-section-title">
             <span className="acceptance-section-index">3</span>
             <h3>分段计时</h3>
-            <button type="button" className="acceptance-edit-button" onClick={() => document.querySelector<HTMLInputElement>('.acceptance-time-row input')?.focus()}>
-              <Pencil size={13} />
-              修改
-            </button>
+            <small>来自记录进展</small>
           </div>
-          <div className="acceptance-time-list">
-            {timeEntries.map((entry) => (
-              <div className="acceptance-time-row" key={entry.id}>
-                <div className="acceptance-time-range">
-                  <TimeTextInput value={entry.start} ariaLabel="开始时间" onChange={(value) => updateEntry(entry.id, 'start', value)} />
-                  <span>至</span>
-                  <TimeTextInput value={entry.end} ariaLabel="结束时间" onChange={(value) => updateEntry(entry.id, 'end', value)} />
+          {timeEntries.length === 0 ? (
+            <p className="acceptance-muted-hint">还没有分段计时。请先在「记录进展」中补充可结算时间段，再确认验收。</p>
+          ) : (
+            <div className="acceptance-readonly-list">
+              {timeEntries.map((entry) => (
+                <div className="acceptance-readonly-time-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.start} - {entry.end}</strong>
+                    <span>{entry.note || '未填写具体内容'}</span>
+                  </div>
+                  <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
                 </div>
-                <input value={entry.note ?? ''} aria-label="分段说明" placeholder="例如：初稿 / 终稿 / 修改" onChange={(event) => updateEntry(entry.id, 'note', event.target.value)} />
-                <strong>{formatDuration(minutesBetween(entry.start, entry.end))}</strong>
-                <button className="icon-button danger-icon" aria-label="删除验收时间段" title="删除时间段" onClick={() => setTimeEntryToDelete(entry)}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <button className="ghost-button compact-button" onClick={() => setTimeEntries((current) => [...current, { id: crypto.randomUUID(), start: '14:00', end: '15:00', note: '新记录' }])}>
-            <Plus size={15} />
-            添加一段时间
-          </button>
+              ))}
+            </div>
+          )}
           <div className="acceptance-hours-total">
             <span>实际工时合计</span>
-            <strong>{computedHours.toFixed(2)} h</strong>
+            <strong>{lockedActualHours.toFixed(2)} h</strong>
           </div>
           <div className="acceptance-waiting-summary">
             <div className="acceptance-section-title compact-title">
@@ -5141,19 +5155,14 @@ function AcceptanceModal({
             {waitingEntries.length === 0 ? (
               <p className="acceptance-muted-hint">暂无等待记录；等待甲方意见、资料或确认时，可在任务进展里单独记录。</p>
             ) : (
-              <div className="acceptance-time-list compact-list">
+              <div className="acceptance-readonly-list compact-list">
                 {waitingEntries.map((entry) => (
-                  <div className="acceptance-time-row" key={entry.id}>
-                    <div className="acceptance-time-range">
-                      <TimeTextInput value={entry.start} ariaLabel="等待开始时间" onChange={(value) => updateWaitingEntry(entry.id, 'start', value)} />
-                      <span>至</span>
-                      <TimeTextInput value={entry.end} ariaLabel="等待结束时间" onChange={(value) => updateWaitingEntry(entry.id, 'end', value)} />
+                  <div className="acceptance-readonly-time-row" key={entry.id}>
+                    <div>
+                      <strong>{entry.start} - {entry.end}</strong>
+                      <span>{entry.note || '等待甲方确认'}</span>
                     </div>
-                    <input value={entry.note ?? ''} aria-label="等待说明" placeholder="例如：等待甲方意见 / 等待资料" onChange={(event) => updateWaitingEntry(entry.id, 'note', event.target.value)} />
-                    <strong>{formatDuration(minutesBetween(entry.start, entry.end))}</strong>
-                    <button className="icon-button danger-icon" aria-label="删除等待记录" title="删除等待记录" onClick={() => setWaitingEntries((current) => current.filter((item) => item.id !== entry.id))}>
-                      <Trash2 size={14} />
-                    </button>
+                    <em>{formatDuration(minutesBetween(entry.start, entry.end))}</em>
                   </div>
                 ))}
               </div>
@@ -5284,7 +5293,7 @@ function AcceptanceModal({
         <p>
           <AlertTriangle size={15} />
           <span>
-            <b>确认验收后：</b>状态变为「已验收」、工时 <b>{computedHours.toFixed(2)} h</b> 锁定并计入结算，进度设为 <b>100%</b>，<em>本次项目结束。</em>
+            <b>确认验收后：</b>状态变为「已验收」、工时 <b>{lockedActualHours.toFixed(2)} h</b> 锁定并计入结算，进度设为 <b>100%</b>，<em>本次项目结束。</em>
           </span>
         </p>
         <button className="ghost-button" onClick={requestClose}>
@@ -5296,7 +5305,7 @@ function AcceptanceModal({
           onClick={() => {
             clearDraftCache(acceptanceDraftKey)
             onConfirm({
-              actualHours: computedHours,
+              actualHours: lockedActualHours,
               acceptanceNote: acceptanceNote.trim(),
               feedbackRating,
               feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
@@ -5321,28 +5330,12 @@ function AcceptanceModal({
             confirmText: '放弃并关闭',
             cancelText: '继续填写',
             tone: 'danger',
-            details: [`系统计算工时：${computedHours.toFixed(2)} h`, uploadedFiles.length > 0 ? `已上传 ${uploadedFiles.length} 个验收附件` : '尚未确认验收'],
+            details: [`系统计算工时：${lockedActualHours.toFixed(2)} h`, uploadedFiles.length > 0 ? `已上传 ${uploadedFiles.length} 个验收附件` : '尚未确认验收'],
             onConfirm: onClose,
           }}
           isBusy={false}
           onClose={() => setCloseConfirmOpen(false)}
           onConfirm={onClose}
-        />
-      )}
-      {timeEntryToDelete && (
-        <ConfirmDialogModal
-          dialog={{
-            eyebrow: '删除验收时间段',
-            title: `确定删除 ${timeEntryToDelete.start} - ${timeEntryToDelete.end} 吗？`,
-            body: '删除后会立即影响本次验收弹窗中系统计算的实际工时。请确认这段时间确实不需要纳入验收。',
-            confirmText: '确认删除',
-            tone: 'danger',
-            details: [formatDuration(minutesBetween(timeEntryToDelete.start, timeEntryToDelete.end))],
-            onConfirm: () => deleteTimeEntry(timeEntryToDelete.id),
-          }}
-          isBusy={false}
-          onClose={() => setTimeEntryToDelete(null)}
-          onConfirm={() => deleteTimeEntry(timeEntryToDelete.id)}
         />
       )}
     </ModalShell>

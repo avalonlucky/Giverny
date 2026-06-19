@@ -2796,6 +2796,7 @@ button {
   font: inherit;
 }
 
+.progress-time-section,
 .progress-waiting-section {
   padding-top: 12px;
   border-top: 1px solid var(--color-border);
@@ -6515,6 +6516,50 @@ input::file-selector-button {
 
 .acceptance-time-list.compact-list {
   gap: 5px;
+}
+
+.acceptance-readonly-list {
+  display: grid;
+  gap: 6px;
+}
+
+.acceptance-readonly-list.compact-list {
+  gap: 5px;
+}
+
+.acceptance-readonly-time-row {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.acceptance-readonly-time-row strong,
+.acceptance-readonly-time-row span {
+  display: block;
+}
+
+.acceptance-readonly-time-row strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.acceptance-readonly-time-row span {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.acceptance-readonly-time-row em {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .acceptance-upload-box {
