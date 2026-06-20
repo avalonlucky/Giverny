@@ -42,7 +42,6 @@ import {
   Info,
   Tag,
   Trash2,
-  UploadCloud,
   UserCircle,
   X,
 } from 'lucide-react'
@@ -389,6 +388,7 @@ type AcceptancePayload = {
   acceptanceNote: string
   feedbackRating?: TaskFeedbackRating | ''
   feedbackTags?: TaskFeedbackTag[]
+  feedbackNote?: string
   timeEntries: TimeEntry[]
   waitingEntries?: WaitingEntry[]
   acceptanceFiles?: string[]
@@ -2451,6 +2451,7 @@ function App() {
         acceptanceNote: payload.acceptanceNote,
         feedbackRating: payload.feedbackRating,
         feedbackTags: payload.feedbackTags,
+        feedbackNote: payload.feedbackNote,
         timeEntries: payload.timeEntries,
         waitingEntries: payload.waitingEntries,
         acceptanceFiles: payload.acceptanceFiles,
@@ -3506,6 +3507,7 @@ function App() {
             reports={reports}
             files={fileItems}
             activity={taskActivity}
+            hourlyRate={hourlyRate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
@@ -3700,6 +3702,7 @@ function App() {
             task={acceptanceTask}
             initialNote={acceptanceTask.acceptanceNote ?? ''}
             files={fileItems}
+            hourlyRate={hourlyRate}
             onClose={() => setAcceptanceModalTaskId(0)}
             onConfirm={(payload) => handleConfirmTaskAcceptance(acceptanceTask, payload)}
             onUploadFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
@@ -4493,6 +4496,7 @@ function TasksView({
   reports,
   files,
   activity,
+  hourlyRate,
   onUploadImage,
   onCreateTaskUpdate,
   onCreateTask,
@@ -4526,6 +4530,7 @@ function TasksView({
   reports: ReportRecord[]
   files: FileAsset[]
   activity: ActivityItem[]
+  hourlyRate: number
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
@@ -4613,6 +4618,7 @@ function TasksView({
       acceptanceNote: payload.acceptanceNote,
       feedbackRating: payload.feedbackRating,
       feedbackTags: payload.feedbackTags,
+      feedbackNote: payload.feedbackNote,
       timeEntries: payload.timeEntries,
       waitingEntries: payload.waitingEntries,
       acceptanceFiles: payload.acceptanceFiles,
@@ -4838,6 +4844,7 @@ function TasksView({
           task={acceptanceTask}
           initialNote={acceptanceTask.acceptanceNote ?? ''}
           files={files}
+          hourlyRate={hourlyRate}
           onClose={() => setAcceptanceTask(null)}
           onConfirm={confirmListAcceptance}
           onUploadFile={onUploadAcceptanceFile}
@@ -5264,6 +5271,7 @@ function AcceptanceModal({
   task,
   initialNote,
   files = [],
+  hourlyRate,
   onClose,
   onConfirm,
   onUploadFile,
@@ -5271,6 +5279,7 @@ function AcceptanceModal({
   task: Task
   initialNote: string
   files?: FileAsset[]
+  hourlyRate: number
   onClose: () => void
   onConfirm: (payload: AcceptancePayload) => void
   onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
@@ -5297,13 +5306,14 @@ function AcceptanceModal({
       uploadedFiles: [] as FileAsset[],
       feedbackRating: task.feedbackRating ?? '' as TaskFeedbackRating | '',
       feedbackTags: task.feedbackTags ?? [] as TaskFeedbackTag[],
+      feedbackNote: task.feedbackNote ?? '',
     }),
   )
   const [acceptanceNote, setAcceptanceNote] = useState(initialAcceptanceDraft.acceptanceNote)
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialAcceptanceDraft.feedbackRating)
   const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialAcceptanceDraft.feedbackTags)
-  const [basicEditing, setBasicEditing] = useState(false)
-  const [basicDraft, setBasicDraft] = useState(initialAcceptanceDraft.basicDraft)
+  const [feedbackNote, setFeedbackNote] = useState(initialAcceptanceDraft.feedbackNote)
+  const basicDraft = initialAcceptanceDraft.basicDraft
   const timeEntries = initialAcceptanceDraft.timeEntries
   const waitingEntries = initialAcceptanceDraft.waitingEntries
   const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>(initialAcceptanceDraft.uploadedFiles)
@@ -5315,20 +5325,6 @@ function AcceptanceModal({
   const [acceptanceAiError, setAcceptanceAiError] = useState('')
   const [isAcceptanceAiLoading, setIsAcceptanceAiLoading] = useState(false)
   const isSupplemental = isSupplementalTask(task)
-  const initialBasicSignature = useMemo(
-    () => JSON.stringify({
-      title: task.title,
-      type: task.type,
-      contact: task.contact,
-      requester: task.requester ?? '',
-      reviewer: task.reviewer ?? '',
-      requirement: task.requirement ?? '',
-      date: task.date,
-      estimatedDate: task.estimatedDate || '',
-    }),
-    [task.contact, task.date, task.estimatedDate, task.requirement, task.requester, task.reviewer, task.title, task.type],
-  )
-  const basicChanged = JSON.stringify(basicDraft) !== initialBasicSignature
 
   useEffect(() => {
     writeDraftCache(acceptanceDraftKey, {
@@ -5339,32 +5335,22 @@ function AcceptanceModal({
       uploadedFiles,
       feedbackRating,
       feedbackTags,
+      feedbackNote,
     })
-  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackRating, feedbackTags, timeEntries, uploadedFiles, waitingEntries])
-
-  const updateBasicDraft = (field: keyof typeof basicDraft, value: string) => {
-    setBasicDraft((current) => ({ ...current, [field]: value }))
-  }
+  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackNote, feedbackRating, feedbackTags, timeEntries, uploadedFiles, waitingEntries])
 
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
   const lockedActualHours = computedHours > 0 ? computedHours : task.actualHours
   const waitingMinutes = sumTimeEntries(waitingEntries)
+  const sortedAcceptanceTimeEntries = [...sortTimeEntriesDesc(timeEntries)].reverse()
+  const sortedAcceptanceWaitingEntries = [...sortTimeEntriesDesc(waitingEntries)].reverse()
+  const latestTimeBounds = timeEntries.map(timeEntryBounds).filter((bounds): bounds is { start: number; end: number } => Boolean(bounds)).sort((a, b) => b.end - a.end)[0]
+  const actualDeliveryPreview = task.actualDeliveryDate || (latestTimeBounds ? planDateTimeFromMinuteStamp(latestTimeBounds.end) : '')
+  const estimatedSettlementAmount = Math.round(lockedActualHours * hourlyRate)
   const canConfirmAcceptance = lockedActualHours > 0 && !isUploading
-  const dueState = taskDueState(task, isoDate(), isoDate(3))
-  const trimmedTaskChanges =
-    basicChanged
-      ? {
-        title: basicDraft.title.trim() || task.title,
-        type: basicDraft.type.trim() || task.type,
-        contact: basicDraft.contact.trim() || task.contact,
-        requester: basicDraft.requester.trim() || task.requester,
-        reviewer: basicDraft.reviewer.trim() || task.reviewer,
-        requirement: basicDraft.requirement.trim(),
-        date: basicDraft.date.trim() || task.date,
-        estimatedDate: basicDraft.estimatedDate.trim(),
-      }
-      : undefined
+  const formatAcceptanceHours = (minutes: number) => `${(Math.round((minutes / 60) * 10) / 10).toFixed(1)}h`
+  const lockedActualHoursLabel = `${(Math.round(lockedActualHours * 10) / 10).toFixed(1)}h`
 
   const uploadAcceptanceFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? [])
@@ -5444,9 +5430,8 @@ function AcceptanceModal({
     >
       <header className="modal-header acceptance-final-header">
         <div>
-          <p className="eyebrow">任务验收 · 终审</p>
-          <h2 id="acceptance-title">确认验收「{task.title}」</h2>
-          <span>请逐项核对全部信息，确认无误后锁定工时进入结算</span>
+          <h2 id="acceptance-title">确认验收 · {task.title}</h2>
+          <span>验收是任务闭环的核心，请逐项核对后确认</span>
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={requestClose}>
           <X size={18} />
@@ -5454,165 +5439,120 @@ function AcceptanceModal({
       </header>
 
       <div className="acceptance-modal-body">
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">1</span>
-            <h3>基础信息</h3>
-            <button type="button" className="acceptance-edit-button" onClick={() => setBasicEditing((current) => !current)}>
-              <Pencil size={13} />
-              {basicEditing ? '收起' : '修改'}
-            </button>
-          </div>
+        <section className="acceptance-final-section acceptance-basic-section">
+          <h3 className="acceptance-plain-section-title">基础信息</h3>
           <div className="acceptance-basic-grid">
-            <div className="wide acceptance-basic-task-title">
+            <div className="acceptance-basic-task-title">
               <span>任务名称</span>
-              {basicEditing ? (
-                <input value={basicDraft.title} onChange={(event) => updateBasicDraft('title', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.title}</strong>
-              )}
+              <strong>{basicDraft.title}</strong>
             </div>
             <div>
               <span>设计类型</span>
-              {basicEditing ? (
-                <input value={basicDraft.type} onChange={(event) => updateBasicDraft('type', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.type || '未分类'}</strong>
-              )}
+              <strong>{basicDraft.type || '未分类'}</strong>
+            </div>
+            <div>
+              <span>结算所属月份</span>
+              <strong>{monthLabelOf(taskSettlementMonth(task) || monthPart(isoDate()))}（{isSupplemental ? '补录' : '非补录'}）</strong>
             </div>
             <div>
               <span>对接人</span>
-              {basicEditing ? (
-                <input value={basicDraft.contact} onChange={(event) => updateBasicDraft('contact', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.contact || '待确认'}</strong>
-              )}
+              <strong>{basicDraft.contact || '待确认'}</strong>
             </div>
             <div>
               <span>需求人</span>
-              {basicEditing ? (
-                <input value={basicDraft.requester} onChange={(event) => updateBasicDraft('requester', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.requester || '待确认'}</strong>
-              )}
+              <strong>{basicDraft.requester || '待确认'}</strong>
             </div>
             <div>
               <span>验收人</span>
-              {basicEditing ? (
-                <input value={basicDraft.reviewer} onChange={(event) => updateBasicDraft('reviewer', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.reviewer || '待确认'}</strong>
-              )}
+              <strong>{basicDraft.reviewer || basicDraft.requester || '待确认'}</strong>
             </div>
             <div>
               <span>预计开始</span>
-              {basicEditing ? (
-                <input value={basicDraft.date} onChange={(event) => updateBasicDraft('date', event.target.value)} />
-              ) : (
-                <strong>{formatPlanDateTime(basicDraft.date)}</strong>
-              )}
+              <strong>{formatPlanDateTime(basicDraft.date)}</strong>
             </div>
             <div>
               <span>预计交付</span>
-              {basicEditing ? (
-                <input value={basicDraft.estimatedDate} onChange={(event) => updateBasicDraft('estimatedDate', event.target.value)} />
-              ) : (
-                <strong className="acceptance-due-value">
-                  {formatPlanDateTime(basicDraft.estimatedDate || basicDraft.date)}
-                  {dueState ? <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span> : null}
-                </strong>
-              )}
+              <strong>{formatPlanDateTime(basicDraft.estimatedDate || basicDraft.date)}</strong>
             </div>
-            {isSupplemental && (
-              <div>
-                <span>补录结算</span>
-                <strong>{monthLabelOf(taskSettlementMonth(task))}</strong>
-              </div>
-            )}
+            <div>
+              <span>实际交付</span>
+              <strong>{actualDeliveryPreview ? formatPlanDateTime(actualDeliveryPreview) : '确认验收时自动记录'}</strong>
+            </div>
             <div className="wide acceptance-basic-requirement">
-              <span>任务需求</span>
-              {basicEditing ? (
-                <textarea value={basicDraft.requirement} onChange={(event) => updateBasicDraft('requirement', event.target.value)} />
-              ) : (
-                <strong>{basicDraft.requirement || '未填写任务需求'}</strong>
-              )}
+              <span>需求描述</span>
+              <strong>{basicDraft.requirement || '未填写任务需求'}</strong>
             </div>
           </div>
         </section>
 
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">2</span>
-            <h3>进度</h3>
-            <small>来自记录进展</small>
-          </div>
+        <section className="acceptance-final-section acceptance-progress-section">
+          <h3 className="acceptance-plain-section-title">整体进度</h3>
           <div className="acceptance-final-progress">
             <div className="acceptance-progress-track" aria-label={`当前进度 ${snapProgress(task.progress)}%`}>
               <span style={{ width: `${snapProgress(task.progress)}%` }} />
             </div>
             <strong>{snapProgress(task.progress)}%</strong>
           </div>
-          <p className="acceptance-muted-hint">验收只核对当前进度；确认通过后，进度将自动设为 100%。如需调整，请先在「记录进展」中修改。</p>
+          <p className="acceptance-muted-hint">确认验收通过后，进度将自动设为 100%。</p>
         </section>
 
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">3</span>
-            <h3>分段计时</h3>
-            <small>来自记录进展</small>
-          </div>
+        <section className="acceptance-final-section acceptance-time-section">
+          <h3 className="acceptance-plain-section-title">计时与工时汇总</h3>
           {timeEntries.length === 0 ? (
             <p className="acceptance-muted-hint">还没有分段计时。请先在「记录进展」中补充可结算时间段，再确认验收。</p>
           ) : (
-            <div className="acceptance-readonly-list">
-              {timeEntries.map((entry) => (
-                <div className="acceptance-readonly-time-row" key={entry.id}>
-                  <div>
-                    <strong>{formatEntryDateTimeRange(task, entry)}</strong>
-                    <span>{entry.note || '未填写具体内容'}</span>
-                  </div>
-                  <em>{formatDuration(minutesForTimeEntry(entry))}</em>
-                </div>
-              ))}
+            <div className="acceptance-table-wrap">
+              <table className="acceptance-time-table">
+                <thead>
+                  <tr><th>日期</th><th>时间段</th><th>内容</th><th>工时</th></tr>
+                </thead>
+                <tbody>
+                {sortedAcceptanceTimeEntries.map((entry) => {
+                  const entryDate = entry.date || datePart(task.date)
+                  const endDate = entry.endDate || entryDate
+                  return (
+                    <tr key={entry.id}>
+                      <td>{formatMonthDay(entryDate)}</td>
+                      <td>{entryDate === endDate ? `${entry.start}–${entry.end}` : `${entry.start}–${formatMonthDay(endDate)} ${entry.end}`}</td>
+                      <td>{entry.note || '（未填写内容）'}</td>
+                      <td>{formatAcceptanceHours(minutesForTimeEntry(entry))}</td>
+                    </tr>
+                  )
+                })}
+                </tbody>
+                <tfoot>
+                  <tr><td colSpan={3}>实际总工时 · 计入结算</td><td>{lockedActualHoursLabel}</td></tr>
+                </tfoot>
+              </table>
             </div>
           )}
-          <div className="acceptance-hours-total">
-            <span>实际工时合计</span>
-            <strong>{lockedActualHours.toFixed(2)} h</strong>
+          <div className="acceptance-money-summary">
+            <div><span>结算时薪（后台设置）</span><strong>¥{hourlyRate.toLocaleString()} / 小时</strong></div>
+            <div><span>本次预计结算金额</span><strong>¥{estimatedSettlementAmount.toLocaleString()}</strong></div>
           </div>
           <div className="acceptance-waiting-summary">
-            <div className="acceptance-section-title compact-title">
-              <h4>等待记录</h4>
-              <small>不计费 · {waitingEntries.length} 段 · {formatDuration(waitingMinutes)}</small>
-            </div>
+            <h4>等待记录 · 仅用于洞察分析，不计入结算</h4>
             {waitingEntries.length === 0 ? (
               <p className="acceptance-muted-hint">暂无等待记录；等待甲方意见、资料或确认时，可在任务进展里单独记录。</p>
             ) : (
-              <div className="acceptance-readonly-list compact-list">
-                {waitingEntries.map((entry) => (
-                  <div className="acceptance-readonly-time-row" key={entry.id}>
-                    <div>
-                      <strong>{formatEntryDateTimeRange(task, entry)}</strong>
-                      <span>{entry.note || entry.reason || '等待甲方确认'}</span>
-                    </div>
-                    <em>{formatDuration(minutesForTimeEntry(entry))}</em>
+              <div className="acceptance-waiting-list">
+                {sortedAcceptanceWaitingEntries.map((entry) => (
+                  <div className="acceptance-waiting-row" key={entry.id}>
+                    <span>{formatEntryDateTimeRange(task, entry)}</span>
+                    <strong>{entry.note || entry.reason || '等待甲方确认'}</strong>
+                    <em>{formatAcceptanceHours(minutesForTimeEntry(entry))}</em>
                   </div>
                 ))}
+                <div className="acceptance-waiting-total"><strong>累计等待</strong><em>{formatAcceptanceHours(waitingMinutes)}</em></div>
               </div>
             )}
           </div>
         </section>
 
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">4</span>
-            <h3>验收附件</h3>
-            <span className="file-tag-chip">验收文件</span>
-          </div>
+        <section className="acceptance-final-section acceptance-attachments-section">
+          <h3 className="acceptance-plain-section-title">验收附件与备注</h3>
           <label className="acceptance-upload-box">
-            <UploadCloud size={18} />
-            <strong>{isUploading ? `上传中 ${uploadProgress}%` : '上传验收附件'}</strong>
-            <em>支持 PNG / PDF / PSD / ZIP · 进入文件库并自动打标签</em>
+            <strong>{isUploading ? `上传中 ${uploadProgress}%` : '+ 上传验收附件（甲方同意验收的截图 / 最终稿）'}</strong>
             <input type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z" multiple disabled={isUploading} onChange={(event) => void uploadAcceptanceFiles(event.target.files)} />
           </label>
           {uploadError && <p className="upload-inline-error">{uploadError}</p>}
@@ -5626,14 +5566,9 @@ function AcceptanceModal({
               ))}
             </div>
           )}
-        </section>
-
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">5</span>
-            <h3>验收备注</h3>
+          <div className="acceptance-note-heading">
+            <span>验收备注</span>
             <div className="action-section-title-actions">
-              <small>可选</small>
               <button
                 type="button"
                 className="icon-button ai-assist-button"
@@ -5677,12 +5612,8 @@ function AcceptanceModal({
           )}
         </section>
 
-        <section className="acceptance-final-section">
-          <div className="acceptance-section-title">
-            <span className="acceptance-section-index">6</span>
-            <h3>任务体感</h3>
-            <small>可选 · 只给设计师自己看</small>
-          </div>
+        <section className="acceptance-final-section acceptance-feedback-section">
+          <h3 className="acceptance-plain-section-title">任务体感反馈 · 用于后续 BI / AI 分析</h3>
           <div className="task-feedback-box">
             <div className="task-feedback-options" role="group" aria-label="任务体感">
               {taskFeedbackRatings.map((rating) => (
@@ -5717,18 +5648,17 @@ function AcceptanceModal({
                 ))}
               </div>
             )}
-            {!feedbackRating && <p>不填也可以验收；这项用于后续识别“做得痛苦但数据正常”的任务。</p>}
+            <label className="acceptance-feedback-note">
+              <span>体感评价</span>
+              <textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="例如：需求清晰，但等待甲方确认主色耗时较长，建议下次先锁主色再展开。" />
+            </label>
           </div>
         </section>
+
+        <div className="acceptance-confirm-summary">确认验收后，状态将变更为「已验收」，相关工时将锁定并计入结算，进度设定为 100%，本次项目结束。</div>
       </div>
 
       <footer className="modal-footer acceptance-final-footer">
-        <p>
-          <AlertTriangle size={15} />
-          <span>
-            <b>确认验收后：</b>状态变为「已验收」、工时 <b>{lockedActualHours.toFixed(2)} h</b> 锁定并计入结算，进度设为 <b>100%</b>，<em>本次项目结束。</em>
-          </span>
-        </p>
         <button className="ghost-button" onClick={requestClose}>
           取消
         </button>
@@ -5742,14 +5672,14 @@ function AcceptanceModal({
               acceptanceNote: acceptanceNote.trim(),
               feedbackRating,
               feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
+              feedbackNote: feedbackNote.trim(),
               timeEntries,
               waitingEntries,
               acceptanceFiles: uploadedFiles.map((file) => file.name),
-              taskChanges: trimmedTaskChanges,
             })
           }}
         >
-          {isUploading ? '上传中…' : '确认验收'}
+          {isUploading ? '上传中…' : '确认验收通过'}
         </button>
       </footer>
       {closeConfirmOpen && (
@@ -5763,7 +5693,7 @@ function AcceptanceModal({
             confirmText: '放弃并关闭',
             cancelText: '继续填写',
             tone: 'danger',
-            details: [`系统计算工时：${lockedActualHours.toFixed(2)} h`, uploadedFiles.length > 0 ? `已上传 ${uploadedFiles.length} 个验收附件` : '尚未确认验收'],
+            details: [`系统计算工时：${lockedActualHoursLabel}`, uploadedFiles.length > 0 ? `已上传 ${uploadedFiles.length} 个验收附件` : '尚未确认验收'],
             onConfirm: onClose,
           }}
           isBusy={false}
@@ -5894,6 +5824,12 @@ function TaskDetailModal({
                   <span>{task.feedbackRating}</span>
                   {(task.feedbackTags ?? []).map((tag) => <em key={tag}>{tag}</em>)}
                 </dd>
+              </div>
+            )}
+            {task.feedbackNote && (
+              <div className="wide">
+                <dt>体感评价</dt>
+                <dd className="admin-only-data">{task.feedbackNote}</dd>
               </div>
             )}
             <div>
