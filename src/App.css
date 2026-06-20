@@ -883,7 +883,9 @@ button {
   border: 0;
   border-radius: 0;
   background: var(--color-surface);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .dashboard-task-sidebar-header {
@@ -965,6 +967,14 @@ button {
   padding: 30px 0 0;
   display: grid;
   gap: 16px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.dashboard-side-progress-section {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
 }
 
 .dashboard-side-section + .dashboard-side-section {
@@ -1107,14 +1117,53 @@ button {
   font-weight: 800;
 }
 
+.dashboard-side-record-tabs {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dashboard-side-record-tabs button {
+  position: relative;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dashboard-side-record-tabs button:hover {
+  color: var(--color-primary);
+}
+
+.dashboard-side-record-tabs button.active {
+  color: var(--color-primary);
+}
+
+.dashboard-side-record-tabs button.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--color-primary);
+  content: "";
+}
+
 .dashboard-side-subsection {
   display: grid;
   gap: 12px;
   padding-top: 16px;
 }
 
-.dashboard-side-subsection + .dashboard-side-subsection {
-  border-top: 1px solid var(--color-border-soft);
+.dashboard-side-record-pane {
+  padding-top: 4px;
 }
 
 .dashboard-side-subsection-title > span {
@@ -1153,6 +1202,7 @@ button {
 .dashboard-side-time-item {
   position: relative;
   padding-left: 20px;
+  padding-right: 48px;
 }
 
 .dashboard-side-time-item::before {
@@ -1192,12 +1242,39 @@ button {
   font-style: normal;
 }
 
+.dashboard-side-entry-edit {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 3px 6px;
+  color: var(--color-primary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.16s ease;
+}
+
+.dashboard-side-time-item:hover .dashboard-side-entry-edit,
+.dashboard-side-waiting-item:hover .dashboard-side-entry-edit,
+.dashboard-side-entry-edit:focus-visible {
+  opacity: 1;
+}
+
+.dashboard-side-entry-edit:hover {
+  background: var(--color-surface-alt);
+}
+
 .dashboard-side-waiting-list {
   display: grid;
   gap: 0;
 }
 
 .dashboard-side-waiting-item {
+  position: relative;
   padding: 14px 0;
   border-bottom: 1px solid var(--color-border);
 }
@@ -1219,6 +1296,22 @@ button {
 .dashboard-side-waiting-total {
   margin: 0;
   line-height: 1.6;
+}
+
+.dashboard-side-expand {
+  justify-self: start;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 6px 10px;
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 10%, var(--color-surface-strong));
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dashboard-side-expand:hover {
+  color: var(--color-status-stopped);
 }
 
 .dashboard-task-sidebar-empty {
@@ -3356,6 +3449,14 @@ button {
 
 .progress-lite-duration.invalid {
   color: var(--color-status-danger);
+}
+
+.progress-lite-entry-error {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  color: var(--color-status-danger);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .progress-lite-body.waiting-mode {
@@ -6509,10 +6610,15 @@ input::file-selector-button {
   height: 182px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  border-left: 1px solid var(--color-border-soft);
+  scrollbar-width: none;
+  border-left: 0;
   display: grid;
   align-content: start;
+}
+
+.date-time-scroll-column::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .date-input-wrap .date-time-scroll-column button {

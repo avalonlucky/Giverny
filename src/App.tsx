@@ -748,6 +748,37 @@ function sumTimeEntries(entries: TimeEntry[]) {
   return entries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
 }
 
+function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
+  const startDate = entry.date || ''
+  const endDate = entry.endDate || startDate
+  const start = dateTimeMinuteStamp(startDate, entry.start)
+  const end = dateTimeMinuteStamp(endDate, entry.end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return null
+  }
+  return { start, end }
+}
+
+function timeEntriesOverlap(
+  current: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
+  existing: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
+) {
+  const currentBounds = timeEntryBounds(current)
+  const existingBounds = timeEntryBounds(existing)
+  if (!currentBounds || !existingBounds) {
+    return false
+  }
+  return currentBounds.start < existingBounds.end && currentBounds.end > existingBounds.start
+}
+
+function sortTimeEntriesDesc<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(entries: T[]) {
+  return [...entries].sort((a, b) => {
+    const aBounds = timeEntryBounds(a)
+    const bBounds = timeEntryBounds(b)
+    return (bBounds?.end ?? 0) - (aBounds?.end ?? 0)
+  })
+}
+
 function defaultTimeEntryDraft() {
   const now = new Date()
   const startHour = Math.min(22, now.getHours())
@@ -780,6 +811,12 @@ const laborTaxBrackets = [
 type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
 
 type ProgressRecordMode = 'progress' | 'waiting'
+
+type ProgressModalTarget = {
+  taskId: number
+  mode: ProgressRecordMode
+  editEntryId?: string
+}
 
 type AnnualIncomeRow = {
   month: string
@@ -1054,6 +1091,9 @@ function PlanDateTimeField({
   saved = false,
   control,
   includeTime = true,
+  pickerId,
+  activePickerId,
+  onActivePickerChange,
 }: {
   label: string
   value: string
@@ -1064,15 +1104,28 @@ function PlanDateTimeField({
   control?: ReactNode
   /** Date-only fields reuse this picker without the hour/minute columns. */
   includeTime?: boolean
+  pickerId?: string
+  activePickerId?: string | null
+  onActivePickerChange?: (pickerId: string | null) => void
 }) {
   const formatValue = (rawValue: string) => includeTime ? formatPlanDateTime(rawValue) : rawValue.replace(/-/g, '/')
   const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
-  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [localPickerOpen, setLocalPickerOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
   const [pickerView, setPickerView] = useState<'calendar' | 'month'>('calendar')
   const hourListRef = useRef<HTMLDivElement | null>(null)
   const minuteListRef = useRef<HTMLDivElement | null>(null)
+  const controlledPicker = Boolean(pickerId && onActivePickerChange)
+  const isPickerOpen = controlledPicker ? activePickerId === pickerId : localPickerOpen
+
+  const setPickerOpen = (nextOpen: boolean) => {
+    if (controlledPicker) {
+      onActivePickerChange?.(nextOpen ? pickerId ?? null : null)
+      return
+    }
+    setLocalPickerOpen(nextOpen)
+  }
 
   if (value !== syncedValue) {
     setSyncedValue(value)
@@ -1186,7 +1239,7 @@ function PlanDateTimeField({
     }
     onChange('')
     setDraft('')
-    setIsPickerOpen(false)
+    setPickerOpen(false)
   }
 
   const chooseMonth = (year: number, month: number) => {
@@ -1226,7 +1279,7 @@ function PlanDateTimeField({
                 setCalendarMonth(monthPart(value || isoDate()))
                 setPickerView('calendar')
               }
-              setIsPickerOpen((current) => !current)
+              setPickerOpen(!isPickerOpen)
             }
           }}
         >
@@ -1923,8 +1976,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
-  const [progressModalTaskId, setProgressModalTaskId] = useState(0)
-  const [progressModalMode, setProgressModalMode] = useState<ProgressRecordMode>('progress')
+  const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
   const [acceptanceModalTaskId, setAcceptanceModalTaskId] = useState(0)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -2298,10 +2350,9 @@ function App() {
     setEditTaskId(taskId)
   }
 
-  const handleOpenTaskProgress = (taskId: number, mode: ProgressRecordMode = 'progress') => {
+  const handleOpenTaskProgress = (taskId: number, mode: ProgressRecordMode = 'progress', editEntryId?: string) => {
     setSelectedTaskId(taskId)
-    setProgressModalMode(mode)
-    setProgressModalTaskId(taskId)
+    setProgressModalTarget({ taskId, mode, editEntryId })
     void loadTaskActivity(taskId)
   }
 
@@ -3558,15 +3609,16 @@ function App() {
           />
         ) : null
       })()}
-      {progressModalTaskId > 0 && (() => {
-        const progressTask = taskItems.find((task) => task.id === progressModalTaskId)
+      {progressModalTarget && (() => {
+        const progressTask = taskItems.find((task) => task.id === progressModalTarget.taskId)
         return progressTask ? (
           <TaskProgressModal
             task={progressTask}
-            mode={progressModalMode}
+            mode={progressModalTarget.mode}
+            editEntryId={progressModalTarget.editEntryId}
             files={fileItems}
             activity={taskActivity}
-            onClose={() => setProgressModalTaskId(0)}
+            onClose={() => setProgressModalTarget(null)}
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
@@ -4106,11 +4158,17 @@ function DashboardTaskSidebar({
 }: {
   task: Task | undefined
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
-  onOpenProgress: (taskId: number, mode?: ProgressRecordMode) => void
+  onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
+  const [progressUiState, setProgressUiState] = useState({
+    taskId: 0,
+    pane: 'progress' as ProgressRecordMode,
+    expandedProgress: false,
+    expandedWaiting: false,
+  })
 
   if (!task) {
     return (
@@ -4131,6 +4189,31 @@ function DashboardTaskSidebar({
   const canAcceptTask = task.status === '待验收'
   const demandPerson = task.requester || task.contact || '待确认'
   const snappedProgress = snapProgress(task.progress)
+  const scopedProgressUiState = progressUiState.taskId === task.id
+    ? progressUiState
+    : { taskId: task.id, pane: 'progress' as ProgressRecordMode, expandedProgress: false, expandedWaiting: false }
+  const progressPane = scopedProgressUiState.pane
+  const expandedProgressEntries = scopedProgressUiState.expandedProgress
+  const expandedWaitingEntries = scopedProgressUiState.expandedWaiting
+  const setProgressPane = (pane: ProgressRecordMode) => {
+    setProgressUiState({ taskId: task.id, pane, expandedProgress: false, expandedWaiting: false })
+  }
+  const toggleProgressEntries = () => {
+    setProgressUiState((current) => {
+      const scoped = current.taskId === task.id ? current : scopedProgressUiState
+      return { ...scoped, expandedProgress: !scoped.expandedProgress }
+    })
+  }
+  const toggleWaitingEntries = () => {
+    setProgressUiState((current) => {
+      const scoped = current.taskId === task.id ? current : scopedProgressUiState
+      return { ...scoped, expandedWaiting: !scoped.expandedWaiting }
+    })
+  }
+  const sortedTimeEntries = sortTimeEntriesDesc(timeEntries)
+  const sortedWaitingEntries = sortTimeEntriesDesc(waitingEntries)
+  const shownTimeEntries = expandedProgressEntries ? sortedTimeEntries : sortedTimeEntries.slice(0, 5)
+  const shownWaitingEntries = expandedWaitingEntries ? sortedWaitingEntries : sortedWaitingEntries.slice(0, 5)
 
   return (
     <aside className="dashboard-task-sidebar">
@@ -4221,60 +4304,91 @@ function DashboardTaskSidebar({
             </div>
           </div>
 
-          <div className="dashboard-side-subsection">
-            <div className="dashboard-side-subsection-title">
-              <span>进展 · 分段计时</span>
-              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'progress')}>
-                <Plus size={15} />
-                记录进展
-              </button>
-            </div>
-            <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</p>
-            {timeEntries.length === 0 ? (
-              <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
-            ) : (
-              <div className="dashboard-side-timeline">
-                {timeEntries.map((entry) => {
-                  const minutes = minutesForTimeEntry(entry)
-                  return (
-                    <article className="dashboard-side-time-item" key={entry.id}>
-                      <span className="dot" />
-                      <time>{formatEntryDateTimeRange(task, entry)}</time>
-                      <p>{entry.note || '未填写具体内容'}</p>
-                      <em>计时 {formatSignedHours(minutes)}</em>
-                    </article>
-                  )
-                })}
-              </div>
-            )}
+          <div className="dashboard-side-record-tabs" role="tablist" aria-label="进展记录类型">
+            <button type="button" className={progressPane === 'progress' ? 'active' : ''} onClick={() => setProgressPane('progress')} role="tab" aria-selected={progressPane === 'progress'}>
+              工作进展分段计时
+            </button>
+            <button type="button" className={progressPane === 'waiting' ? 'active' : ''} onClick={() => setProgressPane('waiting')} role="tab" aria-selected={progressPane === 'waiting'}>
+              等待记录不计结算
+            </button>
           </div>
 
-          <div className="dashboard-side-subsection dashboard-side-waiting">
-            <div className="dashboard-side-subsection-title">
-              <span>等待记录 · 不计结算</span>
-              <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'waiting')}>
-                <Plus size={15} />
-                记录等待
-              </button>
-            </div>
-            {waitingEntries.length === 0 ? (
-              <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
-            ) : (
-              <div className="dashboard-side-waiting-list">
-                {waitingEntries.map((entry) => {
-                  const minutes = minutesForTimeEntry(entry)
-                  return (
-                    <article className="dashboard-side-waiting-item" key={entry.id}>
-                      <time>{formatEntryDateTimeRange(task, entry)}</time>
-                      <p>{entry.note || entry.reason || '等待甲方确认'}</p>
-                      <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
-                    </article>
-                  )
-                })}
+          {progressPane === 'progress' ? (
+            <div className="dashboard-side-subsection dashboard-side-record-pane" role="tabpanel">
+              <div className="dashboard-side-subsection-title">
+                <span>进展 · 分段计时</span>
+                <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'progress')}>
+                  <Plus size={15} />
+                  记录进展
+                </button>
               </div>
-            )}
-            {waitingMinutes > 0 && <p className="dashboard-side-waiting-total">等待合计 {(waitingMinutes / 60).toFixed(1)}h，进入洞察分析，不进入结算工时。</p>}
-          </div>
+              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</p>
+              {timeEntries.length === 0 ? (
+                <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
+              ) : (
+                <>
+                  <div className="dashboard-side-timeline">
+                    {shownTimeEntries.map((entry) => {
+                      const minutes = minutesForTimeEntry(entry)
+                      return (
+                        <article className="dashboard-side-time-item" key={entry.id}>
+                          <span className="dot" />
+                          <button type="button" className="dashboard-side-entry-edit" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>
+                            编辑
+                          </button>
+                          <time>{formatEntryDateTimeRange(task, entry)}</time>
+                          <p>{entry.note || '未填写具体内容'}</p>
+                          <em>计时 {formatSignedHours(minutes)}</em>
+                        </article>
+                      )
+                    })}
+                  </div>
+                  {timeEntries.length > 5 && (
+                    <button type="button" className="dashboard-side-expand" onClick={toggleProgressEntries}>
+                      {expandedProgressEntries ? '收起记录' : `展开 ${timeEntries.length - 5} 条`}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-waiting" role="tabpanel">
+              <div className="dashboard-side-subsection-title">
+                <span>等待记录 · 不计结算</span>
+                <button type="button" className="text-button dashboard-side-action" onClick={() => onOpenProgress(task.id, 'waiting')}>
+                  <Plus size={15} />
+                  记录等待
+                </button>
+              </div>
+              {waitingMinutes > 0 && <p className="dashboard-side-subsection-meta">等待合计 {(waitingMinutes / 60).toFixed(1)}h · 仅进入洞察分析</p>}
+              {waitingEntries.length === 0 ? (
+                <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
+              ) : (
+                <>
+                  <div className="dashboard-side-waiting-list">
+                    {shownWaitingEntries.map((entry) => {
+                      const minutes = minutesForTimeEntry(entry)
+                      return (
+                        <article className="dashboard-side-waiting-item" key={entry.id}>
+                          <button type="button" className="dashboard-side-entry-edit" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>
+                            编辑
+                          </button>
+                          <time>{formatEntryDateTimeRange(task, entry)}</time>
+                          <p>{entry.note || entry.reason || '等待甲方确认'}</p>
+                          <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
+                        </article>
+                      )
+                    })}
+                  </div>
+                  {waitingEntries.length > 5 && (
+                    <button type="button" className="dashboard-side-expand" onClick={toggleWaitingEntries}>
+                      {expandedWaitingEntries ? '收起记录' : `展开 ${waitingEntries.length - 5} 条`}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </section>
       )}
     </aside>
@@ -4679,6 +4793,7 @@ function TasksView({
 function TaskProgressModal({
   task,
   mode = 'progress',
+  editEntryId,
   files,
   activity,
   onClose,
@@ -4688,6 +4803,7 @@ function TaskProgressModal({
 }: {
   task: Task
   mode?: ProgressRecordMode
+  editEntryId?: string
   files: FileAsset[]
   activity: ActivityItem[]
   onClose: () => void
@@ -4696,16 +4812,29 @@ function TaskProgressModal({
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const progressDraftKey = `giverny:task-progress-draft:${task.id}:v1`
+  const isWaitingMode = mode === 'waiting'
+  const editingEntry = (isWaitingMode ? task.waitingEntries ?? [] : task.timeEntries ?? []).find((entry) => entry.id === editEntryId)
+  const progressDraftKey = `giverny:task-progress-draft:${task.id}:${mode}:${editEntryId ?? 'new'}:v2`
   const initialProgressDraft = useMemo(
-    () => readDraftCache(progressDraftKey, {
-      note: '',
-      timeDraft: defaultTimeEntryDraft(),
-      timeEntries: (task.timeEntries ?? []) as TimeEntry[],
-      waitingDraft: defaultTimeEntryDraft(),
-      waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
-    }),
-    [progressDraftKey, task.timeEntries, task.waitingEntries],
+    () => {
+      const entryDraft = editingEntry
+        ? {
+            date: editingEntry.date || isoDate(),
+            endDate: editingEntry.endDate || editingEntry.date || isoDate(),
+            start: editingEntry.start,
+            end: editingEntry.end,
+            note: editingEntry.note ?? '',
+          }
+        : defaultTimeEntryDraft()
+      return readDraftCache(progressDraftKey, {
+        note: editingEntry?.note ?? '',
+        timeDraft: isWaitingMode ? defaultTimeEntryDraft() : entryDraft,
+        timeEntries: (task.timeEntries ?? []) as TimeEntry[],
+        waitingDraft: isWaitingMode ? entryDraft : defaultTimeEntryDraft(),
+        waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
+      })
+    },
+    [editingEntry, isWaitingMode, progressDraftKey, task.timeEntries, task.waitingEntries],
   )
   const [note, setNote] = useState(initialProgressDraft.note)
   const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
@@ -4713,6 +4842,8 @@ function TaskProgressModal({
   const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
   const [draftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
   const [isSaving, setIsSaving] = useState(false)
+  const [timeEntryError, setTimeEntryError] = useState('')
+  const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadedNames, setUploadedNames] = useState<string[]>([])
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
@@ -4723,7 +4854,6 @@ function TaskProgressModal({
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
   const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
   const waitingDirty = JSON.stringify(draftWaitingEntries) !== savedWaitingSignature
-  const isWaitingMode = mode === 'waiting'
   const activeDraft = isWaitingMode ? waitingDraft : timeDraft
   const updateActiveDraft = (updater: (current: TimeEntryDraft) => TimeEntryDraft) => {
     if (isWaitingMode) {
@@ -4742,6 +4872,7 @@ function TaskProgressModal({
   }
   const draftEntryMinutes = minutesForTimeEntry(draftEntry)
   const hasDraftTimeEntry = activeDraft.start.trim() !== '' && activeDraft.end.trim() !== '' && draftEntryMinutes > 0
+  const isEditingEntry = Boolean(editEntryId && editingEntry)
 
   useEffect(() => {
     writeDraftCache(progressDraftKey, { note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
@@ -4754,7 +4885,7 @@ function TaskProgressModal({
     if (!start || !end || draftEntryMinutes <= 0) {
       return null
     }
-    const entry = { id: crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
+    const entry = { id: editEntryId ?? crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
     return entry
   }
 
@@ -4788,10 +4919,23 @@ function TaskProgressModal({
       return
     }
     setIsSaving(true)
+    setTimeEntryError('')
     try {
       const nextEntry = buildDraftTimeEntry()
-      const nextTimeEntries = !isWaitingMode && nextEntry ? [...draftTimeEntries, nextEntry] : draftTimeEntries
-      const nextWaitingEntries = isWaitingMode && nextEntry ? [...draftWaitingEntries, nextEntry] : draftWaitingEntries
+      if (nextEntry) {
+        const comparableEntries = (isWaitingMode ? draftWaitingEntries : draftTimeEntries).filter((entry) => entry.id !== editEntryId)
+        const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
+        if (conflict) {
+          setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
+          return
+        }
+      }
+      const nextTimeEntries = !isWaitingMode && nextEntry
+        ? isEditingEntry ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftTimeEntries, nextEntry]
+        : draftTimeEntries
+      const nextWaitingEntries = isWaitingMode && nextEntry
+        ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]
+        : draftWaitingEntries
       if (!isWaitingMode && (timeDirty || nextEntry)) {
         const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
         onUpdateTask(task.id, { timeEntries: nextTimeEntries, actualHours: nextActualHours })
@@ -4802,7 +4946,7 @@ function TaskProgressModal({
       const body = note.trim() || nextEntry?.note?.trim() || ''
       if (body || uploadedNames.length > 0) {
         await onCreateTaskUpdate(task.id, {
-          title: isWaitingMode ? '等待记录' : '进展更新',
+          title: isEditingEntry ? (isWaitingMode ? '等待记录已修改' : '进展记录已修改') : (isWaitingMode ? '等待记录' : '进展更新'),
           body: body || `上传过程附件：${uploadedNames.join('、')}`,
           hours: 0,
           visible: false,
@@ -4842,17 +4986,24 @@ function TaskProgressModal({
         label="开始时间"
         value={activeDraft.date && normalizeClockInput(activeDraft.start) ? `${activeDraft.date}T${normalizeClockInput(activeDraft.start)}` : ''}
         onChange={(value) => updateActiveDraft((current) => ({ ...current, date: value ? datePart(value) : '', start: value ? value.slice(11, 16) : '' }))}
+        pickerId="progress-start"
+        activePickerId={activeDatePickerId}
+        onActivePickerChange={setActiveDatePickerId}
       />
       <PlanDateTimeField
         label="结束时间"
         value={activeDraft.endDate && normalizeClockInput(activeDraft.end) ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}` : ''}
         onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: value ? datePart(value) : '', end: value ? value.slice(11, 16) : '' }))}
+        pickerId="progress-end"
+        activePickerId={activeDatePickerId}
+        onActivePickerChange={setActiveDatePickerId}
       />
       <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
         {hasDraftTimeEntry
           ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
           : '结束时间需晚于开始时间'}
       </p>
+      {timeEntryError && <p className="progress-lite-entry-error" role="alert">{timeEntryError}</p>}
     </section>
   )
 
@@ -4861,7 +5012,7 @@ function TaskProgressModal({
       <header className="progress-lite-header">
         <div>
           <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : '记录进展'}</h2>
-          <small>{isWaitingMode ? '记录非工作的等待时间段，仅用于洞察分析，不计入结算工时' : `${task.title} · 按时间段计时，工时自动累计并计入结算`}</small>
+          <small>{isEditingEntry ? '修改这段记录的内容和时间' : isWaitingMode ? '记录非工作的等待时间段，仅用于洞察分析，不计入结算工时' : `${task.title} · 按时间段计时，工时自动累计并计入结算`}</small>
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
           <X size={18} />
@@ -4975,7 +5126,7 @@ function TaskProgressModal({
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
         <button className="primary-button" disabled={isSaving || !hasDraftTimeEntry} onClick={() => void saveProgress()}>
-          {isSaving ? '保存中…' : isWaitingMode ? '记录等待' : '记录进展'}
+          {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
         </button>
       </footer>
     </ModalShell>
@@ -5694,6 +5845,7 @@ function TaskEditModal({
   const [draft, setDraft] = useState(initialDraft)
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
   const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>('start')
+  const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const taskEstimatedMinutes = Math.round((Number(draft.estimatedHours) || 0) * 60)
   const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(initialDraft)
 
@@ -5806,6 +5958,9 @@ function TaskEditModal({
               isActive={scheduleAnchor === 'start'}
               readOnly={scheduleAnchor !== 'start'}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+              pickerId="edit-task-start"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
             />
             <PlanDateTimeField
               label="预计交付时间"
@@ -5814,6 +5969,9 @@ function TaskEditModal({
               isActive={scheduleAnchor === 'end'}
               readOnly={scheduleAnchor !== 'end'}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+              pickerId="edit-task-end"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
             />
             <label className="field">
               <span>预估工时</span>
@@ -9081,6 +9239,7 @@ function NewTaskModal({
   const [hourSuggestionError, setHourSuggestionError] = useState('')
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => monthSelectOptions(currentMonthValue, settlementMonth), [currentMonthValue, settlementMonth])
 
   useEffect(() => {
@@ -9390,26 +9549,30 @@ function NewTaskModal({
           </label>
           <div className="new-task-schedule-row">
             <PlanDateTimeField
-              key={`start-${startDate}`}
               label="预计开始时间"
               value={startDate}
               onChange={updateStartDate}
               isActive={scheduleAnchor === 'start'}
               readOnly={scheduleAnchor !== 'start'}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+              pickerId="new-task-start"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
             />
             <label className="field">
               <span>预估工时</span>
               <DurationPicker valueMinutes={estimatedMinutes} onChange={updateEstimatedMinutes} />
             </label>
             <PlanDateTimeField
-              key={`end-${estimatedDate}`}
               label="预计交付时间"
               value={estimatedDate}
               onChange={updateEstimatedDate}
               isActive={scheduleAnchor === 'end'}
               readOnly={scheduleAnchor !== 'end'}
               control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+              pickerId="new-task-end"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
             />
           </div>
           <div className="hour-estimate-panel wide">
