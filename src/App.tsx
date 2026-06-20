@@ -294,7 +294,7 @@ function addMinutesToPlanDateTime(value: string, minutes: number) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-type ScheduleAnchor = 'start' | 'end'
+type ScheduleAnchor = 'start' | 'hours' | 'end'
 
 async function createOptionalPsdPreviewFile(file: File) {
   try {
@@ -1579,7 +1579,7 @@ function DurationPicker({
   )
 }
 
-function CascadingDesignTypePicker({
+function NewTaskDesignTypeSelector({
   groups,
   value,
   onChange,
@@ -1589,74 +1589,46 @@ function CascadingDesignTypePicker({
   onChange: (value: string) => void
 }) {
   const availableGroups = normalizeDesignTypeGroups(groups)
-  const initialGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value)) ?? availableGroups[0]
-  const [isOpen, setIsOpen] = useState(false)
-  const [activeGroupName, setActiveGroupName] = useState(initialGroup.name)
+  const selectedGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value))
+  const [activeGroupName, setActiveGroupName] = useState(selectedGroup?.name ?? availableGroups[0]?.name ?? '')
   const activeGroup = availableGroups.find((group) => group.name === activeGroupName) ?? availableGroups[0]
 
-  const choose = (groupName: string, item: string) => {
-    onChange(`${groupName} / ${item}`)
-    setIsOpen(false)
-  }
-
   return (
-    <div
-      className="cascade-picker"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setIsOpen(false)
-        }
-      }}
-    >
-      <button
-        type="button"
-        className={`cascade-trigger ${isOpen ? 'active' : ''}`}
-        aria-label="选择设计类型"
-        aria-expanded={isOpen}
-        onClick={() => {
-          if (!isOpen) {
-            setActiveGroupName(initialGroup.name)
-          }
-          setIsOpen((open) => !open)
-        }}
-      >
-        <span>{value}</span>
-        <ChevronDown size={16} />
-      </button>
-      {isOpen && (
-        <div className="cascade-menu" role="listbox" aria-label="设计类型二级选择器">
-          <div className="cascade-column">
-            {availableGroups.map((group) => (
+    <div className="new-task-type-selector">
+      <div className="new-task-type-chips" role="listbox" aria-label="设计类型">
+        {availableGroups.map((group) => (
+          <button
+            type="button"
+            className={group.name === activeGroup?.name ? 'active' : ''}
+            key={group.name}
+            onClick={() => setActiveGroupName(group.name)}
+          >
+            {group.name}
+          </button>
+        ))}
+      </div>
+      {activeGroup && activeGroup.items.length > 0 && (
+        <div className="new-task-subtype-chips" role="listbox" aria-label={`${activeGroup.name} 子分类`}>
+          {activeGroup.items.map((item) => {
+            const optionValue = `${activeGroup.name} / ${item}`
+            return (
               <button
                 type="button"
-                className={group.name === activeGroup.name ? 'active' : ''}
-                key={group.name}
-                onMouseEnter={() => setActiveGroupName(group.name)}
-                onFocus={() => setActiveGroupName(group.name)}
+                className={optionValue === value ? 'active' : ''}
+                key={item}
+                aria-selected={optionValue === value}
+                onClick={() => {
+                  setActiveGroupName(activeGroup.name)
+                  onChange(optionValue)
+                }}
               >
-                <span>{group.name}</span>
-                <ChevronRight size={14} />
+                {item}
               </button>
-            ))}
-          </div>
-          <div className="cascade-column child-column">
-            {activeGroup.items.map((item) => {
-              const optionValue = `${activeGroup.name} / ${item}`
-              return (
-                <button
-                  type="button"
-                  className={optionValue === value ? 'selected' : ''}
-                  key={item}
-                  aria-selected={optionValue === value}
-                  onClick={() => choose(activeGroup.name, item)}
-                >
-                  {item}
-                </button>
-              )
-            })}
-          </div>
+            )
+          })}
         </div>
       )}
+      <div className="new-task-type-picked">已选 <b>{value || '未选择'}</b></div>
     </div>
   )
 }
@@ -9240,7 +9212,7 @@ const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, 
       startDate,
       estimatedMinutes,
       estimatedDate: parsed.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
-      scheduleAnchor: parsed.scheduleAnchor === 'end' ? 'end' : 'start',
+      scheduleAnchor: parsed.scheduleAnchor === 'end' || parsed.scheduleAnchor === 'hours' ? parsed.scheduleAnchor : 'start',
       isSupplemental: Boolean(parsed.isSupplemental),
       settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
       requester: parsed.requester ?? '',
@@ -9490,8 +9462,8 @@ function NewTaskModal({
     <ModalShell className="new-task-modal" labelledBy="new-task-title" onClose={onClose} closeOnBackdrop={false} closeOnEscape={false}>
         <header className="modal-header">
           <div>
-            <p className="eyebrow">任务管理</p>
-            <h2 id="new-task-title">新建设计任务</h2>
+            <h2 id="new-task-title">{isSupplemental ? '补录已完成任务' : '新建任务'}</h2>
+            <span>记录一条真实任务，工时、文件与月报都会从这里串起来</span>
           </div>
           <div className="modal-header-actions">
             <div className="supplemental-switch-wrap">
@@ -9519,26 +9491,23 @@ function NewTaskModal({
                 </label>
               )}
             </div>
-            <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
-              <X size={18} />
-            </button>
           </div>
         </header>
 
         <div className="form-grid new-task-form">
-          <label className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
+          <div className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
             <span>设计类型 <em className="required-mark" aria-label="必填">*</em></span>
-            <CascadingDesignTypePicker groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
+            <NewTaskDesignTypeSelector groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
             {formErrors.type && <small className="field-error">{formErrors.type}</small>}
-          </label>
+          </div>
           <label className={`field wide ${formErrors.title ? 'field-invalid' : ''}`}>
-            <span>项目 / 任务名称 <em className="required-mark" aria-label="必填">*</em></span>
+            <span>任务名称 <em className="required-mark" aria-label="必填">*</em></span>
             <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder="例如：金博会邀请函长图设计" aria-required="true" />
             {formErrors.title && <small className="field-error">{formErrors.title}</small>}
           </label>
           <div className={`field wide ${formErrors.requirement ? 'field-invalid' : ''}`}>
             <span className="field-label-row">
-              <span>任务具体需求 <em className="required-mark" aria-label="必填">*</em></span>
+              <span>任务需求 <em className="required-mark" aria-label="必填">*</em></span>
               <button
                 type="button"
                 className="icon-button ai-assist-button"
@@ -9558,7 +9527,7 @@ function NewTaskModal({
               aria-label="任务具体需求"
               value={requirement}
               onChange={(event) => { setRequirement(event.target.value); clearFieldError('requirement') }}
-              placeholder="记录甲方需求、修改范围、交付规格等"
+              placeholder="例如：为金博会制作论坛预热邀请长图，用于各渠道发送"
               aria-required="true"
             />
             {formErrors.requirement && <small className="field-error">{formErrors.requirement}</small>}
@@ -9607,9 +9576,13 @@ function NewTaskModal({
           )}
           <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
             <span>需求人 <em className="required-mark" aria-label="必填">*</em></span>
-            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="提出需求的人" aria-required="true" />
+            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="例如：市场部 · 王敏" aria-required="true" />
             {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
           </label>
+          <div className="new-task-time-label">
+            <span>时间与工时</span>
+            <em>三项同时只激活两项，第三项自动推算（灰色）</em>
+          </div>
           <div className="new-task-schedule-row">
             <PlanDateTimeField
               label="预计开始时间"
@@ -9623,8 +9596,22 @@ function NewTaskModal({
               onActivePickerChange={setActiveDatePickerId}
             />
             <label className="field">
-              <span>预估工时</span>
-              <DurationPicker valueMinutes={estimatedMinutes} onChange={updateEstimatedMinutes} />
+              <span className="new-task-inline-label">
+                预估工时
+                <ScheduleAnchorSwitch active={scheduleAnchor === 'hours'} label="用预估工时推算" onClick={() => setScheduleAnchor('hours')} />
+              </span>
+              <div className="new-task-hours-row">
+                <DurationPicker valueMinutes={estimatedMinutes} onChange={updateEstimatedMinutes} />
+                <button
+                  type="button"
+                  className="new-task-ai-pill"
+                  onClick={() => void requestHourSuggestion()}
+                  disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
+                >
+                  <Sparkles size={14} />
+                  {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
+                </button>
+              </div>
             </label>
             <PlanDateTimeField
               label="预计交付时间"
@@ -9638,6 +9625,7 @@ function NewTaskModal({
               onActivePickerChange={setActiveDatePickerId}
             />
           </div>
+          {(isHourSuggestionLoading || hourSuggestion || hourSuggestionError) && (
           <div className="hour-estimate-panel wide">
             <div className="hour-estimate-head">
               <div>
@@ -9689,6 +9677,7 @@ function NewTaskModal({
               </div>
             )}
           </div>
+          )}
           {isSupplemental && (
             <label className="field wide">
               <span>补录说明</span>
@@ -9702,8 +9691,10 @@ function NewTaskModal({
         </div>
 
         <footer className="modal-footer">
+          <button className="ghost-button" onClick={onClose}>
+            取消
+          </button>
           <button className="primary-button" onClick={handleSubmit}>
-            <Plus size={18} />
             创建任务
           </button>
         </footer>
