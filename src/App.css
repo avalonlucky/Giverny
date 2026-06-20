@@ -5903,7 +5903,7 @@ button.file-chip:focus-visible {
 }
 
 .new-task-modal {
-  width: min(580px, 92vw);
+  width: min(640px, 94vw);
   max-height: 84vh;
   border-radius: 0;
   color: var(--color-editorial-text);
@@ -5919,6 +5919,10 @@ button.file-chip:focus-visible {
 .new-task-modal .modal-header {
   padding: 28px 32px 0;
   align-items: flex-start;
+}
+
+.new-task-modal .modal-header > div:first-child {
+  min-width: 0;
 }
 
 .new-task-modal .modal-header h2 {
@@ -6304,6 +6308,7 @@ button.file-chip:focus-visible {
   background: transparent;
   gap: 16px;
   flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .supplemental-toggle-button {
@@ -6318,7 +6323,16 @@ button.file-chip:focus-visible {
   gap: 9px;
   font: inherit;
   font-size: 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
+}
+
+.supplemental-toggle-button > span:first-child,
+.new-task-modal .supplemental-month-select,
+.new-task-modal .supplemental-month-select span {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .supplemental-toggle-button.active {
