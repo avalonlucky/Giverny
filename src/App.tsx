@@ -481,18 +481,13 @@ function monthLabelOf(value: string) {
   return `${Number(value.slice(0, 4))} 年 ${Number(value.slice(5, 7))} 月`
 }
 
-function monthSelectOptions(anchorValue: string, extraValue?: string) {
-  const anchor = localDateFromIsoDate(`${anchorValue || isoDate().slice(0, 7)}-01`)
-  const values = new Set<string>()
-  for (let offset = -12; offset <= 6; offset += 1) {
+function supplementalMonthSelectOptions(currentValue = monthPart(isoDate())) {
+  const anchor = localDateFromIsoDate(`${currentValue}-01`)
+  return Array.from({ length: 4 }, (_, index) => {
     const date = new Date(anchor)
-    date.setMonth(anchor.getMonth() + offset)
-    values.add(`${date.getFullYear()}-${pad(date.getMonth() + 1)}`)
-  }
-  if (extraValue) {
-    values.add(extraValue)
-  }
-  return [...values].sort((a, b) => b.localeCompare(a))
+    date.setMonth(anchor.getMonth() - index)
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+  })
 }
 
 function shiftMonthValue(value: string, offset: number) {
@@ -9267,7 +9262,7 @@ function NewTaskModal({
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
-  const supplementalMonthOptions = useMemo(() => monthSelectOptions(currentMonthValue, settlementMonth), [currentMonthValue, settlementMonth])
+  const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
 
   useEffect(() => {
     writeNewTaskDraftCache({
@@ -9380,8 +9375,8 @@ function NewTaskModal({
   const toggleSupplemental = () => {
     const next = !isSupplemental
     setIsSupplemental(next)
-    if (next && !settlementMonth) {
-      setSettlementMonth(currentMonthValue)
+    if (next && !supplementalMonthOptions.includes(settlementMonth)) {
+      setSettlementMonth(supplementalMonthOptions[0])
     }
     if (!next) {
       setSupplementalNote('')
