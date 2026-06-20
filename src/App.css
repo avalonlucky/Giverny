@@ -3399,8 +3399,9 @@ button {
 
 .progress-lite-time-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 28px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px 16px;
+  align-items: end;
 }
 
 .progress-lite-time-grid .field {
@@ -3436,6 +3437,32 @@ button {
 .progress-lite-time-grid .date-input-wrap:focus-within > button {
   border-color: var(--color-primary);
   box-shadow: none;
+}
+
+.progress-lite-time-swap {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: var(--color-supplement-bg);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-lite-time-swap:hover {
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-strong));
+}
+
+.progress-lite-time-swap:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .progress-lite-duration {
@@ -10651,6 +10678,11 @@ textarea:focus-visible {
   .detail-summary-grid,
   .settings-tool-grid {
     grid-template-columns: 1fr;
+  }
+
+  .progress-lite-time-swap {
+    justify-self: end;
+    margin: -2px 4px -2px 0;
   }
 
   .update-card,

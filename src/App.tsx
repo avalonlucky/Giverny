@@ -3,6 +3,7 @@ import {
   AlarmClock,
   AlertTriangle,
   Archive,
+  ArrowRightLeft,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -4980,6 +4981,24 @@ function TaskProgressModal({
     }
   }
 
+  const continueFromEndTime = () => {
+    const normalizedEnd = normalizeClockInput(activeDraft.end)
+    if (!activeEndDate || !normalizedEnd) {
+      return
+    }
+    const nextStart = `${activeEndDate}T${normalizedEnd}`
+    const nextEnd = addMinutesToPlanDateTime(nextStart, 60)
+    updateActiveDraft((current) => ({
+      ...current,
+      date: datePart(nextStart),
+      start: nextStart.slice(11, 16),
+      endDate: datePart(nextEnd),
+      end: nextEnd.slice(11, 16),
+    }))
+    setActiveDatePickerId(null)
+    setTimeEntryError('')
+  }
+
   const timeFields = (
     <section className="progress-lite-time-grid">
       <PlanDateTimeField
@@ -4990,6 +5009,16 @@ function TaskProgressModal({
         activePickerId={activeDatePickerId}
         onActivePickerChange={setActiveDatePickerId}
       />
+      <button
+        type="button"
+        className="progress-lite-time-swap"
+        aria-label="用结束时间续接下一段"
+        title="用结束时间续接下一段"
+        onClick={continueFromEndTime}
+        disabled={!activeEndDate || !normalizeClockInput(activeDraft.end)}
+      >
+        <ArrowRightLeft size={15} />
+      </button>
       <PlanDateTimeField
         label="结束时间"
         value={activeDraft.endDate && normalizeClockInput(activeDraft.end) ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}` : ''}
