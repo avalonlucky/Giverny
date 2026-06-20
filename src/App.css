@@ -23,6 +23,15 @@
   --color-status-disabled: #8a9496;
   --color-alert-surface: #f7eee2;
   --color-alert-accent: #a9702b;
+  --color-editorial-surface: #fbfbf8;
+  --color-editorial-surface-alt: #f4f4ee;
+  --color-editorial-text: #1f2a27;
+  --color-editorial-text-secondary: #586460;
+  --color-editorial-text-muted: #949c96;
+  --color-editorial-primary: #3c6b61;
+  --color-editorial-primary-hover: #2f564e;
+  --color-editorial-menu: #20302c;
+  --color-editorial-backdrop: rgba(20, 28, 26, 0.34);
   --color-border: rgba(39, 54, 58, 0.08);
   --color-border-soft: rgba(39, 54, 58, 0.045);
   --radius-control: 8px;
@@ -5897,7 +5906,14 @@ button.file-chip:focus-visible {
   width: min(580px, 92vw);
   max-height: 84vh;
   border-radius: 0;
-  background: var(--color-surface-strong);
+  color: var(--color-editorial-text);
+  background: var(--color-editorial-surface);
+  box-shadow: none;
+}
+
+.modal-backdrop:has(.new-task-modal) {
+  background: var(--color-editorial-backdrop);
+  backdrop-filter: none;
 }
 
 .new-task-modal .modal-header {
@@ -5907,17 +5923,18 @@ button.file-chip:focus-visible {
 
 .new-task-modal .modal-header h2 {
   margin: 0;
-  color: var(--color-text);
+  color: var(--color-editorial-text);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
   font-size: 23px;
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: 0;
 }
 
-.new-task-modal .modal-header span {
+.new-task-modal .new-task-modal-subtitle {
   display: block;
   margin-top: 5px;
-  color: var(--color-text-muted);
+  color: var(--color-editorial-text-muted);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.55;
@@ -5930,7 +5947,7 @@ button.file-chip:focus-visible {
 .new-task-modal .modal-footer {
   padding: 18px 32px 26px;
   border-top: 1px solid var(--color-border);
-  background: var(--color-surface-strong);
+  background: var(--color-editorial-surface);
 }
 
 .new-task-modal .modal-footer .ghost-button,
@@ -6088,50 +6105,95 @@ button.file-chip:focus-visible {
 
 .new-task-type-selector {
   display: grid;
-  gap: 10px;
+  gap: 11px;
 }
 
-.new-task-type-chips,
-.new-task-subtype-chips {
+.new-task-type-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.new-task-type-chips button,
-.new-task-subtype-chips button {
+.new-task-type-category {
+  position: relative;
   min-height: 34px;
   padding: 7px 15px;
-  border: 0;
   border-radius: var(--radius-pill);
-  color: var(--color-text-secondary);
-  background: var(--color-surface-alt);
-  font: inherit;
+  color: var(--color-editorial-text-secondary);
+  background: var(--color-editorial-surface-alt);
   font-size: 13px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+  outline: none;
+}
+
+.new-task-type-category:hover,
+.new-task-type-category:focus-within {
+  color: var(--color-editorial-text);
+  background: color-mix(in srgb, var(--color-editorial-text) 5%, var(--color-editorial-surface-alt));
+}
+
+.new-task-type-category.active {
+  color: var(--color-editorial-surface);
+  background: var(--color-editorial-primary);
+}
+
+.new-task-type-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: var(--z-popover);
+  min-width: 148px;
+  padding: 6px;
+  border-radius: var(--radius-control);
+  background: var(--color-editorial-menu);
+  display: none;
+}
+
+.new-task-type-menu::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  right: 0;
+  left: 0;
+  height: 7px;
+}
+
+.new-task-type-category:hover .new-task-type-menu,
+.new-task-type-category:focus-within .new-task-type-menu {
+  display: block;
+}
+
+.new-task-type-menu button {
+  width: 100%;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 3px);
+  color: var(--color-editorial-surface-alt);
+  background: transparent;
+  display: block;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.new-task-type-chips button:hover,
-.new-task-subtype-chips button:hover {
-  color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
-}
-
-.new-task-type-chips button.active,
-.new-task-subtype-chips button.active {
-  color: var(--color-surface-strong);
-  background: var(--color-primary);
+.new-task-type-menu button:hover,
+.new-task-type-menu button.active {
+  background: color-mix(in srgb, var(--color-surface-strong) 9%, transparent);
 }
 
 .new-task-type-picked {
-  color: var(--color-text-muted);
+  color: var(--color-editorial-text-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .new-task-type-picked b {
-  color: var(--color-primary);
+  color: var(--color-editorial-primary);
   font-weight: 600;
 }
 
@@ -6155,9 +6217,9 @@ button.file-chip:focus-visible {
 .new-task-schedule-row .date-field,
 .new-task-schedule-row > .field {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: 118px minmax(0, 1fr);
   align-items: center;
-  column-gap: 18px;
+  column-gap: 16px;
 }
 
 .new-task-schedule-row .date-field > .field-label-row,
@@ -6165,6 +6227,11 @@ button.file-chip:focus-visible {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.new-task-schedule-row .date-field > .field-label-row {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 .new-task-inline-label {
@@ -6182,7 +6249,7 @@ button.file-chip:focus-visible {
 }
 
 .new-task-time-label em {
-  color: var(--color-text-muted);
+  color: var(--color-editorial-text-muted);
   font-size: 11px;
   font-style: normal;
   line-height: 1.4;
@@ -6196,13 +6263,17 @@ button.file-chip:focus-visible {
   gap: 10px;
 }
 
+.new-task-hours-input {
+  max-width: 90px;
+}
+
 .new-task-ai-pill {
   min-height: 34px;
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-pill);
-  color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
+  color: var(--color-editorial-primary);
+  background: color-mix(in srgb, var(--color-editorial-primary) 8%, var(--color-editorial-surface-alt));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6220,30 +6291,60 @@ button.file-chip:focus-visible {
 }
 
 .new-task-modal .supplemental-switch-wrap {
-  min-height: 38px;
-  padding: 8px 13px;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-alt);
-  gap: 8px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 16px;
 }
 
-.new-task-modal .supplemental-label {
-  margin: 0;
-  color: var(--color-text-secondary);
+.supplemental-toggle-button {
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-editorial-text-secondary);
+  background: var(--color-editorial-surface-alt);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  cursor: pointer;
+}
+
+.supplemental-toggle-button.active {
+  color: var(--color-editorial-primary);
 }
 
 .new-task-modal .supplemental-month-select {
-  margin-left: 2px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 8px;
 }
 
 .new-task-modal .supplemental-month-select span {
-  color: var(--color-text-muted);
+  color: var(--color-editorial-text-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.new-task-modal .supplemental-month-select select {
+  min-width: 116px;
+  height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--color-editorial-text);
+  background: var(--color-editorial-surface-alt);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .new-task-schedule-row .date-field.active .date-input-wrap input,
@@ -6255,6 +6356,14 @@ button.file-chip:focus-visible {
 .new-task-schedule-row .date-field.readonly .date-input-wrap button {
   color: var(--color-text-muted);
   background: transparent;
+  border-bottom-style: dashed;
+  opacity: 0.7;
+}
+
+.new-task-hours-input[readonly] {
+  color: var(--color-text-muted);
+  border-bottom-style: dashed;
+  opacity: 0.7;
 }
 
 .hour-estimate-panel {
@@ -6415,7 +6524,7 @@ button.file-chip:focus-visible {
 .new-task-modal .field > span,
 .new-task-modal .field-label-row > span,
 .new-task-time-label span {
-  color: var(--color-text-muted);
+  color: var(--color-editorial-text-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.12em;
@@ -6456,7 +6565,7 @@ button.file-chip:focus-visible {
 }
 
 .new-task-modal .ai-assist-button {
-  color: var(--color-primary);
+  color: var(--color-editorial-primary);
 }
 
 .ai-assist-button:hover {
@@ -6583,7 +6692,7 @@ button.file-chip:focus-visible {
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-editorial-text);
   font-size: 15px;
   box-shadow: none;
 }
@@ -6593,8 +6702,8 @@ button.file-chip:focus-visible {
   padding: 13px 15px;
   border: 0;
   border-radius: var(--radius-control);
-  background: var(--color-surface-alt);
-  color: var(--color-text);
+  background: var(--color-editorial-surface-alt);
+  color: var(--color-editorial-text);
   font-size: 14px;
   line-height: 1.65;
   box-shadow: none;
@@ -6611,7 +6720,7 @@ button.file-chip:focus-visible {
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-editorial-text);
   box-shadow: none;
 }
 
@@ -6645,8 +6754,20 @@ button.file-chip:focus-visible {
 .new-task-modal .field select:focus,
 .new-task-modal .date-input-wrap input:focus,
 .new-task-modal .field:focus-within .duration-trigger {
-  border-color: var(--color-primary);
+  border-color: var(--color-editorial-primary);
   box-shadow: none;
+}
+
+.new-task-modal .switch-control.active i {
+  background: var(--color-editorial-primary);
+}
+
+.new-task-modal .primary-button {
+  background: var(--color-editorial-primary);
+}
+
+.new-task-modal .primary-button:hover {
+  background: var(--color-editorial-primary-hover);
 }
 
 input::placeholder,

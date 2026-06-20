@@ -1590,44 +1590,36 @@ function NewTaskDesignTypeSelector({
 }) {
   const availableGroups = normalizeDesignTypeGroups(groups)
   const selectedGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value))
-  const [activeGroupName, setActiveGroupName] = useState(selectedGroup?.name ?? availableGroups[0]?.name ?? '')
-  const activeGroup = availableGroups.find((group) => group.name === activeGroupName) ?? availableGroups[0]
 
   return (
     <div className="new-task-type-selector">
       <div className="new-task-type-chips" role="listbox" aria-label="设计类型">
         {availableGroups.map((group) => (
-          <button
-            type="button"
-            className={group.name === activeGroup?.name ? 'active' : ''}
+          <div
+            className={`new-task-type-category ${group.name === selectedGroup?.name ? 'active' : ''}`}
             key={group.name}
-            onClick={() => setActiveGroupName(group.name)}
+            tabIndex={0}
           >
-            {group.name}
-          </button>
+            <span>{group.name}</span>
+            <div className="new-task-type-menu" role="group" aria-label={`${group.name} 子分类`}>
+              {group.items.map((item) => {
+                const optionValue = `${group.name} / ${item}`
+                return (
+                  <button
+                    type="button"
+                    className={optionValue === value ? 'active' : ''}
+                    key={item}
+                    aria-selected={optionValue === value}
+                    onClick={() => onChange(optionValue)}
+                  >
+                    {item}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         ))}
       </div>
-      {activeGroup && activeGroup.items.length > 0 && (
-        <div className="new-task-subtype-chips" role="listbox" aria-label={`${activeGroup.name} 子分类`}>
-          {activeGroup.items.map((item) => {
-            const optionValue = `${activeGroup.name} / ${item}`
-            return (
-              <button
-                type="button"
-                className={optionValue === value ? 'active' : ''}
-                key={item}
-                aria-selected={optionValue === value}
-                onClick={() => {
-                  setActiveGroupName(activeGroup.name)
-                  onChange(optionValue)
-                }}
-              >
-                {item}
-              </button>
-            )
-          })}
-        </div>
-      )}
       <div className="new-task-type-picked">已选 <b>{value || '未选择'}</b></div>
     </div>
   )
@@ -9187,7 +9179,7 @@ const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, 
     startDate: fallbackStartDate,
     estimatedMinutes: fallbackMinutes,
     estimatedDate: addMinutesToPlanDateTime(fallbackStartDate, fallbackMinutes),
-    scheduleAnchor: 'start',
+    scheduleAnchor: 'end',
     isSupplemental: false,
     settlementMonth: fallbackSettlementMonth,
     requester: '',
@@ -9212,7 +9204,7 @@ const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, 
       startDate,
       estimatedMinutes,
       estimatedDate: parsed.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
-      scheduleAnchor: parsed.scheduleAnchor === 'end' || parsed.scheduleAnchor === 'hours' ? parsed.scheduleAnchor : 'start',
+      scheduleAnchor: 'end',
       isSupplemental: Boolean(parsed.isSupplemental),
       settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
       requester: parsed.requester ?? '',
@@ -9261,7 +9253,7 @@ function NewTaskModal({
   const [startDate, setStartDate] = useState(initialDraft.startDate)
   const [estimatedMinutes, setEstimatedMinutes] = useState(initialDraft.estimatedMinutes)
   const [estimatedDate, setEstimatedDate] = useState(initialDraft.estimatedDate)
-  const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
+  const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
   const [isSupplemental, setIsSupplemental] = useState(initialDraft.isSupplemental)
   const [settlementMonth, setSettlementMonth] = useState(initialDraft.settlementMonth)
   const [requester] = useState(initialDraft.requester)
@@ -9285,30 +9277,47 @@ function NewTaskModal({
       startDate,
       estimatedMinutes,
       estimatedDate,
-      scheduleAnchor,
+      scheduleAnchor: scheduleDerivedField,
       isSupplemental,
       settlementMonth,
       requester,
       contact,
       supplementalNote,
     })
-  }, [contact, estimatedDate, estimatedMinutes, isSupplemental, requirement, requester, scheduleAnchor, settlementMonth, startDate, supplementalNote, title, type])
+  }, [contact, estimatedDate, estimatedMinutes, isSupplemental, requirement, requester, scheduleDerivedField, settlementMonth, startDate, supplementalNote, title, type])
+
+  const toggleScheduleField = (field: ScheduleAnchor) => {
+    setScheduleDerivedField((current) => {
+      if (current !== field) {
+        return field
+      }
+      return field === 'start' ? 'end' : 'start'
+    })
+  }
 
   const updateStartDate = (value: string) => {
-    setScheduleAnchor('start')
     setStartDate(value)
+    if (scheduleDerivedField === 'hours') {
+      const nextMinutes = Math.max(30, Math.round((new Date(estimatedDate).getTime() - new Date(value).getTime()) / 60000))
+      setEstimatedMinutes(nextMinutes)
+      return
+    }
     setEstimatedDate(addMinutesToPlanDateTime(value, estimatedMinutes))
   }
 
   const updateEstimatedDate = (value: string) => {
-    setScheduleAnchor('end')
     setEstimatedDate(value)
+    if (scheduleDerivedField === 'hours') {
+      const nextMinutes = Math.max(30, Math.round((new Date(value).getTime() - new Date(startDate).getTime()) / 60000))
+      setEstimatedMinutes(nextMinutes)
+      return
+    }
     setStartDate(addMinutesToPlanDateTime(value, -estimatedMinutes))
   }
 
   const updateEstimatedMinutes = (value: number) => {
     setEstimatedMinutes(value)
-    if (scheduleAnchor === 'end') {
+    if (scheduleDerivedField === 'start') {
       setStartDate(addMinutesToPlanDateTime(estimatedDate, -value))
       return
     }
@@ -9463,24 +9472,13 @@ function NewTaskModal({
         <header className="modal-header">
           <div>
             <h2 id="new-task-title">{isSupplemental ? '补录已完成任务' : '新建任务'}</h2>
-            <span>记录一条真实任务，工时、文件与月报都会从这里串起来</span>
+            <span className="new-task-modal-subtitle">{isSupplemental ? '登记过往已交付、需计入某月结算的任务' : '记录一条真实任务，工时、文件与月报都会从这里串起来'}</span>
           </div>
           <div className="modal-header-actions">
             <div className="supplemental-switch-wrap">
-              <span className="supplemental-label">补录</span>
-              <button
-                type="button"
-                className={`switch-control ${isSupplemental ? 'active' : ''}`}
-                aria-label="补录任务"
-                aria-pressed={isSupplemental}
-                title={isSupplemental ? `补录至 ${monthLabelOf(settlementMonth)}` : '标记为补录任务'}
-                onClick={toggleSupplemental}
-              >
-                <i />
-              </button>
               {isSupplemental && (
                 <label className="supplemental-month-select">
-                  <span>计入月份</span>
+                  <span>记录月份</span>
                   <select value={settlementMonth} onChange={(event) => setSettlementMonth(event.target.value)} aria-label="计入结算月份">
                     {supplementalMonthOptions.map((monthValue) => (
                       <option key={monthValue} value={monthValue}>
@@ -9490,24 +9488,35 @@ function NewTaskModal({
                   </select>
                 </label>
               )}
+              <button
+                type="button"
+                className={`supplemental-toggle-button ${isSupplemental ? 'active' : ''}`}
+                aria-label="补录任务"
+                aria-pressed={isSupplemental}
+                title={isSupplemental ? `补录至 ${monthLabelOf(settlementMonth)}` : '标记为补录任务'}
+                onClick={toggleSupplemental}
+              >
+                <span>补录</span>
+                <span className={`switch-control ${isSupplemental ? 'active' : ''}`} aria-hidden="true"><i /></span>
+              </button>
             </div>
           </div>
         </header>
 
         <div className="form-grid new-task-form">
           <div className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
-            <span>设计类型 <em className="required-mark" aria-label="必填">*</em></span>
+            <span>设计类型</span>
             <NewTaskDesignTypeSelector groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
             {formErrors.type && <small className="field-error">{formErrors.type}</small>}
           </div>
           <label className={`field wide ${formErrors.title ? 'field-invalid' : ''}`}>
-            <span>任务名称 <em className="required-mark" aria-label="必填">*</em></span>
+            <span>任务名称</span>
             <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder="例如：金博会邀请函长图设计" aria-required="true" />
             {formErrors.title && <small className="field-error">{formErrors.title}</small>}
           </label>
           <div className={`field wide ${formErrors.requirement ? 'field-invalid' : ''}`}>
             <span className="field-label-row">
-              <span>任务需求 <em className="required-mark" aria-label="必填">*</em></span>
+              <span>任务需求</span>
               <button
                 type="button"
                 className="icon-button ai-assist-button"
@@ -9575,7 +9584,7 @@ function NewTaskModal({
             </div>
           )}
           <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
-            <span>需求人 <em className="required-mark" aria-label="必填">*</em></span>
+            <span>需求人</span>
             <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="例如：市场部 · 王敏" aria-required="true" />
             {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
           </label>
@@ -9585,23 +9594,32 @@ function NewTaskModal({
           </div>
           <div className="new-task-schedule-row">
             <PlanDateTimeField
-              label="预计开始时间"
+              label="预计开始"
               value={startDate}
               onChange={updateStartDate}
-              isActive={scheduleAnchor === 'start'}
-              readOnly={scheduleAnchor !== 'start'}
-              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
+              isActive={scheduleDerivedField !== 'start'}
+              readOnly={scheduleDerivedField === 'start'}
+              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="切换预计开始时间" onClick={() => toggleScheduleField('start')} />}
               pickerId="new-task-start"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
             />
             <label className="field">
               <span className="new-task-inline-label">
+                <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换预估工时" onClick={() => toggleScheduleField('hours')} />
                 预估工时
-                <ScheduleAnchorSwitch active={scheduleAnchor === 'hours'} label="用预估工时推算" onClick={() => setScheduleAnchor('hours')} />
               </span>
               <div className="new-task-hours-row">
-                <DurationPicker valueMinutes={estimatedMinutes} onChange={updateEstimatedMinutes} />
+                <input
+                  className="new-task-hours-input"
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={Number((estimatedMinutes / 60).toFixed(2))}
+                  readOnly={scheduleDerivedField === 'hours'}
+                  onChange={(event) => updateEstimatedMinutes(Math.max(30, Math.round(Number(event.target.value || 0) * 60)))}
+                  aria-label="预估工时"
+                />
                 <button
                   type="button"
                   className="new-task-ai-pill"
@@ -9614,12 +9632,12 @@ function NewTaskModal({
               </div>
             </label>
             <PlanDateTimeField
-              label="预计交付时间"
+              label="预计交付"
               value={estimatedDate}
               onChange={updateEstimatedDate}
-              isActive={scheduleAnchor === 'end'}
-              readOnly={scheduleAnchor !== 'end'}
-              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
+              isActive={scheduleDerivedField !== 'end'}
+              readOnly={scheduleDerivedField === 'end'}
+              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="切换预计交付时间" onClick={() => toggleScheduleField('end')} />}
               pickerId="new-task-end"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
