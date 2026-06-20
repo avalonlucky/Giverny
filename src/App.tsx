@@ -78,7 +78,7 @@ import {
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import './App.css'
 
 const navItems = [
@@ -758,7 +758,6 @@ function defaultTimeEntryDraft() {
     start: `${pad(startHour)}:00`,
     end: `${pad(endHour)}:00`,
     note: '',
-    reason: '等待甲方意见' as WaitingReason,
   }
 }
 
@@ -781,8 +780,6 @@ const laborTaxBrackets = [
 type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
 
 type ProgressRecordMode = 'progress' | 'waiting'
-
-const waitingReasonOptions: WaitingReason[] = ['等待甲方意见', '等待补充资料', '等待排期', '其他']
 
 type AnnualIncomeRow = {
   month: string
@@ -4758,7 +4755,7 @@ function TaskProgressModal({
       return null
     }
     const entry = { id: crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
-    return isWaitingMode ? { ...entry, reason: activeDraft.reason } : entry
+    return entry
   }
 
   const uploadFiles = async (fileList: FileList | null) => {
@@ -4875,22 +4872,6 @@ function TaskProgressModal({
           <>
             {timeFields}
             <section className="progress-lite-field">
-              <span className="progress-lite-label">等待原因</span>
-              <div className="progress-lite-reason-options" role="group" aria-label="等待原因">
-                {waitingReasonOptions.map((reason) => (
-                  <button
-                    type="button"
-                    className={activeDraft.reason === reason ? 'active' : ''}
-                    aria-pressed={activeDraft.reason === reason}
-                    key={reason}
-                    onClick={() => updateActiveDraft((current) => ({ ...current, reason }))}
-                  >
-                    {reason}
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="progress-lite-field">
               <label className="progress-lite-label" htmlFor="progress-lite-waiting-note">备注</label>
               <textarea
                 id="progress-lite-waiting-note"
@@ -4901,7 +4882,7 @@ function TaskProgressModal({
                   setNote(value)
                   updateActiveDraft((current) => ({ ...current, note: value }))
                 }}
-                placeholder="选填，补充等待的具体原因"
+                placeholder="填写等待原因或补充说明"
               />
             </section>
           </>

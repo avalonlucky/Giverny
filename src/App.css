@@ -3362,35 +3362,6 @@ button {
   gap: 30px;
 }
 
-.progress-lite-reason-options {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.progress-lite-reason-options button {
-  min-height: 40px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  color: var(--color-text-secondary);
-  background: var(--color-surface-alt);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-}
-
-.progress-lite-reason-options button:hover {
-  color: var(--color-primary-strong);
-}
-
-.progress-lite-reason-options button.active {
-  color: var(--color-surface-strong);
-  background: var(--color-primary);
-  font-weight: 700;
-}
-
 .progress-lite-upload-box {
   width: 100%;
   min-height: 104px;
