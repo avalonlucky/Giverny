@@ -876,9 +876,9 @@ function MonthPicker({
   minimal?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  const [displayYear, setDisplayYear] = useState(() => Number(value.slice(0, 4)))
-  const selectedYear = Number(value.slice(0, 4))
+  const selectedYear = Number(value.slice(0, 4)) || new Date().getFullYear()
   const selectedMonth = Number(value.slice(5, 7))
+  const [displayYear, setDisplayYear] = useState(selectedYear)
 
   const chooseMonth = (month: number) => {
     onChange(`${displayYear}-${pad(month)}`)
@@ -913,76 +913,74 @@ function MonthPicker({
 
       {isOpen && (
         <div className="month-popover" role="dialog" aria-label="选择年份和月份">
-          <div className="month-popover-header">
-            <button type="button" className="icon-button compact-button" aria-label="上一年" onClick={() => setDisplayYear((year) => year - 1)}>
-              <ChevronLeft size={16} />
-            </button>
-            <strong>{displayYear} 年</strong>
-            <button type="button" className="icon-button compact-button" aria-label="下一年" onClick={() => setDisplayYear((year) => year + 1)}>
-              <ChevronRight size={16} />
-            </button>
-          </div>
-          <div className="month-grid">
-            {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => {
-              const isSelected = displayYear === selectedYear && month === selectedMonth
-              const monthValue = `${displayYear}-${pad(month)}`
-              const hasTasks = taskMonthValues.has(monthValue)
-              return (
-                <button
-                  type="button"
-                  className={`${isSelected ? 'selected' : ''} ${hasTasks ? 'has-tasks' : ''}`.trim()}
-                  key={month}
-                  aria-label={`${displayYear} 年 ${month} 月${hasTasks ? '，有任务' : ''}`}
-                  aria-pressed={isSelected}
-                  onClick={() => chooseMonth(month)}
-                >
-                  <span>{month} 月</span>
-                  {hasTasks && <i aria-hidden="true" />}
-                </button>
-              )
-            })}
-          </div>
+          <MonthYearPickerPanel
+            year={displayYear}
+            month={displayYear === selectedYear ? selectedMonth : undefined}
+            yearOptions={Array.from({ length: 11 }, (_, index) => displayYear - 5 + index)}
+            taskMonthValues={taskMonthValues}
+            onYearChange={setDisplayYear}
+            onMonthChange={chooseMonth}
+          />
         </div>
       )}
     </div>
   )
 }
 
-function CompactMonthSelector({
-  value,
-  onChange,
+function MonthYearPickerPanel({
+  year,
+  month,
+  yearOptions,
+  onYearChange,
+  onMonthChange,
+  taskMonthValues,
 }: {
-  value: string
-  onChange: (value: string) => void
+  year: number
+  month?: number
+  yearOptions: number[]
+  onYearChange: (year: number) => void
+  onMonthChange: (month: number) => void
+  taskMonthValues?: Set<string>
 }) {
-  const currentYear = Number(value.slice(0, 4)) || new Date().getFullYear()
-  const selectedYear = Number(value.slice(0, 4))
-  const selectedMonth = Number(value.slice(5, 7))
-  const [displayYear, setDisplayYear] = useState(currentYear)
+  const yearListRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      yearListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [year])
 
   return (
-    <div className="compact-month-selector" role="group" aria-label="选择结算月份">
-      <div className="compact-month-header">
-        <button type="button" className="icon-button compact-button" aria-label="上一年" onClick={() => setDisplayYear((year) => year - 1)}>
-          <ChevronLeft size={15} />
-        </button>
-        <strong>{displayYear} 年</strong>
-        <button type="button" className="icon-button compact-button" aria-label="下一年" onClick={() => setDisplayYear((year) => year + 1)}>
-          <ChevronRight size={15} />
-        </button>
+    <div className="date-time-month-panel month-year-picker-panel">
+      <div className="date-time-year-list" ref={yearListRef} aria-label="选择年份">
+        {yearOptions.map((option) => (
+          <button
+            type="button"
+            className={option === year ? 'active' : ''}
+            aria-pressed={option === year}
+            key={option}
+            onClick={() => onYearChange(option)}
+          >
+            {option}
+          </button>
+        ))}
       </div>
-      <div className="month-grid compact-month-grid">
-        {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => {
-          const isSelected = displayYear === selectedYear && month === selectedMonth
+      <div className="date-time-month-grid" aria-label="选择月份">
+        {Array.from({ length: 12 }, (_, index) => index + 1).map((option) => {
+          const isSelected = option === month
+          const hasTasks = taskMonthValues?.has(`${year}-${pad(option)}`) ?? false
           return (
             <button
               type="button"
-              className={isSelected ? 'selected' : ''}
-              key={month}
+              className={`${isSelected ? 'active' : ''} ${hasTasks ? 'has-tasks' : ''}`.trim()}
+              key={option}
               aria-pressed={isSelected}
-              onClick={() => onChange(`${displayYear}-${pad(month)}`)}
+              aria-label={`${year} 年 ${option} 月${hasTasks ? '，有任务' : ''}`}
+              onClick={() => onMonthChange(option)}
             >
-              <span>{month} 月</span>
+              {option}月
+              {hasTasks && <i aria-hidden="true" />}
             </button>
           )
         })}
@@ -1003,6 +1001,9 @@ function SettlementMonthField({
   saved?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const selectedYear = Number(value.slice(0, 4)) || new Date().getFullYear()
+  const selectedMonth = Number(value.slice(5, 7))
+  const [displayYear, setDisplayYear] = useState(selectedYear)
 
   return (
     <label
@@ -1019,17 +1020,25 @@ function SettlementMonthField({
         className={`month-field-trigger ${isOpen ? 'active' : ''}`}
         aria-label={`选择${label}`}
         aria-expanded={isOpen}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={() => {
+          if (!isOpen) {
+            setDisplayYear(selectedYear)
+          }
+          setIsOpen((open) => !open)
+        }}
       >
         <span>{monthLabelOf(value)}</span>
         <CalendarDays size={16} />
       </button>
       {isOpen && (
         <div className="settlement-month-popover">
-          <CompactMonthSelector
-            value={value}
-            onChange={(nextValue) => {
-              onChange(nextValue)
+          <MonthYearPickerPanel
+            year={displayYear}
+            month={displayYear === selectedYear ? selectedMonth : undefined}
+            yearOptions={Array.from({ length: 11 }, (_, index) => displayYear - 5 + index)}
+            onYearChange={setDisplayYear}
+            onMonthChange={(month) => {
+              onChange(`${displayYear}-${pad(month)}`)
               setIsOpen(false)
             }}
           />
@@ -1047,6 +1056,7 @@ function PlanDateTimeField({
   readOnly = false,
   saved = false,
   control,
+  includeTime = true,
 }: {
   label: string
   value: string
@@ -1055,23 +1065,27 @@ function PlanDateTimeField({
   readOnly?: boolean
   saved?: boolean
   control?: ReactNode
+  /** Date-only fields reuse this picker without the hour/minute columns. */
+  includeTime?: boolean
 }) {
-  const [draft, setDraft] = useState(() => formatPlanDateTime(value))
+  const formatValue = (rawValue: string) => includeTime ? formatPlanDateTime(rawValue) : rawValue.replace(/-/g, '/')
+  const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
   const [pickerView, setPickerView] = useState<'calendar' | 'month'>('calendar')
   const hourListRef = useRef<HTMLDivElement | null>(null)
   const minuteListRef = useRef<HTMLDivElement | null>(null)
-  const yearListRef = useRef<HTMLDivElement | null>(null)
 
   if (value !== syncedValue) {
     setSyncedValue(value)
-    setDraft(formatPlanDateTime(value))
+    setDraft(formatValue(value))
   }
 
   const normalizeDateTimeInput = (input: string) => {
-    const match = input.trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$/)
+    const match = input.trim().match(includeTime
+      ? /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}))?$/
+      : /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
     if (!match) {
       return ''
     }
@@ -1083,8 +1097,9 @@ function PlanDateTimeField({
     if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31 || hourNumber < 0 || hourNumber > 23 || minuteNumber < 0 || minuteNumber > 59) {
       return ''
     }
-    const normalized = `${year}-${pad(monthNumber)}-${pad(dayNumber)}T${pad(hourNumber)}:${pad(minuteNumber)}`
-    const date = new Date(normalized)
+    const normalizedDate = `${year}-${pad(monthNumber)}-${pad(dayNumber)}`
+    const normalized = includeTime ? `${normalizedDate}T${pad(hourNumber)}:${pad(minuteNumber)}` : normalizedDate
+    const date = new Date(includeTime ? normalized : `${normalized}T00:00`)
     if (Number.isNaN(date.getTime()) || date.getFullYear() !== Number(year) || date.getMonth() + 1 !== monthNumber || date.getDate() !== dayNumber) {
       return ''
     }
@@ -1093,19 +1108,19 @@ function PlanDateTimeField({
 
   const commitDraft = () => {
     if (readOnly) {
-      setDraft(formatPlanDateTime(value))
+      setDraft(formatValue(value))
       return
     }
     const normalized = normalizeDateTimeInput(draft)
     if (normalized) {
       onChange(normalized)
-      setDraft(formatPlanDateTime(normalized))
+      setDraft(formatValue(normalized))
       return
     }
-    setDraft(formatPlanDateTime(value))
+    setDraft(formatValue(value))
   }
 
-  const selectedValue = toDateTimeInputValue(value || isoDateTime())
+  const selectedValue = toDateTimeInputValue(includeTime ? (value || isoDateTime()) : `${value || isoDate()}T00:00`)
   const selectedDate = datePart(selectedValue)
   const selectedHour = selectedValue.slice(11, 13)
   const selectedMinute = selectedValue.slice(14, 16)
@@ -1122,8 +1137,6 @@ function PlanDateTimeField({
       if (pickerView === 'calendar') {
         hourListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
         minuteListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
-      } else {
-        yearListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
       }
     })
     return () => window.cancelAnimationFrame(frame)
@@ -1139,9 +1152,9 @@ function PlanDateTimeField({
     if (readOnly) {
       return
     }
-    const next = `${dateValue}T${selectedHour}:${selectedMinute}`
+    const next = includeTime ? `${dateValue}T${selectedHour}:${selectedMinute}` : dateValue
     onChange(next)
-    setDraft(formatPlanDateTime(next))
+    setDraft(formatValue(next))
     setCalendarMonth(monthPart(next))
   }
 
@@ -1164,9 +1177,9 @@ function PlanDateTimeField({
     if (readOnly) {
       return
     }
-    const now = isoDateTime()
+    const now = includeTime ? isoDateTime() : isoDate()
     onChange(now)
-    setDraft(formatPlanDateTime(now))
+    setDraft(formatValue(now))
     setCalendarMonth(monthPart(now))
   }
 
@@ -1195,7 +1208,7 @@ function PlanDateTimeField({
           type="text"
           inputMode="numeric"
           value={draft}
-          placeholder="YYYY/MM/DD HH:mm"
+          placeholder={includeTime ? 'YYYY/MM/DD HH:mm' : 'YYYY/MM/DD'}
           readOnly={readOnly}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commitDraft}
@@ -1238,37 +1251,16 @@ function PlanDateTimeField({
                     <ChevronDown size={14} />
                   </button>
                 </div>
-                <div className="date-time-month-panel">
-                  <div className="date-time-year-list" ref={yearListRef} aria-label="选择年份">
-                    {yearOptions.map((year) => (
-                      <button
-                        type="button"
-                        className={year === calendarYear ? 'active' : ''}
-                        aria-pressed={year === calendarYear}
-                        key={year}
-                        onClick={() => setCalendarMonth(`${year}-${pad(selectedMonth)}`)}
-                      >
-                        {year}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="date-time-month-grid" aria-label="选择月份">
-                    {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
-                      <button
-                        type="button"
-                        className={month === selectedMonth ? 'active' : ''}
-                        aria-pressed={month === selectedMonth}
-                        key={month}
-                        onClick={() => chooseMonth(calendarYear, month)}
-                      >
-                        {month}月
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <MonthYearPickerPanel
+                  year={calendarYear}
+                  month={selectedMonth}
+                  yearOptions={yearOptions}
+                  onYearChange={(year) => setCalendarMonth(`${year}-${pad(selectedMonth)}`)}
+                  onMonthChange={(month) => chooseMonth(calendarYear, month)}
+                />
               </>
             ) : (
-              <div className="date-time-picker-main">
+              <div className={`date-time-picker-main ${includeTime ? '' : 'date-only'}`}>
                 <div className="date-time-calendar-pane">
                   <div className="date-time-popover-header">
                     <button
@@ -1308,32 +1300,36 @@ function PlanDateTimeField({
                     ))}
                   </div>
                 </div>
-                <div className="date-time-scroll-column" ref={hourListRef} aria-label="选择小时">
-                  {Array.from({ length: 24 }, (_, hour) => pad(hour)).map((hour) => (
-                    <button
-                      type="button"
-                      className={hour === selectedHour ? 'active' : ''}
-                      aria-pressed={hour === selectedHour}
-                      key={hour}
-                      onClick={() => applyTimePart('hour', hour)}
-                    >
-                      {hour}
-                    </button>
-                  ))}
-                </div>
-                <div className="date-time-scroll-column" ref={minuteListRef} aria-label="选择分钟">
-                  {Array.from({ length: 60 }, (_, minute) => pad(minute)).map((minute) => (
-                    <button
-                      type="button"
-                      className={minute === selectedMinute ? 'active' : ''}
-                      aria-pressed={minute === selectedMinute}
-                      key={minute}
-                      onClick={() => applyTimePart('minute', minute)}
-                    >
-                      {minute}
-                    </button>
-                  ))}
-                </div>
+                {includeTime && (
+                  <>
+                    <div className="date-time-scroll-column" ref={hourListRef} aria-label="选择小时">
+                      {Array.from({ length: 24 }, (_, hour) => pad(hour)).map((hour) => (
+                        <button
+                          type="button"
+                          className={hour === selectedHour ? 'active' : ''}
+                          aria-pressed={hour === selectedHour}
+                          key={hour}
+                          onClick={() => applyTimePart('hour', hour)}
+                        >
+                          {hour}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="date-time-scroll-column" ref={minuteListRef} aria-label="选择分钟">
+                      {Array.from({ length: 60 }, (_, minute) => pad(minute)).map((minute) => (
+                        <button
+                          type="button"
+                          className={minute === selectedMinute ? 'active' : ''}
+                          aria-pressed={minute === selectedMinute}
+                          key={minute}
+                          onClick={() => applyTimePart('minute', minute)}
+                        >
+                          {minute}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <div className="date-time-popover-actions">

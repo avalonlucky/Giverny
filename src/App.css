@@ -6392,7 +6392,11 @@ input::file-selector-button {
   left: 0;
   z-index: var(--z-popover);
   width: min(340px, calc(100vw - 48px));
-  filter: drop-shadow(0 18px 30px rgba(39, 54, 58, 0.14));
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-popover);
 }
 
 .date-time-popover {
@@ -6451,6 +6455,10 @@ input::file-selector-button {
   grid-template-columns: minmax(190px, 1fr) 42px 42px;
   gap: 6px;
   min-height: 182px;
+}
+
+.date-time-picker-main.date-only {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .date-time-calendar-pane {
@@ -6566,6 +6574,24 @@ input::file-selector-button {
   min-height: 182px;
 }
 
+.month-year-picker-panel {
+  margin-top: 0;
+}
+
+.month-year-picker-panel .date-time-month-grid button {
+  position: relative;
+}
+
+.month-year-picker-panel .date-time-month-grid button i {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+}
+
 .date-time-year-list {
   max-height: 182px;
   overflow-y: auto;
@@ -6575,7 +6601,9 @@ input::file-selector-button {
 }
 
 .date-input-wrap .date-time-year-list button,
-.date-input-wrap .date-time-month-grid button {
+.date-input-wrap .date-time-month-grid button,
+.month-year-picker-panel .date-time-year-list button,
+.month-year-picker-panel .date-time-month-grid button {
   width: 100%;
   min-height: 32px;
   border: 0;
@@ -6587,13 +6615,17 @@ input::file-selector-button {
 }
 
 .date-input-wrap .date-time-year-list button:hover,
-.date-input-wrap .date-time-month-grid button:hover {
+.date-input-wrap .date-time-month-grid button:hover,
+.month-year-picker-panel .date-time-year-list button:hover,
+.month-year-picker-panel .date-time-month-grid button:hover {
   color: var(--color-primary-strong);
   background: var(--color-surface-alt);
 }
 
 .date-input-wrap .date-time-year-list button.active,
-.date-input-wrap .date-time-month-grid button.active {
+.date-input-wrap .date-time-month-grid button.active,
+.month-year-picker-panel .date-time-year-list button.active,
+.month-year-picker-panel .date-time-month-grid button.active {
   color: var(--color-surface-strong);
   background: var(--color-primary);
   font-weight: 800;
@@ -6733,52 +6765,6 @@ input::file-selector-button {
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
-}
-
-.compact-month-selector {
-  padding: 10px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
-  border-radius: 8px;
-  background: #fdfdfb;
-}
-
-.compact-month-header {
-  display: grid;
-  grid-template-columns: 34px 1fr 34px;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.compact-month-header strong {
-  color: #243840;
-  text-align: center;
-  font-size: 15px;
-}
-
-.compact-month-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.compact-month-selector .month-grid button {
-  min-height: 34px;
-  background: #f2f5ef;
-}
-
-.compact-month-selector .month-grid button:hover {
-  border-color: rgba(47, 111, 109, 0.24);
-}
-
-.compact-month-selector .month-grid button.selected {
-  color: #fff;
-  border-color: #2f6f6d;
-  background: #2f6f6d;
-}
-
-.compact-month-selector .month-grid button span {
-  color: inherit;
-  font-size: 13px;
-  font-weight: inherit;
 }
 
 .duration-picker {
@@ -8088,12 +8074,13 @@ textarea:focus-visible {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 286px;
-  padding: 12px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
-  border-radius: 8px;
-  background: #f7f8f4;
-  box-shadow: none;
+  z-index: var(--z-popover);
+  width: min(340px, calc(100vw - 48px));
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-popover);
 }
 
 .month-popover-header {
