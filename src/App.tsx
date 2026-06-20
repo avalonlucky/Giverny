@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlarmClock,
   AlertTriangle,
@@ -141,6 +141,14 @@ function isoDate(offsetDays = 0) {
 function isoDateTime(offsetMinutes = 0) {
   const date = new Date()
   date.setMinutes(date.getMinutes() + offsetMinutes)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function planDateTimeFromMinuteStamp(stamp: number) {
+  const date = new Date(stamp * 60000)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
@@ -772,23 +780,63 @@ function timeEntriesOverlap(
   return currentBounds.start < existingBounds.end && currentBounds.end > existingBounds.start
 }
 
+function findNearestAvailableTimeSlot<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(
+  current: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
+  existingEntries: T[],
+) {
+  const currentBounds = timeEntryBounds(current)
+  if (!currentBounds) {
+    return null
+  }
+  const duration = currentBounds.end - currentBounds.start
+  if (duration <= 0) {
+    return null
+  }
+  const existingBounds = existingEntries
+    .map(timeEntryBounds)
+    .filter((bounds): bounds is { start: number; end: number } => Boolean(bounds))
+    .sort((a, b) => a.start - b.start)
+  const conflictBounds = existingBounds.find((bounds) => currentBounds.start < bounds.end && currentBounds.end > bounds.start)
+  if (!conflictBounds) {
+    return null
+  }
+  const candidates = [
+    { start: conflictBounds.end, end: conflictBounds.end + duration },
+    { start: conflictBounds.start - duration, end: conflictBounds.start },
+  ].filter((candidate) => candidate.start >= 0)
+
+  const availableCandidate = candidates
+    .filter((candidate) => !existingBounds.some((bounds) => candidate.start < bounds.end && candidate.end > bounds.start))
+    .sort((a, b) => Math.abs(a.start - currentBounds.start) - Math.abs(b.start - currentBounds.start))[0]
+
+  if (!availableCandidate) {
+    return null
+  }
+
+  const start = planDateTimeFromMinuteStamp(availableCandidate.start)
+  const end = planDateTimeFromMinuteStamp(availableCandidate.end)
+  if (!start || !end) {
+    return null
+  }
+  return { start, end }
+}
+
 function sortTimeEntriesDesc<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(entries: T[]) {
   return [...entries].sort((a, b) => {
     const aBounds = timeEntryBounds(a)
     const bBounds = timeEntryBounds(b)
-    return (bBounds?.end ?? 0) - (aBounds?.end ?? 0)
+    return (bBounds?.start ?? 0) - (aBounds?.start ?? 0)
   })
 }
 
 function defaultTimeEntryDraft() {
-  const now = new Date()
-  const startHour = Math.min(22, now.getHours())
-  const endHour = Math.min(23, startHour + 1)
+  const start = isoDateTime()
+  const end = addMinutesToPlanDateTime(start, 60)
   return {
-    date: isoDate(),
-    endDate: isoDate(),
-    start: `${pad(startHour)}:00`,
-    end: `${pad(endHour)}:00`,
+    date: datePart(start),
+    endDate: datePart(end),
+    start: start.slice(11, 16),
+    end: end.slice(11, 16),
     note: '',
   }
 }
@@ -1109,6 +1157,7 @@ function PlanDateTimeField({
   activePickerId?: string | null
   onActivePickerChange?: (pickerId: string | null) => void
 }) {
+  const fieldRef = useRef<HTMLLabelElement | null>(null)
   const formatValue = (rawValue: string) => includeTime ? formatPlanDateTime(rawValue) : rawValue.replace(/-/g, '/')
   const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
@@ -1120,13 +1169,13 @@ function PlanDateTimeField({
   const controlledPicker = Boolean(pickerId && onActivePickerChange)
   const isPickerOpen = controlledPicker ? activePickerId === pickerId : localPickerOpen
 
-  const setPickerOpen = (nextOpen: boolean) => {
+  const setPickerOpen = useCallback((nextOpen: boolean) => {
     if (controlledPicker) {
       onActivePickerChange?.(nextOpen ? pickerId ?? null : null)
       return
     }
     setLocalPickerOpen(nextOpen)
-  }
+  }, [controlledPicker, onActivePickerChange, pickerId])
 
   if (value !== syncedValue) {
     setSyncedValue(value)
@@ -1184,14 +1233,23 @@ function PlanDateTimeField({
     if (!isPickerOpen) {
       return
     }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!fieldRef.current?.contains(event.target as Node)) {
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
     const frame = window.requestAnimationFrame(() => {
       if (pickerView === 'calendar') {
         hourListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
         minuteListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
       }
     })
-    return () => window.cancelAnimationFrame(frame)
-  }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear])
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.cancelAnimationFrame(frame)
+    }
+  }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear, setPickerOpen])
 
   const shiftMonth = (offset: number) => {
     const current = localDateFromIsoDate(`${calendarMonth}-01`)
@@ -1249,7 +1307,7 @@ function PlanDateTimeField({
   }
 
   return (
-    <label className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
+    <label ref={fieldRef} className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
       <span className="field-label-row">
         <span>{label}</span>
         {control}
@@ -1287,7 +1345,16 @@ function PlanDateTimeField({
           <CalendarDays size={16} />
         </button>
         {isPickerOpen && (
-          <div className="date-time-popover" role="dialog" aria-label={`${label}选择器`}>
+          <div
+            className="date-time-popover"
+            role="dialog"
+            aria-label={`${label}选择器`}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setPickerOpen(false)
+              }
+            }}
+          >
             {pickerView === 'month' ? (
               <>
                 <div className="date-time-popover-header">
@@ -4818,6 +4885,7 @@ function TaskProgressModal({
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:${mode}:${editEntryId ?? 'new'}:v2`
   const initialProgressDraft = useMemo(
     () => {
+      const currentDefault = defaultTimeEntryDraft()
       const entryDraft = editingEntry
         ? {
             date: editingEntry.date || isoDate(),
@@ -4826,14 +4894,22 @@ function TaskProgressModal({
             end: editingEntry.end,
             note: editingEntry.note ?? '',
           }
-        : defaultTimeEntryDraft()
-      return readDraftCache(progressDraftKey, {
+        : currentDefault
+      const cachedDraft = readDraftCache(progressDraftKey, {
         note: editingEntry?.note ?? '',
-        timeDraft: isWaitingMode ? defaultTimeEntryDraft() : entryDraft,
+        timeDraft: isWaitingMode ? currentDefault : entryDraft,
         timeEntries: (task.timeEntries ?? []) as TimeEntry[],
-        waitingDraft: isWaitingMode ? entryDraft : defaultTimeEntryDraft(),
+        waitingDraft: isWaitingMode ? entryDraft : currentDefault,
         waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
       })
+      if (editingEntry) {
+        return cachedDraft
+      }
+      return {
+        ...cachedDraft,
+        timeDraft: currentDefault,
+        waitingDraft: currentDefault,
+      }
     },
     [editingEntry, isWaitingMode, progressDraftKey, task.timeEntries, task.waitingEntries],
   )
@@ -4874,6 +4950,25 @@ function TaskProgressModal({
   const draftEntryMinutes = minutesForTimeEntry(draftEntry)
   const hasDraftTimeEntry = activeDraft.start.trim() !== '' && activeDraft.end.trim() !== '' && draftEntryMinutes > 0
   const isEditingEntry = Boolean(editEntryId && editingEntry)
+  const comparableEntries = [...draftTimeEntries, ...draftWaitingEntries].filter((entry) => entry.id !== editEntryId)
+  const draftConflict = activeDraft.start.trim() && activeDraft.end.trim() && draftEntryMinutes > 0
+    ? comparableEntries.find((entry) => timeEntriesOverlap(draftEntry, entry))
+    : undefined
+  const suggestedTimeSlot = draftConflict ? findNearestAvailableTimeSlot(draftEntry, comparableEntries) : null
+  const applySuggestedTimeSlot = () => {
+    if (!suggestedTimeSlot) {
+      return
+    }
+    updateActiveDraft((current) => ({
+      ...current,
+      date: datePart(suggestedTimeSlot.start),
+      start: suggestedTimeSlot.start.slice(11, 16),
+      endDate: datePart(suggestedTimeSlot.end),
+      end: suggestedTimeSlot.end.slice(11, 16),
+    }))
+    setTimeEntryError('')
+    setActiveDatePickerId(null)
+  }
 
   useEffect(() => {
     writeDraftCache(progressDraftKey, { note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
@@ -4924,7 +5019,6 @@ function TaskProgressModal({
     try {
       const nextEntry = buildDraftTimeEntry()
       if (nextEntry) {
-        const comparableEntries = (isWaitingMode ? draftWaitingEntries : draftTimeEntries).filter((entry) => entry.id !== editEntryId)
         const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
         if (conflict) {
           setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
@@ -4981,19 +5075,13 @@ function TaskProgressModal({
     }
   }
 
-  const continueFromEndTime = () => {
-    const normalizedEnd = normalizeClockInput(activeDraft.end)
-    if (!activeEndDate || !normalizedEnd) {
-      return
-    }
-    const nextStart = `${activeEndDate}T${normalizedEnd}`
-    const nextEnd = addMinutesToPlanDateTime(nextStart, 60)
+  const swapDraftTimes = () => {
     updateActiveDraft((current) => ({
       ...current,
-      date: datePart(nextStart),
-      start: nextStart.slice(11, 16),
-      endDate: datePart(nextEnd),
-      end: nextEnd.slice(11, 16),
+      date: current.endDate || current.date,
+      start: current.end,
+      endDate: current.date,
+      end: current.start,
     }))
     setActiveDatePickerId(null)
     setTimeEntryError('')
@@ -5012,10 +5100,10 @@ function TaskProgressModal({
       <button
         type="button"
         className="progress-lite-time-swap"
-        aria-label="用结束时间续接下一段"
-        title="用结束时间续接下一段"
-        onClick={continueFromEndTime}
-        disabled={!activeEndDate || !normalizeClockInput(activeDraft.end)}
+        aria-label="交换开始时间和结束时间"
+        title="交换开始时间和结束时间"
+        onClick={swapDraftTimes}
+        disabled={!activeDraft.start.trim() || !activeDraft.end.trim()}
       >
         <ArrowRightLeft size={15} />
       </button>
@@ -5032,7 +5120,17 @@ function TaskProgressModal({
           ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
           : '结束时间需晚于开始时间'}
       </p>
-      {timeEntryError && <p className="progress-lite-entry-error" role="alert">{timeEntryError}</p>}
+      {(timeEntryError || draftConflict) && (
+        <p className="progress-lite-entry-error" role="alert">
+          <span>{timeEntryError || (draftConflict ? `这个时间段和 ${formatEntryDateTimeRange(task, draftConflict)} 已有记录重叠，请改到前后相邻的空档。` : '')}</span>
+          {suggestedTimeSlot && (
+            <button type="button" onClick={applySuggestedTimeSlot}>
+              <Sparkles size={13} />
+              切换到 {formatPlanDateTime(suggestedTimeSlot.start)}
+            </button>
+          )}
+        </p>
+      )}
     </section>
   )
 
@@ -5154,7 +5252,7 @@ function TaskProgressModal({
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || !hasDraftTimeEntry} onClick={() => void saveProgress()}>
+        <button className="primary-button" disabled={isSaving || !hasDraftTimeEntry || Boolean(draftConflict)} onClick={() => void saveProgress()}>
           {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
         </button>
       </footer>
