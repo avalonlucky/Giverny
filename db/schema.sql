@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   estimated_delivery_date TEXT,
   actual_delivery_date TEXT,
   settlement_month TEXT,
+  is_supplemental INTEGER NOT NULL DEFAULT 0,
   estimated_hours REAL NOT NULL DEFAULT 0,
   actual_hours REAL NOT NULL DEFAULT 0,
   hourly_rate REAL NOT NULL DEFAULT 300,
@@ -26,9 +27,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   progress INTEGER NOT NULL DEFAULT 0,
   suspend_reason TEXT,
   terminate_reason TEXT,
+  supplemental_note TEXT,
   acceptance_note TEXT,
   feedback_rating TEXT,
   feedback_tags_json TEXT,
+  feedback_note TEXT,
   time_entries_json TEXT,
   waiting_entries_json TEXT,
   is_billable INTEGER NOT NULL DEFAULT 1,
@@ -57,6 +60,8 @@ CREATE TABLE IF NOT EXISTS attachments (
   id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL,
   update_id TEXT,
+  entry_id TEXT,
+  attachment_scope TEXT NOT NULL DEFAULT 'progress',
   file_name TEXT NOT NULL,
   file_type TEXT,
   mime_type TEXT,
@@ -68,6 +73,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   visible_to_client INTEGER NOT NULL DEFAULT 1,
   file_tag TEXT,
   uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT,
   FOREIGN KEY (task_id) REFERENCES tasks(id),
   FOREIGN KEY (update_id) REFERENCES task_updates(id)
 );
@@ -165,6 +171,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_settlement_month ON tasks(settlement_month)
 CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at ON tasks(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_id ON task_updates(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(task_id, entry_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_scope_uploaded_at ON attachments(attachment_scope, uploaded_at);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_task_id ON attachment_analyses(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_status ON attachment_analyses(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_insight_diagnoses_period ON insight_diagnoses(period_type, created_at);

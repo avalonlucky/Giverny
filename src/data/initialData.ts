@@ -210,6 +210,7 @@ export const initialFileAssets: FileAsset[] = [
   {
     id: 5,
     taskId: 7,
+    scope: 'acceptance',
     name: '端午海报终稿.png',
     task: '端午节品牌海报',
     type: 'PNG',
@@ -221,6 +222,7 @@ export const initialFileAssets: FileAsset[] = [
   {
     id: 1,
     taskId: 3,
+    scope: 'acceptance',
     name: '邀请函长图终稿.png',
     task: '金博会邀请函长图设计',
     type: 'PNG',
@@ -232,6 +234,7 @@ export const initialFileAssets: FileAsset[] = [
   {
     id: 2,
     taskId: 3,
+    scope: 'acceptance',
     name: '邀请函源文件.psd',
     task: '金博会邀请函长图设计',
     type: 'PSD',
@@ -243,6 +246,7 @@ export const initialFileAssets: FileAsset[] = [
   {
     id: 3,
     taskId: 2,
+    scope: 'acceptance',
     name: '三折页印刷文件.ai',
     task: '公司介绍三折页二次更新',
     type: 'AI',
@@ -254,6 +258,7 @@ export const initialFileAssets: FileAsset[] = [
   {
     id: 4,
     taskId: 5,
+    scope: 'progress',
     name: '二维码物料预览.pdf',
     task: 'KT 版销售二维码更新',
     type: 'PDF',
@@ -263,4 +268,3 @@ export const initialFileAssets: FileAsset[] = [
     visible: false,
   },
 ]
-

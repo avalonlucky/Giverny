@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlarmClock,
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   FileArchive,
   FileImage,
   FileText,
+  Folder,
   FolderKanban,
   GripVertical,
   KeyRound,
@@ -69,7 +70,9 @@ import {
   type AiModelConfig,
   type AiModelEndpointConfig,
   type AiModelRouteKey,
+  type AttachmentNameSuggestion,
   type AuthRole,
+  type DailyKnowledgeSuggestion,
   type HourEstimateSuggestion,
   type ReportRecord,
   type StoredAuth,
@@ -79,6 +82,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
 const navItems = [
@@ -102,6 +106,276 @@ const viewRoutes: Record<AppView, string> = {
 }
 
 const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
+
+type DailyKnowledgeItem = {
+  category: string
+  source: string
+  title: string
+  teaser: string
+  body: string[]
+}
+
+const dailyKnowledgePool: DailyKnowledgeItem[] = [
+  {
+    category: '人物・设计师',
+    source: '原研哉',
+    title: '把「空」做成一种设计',
+    teaser: '留白不是没有内容，而是给观看者留下参与和想象的位置。',
+    body: [
+      '原研哉把 **Emptiness（空）** 理解为一种容器：它并不急着替用户说完所有话，而是让不同的人把自己的经验放进去。',
+      '无印良品常用克制的图像、材料和文字建立这种空间。它不宣称“这样最好”，而是提供一种“这样就好”的平静感。',
+      '在日常设计里，留白并不等于浪费版面。**真正有效的留白会帮助信息分级**，让标题、正文和操作各自拥有清晰的位置。',
+    ],
+  },
+  {
+    category: '视觉科学',
+    source: '视觉科学',
+    title: '为什么人眼对绿色格外敏感？',
+    teaser: '黄绿色附近正处于人眼明视觉灵敏度的高峰区域。',
+    body: [
+      '人眼在明亮环境中的亮度感知峰值大约位于 **555nm**，接近黄绿色。因此在相同物理亮度下，绿色往往更容易被看见。',
+      '医院手术服常使用青绿色，还有一个原因：长时间注视红色后容易产生互补色残像，绿色可以帮助缓解视觉疲劳。',
+      '但高可见度不意味着应该大面积使用高饱和绿色。界面中的绿色更适合承担 **进度、确认和可操作提示**，背景则应保持克制。',
+    ],
+  },
+  {
+    category: '科普',
+    source: '比例之美',
+    title: '黄金比例并不是审美的法律',
+    teaser: '1.618 是一种好用的比例工具，但并不会自动让作品变得高级。',
+    body: [
+      '黄金比例常被用于版面、网格和图形结构，因为它能形成一种 **不完全对称、又保持秩序** 的关系。',
+      '许多著名建筑和绘画被事后套上黄金比例，但测量方式稍有变化，结论往往也会变化。',
+      '设计中真正重要的仍是 **内容、层级和观看距离**。比例能辅助判断，却不能替代设计师对具体场景的观察。',
+    ],
+  },
+  {
+    category: '心理学',
+    source: '认知偏差',
+    title: '为什么高手常常更谦逊？',
+    teaser: '知道得越多，越能看见自己尚未抵达的边界。',
+    body: [
+      '心理学中的 **达克效应** 提醒我们：能力尚不足时，人往往也缺少判断自身不足的参照，因此更容易高估自己。',
+      '真正熟练的人见过更多路径、问题和失败案例，视野里反而会出现更多未知，所以判断会更谨慎。',
+      '谦逊不是故作姿态，而是对复杂度有了更准确的感知。**先承认不知道，才有空间继续学习。**',
+    ],
+  },
+  {
+    category: '每天一本好书',
+    source: '尤瓦尔・赫拉利',
+    title: '小麦可能驯化了人类',
+    teaser: '农业让粮食更多，也让许多人被固定在更漫长的劳动里。',
+    body: [
+      '《人类简史》提出了一个反直觉的观察：人类看似驯化了小麦，实际上却为了照顾小麦而 **定居、除草、劳作并不断增加人口**。',
+      '从物种扩张看，农业非常成功；从单个人的日常幸福看，它却可能带来了更单调、更沉重的劳动。',
+      '这个视角提醒我们，**效率和进步并不总是同义词**。判断一件事时，值得同时看系统收益与个体感受。',
+    ],
+  },
+  {
+    category: '历史・冷知识',
+    source: '时间的褶皱',
+    title: '牛津大学比阿兹特克帝国更早',
+    teaser: '当牛津已授课两百多年，阿兹特克的都城才刚刚建立。',
+    body: [
+      '牛津大学约在 **1096 年** 便开始授课，而阿兹特克帝国的首都特诺奇蒂特兰大约在 **1325 年** 才建立。',
+      '这类时间错位会打破我们对“古老”的直觉：同一段历史里，不同地区的文明进程并不总在同步发生。',
+      '历史的魅力正在于这些褶皱。它提醒我们，**熟悉的时间线其实远比教科书里的直线复杂**。',
+    ],
+  },
+  {
+    category: '神话・哲学',
+    source: '阿尔贝・加缪',
+    title: '西西弗斯为什么可以幸福？',
+    teaser: '意义不只在抵达山顶，也在清醒地走完每一次下山路。',
+    body: [
+      '在希腊神话里，西西弗斯被罚不断把巨石推上山顶，石头又会立刻滚回山脚。这象征着 **永远无法完成的劳动**。',
+      '加缪却在《西西弗斯神话》中重新理解了他：当西西弗斯走下山去时，他清醒地知道自己的命运，也拥有了自己的意识。',
+      '重复并不必然让人失去意义。重要的是在重复之中，仍能保留 **判断、节奏和一点属于自己的从容**。',
+    ],
+  },
+  {
+    category: '自然・植物',
+    source: '草木观察',
+    title: '红茶绿茶原来是一种叶子',
+    teaser: '它们的差别不在树种，而在采摘后被氧化到了哪一步。',
+    body: [
+      '红茶、绿茶、乌龙茶都来自茶树。它们看起来截然不同，关键差别其实来自制作中对氧化过程的控制。',
+      '绿茶在采下后很快杀青，保留清爽的草本气味；红茶充分氧化，颜色变深、口感也更醇厚；乌龙则停在中间。',
+      '同一片叶子因为停在不同阶段，呈现出完全不同的性格。很多变化并不是换了材料，而是改变了过程。',
+    ],
+  },
+  {
+    category: '音乐・工艺',
+    source: '克雷莫纳',
+    title: '小提琴为什么会有天价？',
+    teaser: '材料、气候、手艺与三百年的时间，共同构成了一把琴的声音。',
+    body: [
+      '斯特拉迪瓦里和瓜奈里的名琴出自十七至十八世纪的意大利克雷莫纳，许多至今仍被演奏家和收藏家珍视。',
+      '关于独特音色的来源，研究者提出过木材密度、涂层化学和小冰期气候等解释，但没有单一答案能解释全部。',
+      '极致作品往往不是某个秘诀的结果，而是材料、时代与人的长期协作。这种不可复制性本身就是工艺的价值。',
+    ],
+  },
+  {
+    category: '咖啡冷知识',
+    source: '风味起源',
+    title: '美式咖啡为什么叫美式？',
+    teaser: '它据说来自美军把浓缩咖啡兑入热水的习惯。',
+    body: [
+      'Espresso 不是一种咖啡豆，而是一种高压萃取方式。细研磨咖啡粉在短时间内被热水穿过，得到浓缩而强烈的一小杯。',
+      '二战时期，驻意大利的美军常觉得浓缩太浓，便加入热水稀释。意大利人把这种喝法称作 Americano。',
+      '一杯饮品的名称，也会留下迁徙、战争与日常习惯的痕迹。食物和饮料往往是历史最轻盈的入口。',
+    ],
+  },
+  {
+    category: '世界未解之谜',
+    source: '纳斯卡线条',
+    title: '谁画下了巨大的纳斯卡线？',
+    teaser: '荒漠中的蜂鸟和猴子图案，只有从高处才能看清全貌。',
+    body: [
+      '秘鲁南部荒漠保留着数百幅巨型地画，创作者移开表层深色砾石，让浅色地面构成蜂鸟、猴子和蜘蛛等图案。',
+      '这些图案尺度很大，从地面难以辨识全貌，因此它们的用途至今仍有争议：可能和祭祀、水源或天文观测有关。',
+      '人类常会为暂时看不见结果的事投入极大耐心。那些留给远方、未来或天空的作品，也是一种创造力。',
+    ],
+  },
+  {
+    category: '乐器科普',
+    source: '声音原理',
+    title: '钢琴为什么也算打击乐？',
+    teaser: '琴键按下去的瞬间，真正发声的是小槌敲击琴弦。',
+    body: [
+      '钢琴常被放在键盘乐器里讨论，但从发声机制看，它也带着 **打击乐器** 的性格：手指按下琴键，小槌会击打琴弦。',
+      '这也是钢琴能同时拥有清晰颗粒感和悠长共鸣的原因。它不是单纯拨弦，也不是持续拉弦，而是一次精确的敲击。',
+      '有些事物的分类并不只有一个答案。换一个观察角度，熟悉的东西会露出另一套结构。',
+    ],
+  },
+  {
+    category: '冷笑话',
+    source: '乙方词典',
+    title: '“马上确认”到底有多马上？',
+    teaser: '它可能是五分钟，也可能是五天，取决于对方突然忙不忙。',
+    body: [
+      '乙方词典里，“马上确认”是一种 **弹性时间单位**：短则一杯咖啡，长则跨过一个周末。',
+      '“就改一个小地方”也类似。它听起来像局部修补，实际常常会牵动标题、留白、比例和导出规格。',
+      '冷笑话的用处不是抱怨，而是提醒自己把等待记录下来。沉默不计费，但它确实占用了一段真实时间。',
+    ],
+  },
+  {
+    category: '名人介绍',
+    source: '居里夫人',
+    title: '居里夫人为什么拒绝专利？',
+    teaser: '她把镭的提炼方法公开，让更多研究者能继续使用。',
+    body: [
+      '居里夫人和皮埃尔・居里发现镭之后，没有为提炼方法申请专利。他们认为科学成果应当 **服务公共研究**。',
+      '这个选择让他们失去了可能的商业收入，却让实验室和医院更容易接触相关技术，推动了后续研究。',
+      '一个人的价值判断，常常藏在“可以拿走但没有拿走”的地方。科学史里也有很多这样的安静决定。',
+    ],
+  },
+  {
+    category: '名画故事',
+    source: '梵高',
+    title: '《星月夜》不是安静的夜晚',
+    teaser: '旋涡般的天空，来自疗养院窗口外的观察与想象。',
+    body: [
+      '梵高在圣雷米疗养院期间画下《星月夜》。画面里的村庄并非完全来自实景，而是 **观察、记忆和想象** 的混合。',
+      '天空中的旋涡让夜晚像在流动，柏树则像火焰一样向上伸展。它不是宁静的风景，更像内心能量的外化。',
+      '名画不一定只记录眼前所见。有时它真正保存的是一个人看世界时的强度。',
+    ],
+  },
+  {
+    category: '奇怪小知识',
+    source: '生活物理',
+    title: '纸为什么很难对折八次？',
+    teaser: '厚度会指数级增长，手里的纸很快就不再像纸。',
+    body: [
+      '一张纸每对折一次，厚度都会翻倍。看似轻薄的纸，在几次折叠后会迅速变成 **越来越硬的厚块**。',
+      '普通 A4 纸通常很难手工对折到八次以上，不只是因为面积变小，也因为折痕处需要克服更大的材料阻力。',
+      '很多限制不是来自第一步，而是来自不断累积后的结构变化。小问题叠起来，常常会变成完全不同的问题。',
+    ],
+  },
+  {
+    category: '电影冷知识',
+    source: '片场工具',
+    title: '场记板不是只用来喊开始',
+    teaser: '那一下清脆的合板声，是画面和声音同步的重要标记。',
+    body: [
+      '电影拍摄时，画面和声音常由不同设备记录。场记板合上的一瞬间，会留下清楚的视觉动作和声音峰值。',
+      '后期剪辑时，剪辑师可以通过这两个信号对齐素材。那声“啪”其实是 **同步画面与声音** 的技术锚点。',
+      '一些看起来很仪式化的小动作，背后往往是为了让复杂流程更稳定。',
+    ],
+  },
+  {
+    category: '小知识',
+    source: '日用品来历',
+    title: '便利贴来自一次失败胶水',
+    teaser: '黏不牢的胶，后来变成了可以反复撕贴的工具。',
+    body: [
+      '3M 研究员曾做出一种黏性不强、却能反复贴上的胶。它一开始不像成功产品，更像一次 **不够完美的实验**。',
+      '后来有人想到把它用于书签和便条，于是便利贴出现了。失败特性没有被消灭，而是换了一个合适场景。',
+      '创新有时不是把缺点修掉，而是找到一个地方，让缺点变成刚刚好的优点。',
+    ],
+  },
+  {
+    category: '未解之谜',
+    source: '深海声音',
+    title: '海底传来的“Bloop”是什么？',
+    teaser: '它曾被误认为神秘生物，后来被解释为冰裂声。',
+    body: [
+      '1997 年，美国海洋探测设备记录到一个极低频、传播距离很远的声音，后来被称为 Bloop。',
+      '它一度激发许多猜测：有人想象它来自未知巨型生物。后续研究更倾向认为，它是 **冰山破裂或摩擦** 产生的声音。',
+      '未解之谜吸引人的地方，不只是答案神秘，也在于它让我们意识到世界还有很多尺度超出日常经验。',
+    ],
+  },
+]
+
+const dailyKnowledgeHistoryKey = 'giverny-daily-knowledge-history-v1'
+const dailyKnowledgeQueueSize = 10
+
+function readDailyKnowledgeHistory() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeHistoryKey) ?? '[]') as unknown
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(-30) : []
+  } catch {
+    return []
+  }
+}
+
+function rememberDailyKnowledgeTitle(title: string) {
+  const history = readDailyKnowledgeHistory().filter((item) => item !== title)
+  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-30)))
+}
+
+function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
+  const excluded = new Set(Array.isArray(excludedTitles) ? excludedTitles : [excludedTitles].filter(Boolean))
+  const candidates = dailyKnowledgePool.filter((item) => !excluded.has(item.title))
+  const pool = candidates.length > 0 ? candidates : dailyKnowledgePool
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+function fallbackDailyKnowledgeBatch(count: number, excludedTitles: string[] = []) {
+  const items: DailyKnowledgeItem[] = []
+  const excluded = new Set(excludedTitles)
+  while (items.length < count && excluded.size < dailyKnowledgePool.length) {
+    const next = fallbackDailyKnowledge([...excluded])
+    if (excluded.has(next.title)) {
+      break
+    }
+    items.push(next)
+    excluded.add(next.title)
+  }
+  return items
+}
+
+function mergeDailyKnowledgeQueue(items: DailyKnowledgeItem[], excludedTitles: string[] = []) {
+  const excluded = new Set(excludedTitles)
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (!item.title || excluded.has(item.title) || seen.has(item.title)) {
+      return false
+    }
+    seen.add(item.title)
+    return true
+  })
+}
 
 function viewFromPath(pathname: string): AppView {
   if (pathname === '/updates') {
@@ -405,6 +679,73 @@ function validateUploadFile(file: File) {
   return false
 }
 
+type PendingProgressAttachment = {
+  id: string
+  file: File
+  name: string
+  originalName: string
+  aiSuggestion?: AttachmentNameSuggestion
+  aiLoading?: boolean
+  aiError?: string
+}
+
+const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
+
+function splitFileName(value: string) {
+  const trimmed = value.trim()
+  const dotIndex = trimmed.lastIndexOf('.')
+  if (dotIndex <= 0 || dotIndex === trimmed.length - 1) {
+    return { base: trimmed, extension: '' }
+  }
+  return { base: trimmed.slice(0, dotIndex), extension: trimmed.slice(dotIndex) }
+}
+
+function sanitizeAttachmentName(value: string, fallbackName: string) {
+  const fallback = splitFileName(fallbackName)
+  const candidate = splitFileName(value)
+  const base = candidate.base
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[.\s-]+$/g, '')
+    .trim()
+    .slice(0, 90)
+  const extension = fallback.extension || candidate.extension
+  return `${base || fallback.base || '过程附件'}${extension}`
+}
+
+function renamedFile(file: File, name: string) {
+  const normalizedName = sanitizeAttachmentName(name, file.name)
+  return normalizedName === file.name
+    ? file
+    : new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
+}
+
+function pastedImageName(file: File) {
+  const now = new Date()
+  const extension = splitFileName(file.name).extension || (file.type === 'image/jpeg' ? '.jpg' : '.png')
+  return `粘贴截图_${isoDate()}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}${extension}`
+}
+
+function looksLikeUntidyFileName(value: string) {
+  const base = splitFileName(value).base.toLowerCase()
+  return /^(img|dsc|pxl|screenshot|screen shot|截屏|截图|微信图片|ishot)[-_ ]?\d*/i.test(base)
+    || /^\d{8,}$/.test(base.replace(/\D/g, ''))
+    || /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(base)
+}
+
+async function imageFileBase64(file: File) {
+  if (!file.type.startsWith('image/') || file.size > 8 * 1024 * 1024) {
+    return ''
+  }
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('图片读取失败'))
+    reader.readAsDataURL(file)
+  })
+  return dataUrl.slice(dataUrl.indexOf(',') + 1)
+}
+
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
 
 type DonutItem = { label: string; value: number; color: string }
@@ -417,7 +758,7 @@ type TaskContextInsight = {
 }
 
 type InsightPeriod = InsightPeriodType
-type InsightTab = 'period' | 'deliverable' | 'capability' | 'advisor'
+type InsightTab = 'period' | 'capability' | 'advisor'
 
 const insightPeriods: { value: InsightPeriod; label: string }[] = [
   { value: 'day', label: '日' },
@@ -430,7 +771,6 @@ const insightPeriods: { value: InsightPeriod; label: string }[] = [
 
 const insightTabs: { value: InsightTab; label: string; icon: ReactNode }[] = [
   { value: 'period', label: '周期复盘', icon: <BarChart3 size={16} /> },
-  { value: 'deliverable', label: '交付件理解', icon: <Archive size={16} /> },
   { value: 'capability', label: '异常诊断', icon: <AlertTriangle size={16} /> },
   { value: 'advisor', label: '数据结论', icon: <Sparkles size={16} /> },
 ]
@@ -505,7 +845,7 @@ function taskSettlementMonth(task: Task) {
 }
 
 function isSupplementalTask(task: Task) {
-  return Boolean(task.settlementMonth) && task.settlementMonth !== monthPart(task.date)
+  return Boolean(task.isSupplemental) || (Boolean(task.settlementMonth) && task.settlementMonth !== monthPart(task.date))
 }
 
 function dateFromValue(value: string | undefined) {
@@ -659,9 +999,6 @@ function isVisualReviewReady(file: FileAsset) {
 }
 
 const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
-
-const durationMinuteOptions = Array.from({ length: 6 }, (_, index) => index * 10)
-const durationHourOptions = Array.from({ length: 11 }, (_, index) => index)
 
 function formatDuration(minutes: number) {
   const safeMinutes = Math.max(0, minutes)
@@ -1067,65 +1404,6 @@ function MonthYearPickerPanel({
   )
 }
 
-function SettlementMonthField({
-  label,
-  value,
-  onChange,
-  saved = false,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  saved?: boolean
-}) {
-  const [isOpen, setIsOpen] = useState(false)
-  const selectedYear = Number(value.slice(0, 4)) || new Date().getFullYear()
-  const selectedMonth = Number(value.slice(5, 7))
-  const [displayYear, setDisplayYear] = useState(selectedYear)
-
-  return (
-    <label
-      className={`field settlement-month-field ${saved ? 'field-saved' : ''}`}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setIsOpen(false)
-        }
-      }}
-    >
-      <span>{label}</span>
-      <button
-        type="button"
-        className={`month-field-trigger ${isOpen ? 'active' : ''}`}
-        aria-label={`选择${label}`}
-        aria-expanded={isOpen}
-        onClick={() => {
-          if (!isOpen) {
-            setDisplayYear(selectedYear)
-          }
-          setIsOpen((open) => !open)
-        }}
-      >
-        <span>{monthLabelOf(value)}</span>
-        <CalendarDays size={16} />
-      </button>
-      {isOpen && (
-        <div className="settlement-month-popover">
-          <MonthYearPickerPanel
-            year={displayYear}
-            month={displayYear === selectedYear ? selectedMonth : undefined}
-            yearOptions={Array.from({ length: 11 }, (_, index) => displayYear - 5 + index)}
-            onYearChange={setDisplayYear}
-            onMonthChange={(month) => {
-              onChange(`${displayYear}-${pad(month)}`)
-              setIsOpen(false)
-            }}
-          />
-        </div>
-      )}
-    </label>
-  )
-}
-
 function PlanDateTimeField({
   label,
   value,
@@ -1479,101 +1757,6 @@ function ScheduleAnchorSwitch({
   )
 }
 
-function DurationPicker({
-  valueMinutes,
-  onChange,
-}: {
-  valueMinutes: number
-  onChange: (valueMinutes: number) => void
-}) {
-  const [isOpen, setIsOpen] = useState(false)
-  const selectedHours = Math.floor(valueMinutes / 60)
-  const selectedMinutes = valueMinutes % 60
-  const manualHours = Number.isInteger(valueMinutes / 60) ? String(valueMinutes / 60) : (valueMinutes / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
-
-  const choose = (hours: number, minutes: number) => {
-    onChange(hours * 60 + minutes)
-  }
-
-  const setManualHours = (value: string) => {
-    const hours = Number.parseFloat(value)
-    if (!Number.isFinite(hours) || hours < 0) {
-      return
-    }
-    onChange(Math.round(hours * 60))
-  }
-
-  return (
-    <div
-      className="duration-picker"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setIsOpen(false)
-        }
-      }}
-    >
-      <button
-        type="button"
-        className={`duration-trigger ${isOpen ? 'active' : ''}`}
-        aria-label="选择预估工时"
-        aria-expanded={isOpen}
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span>{formatDuration(valueMinutes)}</span>
-        <ChevronDown size={16} />
-      </button>
-      {isOpen && (
-        <div className="duration-menu" aria-label="预估工时选择器">
-          <div className="duration-column">
-            <strong>h</strong>
-            <div className="duration-options">
-              {durationHourOptions.map((hour) => (
-                <button
-                  type="button"
-                  className={hour === selectedHours ? 'selected' : ''}
-                  key={hour}
-                  onClick={() => choose(hour, selectedMinutes)}
-                >
-                  {hour} h
-                </button>
-              ))}
-            </div>
-            <label className="duration-manual">
-              <span>手动输入 h</span>
-              <input
-                type="number"
-                min="0"
-                step="0.1"
-                value={manualHours}
-                onChange={(event) => setManualHours(event.target.value)}
-                onFocus={(event) => event.currentTarget.select()}
-              />
-            </label>
-          </div>
-          <div className="duration-column">
-            <strong>min</strong>
-            <div className="duration-options">
-              {durationMinuteOptions.map((minutes) => (
-                <button
-                  type="button"
-                  className={minutes === selectedMinutes ? 'selected' : ''}
-                  key={minutes}
-                  onClick={() => {
-                    choose(selectedHours, minutes)
-                    setIsOpen(false)
-                  }}
-                >
-                  {minutes} min
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function NewTaskDesignTypeSelector({
   groups,
   value,
@@ -1643,7 +1826,7 @@ const taskFieldLabels: Record<string, string> = {
   date: '预计开始时间',
   estimatedDate: '预计交付时间',
   requester: '需求人',
-  contact: '需求人',
+  contact: '对接人',
   reviewer: '验收人',
   requirement: '需求描述',
 }
@@ -1935,13 +2118,14 @@ function snapProgress(value: number) {
 }
 
 type ConfirmDialogState = {
-  eyebrow: string
+  eyebrow?: string
   title: string
   body: string
   confirmText: string
   cancelText?: string
   tone?: 'danger' | 'default'
   details?: string[]
+  hideIcon?: boolean
   onConfirm: () => void | Promise<void>
 }
 
@@ -1956,6 +2140,9 @@ type ToastState = {
   id: number
   message: string
   tone: ToastTone
+  actionLabel?: string
+  onAction?: () => void | Promise<void>
+  durationMs?: number
 }
 
 const inferToastTone = (message: string): ToastTone => {
@@ -1978,6 +2165,197 @@ function ToastIcon({ tone }: { tone: ToastTone }) {
   return <CheckCircle2 size={17} />
 }
 
+type CommandPaletteAction = {
+  id: string
+  group: string
+  label: string
+  detail?: string
+  shortcut?: string
+  keywords?: string
+  disabled?: boolean
+  run: () => void
+}
+
+type ShortcutHelpGroup = {
+  label: string
+  items: Array<{ keys: string; action: string }>
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+}
+
+function CommandPalette({
+  actions,
+  initialQuery,
+  onClose,
+}: {
+  actions: CommandPaletteAction[]
+  initialQuery: string
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState(initialQuery)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredActions = useMemo(
+    () =>
+      actions.filter((action) => {
+        if (!normalizedQuery) {
+          return true
+        }
+        return [action.label, action.detail, action.group, action.keywords]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedQuery)
+      }),
+    [actions, normalizedQuery],
+  )
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const runAction = (action: CommandPaletteAction | undefined) => {
+    if (!action || action.disabled) {
+      return
+    }
+    onClose()
+    action.run()
+  }
+
+  const groupedActions = filteredActions.reduce<Array<{ label: string; actions: CommandPaletteAction[] }>>((groups, action) => {
+    const existing = groups.find((group) => group.label === action.group)
+    if (existing) {
+      existing.actions.push(action)
+    } else {
+      groups.push({ label: action.group, actions: [action] })
+    }
+    return groups
+  }, [])
+
+  return (
+    <div className="command-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section
+        className="command-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="命令面板"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onClose()
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setActiveIndex((current) => Math.min(current + 1, Math.max(filteredActions.length - 1, 0)))
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setActiveIndex((current) => Math.max(current - 1, 0))
+          } else if (event.key === 'Enter') {
+            event.preventDefault()
+            runAction(filteredActions[activeIndex])
+          }
+        }}
+      >
+        <label className="command-search">
+          <Search size={18} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setActiveIndex(0)
+            }}
+            placeholder="搜索任务、页面或操作…"
+          />
+          <kbd>Esc</kbd>
+        </label>
+        <div className="command-results" role="listbox" aria-label="可用命令">
+          {groupedActions.map((group) => (
+            <div className="command-group" key={group.label}>
+              <p>{group.label}</p>
+              {group.actions.map((action) => {
+                const flatIndex = filteredActions.indexOf(action)
+                return (
+                  <button
+                    type="button"
+                    className={`command-item ${flatIndex === activeIndex ? 'active' : ''}`}
+                    key={action.id}
+                    disabled={action.disabled}
+                    onMouseMove={() => setActiveIndex(flatIndex)}
+                    onClick={() => runAction(action)}
+                  >
+                    <span>
+                      <strong>{action.label}</strong>
+                      {action.detail && <small>{action.detail}</small>}
+                    </span>
+                    {action.shortcut && <kbd>{action.shortcut}</kbd>}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+          {filteredActions.length === 0 && (
+            <div className="command-empty">
+              <Search size={18} />
+              <span>没有匹配的任务或操作</span>
+            </div>
+          )}
+        </div>
+        <footer className="command-footer">
+          <span><kbd>↑↓</kbd> 选择</span>
+          <span><kbd>Enter</kbd> 执行</span>
+          <span><kbd>?</kbd> 快捷键</span>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+function ShortcutHelpModal({ groups, onClose }: { groups: ShortcutHelpGroup[]; onClose: () => void }) {
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.key === '?') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [onClose])
+
+  return (
+    <div className="command-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="shortcut-help" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title">
+        <header>
+          <div>
+            <p className="eyebrow">Giverny 快捷操作</p>
+            <h2 id="shortcut-help-title">键盘快捷键</h2>
+          </div>
+          <button type="button" className="shortcut-close" aria-label="关闭快捷键列表" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="shortcut-groups">
+          {groups.map((group) => (
+            <section key={group.label}>
+              <h3>{group.label}</h3>
+              {group.items.map((item) => (
+                <div className="shortcut-row" key={`${group.label}-${item.keys}`}>
+                  <span>{item.action}</span>
+                  <kbd>{item.keys}</kbd>
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
+        <footer>在输入框和编辑区域内，单键快捷键会自动停用。</footer>
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
   const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
@@ -1990,6 +2368,7 @@ function App() {
   const [isLoaded, setIsLoaded] = useState(false)
   const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
   const [taskItems, setTaskItems] = useState<Task[]>([])
+  const taskItemsRef = useRef<Task[]>([])
   const [updateItems, setUpdateItems] = useState<TaskUpdate[]>([])
   const [fileItems, setFileItems] = useState<FileAsset[]>([])
   const [attachmentAnalyses, setAttachmentAnalyses] = useState<AttachmentAnalysis[]>([])
@@ -2007,6 +2386,17 @@ function App() {
   const [acceptanceModalTaskId, setAcceptanceModalTaskId] = useState(0)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('')
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
+  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge())
+  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() =>
+    fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize),
+  )
+  const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
+  const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
+  const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
@@ -2026,6 +2416,12 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<'连接中' | '已接入 D1/R2' | '后端异常'>('连接中')
   const [taskQuery, setTaskQuery] = useState('')
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
+  const navigationChordRef = useRef<number | null>(null)
+  const dailyKnowledgeRequestedRef = useRef(false)
+  const dailyKnowledgeRef = useRef(dailyKnowledge)
+  const dailyKnowledgeQueueRef = useRef(dailyKnowledgeQueue)
+  const dailyKnowledgePrefetchRef = useRef(false)
+  const isAdmin = role === 'admin' && Boolean(auth)
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
   const taskMonthValues = useMemo(
     () => new Set(taskItems.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value))),
@@ -2061,16 +2457,134 @@ function App() {
   const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
 
-  const notify = (message: string, tone: ToastTone = inferToastTone(message)) => {
+  const notify = (
+    message: string,
+    tone: ToastTone = inferToastTone(message),
+    options: Pick<ToastState, 'actionLabel' | 'onAction' | 'durationMs'> = {},
+  ) => {
     const id = Date.now() + Math.random()
-    const nextToast: ToastState = { id, message, tone }
-    const duration = tone === 'error' ? 4200 : 2400
+    const nextToast: ToastState = { id, message, tone, ...options }
+    const duration = options.durationMs ?? (tone === 'error' ? 4200 : 2400)
     setToastQueue((current) => [...current, nextToast].slice(-3))
     const timer = window.setTimeout(() => {
       setToastQueue((current) => current.filter((item) => item !== nextToast))
       toastTimersRef.current = toastTimersRef.current.filter((value) => value !== timer)
     }, duration)
     toastTimersRef.current = [...toastTimersRef.current, timer]
+  }
+
+  useEffect(() => {
+    taskItemsRef.current = taskItems
+  }, [taskItems])
+
+  useEffect(() => {
+    dailyKnowledgeRef.current = dailyKnowledge
+  }, [dailyKnowledge])
+
+  useEffect(() => {
+    dailyKnowledgeQueueRef.current = dailyKnowledgeQueue
+  }, [dailyKnowledgeQueue])
+
+  const seedDailyKnowledgeQueue = useCallback((baseQueue: DailyKnowledgeItem[] = dailyKnowledgeQueueRef.current) => {
+    const currentTitle = dailyKnowledgeRef.current.title
+    const merged = mergeDailyKnowledgeQueue(baseQueue, [currentTitle])
+    const missingCount = dailyKnowledgeQueueSize - merged.length
+    const filled = missingCount > 0
+      ? mergeDailyKnowledgeQueue(
+        [
+          ...merged,
+          ...fallbackDailyKnowledgeBatch(missingCount, [currentTitle, ...merged.map((item) => item.title)]),
+        ],
+        [currentTitle],
+      )
+      : merged
+    const nextQueue = filled.slice(0, dailyKnowledgeQueueSize)
+    dailyKnowledgeQueueRef.current = nextQueue
+    setDailyKnowledgeQueue(nextQueue)
+    return nextQueue
+  }, [])
+
+  const fetchDailyKnowledgeItem = useCallback(async (extraTitles: string[] = []) => {
+    const taskThemes = activeMonthTasks.flatMap((task) => [task.type, task.title]).filter(Boolean).slice(0, 12)
+    const recentTitles = [
+      ...readDailyKnowledgeHistory(),
+      dailyKnowledgeRef.current.title,
+      ...dailyKnowledgeQueueRef.current.map((item) => item.title),
+      ...extraTitles,
+    ].filter(Boolean).slice(-30)
+    const suggestion: DailyKnowledgeSuggestion = await api.suggestDailyKnowledge({
+      currentMonth: currentMonth.value,
+      taskThemes,
+      recentTitles,
+    })
+    if (!suggestion.title || recentTitles.includes(suggestion.title)) {
+      return null
+    }
+    return suggestion
+  }, [activeMonthTasks, currentMonth.value])
+
+  const prefetchDailyKnowledgeQueue = useCallback(async () => {
+    if (!isAdmin || dailyKnowledgePrefetchRef.current) {
+      return
+    }
+    dailyKnowledgePrefetchRef.current = true
+    setIsDailyKnowledgePrefetching(true)
+    try {
+      const fetchedItems: DailyKnowledgeItem[] = []
+      const fetchTargetCount = Math.min(3, dailyKnowledgeQueueSize)
+      for (let index = 0; index < fetchTargetCount; index += 1) {
+        const nextItem = await fetchDailyKnowledgeItem(fetchedItems.map((item) => item.title))
+        if (!nextItem) {
+          break
+        }
+        fetchedItems.push(nextItem)
+        const nextQueue = mergeDailyKnowledgeQueue(
+          [nextItem, ...dailyKnowledgeQueueRef.current],
+          [dailyKnowledgeRef.current.title],
+        ).slice(0, dailyKnowledgeQueueSize)
+        dailyKnowledgeQueueRef.current = nextQueue
+        setDailyKnowledgeQueue(nextQueue)
+      }
+    } catch {
+      seedDailyKnowledgeQueue()
+    } finally {
+      seedDailyKnowledgeQueue()
+      dailyKnowledgePrefetchRef.current = false
+      setIsDailyKnowledgePrefetching(false)
+    }
+  }, [fetchDailyKnowledgeItem, isAdmin, seedDailyKnowledgeQueue])
+
+  const showNextDailyKnowledge = async () => {
+    const [nextItem, ...remainingQueue] = dailyKnowledgeQueueRef.current
+    if (nextItem) {
+      dailyKnowledgeRef.current = nextItem
+      setDailyKnowledge(nextItem)
+      rememberDailyKnowledgeTitle(nextItem.title)
+      seedDailyKnowledgeQueue(remainingQueue)
+      void prefetchDailyKnowledgeQueue()
+      return
+    }
+
+    if (isDailyKnowledgeLoading) {
+      return
+    }
+    setIsDailyKnowledgeLoading(true)
+    try {
+      const fetchedItem = await fetchDailyKnowledgeItem()
+      const nextFallback = fetchedItem ?? fallbackDailyKnowledge(dailyKnowledgeRef.current.title)
+      dailyKnowledgeRef.current = nextFallback
+      setDailyKnowledge(nextFallback)
+      rememberDailyKnowledgeTitle(nextFallback.title)
+    } catch {
+      const fallback = fallbackDailyKnowledge(dailyKnowledgeRef.current.title)
+      dailyKnowledgeRef.current = fallback
+      setDailyKnowledge(fallback)
+      rememberDailyKnowledgeTitle(fallback.title)
+    } finally {
+      setIsDailyKnowledgeLoading(false)
+      seedDailyKnowledgeQueue()
+      void prefetchDailyKnowledgeQueue()
+    }
   }
 
   const handleConfirmDialogConfirm = async () => {
@@ -2189,6 +2703,17 @@ function App() {
     })
   }, [auth])
 
+  useEffect(() => {
+    if (!isLoaded || role !== 'admin' || dailyKnowledgeRequestedRef.current) {
+      return
+    }
+    dailyKnowledgeRequestedRef.current = true
+    seedDailyKnowledgeQueue()
+    void prefetchDailyKnowledgeQueue()
+    // Keep a ready-to-read pool so manual refresh can swap instantly while AI refills in the background.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, role])
+
   const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
 
   const filterTasks = (tasks: Task[], filter: TaskFilter = taskFilter) =>
@@ -2259,9 +2784,22 @@ function App() {
   const today = isoDate()
   const dueSoonDate = isoDate(3)
   const dueTasks = useMemo(() => {
-    const overdue = activeMonthTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue')
-    const soon = activeMonthTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon')
-    return { overdue, soon }
+    const actionableTasks = activeMonthTasks.filter((task) => !['已验收', '终止', '不计费'].includes(task.status))
+    const byEstimateAsc = (a: Task, b: Task) => datePart(a.estimatedDate || a.date).localeCompare(datePart(b.estimatedDate || b.date))
+    const byNearestPlan = (a: Task, b: Task) => {
+      const aDate = datePart(a.estimatedDate || a.date)
+      const bDate = datePart(b.estimatedDate || b.date)
+      const aFutureRank = aDate >= today ? 0 : 1
+      const bFutureRank = bDate >= today ? 0 : 1
+      if (aFutureRank !== bFutureRank) return aFutureRank - bFutureRank
+      return aFutureRank === 0 ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate)
+    }
+    const overdue = actionableTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue').sort(byEstimateAsc)
+    const soon = actionableTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon').sort(byEstimateAsc)
+    const primary = overdue[0] ?? [...actionableTasks].sort(byNearestPlan)[0] ?? null
+    const soonHighlights = soon.filter((task) => task.id !== primary?.id).slice(0, 2)
+    const reminderTasks = [primary, ...soonHighlights].filter((task): task is Task => Boolean(task))
+    return { overdue, soon, primary, soonHighlights, reminderTasks }
   }, [activeMonthTasks, dueSoonDate, today])
 
   const annualData = useMemo(() => {
@@ -2324,12 +2862,6 @@ function App() {
     }
   }
 
-  const handleBackfillAttachmentAnalyses = async () => {
-    const result = await api.backfillAttachmentAnalyses()
-    notify(result.created > 0 ? `已为 ${result.created} 个历史附件创建分析任务` : '历史附件都已进入分析链路')
-    await refreshState()
-  }
-
   const handleRetryAttachmentAnalysis = async (attachmentId: number) => {
     await api.retryAttachmentAnalysis(attachmentId)
     notify('已重新创建附件分析任务')
@@ -2383,6 +2915,104 @@ function App() {
     void loadTaskActivity(taskId)
   }
 
+  const handleDeleteTaskTimeEntry = (taskId: number, mode: ProgressRecordMode, entryId: string) => {
+    const task = taskItems.find((item) => item.id === taskId)
+    if (!task) {
+      return
+    }
+    if (mode === 'progress' && task.status === '已验收') {
+      notify('已验收任务的结算工时已锁定，不能直接删除分段记录', 'error')
+      return
+    }
+    const entries = mode === 'waiting' ? task.waitingEntries ?? [] : task.timeEntries ?? []
+    const entry = entries.find((item) => item.id === entryId)
+    if (!entry) {
+      notify('这条记录已不存在，请刷新后重试', 'error')
+      return
+    }
+    const isWaiting = mode === 'waiting'
+    const restoreDeletedEntry = async () => {
+      const latestTask = taskItemsRef.current.find((item) => item.id === taskId)
+      if (!latestTask) {
+        notify('撤回失败：任务不存在', 'error')
+        return
+      }
+      if (isWaiting) {
+        const latestEntries = latestTask.waitingEntries ?? []
+        if (latestEntries.some((item) => item.id === entry.id)) {
+          notify('这段等待记录已恢复')
+          return
+        }
+        const restored = await handleUpdateTask(taskId, { waitingEntries: sortTimeEntriesDesc([...latestEntries, entry as WaitingEntry]) })
+        if (!restored) {
+          notify('撤回失败：等待记录未能恢复', 'error')
+          return
+        }
+        await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+        await refreshState()
+        notify('已撤回等待记录')
+        return
+      }
+      const latestEntries = latestTask.timeEntries ?? []
+      if (latestEntries.some((item) => item.id === entry.id)) {
+        notify('这段分段计时已恢复')
+        return
+      }
+      const nextEntries = sortTimeEntriesDesc([...latestEntries, entry])
+      const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
+      const restored = await handleUpdateTask(taskId, { timeEntries: nextEntries, actualHours: nextActualHours })
+      if (!restored) {
+        notify('撤回失败：分段计时未能恢复', 'error')
+        return
+      }
+      await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+      await refreshState()
+      notify('已撤回分段计时')
+    }
+    setConfirmDialog({
+      title: `确定删除 ${formatEntryDateTimeRange(task, entry)} 这段记录吗？`,
+      body: isWaiting
+        ? '删除后，这段等待时长将不再进入洞察分析。'
+        : '删除后，这段工时会从实际工时和结算金额中扣除。',
+      confirmText: '确认删除',
+      tone: 'danger',
+      hideIcon: true,
+      details: [entry.note || (isWaiting ? '未填写等待说明' : '未填写进展内容'), isWaiting ? '不计结算' : `计时 ${formatDuration(minutesForTimeEntry(entry))}`],
+      onConfirm: async () => {
+        await api.setEntryAttachmentsArchived(taskId, entry.id, true)
+        if (isWaiting) {
+          const deleted = await handleUpdateTask(taskId, { waitingEntries: entries.filter((item) => item.id !== entryId) })
+          if (!deleted) {
+            await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+            notify('等待记录删除失败，关联附件已保留', 'error')
+            return
+          }
+          await refreshState()
+          notify('等待记录已删除', 'success', {
+            actionLabel: '撤回',
+            durationMs: 7200,
+            onAction: restoreDeletedEntry,
+          })
+          return
+        }
+        const nextEntries = entries.filter((item) => item.id !== entryId)
+        const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
+        const deleted = await handleUpdateTask(taskId, { timeEntries: nextEntries, actualHours: nextActualHours })
+        if (!deleted) {
+          await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+          notify('分段计时删除失败，关联附件已保留', 'error')
+          return
+        }
+        await refreshState()
+        notify('分段计时已删除，实际工时已重新计算', 'success', {
+          actionLabel: '撤回',
+          durationMs: 7200,
+          onAction: restoreDeletedEntry,
+        })
+      },
+    })
+  }
+
   const handleOpenTaskAcceptance = (taskId: number) => {
     setSelectedTaskId(taskId)
     setAcceptanceModalTaskId(taskId)
@@ -2422,6 +3052,12 @@ function App() {
       requireAdmin()
     }
     setAcceptanceModalTaskId(0)
+  }
+
+  const handleConfirmAcceptanceModal = (payload: AcceptancePayload) => {
+    const task = taskItems.find((item) => item.id === acceptanceModalTaskId)
+    if (!task) return
+    handleConfirmTaskAcceptance(task, payload)
   }
 
   useEffect(() => {
@@ -2465,11 +3101,7 @@ function App() {
 
   const openNewTaskFromDashboardMenu = () => {
     setDashboardCreateMenu(null)
-    if (isAdmin) {
-      setIsModalOpen(true)
-    } else {
-      requireAdmin()
-    }
+    openCreateTask(false)
   }
 
   // 选中任务变化时自动加载它的动态时间轴（工作台右侧明细卡用）
@@ -2480,13 +3112,20 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTask?.id])
 
-  const handleQuickUploadImage = async (taskId: number, file: File, onProgress?: (ratio: number) => void) => {
+  const handleQuickUploadImage = async (
+    taskId: number,
+    file: File,
+    onProgress?: (ratio: number) => void,
+    entryId?: string,
+  ) => {
     try {
       validateUploadFile(file)
       const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
       const preview = await createOptionalPsdPreviewFile(file)
       await api.uploadFile({
         taskId,
+        entryId,
+        scope: 'progress',
         file,
         preview,
         type: extension,
@@ -2509,11 +3148,12 @@ function App() {
     const savedFile = await api.uploadFile(
       {
         taskId,
+        scope: 'acceptance',
         file,
         preview,
         type: extension,
         size: formatFileSize(file.size),
-        final: false,
+        final: true,
         visible: true,
         tag: '验收文件',
       },
@@ -2530,20 +3170,20 @@ function App() {
   const handleUpdateTask = async (taskId: number, changes: Partial<Task>) => {
     if (updatingTaskIdsRef.current.has(taskId)) {
       pendingTaskChangesRef.current.set(taskId, { ...(pendingTaskChangesRef.current.get(taskId) ?? {}), ...changes })
-      return
+      return false
     }
-    const currentTask = taskItems.find((task) => task.id === taskId)
+    const currentTask = taskItemsRef.current.find((task) => task.id === taskId)
     if (!currentTask) {
-      return
+      return false
     }
     if (currentTask.status === '已验收') {
       if (changes.status && changes.status !== '已验收') {
         notify('已验收任务状态已锁定，如需调整请先走验收修正流程')
-        return
+        return false
       }
       if ('actualHours' in changes || 'timeEntries' in changes) {
         notify('已验收任务的工时已锁定，不能再修改实际工时')
-        return
+        return false
       }
     }
     const normalizedChanges = { ...changes }
@@ -2557,6 +3197,7 @@ function App() {
     }
 
     updatingTaskIdsRef.current.add(taskId)
+    let savedSuccessfully = false
     try {
       const savedTask = await api.updateTask(taskId, normalizedChanges)
       setTaskItems((currentTasks) => currentTasks.map((task) => (task.id === taskId ? { ...task, ...savedTask } : task)))
@@ -2574,6 +3215,7 @@ function App() {
       if (changes.status) {
         notify('任务已同步到 D1')
       }
+      savedSuccessfully = true
     } catch (error) {
       setBackendStatus('后端异常')
       notify(error instanceof Error ? `任务更新失败：${error.message}` : '任务更新失败')
@@ -2585,6 +3227,7 @@ function App() {
         void handleUpdateTask(taskId, pendingChanges)
       }
     }
+    return savedSuccessfully
   }
 
   const handleVoidTask = (taskId: number) => {
@@ -2997,29 +3640,18 @@ function App() {
     }
   }
 
-  const isAdmin = role === 'admin' && Boolean(auth)
   const requireAdmin = () => {
     notify('请先登录管理员身份再编辑')
     setIsLoginModalOpen(true)
   }
-  const openCreateTask = () => {
+  const openCreateTask = (supplemental = false) => {
     if (isAdmin) {
+      setNewTaskSupplemental(supplemental)
       setIsModalOpen(true)
       return
     }
     requireAdmin()
   }
-  useEffect(() => {
-    const handleCreateTaskShortcut = (event: KeyboardEvent) => {
-      if (event.repeat || event.key.toLowerCase() !== 'k' || (!event.metaKey && !event.ctrlKey)) {
-        return
-      }
-      event.preventDefault()
-      openCreateTask()
-    }
-    window.addEventListener('keydown', handleCreateTaskShortcut)
-    return () => window.removeEventListener('keydown', handleCreateTaskShortcut)
-  })
   const readOnlyUpdateTask = () => requireAdmin()
   const readOnlyUploadFile = async (): Promise<FileAsset> => {
     requireAdmin()
@@ -3033,7 +3665,291 @@ function App() {
     requireAdmin()
     throw new Error('需要管理员权限')
   }
-  const visibleNavItems = isAdmin ? navItems : navItems.filter((item) => !['结算', '收入', '洞察'].includes(item.label))
+  const visibleNavItems = navItems
+  const openCommandPalette = (initialQuery = '') => {
+    setCommandPaletteInitialQuery(initialQuery)
+    setIsShortcutHelpOpen(false)
+    setIsCommandPaletteOpen(true)
+  }
+  const commandActions: CommandPaletteAction[] = [
+    ...visibleNavItems.map((item) => {
+      const shortcuts: Partial<Record<AppView, string>> = {
+        工作台: 'G D',
+        任务: 'G T',
+        文件库: 'G F',
+        洞察: 'G I',
+        结算: 'G S',
+        收入: 'G R',
+      }
+      return {
+        id: `view-${item.label}`,
+        group: '快速导航',
+        label: `前往${item.label}`,
+        detail: item.label === activeView ? '当前页面' : undefined,
+        shortcut: shortcuts[item.label as AppView],
+        keywords: `页面 导航 ${item.label}`,
+        run: () => navigateView(item.label as AppView),
+      }
+    }),
+    {
+      id: 'view-settings',
+      group: '快速导航',
+      label: '前往设置',
+      shortcut: 'G O',
+      keywords: '设置 配置 API 模型',
+      run: () => navigateView('设置'),
+    },
+    {
+      id: 'create-task',
+      group: '任务操作',
+      label: '新建任务',
+      detail: '记录一条新的设计任务',
+      shortcut: 'N',
+      keywords: '创建 新任务',
+      run: () => openCreateTask(false),
+    },
+    {
+      id: 'create-supplemental-task',
+      group: '任务操作',
+      label: '补录已完成任务',
+      detail: '补录过去三个月内的任务',
+      shortcut: '⇧ N',
+      keywords: '补录 历史任务',
+      run: () => openCreateTask(true),
+    },
+    ...(selectedTask
+      ? [
+          {
+            id: 'selected-task-detail',
+            group: '当前任务',
+            label: '查看任务详情',
+            detail: selectedTask.title,
+            shortcut: 'Enter',
+            keywords: '打开 详情',
+            run: () => handleOpenTaskDetail(selectedTask.id),
+          },
+          {
+            id: 'selected-task-edit',
+            group: '当前任务',
+            label: '编辑任务',
+            detail: selectedTask.title,
+            shortcut: 'E',
+            keywords: '修改 编辑',
+            disabled: !isAdmin,
+            run: () => handleOpenTaskEdit(selectedTask.id),
+          },
+          {
+            id: 'selected-task-progress',
+            group: '当前任务',
+            label: '记录进展',
+            detail: selectedTask.title,
+            shortcut: 'P',
+            keywords: '进展 工时 附件',
+            disabled: !isAdmin,
+            run: () => handleOpenTaskProgress(selectedTask.id),
+          },
+          {
+            id: 'selected-task-acceptance',
+            group: '当前任务',
+            label: '去验收',
+            detail: selectedTask.status === '待验收' ? selectedTask.title : `当前状态：${selectedTask.status}`,
+            shortcut: 'A',
+            keywords: '验收 交付',
+            disabled: !isAdmin || selectedTask.status !== '待验收',
+            run: () => handleOpenTaskAcceptance(selectedTask.id),
+          },
+          {
+            id: 'selected-task-status',
+            group: '修改状态',
+            label: '修改任务状态',
+            detail: `${selectedTask.title} · 当前${selectedTask.status}`,
+            shortcut: 'S',
+            keywords: '状态 计划中 进行中 待验收 挂起 终止',
+            disabled: !isAdmin || selectedTask.status === '已验收',
+            run: () => handleOpenTaskEdit(selectedTask.id),
+          },
+        ]
+      : []),
+    ...taskItems
+      .filter((task) => !task.voidedAt)
+      .slice()
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .map((task) => ({
+        id: `task-${task.id}`,
+        group: '搜索任务',
+        label: task.title,
+        detail: `${task.type} · ${task.requester || task.contact} · ${task.status}`,
+        keywords: `${task.requirement} ${task.contact} ${task.requester} ${task.status}`,
+        run: () => handleOpenTaskDetail(task.id),
+      })),
+  ]
+  const shortcutHelpGroups: ShortcutHelpGroup[] = [
+    {
+      label: '全局',
+      items: [
+        { keys: '⌘ K / Ctrl K', action: '打开命令面板' },
+        { keys: '?', action: '查看快捷键' },
+        { keys: 'N', action: '新建任务' },
+        { keys: '⇧ N', action: '补录任务' },
+        { keys: '/', action: '聚焦任务搜索' },
+        { keys: 'Esc', action: '关闭当前浮层' },
+      ],
+    },
+    {
+      label: '导航',
+      items: [
+        { keys: 'G D', action: '工作台' },
+        { keys: 'G T', action: '任务' },
+        { keys: 'G F', action: '文件库' },
+        { keys: 'G I', action: '洞察' },
+        { keys: 'G S', action: '结算' },
+        { keys: 'G R', action: '收入' },
+        { keys: 'G O', action: '设置' },
+      ],
+    },
+    {
+      label: '任务列表',
+      items: [
+        { keys: 'J / K', action: '选择下一个 / 上一个任务' },
+        { keys: 'Enter', action: '查看选中任务详情' },
+        { keys: 'E', action: '编辑选中任务' },
+        { keys: 'P', action: '记录选中任务进展' },
+        { keys: 'A', action: '验收选中任务' },
+        { keys: 'S', action: '修改选中任务状态' },
+      ],
+    },
+    {
+      label: '月份',
+      items: [
+        { keys: '[', action: '切换到上个月' },
+        { keys: ']', action: '切换到下个月' },
+      ],
+    },
+  ]
+  const hasBlockingModal = Boolean(
+    isModalOpen
+      || detailTaskId
+      || editTaskId
+      || progressModalTarget
+      || acceptanceModalTaskId
+      || previewFile
+      || confirmDialog
+      || voidTaskTarget
+      || statusReasonTarget
+      || isLoginModalOpen,
+  )
+
+  useEffect(() => {
+    const handleGlobalShortcut = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      if (event.repeat) {
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && key === 'k') {
+        event.preventDefault()
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false)
+        } else {
+          openCommandPalette()
+        }
+        return
+      }
+      if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
+        return
+      }
+      if (event.key === '?') {
+        event.preventDefault()
+        setIsShortcutHelpOpen(true)
+        return
+      }
+      if (key === 'g' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        if (navigationChordRef.current) {
+          window.clearTimeout(navigationChordRef.current)
+        }
+        navigationChordRef.current = window.setTimeout(() => {
+          navigationChordRef.current = null
+        }, 1000)
+        return
+      }
+      if (navigationChordRef.current) {
+        window.clearTimeout(navigationChordRef.current)
+        navigationChordRef.current = null
+        const navigationShortcuts: Record<string, AppView> = {
+          d: '工作台',
+          t: '任务',
+          f: '文件库',
+          i: '洞察',
+          s: '结算',
+          r: '收入',
+          o: '设置',
+        }
+        const nextView = navigationShortcuts[key]
+        if (nextView && (nextView === '设置' || visibleNavItems.some((item) => item.label === nextView))) {
+          event.preventDefault()
+          navigateView(nextView)
+        }
+        return
+      }
+      if (key === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        openCreateTask(event.shiftKey)
+        return
+      }
+      if (event.key === '/') {
+        const searchInput = document.querySelector<HTMLInputElement>('.dashboard-task-search input, .task-search-inline input')
+        if (searchInput) {
+          event.preventDefault()
+          searchInput.focus()
+          searchInput.select()
+        }
+        return
+      }
+      if (event.key === '[' || event.key === ']') {
+        event.preventDefault()
+        setMonthValue((current) => shiftMonthValue(current, event.key === '[' ? -1 : 1))
+        return
+      }
+      if (!selectedTask || !['工作台', '任务'].includes(activeView)) {
+        return
+      }
+      if (key === 'j' || key === 'k') {
+        event.preventDefault()
+        const currentIndex = Math.max(0, selectedTaskSource.findIndex((task) => task.id === selectedTask.id))
+        const offset = key === 'j' ? 1 : -1
+        const nextIndex = Math.min(Math.max(currentIndex + offset, 0), selectedTaskSource.length - 1)
+        const nextTask = selectedTaskSource[nextIndex]
+        if (nextTask) {
+          setSelectedTaskId(nextTask.id)
+        }
+        return
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        handleOpenTaskDetail(selectedTask.id)
+      } else if (key === 'e' && isAdmin) {
+        event.preventDefault()
+        handleOpenTaskEdit(selectedTask.id)
+      } else if (key === 'p' && isAdmin) {
+        event.preventDefault()
+        handleOpenTaskProgress(selectedTask.id)
+      } else if (key === 'a' && isAdmin && selectedTask.status === '待验收') {
+        event.preventDefault()
+        handleOpenTaskAcceptance(selectedTask.id)
+      } else if (key === 's' && isAdmin) {
+        event.preventDefault()
+        openCommandPalette('状态')
+      }
+    }
+    window.addEventListener('keydown', handleGlobalShortcut)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalShortcut)
+      if (navigationChordRef.current) {
+        window.clearTimeout(navigationChordRef.current)
+        navigationChordRef.current = null
+      }
+    }
+  })
   const adminOnlyPanel = (
     <section className="panel read-only-settings-panel">
       <div className="panel-header compact">
@@ -3169,46 +4085,81 @@ function App() {
             <button
               type="button"
               className="topbar-shortcut"
-              title="新建任务（Command + K）"
-              aria-label="使用快捷键新建任务"
+              title="打开命令面板（Command + K）"
+              aria-label="打开命令面板"
               aria-keyshortcuts="Meta+K Control+K"
-              onClick={openCreateTask}
+              onClick={() => openCommandPalette()}
             >
               <kbd>⌘K</kbd>
             </button>
-            <button className="primary-button topbar-create-button" onClick={openCreateTask}>新建任务</button>
+            <button className="primary-button topbar-create-button" onClick={() => openCreateTask(false)}>新建任务</button>
           </div>
         </header>
 
         {activeView === '工作台' && (
           <div className="dashboard-context-surface" onContextMenu={openDashboardCreateMenu}>
-        <section className="stats-grid" aria-label="本月统计">
-          <StatCard
-            label="本月总工时"
-            value={`${stats.totalHours.toFixed(1)}h`}
-            trend={importedHours > 0 ? `含导入工时 ${importedHours.toFixed(1)}h` : '本月任务实际投入'}
-            icon={<Clock3 size={20} />}
-          />
-          <StatCard label="计费工时" value={`${stats.billableHours.toFixed(1)}h`} trend="已排除不计费项" icon={<CheckCircle2 size={20} />} />
-          <StatCard
-            label="预计收入"
-            value={isAdmin ? `¥${stats.amount.toLocaleString()}` : '仅管理员'}
-            trend={isAdmin ? `按 ¥${hourlyRate} / 小时` : '游客与甲方不可见'}
-            icon={<BarChart3 size={20} />}
-          />
-          <StatCard label="验收情况" value={`${stats.accepted} / ${activeMonthTasks.length}`} trend={`${stats.pending} 个待验收`} icon={<ListChecks size={20} />} />
+        <section className="dashboard-metrics" aria-label="本月统计">
+          <article className="dashboard-metric">
+            <span>本月总工时</span>
+            <strong>{stats.totalHours.toFixed(1)}<small>h</small></strong>
+            <p>{importedHours > 0 ? `含导入工时 ${importedHours.toFixed(1)}h` : '本月任务实际投入'}</p>
+          </article>
+          <article className="dashboard-metric">
+            <span>计费工时</span>
+            <strong>{stats.billableHours.toFixed(1)}<small>h</small></strong>
+            <p>已排除不计费项</p>
+          </article>
+          <article className="dashboard-metric">
+            <span>预计收入</span>
+            <strong>{isAdmin ? `¥${stats.amount.toLocaleString()}` : '仅管理员'}</strong>
+            <p>{isAdmin ? `按 ¥${hourlyRate} / 小时` : '游客与甲方不可见'}</p>
+          </article>
+          <article className="dashboard-metric">
+            <span>验收情况</span>
+            <strong>{stats.accepted} / {activeMonthTasks.length}</strong>
+            <p className={stats.pending > 0 ? 'attention' : ''}>{stats.pending} 个待验收</p>
+          </article>
         </section>
 
-        {(dueTasks.overdue.length > 0 || dueTasks.soon.length > 0) && (
+        <section className="daily-knowledge" aria-label="AI 每日知识">
+          <button className="daily-knowledge-main" type="button" onClick={() => setIsDailyKnowledgeOpen(true)}>
+            <span className="daily-knowledge-category">✦ {isDailyKnowledgeLoading ? 'AI' : dailyKnowledge.category}</span>
+            <span className="daily-knowledge-copy">
+              <strong>{isDailyKnowledgeLoading ? 'AI 正在准备一条新的小知识' : dailyKnowledge.title}</strong>
+              {!isDailyKnowledgeLoading && <span> · {dailyKnowledge.teaser}</span>}
+            </span>
+            <span className="daily-knowledge-more">展开阅读</span>
+            <em>{dailyKnowledge.source}</em>
+          </button>
+          <button
+            className="daily-knowledge-roll"
+            type="button"
+            aria-label="让 AI 换一条知识"
+            title={isDailyKnowledgePrefetching ? '正在后台预加载小知识' : '换一条'}
+            disabled={!isAdmin || (isDailyKnowledgeLoading && dailyKnowledgeQueue.length === 0)}
+            onClick={(event) => {
+              event.stopPropagation()
+              void showNextDailyKnowledge()
+            }}
+          >
+            ↻ 换一条
+          </button>
+        </section>
+
+        {dueTasks.reminderTasks.length > 0 && (
           <button className="due-strip" onClick={() => navigateView('任务')}>
             <AlarmClock size={17} />
             <span className="due-summary">
-              {dueTasks.overdue.length > 0 && <strong className="due-summary-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>}
-              {dueTasks.overdue.length > 0 && dueTasks.soon.length > 0 && ' · '}
-              {dueTasks.soon.length > 0 && <span className="due-summary-soon">{dueTasks.soon.length} 个任务 3 天内交付</span>}
+              {dueTasks.overdue.length > 0 ? (
+                <strong className="due-summary-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>
+              ) : (
+                <strong className="due-summary-nearest">最近任务</strong>
+              )}
+              {dueTasks.soonHighlights.length > 0 && ' · '}
+              {dueTasks.soonHighlights.length > 0 && <span className="due-summary-soon">{dueTasks.soonHighlights.length} 个任务 3 天内交付</span>}
             </span>
-            <em>{[...dueTasks.overdue, ...dueTasks.soon].slice(0, 3).map((task) => task.title).join('、')}</em>
-            <ChevronDown size={15} className="due-arrow" />
+            <em>{dueTasks.reminderTasks.map((task) => task.title).join('、')}</em>
+            <ChevronRight size={15} className="due-arrow" />
           </button>
         )}
 
@@ -3240,7 +4191,7 @@ function App() {
                     <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
                     <p>{activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}</p>
                     {activeMonthTasks.length === 0 && (
-                      <button className="ghost-button compact-button empty-state-action" onClick={() => setIsModalOpen(true)}>
+                      <button className="ghost-button compact-button empty-state-action" onClick={() => openCreateTask(false)}>
                         <Plus size={15} />
                         新建任务
                       </button>
@@ -3428,6 +4379,7 @@ function App() {
             task={selectedTask}
             onUpdateTask={handleUpdateTask}
             onOpenProgress={handleOpenTaskProgress}
+            onDeleteEntry={handleDeleteTaskTimeEntry}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
           />
@@ -3460,6 +4412,7 @@ function App() {
             onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
             onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
             onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
+            onDeleteEntry={isAdmin ? handleDeleteTaskTimeEntry : () => requireAdmin()}
             onCopyShareLink={handleCopyShareLink}
             onOpenTask={handleOpenTaskDetail}
             onOpenEditTask={handleOpenTaskEdit}
@@ -3468,8 +4421,9 @@ function App() {
             activity={taskActivity}
             hourlyRate={hourlyRate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
+            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
-            onCreateTask={() => (isAdmin ? setIsModalOpen(true) : requireAdmin())}
+            onCreateTask={() => openCreateTask(false)}
           />
         )}
 
@@ -3477,11 +4431,13 @@ function App() {
           <FilesView
             files={fileItems}
             tasks={taskItems}
+            attachmentAnalyses={attachmentAnalyses}
             currentMonthValue={currentMonth.value}
             onPreviewFile={setPreviewFile}
             onDeleteFile={isAdmin ? handleDeleteFile : readOnlyUpdateTask}
             onDownloadFile={handleDownloadFile}
             onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+            onRetryAnalysis={handleRetryAttachmentAnalysis}
           />
         )}
 
@@ -3495,8 +4451,6 @@ function App() {
               reports={reports}
               currentMonth={currentMonth}
               hourlyRate={hourlyRate}
-              onBackfillAnalyses={handleBackfillAttachmentAnalyses}
-              onRetryAnalysis={handleRetryAttachmentAnalysis}
             />
           ) : (
             adminOnlyPanel
@@ -3595,10 +4549,31 @@ function App() {
         )}
       </section>
 
+      {isDailyKnowledgeOpen && (
+        <DailyKnowledgeModal
+          item={dailyKnowledge}
+          isLoading={isDailyKnowledgeLoading}
+          canRefresh={isAdmin}
+          onRefresh={() => void showNextDailyKnowledge()}
+          onClose={() => setIsDailyKnowledgeOpen(false)}
+        />
+      )}
+      {isCommandPaletteOpen && (
+        <CommandPalette
+          key={commandPaletteInitialQuery}
+          actions={commandActions}
+          initialQuery={commandPaletteInitialQuery}
+          onClose={() => setIsCommandPaletteOpen(false)}
+        />
+      )}
+      {isShortcutHelpOpen && (
+        <ShortcutHelpModal groups={shortcutHelpGroups} onClose={() => setIsShortcutHelpOpen(false)} />
+      )}
       {isModalOpen && (
         <NewTaskModal
           designTypeGroups={designTypeGroups}
           currentMonthValue={currentMonth.value}
+          initialSupplemental={newTaskSupplemental}
           onClose={() => setIsModalOpen(false)}
           onCreate={isAdmin ? handleCreateTask : async () => requireAdmin()}
           onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
@@ -3630,11 +4605,15 @@ function App() {
       {editTaskId > 0 && (() => {
         const editTask = taskItems.find((task) => task.id === editTaskId)
         return editTask ? (
-          <TaskEditModal
-            key={editTask.id}
-            task={editTask}
+          <NewTaskModal
+            key={`edit-${editTask.id}`}
+            designTypeGroups={designTypeGroups}
+            currentMonthValue={currentMonth.value}
+            editingTask={editTask}
             onClose={() => setEditTaskId(0)}
+            onCreate={isAdmin ? handleCreateTask : async () => requireAdmin()}
             onSave={(changes) => handleSaveTaskEdit(editTask.id, changes)}
+            onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
           />
         ) : null
       })()}
@@ -3651,6 +4630,9 @@ function App() {
             onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
+            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+            onUploadAcceptanceFile={isAdmin ? handleAcceptanceFileUpload : undefined}
+            hourlyRate={hourlyRate}
           />
         ) : null
       })()}
@@ -3660,13 +4642,13 @@ function App() {
           <AcceptanceModal
             task={acceptanceTask}
             initialNote={acceptanceTask.acceptanceNote ?? ''}
-            files={fileItems}
-            hourlyRate={hourlyRate}
-            onClose={() => setAcceptanceModalTaskId(0)}
-            onConfirm={(payload) => handleConfirmTaskAcceptance(acceptanceTask, payload)}
-            onUploadFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
-          />
-        ) : null
+        files={fileItems}
+        hourlyRate={hourlyRate}
+        onClose={() => setAcceptanceModalTaskId(0)}
+        onConfirm={handleConfirmAcceptanceModal}
+        onUploadFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
+      />
+    ) : null
       })()}
       {confirmDialog && (
         <ConfirmDialogModal
@@ -3709,6 +4691,18 @@ function App() {
             <div className={`toast toast-${item.tone}`} key={item.id} role={item.tone === 'error' ? 'alert' : 'status'}>
               <ToastIcon tone={item.tone} />
               <span>{item.message}</span>
+              {item.actionLabel && item.onAction ? (
+                <button
+                  type="button"
+                  className="toast-action"
+                  onClick={() => {
+                    void item.onAction?.()
+                    setToastQueue((current) => current.filter((toast) => toast.id !== item.id))
+                  }}
+                >
+                  {item.actionLabel}
+                </button>
+              ) : null}
             </div>
           ))}
         </div>
@@ -4183,12 +5177,14 @@ function DashboardTaskSidebar({
   task,
   onUpdateTask,
   onOpenProgress,
+  onDeleteEntry,
   onOpenEdit,
   onOpenAcceptance,
 }: {
   task: Task | undefined
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string) => void
+  onDeleteEntry: (taskId: number, mode: ProgressRecordMode, entryId: string) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
 }) {
@@ -4363,9 +5359,10 @@ function DashboardTaskSidebar({
                       return (
                         <article className="dashboard-side-time-item" key={entry.id}>
                           <span className="dot" />
-                          <button type="button" className="dashboard-side-entry-edit" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>
-                            编辑
-                          </button>
+                          <div className="dashboard-side-entry-actions">
+                            <button type="button" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>编辑</button>
+                            <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'progress', entry.id)}>删除</button>
+                          </div>
                           <time>{formatEntryDateTimeRange(task, entry)}</time>
                           <p>{entry.note || '未填写具体内容'}</p>
                           <em>计时 {formatSignedHours(minutes)}</em>
@@ -4400,9 +5397,10 @@ function DashboardTaskSidebar({
                       const minutes = minutesForTimeEntry(entry)
                       return (
                         <article className="dashboard-side-waiting-item" key={entry.id}>
-                          <button type="button" className="dashboard-side-entry-edit" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>
-                            编辑
-                          </button>
+                          <div className="dashboard-side-entry-actions">
+                            <button type="button" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>编辑</button>
+                            <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>
+                          </div>
                           <time>{formatEntryDateTimeRange(task, entry)}</time>
                           <p>{entry.note || entry.reason || '等待甲方确认'}</p>
                           <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
@@ -4449,6 +5447,7 @@ function TasksView({
   onVoidTask,
   onRestoreTask,
   onDeleteTask,
+  onDeleteEntry,
   onCopyShareLink,
   onOpenTask,
   onOpenEditTask,
@@ -4457,6 +5456,7 @@ function TasksView({
   activity,
   hourlyRate,
   onUploadImage,
+  onConfirmAcceptance,
   onCreateTaskUpdate,
   onCreateTask,
 }: {
@@ -4483,6 +5483,7 @@ function TasksView({
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
+  onDeleteEntry: (taskId: number, mode: ProgressRecordMode, entryId: string) => void
   onCopyShareLink: (token: string) => void
   onOpenTask: (taskId: number) => void
   onOpenEditTask: (taskId: number) => void
@@ -4490,14 +5491,15 @@ function TasksView({
   files: FileAsset[]
   activity: ActivityItem[]
   hourlyRate: number
-  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
+  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [acceptanceTask, setAcceptanceTask] = useState<Task | null>(null)
-  const [progressTask, setProgressTask] = useState<Task | null>(null)
+  const [progressTarget, setProgressTarget] = useState<{ task: Task; mode?: ProgressRecordMode; editEntryId?: string } | null>(null)
   const viewTabs = (
     <div className="view-mode-tabs" aria-label="任务视图切换">
       <button className={viewMode === '列表' ? 'active' : ''} onClick={() => onViewModeChange('列表')}>
@@ -4560,9 +5562,9 @@ function TasksView({
     setAcceptanceTask(task)
   }
 
-  const openProgress = (task: Task) => {
+  const openProgress = (task: Task, mode?: ProgressRecordMode, editEntryId?: string) => {
     onSelectTask(task.id)
-    setProgressTask(task)
+    setProgressTarget({ task, mode, editEntryId })
   }
 
   const confirmListAcceptance = (payload: AcceptancePayload) => {
@@ -4674,13 +5676,11 @@ function TasksView({
               tabIndex={0}
               onClick={() => {
                 onSelectTask(task.id)
-                onOpenTask(task.id)
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
                   onSelectTask(task.id)
-                  onOpenTask(task.id)
                 }
               }}
               onContextMenu={(event) => openContextMenu(event, task)}
@@ -4797,6 +5797,24 @@ function TasksView({
             />
           )}
         </div>
+        <DashboardTaskSidebar
+          task={selectedTask}
+          onUpdateTask={onUpdateTask}
+          onOpenProgress={(taskId, mode, editEntryId) => {
+            const task = tasks.find((item) => item.id === taskId)
+            if (task) {
+              openProgress(task, mode, editEntryId)
+            }
+          }}
+          onDeleteEntry={onDeleteEntry}
+          onOpenEdit={onOpenEditTask}
+          onOpenAcceptance={(taskId) => {
+            const task = tasks.find((item) => item.id === taskId)
+            if (task) {
+              openAcceptance(task)
+            }
+          }}
+        />
       </section>
       {acceptanceTask && (
         <AcceptanceModal
@@ -4809,15 +5827,20 @@ function TasksView({
           onUploadFile={onUploadAcceptanceFile}
         />
       )}
-      {progressTask && (
+      {progressTarget && (
         <TaskProgressModal
-          task={tasks.find((task) => task.id === progressTask.id) ?? progressTask}
+          task={tasks.find((task) => task.id === progressTarget.task.id) ?? progressTarget.task}
+          mode={progressTarget.mode}
+          editEntryId={progressTarget.editEntryId}
           files={files}
           activity={activity}
-          onClose={() => setProgressTask(null)}
+          onClose={() => setProgressTarget(null)}
           onUpdateTask={onUpdateTask}
           onCreateTaskUpdate={onCreateTaskUpdate}
           onUploadImage={onUploadImage}
+          onConfirmAcceptance={onConfirmAcceptance}
+          onUploadAcceptanceFile={onUploadAcceptanceFile}
+          hourlyRate={hourlyRate}
         />
       )}
     </section>
@@ -4834,6 +5857,9 @@ function TaskProgressModal({
   onUpdateTask,
   onCreateTaskUpdate,
   onUploadImage,
+  onConfirmAcceptance,
+  onUploadAcceptanceFile,
+  hourlyRate = 0,
 }: {
   task: Task
   mode?: ProgressRecordMode
@@ -4843,9 +5869,14 @@ function TaskProgressModal({
   onClose: () => void
   onUpdateTask: (taskId: number, changes: Partial<Task>) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
-  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<void>
+  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
+  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
+  onUploadAcceptanceFile?: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
+  hourlyRate?: number
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const replacementInputRef = useRef<HTMLInputElement | null>(null)
+  const [replacementAttachmentId, setReplacementAttachmentId] = useState('')
   const isWaitingMode = mode === 'waiting'
   const editingEntry = (isWaitingMode ? task.waitingEntries ?? [] : task.timeEntries ?? []).find((entry) => entry.id === editEntryId)
   const progressDraftKey = `giverny:task-progress-draft:${task.id}:${mode}:${editEntryId ?? 'new'}:v2`
@@ -4867,14 +5898,17 @@ function TaskProgressModal({
         timeEntries: (task.timeEntries ?? []) as TimeEntry[],
         waitingDraft: isWaitingMode ? entryDraft : currentDefault,
         waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
+        segmentMinutes: Math.max(1, minutesForTimeEntry(entryDraft)),
+        scheduleAnchor: 'hours' as ScheduleAnchor,
       })
-      if (editingEntry) {
-        return cachedDraft
-      }
       return {
         ...cachedDraft,
-        timeDraft: currentDefault,
-        waitingDraft: currentDefault,
+        segmentMinutes: Number.isFinite(cachedDraft.segmentMinutes) && cachedDraft.segmentMinutes > 0
+          ? cachedDraft.segmentMinutes
+          : Math.max(1, minutesForTimeEntry(entryDraft)),
+        scheduleAnchor: (['start', 'hours', 'end'] as ScheduleAnchor[]).includes(cachedDraft.scheduleAnchor)
+          ? cachedDraft.scheduleAnchor
+          : 'hours',
       }
     },
     [editingEntry, isWaitingMode, progressDraftKey, task.timeEntries, task.waitingEntries],
@@ -4884,15 +5918,24 @@ function TaskProgressModal({
   const [draftTimeEntries] = useState<TimeEntry[]>(initialProgressDraft.timeEntries)
   const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
   const [draftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
+  const [segmentMinutes, setSegmentMinutes] = useState(initialProgressDraft.segmentMinutes)
+  const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialProgressDraft.scheduleAnchor)
   const [isSaving, setIsSaving] = useState(false)
   const [timeEntryError, setTimeEntryError] = useState('')
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadedNames, setUploadedNames] = useState<string[]>([])
+  const [pendingAttachments, setPendingAttachments] = useState<PendingProgressAttachment[]>(
+    () => progressAttachmentDraftCache.get(progressDraftKey) ?? [],
+  )
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [previewAttachment, setPreviewAttachment] = useState<PendingProgressAttachment | null>(null)
+  const [isAcceptanceMode, setIsAcceptanceMode] = useState(false)
+  const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(task.feedbackRating ?? '')
+  const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(task.feedbackTags ?? [])
+  const [feedbackNote, setFeedbackNote] = useState(task.feedbackNote ?? '')
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
+  const uploadedNames = pendingAttachments.map((attachment) => sanitizeAttachmentName(attachment.name, attachment.originalName))
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
   const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
@@ -4932,13 +5975,31 @@ function TaskProgressModal({
       endDate: datePart(suggestedTimeSlot.end),
       end: suggestedTimeSlot.end.slice(11, 16),
     }))
+    setSegmentMinutes(Math.max(1, minutesForTimeEntry({
+      date: datePart(suggestedTimeSlot.start),
+      start: suggestedTimeSlot.start.slice(11, 16),
+      endDate: datePart(suggestedTimeSlot.end),
+      end: suggestedTimeSlot.end.slice(11, 16),
+    })))
     setTimeEntryError('')
     setActiveDatePickerId(null)
   }
 
   useEffect(() => {
-    writeDraftCache(progressDraftKey, { note, timeDraft, timeEntries: draftTimeEntries, waitingDraft, waitingEntries: draftWaitingEntries })
-  }, [draftTimeEntries, draftWaitingEntries, note, progressDraftKey, timeDraft, waitingDraft])
+    writeDraftCache(progressDraftKey, {
+      note,
+      timeDraft,
+      timeEntries: draftTimeEntries,
+      waitingDraft,
+      waitingEntries: draftWaitingEntries,
+      segmentMinutes,
+      scheduleAnchor: scheduleDerivedField,
+    })
+  }, [draftTimeEntries, draftWaitingEntries, note, progressDraftKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
+
+  useEffect(() => {
+    progressAttachmentDraftCache.set(progressDraftKey, pendingAttachments)
+  }, [pendingAttachments, progressDraftKey])
 
   const buildDraftTimeEntry = () => {
     const start = activeDraft.start.trim()
@@ -4951,29 +6012,115 @@ function TaskProgressModal({
     return entry
   }
 
-  const uploadFiles = async (fileList: FileList | null) => {
+  const addPendingFiles = (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
     const selectedFiles = Array.from(fileList ?? [])
-    if (selectedFiles.length === 0 || uploading) {
+    if (selectedFiles.length === 0) {
       return
     }
-    setUploading(true)
     setUploadErrors([])
-    try {
-      for (const file of selectedFiles) {
-        try {
-          await onUploadImage(task.id, file)
-          setUploadedNames((currentNames) => [...currentNames, file.name])
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : '上传失败'
-          setUploadErrors((currentErrors) => [...currentErrors, `${file.name}：${reason}`])
-        }
+    const nextAttachments: PendingProgressAttachment[] = []
+    const nextErrors: string[] = []
+    selectedFiles.forEach((file) => {
+      try {
+        validateUploadFile(file)
+        const displayName = source === 'paste' ? pastedImageName(file) : file.name
+        nextAttachments.push({
+          id: crypto.randomUUID(),
+          file,
+          name: displayName,
+          originalName: file.name,
+        })
+      } catch (error) {
+        nextErrors.push(error instanceof Error ? error.message : `${file.name}：文件无法添加`)
       }
+    })
+    if (nextAttachments.length > 0) {
+      setPendingAttachments((current) => [...current, ...nextAttachments])
+      nextAttachments
+        .filter((attachment) => looksLikeUntidyFileName(attachment.name))
+        .forEach((attachment) => {
+          window.setTimeout(() => void requestAttachmentNameSuggestion(attachment.id, attachment), 0)
+        })
+    }
+    if (nextErrors.length > 0) {
+      setUploadErrors(nextErrors)
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const replacePendingAttachment = (fileList: FileList | null) => {
+    const file = fileList?.[0]
+    if (!file || !replacementAttachmentId) {
+      return
+    }
+    try {
+      validateUploadFile(file)
+      setPendingAttachments((current) => current.map((attachment) =>
+        attachment.id === replacementAttachmentId
+          ? { ...attachment, file, name: file.name, originalName: file.name, aiSuggestion: undefined, aiError: undefined }
+          : attachment,
+      ))
+      setUploadErrors([])
+    } catch (error) {
+      setUploadErrors([error instanceof Error ? error.message : `${file.name}：文件无法替换`])
     } finally {
-      setUploading(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
+      setReplacementAttachmentId('')
+      if (replacementInputRef.current) {
+        replacementInputRef.current.value = ''
       }
     }
+  }
+
+  const requestAttachmentNameSuggestion = async (
+    attachmentId: string,
+    attachmentSnapshot?: PendingProgressAttachment,
+  ) => {
+    const attachment = attachmentSnapshot ?? pendingAttachments.find((item) => item.id === attachmentId)
+    if (!attachment || attachment.aiLoading) {
+      return
+    }
+    setPendingAttachments((current) => current.map((item) =>
+      item.id === attachmentId ? { ...item, aiLoading: true, aiError: undefined, aiSuggestion: undefined } : item,
+    ))
+    try {
+      const suggestion = await api.suggestAttachmentName({
+        fileName: sanitizeAttachmentName(attachment.name, attachment.originalName),
+        mimeType: attachment.file.type,
+        imageBase64: await imageFileBase64(attachment.file),
+        note,
+        recentFileNames: files.filter((file) => file.taskId === task.id).map((file) => file.name).slice(-12),
+        task,
+      })
+      setPendingAttachments((current) => current.map((item) =>
+        item.id === attachmentId ? { ...item, aiLoading: false, aiSuggestion: suggestion } : item,
+      ))
+    } catch (error) {
+      setPendingAttachments((current) => current.map((item) =>
+        item.id === attachmentId
+          ? { ...item, aiLoading: false, aiError: error instanceof Error ? error.message : 'AI 命名暂时不可用' }
+          : item,
+      ))
+    }
+  }
+
+  const requestAllAttachmentNameSuggestions = () => {
+    pendingAttachments.forEach((attachment) => {
+      void requestAttachmentNameSuggestion(attachment.id)
+    })
+  }
+
+  // 验收态：工时汇总计算（复用现有工具函数）
+  const acceptanceTimeEntries = task.timeEntries ?? []
+  const acceptanceWaitingEntries = task.waitingEntries ?? []
+  const acceptanceComputedMinutes = sumTimeEntries(acceptanceTimeEntries)
+  const acceptanceLockedHours = Math.round((acceptanceComputedMinutes / 60) * 100) / 100
+  const acceptanceWaitingMinutes = sumTimeEntries(acceptanceWaitingEntries)
+  const acceptanceEstimatedAmount = Math.round(acceptanceLockedHours * hourlyRate)
+  const canConfirmAcceptance = acceptanceLockedHours > 0 && !isSaving && Boolean(onConfirmAcceptance)
+  const toggleFeedbackTag = (tag: TaskFeedbackTag) => {
+    setFeedbackTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])
   }
 
   const saveProgress = async () => {
@@ -4991,6 +6138,21 @@ function TaskProgressModal({
           return
         }
       }
+      const finalizedUploadedNames: string[] = []
+      const uploadFailures: string[] = []
+      for (const attachment of pendingAttachments) {
+        const uploadFile = renamedFile(attachment.file, attachment.name)
+        try {
+          await onUploadImage(task.id, uploadFile, undefined, nextEntry?.id)
+          finalizedUploadedNames.push(uploadFile.name)
+        } catch (error) {
+          uploadFailures.push(`${uploadFile.name}：${error instanceof Error ? error.message : '上传失败'}`)
+        }
+      }
+      if (uploadFailures.length > 0) {
+        setUploadErrors(uploadFailures)
+        return
+      }
       const nextTimeEntries = !isWaitingMode && nextEntry
         ? isEditingEntry ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftTimeEntries, nextEntry]
         : draftTimeEntries
@@ -5005,15 +6167,84 @@ function TaskProgressModal({
         onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
       }
       const body = note.trim() || nextEntry?.note?.trim() || ''
-      if (body || uploadedNames.length > 0) {
+      if (body || finalizedUploadedNames.length > 0) {
         await onCreateTaskUpdate(task.id, {
           title: isEditingEntry ? (isWaitingMode ? '等待记录已修改' : '进展记录已修改') : (isWaitingMode ? '等待记录' : '进展更新'),
-          body: body || `上传过程附件：${uploadedNames.join('、')}`,
+          body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
           hours: 0,
           visible: false,
         })
       }
       clearDraftCache(progressDraftKey)
+      progressAttachmentDraftCache.delete(progressDraftKey)
+      onClose()
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // 验收进展：先记录本次进展（工时/附件），再触发验收确认
+  const confirmAcceptanceFromProgress = async () => {
+    if (isSaving || !onConfirmAcceptance) {
+      return
+    }
+    setIsSaving(true)
+    setTimeEntryError('')
+    try {
+      const nextEntry = buildDraftTimeEntry()
+      if (nextEntry) {
+        const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
+        if (conflict) {
+          setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
+          return
+        }
+      }
+      // 上传附件（验收态用 onUploadAcceptanceFile，自动打「验收文件」标签）
+      const finalizedUploadedNames: string[] = []
+      const uploadFailures: string[] = []
+      for (const attachment of pendingAttachments) {
+        const uploadFile = renamedFile(attachment.file, attachment.name)
+        try {
+          if (onUploadAcceptanceFile) {
+            await onUploadAcceptanceFile(task.id, uploadFile)
+          } else {
+            await onUploadImage(task.id, uploadFile, undefined, nextEntry?.id)
+          }
+          finalizedUploadedNames.push(uploadFile.name)
+        } catch (error) {
+          uploadFailures.push(`${uploadFile.name}：${error instanceof Error ? error.message : '上传失败'}`)
+        }
+      }
+      if (uploadFailures.length > 0) {
+        setUploadErrors(uploadFailures)
+        return
+      }
+      // 累计工时
+      const nextTimeEntries = nextEntry ? [...acceptanceTimeEntries, nextEntry] : acceptanceTimeEntries
+      const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
+      // 记录本次进展动态
+      const body = note.trim() || nextEntry?.note?.trim() || ''
+      if (body || finalizedUploadedNames.length > 0) {
+        await onCreateTaskUpdate(task.id, {
+          title: '验收进展',
+          body: body || `上传验收附件：${finalizedUploadedNames.join('、')}`,
+          hours: 0,
+          visible: false,
+        })
+      }
+      // 触发验收确认（复用现有 handleConfirmTaskAcceptance 逻辑）
+      onConfirmAcceptance(task, {
+        actualHours: nextActualHours,
+        acceptanceNote: note.trim(),
+        feedbackRating,
+        feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
+        feedbackNote: feedbackNote.trim(),
+        timeEntries: nextTimeEntries,
+        waitingEntries: acceptanceWaitingEntries,
+        acceptanceFiles: finalizedUploadedNames,
+      })
+      clearDraftCache(progressDraftKey)
+      progressAttachmentDraftCache.delete(progressDraftKey)
       onClose()
     } finally {
       setIsSaving(false)
@@ -5053,34 +6284,153 @@ function TaskProgressModal({
     setTimeEntryError('')
   }
 
+  const progressStartValue = activeDraft.date && normalizeClockInput(activeDraft.start)
+    ? `${activeDraft.date}T${normalizeClockInput(activeDraft.start)}`
+    : ''
+  const progressEndValue = activeDraft.endDate && normalizeClockInput(activeDraft.end)
+    ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}`
+    : ''
+
+  const writeProgressStart = (value: string) => {
+    updateActiveDraft((current) => ({
+      ...current,
+      date: value ? datePart(value) : '',
+      start: value ? value.slice(11, 16) : '',
+    }))
+  }
+
+  const writeProgressEnd = (value: string) => {
+    updateActiveDraft((current) => ({
+      ...current,
+      endDate: value ? datePart(value) : '',
+      end: value ? value.slice(11, 16) : '',
+    }))
+  }
+
+  const updateProgressStart = (value: string) => {
+    writeProgressStart(value)
+    if (!value) {
+      return
+    }
+    if (scheduleDerivedField === 'hours' && progressEndValue) {
+      const nextMinutes = Math.round((new Date(progressEndValue).getTime() - new Date(value).getTime()) / 60000)
+      if (nextMinutes > 0) {
+        setSegmentMinutes(nextMinutes)
+      }
+      return
+    }
+    if (scheduleDerivedField === 'end') {
+      writeProgressEnd(addMinutesToPlanDateTime(value, segmentMinutes))
+    }
+  }
+
+  const updateProgressEnd = (value: string) => {
+    writeProgressEnd(value)
+    if (!value) {
+      return
+    }
+    if (scheduleDerivedField === 'hours' && progressStartValue) {
+      const nextMinutes = Math.round((new Date(value).getTime() - new Date(progressStartValue).getTime()) / 60000)
+      if (nextMinutes > 0) {
+        setSegmentMinutes(nextMinutes)
+      }
+      return
+    }
+    if (scheduleDerivedField === 'start') {
+      writeProgressStart(addMinutesToPlanDateTime(value, -segmentMinutes))
+    }
+  }
+
+  const updateProgressMinutes = (value: number) => {
+    const nextMinutes = Math.max(1, Math.round(value))
+    setSegmentMinutes(nextMinutes)
+    if (scheduleDerivedField === 'start' && progressEndValue) {
+      writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -nextMinutes))
+      return
+    }
+    if (scheduleDerivedField === 'end' && progressStartValue) {
+      writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, nextMinutes))
+    }
+  }
+
+  const applyProgressDerivedField = (field: ScheduleAnchor) => {
+    if (field === 'start' && progressEndValue) {
+      writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -segmentMinutes))
+    } else if (field === 'end' && progressStartValue) {
+      writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, segmentMinutes))
+    } else if (field === 'hours' && draftEntryMinutes > 0) {
+      setSegmentMinutes(draftEntryMinutes)
+    }
+  }
+
+  const toggleProgressScheduleField = (field: ScheduleAnchor) => {
+    const nextField = scheduleDerivedField !== field ? field : field === 'start' ? 'end' : 'start'
+    setScheduleDerivedField(nextField)
+    applyProgressDerivedField(nextField)
+    setTimeEntryError('')
+  }
+
   const timeFields = (
-    <section className="progress-lite-time-grid">
-      <PlanDateTimeField
-        label="开始时间"
-        value={activeDraft.date && normalizeClockInput(activeDraft.start) ? `${activeDraft.date}T${normalizeClockInput(activeDraft.start)}` : ''}
-        onChange={(value) => updateActiveDraft((current) => ({ ...current, date: value ? datePart(value) : '', start: value ? value.slice(11, 16) : '' }))}
-        pickerId="progress-start"
-        activePickerId={activeDatePickerId}
-        onActivePickerChange={setActiveDatePickerId}
-      />
-      <button
-        type="button"
-        className="progress-lite-time-swap"
-        aria-label="交换开始时间和结束时间"
-        title="交换开始时间和结束时间"
-        onClick={swapDraftTimes}
-        disabled={!activeDraft.start.trim() || !activeDraft.end.trim()}
-      >
-        <ArrowRightLeft size={15} />
-      </button>
-      <PlanDateTimeField
-        label="结束时间"
-        value={activeDraft.endDate && normalizeClockInput(activeDraft.end) ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}` : ''}
-        onChange={(value) => updateActiveDraft((current) => ({ ...current, endDate: value ? datePart(value) : '', end: value ? value.slice(11, 16) : '' }))}
-        pickerId="progress-end"
-        activePickerId={activeDatePickerId}
-        onActivePickerChange={setActiveDatePickerId}
-      />
+    <section className="progress-lite-time-formula">
+      <div className="progress-lite-time-heading">
+        <div>
+          <span>时间与工时</span>
+          <small>三项同时只激活两项，第三项自动推算（灰色）</small>
+        </div>
+        <button
+          type="button"
+          className="progress-lite-time-swap"
+          aria-label="交换开始时间和结束时间"
+          title="交换开始时间和结束时间"
+          onClick={swapDraftTimes}
+          disabled={!activeDraft.start.trim() || !activeDraft.end.trim()}
+        >
+          <ArrowRightLeft size={15} />
+        </button>
+      </div>
+      <div className="new-task-schedule-row progress-lite-schedule-row">
+        <PlanDateTimeField
+          label="开始时间"
+          value={progressStartValue}
+          onChange={updateProgressStart}
+          isActive={scheduleDerivedField !== 'start'}
+          readOnly={scheduleDerivedField === 'start'}
+          control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="切换开始时间" onClick={() => toggleProgressScheduleField('start')} />}
+          pickerId="progress-start"
+          activePickerId={activeDatePickerId}
+          onActivePickerChange={setActiveDatePickerId}
+        />
+        <label className="field progress-lite-hours-field">
+          <span className="new-task-inline-label">
+            <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换本段工时" onClick={() => toggleProgressScheduleField('hours')} />
+            本段工时
+          </span>
+          <div className="new-task-hours-row progress-lite-hours-row">
+            <input
+              className="new-task-hours-input"
+              type="number"
+              min="0.02"
+              step="0.25"
+              value={Number((segmentMinutes / 60).toFixed(2))}
+              readOnly={scheduleDerivedField === 'hours'}
+              onChange={(event) => updateProgressMinutes(Number(event.target.value || 0) * 60)}
+              aria-label="本段工时"
+            />
+            <span className="progress-lite-hours-unit">小时</span>
+          </div>
+        </label>
+        <PlanDateTimeField
+          label="结束时间"
+          value={progressEndValue}
+          onChange={updateProgressEnd}
+          isActive={scheduleDerivedField !== 'end'}
+          readOnly={scheduleDerivedField === 'end'}
+          control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="切换结束时间" onClick={() => toggleProgressScheduleField('end')} />}
+          pickerId="progress-end"
+          activePickerId={activeDatePickerId}
+          onActivePickerChange={setActiveDatePickerId}
+        />
+      </div>
       <p className={`progress-lite-duration ${hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
         {hasDraftTimeEntry
           ? `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
@@ -5132,9 +6482,22 @@ function TaskProgressModal({
           </>
         ) : (
           <>
+            {onConfirmAcceptance && !isEditingEntry && (
+              <div
+                className={`progress-acceptance-toggle ${isAcceptanceMode ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setIsAcceptanceMode((current) => !current)}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setIsAcceptanceMode((current) => !current) } }}
+              >
+                <span className={`switch-control ${isAcceptanceMode ? 'active' : ''}`}><i /></span>
+                <span className="progress-acceptance-toggle-label">本次进展为验收进展</span>
+                <em>{isAcceptanceMode ? '附件将标记为验收文件，工时锁定' : '打开后将展开验收信息'}</em>
+              </div>
+            )}
             <section className="progress-lite-field">
               <div className="progress-lite-label-row">
-                <label htmlFor="progress-lite-note">进展内容</label>
+                <label htmlFor="progress-lite-note">{isAcceptanceMode ? '验收备注' : '进展内容'}</label>
                 <button
                   type="button"
                   className="icon-button ai-assist-button"
@@ -5188,11 +6551,145 @@ function TaskProgressModal({
               )}
             </section>
             {timeFields}
-            <section className="progress-lite-field">
-              <span className="progress-lite-label">附件（选填）</span>
-              {uploadedNames.length > 0 && (
-                <div className="uploaded-chip-row">
-                  {uploadedNames.map((name) => <span className="file-chip" key={name}><Paperclip size={13} />{name}</span>)}
+            <section
+              className="progress-lite-field progress-attachment-field"
+              onPaste={(event) => {
+                const pastedImages = Array.from(event.clipboardData.items)
+                  .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+                  .map((item) => item.getAsFile())
+                  .filter((file): file is File => Boolean(file))
+                if (pastedImages.length > 0) {
+                  event.preventDefault()
+                  addPendingFiles(pastedImages, 'paste')
+                }
+              }}
+            >
+              <div className="progress-lite-label-row">
+                <span className="progress-lite-label">{isAcceptanceMode ? '验收附件' : '附件（选填）'}</span>
+                {pendingAttachments.length > 0 && (
+                  <button
+                    type="button"
+                    className="attachment-ai-all"
+                    onClick={requestAllAttachmentNameSuggestions}
+                    disabled={pendingAttachments.every((attachment) => attachment.aiLoading)}
+                  >
+                    <Sparkles size={13} />
+                    AI 命名
+                  </button>
+                )}
+              </div>
+              {pendingAttachments.length > 0 && (
+                <div className="progress-attachment-thumbs" aria-label="附件缩略图">
+                  {pendingAttachments.map((attachment) => {
+                    const isImage = attachment.file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(attachment.name)
+                    const thumbUrl = isImage ? URL.createObjectURL(attachment.file) : ''
+                    return (
+                      <button
+                        type="button"
+                        className="progress-attachment-thumb"
+                        key={attachment.id}
+                        title={attachment.name}
+                        onClick={() => setPreviewAttachment(attachment)}
+                      >
+                        {isImage
+                          ? <img src={thumbUrl} alt={attachment.name} loading="lazy" />
+                          : <span className="progress-attachment-thumb-file">{splitFileName(attachment.name).extension.replace('.', '').toUpperCase() || 'FILE'}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {pendingAttachments.length > 0 && (
+                <div className="progress-attachment-list">
+                  {pendingAttachments.map((attachment) => (
+                    <article className="progress-attachment-draft" key={attachment.id}>
+                      <Paperclip size={15} />
+                      <div className="progress-attachment-main">
+                        <div className="progress-attachment-name-field">
+                          <input
+                            aria-label={`重命名 ${attachment.originalName}，扩展名不可修改`}
+                            value={splitFileName(attachment.name).base}
+                            onChange={(event) => {
+                              const base = event.target.value
+                              const extension = splitFileName(attachment.originalName).extension
+                              setPendingAttachments((current) => current.map((item) =>
+                                item.id === attachment.id
+                                  ? { ...item, name: `${base}${extension}`, aiSuggestion: undefined, aiError: undefined }
+                                  : item,
+                              ))
+                            }}
+                            onBlur={() => {
+                              setPendingAttachments((current) => current.map((item) =>
+                                item.id === attachment.id
+                                  ? { ...item, name: sanitizeAttachmentName(item.name, item.originalName) }
+                                  : item,
+                              ))
+                            }}
+                          />
+                          <span title="文件扩展名由系统保护，不可修改">
+                            {splitFileName(attachment.originalName).extension}
+                          </span>
+                        </div>
+                        {attachment.aiLoading && <small>视觉模型正在识别文件内容并整理名称...</small>}
+                        {attachment.aiError && <small className="attachment-ai-error">{attachment.aiError}</small>}
+                        {attachment.aiSuggestion && (
+                          <div className="attachment-ai-suggestion">
+                            <span>
+                              建议：{attachment.aiSuggestion.suggestedName}
+                              {attachment.aiSuggestion.reason ? ` · ${attachment.aiSuggestion.reason}` : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPendingAttachments((current) => current.map((item) =>
+                                  item.id === attachment.id
+                                    ? {
+                                        ...item,
+                                        name: sanitizeAttachmentName(attachment.aiSuggestion?.suggestedName ?? item.name, item.originalName),
+                                        aiSuggestion: undefined,
+                                      }
+                                    : item,
+                                ))
+                              }}
+                            >
+                              采用
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="progress-attachment-actions">
+                        <button
+                          type="button"
+                          aria-label="AI 建议文件名"
+                          title="AI 建议文件名"
+                          onClick={() => void requestAttachmentNameSuggestion(attachment.id)}
+                          disabled={attachment.aiLoading}
+                        >
+                          <Sparkles size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="重新上传"
+                          title="重新上传"
+                          onClick={() => {
+                            setReplacementAttachmentId(attachment.id)
+                            replacementInputRef.current?.click()
+                          }}
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="删除附件"
+                          title="删除附件"
+                          className="danger"
+                          onClick={() => setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               )}
               {uploadErrors.length > 0 && (
@@ -5200,9 +6697,10 @@ function TaskProgressModal({
                   {uploadErrors.map((message) => <span key={message}>{message}</span>)}
                 </div>
               )}
-              <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={isSaving}>
                 <Plus size={15} />
-                {uploading ? '上传中…' : '添加过程截图 / 文件'}
+                添加过程截图 / 文件
+                <small>也可以直接 Ctrl+V 粘贴图片</small>
               </button>
               <input
                 ref={fileInputRef}
@@ -5210,18 +6708,148 @@ function TaskProgressModal({
                 type="file"
                 multiple
                 accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
-                onChange={(event) => void uploadFiles(event.target.files)}
+                onChange={(event) => addPendingFiles(event.target.files)}
+              />
+              <input
+                ref={replacementInputRef}
+                className="task-row-upload-input"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+                onChange={(event) => replacePendingAttachment(event.target.files)}
               />
             </section>
+            {isAcceptanceMode && (
+              <div className="progress-acceptance-sections">
+                <section className="progress-acceptance-block">
+                  <h3 className="progress-acceptance-block-title">基础信息</h3>
+                  <div className="progress-acceptance-basic-grid">
+                    <div className="wide"><span>任务名称</span><strong>{task.title}</strong></div>
+                    <div><span>设计类型</span><strong>{task.type || '未分类'}</strong></div>
+                    <div><span>结算月份</span><strong>{monthLabelOf(taskSettlementMonth(task))}（{isSupplementalTask(task) ? '补录' : '非补录'}）</strong></div>
+                    <div><span>对接人</span><strong>{task.contact || '待确认'}</strong></div>
+                    <div><span>需求人</span><strong>{task.requester || '待确认'}</strong></div>
+                    <div><span>验收人</span><strong>{task.reviewer || task.requester || '待确认'}</strong></div>
+                    <div><span>预计开始</span><strong>{formatPlanDateTime(task.date)}</strong></div>
+                    <div><span>预计交付</span><strong>{formatPlanDateTime(task.estimatedDate || task.date)}</strong></div>
+                    <div className="wide"><span>需求描述</span><strong>{task.requirement || '未填写'}</strong></div>
+                  </div>
+                </section>
+                <section className="progress-acceptance-block">
+                  <h3 className="progress-acceptance-block-title">整体进度</h3>
+                  <div className="progress-acceptance-progress">
+                    <div className="acceptance-progress-track" aria-label={`当前进度 ${task.progress}%`}>
+                      <span style={{ width: `${task.progress}%` }} />
+                    </div>
+                    <strong>{task.progress}%</strong>
+                  </div>
+                  <p className="progress-acceptance-hint">确认验收后，进度将自动设为 100%。</p>
+                </section>
+                <section className="progress-acceptance-block">
+                  <h3 className="progress-acceptance-block-title">计时与工时汇总</h3>
+                  {acceptanceTimeEntries.length === 0 ? (
+                    <p className="progress-acceptance-hint">还没有分段计时。</p>
+                  ) : (
+                    <div className="progress-acceptance-time-table-wrap">
+                      <table className="progress-acceptance-time-table">
+                        <thead><tr><th>日期</th><th>时间段</th><th>工时</th></tr></thead>
+                        <tbody>
+                          {acceptanceTimeEntries.map((entry) => (
+                            <tr key={entry.id}>
+                              <td>{formatMonthDay(entry.date || datePart(task.date))}</td>
+                              <td>{entry.start}–{entry.end}</td>
+                              <td>{(minutesForTimeEntry(entry) / 60).toFixed(1)}h</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot><tr><td colSpan={2}>实际总工时 · 计入结算</td><td>{acceptanceLockedHours.toFixed(1)}h</td></tr></tfoot>
+                      </table>
+                    </div>
+                  )}
+                  <div className="progress-acceptance-money">
+                    <div><span>结算时薪</span><strong>¥{hourlyRate.toLocaleString()} / 小时</strong></div>
+                    <div><span>预计结算金额</span><strong>¥{acceptanceEstimatedAmount.toLocaleString()}</strong></div>
+                  </div>
+                  {acceptanceWaitingEntries.length > 0 && (
+                    <div className="progress-acceptance-waiting">
+                      <h4>等待记录 · 不计入结算</h4>
+                      {acceptanceWaitingEntries.map((entry) => (
+                        <div className="progress-acceptance-waiting-row" key={entry.id}>
+                          <span>{formatEntryDateTimeRange(task, entry)}</span>
+                          <em>{(minutesForTimeEntry(entry) / 60).toFixed(1)}h</em>
+                        </div>
+                      ))}
+                      <div className="progress-acceptance-waiting-total"><strong>累计等待</strong><em>{(acceptanceWaitingMinutes / 60).toFixed(1)}h</em></div>
+                    </div>
+                  )}
+                </section>
+                <section className="progress-acceptance-block">
+                  <h3 className="progress-acceptance-block-title">任务体感反馈 · 用于后续 BI / AI 分析</h3>
+                  <div className="progress-acceptance-feedback">
+                    <div className="task-feedback-options" role="group" aria-label="任务体感">
+                      {taskFeedbackRatings.map((rating) => (
+                        <button
+                          type="button"
+                          className={feedbackRating === rating ? 'active' : ''}
+                          key={rating}
+                          aria-pressed={feedbackRating === rating}
+                          onClick={() => {
+                            setFeedbackRating((current) => current === rating ? '' : rating)
+                            if (rating === '顺利') { setFeedbackTags([]) }
+                          }}
+                        >
+                          {rating}
+                        </button>
+                      ))}
+                    </div>
+                    {feedbackRating && feedbackRating !== '顺利' && (
+                      <div className="task-feedback-tags" aria-label="体感原因标签">
+                        {taskFeedbackTags.map((tag) => (
+                          <button
+                            type="button"
+                            className={feedbackTags.includes(tag) ? 'active' : ''}
+                            key={tag}
+                            aria-pressed={feedbackTags.includes(tag)}
+                            onClick={() => toggleFeedbackTag(tag)}
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <label className="acceptance-feedback-note">
+                      <span>体感评价</span>
+                      <textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="例如：需求清晰，但等待甲方确认主色耗时较长。" />
+                    </label>
+                  </div>
+                </section>
+                <div className="progress-acceptance-confirm-summary">确认验收后，状态变更为「已验收」，工时锁定并计入结算，进度设为 100%。</div>
+              </div>
+            )}
           </>
         )}
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" disabled={isSaving || !hasDraftTimeEntry || Boolean(draftConflict)} onClick={() => void saveProgress()}>
-          {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
-        </button>
+        {isAcceptanceMode && onConfirmAcceptance ? (
+          <button
+            data-modal-save="true"
+            className="primary-button progress-acceptance-confirm-button"
+            disabled={!canConfirmAcceptance}
+            onClick={() => void confirmAcceptanceFromProgress()}
+          >
+            {isSaving ? '保存中…' : '确认验收通过'}
+          </button>
+        ) : (
+          <button data-modal-save="true" className="primary-button" disabled={isSaving || !hasDraftTimeEntry || Boolean(draftConflict)} onClick={() => void saveProgress()}>
+            {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
+          </button>
+        )}
       </footer>
+      {previewAttachment && (
+        <div className="progress-attachment-preview-overlay" role="dialog" aria-label="附件预览" onClick={() => setPreviewAttachment(null)}>
+          <img src={URL.createObjectURL(previewAttachment.file)} alt={previewAttachment.name} />
+        </div>
+      )}
     </ModalShell>
   )
 }
@@ -5243,38 +6871,47 @@ function AcceptanceModal({
   onConfirm: (payload: AcceptancePayload) => void
   onUploadFile: (taskId: number, file: File, onProgress?: (ratio: number) => void) => Promise<FileAsset>
 }) {
-  const acceptanceDraftKey = `giverny:acceptance-draft:${task.id}:v1`
-  const fallbackBasicDraft = {
-    title: task.title,
-    type: task.type,
-    contact: task.contact,
-    requester: task.requester ?? '',
-    reviewer: task.reviewer ?? '',
-    requirement: task.requirement ?? '',
-    date: task.date,
-    estimatedDate: task.estimatedDate || '',
-  }
-  const fallbackTimeEntries = task.timeEntries ?? []
-  const fallbackWaitingEntries = task.waitingEntries ?? []
-  const [initialAcceptanceDraft] = useState(() =>
-    readDraftCache(acceptanceDraftKey, {
+  const acceptanceDraftKey = `giverny:acceptance-draft:${task.id}:v2`
+  const [initialAcceptanceDraft] = useState(() => {
+    // 草稿缓存只保留验收弹窗内用户手写 / 上传但未保存的内容。
+    // 任务基础信息、分段工时和等待记录必须实时来自 task，避免旧缓存污染结算。
+    const cached = readDraftCache(acceptanceDraftKey, {
       acceptanceNote: initialNote,
-      basicDraft: fallbackBasicDraft,
-      timeEntries: fallbackTimeEntries,
-      waitingEntries: fallbackWaitingEntries,
       uploadedFiles: [] as FileAsset[],
-      feedbackRating: task.feedbackRating ?? '' as TaskFeedbackRating | '',
-      feedbackTags: task.feedbackTags ?? [] as TaskFeedbackTag[],
-      feedbackNote: task.feedbackNote ?? '',
-    }),
-  )
+      feedbackRating: '' as TaskFeedbackRating | '',
+      feedbackTags: [] as TaskFeedbackTag[],
+      feedbackNote: '',
+    })
+    const cachedUploadedFiles = Array.isArray(cached.uploadedFiles) ? cached.uploadedFiles : []
+    const cachedFeedbackTags = Array.isArray(cached.feedbackTags) ? cached.feedbackTags : []
+    return {
+      acceptanceNote: cached.acceptanceNote,
+      uploadedFiles: cachedUploadedFiles,
+      feedbackRating: cached.feedbackRating || (task.feedbackRating ?? ''),
+      feedbackTags: cachedFeedbackTags.length > 0 ? cachedFeedbackTags : (task.feedbackTags ?? []),
+      feedbackNote: cached.feedbackNote || (task.feedbackNote ?? ''),
+    }
+  })
   const [acceptanceNote, setAcceptanceNote] = useState(initialAcceptanceDraft.acceptanceNote)
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialAcceptanceDraft.feedbackRating)
   const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialAcceptanceDraft.feedbackTags)
   const [feedbackNote, setFeedbackNote] = useState(initialAcceptanceDraft.feedbackNote)
-  const basicDraft = initialAcceptanceDraft.basicDraft
-  const timeEntries = initialAcceptanceDraft.timeEntries
-  const waitingEntries = initialAcceptanceDraft.waitingEntries
+  const basicDraft = useMemo(
+    () => ({
+      title: task.title,
+      type: task.type,
+      contact: task.contact,
+      requester: task.requester ?? '',
+      reviewer: task.reviewer ?? '',
+      requirement: task.requirement ?? '',
+      supplementalNote: task.supplementalNote ?? '',
+      date: task.date,
+      estimatedDate: task.estimatedDate || '',
+    }),
+    [task.contact, task.date, task.estimatedDate, task.requester, task.requirement, task.reviewer, task.supplementalNote, task.title, task.type],
+  )
+  const timeEntries = task.timeEntries ?? []
+  const waitingEntries = task.waitingEntries ?? []
   const [uploadedFiles, setUploadedFiles] = useState<FileAsset[]>(initialAcceptanceDraft.uploadedFiles)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -5288,15 +6925,12 @@ function AcceptanceModal({
   useEffect(() => {
     writeDraftCache(acceptanceDraftKey, {
       acceptanceNote,
-      basicDraft,
-      timeEntries,
-      waitingEntries,
       uploadedFiles,
       feedbackRating,
       feedbackTags,
       feedbackNote,
     })
-  }, [acceptanceDraftKey, acceptanceNote, basicDraft, feedbackNote, feedbackRating, feedbackTags, timeEntries, uploadedFiles, waitingEntries])
+  }, [acceptanceDraftKey, acceptanceNote, feedbackNote, feedbackRating, feedbackTags, uploadedFiles])
 
   const computedMinutes = sumTimeEntries(timeEntries)
   const computedHours = Math.round((computedMinutes / 60) * 100) / 100
@@ -5441,6 +7075,12 @@ function AcceptanceModal({
               <span>需求描述</span>
               <strong>{basicDraft.requirement || '未填写任务需求'}</strong>
             </div>
+            {isSupplemental && (
+              <div className="wide acceptance-basic-supplemental-note">
+                <span>补录说明</span>
+                <strong>{basicDraft.supplementalNote || '未填写补录说明'}</strong>
+              </div>
+            )}
           </div>
         </section>
 
@@ -5622,6 +7262,7 @@ function AcceptanceModal({
           取消
         </button>
         <button
+          data-modal-save="true"
           className="primary-button"
           disabled={!canConfirmAcceptance}
           onClick={() => {
@@ -5747,6 +7388,12 @@ function TaskDetailModal({
               <dt>任务需求</dt>
               <dd>{task.requirement || '未填写'}</dd>
             </div>
+            {isSupplementalTask(task) && (
+              <div className="wide">
+                <dt>补录说明</dt>
+                <dd className="supplemental-note-content">{task.supplementalNote || '未填写'}</dd>
+              </div>
+            )}
             <div>
               <dt>预计开始</dt>
               <dd>{task.date ? formatPlanDateTime(task.date) : '未设置'}</dd>
@@ -5842,195 +7489,6 @@ function TaskDetailModal({
   )
 }
 
-function TaskEditModal({
-  task,
-  onClose,
-  onSave,
-}: {
-  task: Task
-  onClose: () => void
-  onSave: (changes: Partial<Task>) => void
-}) {
-  const initialDraft = useMemo(() => ({
-    title: task.title,
-    type: task.type,
-    contact: task.contact,
-    requester: task.requester ?? '',
-    reviewer: task.reviewer,
-    requirement: task.requirement,
-    status: task.status,
-    date: task.date,
-    estimatedDate: task.estimatedDate,
-    estimatedHours: task.estimatedHours,
-    settlementMonth: taskSettlementMonth(task),
-  }), [task])
-  const [draft, setDraft] = useState(initialDraft)
-  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
-  const [scheduleAnchor, setScheduleAnchor] = useState<ScheduleAnchor>('start')
-  const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
-  const taskEstimatedMinutes = Math.round((Number(draft.estimatedHours) || 0) * 60)
-  const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(initialDraft)
-
-  const setField = <Key extends keyof typeof draft>(field: Key, value: (typeof draft)[Key]) => {
-    setDraft((current) => ({ ...current, [field]: value }))
-  }
-
-  const updatePlannedStartTime = (value: string) => {
-    setDraft((current) => ({ ...current, date: value, estimatedDate: addMinutesToPlanDateTime(value, taskEstimatedMinutes) }))
-  }
-
-  const updatePlannedEndTime = (value: string) => {
-    setDraft((current) => ({ ...current, date: addMinutesToPlanDateTime(value, -taskEstimatedMinutes), estimatedDate: value }))
-  }
-
-  const updateEstimatedHours = (valueMinutes: number) => {
-    const estimatedHours = Math.round((valueMinutes / 60) * 100) / 100
-    setDraft((current) => {
-      if (scheduleAnchor === 'end') {
-        return { ...current, estimatedHours, date: addMinutesToPlanDateTime(current.estimatedDate || current.date, -valueMinutes) }
-      }
-      return { ...current, estimatedHours, estimatedDate: addMinutesToPlanDateTime(current.date, valueMinutes) }
-    })
-  }
-
-  const save = () => {
-    onSave({
-      title: draft.title.trim() || task.title,
-      type: draft.type.trim() || task.type,
-      contact: draft.contact.trim() || '待确认',
-      requester: draft.requester.trim(),
-      reviewer: draft.reviewer.trim() || draft.requester.trim() || '待确认',
-      requirement: draft.requirement.trim(),
-      status: draft.status,
-      date: draft.date,
-      estimatedDate: draft.estimatedDate,
-      estimatedHours: draft.estimatedHours,
-      settlementMonth: draft.settlementMonth,
-    })
-  }
-
-  const requestClose = () => {
-    if (hasUnsavedChanges) {
-      setShowDiscardConfirm(true)
-      return
-    }
-    onClose()
-  }
-
-  return (
-    <ModalShell className="task-detail-modal task-edit-modal" labelledBy="task-edit-title" onClose={requestClose}>
-      <header className="modal-header">
-        <div>
-          <p className="eyebrow">任务信息</p>
-          <h2 id="task-edit-title">编辑任务</h2>
-        </div>
-        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={requestClose}>
-          <X size={18} />
-        </button>
-      </header>
-
-      <div className="task-detail-body">
-        <section className="task-detail-section plain-section">
-          <div className="form-grid task-detail-fields">
-            <label className="field wide">
-              <span>任务名称</span>
-              <input value={draft.title} onChange={(event) => setField('title', event.target.value)} />
-            </label>
-            <label className="field">
-              <span>设计类型</span>
-              <input value={draft.type} onChange={(event) => setField('type', event.target.value)} />
-            </label>
-            <label className="field">
-              <span>对接人</span>
-              <input value={draft.contact} onChange={(event) => setField('contact', event.target.value)} />
-            </label>
-            <label className="field">
-              <span>需求人</span>
-              <input value={draft.requester} onChange={(event) => setField('requester', event.target.value)} />
-            </label>
-            <label className="field">
-              <span>验收人</span>
-              <input value={draft.reviewer} onChange={(event) => setField('reviewer', event.target.value)} />
-            </label>
-            <label className="field">
-              <span>任务状态</span>
-              <select value={draft.status} onChange={(event) => setField('status', event.target.value as TaskStatus)}>
-                <option>计划中</option>
-                <option>进行中</option>
-                <option>挂起</option>
-                <option>待验收</option>
-                <option>已验收</option>
-                <option>终止</option>
-                <option>不计费</option>
-              </select>
-            </label>
-            <label className="field wide">
-              <span>任务需求</span>
-              <textarea className="task-detail-requirement" value={draft.requirement} onChange={(event) => setField('requirement', event.target.value)} />
-            </label>
-          </div>
-        </section>
-
-        <section className="task-detail-section plain-section">
-          <div className="form-grid task-detail-fields">
-            <PlanDateTimeField
-              label="预计开始时间"
-              value={draft.date}
-              onChange={updatePlannedStartTime}
-              isActive={scheduleAnchor === 'start'}
-              readOnly={scheduleAnchor !== 'start'}
-              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'start'} label="用预计开始时间推算交付时间" onClick={() => setScheduleAnchor('start')} />}
-              pickerId="edit-task-start"
-              activePickerId={activeDatePickerId}
-              onActivePickerChange={setActiveDatePickerId}
-            />
-            <PlanDateTimeField
-              label="预计交付时间"
-              value={draft.estimatedDate}
-              onChange={updatePlannedEndTime}
-              isActive={scheduleAnchor === 'end'}
-              readOnly={scheduleAnchor !== 'end'}
-              control={<ScheduleAnchorSwitch active={scheduleAnchor === 'end'} label="用预计交付时间倒推开始时间" onClick={() => setScheduleAnchor('end')} />}
-              pickerId="edit-task-end"
-              activePickerId={activeDatePickerId}
-              onActivePickerChange={setActiveDatePickerId}
-            />
-            <label className="field">
-              <span>预估工时</span>
-              <DurationPicker valueMinutes={taskEstimatedMinutes} onChange={updateEstimatedHours} />
-            </label>
-            <SettlementMonthField label="结算月份" value={draft.settlementMonth} onChange={(value) => setField('settlementMonth', value)} />
-            <label className="field">
-              <span>实际工时（系统计算）</span>
-              <input value={`${task.actualHours.toFixed(2)} h`} readOnly />
-            </label>
-            <div className="field">
-              <span>当前进度</span>
-              <div className="progress-block inline-progress readonly-progress">
-                <div className="large-meter">
-                  <span style={{ width: `${snapProgress(task.progress)}%` }} />
-                </div>
-                <strong>{snapProgress(task.progress)}%</strong>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <footer className="modal-footer">
-        {showDiscardConfirm && (
-          <div className="discard-inline" role="alert">
-            <span>有未保存的修改，确定放弃吗？</span>
-            <button type="button" className="ghost-button compact-button" onClick={() => setShowDiscardConfirm(false)}>继续编辑</button>
-            <button type="button" className="danger-button compact-button" onClick={onClose}>放弃修改</button>
-          </div>
-        )}
-        <button className="ghost-button" onClick={requestClose}>取消</button>
-        <button className="primary-button" onClick={save}>保存</button>
-      </footer>
-    </ModalShell>
-  )
-}
 
 function CalendarView({
   monthValue,
@@ -6199,69 +7657,91 @@ function CalendarView({
 function FilesView({
   files,
   tasks,
+  attachmentAnalyses,
   currentMonthValue,
   onPreviewFile,
   onDeleteFile,
   onDownloadFile,
   onUpdateFile,
+  onRetryAnalysis,
 }: {
   files: FileAsset[]
   tasks: Task[]
+  attachmentAnalyses: AttachmentAnalysis[]
   currentMonthValue: string
   onPreviewFile: (file: FileAsset) => void
   onDeleteFile: (fileId: number) => void
   onDownloadFile: (file: FileAsset) => void
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
+  onRetryAnalysis: (attachmentId: number) => Promise<void>
 }) {
-  const [monthFilter, setMonthFilter] = useState(currentMonthValue)
+  const acceptanceFiles = useMemo(() => files.filter((file) => file.scope === 'acceptance'), [files])
+  const analysisByAttachment = useMemo(
+    () => new Map(attachmentAnalyses.map((analysis) => [analysis.attachmentId, analysis])),
+    [attachmentAnalyses],
+  )
   const [fileQuery, setFileQuery] = useState('')
   const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; file: FileAsset } | null>(null)
   const [focusFileField, setFocusFileField] = useState<'name' | 'tag' | null>(null)
-  const monthOptions = useMemo(
-    () =>
-      [...new Set([
-        currentMonthValue,
-        ...files.map((file) => file.uploadedAt.slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)),
-        ...tasks.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value)),
-      ])].sort((a, b) => b.localeCompare(a)),
-    [currentMonthValue, files, tasks],
-  )
+  const [openMonths, setOpenMonths] = useState<Set<string>>(() => new Set([currentMonthValue]))
   const filteredFiles = useMemo(() => {
     const query = fileQuery.trim().toLowerCase()
-    return files.filter((file) => {
-      const task = tasks.find((item) => item.id === file.taskId)
-      const matchesMonth = monthFilter === 'all' || file.uploadedAt.startsWith(monthFilter) || (task ? taskSettlementMonth(task) === monthFilter : false)
+    return acceptanceFiles.filter((file) => {
       const matchesQuery =
         !query ||
         [file.name, file.task, file.type, file.tag ?? ''].some((value) => value.toLowerCase().includes(query))
-      return matchesMonth && matchesQuery
+      return matchesQuery
     })
-  }, [fileQuery, files, monthFilter, tasks])
-  const groupedTasks = useMemo(() => {
+  }, [acceptanceFiles, fileQuery])
+  const projectRecords = useMemo(() => {
     const taskMap = new Map(tasks.map((task) => [task.id, task]))
     const fileTaskIds = [...new Set(filteredFiles.map((file) => file.taskId))]
     return fileTaskIds
-      .map((taskId) => taskMap.get(taskId) ?? {
-        id: taskId,
-        title: filteredFiles.find((file) => file.taskId === taskId)?.task ?? '未关联任务',
-        type: '未分类',
-        actualHours: 0,
-        status: '计划中' as TaskStatus,
+      .map((taskId) => {
+        const task = taskMap.get(taskId)
+        const projectFiles = filteredFiles
+          .filter((file) => file.taskId === taskId)
+          .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))
+        const latestUploadedAt = projectFiles[0]?.uploadedAt ?? ''
+        const settlementMonth = task ? taskSettlementMonth(task) : ''
+        const month = /^\d{4}-\d{2}$/.test(settlementMonth)
+          ? settlementMonth
+          : latestUploadedAt.slice(0, 7)
+        return {
+          id: taskId,
+          title: task?.title ?? projectFiles[0]?.task ?? '未关联任务',
+          type: task?.type ?? '未分类',
+          contact: task?.contact ?? '',
+          acceptanceNote: task?.acceptanceNote ?? '',
+          month: /^\d{4}-\d{2}$/.test(month) ? month : currentMonthValue,
+          files: projectFiles,
+          latestUploadedAt,
+        }
       })
-      .filter((task) => filteredFiles.some((file) => file.taskId === task.id))
       .sort((a, b) => {
-        const latestA = filteredFiles.filter((file) => file.taskId === a.id).map((file) => file.uploadedAt).sort().at(-1) ?? ''
-        const latestB = filteredFiles.filter((file) => file.taskId === b.id).map((file) => file.uploadedAt).sort().at(-1) ?? ''
-        return latestB.localeCompare(latestA)
+        const monthOrder = b.month.localeCompare(a.month)
+        return monthOrder || b.latestUploadedAt.localeCompare(a.latestUploadedAt)
       })
-  }, [filteredFiles, tasks])
-  const [selectedProjectId, setSelectedProjectId] = useState(() => groupedTasks[0]?.id ?? 0)
-  const selectedProject = groupedTasks.find((task) => task.id === selectedProjectId) ?? groupedTasks[0]
-  const selectedFiles = selectedProject
-    ? filteredFiles.filter((file) => file.taskId === selectedProject.id).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))
-    : []
+  }, [currentMonthValue, filteredFiles, tasks])
+  const monthGroups = useMemo(() => {
+    const groups = new Map<string, typeof projectRecords>()
+    projectRecords.forEach((project) => {
+      groups.set(project.month, [...(groups.get(project.month) ?? []), project])
+    })
+    return [...groups.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([month, projects]) => ({
+        month,
+        projects,
+        fileCount: projects.reduce((sum, project) => sum + project.files.length, 0),
+      }))
+  }, [projectRecords])
+  const [selectedProjectId, setSelectedProjectId] = useState(() => projectRecords[0]?.id ?? 0)
+  const selectedProject = projectRecords.find((task) => task.id === selectedProjectId) ?? projectRecords[0]
+  const selectedFiles = selectedProject?.files ?? []
   const [selectedFileId, setSelectedFileId] = useState(0)
   const selectedFile = selectedFiles.find((file) => file.id === selectedFileId)
+
   const openFileSource = (file: FileAsset) => {
     const sourceUrl = authedPreviewUrl(file.sourceUrl)
     if (sourceUrl) {
@@ -6302,6 +7782,11 @@ function FilesView({
     const handleKeydown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable
+      if (event.key === 'Escape' && selectedFile) {
+        setSelectedFileId(0)
+        setFocusFileField(null)
+        return
+      }
       if (event.code === 'Space' && selectedFile && !isTyping) {
         event.preventDefault()
         onPreviewFile(selectedFile)
@@ -6313,74 +7798,84 @@ function FilesView({
 
   return (
     <section className="view-stack">
-      <section className="panel view-toolbar">
-        <div className="panel-header compact">
-          <div>
-            <h2>文件库</h2>
-            <p>自动汇总任务生命周期中的过程文件、最终稿和验收文件</p>
-          </div>
-        </div>
+      <section className="file-library-header">
+        <p>按项目归档 · 点进项目查看验收交付件，AI 已自动解析</p>
+        <label className="file-search-line file-library-search">
+          <Search size={15} />
+          <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="搜索文件、项目、标签、关联任务" />
+        </label>
       </section>
 
-      <section className={`file-library-layout ${selectedFile ? 'inspector-open' : ''}`}>
-        <aside className="panel file-project-list">
-          <div className="panel-header compact">
-            <div>
-              <h2>项目 / 任务</h2>
-              <p>{groupedTasks.length} 个条目 · 最近上传优先</p>
-            </div>
-          </div>
-          <div className="file-library-filters">
-            <label className="search-box file-search-box">
-              <Search size={16} />
-              <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="搜索项目或文件" />
-            </label>
-            <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)}>
-              <option value="all">全部月份</option>
-              {monthOptions.map((month) => (
-                <option value={month} key={month}>{monthLabelOf(month)}</option>
-              ))}
-            </select>
-          </div>
-          {groupedTasks.length === 0 && <p className="calendar-empty-hint">当前筛选下还没有文件。</p>}
-          {groupedTasks.map((task) => {
-            const taskFiles = filteredFiles.filter((file) => file.taskId === task.id)
-            const latestUploadedAt = taskFiles.map((file) => file.uploadedAt).sort().at(-1)
+      <section className="file-library-layout">
+        <aside className="file-project-list">
+          {monthGroups.length === 0 && <p className="calendar-empty-hint">当前还没有验收文件。</p>}
+          {monthGroups.map((group) => {
+            const isOpen = Boolean(fileQuery.trim()) || openMonths.has(group.month)
             return (
-              <button
-                className={`file-project-row ${selectedProject?.id === task.id ? 'active' : ''}`}
-                key={task.id}
-                onClick={() => {
-                  setSelectedProjectId(task.id)
-                  setSelectedFileId(0)
-                }}
-              >
-                <div>
-                  <strong>{task.title}</strong>
-                  <span>{task.type}{latestUploadedAt ? ` · ${latestUploadedAt.slice(0, 10)}` : ''}</span>
-                </div>
-                <em>{taskFiles.length} 个文件</em>
-              </button>
+              <section className={`file-tree-month ${isOpen ? 'open' : ''}`} key={group.month}>
+                <button
+                  className="file-tree-month-header"
+                  type="button"
+                  onClick={() => {
+                    setOpenMonths((current) => {
+                      const next = new Set(current)
+                      if (next.has(group.month)) {
+                        next.delete(group.month)
+                      } else {
+                        next.add(group.month)
+                      }
+                      return next
+                    })
+                  }}
+                >
+                  {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <strong>{monthLabelOf(group.month)}</strong>
+                  <span>{group.projects.length} 项 · {group.fileCount} 文件</span>
+                </button>
+                {isOpen && (
+                  <div className="file-tree-projects">
+                    {group.projects.map((project) => (
+                      <button
+                        className={`file-project-row ${selectedProject?.id === project.id ? 'active' : ''}`}
+                        key={project.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedProjectId(project.id)
+                          setSelectedFileId(0)
+                        }}
+                      >
+                        <Folder size={14} />
+                        <span>{project.title}</span>
+                        <em>{project.files.length}</em>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
             )
           })}
         </aside>
 
         <section className="file-project-detail">
-          <div className="panel-header compact">
+          <div className="file-project-heading">
             <div>
               <h2>{selectedProject?.title ?? '选择一个项目'}</h2>
-              <p>{selectedProject ? `${selectedFiles.length} 个关联文件 · 点击文件查看信息，双击或空格预览` : '点击左侧条目查看文件'}</p>
+              <p>
+                {selectedProject
+                  ? `${selectedProject.contact || '未填写对接人'} · ${selectedProject.type} · ${selectedFiles.length} 个验收文件`
+                  : '点击左侧项目查看验收文件'}
+              </p>
             </div>
           </div>
+          {selectedProject?.acceptanceNote && (
+            <div className="file-project-note">
+              <strong>最新交付说明</strong>
+              <span>{selectedProject.acceptanceNote}</span>
+            </div>
+          )}
           <div className="grouped-file-grid">
             {selectedFiles.map((file) => {
               const fileType = file.type.toUpperCase()
-              const isImage = isInlineImageFileType(fileType)
-              const isDocumentPreview = isInlineDocumentFileType(fileType)
-              const isOfficePreview = isOfficeFileType(fileType)
-              const hasVisualPreview = Boolean(file.previewUrl) || isImage || isDocumentPreview || isOfficePreview
-              const thumbUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
-              const documentPreviewUrl = isDocumentPreview ? fileDocumentPreviewSource(file) : undefined
               return (
                 <article
                   className={`file-thumb-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
@@ -6397,28 +7892,17 @@ function FilesView({
                     }
                   }}
                 >
-                  <div className={`file-thumb-preview ${hasVisualPreview ? 'visual-preview' : ''}`}>
+                  <div className="file-thumb-preview visual-preview">
                     <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
-                    {thumbUrl ? (
-                      <img src={thumbUrl} alt={file.name} loading="lazy" />
-                    ) : documentPreviewUrl ? (
-                      <iframe className="file-thumb-frame" src={documentPreviewUrl} title={file.name} loading="lazy" />
-                    ) : isOfficePreview ? (
-                      <div className="file-thumb-document">
-                        <FileText size={42} />
-                        <strong>{fileType}</strong>
-                        <span>可预览</span>
-                      </div>
-                    ) : (
-                      <div className="file-thumb-placeholder">
-                        {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
-                        <strong>{fileType}</strong>
-                      </div>
-                    )}
+                    <FileThumbnailPreview file={file} />
                   </div>
                   <div className="file-thumb-info">
                     <h2>{file.name}</h2>
-                    <p>{file.size} · {file.uploadedAt}</p>
+                    <p>{file.size} · {file.uploadedAt.slice(0, 10)}</p>
+                    <div className="file-thumb-tags">
+                      <span>验收文件</span>
+                      {parseFileTags(file.tag).slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}
+                    </div>
                   </div>
                 </article>
               )
@@ -6430,11 +7914,18 @@ function FilesView({
           <FileInspector
             key={selectedFile.id}
             file={selectedFile}
+            analysis={analysisByAttachment.get(selectedFile.id)}
             onPreview={onPreviewFile}
+            onDownload={onDownloadFile}
             onDelete={onDeleteFile}
             onUpdateFile={onUpdateFile}
+            onRetryAnalysis={onRetryAnalysis}
             focusField={focusFileField}
             onFocusHandled={() => setFocusFileField(null)}
+            onClose={() => {
+              setSelectedFileId(0)
+              setFocusFileField(null)
+            }}
           />
         )}
       </section>
@@ -6456,18 +7947,26 @@ function FilesView({
 
 function FileInspector({
   file,
+  analysis,
   onPreview,
+  onDownload,
   onDelete,
   onUpdateFile,
+  onRetryAnalysis,
   focusField,
   onFocusHandled,
+  onClose,
 }: {
   file: FileAsset | undefined
+  analysis?: AttachmentAnalysis
   onPreview: (file: FileAsset) => void
+  onDownload: (file: FileAsset) => void
   onDelete: (fileId: number) => void
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
+  onRetryAnalysis: (attachmentId: number) => Promise<void>
   focusField?: 'name' | 'tag' | null
   onFocusHandled?: () => void
+  onClose: () => void
 }) {
   const nameInputRef = useRef<HTMLInputElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
@@ -6475,6 +7974,7 @@ function FileInspector({
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState(() => parseFileTags(file?.tag))
   const [isSaving, setIsSaving] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
 
   useEffect(() => {
     // File metadata is editable draft state; reset it when the selected file changes to avoid cross-file overwrites.
@@ -6494,24 +7994,9 @@ function FileInspector({
     onFocusHandled?.()
   }, [file, focusField, onFocusHandled])
 
-  if (!file) {
-    return (
-      <aside className="panel file-inspector">
-        <div className="file-inspector-empty">
-          <FileImage size={28} />
-          <strong>选择一个文件</strong>
-          <span>右侧会显示预览、重命名、标签和基础信息。</span>
-        </div>
-      </aside>
-    )
-  }
+  if (!file) return null
 
   const fileType = file.type.toUpperCase()
-  const isImage = isInlineImageFileType(fileType)
-  const isDocumentPreview = isInlineDocumentFileType(fileType)
-  const isOfficePreview = isOfficeFileType(fileType)
-  const inspectorPreviewUrl = authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined))
-  const inspectorDocumentUrl = isDocumentPreview ? fileDocumentPreviewSource(file) : undefined
   const sourceUrl = authedPreviewUrl(file.sourceUrl)
   const saveMetadata = async (nextTags = tags) => {
     setIsSaving(true)
@@ -6539,35 +8024,46 @@ function FileInspector({
   }
 
   return (
-    <aside className="panel file-inspector">
-      <button className="file-inspector-preview" type="button" onClick={() => onPreview(file)}>
-        <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
-        {inspectorPreviewUrl ? (
-          <img src={inspectorPreviewUrl} alt={file.name} loading="lazy" />
-        ) : inspectorDocumentUrl ? (
-          <iframe className="file-inspector-frame" src={inspectorDocumentUrl} title={file.name} loading="lazy" />
-        ) : isOfficePreview ? (
-          <div className="file-thumb-document file-thumb-document-large">
-            <FileText size={42} />
-            <strong>{fileType}</strong>
-            <span>双击或空格预览内容</span>
+    <>
+      <button className="file-inspector-scrim" type="button" aria-label="关闭文件详情" onClick={onClose} />
+      <aside className="file-inspector" aria-label={`${file.name} 文件详情`}>
+        <header className="file-inspector-header">
+          <div>
+            <span>{fileType}</span>
+            <strong>验收文件</strong>
           </div>
-        ) : (
-          <div className="file-thumb-placeholder">
-            {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
-            <strong>{fileType}</strong>
+          <button type="button" onClick={onClose}>
+            关闭 <X size={16} />
+          </button>
+        </header>
+        <label className="inspector-field file-inspector-name">
+          <span>文件名</span>
+          <input ref={nameInputRef} value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={() => void saveMetadata()} />
+        </label>
+        <p className="file-inspector-subtitle">{file.task} · {file.type}</p>
+        <button className="file-inspector-preview" type="button" onClick={() => onPreview(file)}>
+          <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
+          <FileThumbnailPreview file={file} inspector />
+        </button>
+        <p className="file-inspector-preview-hint">双击文件卡或按空格可放大预览</p>
+        <dl className="inspector-meta">
+          <div>
+            <dt>关联任务</dt>
+            <dd>{file.task}</dd>
           </div>
-        )}
-      </button>
-      <div className="inspector-color-dots" aria-hidden="true">
-        {['#f7f5ed', '#d8c3a5', '#9b6d52', '#c9c2ba', '#425f72', '#67c6c0', '#5aa3ce', '#526f48', '#8b7189', '#d8d158'].map((color) => (
-          <span key={color} style={{ backgroundColor: color }} />
-        ))}
-      </div>
-      <label className="inspector-field">
-        <span>文件名</span>
-        <input ref={nameInputRef} value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={() => void saveMetadata()} />
-      </label>
+          <div>
+            <dt>尺寸 / 大小</dt>
+            <dd>{file.size}</dd>
+          </div>
+          <div>
+            <dt>上传日期</dt>
+            <dd>{file.uploadedAt}</dd>
+          </div>
+          <div>
+            <dt>文件类型</dt>
+            <dd><span className="file-meta-chip">验收文件</span></dd>
+          </div>
+        </dl>
       <label className="inspector-field">
         <span>标签</span>
         <input
@@ -6583,12 +8079,7 @@ function FileInspector({
           placeholder={isSaving ? '保存中…' : '输入标签后按回车'}
         />
       </label>
-      <label className="inspector-field">
-        <span>链接</span>
-        <input value={sourceUrl ?? ''} readOnly placeholder="源文件链接" />
-      </label>
       <div className="inspector-tags">
-        <strong>标签</strong>
         {tags.length === 0 && <em>暂无标签</em>}
         {tags.map((tag) => (
           <span key={tag}>
@@ -6599,40 +8090,201 @@ function FileInspector({
           </span>
         ))}
       </div>
-      <dl className="inspector-meta">
-        <div>
-          <dt>关联任务</dt>
-          <dd>{file.task}</dd>
+      <section className="file-understanding">
+        <div className="file-understanding-header">
+          <div>
+            <span>交付件理解</span>
+            <strong>
+              {!analysis ? '等待分析' : analysis.status === 'completed' ? '已完成' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : '需要重试'}
+            </strong>
+          </div>
+          <button
+            type="button"
+            className="ghost-button compact-button"
+            disabled={isRetrying || analysis?.status === 'processing'}
+            onClick={() => {
+              setIsRetrying(true)
+              void onRetryAnalysis(file.id).finally(() => setIsRetrying(false))
+            }}
+          >
+            <RotateCcw size={13} />
+            {isRetrying ? '提交中' : '重新分析'}
+          </button>
         </div>
-        <div>
-          <dt>尺寸 / 大小</dt>
-          <dd>{file.size}</dd>
-        </div>
-        <div>
-          <dt>格式</dt>
-          <dd>{file.type}</dd>
-        </div>
-        <div>
-          <dt>上传日期</dt>
-          <dd>{file.uploadedAt}</dd>
-        </div>
-        <div>
-          <dt>版本状态</dt>
-          <dd>{file.final ? '最终稿' : '过程文件'}</dd>
-        </div>
-      </dl>
+        {analysis?.status === 'completed' ? (
+          <>
+            <p className="file-understanding-summary">{analysis.summary}</p>
+            <div className="file-understanding-meta">
+              <span>{analysis.contentType || file.type}</span>
+              <span>{analysis.provider} / {analysis.model}</span>
+              <strong className="analysis-confidence">置信度{analysis.confidence || '中'}</strong>
+            </div>
+            <div className="file-understanding-sections">
+              <AnalysisList title="需求匹配" items={analysis.requirementMatches} emptyText="暂无明确匹配结论" />
+              <AnalysisList title="质量分析" items={analysis.qualityIssues} emptyText="未发现明确质量问题" />
+              <AnalysisList title="风险与建议" items={[...analysis.risks, ...analysis.suggestions]} emptyText="暂无额外风险或建议" />
+            </div>
+          </>
+        ) : (
+          <p className={`file-understanding-message ${analysis?.status === 'failed' || analysis?.status === 'unsupported' ? 'error' : ''}`}>
+            {analysis?.errorMessage || '文件上传后会自动解析内容，并结合任务需求给出质量与风险判断。'}
+          </p>
+        )}
+      </section>
       <div className="inspector-actions">
-        <button className="inspector-action-button" type="button" title="预览" aria-label="预览" onClick={() => onPreview(file)}>
-          <Eye size={16} />
+        <button className="primary-button" type="button" onClick={() => onDownload(file)}>
+          <Download size={15} />
+          下载
         </button>
-        <button className="inspector-action-button" type="button" title="打开" aria-label="打开" onClick={() => sourceUrl && window.open(sourceUrl, '_blank', 'noreferrer')}>
-          <ExternalLink size={16} />
+        <button className="ghost-button" type="button" onClick={() => sourceUrl && window.open(sourceUrl, '_blank', 'noreferrer')}>
+          打开原文件
         </button>
-        <button className="inspector-action-button danger-action" type="button" title="删除" aria-label="删除" onClick={() => onDelete(file.id)}>
-          <Trash2 size={16} />
+        <button className="ghost-button danger-text-button" type="button" onClick={() => onDelete(file.id)}>
+          删除
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
+  )
+}
+
+function FileThumbnailPreview({ file, inspector = false }: { file: FileAsset; inspector?: boolean }) {
+  const fileType = file.type.toUpperCase()
+  const previewUrl = authedPreviewUrl(file.previewUrl)
+  const sourceUrl = fileDocumentPreviewSource(file)
+
+  if (previewUrl || (isInlineImageFileType(fileType) && sourceUrl)) {
+    return <img src={previewUrl ?? sourceUrl} alt={file.name} loading="lazy" />
+  }
+
+  if (['PDF', 'AI'].includes(fileType) && sourceUrl) {
+    return <PdfThumbnail sourceUrl={sourceUrl} label={file.name} />
+  }
+
+  if (fileType === 'PSD' && sourceUrl) {
+    return <PsdThumbnail sourceUrl={sourceUrl} label={file.name} />
+  }
+
+  if (isOfficeFileType(fileType) && sourceUrl) {
+    return (
+      <div className={`file-thumbnail-office ${inspector ? 'inspector' : ''}`}>
+        <OfficePreview fileType={fileType} sourceUrl={sourceUrl} compact />
+      </div>
+    )
+  }
+
+  return (
+    <div className={`file-thumb-placeholder ${inspector ? 'file-thumb-document-large' : ''}`}>
+      {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
+      <strong>{fileType}</strong>
+      <span>暂时无法生成缩略图</span>
+    </div>
+  )
+}
+
+function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const renderFirstPage = async () => {
+      try {
+        const response = await fetch(sourceUrl)
+        if (!response.ok) {
+          throw new Error('PDF 读取失败')
+        }
+        const data = await response.arrayBuffer()
+        const pdfjs = await import('pdfjs-dist')
+        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+        const document = await pdfjs.getDocument({ data }).promise
+        const page = await document.getPage(1)
+        const baseViewport = page.getViewport({ scale: 1 })
+        const targetWidth = 720
+        const viewport = page.getViewport({ scale: targetWidth / baseViewport.width })
+        const canvas = canvasRef.current
+        if (!canvas || cancelled) {
+          return
+        }
+        const context = canvas.getContext('2d')
+        if (!context) {
+          throw new Error('Canvas 不可用')
+        }
+        canvas.width = Math.ceil(viewport.width)
+        canvas.height = Math.ceil(viewport.height)
+        await page.render({ canvasContext: context, viewport }).promise
+      } catch (error) {
+        console.warn('PDF thumbnail generation failed', error)
+        if (!cancelled) {
+          setFailed(true)
+        }
+      }
+    }
+    void renderFirstPage()
+    return () => {
+      cancelled = true
+    }
+  }, [sourceUrl])
+
+  if (failed) {
+    return (
+      <div className="file-thumb-placeholder">
+        <FileText size={42} />
+        <strong>PDF</strong>
+        <span>缩略图生成失败</span>
+      </div>
+    )
+  }
+
+  return <canvas ref={canvasRef} className="file-thumbnail-canvas" aria-label={`${label} 第一页缩略图`} />
+}
+
+function PsdThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }) {
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl = ''
+    const renderPsd = async () => {
+      try {
+        const response = await fetch(sourceUrl)
+        if (!response.ok) {
+          throw new Error('PSD 读取失败')
+        }
+        const source = new File([await response.blob()], label, { type: 'image/vnd.adobe.photoshop' })
+        const preview = await createPsdPreviewFile(source)
+        if (!preview || cancelled) {
+          throw new Error('PSD 无合成预览')
+        }
+        objectUrl = URL.createObjectURL(preview)
+        setPreviewUrl(objectUrl)
+      } catch (error) {
+        console.warn('PSD thumbnail generation failed', error)
+        if (!cancelled) {
+          setFailed(true)
+        }
+      }
+    }
+    void renderPsd()
+    return () => {
+      cancelled = true
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [label, sourceUrl])
+
+  if (previewUrl) {
+    return <img src={previewUrl} alt={label} loading="lazy" />
+  }
+
+  return (
+    <div className="file-thumb-placeholder">
+      <FileImage size={42} />
+      <strong>PSD</strong>
+      <span>{failed ? '缩略图生成失败' : '正在生成缩略图'}</span>
+    </div>
   )
 }
 
@@ -6659,8 +8311,6 @@ function InsightsView({
   reports,
   currentMonth,
   hourlyRate,
-  onBackfillAnalyses,
-  onRetryAnalysis,
 }: {
   tasks: Task[]
   updates: TaskUpdate[]
@@ -6669,12 +8319,9 @@ function InsightsView({
   reports: ReportRecord[]
   currentMonth: { label: string; value: string }
   hourlyRate: number
-  onBackfillAnalyses: () => Promise<void>
-  onRetryAnalysis: (attachmentId: number) => Promise<void>
 }) {
   const [period, setPeriod] = useState<InsightPeriod>('month')
   const [activeTab, setActiveTab] = useState<InsightTab>('period')
-  const [analysisActionId, setAnalysisActionId] = useState<number | 'backfill' | null>(null)
   const [diagnosis, setDiagnosis] = useState<InsightDiagnosis | null>(null)
   const [isDiagnosisLoading, setIsDiagnosisLoading] = useState(false)
   const [diagnosisError, setDiagnosisError] = useState('')
@@ -6706,9 +8353,6 @@ function InsightsView({
     [analysisByAttachment, periodFiles],
   )
   const completedAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'completed')
-  const pendingAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'pending' || analysis.status === 'processing')
-  const problemAnalyses = periodAnalyses.filter((analysis) => analysis.status === 'failed' || analysis.status === 'unsupported')
-  const unanalyzedCount = Math.max(0, periodFiles.length - periodAnalyses.length)
   const filesByTask = useMemo(() => {
     const map = new Map<number, FileAsset[]>()
     periodFiles.forEach((file) => {
@@ -6972,98 +8616,6 @@ function InsightsView({
             </section>
           </section>
         </>
-      )}
-
-      {activeTab === 'deliverable' && (
-        <section className="panel insights-chain-panel attachment-analysis-panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>交付件内容理解</h2>
-              <p>读取 R2 附件，经 PDF / Office / 图片解析后由视觉模型分析，结果保存到 D1</p>
-            </div>
-            <button
-              type="button"
-              className="ghost-button compact-button"
-              disabled={analysisActionId !== null}
-              onClick={() => {
-                setAnalysisActionId('backfill')
-                void onBackfillAnalyses().finally(() => setAnalysisActionId(null))
-              }}
-            >
-              <RotateCcw size={14} />
-              {analysisActionId === 'backfill' ? '正在创建任务' : '补分析历史附件'}
-            </button>
-          </div>
-          <div className="attachment-analysis-stats" aria-label="附件分析状态">
-            <div><strong>{completedAnalyses.length}</strong><span>已读懂</span></div>
-            <div><strong>{pendingAnalyses.length}</strong><span>分析中</span></div>
-            <div><strong>{problemAnalyses.length}</strong><span>需处理</span></div>
-            <div><strong>{unanalyzedCount}</strong><span>待建任务</span></div>
-          </div>
-          <div className="attachment-analysis-list">
-            {periodFiles.length === 0 && (
-              <div className="empty-state">
-                <strong>当前周期暂无附件</strong>
-                <p>上传 PDF、PPTX、DOCX、XLSX 或图片后，系统会自动创建分析任务。</p>
-              </div>
-            )}
-            {periodFiles.map((file) => {
-              const analysis = analysisByAttachment.get(file.id)
-              const task = tasks.find((item) => item.id === file.taskId)
-              const isProblem = analysis?.status === 'failed' || analysis?.status === 'unsupported'
-              return (
-                <article className="attachment-analysis-row" key={file.id}>
-                  <header>
-                    <div>
-                      <strong>{file.name}</strong>
-                      <span>{task?.title || file.task} · {file.type} · {file.uploadedAt}</span>
-                    </div>
-                    <span className={`analysis-status status-${analysis?.status || 'pending'}`}>
-                      {!analysis ? '待建任务' : analysis.status === 'completed' ? '已分析' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : analysis.status === 'unsupported' ? '需预览图' : '分析失败'}
-                    </span>
-                  </header>
-                  {analysis?.status === 'completed' && (
-                    <>
-                      <p className="attachment-analysis-summary">{analysis.summary}</p>
-                      <div className="attachment-analysis-meta">
-                        <span>{analysis.contentType || file.type}</span>
-                        <span>{analysis.parserKind}</span>
-                        <span>{analysis.provider} / {analysis.model}</span>
-                        <span>置信度 {analysis.confidence || '中'}</span>
-                      </div>
-                      <div className="attachment-analysis-columns">
-                        <AnalysisList title="需求匹配" items={analysis.requirementMatches} emptyText="暂无明确匹配结论" />
-                        <AnalysisList title="质量问题" items={analysis.qualityIssues} emptyText="未发现明确质量问题" />
-                        <AnalysisList title="风险与建议" items={[...analysis.risks, ...analysis.suggestions]} emptyText="暂无额外风险或建议" />
-                      </div>
-                    </>
-                  )}
-                  {(analysis?.status === 'pending' || analysis?.status === 'processing') && (
-                    <p className="attachment-analysis-message">后台正在解析文件并调用视觉模型，完成后结果会自动写回 D1。</p>
-                  )}
-                  {isProblem && (
-                    <div className="attachment-analysis-error">
-                      <p>{analysis.errorMessage || '附件分析未完成'}</p>
-                      <button
-                        type="button"
-                        className="ghost-button compact-button"
-                        disabled={analysisActionId !== null}
-                        onClick={() => {
-                          setAnalysisActionId(file.id)
-                          void onRetryAnalysis(file.id).finally(() => setAnalysisActionId(null))
-                        }}
-                      >
-                        <RotateCcw size={14} />
-                        {analysisActionId === file.id ? '重试中' : '重新分析'}
-                      </button>
-                    </div>
-                  )}
-                  {!analysis && <p className="attachment-analysis-message">点击“补分析历史附件”后会为该文件创建后台任务。</p>}
-                </article>
-              )
-            })}
-          </div>
-        </section>
       )}
 
       {activeTab === 'capability' && (
@@ -8775,12 +10327,18 @@ function ConfirmDialogModal({
   const isDanger = dialog.tone === 'danger'
 
   return (
-    <ModalShell className={`delete-confirm-modal confirm-dialog-modal ${isDanger ? 'danger-confirm' : ''}`} labelledBy="confirm-dialog-title" onClose={onClose}>
-      <div className="delete-confirm-icon">
-        {isDanger ? <Trash2 size={24} /> : <CheckCircle2 size={24} />}
-      </div>
+    <ModalShell
+      className={`delete-confirm-modal confirm-dialog-modal ${isDanger ? 'danger-confirm' : ''} ${dialog.hideIcon ? 'compact-confirm-dialog' : ''}`}
+      labelledBy="confirm-dialog-title"
+      onClose={onClose}
+    >
+      {!dialog.hideIcon && (
+        <div className="delete-confirm-icon">
+          {isDanger ? <Trash2 size={24} /> : <CheckCircle2 size={24} />}
+        </div>
+      )}
       <div className="delete-confirm-copy">
-        <p className="eyebrow">{dialog.eyebrow}</p>
+        {dialog.eyebrow && <p className="eyebrow">{dialog.eyebrow}</p>}
         <h2 id="confirm-dialog-title">{dialog.title}</h2>
         <p>{dialog.body}</p>
       </div>
@@ -8930,10 +10488,18 @@ function ModalShell({
   closeOnEscape?: boolean
   children: React.ReactNode
 }) {
+  const modalRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (closeOnEscape && event.key === 'Escape') {
         onClose()
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        const saveButton = modalRef.current?.querySelector<HTMLButtonElement>('[data-modal-save="true"]')
+        if (saveButton && !saveButton.disabled) {
+          event.preventDefault()
+          saveButton.click()
+        }
       }
     }
     window.addEventListener('keydown', handleKeydown)
@@ -8949,11 +10515,63 @@ function ModalShell({
           onClose()
         }
       }}
+      onDoubleClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
     >
-      <section className={`task-modal ${className ?? ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
+      <section ref={modalRef} className={`task-modal ${className ?? ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
         {children}
       </section>
     </div>
+  )
+}
+
+function renderKnowledgeParagraph(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    return <Fragment key={`${part}-${index}`}>{part}</Fragment>
+  })
+}
+
+function DailyKnowledgeModal({
+  item,
+  isLoading,
+  canRefresh,
+  onRefresh,
+  onClose,
+}: {
+  item: DailyKnowledgeItem
+  isLoading: boolean
+  canRefresh: boolean
+  onRefresh: () => void
+  onClose: () => void
+}) {
+  const sourceLabel = item.source.startsWith('AI · ') ? `AI 生成（${item.source.replace('AI · ', '')}）` : item.source
+
+  return (
+    <ModalShell className="daily-knowledge-modal" labelledBy="daily-knowledge-title" onClose={onClose}>
+      <header className="daily-knowledge-modal-header">
+        <h2 id="daily-knowledge-title">{item.title}</h2>
+        <p>{item.category} · {sourceLabel}</p>
+      </header>
+      <div className="daily-knowledge-article">
+        {item.body.map((paragraph, index) => (
+          <p key={`${item.title}-${index}`}>{renderKnowledgeParagraph(paragraph)}</p>
+        ))}
+      </div>
+      <footer className="daily-knowledge-modal-footer">
+        <button className="daily-knowledge-ghost" type="button" onClick={onClose}>关闭</button>
+        {canRefresh && (
+          <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
+            {isLoading ? '生成中' : '换一篇'}
+          </button>
+        )}
+      </footer>
+    </ModalShell>
   )
 }
 
@@ -9010,7 +10628,15 @@ type SpreadsheetPreview = {
   rows: string[][]
 }[]
 
-function OfficePreview({ fileType, sourceUrl }: { fileType: string; sourceUrl: string }) {
+function OfficePreview({
+  fileType,
+  sourceUrl,
+  compact = false,
+}: {
+  fileType: string
+  sourceUrl: string
+  compact?: boolean
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [status, setStatus] = useState('正在加载预览…')
   const [error, setError] = useState('')
@@ -9052,7 +10678,7 @@ function OfficePreview({ fileType, sourceUrl }: { fileType: string; sourceUrl: s
             inWrapper: true,
             ignoreWidth: false,
             ignoreHeight: false,
-            breakPages: true,
+            breakPages: !compact,
             useBase64URL: true,
           })
           if (!cancelled) {
@@ -9063,7 +10689,10 @@ function OfficePreview({ fileType, sourceUrl }: { fileType: string; sourceUrl: s
 
         if (fileType === 'PPTX') {
           const { init } = await import('pptx-preview')
-          const previewer = init(containerRef.current, { width: 960, height: 540 })
+          const previewer = init(
+            containerRef.current,
+            compact ? { width: 480, height: 270 } : { width: 960, height: 540 },
+          )
           await previewer.preview(buffer)
           if (!cancelled) {
             setStatus('')
@@ -9105,20 +10734,22 @@ function OfficePreview({ fileType, sourceUrl }: { fileType: string; sourceUrl: s
     return () => {
       cancelled = true
     }
-  }, [fileType, isLegacyOffice, sourceUrl])
+  }, [compact, fileType, isLegacyOffice, sourceUrl])
 
   return (
-    <div className={`office-preview office-preview-${fileType.toLowerCase()}`}>
+    <div className={`office-preview office-preview-${fileType.toLowerCase()} ${compact ? 'compact' : ''}`}>
       {status && <div className="office-preview-status">{status}</div>}
       {error && (
         <div className="file-preview-placeholder">
-          <FileText size={42} />
+          <FileText size={compact ? 28 : 42} />
           <strong>{fileType}</strong>
-          <span>{error}</span>
-          <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
-            <ExternalLink size={15} />
-            打开源文件
-          </a>
+          <span>{compact ? '旧版格式无法生成浏览器缩略图' : error}</span>
+          {!compact && (
+            <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
+              <ExternalLink size={15} />
+              打开源文件
+            </a>
+          )}
         </div>
       )}
       {fileType === 'XLSX' && workbookPreview.length > 0 && (
@@ -9160,6 +10791,7 @@ type NewTaskDraftCache = {
   settlementMonth: string
   requester: string
   contact: string
+  reviewer: string
   supplementalNote: string
 }
 
@@ -9177,8 +10809,9 @@ const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, 
     scheduleAnchor: 'end',
     isSupplemental: false,
     settlementMonth: fallbackSettlementMonth,
-    requester: '',
+    requester: '黄媚',
     contact: '黄媚',
+    reviewer: '黄媚',
     supplementalNote: '',
   }
   if (typeof window === 'undefined') {
@@ -9202,8 +10835,9 @@ const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, 
       scheduleAnchor: 'end',
       isSupplemental: Boolean(parsed.isSupplemental),
       settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
-      requester: parsed.requester ?? '',
+      requester: parsed.requester || parsed.contact || '黄媚',
       contact: parsed.contact || '黄媚',
+      reviewer: parsed.reviewer || parsed.requester || parsed.contact || '黄媚',
       supplementalNote: parsed.supplementalNote ?? '',
     }
   } catch {
@@ -9225,23 +10859,55 @@ const clearNewTaskDraftCache = () => {
   window.localStorage.removeItem(newTaskDraftStorageKey)
 }
 
+const newTaskDraftFromTask = (task: Task, fallbackType: string, fallbackSettlementMonth: string): NewTaskDraftCache => {
+  const startDate = task.date || isoDateTime()
+  const estimatedMinutes = Math.max(30, Math.round((Number(task.estimatedHours) || 2) * 60))
+  return {
+    title: task.title ?? '',
+    requirement: task.requirement ?? '',
+    type: task.type || fallbackType,
+    startDate,
+    estimatedMinutes,
+    estimatedDate: task.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
+    scheduleAnchor: 'end',
+    isSupplemental: isSupplementalTask(task),
+    settlementMonth: taskSettlementMonth(task) || fallbackSettlementMonth,
+    requester: task.requester || task.contact || '黄媚',
+    contact: task.contact || task.requester || '黄媚',
+    reviewer: task.reviewer || task.requester || task.contact || '黄媚',
+    supplementalNote: task.supplementalNote ?? '',
+  }
+}
+
 function NewTaskModal({
   designTypeGroups,
   currentMonthValue,
+  initialSupplemental = false,
+  editingTask,
   onClose,
   onCreate,
+  onSave,
   onDesignTypeGroupsChange,
 }: {
   designTypeGroups: DesignTypeGroup[]
   currentMonthValue: string
+  initialSupplemental?: boolean
+  editingTask?: Task
   onClose: () => void
   onCreate: (task: Task) => void
+  onSave?: (changes: Partial<Task>) => void
   onDesignTypeGroupsChange: (nextGroups: DesignTypeGroup[]) => void | Promise<void>
 }) {
   const availableDesignTypeGroups = normalizeDesignTypeGroups(designTypeGroups)
   const fallbackType = flattenDesignTypeGroups(availableDesignTypeGroups)[0] ?? defaultDesignTypes[0]
   const defaultStartDateTime = useMemo(() => isoDateTime(), [])
-  const initialDraft = useMemo(() => readNewTaskDraftCache(defaultStartDateTime, fallbackType, currentMonthValue), [currentMonthValue, defaultStartDateTime, fallbackType])
+  const isEditing = Boolean(editingTask)
+  const initialDraft = useMemo(
+    () => editingTask
+      ? newTaskDraftFromTask(editingTask, fallbackType, currentMonthValue)
+      : readNewTaskDraftCache(defaultStartDateTime, fallbackType, currentMonthValue),
+    [currentMonthValue, defaultStartDateTime, editingTask, fallbackType],
+  )
   const [title, setTitle] = useState(initialDraft.title)
   const [requirement, setRequirement] = useState(initialDraft.requirement)
   const [type, setType] = useState(initialDraft.type)
@@ -9249,10 +10915,14 @@ function NewTaskModal({
   const [estimatedMinutes, setEstimatedMinutes] = useState(initialDraft.estimatedMinutes)
   const [estimatedDate, setEstimatedDate] = useState(initialDraft.estimatedDate)
   const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
-  const [isSupplemental, setIsSupplemental] = useState(initialDraft.isSupplemental)
+  const [isSupplemental, setIsSupplemental] = useState(initialSupplemental || initialDraft.isSupplemental)
   const [settlementMonth, setSettlementMonth] = useState(initialDraft.settlementMonth)
-  const [requester] = useState(initialDraft.requester)
+  const [requester, setRequester] = useState(initialDraft.requester)
   const [contact, setContact] = useState(initialDraft.contact)
+  const [reviewer, setReviewer] = useState(initialDraft.reviewer)
+  const [reviewerEdited, setReviewerEdited] = useState(
+    Boolean(editingTask?.reviewer && editingTask.reviewer !== (editingTask.requester || editingTask.contact)),
+  )
   const [supplementalNote, setSupplementalNote] = useState(initialDraft.supplementalNote)
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
   const [aiError, setAiError] = useState('')
@@ -9265,6 +10935,9 @@ function NewTaskModal({
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
 
   useEffect(() => {
+    if (isEditing) {
+      return
+    }
     writeNewTaskDraftCache({
       title,
       requirement,
@@ -9277,9 +10950,10 @@ function NewTaskModal({
       settlementMonth,
       requester,
       contact,
+      reviewer,
       supplementalNote,
     })
-  }, [contact, estimatedDate, estimatedMinutes, isSupplemental, requirement, requester, scheduleDerivedField, settlementMonth, startDate, supplementalNote, title, type])
+  }, [contact, estimatedDate, estimatedMinutes, isEditing, isSupplemental, requirement, requester, reviewer, scheduleDerivedField, settlementMonth, startDate, supplementalNote, title, type])
 
   const toggleScheduleField = (field: ScheduleAnchor) => {
     setScheduleDerivedField((current) => {
@@ -9341,14 +11015,41 @@ function NewTaskModal({
     if (!requirement.trim()) {
       nextErrors.requirement = '请填写任务具体需求'
     }
+    if (!requester.trim()) {
+      nextErrors.requester = '请填写需求人'
+    }
     if (!contact.trim()) {
-      nextErrors.contact = '请填写需求人'
+      nextErrors.contact = '请填写对接人'
+    }
+    if (!reviewer.trim()) {
+      nextErrors.reviewer = '请填写验收人'
     }
     setFormErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
       return
     }
     const estimated = Math.round((estimatedMinutes / 60) * 100) / 100
+    if (editingTask && onSave) {
+      const nextRequester = requester.trim() || editingTask.requester || contact.trim() || '待确认'
+      const nextContact = contact.trim() || editingTask.contact || nextRequester
+      const nextReviewer = reviewer.trim() || editingTask.reviewer || nextRequester
+      onSave({
+        title: title.trim() || editingTask.title,
+        date: startDate,
+        estimatedDate,
+        settlementMonth: isSupplemental ? settlementMonth : '',
+        isSupplemental,
+        type: type.trim() || editingTask.type,
+        requirement: requirement.trim(),
+        requester: nextRequester,
+        contact: nextContact,
+        reviewer: nextReviewer,
+        estimatedHours: estimated,
+        supplementalNote: isSupplemental ? supplementalNote.trim() : '',
+        acceptanceNote: editingTask.acceptanceNote ?? '',
+      })
+      return
+    }
     const status: TaskStatus = '计划中'
 
     onCreate({
@@ -9356,18 +11057,20 @@ function NewTaskModal({
       date: startDate,
       estimatedDate,
       settlementMonth: isSupplemental ? settlementMonth : '',
+      isSupplemental,
       type: type.trim(),
       title: title.trim(),
       requirement: requirement.trim(),
-      requester: contact.trim() || requester.trim(),
+      requester: requester.trim(),
       contact: contact.trim(),
-      reviewer: contact.trim() || requester.trim() || '待确认',
+      reviewer: reviewer.trim() || requester.trim(),
       stage: status,
       estimatedHours: estimated,
       actualHours: 0,
       status,
       progress: 0,
-      acceptanceNote: isSupplemental ? supplementalNote.trim() : '',
+      supplementalNote: isSupplemental ? supplementalNote.trim() : '',
+      acceptanceNote: '',
       files: [],
     })
   }
@@ -9466,8 +11169,10 @@ function NewTaskModal({
     <ModalShell className="new-task-modal" labelledBy="new-task-title" onClose={onClose} closeOnBackdrop={false} closeOnEscape={false}>
         <header className="modal-header">
           <div>
-            <h2 id="new-task-title">{isSupplemental ? '补录已完成任务' : '新建任务'}</h2>
-            <span className="new-task-modal-subtitle">{isSupplemental ? '登记过往已交付、需计入某月结算的任务' : '记录一条真实任务，工时、文件与月报都会从这里串起来'}</span>
+            <h2 id="new-task-title">{isEditing ? '编辑任务' : isSupplemental ? '补录已完成任务' : '新建任务'}</h2>
+            <span className="new-task-modal-subtitle">
+              {isEditing ? '修改任务信息，工时、文件与月报仍会从这里串起来' : isSupplemental ? '登记过往已交付、需计入某月结算的任务' : '记录一条真实任务，工时、文件与月报都会从这里串起来'}
+            </span>
           </div>
           <div className="modal-header-actions">
             <div className="supplemental-switch-wrap">
@@ -9578,11 +11283,47 @@ function NewTaskModal({
               )}
             </div>
           )}
-          <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
-            <span>需求人</span>
-            <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="例如：市场部 · 王敏" aria-required="true" />
-            {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
-          </label>
+          <div className="new-task-people-row wide">
+            <label className={`field ${formErrors.requester ? 'field-invalid' : ''}`}>
+              <span>需求人</span>
+              <input
+                value={requester}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setRequester(value)
+                  if (!reviewerEdited) {
+                    setReviewer(value)
+                  }
+                  clearFieldError('requester')
+                  if (!reviewerEdited) {
+                    clearFieldError('reviewer')
+                  }
+                }}
+                placeholder="例如：市场部 · 王敏"
+                aria-required="true"
+              />
+              {formErrors.requester && <small className="field-error">{formErrors.requester}</small>}
+            </label>
+            <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
+              <span>对接人</span>
+              <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="例如：黄媚" aria-required="true" />
+              {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
+            </label>
+            <label className={`field ${formErrors.reviewer ? 'field-invalid' : ''}`}>
+              <span>验收人</span>
+              <input
+                value={reviewer}
+                onChange={(event) => {
+                  setReviewer(event.target.value)
+                  setReviewerEdited(true)
+                  clearFieldError('reviewer')
+                }}
+                placeholder="默认同需求人"
+                aria-required="true"
+              />
+              {formErrors.reviewer && <small className="field-error">{formErrors.reviewer}</small>}
+            </label>
+          </div>
           <div className="new-task-time-label">
             <span>时间与工时</span>
             <em>三项同时只激活两项，第三项自动推算（灰色）</em>
@@ -9707,8 +11448,8 @@ function NewTaskModal({
           <button className="ghost-button" onClick={onClose}>
             取消
           </button>
-          <button className="primary-button" onClick={handleSubmit}>
-            创建任务
+          <button data-modal-save="true" className="primary-button" onClick={handleSubmit}>
+            {isEditing ? '保存修改' : '创建任务'}
           </button>
         </footer>
     </ModalShell>

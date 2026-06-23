@@ -21,6 +21,7 @@ crons = ["*/5 * * * *"]
 binding = "DB"
 database_name = "designer-worklog-db"
 database_id = "4b784afe-7d17-4b22-b101-bec380ddc075"
+migrations_dir = "db/migrations"
 
 [[r2_buckets]]
 binding = "UPLOADS"

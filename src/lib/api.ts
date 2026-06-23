@@ -121,10 +121,26 @@ export type TextAssistantSuggestion = {
 export type TextAssistantPayload = {
   mode: TextAssistantMode
   text: string
-  task: Pick<Task, 'id' | 'title' | 'type' | 'requirement' | 'contact' | 'requester' | 'reviewer' | 'date' | 'estimatedDate' | 'status' | 'progress' | 'actualHours' | 'acceptanceNote' | 'acceptanceFiles' | 'files'>
+  task: Pick<Task, 'id' | 'title' | 'type' | 'requirement' | 'contact' | 'requester' | 'reviewer' | 'date' | 'estimatedDate' | 'status' | 'progress' | 'actualHours' | 'supplementalNote' | 'acceptanceNote' | 'acceptanceFiles' | 'files'>
   files: Array<Pick<FileAsset, 'name' | 'type' | 'tag' | 'final' | 'visible' | 'uploadedAt'>>
   activity?: Array<{ createdAt: string; summary: string }>
   uploadedFileNames?: string[]
+}
+
+export type AttachmentNamePayload = {
+  fileName: string
+  mimeType?: string
+  imageBase64?: string
+  note?: string
+  recentFileNames?: string[]
+  task?: Pick<Task, 'id' | 'title' | 'type' | 'requirement' | 'contact' | 'requester' | 'reviewer'>
+}
+
+export type AttachmentNameSuggestion = {
+  suggestedName: string
+  reason: string
+  confidence: '低' | '中' | '高'
+  fallbackUsed?: boolean
 }
 
 export type HourEstimateSuggestion = {
@@ -148,6 +164,20 @@ export type HourEstimatePayload = {
   selectedType: string
   startDate: string
   estimatedDate: string
+}
+
+export type DailyKnowledgeSuggestion = {
+  category: string
+  source: string
+  title: string
+  teaser: string
+  body: string[]
+}
+
+export type DailyKnowledgePayload = {
+  currentMonth: string
+  taskThemes: string[]
+  recentTitles: string[]
 }
 
 const authStorageKey = 'designer-worklog-auth'
@@ -367,6 +397,8 @@ export const api = {
   uploadFile: async (
     payload: {
       taskId: number
+      entryId?: string
+      scope: 'progress' | 'acceptance'
       file: File
       preview?: File
       type: string
@@ -383,6 +415,8 @@ export const api = {
     if (file.size <= singleShotLimit) {
       const form = new FormData()
       form.set('taskId', String(payload.taskId))
+      form.set('entryId', payload.entryId ?? '')
+      form.set('scope', payload.scope)
       form.set('file', file)
       form.set('type', payload.type)
       form.set('size', payload.size)
@@ -399,7 +433,7 @@ export const api = {
     const init = await requestJson<{ fileId: string; key: string; uploadId: string }>('/api/files/multipart/init', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ taskId: payload.taskId, fileName: file.name, contentType: file.type }),
+      body: JSON.stringify({ taskId: payload.taskId, entryId: payload.entryId ?? '', fileName: file.name, contentType: file.type }),
     })
 
     const partSize = 40 * 1024 * 1024
@@ -423,6 +457,8 @@ export const api = {
     completeForm.set('fileId', init.fileId)
     completeForm.set('parts', JSON.stringify(parts))
     completeForm.set('taskId', String(payload.taskId))
+    completeForm.set('entryId', payload.entryId ?? '')
+    completeForm.set('scope', payload.scope)
     completeForm.set('name', file.name)
     completeForm.set('type', payload.type)
     completeForm.set('size', payload.size)
@@ -447,6 +483,12 @@ export const api = {
   deleteFile: (fileId: number) =>
     requestJson<{ ok: true }>(`/api/files/${fileId}`, {
       method: 'DELETE',
+    }),
+  setEntryAttachmentsArchived: (taskId: number, entryId: string, archived: boolean) =>
+    requestJson<{ ok: true; affected: number }>(`/api/tasks/${taskId}/entry-attachments`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entryId, archived }),
     }),
   retryAttachmentAnalysis: (fileId: number) =>
     requestJson<{ ok: true; attachmentId: number }>(`/api/files/${fileId}/analysis/retry`, {
@@ -531,8 +573,20 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  suggestAttachmentName: (payload: AttachmentNamePayload) =>
+    requestJson<AttachmentNameSuggestion>('/api/ai/attachment-name', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   suggestHourEstimate: (payload: HourEstimatePayload) =>
     requestJson<HourEstimateSuggestion>('/api/ai/hour-estimate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  suggestDailyKnowledge: (payload: DailyKnowledgePayload) =>
+    requestJson<DailyKnowledgeSuggestion>('/api/ai/daily-knowledge', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

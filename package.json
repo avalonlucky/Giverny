@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.11.44",
+  "version": "0.11.66",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
@@ -19,6 +19,7 @@
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.17.0",
+    "pdfjs-dist": "4.10.38",
     "pptx-preview": "^1.0.7",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"

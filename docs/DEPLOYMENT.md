@@ -11,13 +11,17 @@
 
 ## 默认流程
 
-用户已明确要求：以后涉及代码或前端体验的改动，不要只停留在本地。完成本地实现和验证后，直接部署到正式站。
+用户已明确要求：以后涉及代码或前端体验的改动，不要只停留在本地。完成本地实现和验证后，先直接部署到正式站供用户验收；用户确认满意后，再同步 GitHub、tag 和 Release。
 
 1. 本地修改。
 2. 跑 `npm run lint`。
 3. 跑 `npm run build`。
 4. 部署正式站。
 5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
+6. 用户在线验收；如需调整，继续本地修改、验证并重新部署正式站。
+7. 用户明确确认满意后，再执行 GitHub commit / push / tag / Release 发布闭环。
+
+线上验收阶段不要求每次部署都产生 GitHub 提交，但必须同步维护版本号与 `CHANGELOG.md`，并在最终 GitHub 提交中完整收录本轮所有已确认改动。
 
 ## GitHub 部署记录
 
@@ -39,8 +43,14 @@
 ```bash
 npm run lint
 npm run build
-env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u http_proxy npx wrangler deploy
+mkdir -p /private/tmp/giverny-npm-cache
+env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u http_proxy \
+  npm_config_cache=/private/tmp/giverny-npm-cache \
+  WRANGLER_LOG_PATH=/private/tmp/giverny-wrangler.log \
+  npx wrangler deploy
 ```
+
+桌面沙箱下不要直接使用用户级 `~/.npm` 缓存或 `~/.wrangler/logs`：这些目录可能因旧权限或沙箱写入限制导致 `EPERM`。正式部署统一把临时 npm 缓存和 Wrangler 日志都指向 `/private/tmp`，无需修改系统权限。
 
 ## 数据安全
 

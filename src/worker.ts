@@ -136,6 +136,7 @@ type DbTask = {
   estimated_delivery_date: string | null
   actual_delivery_date: string | null
   settlement_month: string | null
+  is_supplemental: number
   estimated_hours: number
   actual_hours: number
   hourly_rate: number
@@ -147,9 +148,11 @@ type DbTask = {
   progress: number
   suspend_reason: string | null
   terminate_reason: string | null
+  supplemental_note: string | null
   acceptance_note: string | null
   feedback_rating: TaskFeedbackRating | null
   feedback_tags_json: string | null
+  feedback_note: string | null
   time_entries_json: string | null
   waiting_entries_json: string | null
   is_billable: number
@@ -171,6 +174,8 @@ type DbUpdate = {
 type DbAttachment = {
   id: string
   task_id: string
+  entry_id: string | null
+  attachment_scope: 'progress' | 'acceptance'
   file_name: string
   file_type: string | null
   mime_type: string | null
@@ -182,6 +187,7 @@ type DbAttachment = {
   visible_to_client: number
   file_tag: string | null
   uploaded_at: string
+  deleted_at: string | null
   task_title: string | null
 }
 
@@ -533,17 +539,44 @@ function extractGeminiText(data: { candidates?: Array<{ content?: { parts?: Arra
   return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || ''
 }
 
-function extractOpenAiText(data: { choices?: Array<{ message?: { content?: string } }> } | null) {
-  return data?.choices?.[0]?.message?.content?.trim() || ''
+type OpenAiMessageContent = string | Array<{ type?: string; text?: string }> | null
+
+type OpenAiCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: OpenAiMessageContent
+      tool_calls?: Array<{ function?: { arguments?: string } }>
+    }
+  }>
 }
 
-async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string, maxOutputTokens = 64) {
+function extractOpenAiText(data: OpenAiCompletionResponse | null) {
+  const message = data?.choices?.[0]?.message
+  if (typeof message?.content === 'string') {
+    return message.content.trim()
+  }
+  if (Array.isArray(message?.content)) {
+    const content = message.content.map((part) => part.text || '').join('').trim()
+    if (content) {
+      return content
+    }
+  }
+  return message?.tool_calls?.map((item) => item.function?.arguments || '').join('').trim() || ''
+}
+
+async function callAiEndpointText(
+  endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>,
+  prompt: string,
+  maxOutputTokens = 64,
+  signal?: AbortSignal,
+) {
   if (!endpoint.apiKey) {
     throw new Error('模型 API Key 未配置')
   }
   if (endpoint.provider === 'gemini') {
     const response = await fetch(`${endpoint.baseUrl}/models/${endpoint.model}:generateContent`, {
       method: 'POST',
+      signal,
       headers: {
         'content-type': 'application/json',
         'x-goog-api-key': endpoint.apiKey,
@@ -562,6 +595,7 @@ async function callAiEndpointText(endpoint: Awaited<ReturnType<typeof resolveAiE
 
   const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
     method: 'POST',
+    signal,
     headers: {
       authorization: `Bearer ${endpoint.apiKey}`,
       'content-type': 'application/json',
@@ -601,20 +635,32 @@ ${JSON.stringify(payload)}`
   }
 }
 
-async function callAiEndpointVision(endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, prompt: string, imageBase64: string, mimeType = 'image/png') {
+async function callAiEndpointVision(
+  endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>,
+  prompt: string,
+  imageBase64: string,
+  mimeType = 'image/png',
+  maxOutputTokens = 96,
+  signal?: AbortSignal,
+  structuredJson = false,
+) {
   if (!endpoint.apiKey) {
     throw new Error('模型 API Key 未配置')
   }
   if (endpoint.provider === 'gemini') {
     const response = await fetch(`${endpoint.baseUrl}/models/${endpoint.model}:generateContent`, {
       method: 'POST',
+      signal,
       headers: {
         'content-type': 'application/json',
         'x-goog-api-key': endpoint.apiKey,
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
-        generationConfig: { maxOutputTokens: 64 },
+        generationConfig: {
+          maxOutputTokens,
+          ...(structuredJson ? { responseMimeType: 'application/json' } : {}),
+        },
       }),
     })
     const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
@@ -624,28 +670,36 @@ async function callAiEndpointVision(endpoint: Awaited<ReturnType<typeof resolveA
     return extractGeminiText(data)
   }
 
+  const outputTokenBudget = endpoint.provider === 'kimi' && endpoint.model.includes('k2.6')
+    ? Math.max(maxOutputTokens, 2048)
+    : maxOutputTokens
+  const requestBody: Record<string, unknown> = {
+    model: endpoint.model,
+    temperature: kimiTemperature(endpoint.provider, endpoint.model),
+    max_tokens: outputTokenBudget,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+        ],
+      },
+    ],
+  }
+  if (structuredJson) {
+    requestBody.response_format = { type: 'json_object' }
+  }
   const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
     method: 'POST',
+    signal,
     headers: {
       authorization: `Bearer ${endpoint.apiKey}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: endpoint.model,
-      temperature: kimiTemperature(endpoint.provider, endpoint.model),
-      max_tokens: 96,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
-          ],
-        },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
   })
-  const data = (await response.json().catch(() => null)) as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> } | null
+  const data = (await response.json().catch(() => null)) as ({ error?: { message?: string } } & OpenAiCompletionResponse) | null
   if (!response.ok || data?.error) {
     throw new Error(data?.error?.message || `识图请求失败：${response.status}`)
   }
@@ -905,12 +959,16 @@ function normalizeAnalysisPayload(value: Record<string, unknown>): AnalysisPaylo
   }
 }
 
-function attachmentAnalysisPrompt(row: DbAttachment & { requirement: string | null; acceptance_note: string | null }, source: AnalysisSource) {
+function attachmentAnalysisPrompt(
+  row: DbAttachment & { requirement: string | null; supplemental_note: string | null; acceptance_note: string | null },
+  source: AnalysisSource,
+) {
   return `你是 Giverny 的资深设计交付件审查与工作复盘助手。请基于文件内容和站内任务事实做分析，不要编造客户反馈、交付结果或文件中不存在的信息。
 
 任务名称：${row.task_title || '未命名任务'}
 设计类型：${row.file_tag || row.file_type || '未分类'}
 原始任务需求：${row.requirement || '未填写'}
+补录说明：${row.supplemental_note || '无'}
 验收备注：${row.acceptance_note || '未填写'}
 文件名：${row.file_name}
 是否终稿：${row.is_final ? '是' : '否'}
@@ -1014,11 +1072,11 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
   }
 
   const row = await env.DB.prepare(
-    `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.acceptance_note
+    `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.supplemental_note, tasks.acceptance_note
      FROM attachments
      INNER JOIN tasks ON tasks.id = attachments.task_id
-     WHERE attachments.id = ? AND tasks.deleted_at IS NULL`,
-  ).bind(attachmentId).first<DbAttachment & { requirement: string | null; acceptance_note: string | null }>()
+     WHERE attachments.id = ? AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL`,
+  ).bind(attachmentId).first<DbAttachment & { requirement: string | null; supplemental_note: string | null; acceptance_note: string | null }>()
   if (!row) {
     await markAnalysisFailure(env, attachmentId, new Error('附件或关联任务不存在'), true)
     return
@@ -1094,11 +1152,16 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
 
 async function processPendingAttachmentAnalyses(env: Env, limit = 2) {
   const rows = await env.DB.prepare(
-    `SELECT attachment_id FROM attachment_analyses
-     WHERE status = 'pending'
-        OR (status = 'failed' AND attempt_count < 3)
-        OR (status = 'processing' AND updated_at < datetime('now', '-20 minutes'))
-     ORDER BY requested_at ASC
+    `SELECT attachment_analyses.attachment_id
+     FROM attachment_analyses
+     INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
+     WHERE attachments.deleted_at IS NULL
+       AND (
+         attachment_analyses.status = 'pending'
+         OR (attachment_analyses.status = 'failed' AND attachment_analyses.attempt_count < 3)
+         OR (attachment_analyses.status = 'processing' AND attachment_analyses.updated_at < datetime('now', '-20 minutes'))
+       )
+     ORDER BY attachment_analyses.requested_at ASC
      LIMIT ?`,
   ).bind(limit).all<{ attachment_id: string }>()
   for (const row of rows.results ?? []) {
@@ -1249,7 +1312,7 @@ async function loadInsightData(env: Env): Promise<InsightDataSet> {
   const [taskRows, updateRows, analysisRows] = await Promise.all([
     env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND status <> '不计费'").all<DbTask>(),
     env.DB.prepare(`SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL`).all<DbUpdate>(),
-    env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
+    env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
   ])
   const updatesByTask = new Map<string, DbUpdate[]>()
   for (const update of updateRows.results ?? []) {
@@ -1555,7 +1618,7 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
         finding: `${contact} 的任务主观反馈集中在「${dominantTag[0]}」`,
         recommendationHint: '复盘该对接人的需求输入、反馈路径和报价边界，把体感问题转成下次接单前的明确约束。',
         severity: subjectiveIssues.length >= 3 || dominantTag[1] >= 3 ? 'high' : 'medium',
-        dataSnapshot: { currentMonth, contact, issueTaskCount: subjectiveIssues.length, tagCounts, tasks: subjectiveIssues.map((task) => ({ id: task.id, title: task.title, type: task.design_type, rating: task.feedback_rating, tags: parseFeedbackTags(task.feedback_tags_json) })) },
+        dataSnapshot: { currentMonth, contact, issueTaskCount: subjectiveIssues.length, tagCounts, tasks: subjectiveIssues.map((task) => ({ id: task.id, title: task.title, type: task.design_type, rating: task.feedback_rating, tags: parseFeedbackTags(task.feedback_tags_json), note: task.feedback_note ?? '' })) },
       })
     }
   }
@@ -1682,6 +1745,7 @@ async function diagnoseInsights(env: Env, request: Request) {
       weightedHourlyRate: '按任务实际工时加权的任务结算时薪；若任务均使用同一费率，该指标不会产生可用差异。',
       feedbackRatings: '验收时设计师主观体感：顺利、一般、有问题；这是客观工时无法覆盖的痛苦度信号。',
       feedbackTags: '验收时设计师可选原因标签：需求不清晰、沟通成本高、定价偏低、技术挑战大。',
+      feedbackNote: '验收时设计师填写的主观体感评价，用于补充等待、沟通、返工等客观字段无法表达的背景。',
       cycleHours: '任务从预计/接受开始到实际验收的总占用周期小时；首次验收时系统写入 actual_delivery_date。',
       opportunityWaitHours: '周期占用等待 = 任务总周期小时 - 实际计费工时。用于识别“被项目占着但没有收入”的机会成本。',
       explicitWaitingHours: '设计师手动记录的等待/非计费时间段，例如等待甲方意见、等待资料、等待确认；不进入结算工时。',
@@ -1943,7 +2007,9 @@ const toTask = (row: DbTask, files: string[] = []): Task => ({
   id: Number(row.id),
   date: row.start_date ?? '',
   estimatedDate: row.estimated_delivery_date ?? '',
+  actualDeliveryDate: row.actual_delivery_date ?? '',
   settlementMonth: row.settlement_month || '',
+  isSupplemental: Boolean(row.is_supplemental),
   type: row.design_type ?? '',
   title: row.title,
   requirement: row.requirement ?? '',
@@ -1957,9 +2023,11 @@ const toTask = (row: DbTask, files: string[] = []): Task => ({
   progress: Number(row.progress) || 0,
   suspendReason: row.suspend_reason ?? '',
   terminateReason: row.terminate_reason ?? '',
+  supplementalNote: row.supplemental_note ?? '',
   acceptanceNote: row.acceptance_note ?? '',
   feedbackRating: normalizeFeedbackRating(row.feedback_rating),
   feedbackTags: parseFeedbackTags(row.feedback_tags_json),
+  feedbackNote: row.feedback_note ?? '',
   timeEntries: parseTimeEntries(row.time_entries_json),
   waitingEntries: parseWaitingEntries(row.waiting_entries_json),
   voidedAt: row.voided_at ?? '',
@@ -2027,6 +2095,8 @@ const toUpdate = (row: DbUpdate, files: string[] = []): TaskUpdate => ({
 const toFile = (row: DbAttachment): FileAsset => ({
   id: Number(row.id),
   taskId: Number(row.task_id),
+  entryId: row.entry_id ?? '',
+  scope: row.attachment_scope === 'acceptance' ? 'acceptance' : 'progress',
   name: row.file_name,
   task: row.task_title ?? '未关联任务',
   type: row.file_type ?? 'FILE',
@@ -2035,6 +2105,7 @@ const toFile = (row: DbAttachment): FileAsset => ({
   final: Boolean(row.is_final),
   visible: Boolean(row.visible_to_client),
   tag: row.file_tag ?? '',
+  deletedAt: row.deleted_at ?? '',
   previewUrl: row.preview_r2_key ? `/api/files/${row.id}/preview` : undefined,
   sourceUrl: `/api/files/${row.id}/source`,
 })
@@ -2129,6 +2200,13 @@ type HourEstimateToolArgs = {
   confidence?: string
   basis?: string[]
   historicalSummary?: string
+}
+
+type DailyKnowledgeToolArgs = {
+  category?: string
+  title?: string
+  teaser?: string
+  body?: string[]
 }
 
 type HourEstimateSample = {
@@ -2454,6 +2532,41 @@ async function deleteAccessToken(env: Env, id: string) {
   return ok({ ok: true })
 }
 
+async function purgeExpiredProgressAttachments(env: Env, limit = 50) {
+  const rows = await env.DB.prepare(
+    `SELECT id, task_id, file_name, r2_key, preview_r2_key
+     FROM attachments
+     WHERE attachment_scope = 'progress'
+       AND datetime(uploaded_at) < datetime('now', '-2 months')
+     ORDER BY uploaded_at ASC
+     LIMIT ?`,
+  ).bind(limit).all<{
+    id: string
+    task_id: string
+    file_name: string
+    r2_key: string
+    preview_r2_key: string | null
+  }>()
+
+  for (const row of rows.results ?? []) {
+    await audit(env, 'expire', 'attachment', row.id, {
+      taskId: Number(row.task_id),
+      fileName: row.file_name,
+      retention: '2 months',
+    })
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM attachment_analyses WHERE attachment_id = ?').bind(row.id),
+      env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(row.id),
+    ])
+    await env.UPLOADS.delete(row.r2_key)
+    if (row.preview_r2_key && row.preview_r2_key !== row.r2_key) {
+      await env.UPLOADS.delete(row.preview_r2_key)
+    }
+  }
+
+  return rows.results?.length ?? 0
+}
+
 async function audit(env: Env, action: string, entityType: string, entityId: string, payload: unknown) {
   await env.DB.prepare('INSERT INTO audit_log (id, action, entity_type, entity_id, payload_json) VALUES (?, ?, ?, ?, ?)')
     .bind(crypto.randomUUID(), action, entityType, entityId, JSON.stringify(payload ?? null))
@@ -2486,7 +2599,7 @@ async function getState(env: Env, role: AuthRole) {
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        LEFT JOIN tasks ON tasks.id = attachments.task_id
-       WHERE tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL AND attachments.visible_to_client = 1'}
+       WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL AND attachments.visible_to_client = 1'}
        ORDER BY uploaded_at DESC`,
     ).all<DbAttachment>(),
     role === 'admin'
@@ -2495,7 +2608,7 @@ async function getState(env: Env, role: AuthRole) {
            FROM attachment_analyses
            INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
            INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
-           WHERE tasks.deleted_at IS NULL
+           WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL
            ORDER BY attachment_analyses.requested_at DESC`,
         ).all<DbAttachmentAnalysis>()
       : Promise.resolve({ success: true, results: [] } as D1Result<DbAttachmentAnalysis>),
@@ -2559,7 +2672,9 @@ async function getSharedReport(env: Env, token: string) {
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        INNER JOIN tasks ON tasks.id = attachments.task_id
-       WHERE attachments.visible_to_client = 1
+       WHERE attachments.deleted_at IS NULL
+         AND attachments.visible_to_client = 1
+         AND attachments.attachment_scope = 'acceptance'
          AND (attachments.uploaded_at LIKE ? OR tasks.settlement_month = ?)
          AND tasks.deleted_at IS NULL
          AND tasks.voided_at IS NULL
@@ -2591,10 +2706,10 @@ async function createTask(env: Env, request: Request) {
   const hourlyRate = await getHourlyRate(env)
   await env.DB.prepare(
     `INSERT INTO tasks (
-      id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month,
+      id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
       estimated_hours, actual_hours, hourly_rate, requester, contact_person, reviewer, stage, status, progress,
-      suspend_reason, terminate_reason, acceptance_note, feedback_rating, feedback_tags_json, time_entries_json, waiting_entries_json, is_billable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      suspend_reason, terminate_reason, supplemental_note, acceptance_note, feedback_rating, feedback_tags_json, feedback_note, time_entries_json, waiting_entries_json, is_billable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
@@ -2605,6 +2720,7 @@ async function createTask(env: Env, request: Request) {
       task.estimatedDate || task.date,
       task.status === '已验收' ? nowIso() : null,
       task.settlementMonth || monthPart(nowIso()),
+      task.isSupplemental ? 1 : 0,
       task.estimatedHours,
       task.actualHours,
       hourlyRate,
@@ -2616,9 +2732,11 @@ async function createTask(env: Env, request: Request) {
       task.progress,
       task.suspendReason ?? '',
       task.terminateReason ?? '',
+      task.supplementalNote ?? '',
       task.acceptanceNote ?? '',
       normalizeFeedbackRating(task.feedbackRating),
       JSON.stringify(normalizeFeedbackTags(task.feedbackTags)),
+      task.feedbackNote ?? '',
       JSON.stringify(task.timeEntries ?? []),
       JSON.stringify(task.waitingEntries ?? []),
       task.status === '不计费' ? 0 : 1,
@@ -2668,6 +2786,9 @@ async function updateTask(env: Env, id: string, request: Request) {
     date: changes.date ?? current.start_date ?? '',
     estimatedDate: changes.estimatedDate ?? current.estimated_delivery_date ?? '',
     settlementMonth: changes.settlementMonth ?? current.settlement_month ?? monthPart(nowIso()),
+    isSupplemental: Object.prototype.hasOwnProperty.call(changes, 'isSupplemental')
+      ? Boolean(changes.isSupplemental)
+      : Boolean(current.is_supplemental),
     estimatedHours: changes.estimatedHours ?? current.estimated_hours,
     actualHours: changes.actualHours ?? current.actual_hours,
     requester: changes.requester ?? current.requester ?? '',
@@ -2678,9 +2799,11 @@ async function updateTask(env: Env, id: string, request: Request) {
     progress: changes.progress ?? current.progress,
     suspendReason: changes.suspendReason ?? current.suspend_reason ?? '',
     terminateReason: changes.terminateReason ?? current.terminate_reason ?? '',
+    supplementalNote: changes.supplementalNote ?? current.supplemental_note ?? '',
     acceptanceNote: changes.acceptanceNote ?? current.acceptance_note ?? '',
     feedbackRating: Object.prototype.hasOwnProperty.call(changes, 'feedbackRating') ? normalizeFeedbackRating(changes.feedbackRating) : normalizeFeedbackRating(current.feedback_rating),
     feedbackTags: Object.prototype.hasOwnProperty.call(changes, 'feedbackTags') ? normalizeFeedbackTags(changes.feedbackTags) : parseFeedbackTags(current.feedback_tags_json),
+    feedbackNote: Object.prototype.hasOwnProperty.call(changes, 'feedbackNote') ? String(changes.feedbackNote ?? '') : current.feedback_note ?? '',
     timeEntries: changes.timeEntries ?? parseTimeEntries(current.time_entries_json),
     waitingEntries: changes.waitingEntries ?? parseWaitingEntries(current.waiting_entries_json),
     actualDeliveryDate: changes.status === '已验收' && current.status !== '已验收'
@@ -2690,9 +2813,9 @@ async function updateTask(env: Env, id: string, request: Request) {
 
   await env.DB.prepare(
     `UPDATE tasks SET
-      title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, actual_delivery_date = ?, settlement_month = ?, estimated_hours = ?, actual_hours = ?,
+      title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, actual_delivery_date = ?, settlement_month = ?, is_supplemental = ?, estimated_hours = ?, actual_hours = ?,
       requester = ?, contact_person = ?, reviewer = ?, stage = ?, status = ?, progress = ?,
-      suspend_reason = ?, terminate_reason = ?, acceptance_note = ?, feedback_rating = ?, feedback_tags_json = ?, time_entries_json = ?, waiting_entries_json = ?, is_billable = ?, updated_at = CURRENT_TIMESTAMP
+      suspend_reason = ?, terminate_reason = ?, supplemental_note = ?, acceptance_note = ?, feedback_rating = ?, feedback_tags_json = ?, feedback_note = ?, time_entries_json = ?, waiting_entries_json = ?, is_billable = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
   )
     .bind(
@@ -2703,6 +2826,7 @@ async function updateTask(env: Env, id: string, request: Request) {
       next.estimatedDate || null,
       next.actualDeliveryDate,
       next.settlementMonth || monthPart(nowIso()),
+      next.isSupplemental ? 1 : 0,
       next.estimatedHours,
       next.actualHours,
       next.requester,
@@ -2713,9 +2837,11 @@ async function updateTask(env: Env, id: string, request: Request) {
       next.progress,
       next.suspendReason,
       next.terminateReason,
+      next.supplementalNote,
       next.acceptanceNote,
       next.feedbackRating,
       JSON.stringify(next.feedbackTags),
+      next.feedbackNote,
       JSON.stringify(next.timeEntries),
       JSON.stringify(next.waitingEntries),
       next.status === '不计费' ? 0 : 1,
@@ -2849,13 +2975,19 @@ async function deleteUpdate(env: Env, id: string) {
 }
 
 async function getTaskActivity(env: Env, taskId: string) {
-  const rows = await env.DB.prepare(
-    `SELECT * FROM audit_log
-     WHERE (entity_type = 'task' AND entity_id = ?) OR entity_type IN ('attachment', 'update')
-     ORDER BY created_at DESC LIMIT 400`,
-  )
-    .bind(taskId)
-    .all<{ id: string; action: string; entity_type: string; entity_id: string; payload_json: string | null; created_at: string }>()
+  const [rows, activeAttachmentRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT * FROM audit_log
+       WHERE (entity_type = 'task' AND entity_id = ?) OR entity_type IN ('attachment', 'update')
+       ORDER BY created_at DESC LIMIT 400`,
+    )
+      .bind(taskId)
+      .all<{ id: string; action: string; entity_type: string; entity_id: string; payload_json: string | null; created_at: string }>(),
+    env.DB.prepare(
+      'SELECT id FROM attachments WHERE task_id = ? AND deleted_at IS NULL',
+    ).bind(taskId).all<{ id: string }>(),
+  ])
+  const activeAttachmentIds = new Set((activeAttachmentRows.results ?? []).map((row) => row.id))
 
   const items = []
   for (const row of rows.results ?? []) {
@@ -2866,6 +2998,9 @@ async function getTaskActivity(env: Env, taskId: string) {
       payload = null
     }
     if (row.entity_type !== 'task' && String(payload?.taskId ?? '') !== String(taskId)) {
+      continue
+    }
+    if (row.entity_type === 'attachment' && row.action !== 'delete' && !activeAttachmentIds.has(row.entity_id)) {
       continue
     }
     items.push({
@@ -2902,6 +3037,8 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
 
   const id = String(Date.now())
   const taskId = String(form.get('taskId') ?? '')
+  const entryId = String(form.get('entryId') ?? '').trim()
+  const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
   const type = String(form.get('type') || file.name.split('.').pop()?.toUpperCase() || 'FILE')
   const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(taskId).first<{ id: string }>()
   if (!task) {
@@ -2921,6 +3058,8 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   const saved = await insertAttachment(env, {
     id,
     taskId,
+    entryId,
+    scope,
     fileName: file.name,
     fileType: type,
     mimeType: file.type || null,
@@ -2946,6 +3085,8 @@ async function insertAttachment(
   payload: {
     id: string
     taskId: string
+    entryId?: string
+    scope: 'progress' | 'acceptance'
     fileName: string
     fileType: string
     mimeType: string | null
@@ -2965,12 +3106,14 @@ async function insertAttachment(
   }
   await env.DB.prepare(
     `INSERT INTO attachments (
-      id, task_id, file_name, file_type, mime_type, r2_key, preview_r2_key, file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key, preview_r2_key, file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       payload.id,
       payload.taskId,
+      payload.entryId || null,
+      payload.scope,
       payload.fileName,
       payload.fileType,
       payload.mimeType,
@@ -2987,6 +3130,8 @@ async function insertAttachment(
 
   await audit(env, 'create', 'attachment', payload.id, {
     taskId: Number(payload.taskId),
+    entryId: payload.entryId ?? '',
+    scope: payload.scope,
     fileName: payload.fileName,
     fileSize: payload.fileSize,
     final: payload.final,
@@ -2998,6 +3143,8 @@ async function insertAttachment(
   return {
     id: Number(payload.id),
     taskId: Number(payload.taskId),
+    entryId: payload.entryId ?? '',
+    scope: payload.scope,
     name: payload.fileName,
     task: task.title,
     type: payload.fileType,
@@ -3012,7 +3159,7 @@ async function insertAttachment(
 }
 
 async function initMultipartUpload(env: Env, request: Request) {
-  const body = (await request.json()) as { taskId: number; fileName: string; contentType?: string }
+  const body = (await request.json()) as { taskId: number; entryId?: string; fileName: string; contentType?: string }
   if (!body.fileName || !body.taskId) {
     return fail('缺少文件名或关联任务')
   }
@@ -3048,6 +3195,8 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
   const uploadId = String(form.get('uploadId') ?? '')
   const fileId = String(form.get('fileId') ?? Date.now())
   const taskId = String(form.get('taskId') ?? '')
+  const entryId = String(form.get('entryId') ?? '').trim()
+  const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
   const parts = JSON.parse(String(form.get('parts') ?? '[]')) as R2UploadedPart[]
   if (!key || !uploadId || parts.length === 0) {
     return fail('分片信息不完整')
@@ -3071,6 +3220,8 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
   const saved = await insertAttachment(env, {
     id: fileId,
     taskId,
+    entryId,
+    scope,
     fileName,
     fileType: String(form.get('type') ?? fileName.split('.').pop()?.toUpperCase() ?? 'FILE'),
     mimeType: String(form.get('contentType') ?? '') || null,
@@ -3099,7 +3250,9 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
      INNER JOIN attachments ON attachments.id = ?
      LEFT JOIN tasks ON tasks.id = attachments.task_id
      WHERE monthly_reports.public_token = ?
+       AND attachments.deleted_at IS NULL
        AND attachments.visible_to_client = 1
+       AND attachments.attachment_scope = 'acceptance'
        AND (
          attachments.uploaded_at LIKE monthly_reports.month || '%'
          OR tasks.settlement_month = monthly_reports.month
@@ -3113,7 +3266,7 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
 }
 
 async function getFilePreview(env: Env, id: string, request: Request) {
-  const row = await env.DB.prepare('SELECT preview_r2_key, mime_type, visible_to_client FROM attachments WHERE id = ?').bind(id).first<{
+  const row = await env.DB.prepare('SELECT preview_r2_key, mime_type, visible_to_client FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{
     preview_r2_key: string | null
     mime_type: string | null
     visible_to_client: number
@@ -3150,7 +3303,7 @@ async function getFilePreview(env: Env, id: string, request: Request) {
 
 async function getFileSource(env: Env, id: string, request: Request) {
   const url = new URL(request.url)
-  const row = await env.DB.prepare('SELECT file_name, r2_key, mime_type, visible_to_client FROM attachments WHERE id = ?').bind(id).first<{
+  const row = await env.DB.prepare('SELECT file_name, r2_key, mime_type, visible_to_client FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{
     file_name: string
     r2_key: string
     mime_type: string | null
@@ -3190,7 +3343,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
 
 async function updateFileMetadata(env: Env, id: string, request: Request) {
   const body = (await request.json()) as { name?: string; tag?: string }
-  const current = await env.DB.prepare('SELECT file_name, file_tag FROM attachments WHERE id = ?').bind(id).first<{ file_name: string; file_tag: string | null }>()
+  const current = await env.DB.prepare('SELECT file_name, file_tag FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ file_name: string; file_tag: string | null }>()
   if (!current) {
     return fail('文件不存在', 404)
   }
@@ -3204,7 +3357,7 @@ async function updateFileMetadata(env: Env, id: string, request: Request) {
     SELECT a.*, t.title AS task_title
     FROM attachments a
     LEFT JOIN tasks t ON t.id = a.task_id
-    WHERE a.id = ?
+    WHERE a.id = ? AND a.deleted_at IS NULL
   `).bind(id).first<DbAttachment>()
   return ok(row ? toFile(row) : { ok: true })
 }
@@ -3214,7 +3367,7 @@ async function deleteFile(env: Env, id: string) {
     SELECT attachments.task_id, attachments.file_name, attachments.r2_key, attachments.preview_r2_key, tasks.settlement_month
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
-    WHERE attachments.id = ?
+    WHERE attachments.id = ? AND attachments.deleted_at IS NULL
   `).bind(id).first<{
     task_id: string
     file_name: string
@@ -3245,8 +3398,42 @@ async function deleteFile(env: Env, id: string) {
   return ok({ ok: true, storageCleanupFailed: failedDeletes > 0 })
 }
 
+async function setEntryAttachmentsArchived(env: Env, taskId: string, request: Request) {
+  const body = (await request.json()) as { entryId?: string; archived?: boolean }
+  const entryId = String(body.entryId ?? '').trim()
+  if (!entryId) {
+    return fail('缺少分段记录 ID')
+  }
+  const task = await env.DB.prepare(
+    'SELECT id, settlement_month FROM tasks WHERE id = ? AND deleted_at IS NULL',
+  ).bind(taskId).first<{ id: string; settlement_month: string | null }>()
+  if (!task) {
+    return fail('任务不存在或已删除', 404)
+  }
+  if (await isLockedReportMonth(env, task.settlement_month)) {
+    return fail('该任务所属月份已锁定结算，不能调整关联附件', 409)
+  }
+  const result = body.archived
+    ? await env.DB.prepare(
+        `UPDATE attachments
+         SET deleted_at = CURRENT_TIMESTAMP
+         WHERE task_id = ? AND entry_id = ? AND deleted_at IS NULL`,
+      ).bind(taskId, entryId).run()
+    : await env.DB.prepare(
+        `UPDATE attachments
+         SET deleted_at = NULL
+         WHERE task_id = ? AND entry_id = ? AND deleted_at IS NOT NULL`,
+      ).bind(taskId, entryId).run()
+  const affected = Number(result.meta?.changes ?? 0)
+  await audit(env, body.archived ? 'archive' : 'restore', 'entry_attachment', entryId, {
+    taskId: Number(taskId),
+    affected,
+  })
+  return ok({ ok: true, affected })
+}
+
 async function retryAttachmentAnalysis(env: Env, attachmentId: string, ctx?: WorkerExecutionContext) {
-  const row = await env.DB.prepare('SELECT task_id FROM attachments WHERE id = ?').bind(attachmentId).first<{ task_id: string }>()
+  const row = await env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(attachmentId).first<{ task_id: string }>()
   if (!row) {
     return fail('附件不存在', 404)
   }
@@ -3261,7 +3448,7 @@ async function backfillAttachmentAnalyses(env: Env, ctx?: WorkerExecutionContext
      FROM attachments
      LEFT JOIN attachment_analyses ON attachment_analyses.attachment_id = attachments.id
      INNER JOIN tasks ON tasks.id = attachments.task_id
-     WHERE attachment_analyses.attachment_id IS NULL AND tasks.deleted_at IS NULL
+     WHERE attachment_analyses.attachment_id IS NULL AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL
      ORDER BY attachments.uploaded_at DESC`,
   ).all<{ id: string; task_id: string }>()
   for (const row of rows.results ?? []) {
@@ -3694,6 +3881,260 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })
 }
 
+async function suggestAttachmentNameWithAi(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    fileName?: string
+    mimeType?: string
+    imageBase64?: string
+    note?: string
+    recentFileNames?: string[]
+    task?: {
+      id?: number
+      title?: string
+      type?: string
+      requirement?: string
+      contact?: string
+      requester?: string
+      reviewer?: string
+    }
+  }
+  const fileName = String(body.fileName ?? '').trim()
+  if (!fileName) {
+    return fail('请先添加需要命名的附件')
+  }
+  const dotIndex = fileName.lastIndexOf('.')
+  const extension = dotIndex > 0 && dotIndex < fileName.length - 1 ? fileName.slice(dotIndex).toLowerCase() : ''
+  const imageBase64 = String(body.imageBase64 ?? '').trim()
+  const mimeType = String(body.mimeType ?? '').trim() || 'image/png'
+  const recentFileNames = Array.isArray(body.recentFileNames)
+    ? body.recentFileNames.map((item) => String(item).trim()).filter(Boolean).slice(-12)
+    : []
+  const payload = {
+    currentFileName: fileName,
+    requiredExtension: extension,
+    progressNote: String(body.note ?? '').trim(),
+    task: body.task ?? {},
+    recentFileNames,
+  }
+  const prompt = `你是 Giverny 的设计交付文件命名助手。请分析附件内容和业务上下文，为设计师给出一个可直接使用的中文文件名。
+
+分析优先级：
+1. 如果提供了图片，先识别图片中的标题、项目名、版本、页面类型；企微/微信聊天截图、反馈截图、审批截图等，要准确描述其场景。
+2. 结合任务名称、设计类型、任务需求和当前进展备注，避免只复述原始随机文件名。
+3. 参考 recentFileNames 的真实命名习惯，但不要照抄无意义的截图时间戳。
+4. 文件名必须简洁、可检索，主体建议 8-20 个中文字符，最多不超过 28 个中文字符；不要把任务标题全文、聊天原文、时间句子或失败原因塞进文件名。
+5. 必须保留 requiredExtension；去掉 / \\ : * ? " < > | 等非法字符。
+6. 如果确实无法识别附件内容，请返回空 suggestedName，不要编造兜底文件名。
+7. 只返回 JSON，不要 Markdown，不要额外解释。
+
+JSON 结构：
+{"suggestedName":"包含扩展名的文件名，无法识别则为空字符串","reason":"不超过36字的命名依据","confidence":"低|中|高"}
+
+输入：
+${JSON.stringify(payload)}`
+
+  const normalizeSuggestion = (output: string, fallbackUsed: boolean) => {
+    const parsed = parseLooseJsonObject(output)
+    const cleanedOutput = output
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+    const directName = cleanedOutput
+      .split('\n')
+      .map((line) => line
+        .replace(/^[-*#\d.\s]+/, '')
+        .replace(/^(建议文件名|文件名|名称)\s*[：:]\s*/i, '')
+        .trim())
+      .find((line) => line && line.length <= 70 && !line.includes('{') && !line.includes('}'))
+    const extensionPattern = extension
+      ? new RegExp(`([^\\n"'{}]{2,64})${extension.replace('.', '\\.')}\\b`, 'i')
+      : null
+    const matchedName = extensionPattern?.exec(cleanedOutput)?.[0]
+    const rawName = String(
+      parsed.suggestedName
+      ?? parsed.fileName
+      ?? parsed.filename
+      ?? parsed.name
+      ?? matchedName
+      ?? directName
+      ?? '',
+    ).trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    if (!rawName) {
+      return null
+    }
+    const parsedDotIndex = rawName.lastIndexOf('.')
+    const rawBase = parsedDotIndex > 0 ? rawName.slice(0, parsedDotIndex) : rawName
+    const safeBase = rawBase
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/[.\s-]+$/g, '')
+      .trim()
+    const invalidNamePattern = /(视觉模型|暂时不可用|响应超时|API\s*Key|已按任务|备用视觉|主视觉|没有返回|无法识别|建议：|建议:|命名暂时|失败|超时)/i
+    const punctuationCount = (safeBase.match(/[，。；;、：:「」“”"']/g) ?? []).length
+    if (
+      !safeBase
+      || invalidNamePattern.test(safeBase)
+      || safeBase.length > 28
+      || punctuationCount > 2
+      || safeBase.includes('\n')
+    ) {
+      return null
+    }
+    const confidence = parsed.confidence === '高' || parsed.confidence === '中' || parsed.confidence === '低'
+      ? parsed.confidence
+      : imageBase64 ? '中' : '低'
+    const reason = String(parsed.reason ?? parsed.basis ?? '已结合附件内容与任务上下文整理').trim()
+    return {
+      suggestedName: `${safeBase}${extension}`,
+      reason: invalidNamePattern.test(reason) ? '已结合附件内容与任务上下文整理' : reason.slice(0, 36),
+      confidence,
+      fallbackUsed,
+    }
+  }
+
+  const routes: AiModelRouteKey[] = ['visionPrimary', 'visionFallback']
+  const attachmentNameTimeoutMs = 30_000
+  let lastError = ''
+  let configuredRouteCount = 0
+  for (let index = 0; index < routes.length; index += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('AI 命名请求超时'), attachmentNameTimeoutMs)
+    try {
+      const endpoint = await resolveAiEndpoint(env, routes[index])
+      if (!endpoint.apiKey) {
+        continue
+      }
+      configuredRouteCount += 1
+      const output = imageBase64
+        ? await callAiEndpointVision(endpoint, prompt, imageBase64, mimeType, 1024, controller.signal, true)
+        : await callAiEndpointText(endpoint, prompt, 1024, controller.signal)
+      const suggestion = normalizeSuggestion(output, index > 0)
+      if (!suggestion) {
+        lastError = `${endpoint.model} 返回内容无法解析为短文件名`
+        console.warn(JSON.stringify({
+          event: 'ai_attachment_name_unparseable',
+          provider: endpoint.provider,
+          model: endpoint.model,
+          outputLength: output.length,
+          usedImage: Boolean(imageBase64),
+        }))
+        continue
+      }
+      await audit(env, 'suggest', 'ai_attachment_name', String(body.task?.id ?? fileName), {
+        originalName: fileName,
+        suggestedName: suggestion.suggestedName,
+        provider: endpoint.provider,
+        model: endpoint.model,
+        fallbackUsed: index > 0,
+        usedImage: Boolean(imageBase64),
+      })
+      return ok(suggestion)
+    } catch (error) {
+      lastError = controller.signal.aborted
+        ? `${routes[index] === 'visionPrimary' ? '主视觉模型' : '备用视觉模型'}响应超时`
+        : error instanceof Error ? error.message : '模型请求失败'
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+  if (configuredRouteCount === 0) {
+    return fail('视觉模型尚未配置可用的 API Key', 503)
+  }
+  return fail(lastError ? `AI 命名暂时不可用：${lastError}` : '视觉模型没有返回可用命名建议，请稍后重试或手动命名。', 503)
+}
+
+async function suggestDailyKnowledgeWithAi(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    currentMonth?: string
+    taskThemes?: string[]
+    recentTitles?: string[]
+  }
+  const currentMonth = String(body.currentMonth ?? '').trim().slice(0, 7)
+  const taskThemes = Array.isArray(body.taskThemes)
+    ? [...new Set(body.taskThemes.map((item) => String(item).trim()).filter(Boolean))].slice(0, 12)
+    : []
+  const recentTitles = Array.isArray(body.recentTitles)
+    ? [...new Set(body.recentTitles.map((item) => String(item).trim()).filter(Boolean))].slice(-30)
+    : []
+  const payload = {
+    currentMonth,
+    currentTaskThemes: taskThemes,
+    recentlyShownTitles: recentTitles,
+  }
+  const prompt = `你是 Giverny 工作台的每日知识编辑。请生成一条适合成年人在工作间隙快速阅读的中文知识卡片；它不是“设计知识专栏”，而是一个有广度的内容池。
+
+内容方向要像“工作间隙随手翻到的一页杂志”，广而有趣，不要自我限制。可以在以下栏目之间轮换，也可以自由扩展出同等质量的新栏目，尽量让连续几次的 category 不同：
+- 视觉 / 艺术：人物・设计师、人物・画家、名画故事、画作介绍、摄影史、建筑・工艺、博物馆冷知识、色彩科普、品牌故事
+- 人文 / 人物：名人介绍、作家小传、每天一本好书、哲学、神话、宗教故事、语言与文化、知乎高赞、冷门历史人物
+- 世界 / 历史：历史・冷知识、世界未解之谜、考古发现、古文明、城市与旅行、地图故事、奇怪地名、民俗传说
+- 科学 / 自然：视觉科学、自然・植物、动物冷知识、天文小知识、心理学、科技冷知识、生活物理、人体小知识
+- 生活 / 风味：咖啡冷知识、茶・冷知识、食物史、香水故事、服饰史、节日由来、日用品来历
+- 声音 / 表演：乐器科普、乐器・历史、音乐家故事、电影冷知识、戏剧故事、声音与声学
+- 轻松 / 奇怪：冷笑话、乙方语言学、奇怪小知识、荒诞事实、脑洞问题、误解澄清、工作方法、沟通观察
+
+可以偶尔借当前任务主题选择方向，但不要每次都回到设计，不要泄露、复述或猜测具体客户信息。
+
+硬性规则：
+1. 不得与 recentlyShownTitles 中的标题或核心观点重复。
+2. 不要写空泛鸡汤、名人语录或无法核实的夸张结论。
+3. 标题不超过 18 个汉字；摘要不超过 42 个汉字。
+4. 正文必须是 3 段，每段 45-90 个汉字，讲清知识本身；只有确有必要时才自然联系工作，不要强行把每个主题落到设计。
+5. 正文每段最多用一次 **重点短语** 标记真正需要强调的关键词；不要整句加粗。
+6. category 为 2-8 个汉字，例如“历史・冷知识”“每天一本好书”“咖啡冷知识”“乐器科普”“冷笑话”“名画故事”“世界未解之谜”。
+7. 只返回 JSON，不要额外解释。
+
+JSON 结构：
+{"category":"string","title":"string","teaser":"string","body":["string","string","string"]}
+
+输入：
+${JSON.stringify(payload)}`
+
+  const callRoute = async (route: AiModelRouteKey) => {
+    const endpoint = await resolveAiEndpoint(env, route)
+    if (!endpoint.apiKey) {
+      return null
+    }
+    const output = await callAiEndpointText(endpoint, prompt, 900)
+    const parsed = parseLooseJsonObject(output) as DailyKnowledgeToolArgs
+    const title = String(parsed.title ?? '').trim()
+    const category = String(parsed.category ?? '').trim()
+    const teaser = String(parsed.teaser ?? '').trim()
+    const paragraphs = Array.isArray(parsed.body)
+      ? parsed.body.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+      : []
+    if (!title || !category || !teaser || paragraphs.length !== 3 || recentTitles.includes(title)) {
+      return null
+    }
+    return {
+      category: category.slice(0, 12),
+      source: `AI · ${endpoint.model}`,
+      title: title.slice(0, 36),
+      teaser: teaser.slice(0, 90),
+      body: paragraphs,
+    }
+  }
+
+  try {
+    const suggestion = await callRoute('textPrimary')
+    if (suggestion) {
+      return ok(suggestion)
+    }
+  } catch {
+    // Primary failures fall through to the configured text backup.
+  }
+
+  try {
+    const fallback = await callRoute('textFallback')
+    if (fallback) {
+      return ok(fallback)
+    }
+  } catch {
+    // The frontend has a curated fallback pool, so keep this endpoint concise.
+  }
+
+  return fail('AI 暂时没有生成可用内容', 503)
+}
+
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
@@ -4073,7 +4514,11 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   let role: AuthRole = 'member'
   const authEnabled = Boolean(env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING)))
   if (authEnabled && !isPublic) {
-    const resolved = await resolveRole(env, request.headers.get('x-auth-key') ?? '', request.headers.get('x-auth-email') ?? '')
+    const resolved = await resolveRole(
+      env,
+      request.headers.get('x-auth-key') ?? '',
+      request.headers.get('x-auth-email') ?? '',
+    )
     if (resolved) {
       role = resolved
     } else if (!isGet) {
@@ -4137,6 +4582,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/tasks' && request.method === 'POST') {
     return createTask(env, request)
   }
+  if (path.startsWith('/api/tasks/') && path.endsWith('/entry-attachments') && request.method === 'PATCH') {
+    return setEntryAttachmentsArchived(env, path.split('/')[3], request)
+  }
   if (path.startsWith('/api/tasks/') && request.method === 'PATCH') {
     return updateTask(env, path.split('/').pop() ?? '', request)
   }
@@ -4197,8 +4645,14 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)
   }
+  if (path === '/api/ai/attachment-name' && request.method === 'POST') {
+    return suggestAttachmentNameWithAi(env, request)
+  }
   if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
     return suggestHourEstimateWithAi(env, request)
+  }
+  if (path === '/api/ai/daily-knowledge' && request.method === 'POST') {
+    return suggestDailyKnowledgeWithAi(env, request)
   }
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)
@@ -4272,6 +4726,9 @@ export default {
     return withSecurityHeaders(await env.ASSETS.fetch(request))
   },
   async scheduled(_controller: unknown, env: Env) {
+    await purgeExpiredProgressAttachments(env).catch((error) => {
+      console.error('progress attachment retention cleanup failed', error)
+    })
     await processPendingAttachmentAnalyses(env, 1)
     await runEventDrivenInsights(env, 1).catch((error) => {
       console.error('insight event trigger failed', error)

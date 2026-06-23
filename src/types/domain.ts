@@ -15,7 +15,9 @@ export type Task = {
   id: number
   date: string
   estimatedDate: string
+  actualDeliveryDate?: string
   settlementMonth?: string
+  isSupplemental?: boolean
   type: string
   title: string
   requirement: string
@@ -29,9 +31,11 @@ export type Task = {
   progress: number
   suspendReason?: string
   terminateReason?: string
+  supplementalNote?: string
   acceptanceNote?: string
   feedbackRating?: TaskFeedbackRating | ''
   feedbackTags?: TaskFeedbackTag[]
+  feedbackNote?: string
   acceptanceFiles?: string[]
   timeEntries?: TimeEntry[]
   waitingEntries?: WaitingEntry[]
@@ -58,6 +62,8 @@ export type WaitingEntry = TimeEntry & {
 export type FileAsset = {
   id: number
   taskId: number
+  entryId?: string
+  scope: 'progress' | 'acceptance'
   name: string
   task: string
   type: string
@@ -66,6 +72,7 @@ export type FileAsset = {
   final: boolean
   visible: boolean
   tag?: string
+  deletedAt?: string
   previewUrl?: string
   sourceUrl?: string
 }
