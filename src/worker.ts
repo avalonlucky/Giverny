@@ -1,6 +1,6 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
 import JSZip from 'jszip'
-import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
+import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -1271,31 +1271,81 @@ function inDateRange(value: string | null | undefined, range: { start: string; e
   return Boolean(date && date >= range.start && date <= range.end)
 }
 
+function entryMinuteStamp(dateValue: string | undefined, timeValue: string | undefined) {
+  const dateMatch = String(dateValue || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const timeMatch = String(timeValue || '').match(/^(\d{1,2}):(\d{2})$/)
+  if (!dateMatch || !timeMatch) {
+    return Number.NaN
+  }
+  const [, year, month, day] = dateMatch.map(Number)
+  const [, hour, minute] = timeMatch.map(Number)
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return Number.NaN
+  }
+  return Math.round(Date.UTC(year, month - 1, day, hour, minute) / 60000)
+}
+
+function dateFromMinuteStamp(stamp: number) {
+  return Number.isFinite(stamp) ? new Date(stamp * 60000).toISOString().slice(0, 10) : ''
+}
+
+function entryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>, fallbackDate?: string | null) {
+  const startDate = entry.date || String(fallbackDate || '').slice(0, 10)
+  const endDate = entry.endDate || entry.date || startDate
+  const start = entryMinuteStamp(startDate, entry.start)
+  const end = entryMinuteStamp(endDate, entry.end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null
+  }
+  return { start, end }
+}
+
+function taskLifecycleBounds(task: DbTask) {
+  if (task.status === '计划中') {
+    return null
+  }
+  const entries = parseTimeEntries(task.time_entries_json)
+    .map((entry) => ({ entry, bounds: entryBounds(entry, task.start_date) }))
+    .filter((item): item is { entry: TimeEntry; bounds: { start: number; end: number } } => Boolean(item.bounds))
+  if (entries.length === 0) {
+    return null
+  }
+  const start = Math.min(...entries.map((item) => item.bounds.start))
+  const acceptanceEntries = entries.filter((item) => item.entry.isAcceptanceProgress)
+  const endSource = acceptanceEntries.length > 0 ? acceptanceEntries : entries
+  const end = Math.max(...endSource.map((item) => item.bounds.end))
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null
+  }
+  return {
+    start,
+    end,
+    hours: Math.round(((end - start) / 60) * 100) / 100,
+    startDate: dateFromMinuteStamp(start),
+    endDate: dateFromMinuteStamp(end),
+  }
+}
+
 function taskInsightDate(task: DbTask) {
-  return task.actual_delivery_date || task.start_date || (task.settlement_month ? `${task.settlement_month}-01` : '')
+  if (task.status === '计划中') {
+    return ''
+  }
+  return taskLifecycleBounds(task)?.endDate || task.start_date || (task.settlement_month ? `${task.settlement_month}-01` : '')
 }
 
 function taskCycleDays(task: DbTask) {
-  const start = task.start_date ? new Date(task.start_date).getTime() : 0
-  const endValue = task.actual_delivery_date || task.estimated_delivery_date
-  const end = endValue ? new Date(endValue).getTime() : 0
-  if (!start || !end || end < start) {
+  const lifecycle = taskLifecycleBounds(task)
+  if (!lifecycle) {
     return null
   }
-  return Math.max(1, Math.round((end - start) / 86400000))
+  return Math.max(1, Math.round((lifecycle.end - lifecycle.start) / 1440))
 }
 
-function entryMinutesBetween(start: string, end: string) {
-  const [startHour, startMinute] = start.split(':').map(Number)
-  const [endHour, endMinute] = end.split(':').map(Number)
-  if ([startHour, startMinute, endHour, endMinute].some((value) => !Number.isFinite(value))) {
-    return 0
-  }
-  return Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute))
-}
-
-function entriesHours(entries: TimeEntry[]) {
-  const minutes = entries.reduce((sum, entry) => sum + entryMinutesBetween(entry.start, entry.end), 0)
+function entriesHours(entries: TimeEntry[], fallbackDate?: string | null) {
+  const minutes = entries.reduce((sum, entry) => {
+    const bounds = entryBounds(entry, fallbackDate)
+    return sum + (bounds ? Math.max(0, bounds.end - bounds.start) : 0)
+  }, 0)
   return Math.round((minutes / 60) * 100) / 100
 }
 
@@ -1310,7 +1360,7 @@ function parseAnalysisItems(value: string | null) {
 
 async function loadInsightData(env: Env): Promise<InsightDataSet> {
   const [taskRows, updateRows, analysisRows] = await Promise.all([
-    env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND status <> '不计费'").all<DbTask>(),
+    env.DB.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND is_billable = 1").all<DbTask>(),
     env.DB.prepare(`SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL`).all<DbUpdate>(),
     env.DB.prepare(`SELECT attachment_analyses.* FROM attachment_analyses INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id INNER JOIN tasks ON tasks.id = attachment_analyses.task_id WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL AND attachment_analyses.status = 'completed'`).all<DbAttachmentAnalysis>(),
   ])
@@ -1327,19 +1377,16 @@ async function loadInsightData(env: Env): Promise<InsightDataSet> {
 
 function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet, 'updatesByTask' | 'analysesByTask'>): InsightTypeMetrics[] {
   const groups = new Map<string, DbTask[]>()
-  for (const task of source) {
+  for (const task of source.filter((item) => item.status !== '计划中')) {
     const type = task.design_type || '未分类'
     groups.set(type, [...(groups.get(type) ?? []), task])
   }
   return [...groups.entries()].map(([type, items]) => {
     const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
     const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
-    const cycleHours = items.reduce((sum, task) => sum + hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date), 0)
-    const explicitWaitingHours = items.reduce((sum, task) => sum + entriesHours(parseWaitingEntries(task.waiting_entries_json)), 0)
-    const opportunityWaitHours = items.reduce((sum, task) => {
-      const cycle = hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date)
-      return sum + Math.max(0, cycle - (Number(task.actual_hours) || 0))
-    }, 0)
+    const cycleHours = items.reduce((sum, task) => sum + (taskLifecycleBounds(task)?.hours ?? 0), 0)
+    const explicitWaitingHours = items.reduce((sum, task) => sum + entriesHours(parseWaitingEntries(task.waiting_entries_json), task.start_date), 0)
+    const opportunityWaitHours = explicitWaitingHours
     const revisionSignals = items.reduce(
       (sum, task) => sum + (dataSet.updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
       0,
@@ -1372,7 +1419,7 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
       cycleHours: Number(cycleHours.toFixed(1)),
       opportunityWaitHours: Number(opportunityWaitHours.toFixed(1)),
       explicitWaitingHours: Number(explicitWaitingHours.toFixed(1)),
-      waitingRatioPercent: cycleHours > 0 ? Math.round((opportunityWaitHours / cycleHours) * 100) : null,
+      waitingRatioPercent: explicitWaitingHours > 0 ? Math.round((explicitWaitingHours / Math.max(actualHours + explicitWaitingHours, explicitWaitingHours)) * 100) : 0,
       estimateVariancePercent: estimatedHours > 0 ? Math.round(((actualHours - estimatedHours) / estimatedHours) * 100) : null,
       revisionSignals,
       revisionSignalsPerTask: items.length > 0 ? Number((revisionSignals / items.length).toFixed(2)) : null,
@@ -1444,13 +1491,13 @@ function toInsightHistoryItem(row: DbInsightHistory): InsightHistoryItem {
 
 function classifyInsightType(signal: string, action: string): InsightHistoryItem['insightType'] {
   const text = `${signal} ${action}`
-  if (/时薪|价格|报价|低于均值|客户价值|对接人/.test(text)) {
+  if (/时薪|价格|报价|低于均值|客户价值|需求人|对接人/.test(text)) {
     return 'pricing'
   }
   if (/空缺|缺少|拓展|闲置|类型/.test(text)) {
     return 'gap'
   }
-  if (/客户|对接人|沟通|修改|反馈|返工/.test(text)) {
+  if (/客户|需求人|对接人|沟通|修改|反馈|返工/.test(text)) {
     return 'client'
   }
   return 'efficiency'
@@ -1577,14 +1624,14 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
     })
   }
 
-  const contacts = [...new Set(dataSet.tasks.map((task) => task.contact_person || '').filter(Boolean))]
+  const requesters = [...new Set(dataSet.tasks.map((task) => task.requester || '').filter(Boolean))]
   const historicalRatedTasks = dataSet.tasks.filter((task) => (Number(task.actual_hours) || 0) > 0 && (Number(task.hourly_rate) || 0) > 0)
   const globalHourlyRate =
     historicalRatedTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) /
     Math.max(1, historicalRatedTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
-  for (const contact of contacts) {
+  for (const requester of requesters) {
     const rateForMonth = (targetMonth: string) => {
-      const items = monthTasks(dataSet, targetMonth).filter((task) => (task.contact_person || '') === contact && (Number(task.actual_hours) || 0) > 0)
+      const items = monthTasks(dataSet, targetMonth).filter((task) => (task.requester || '') === requester && (Number(task.actual_hours) || 0) > 0)
       const hours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
       const rate = hours > 0 ? items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0) * (Number(task.hourly_rate) || 0), 0) / hours : null
       return { taskCount: items.length, hours: Number(hours.toFixed(1)), rate: rate === null ? null : Number(rate.toFixed(2)) }
@@ -1594,15 +1641,15 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
     if ((current.rate ?? globalHourlyRate) < globalHourlyRate * 0.9 && (previous.rate ?? globalHourlyRate) < globalHourlyRate * 0.9 && current.taskCount > 0 && previous.taskCount > 0) {
       triggers.push({
         insightType: 'pricing',
-        triggerKey: `contact-rate:${contact}`,
-        finding: `${contact} 的任务综合时薪连续低于均值`,
-        recommendationHint: '评估该对接人的需求沟通成本、修改风险和报价结构，必要时提高报价或限制低价值任务占比。',
+        triggerKey: `requester-rate:${requester}`,
+        finding: `${requester} 的任务综合时薪连续低于均值`,
+        recommendationHint: '评估该需求人的需求决策成本、修改风险和报价结构，必要时提高报价或限制低价值任务占比。',
         severity: (current.rate ?? 0) < globalHourlyRate * 0.75 ? 'high' : 'medium',
-        dataSnapshot: { currentMonth, previousMonth, contact, current, previous, baselineHourlyRate: Number(globalHourlyRate.toFixed(2)) },
+        dataSnapshot: { currentMonth, previousMonth, requester, current, previous, baselineHourlyRate: Number(globalHourlyRate.toFixed(2)) },
       })
     }
-    const currentContactTasks = monthTasks(dataSet, currentMonth).filter((task) => (task.contact_person || '') === contact)
-    const subjectiveIssues = currentContactTasks
+    const currentRequesterTasks = monthTasks(dataSet, currentMonth).filter((task) => (task.requester || '') === requester)
+    const subjectiveIssues = currentRequesterTasks
       .filter((task) => normalizeFeedbackRating(task.feedback_rating) === '一般' || normalizeFeedbackRating(task.feedback_rating) === '有问题')
     const tagCounts = subjectiveIssues.reduce<Record<string, number>>((map, task) => {
       parseFeedbackTags(task.feedback_tags_json).forEach((tag) => {
@@ -1614,11 +1661,11 @@ function buildInsightEventTriggers(dataSet: InsightDataSet, month: string): Insi
     if (subjectiveIssues.length >= 2 && dominantTag) {
       triggers.push({
         insightType: 'client',
-        triggerKey: `feedback-contact:${contact}:${dominantTag[0]}`,
-        finding: `${contact} 的任务主观反馈集中在「${dominantTag[0]}」`,
-        recommendationHint: '复盘该对接人的需求输入、反馈路径和报价边界，把体感问题转成下次接单前的明确约束。',
+        triggerKey: `feedback-requester:${requester}:${dominantTag[0]}`,
+        finding: `${requester} 的任务主观反馈集中在「${dominantTag[0]}」`,
+        recommendationHint: '复盘该需求人的需求输入、决策路径和报价边界，把体感问题转成下次接单前的明确约束。',
         severity: subjectiveIssues.length >= 3 || dominantTag[1] >= 3 ? 'high' : 'medium',
-        dataSnapshot: { currentMonth, contact, issueTaskCount: subjectiveIssues.length, tagCounts, tasks: subjectiveIssues.map((task) => ({ id: task.id, title: task.title, type: task.design_type, rating: task.feedback_rating, tags: parseFeedbackTags(task.feedback_tags_json), note: task.feedback_note ?? '' })) },
+        dataSnapshot: { currentMonth, requester, issueTaskCount: subjectiveIssues.length, tagCounts, tasks: subjectiveIssues.map((task) => ({ id: task.id, title: task.title, type: task.design_type, rating: task.feedback_rating, tags: parseFeedbackTags(task.feedback_tags_json), note: task.feedback_note ?? '' })) },
       })
     }
   }
@@ -1688,7 +1735,7 @@ async function runEventDrivenInsights(env: Env, limit = 2) {
     }))
     const prompt = [
       '你是 Giverny 的事件型洞察顾问。当前 SQL 规则已经确认出现异常，你只负责基于数据变化生成专项洞察。',
-      '硬规则：1. 不写正面总结；2. 不重复上次建议，而是评估上次建议是否改善；3. 只能引用输入数据；4. 返回一个简短 finding 和一个具体 recommendation。',
+      '硬规则：1. 不写正面总结；2. 不重复上次建议，而是评估上次建议是否改善；3. 只能引用输入数据；4. 计划中和系统流水时间不算真实生命周期；5. 等待只能来自显式等待记录，不得用自然日差推断；6. 返回一个简短 finding 和一个具体 recommendation。',
       'status 规则：仍未改善为 open；轻微改善但未回到基线为 improved；已经回到基线或异常消失为 resolved。',
       '只返回 JSON：{"finding":"本次发现","recommendation":"具体动作","status":"open|improved|resolved"}',
       `事件触发：${JSON.stringify(trigger)}`,
@@ -1741,15 +1788,16 @@ async function diagnoseInsights(env: Env, request: Request) {
     previousPeriod: { range: ranges.previous, byType: aggregateInsightMetrics(previousTasks, dataSet) },
     historicalBaseline: { byType: aggregateInsightMetrics(tasks.filter((task) => !currentIds.has(task.id)), dataSet) },
     definitions: {
+      lifecycleRule: '计划中不计入任务真实生命周期。真实生命周期只从进入进行中后的有效分段进展开始，到验收进展的时间段结束；补录任务的系统更新/创建/验收流水时间只是审计日志，不代表真实执行或交付时间。',
       revisionSignals: '进展记录标题或内容含修改、调整、改稿、反馈、返工或 revision 的次数；这是可追溯代理指标，不等于人工确认的精确修改轮次。',
       weightedHourlyRate: '按任务实际工时加权的任务结算时薪；若任务均使用同一费率，该指标不会产生可用差异。',
       feedbackRatings: '验收时设计师主观体感：顺利、一般、有问题；这是客观工时无法覆盖的痛苦度信号。',
       feedbackTags: '验收时设计师可选原因标签：需求不清晰、沟通成本高、定价偏低、技术挑战大。',
       feedbackNote: '验收时设计师填写的主观体感评价，用于补充等待、沟通、返工等客观字段无法表达的背景。',
-      cycleHours: '任务从预计/接受开始到实际验收的总占用周期小时；首次验收时系统写入 actual_delivery_date。',
-      opportunityWaitHours: '周期占用等待 = 任务总周期小时 - 实际计费工时。用于识别“被项目占着但没有收入”的机会成本。',
+      cycleHours: '基于分段进展计时推导的真实执行生命周期小时，排除计划中阶段和系统补录/编辑流水时间；优先以验收进展作为结束点。',
+      opportunityWaitHours: '显式等待小时，等同于设计师手动记录的等待/非计费时间；不得用自然日周期减计费工时推断等待。',
       explicitWaitingHours: '设计师手动记录的等待/非计费时间段，例如等待甲方意见、等待资料、等待确认；不进入结算工时。',
-      waitingRatioPercent: '周期占用等待占总周期的百分比。该值高说明任务拖得久但计费少，可能挤占其他接单时间。',
+      waitingRatioPercent: '显式等待小时占（计费工时 + 显式等待小时）的百分比。没有等待记录时为 0，不能推断为长等待。',
     },
   }
   const fingerprint = await fingerprintInsightData(metricPayload)
@@ -1786,7 +1834,9 @@ async function diagnoseInsights(env: Env, request: Request) {
     '3. 只能引用输入数据中的数值和事实，不能编造客户反馈、利润、修改轮次或附件内容。',
     '4. 修改信号是进展文案代理指标，不得写成精确人工修改轮次。',
     '5. 不得重复历史诊断记忆里已经出现的建议，除非当前数据证明该问题仍未解决；此时 state 必须为 persisting。若数据表明改善，state 为 improved 且动作改为巩固或停止措施。',
-    '6. 最多输出 5 条，优先输出变化幅度大、与历史基线矛盾、交付风险或质量风险。',
+    '6. 计划中阶段不是执行周期；系统更新、创建、确认验收流水只用于审计，尤其补录任务不能用这些时间推断真实开始或交付。',
+    '7. 等待只能来自 explicitWaitingHours / waiting_entries_json；没有等待记录时不得用自然日差、cycleHours - actualHours 或交付跨度推断等待。',
+    '8. 最多输出 5 条，优先输出变化幅度大、与历史基线矛盾、交付风险或质量风险。',
     '只返回 JSON：{"status":"anomalies|clear","insights":[{"key":"稳定短键","signal":"异常信号","evidence":"含当前/上期/历史对照的具体数据","action":"一个可执行动作","state":"new|persisting|improved"}],"dataNotes":["数据不足或口径提醒"]}',
     `当前对照数据：${JSON.stringify(metricPayload)}`,
     `历史诊断记忆：${JSON.stringify(previousAdvice)}`,
@@ -2021,6 +2071,7 @@ const toTask = (row: DbTask, files: string[] = []): Task => ({
   actualHours: Number(row.actual_hours) || 0,
   status: row.status,
   progress: Number(row.progress) || 0,
+  billable: Number(row.is_billable) !== 0,
   suspendReason: row.suspend_reason ?? '',
   terminateReason: row.terminate_reason ?? '',
   supplementalNote: row.supplemental_note ?? '',
@@ -2050,6 +2101,8 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
             start: String((entry as TimeEntry).start ?? ''),
             end: String((entry as TimeEntry).end ?? ''),
             note: String((entry as TimeEntry).note ?? ''),
+            isAcceptanceProgress: Boolean((entry as TimeEntry).isAcceptanceProgress),
+            isRevision: Boolean((entry as TimeEntry).isRevision),
             reason: String((entry as WaitingEntry).reason ?? '') as WaitingReason,
           }))
           .filter((entry) => entry.start && entry.end)
@@ -2704,6 +2757,10 @@ async function createTask(env: Env, request: Request) {
   const task = (await request.json()) as Task
   const id = toId(task.id || Date.now())
   const hourlyRate = await getHourlyRate(env)
+  // 所有任务都从「计划中」开始；是否计费由独立的 billable 标记决定（不随状态变化），
+  // 这样「不计费任务」即便后续走完整验收流程，也始终不计费。
+  const initialStatus: TaskStatus = task.status === '不计费' ? '不计费' : '计划中'
+  const initialBillable = task.billable === false ? 0 : initialStatus === '不计费' ? 0 : 1
   await env.DB.prepare(
     `INSERT INTO tasks (
       id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
@@ -2718,7 +2775,7 @@ async function createTask(env: Env, request: Request) {
       task.type,
       task.date,
       task.estimatedDate || task.date,
-      task.status === '已验收' ? nowIso() : null,
+      null,
       task.settlementMonth || monthPart(nowIso()),
       task.isSupplemental ? 1 : 0,
       task.estimatedHours,
@@ -2728,8 +2785,8 @@ async function createTask(env: Env, request: Request) {
       task.contact,
       task.reviewer,
       task.stage,
-      task.status,
-      task.progress,
+      initialStatus,
+      0,
       task.suspendReason ?? '',
       task.terminateReason ?? '',
       task.supplementalNote ?? '',
@@ -2739,7 +2796,7 @@ async function createTask(env: Env, request: Request) {
       task.feedbackNote ?? '',
       JSON.stringify(task.timeEntries ?? []),
       JSON.stringify(task.waitingEntries ?? []),
-      task.status === '不计费' ? 0 : 1,
+      initialBillable,
     )
     .run()
 
@@ -2758,7 +2815,7 @@ async function createTask(env: Env, request: Request) {
     .run()
 
   await audit(env, 'create', 'task', id, task)
-  return ok({ ...task, id: Number(id), files: [] }, 201)
+  return ok({ ...task, id: Number(id), status: initialStatus, progress: 0, files: [] }, 201)
 }
 
 async function updateTask(env: Env, id: string, request: Request) {
@@ -2770,11 +2827,13 @@ async function updateTask(env: Env, id: string, request: Request) {
   if (await isLockedReportMonth(env, current.settlement_month)) {
     return fail('该任务所属月份已锁定结算，不能再修改任务明细', 409)
   }
+  const allowAcceptedTimeEdit = Boolean((changes as { allowAcceptedTimeEdit?: boolean }).allowAcceptedTimeEdit)
+  const allowAcceptanceRollback = Boolean((changes as { allowAcceptanceRollback?: boolean }).allowAcceptanceRollback)
   if (current.status === '已验收') {
-    if (changes.status && changes.status !== '已验收') {
+    if (changes.status && changes.status !== '已验收' && !allowAcceptanceRollback) {
       return fail('已验收任务状态已锁定，不能直接改回其他状态', 409)
     }
-    if (Object.prototype.hasOwnProperty.call(changes, 'actualHours') || Object.prototype.hasOwnProperty.call(changes, 'timeEntries')) {
+    if (!allowAcceptedTimeEdit && (Object.prototype.hasOwnProperty.call(changes, 'actualHours') || Object.prototype.hasOwnProperty.call(changes, 'timeEntries'))) {
       return fail('已验收任务的工时已锁定，不能再修改实际工时', 409)
     }
   }
@@ -2806,9 +2865,11 @@ async function updateTask(env: Env, id: string, request: Request) {
     feedbackNote: Object.prototype.hasOwnProperty.call(changes, 'feedbackNote') ? String(changes.feedbackNote ?? '') : current.feedback_note ?? '',
     timeEntries: changes.timeEntries ?? parseTimeEntries(current.time_entries_json),
     waitingEntries: changes.waitingEntries ?? parseWaitingEntries(current.waiting_entries_json),
-    actualDeliveryDate: changes.status === '已验收' && current.status !== '已验收'
-      ? nowIso()
-      : current.actual_delivery_date,
+    actualDeliveryDate: Object.prototype.hasOwnProperty.call(changes, 'actualDeliveryDate')
+      ? String(changes.actualDeliveryDate ?? '')
+      : changes.status === '已验收' && current.status !== '已验收'
+        ? nowIso()
+        : current.actual_delivery_date,
   }
 
   await env.DB.prepare(
@@ -2844,7 +2905,13 @@ async function updateTask(env: Env, id: string, request: Request) {
       next.feedbackNote,
       JSON.stringify(next.timeEntries),
       JSON.stringify(next.waitingEntries),
-      next.status === '不计费' ? 0 : 1,
+      // 计费标记是独立的、持久的：默认保留原值；状态变化（含验收）不会改变它。
+      // 仅当本次更新显式带 billable，或状态被设为「不计费」时才改写。
+      Object.prototype.hasOwnProperty.call(changes, 'billable')
+        ? ((changes as { billable?: boolean }).billable === false ? 0 : 1)
+        : next.status === '不计费'
+          ? 0
+          : Number(current.is_billable),
       id,
     )
     .run()
@@ -3070,11 +3137,14 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
     final: form.get('final') === 'true',
     visible: form.get('visible') !== 'false',
     tag: String(form.get('tag') ?? ''),
+    analyze: form.get('analyze') !== 'false',
   })
   if (saved instanceof Response) {
     return saved
   }
-  ctx?.waitUntil(processAttachmentAnalysis(env, id))
+  if (form.get('analyze') !== 'false') {
+    ctx?.waitUntil(processAttachmentAnalysis(env, id))
+  }
   return ok(saved, 201)
 }
 
@@ -3097,6 +3167,7 @@ async function insertAttachment(
     final: boolean
     visible: boolean
     tag?: string
+    analyze?: boolean
   },
 ) {
   const uploadedAt = nowIso()
@@ -3138,7 +3209,9 @@ async function insertAttachment(
     visible: payload.visible,
     tag: payload.tag ?? '',
   })
-  await createAttachmentAnalysisJob(env, payload.id, payload.taskId)
+  if (payload.analyze) {
+    await createAttachmentAnalysisJob(env, payload.id, payload.taskId)
+  }
 
   return {
     id: Number(payload.id),
@@ -3232,11 +3305,14 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
     final: form.get('final') === 'true',
     visible: form.get('visible') !== 'false',
     tag: String(form.get('tag') ?? ''),
+    analyze: form.get('analyze') !== 'false',
   })
   if (saved instanceof Response) {
     return saved
   }
-  ctx?.waitUntil(processAttachmentAnalysis(env, fileId))
+  if (form.get('analyze') !== 'false') {
+    ctx?.waitUntil(processAttachmentAnalysis(env, fileId))
+  }
   return ok(saved, 201)
 }
 
@@ -4447,9 +4523,17 @@ async function generateMonthlyReport(env: Env, request: Request) {
   const rows = await env.DB.prepare("SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL").bind(body.month).all<DbTask>()
   const tasks = rows.results ?? []
   const importedHours = Number(body.importedHours) || 0
+  const hourlyRate = Number(body.hourlyRate) || defaultHourlyRate
+  const roundCents = (value: number) => Math.round(value * 100) / 100
   const totalHours = tasks.reduce((sum, task) => sum + Number(task.actual_hours), importedHours)
   const billableHours = tasks.filter((task) => task.is_billable).reduce((sum, task) => sum + Number(task.actual_hours), importedHours)
-  const totalAmount = Math.round(billableHours * (Number(body.hourlyRate) || defaultHourlyRate))
+  // 每行取真实金额（精确到分，不取整到元），再求和，保证回单「明细金额之和 === 总额」（与前端 sumBillableAmount 一致）
+  const totalAmount = roundCents(
+    tasks
+      .filter((task) => task.is_billable && Number(task.actual_hours) > 0)
+      .reduce((sum, task) => sum + roundCents(Number(task.actual_hours) * hourlyRate), 0)
+    + (importedHours > 0 ? roundCents(importedHours * hourlyRate) : 0),
+  )
 
   // 每月只保留一条结算记录：重复锁定时更新数据但保留原 token，已发给甲方的链接不会失效
   const existing = await env.DB.prepare('SELECT id, public_token FROM monthly_reports WHERE month = ?').bind(body.month).first<{

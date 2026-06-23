@@ -1,6 +1,6 @@
 export type TaskStatus = '计划中' | '进行中' | '挂起' | '待验收' | '已验收' | '终止' | '不计费'
 
-export type AppView = '工作台' | '任务' | '文件库' | '洞察' | '收入' | '结算' | '甲方查看' | '设置'
+export type AppView = '工作台' | '任务' | '文件库' | '洞察' | '收入' | '结算' | '设置'
 
 export type TaskFilter = '全部' | '计划中' | '进行中' | '挂起' | '待验收' | '已验收' | '终止'
 
@@ -29,6 +29,8 @@ export type Task = {
   actualHours: number
   status: TaskStatus
   progress: number
+  /** 是否计费。独立于状态、持久保存：不计费任务即便走完整验收流程也始终不计费 */
+  billable?: boolean
   suspendReason?: string
   terminateReason?: string
   supplementalNote?: string
@@ -51,6 +53,10 @@ export type TimeEntry = {
   start: string
   end: string
   note?: string
+  isAcceptanceProgress?: boolean
+  /** 本段是否为「改稿轮次」。仅用于需求人画像/AI 分析，不影响计时与结算。
+   *  显式开关判定，避免把「任务分阶段提交」误判为改稿。 */
+  isRevision?: boolean
 }
 
 export type WaitingReason = '等待甲方意见' | '等待补充资料' | '等待排期' | '其他'

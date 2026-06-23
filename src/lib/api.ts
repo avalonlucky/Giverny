@@ -186,6 +186,8 @@ const legacyTokenStorageKey = 'designer-worklog-admin-token'
 export type StoredAuth = {
   email: string
   key: string
+  /** 登录时拿到的角色，用于在重新加载时检测「管理员凭证已失效被降级」 */
+  role?: 'admin' | 'member'
 }
 
 export function getStoredAuth(): StoredAuth | null {
@@ -197,7 +199,7 @@ export function getStoredAuth(): StoredAuth | null {
       return null
     }
     const parsed = JSON.parse(raw) as StoredAuth
-    return parsed.key ? { email: parsed.email ?? '', key: parsed.key } : null
+    return parsed.key ? { email: parsed.email ?? '', key: parsed.key, role: parsed.role } : null
   } catch {
     return null
   }
@@ -406,11 +408,12 @@ export const api = {
       final: boolean
       visible: boolean
       tag?: string
+      analyze?: boolean
     },
     onProgress?: (ratio: number) => void,
   ): Promise<FileAsset> => {
     const { file } = payload
-    const singleShotLimit = 90 * 1024 * 1024
+    const singleShotLimit = 12 * 1024 * 1024
 
     if (file.size <= singleShotLimit) {
       const form = new FormData()
@@ -423,6 +426,7 @@ export const api = {
       form.set('final', String(payload.final))
       form.set('visible', String(payload.visible))
       form.set('tag', payload.tag ?? '')
+      form.set('analyze', String(payload.analyze ?? true))
       if (payload.preview) {
         form.set('preview', payload.preview)
       }
@@ -436,7 +440,7 @@ export const api = {
       body: JSON.stringify({ taskId: payload.taskId, entryId: payload.entryId ?? '', fileName: file.name, contentType: file.type }),
     })
 
-    const partSize = 40 * 1024 * 1024
+    const partSize = 8 * 1024 * 1024
     const totalParts = Math.ceil(file.size / partSize)
     const parts: { partNumber: number; etag: string }[] = []
     for (let index = 0; index < totalParts; index += 1) {
@@ -467,6 +471,7 @@ export const api = {
     completeForm.set('final', String(payload.final))
     completeForm.set('visible', String(payload.visible))
     completeForm.set('tag', payload.tag ?? '')
+    completeForm.set('analyze', String(payload.analyze ?? true))
     if (payload.preview) {
       completeForm.set('preview', payload.preview)
     }

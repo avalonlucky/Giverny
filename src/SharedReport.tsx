@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Archive, BarChart3, CheckCircle2, Clock3, Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, Sparkles, X } from 'lucide-react'
+import { Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, Sparkles, X } from 'lucide-react'
 import { defaultPdfTitle, defaultServiceCompanyName } from './config/appConfig'
 import { api, type SharedReportState } from './lib/api'
-import type { FileAsset, TaskStatus } from './types/domain'
+import { toChineseAmount } from './lib/format'
+import type { FileAsset } from './types/domain'
 import './App.css'
+
+// 金额展示：真实保留小数（最多两位），不四舍五入到元
+const formatYuan = (value: number) =>
+  (Math.round(value * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 function monthLabel(month: string) {
   const [year, monthNumber] = month.split('-').map(Number)
@@ -20,23 +25,6 @@ function monthPart(value: string) {
 
 function formatPublicDate(value: string) {
   return datePart(value).replaceAll('-', '/')
-}
-
-function SharedStatusBadge({ status }: { status: TaskStatus }) {
-  return <span className={`status-badge status-${status}`}>{status}</span>
-}
-
-function SharedStatCard({ label, value, trend, icon }: { label: string; value: string; trend: string; icon: React.ReactNode }) {
-  return (
-    <article className="stat-card">
-      <div className="stat-icon">{icon}</div>
-      <div className="stat-text">
-        <p>{label}</p>
-        <strong>{value}</strong>
-        <span>{trend}</span>
-      </div>
-    </article>
-  )
 }
 
 function SharedFilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
@@ -133,6 +121,15 @@ export default function SharedReport({ token }: { token: string }) {
   const { report, tasks, updates, files } = state
   const pdfTitle = state.settings?.pdfTitle || defaultPdfTitle
   const serviceCompanyName = state.settings?.serviceCompanyName || defaultServiceCompanyName
+  // 计费口径与主应用一致：状态不影响计费，只排除「不计费」；仅展示有工时的计费行
+  const billableTasks = tasks.filter((task) => task.billable !== false && task.status !== '不计费' && task.actualHours > 0)
+  // 不计费任务（免费协助）：以 ¥0 行体现在回单里，不计入合计金额
+  const freeTasks = tasks.filter((task) => task.billable === false || task.status === '不计费')
+  // 用精确单价（不取整）反推，保证每行金额之和恰好等于已锁定的总额
+  const hourlyRate = report.billableHours > 0 ? report.totalAmount / report.billableHours : 0
+  const receiptNo = `AK-${report.month.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
+  const acceptedCount = tasks.filter((task) => task.status === '已验收').length
+  const pendingCount = tasks.filter((task) => task.status === '待验收').length
 
   const handleExportPdf = () => {
     const previousTitle = document.title
@@ -141,99 +138,192 @@ export default function SharedReport({ token }: { token: string }) {
     document.title = previousTitle
   }
 
+  const handleExportUserSheet = async () => {
+    const ExcelJS = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('User')
+    sheet.columns = [
+      { header: '参考开始日期', key: 'start', width: 16 },
+      { header: '设计类型', key: 'type', width: 18 },
+      { header: '项目/任务名称', key: 'title', width: 34 },
+      { header: '具体任务需求', key: 'requirement', width: 46 },
+      { header: '需求人', key: 'requester', width: 14 },
+      { header: '实际工时', key: 'actualHours', width: 12 },
+      { header: '状态', key: 'status', width: 12 },
+      { header: '验收人/确认', key: 'reviewer', width: 14 },
+      { header: '验收备注', key: 'acceptanceNote', width: 48 },
+    ]
+    billableTasks.forEach((task) => {
+      sheet.addRow({
+        start: formatPublicDate(task.date),
+        type: task.type,
+        title: task.title,
+        requirement: task.requirement || '',
+        requester: task.requester || task.contact || '',
+        actualHours: task.actualHours,
+        status: task.status,
+        reviewer: task.reviewer || task.requester || '',
+        acceptanceNote: task.acceptanceNote || '',
+      })
+    })
+    sheet.getRow(1).font = { bold: true }
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
+    sheet.eachRow((row) => {
+      row.alignment = { vertical: 'top', wrapText: true }
+    })
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `User_${monthLabel(report.month).replace(/\s/g, '')}_工时明细.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <main className="shared-page">
-      <div className="shared-content client-view">
-        <section className="client-hero panel">
+      <div className="shared-content shared-receipt-view">
+        <header className="shared-receipt-toolbar">
           <div>
-            <p className="eyebrow">
-              <Sparkles size={14} /> {serviceCompanyName} · 设计服务月度报告
-            </p>
-            <h2>{monthLabel(report.month)}{pdfTitle}</h2>
-            <p>
-              本报告由工时系统生成，结算数据已于 {report.generatedAt || '锁定时'} 锁定。包含任务明细、进展记录和可在线预览的交付文件。
-            </p>
+            <h1>结算回单</h1>
+            <p>{monthLabel(report.month)} · 数据已锁定，只读查看</p>
           </div>
-          <button className="primary-button" onClick={handleExportPdf}>
-            <Download size={18} />
-            下载 PDF
-          </button>
-        </section>
+          <div className="shared-receipt-actions">
+            <button type="button" onClick={() => void handleExportUserSheet()}>
+              <Download size={16} />
+              下载 User 表
+            </button>
+            <button type="button" onClick={handleExportPdf}>
+              <Download size={16} />
+              下载 PDF
+            </button>
+          </div>
+        </header>
 
-        <section className="stats-grid">
-          <SharedStatCard label="总工时" value={`${report.totalHours.toFixed(1)}h`} trend="本月投入" icon={<Clock3 size={20} />} />
-          <SharedStatCard label="计费工时" value={`${report.billableHours.toFixed(1)}h`} trend="已排除不计费项" icon={<CheckCircle2 size={20} />} />
-          <SharedStatCard label="结算金额" value={`¥${report.totalAmount.toLocaleString()}`} trend="已锁定快照" icon={<BarChart3 size={20} />} />
-          <SharedStatCard label="交付文件" value={`${files.length}`} trend="点击可在线预览" icon={<Archive size={20} />} />
-        </section>
-
-        <section className="client-grid">
-          <div className="panel">
-            <div className="panel-header compact">
+        <section className="receipt receipt-template-min shared-receipt" aria-label="月度结算回单" data-company={serviceCompanyName}>
+          <header className="receipt-header">
+            <div className="receipt-brand">
+              <span className="receipt-mark"><Sparkles size={16} /></span>
               <div>
-                <h2>任务明细</h2>
-                <p>本月计费与交付相关任务</p>
+                <strong>{serviceCompanyName}</strong>
+                <small>ANKKI TECHNOLOGY</small>
               </div>
             </div>
-            {tasks.length === 0 && <p className="calendar-empty-hint">本月暂无任务记录。</p>}
-            {tasks.map((task) => (
-              <div className="client-task-row" key={task.id}>
-                <div>
-                  <strong>{task.title}</strong>
-                  <span>
-                    {formatPublicDate(task.date)}
-                    {task.settlementMonth && task.settlementMonth !== monthPart(task.date) ? ` · 补录至 ${monthLabel(task.settlementMonth)}` : ''}
-                    {' · '}
-                    {task.requirement}
-                  </span>
-                </div>
-                <em>{task.actualHours.toFixed(1)}h</em>
-                <SharedStatusBadge status={task.status} />
-              </div>
-            ))}
+            <div className="receipt-title">
+              <h2>{pdfTitle}</h2>
+              <span>MONTHLY SETTLEMENT RECEIPT</span>
+            </div>
+            <div className="receipt-no">
+              <span>回单编号：{receiptNo}</span>
+              <span>锁定时间：{report.generatedAt || '—'}</span>
+            </div>
+          </header>
+          <div className="receipt-rule" />
+          <dl className="receipt-info">
+            <div><dt>客户名称</dt><dd>{serviceCompanyName}</dd></div>
+            <div><dt>服务内容</dt><dd>平面设计兼职</dd></div>
+            <div><dt>结算月份</dt><dd>{monthLabel(report.month)}</dd></div>
+            <div><dt>结算单价</dt><dd>¥{formatYuan(hourlyRate)} / 小时</dd></div>
+          </dl>
+          <table className="receipt-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>结算月份</th>
+                <th>项目名称</th>
+                <th>类型</th>
+                <th className="num">工时</th>
+                <th className="num">金额（元）</th>
+              </tr>
+            </thead>
+            <tbody>
+              {billableTasks.map((task, index) => (
+                <tr key={task.id}>
+                  <td>{String(index + 1).padStart(2, '0')}</td>
+                  <td>
+                    {monthLabel(task.settlementMonth || report.month)}
+                    {task.settlementMonth && task.settlementMonth !== monthPart(task.date) ? '（补录）' : ''}
+                  </td>
+                  <td className="receipt-task-name">{task.title}</td>
+                  <td>{task.type}</td>
+                  <td className="num">{task.actualHours.toFixed(1)}</td>
+                  <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
+                </tr>
+              ))}
+              {freeTasks.map((task, index) => (
+                <tr key={task.id} className="receipt-free-row">
+                  <td>{String(billableTasks.length + index + 1).padStart(2, '0')}</td>
+                  <td>{monthLabel(task.settlementMonth || report.month)}</td>
+                  <td className="receipt-task-name">{task.title} <em className="receipt-free-tag">不计费</em></td>
+                  <td>{task.type}</td>
+                  <td className="num">{task.actualHours.toFixed(1)}</td>
+                  <td className="num">¥0</td>
+                </tr>
+              ))}
+              {billableTasks.length === 0 && freeTasks.length === 0 && (
+                <tr><td className="receipt-empty" colSpan={6}>本月暂无可纳入结算的任务</td></tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={4}>合计</td>
+                <td className="num">{report.billableHours.toFixed(1)}</td>
+                <td className="num">¥{formatYuan(report.totalAmount)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <div className="receipt-amount">
+            <span>人民币（大写）</span>
+            <strong>{toChineseAmount(report.totalAmount)}</strong>
           </div>
+          <div className="receipt-remarks">
+            <p>备注：本月共 {tasks.length} 项任务，已验收 {acceptedCount} 项，待验收 {pendingCount} 项。</p>
+            <p>本回单由系统根据已锁定的任务与工时记录自动生成。</p>
+            <div className="receipt-stamp" aria-hidden="true">
+              <span>{serviceCompanyName}</span>
+              <em>★</em>
+              <span>工时结算确认</span>
+            </div>
+          </div>
+          <div className="receipt-cutline"><span>✂</span></div>
+        </section>
 
-          <aside className="panel">
-            <div className="panel-header compact">
+        {(files.length > 0 || updates.length > 0) && (
+          <section className="shared-receipt-appendix">
+            {files.length > 0 && (
               <div>
                 <h2>交付文件</h2>
-                <p>点击文件即可在线预览</p>
+                <div className="shared-file-list">
+                  {files.map((file) => (
+                    <button type="button" key={file.id} onClick={() => setPreviewFile(file)}>
+                      <Paperclip size={15} />
+                      <span>{file.name}</span>
+                      <Eye size={15} />
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="client-files">
-              {files.length === 0 && <p className="calendar-empty-hint">本月暂无可见文件。</p>}
-              {files.map((file) => (
-                <button className="client-file-row" key={file.id} onClick={() => setPreviewFile(file)}>
-                  <Paperclip size={15} />
-                  <span>{file.name}</span>
-                  <Eye size={15} />
-                </button>
-              ))}
-            </div>
-          </aside>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>进展记录</h2>
-              <p>按时间倒序</p>
-            </div>
-          </div>
-          <div className="timeline">
-            {updates.length === 0 && <p className="calendar-empty-hint">本月暂无可见进展。</p>}
-            {updates.map((update) => (
-              <article className="timeline-item" key={update.id}>
-                <span className="dot" />
-                <time>{datePart(update.date)}</time>
-                <h3>{update.title}</h3>
-                <p>{update.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <footer className="shared-footer">本页面为只读报告，由 Giverny 自动生成。</footer>
+            )}
+            {updates.length > 0 && (
+              <div>
+                <h2>验收与进展记录</h2>
+                <div className="shared-update-list">
+                  {updates.map((update) => (
+                    <article key={update.id}>
+                      <time>{datePart(update.date)}</time>
+                      <strong>{update.title}</strong>
+                      <p>{update.body}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+        <footer className="shared-footer">本页面为只读结算回单，由 Giverny 自动生成。</footer>
       </div>
       {previewFile && <SharedFilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
     </main>
