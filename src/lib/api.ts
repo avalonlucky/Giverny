@@ -186,6 +186,8 @@ const legacyTokenStorageKey = 'designer-worklog-admin-token'
 export type StoredAuth = {
   email: string
   key: string
+  /** 登录时拿到的角色，用于在重新加载时检测「管理员凭证已失效被降级」 */
+  role?: 'admin' | 'member'
 }
 
 export function getStoredAuth(): StoredAuth | null {
@@ -197,7 +199,7 @@ export function getStoredAuth(): StoredAuth | null {
       return null
     }
     const parsed = JSON.parse(raw) as StoredAuth
-    return parsed.key ? { email: parsed.email ?? '', key: parsed.key } : null
+    return parsed.key ? { email: parsed.email ?? '', key: parsed.key, role: parsed.role } : null
   } catch {
     return null
   }
