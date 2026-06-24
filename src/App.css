@@ -115,13 +115,14 @@
   --color-text-secondary: #5d6863;
   --color-text-muted: #939c96;
   /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
-     基底是近白，季节色按很低比例渗入，所以底色干净、可读，但能看出春绿/夏青/秋金/冬蓝。 */
-  --color-surface: color-mix(in srgb, var(--brand-primary) 7%, #fcfcfa);
-  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 4%, #fdfdfc);
-  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 13%, #f7f8f5);
-  --color-sidebar: color-mix(in srgb, var(--brand-primary) 10%, #fafbf8);
-  --color-border: color-mix(in srgb, var(--brand-primary) 16%, transparent);
-  --color-border-soft: color-mix(in srgb, var(--brand-primary) 9%, transparent);
+     基底是近白，季节色按低比例渗入：底色干净可读，但能清楚看出春绿/夏青/秋金/冬蓝。
+     卡片(strong)最浅、水面(surface)中、页底(alt)最深，营造「卡片浮在水上」的层次。 */
+  --color-surface: color-mix(in srgb, var(--brand-primary) 11%, #fbfbf9);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 6%, #fdfdfc);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 17%, #f6f7f4);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 14%, #f9faf7);
+  --color-border: color-mix(in srgb, var(--brand-primary) 20%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 11%, transparent);
   /* 主色随季节走（见下方花园四季块）。默认夏。 */
   --brand-primary: #3c6b61;
   --brand-primary-strong: #2f564e;
