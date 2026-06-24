@@ -5471,6 +5471,7 @@ function App() {
         />
       )}
       {showFireworks && <Fireworks />}
+      <SeasonDevSwitcher />
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">
           {toastQueue.map((item) => (
@@ -5723,6 +5724,43 @@ function Fireworks() {
   )
 }
 
+// 临时季节预览开关：仅在预览/本地环境出现（生产域名 mayeai.com 上自动隐藏），
+// 用于设计阶段逐季对比品牌主色。上线前可随这段一起移除。
+function SeasonDevSwitcher() {
+  const isProd = typeof location !== 'undefined' && /(^|\.)mayeai\.com$/i.test(location.hostname)
+  const [season, setSeason] = useState<string>(() =>
+    (typeof document !== 'undefined' && document.documentElement.dataset.season) || 'summer',
+  )
+  if (isProd) {
+    return null
+  }
+  const seasons: Array<[string, string]> = [
+    ['spring', '春'],
+    ['summer', '夏'],
+    ['autumn', '秋'],
+    ['winter', '冬'],
+  ]
+  const pick = (next: string) => {
+    document.documentElement.dataset.season = next
+    setSeason(next)
+  }
+  return (
+    <div className="season-dev-switcher" role="group" aria-label="季节预览（临时）">
+      <span className="season-dev-label">季节预览</span>
+      {seasons.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          className={season === key ? 'active' : ''}
+          onClick={() => pick(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function AdminLoginModal({
   error,
   onClose,
@@ -5750,15 +5788,22 @@ function AdminLoginModal({
 
   return (
     <ModalShell className="admin-login-modal" labelledBy="admin-login-title" onClose={onClose}>
-      <header className="modal-header">
+      <div className="login-atmosphere">
+        <div className="login-pond" aria-hidden="true" />
+        <button className="icon-button modal-close-button login-close" aria-label="关闭" title="关闭" onClick={onClose}>
+          <X size={18} />
+        </button>
+        <div className="login-wordmark">
+          <img className="brand-logo" src="/giverny-logo.png" alt="" />
+          <strong>Giverny</strong>
+          <span>让创作在自己的花园里生长</span>
+        </div>
+      </div>
+      <header className="modal-header login-functional-header">
         <div>
-          <p className="eyebrow">管理员登录</p>
           <h2 id="admin-login-title">登录后才能编辑</h2>
           <small>游客可直接浏览；新建、修改、上传、验收和结算需要管理员身份。</small>
         </div>
-        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
-          <X size={18} />
-        </button>
       </header>
       <div className="admin-login-body">
         <label className="lock-input">
