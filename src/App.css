@@ -1031,6 +1031,10 @@ button {
 
 .daily-knowledge-article {
   padding: 24px 32px;
+  /* 内容可长可短：正文区独立滚动，标题与底部按钮保持可见 */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .daily-knowledge-article p {
@@ -1329,6 +1333,64 @@ button {
 .task-list {
   display: grid;
   gap: 8px;
+}
+
+/* 兜底分页「展开剩余 / 收起」 */
+.dashboard-list-more {
+  justify-self: start;
+  margin: 2px 0 0 14px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dashboard-list-more:hover {
+  color: var(--color-primary);
+}
+
+/* 已验收折叠分区 */
+.dashboard-accepted-group {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  box-shadow: inset 0 1px 0 var(--color-border);
+}
+
+.dashboard-accepted-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dashboard-accepted-toggle:hover {
+  color: var(--color-text);
+}
+
+.dashboard-accepted-toggle svg {
+  transition: transform 0.18s ease;
+  color: var(--color-text-muted);
+}
+
+.dashboard-accepted-toggle.open svg {
+  transform: rotate(180deg);
+}
+
+.dashboard-accepted-toggle em {
+  margin-left: auto;
+  font-style: normal;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .dashboard-task-panel {
@@ -4906,6 +4968,16 @@ button {
 
 .progress-attachment-field {
   min-width: 0;
+  border-radius: var(--radius-control);
+  transition: background 0.14s ease, outline-color 0.14s ease;
+  outline: 2px dashed transparent;
+  outline-offset: 4px;
+}
+
+/* 拖拽文件到附件区时的高亮反馈 */
+.progress-attachment-field.is-dragover {
+  outline-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
 }
 
 .attachment-ai-all {

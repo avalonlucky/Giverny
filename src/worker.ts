@@ -4140,23 +4140,26 @@ async function suggestDailyKnowledgeWithAi(env: Env, request: Request) {
   const prompt = `你是 Giverny 工作台的每日知识编辑。请生成一条适合成年人在工作间隙快速阅读的中文知识卡片；它不是“设计知识专栏”，而是一个有广度的内容池。
 
 内容方向要像“工作间隙随手翻到的一页杂志”，广而有趣，不要自我限制。可以在以下栏目之间轮换，也可以自由扩展出同等质量的新栏目，尽量让连续几次的 category 不同：
-- 视觉 / 艺术：人物・设计师、人物・画家、名画故事、画作介绍、摄影史、建筑・工艺、博物馆冷知识、色彩科普、品牌故事
-- 人文 / 人物：名人介绍、作家小传、每天一本好书、哲学、神话、宗教故事、语言与文化、知乎高赞、冷门历史人物
-- 世界 / 历史：历史・冷知识、世界未解之谜、考古发现、古文明、城市与旅行、地图故事、奇怪地名、民俗传说
+- 视觉 / 艺术：人物・设计师、人物・画家、名画故事（如莫奈创作《睡莲》）、画作介绍、摄影史、建筑・工艺、博物馆冷知识、色彩科普、品牌故事
+- 人文 / 人物：名人介绍（生平与传说故事，古今中外皆可，如黄仁勋、居里夫人）、作家小传、每天一本好书、哲学、神话、宗教故事、语言与文化、冷门历史人物
+- 世界 / 历史：历史・冷知识、世界未解之谜、考古发现、古文明、各国国别史与王朝故事、战争冷知识、城市与旅行、地图故事、奇怪地名、民俗传说、历史上的今天
 - 科学 / 自然：视觉科学、自然・植物、动物冷知识、天文小知识、心理学、科技冷知识、生活物理、人体小知识
+- 财经 / 商业：股票与投资常识、金融冷知识、商业故事、公司与品牌兴衰、经济学小科普、商务礼仪、谈判与沟通技巧、职场观察
+- 情感 / 关系：爱情故事、关系心理学、约会小技巧与小理由、沟通的艺术、社交礼仪、共情与表达
 - 生活 / 风味：咖啡冷知识、茶・冷知识、食物史、香水故事、服饰史、节日由来、日用品来历
 - 声音 / 表演：乐器科普、乐器・历史、音乐家故事、电影冷知识、戏剧故事、声音与声学
+- 治愈 / 日常：治愈系小故事、温暖瞬间、解压与正念、生活美学、自然疗愈、慢生活
 - 轻松 / 奇怪：冷笑话、乙方语言学、奇怪小知识、荒诞事实、脑洞问题、误解澄清、工作方法、沟通观察
 
 可以偶尔借当前任务主题选择方向，但不要每次都回到设计，不要泄露、复述或猜测具体客户信息。
 
 硬性规则：
 1. 不得与 recentlyShownTitles 中的标题或核心观点重复。
-2. 不要写空泛鸡汤、名人语录或无法核实的夸张结论。
+2. 不要写空泛鸡汤、名人语录或无法核实的夸张结论；不要编造具体的实时新闻、当日热点或可被证伪的时效性事实（“历史上的今天”这类确有定论的内容可以）。
 3. 标题不超过 18 个汉字；摘要不超过 42 个汉字。
-4. 正文必须是 3 段，每段 45-90 个汉字，讲清知识本身；只有确有必要时才自然联系工作，不要强行把每个主题落到设计。
+4. 正文 2-5 段，每段约 40-180 个汉字。值得展开的题材（人物生平、传说故事、历史脉络等）可以写得更充实、更长，把故事讲完整；不必强行联系工作或设计。阅读弹窗支持滚动，不用怕长。
 5. 正文每段最多用一次 **重点短语** 标记真正需要强调的关键词；不要整句加粗。
-6. category 为 2-8 个汉字，例如“历史・冷知识”“每天一本好书”“咖啡冷知识”“乐器科普”“冷笑话”“名画故事”“世界未解之谜”。
+6. category 为 2-8 个汉字，例如“名画故事”“世界未解之谜”“股票冷知识”“商务礼仪”“爱情故事”“约会小技巧”“治愈系”“历史上的今天”。
 7. 只返回 JSON，不要额外解释。
 
 JSON 结构：
@@ -4170,15 +4173,15 @@ ${JSON.stringify(payload)}`
     if (!endpoint.apiKey) {
       return null
     }
-    const output = await callAiEndpointText(endpoint, prompt, 900)
+    const output = await callAiEndpointText(endpoint, prompt, 1600)
     const parsed = parseLooseJsonObject(output) as DailyKnowledgeToolArgs
     const title = String(parsed.title ?? '').trim()
     const category = String(parsed.category ?? '').trim()
     const teaser = String(parsed.teaser ?? '').trim()
     const paragraphs = Array.isArray(parsed.body)
-      ? parsed.body.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+      ? parsed.body.map((item) => String(item).trim()).filter(Boolean).slice(0, 5)
       : []
-    if (!title || !category || !teaser || paragraphs.length !== 3 || recentTitles.includes(title)) {
+    if (!title || !category || !teaser || paragraphs.length < 2 || recentTitles.includes(title)) {
       return null
     }
     return {

@@ -2785,6 +2785,10 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<'连接中' | '已接入 D1/R2' | '后端异常'>('连接中')
   const [taskQuery, setTaskQuery] = useState('')
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
+  // 工作台任务明细：未完成列表兜底分页 + 已验收默认折叠
+  const [dashboardPendingShowAll, setDashboardPendingShowAll] = useState(false)
+  const [dashboardAcceptedOpen, setDashboardAcceptedOpen] = useState(false)
+  const [dashboardAcceptedShowAll, setDashboardAcceptedShowAll] = useState(false)
   const navigationChordRef = useRef<number | null>(null)
   const dailyKnowledgeRequestedRef = useRef(false)
   const dailyKnowledgeRef = useRef(dailyKnowledge)
@@ -3098,6 +3102,93 @@ function App() {
 
   const visibleTasks = filterTasks(activeMonthTasks, dashboardTaskFilter)
   const taskPageTasks = filterTasks(taskPageSourceTasks)
+
+  // 工作台只在「全部」筛选下折叠已验收：未完成任务进首屏（兜底分页），已验收收进可展开分区。
+  // 选了具体状态（含「已验收」）时直接全量展示该状态，不再折叠。
+  const DASHBOARD_PAGE_SIZE = 15
+  const isAllDashboardFilter = dashboardTaskFilter === '全部'
+  const dashboardPendingTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status !== '已验收') : visibleTasks
+  const dashboardAcceptedTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status === '已验收') : []
+  const dashboardPendingVisible = dashboardPendingShowAll ? dashboardPendingTasks : dashboardPendingTasks.slice(0, DASHBOARD_PAGE_SIZE)
+  const dashboardAcceptedVisible = dashboardAcceptedShowAll ? dashboardAcceptedTasks : dashboardAcceptedTasks.slice(0, DASHBOARD_PAGE_SIZE)
+
+  const renderDashboardTaskRow = (task: Task) => {
+    const dueState = taskDueState(task, today, dueSoonDate)
+    const canAcceptTask = task.status === '待验收'
+    const canRecordProgress = canRecordNewProgress(task)
+    const contextInsight = taskContextInsights.get(task.id)
+    return (
+      <article
+        className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
+        key={task.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => setSelectedTaskId(task.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setSelectedTaskId(task.id)
+          }
+        }}
+        onContextMenu={(event) => openDashboardContextMenu(event, task)}
+      >
+        <div className="task-date">
+          <b>{formatMonthDay(task.date)}</b>
+          <span className="task-date-meta">
+            <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
+            {isSupplementalTask(task) && (
+              <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
+                补录
+              </em>
+            )}
+          </span>
+        </div>
+        <div className="task-main">
+          <strong>{task.title}</strong>
+          <p>{task.requirement}</p>
+          <TaskContextInsightBadge insight={contextInsight} />
+        </div>
+        <div className="task-meta">
+          <b>{task.requester || task.contact || '待确认'}</b>
+          <span>
+            实际 <strong>{task.actualHours.toFixed(1)}h</strong>
+          </span>
+        </div>
+        <div className="task-row-end">
+          <div className="task-state">
+            <div className="task-state-badges">
+              {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
+              <StatusBadge status={task.status} />
+            </div>
+            <div className="progress-cell">
+              <div className="mini-meter">
+                <span style={{ width: `${taskDisplayProgress(task)}%` }} />
+              </div>
+              <small>{taskDisplayProgress(task)}%</small>
+            </div>
+          </div>
+          <div className="task-row-actions" aria-label="任务快捷操作">
+            <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
+              <Pencil size={15} />
+            </button>
+            <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
+              <BarChart3 size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              title={canAcceptTask ? '去验收' : '当前不是待验收'}
+              aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
+              disabled={!canAcceptTask}
+              onClick={(event) => { event.stopPropagation(); handleOpenTaskAcceptance(task.id) }}
+            >
+              <ClipboardCheck size={15} />
+            </button>
+          </div>
+        </div>
+      </article>
+    )
+  }
 
   const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
 
@@ -4694,83 +4785,35 @@ function App() {
                     )}
                   </div>
                 )}
-                {visibleTasks.map((task) => {
-                  const dueState = taskDueState(task, today, dueSoonDate)
-                  const canAcceptTask = task.status === '待验收'
-                  const canRecordProgress = canRecordNewProgress(task)
-                  const contextInsight = taskContextInsights.get(task.id)
-                  return (
-                  <article
-                    className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
-                    key={task.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        setSelectedTaskId(task.id)
-                      }
-                    }}
-                    onContextMenu={(event) => openDashboardContextMenu(event, task)}
-                  >
-                    <div className="task-date">
-                      <b>{formatMonthDay(task.date)}</b>
-                      <span className="task-date-meta">
-                        <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
-                        {isSupplementalTask(task) && (
-                          <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
-                            补录
-                          </em>
+                {dashboardPendingVisible.map(renderDashboardTaskRow)}
+                {dashboardPendingTasks.length > DASHBOARD_PAGE_SIZE && (
+                  <button type="button" className="dashboard-list-more" onClick={() => setDashboardPendingShowAll((current) => !current)}>
+                    {dashboardPendingShowAll ? '收起' : `展开剩余 ${dashboardPendingTasks.length - DASHBOARD_PAGE_SIZE} 条`}
+                  </button>
+                )}
+                {isAllDashboardFilter && dashboardAcceptedTasks.length > 0 && (
+                  <div className="dashboard-accepted-group">
+                    <button
+                      type="button"
+                      className={`dashboard-accepted-toggle ${dashboardAcceptedOpen ? 'open' : ''}`}
+                      onClick={() => setDashboardAcceptedOpen((current) => !current)}
+                    >
+                      <ChevronDown size={15} />
+                      <span>已验收 {dashboardAcceptedTasks.length} 个</span>
+                      <em>{dashboardAcceptedOpen ? '收起' : '展开'}</em>
+                    </button>
+                    {dashboardAcceptedOpen && (
+                      <>
+                        {dashboardAcceptedVisible.map(renderDashboardTaskRow)}
+                        {dashboardAcceptedTasks.length > DASHBOARD_PAGE_SIZE && (
+                          <button type="button" className="dashboard-list-more" onClick={() => setDashboardAcceptedShowAll((current) => !current)}>
+                            {dashboardAcceptedShowAll ? '收起' : `展开剩余 ${dashboardAcceptedTasks.length - DASHBOARD_PAGE_SIZE} 条`}
+                          </button>
                         )}
-                      </span>
-                    </div>
-                    <div className="task-main">
-                      <strong>{task.title}</strong>
-                      <p>{task.requirement}</p>
-                      <TaskContextInsightBadge insight={contextInsight} />
-                    </div>
-                    <div className="task-meta">
-                      <b>{task.requester || task.contact || '待确认'}</b>
-                      <span>
-                        实际 <strong>{task.actualHours.toFixed(1)}h</strong>
-                      </span>
-                    </div>
-                    <div className="task-row-end">
-                      <div className="task-state">
-                        <div className="task-state-badges">
-                          {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
-                          <StatusBadge status={task.status} />
-                        </div>
-                        <div className="progress-cell">
-                          <div className="mini-meter">
-                            <span style={{ width: `${taskDisplayProgress(task)}%` }} />
-                          </div>
-                          <small>{taskDisplayProgress(task)}%</small>
-                        </div>
-                      </div>
-                      <div className="task-row-actions" aria-label="任务快捷操作">
-                        <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
-                          <Pencil size={15} />
-                        </button>
-                        <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
-                          <BarChart3 size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          title={canAcceptTask ? '去验收' : '当前不是待验收'}
-                          aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
-                          disabled={!canAcceptTask}
-                          onClick={(event) => { event.stopPropagation(); handleOpenTaskAcceptance(task.id) }}
-                        >
-                          <ClipboardCheck size={15} />
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                  )
-                })}
+                      </>
+                    )}
+                  </div>
+                )}
                 {dashboardContextMenu && (
                   <TaskContextMenu
                     menu={dashboardContextMenu}
@@ -6551,6 +6594,8 @@ function TaskProgressModal({
   const [uploadingExistingFileId, setUploadingExistingFileId] = useState<number | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [previewAttachment, setPreviewAttachment] = useState<PendingProgressAttachment | null>(null)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const dragDepthRef = useRef(0)
   const [isAcceptanceMode, setIsAcceptanceMode] = useState(initialAcceptanceFlag)
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
@@ -7437,7 +7482,7 @@ function TaskProgressModal({
             )}
             {!isAcceptanceMode && timeFields}
             <section
-              className="progress-lite-field progress-attachment-field"
+              className={`progress-lite-field progress-attachment-field ${isDraggingFiles ? 'is-dragover' : ''}`}
               onPaste={(event) => {
                 const pastedImages = Array.from(event.clipboardData.items)
                   .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
@@ -7446,6 +7491,34 @@ function TaskProgressModal({
                 if (pastedImages.length > 0) {
                   event.preventDefault()
                   addPendingFiles(pastedImages, 'paste')
+                }
+              }}
+              onDragEnter={(event) => {
+                if (Array.from(event.dataTransfer.types).includes('Files')) {
+                  event.preventDefault()
+                  dragDepthRef.current += 1
+                  setIsDraggingFiles(true)
+                }
+              }}
+              onDragOver={(event) => {
+                if (Array.from(event.dataTransfer.types).includes('Files')) {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'copy'
+                }
+              }}
+              onDragLeave={() => {
+                dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+                if (dragDepthRef.current === 0) {
+                  setIsDraggingFiles(false)
+                }
+              }}
+              onDrop={(event) => {
+                const droppedFiles = Array.from(event.dataTransfer.files)
+                dragDepthRef.current = 0
+                setIsDraggingFiles(false)
+                if (droppedFiles.length > 0) {
+                  event.preventDefault()
+                  addPendingFiles(droppedFiles, 'picker')
                 }
               }}
             >
