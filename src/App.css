@@ -2187,25 +2187,13 @@ button {
 .task-row:hover,
 .task-row:focus-visible {
   background: var(--row-fill);
-  border-color: color-mix(in srgb, var(--row-mark) 26%, transparent);
+  border-color: transparent;
   outline: none;
 }
 
 .task-row.selected {
   background: var(--row-fill);
-  border-color: color-mix(in srgb, var(--row-mark) 36%, transparent);
-}
-
-/* 选中左标记用伪元素（避开全站 box-shadow:none 基线） */
-.task-row.selected::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--row-mark);
+  border-color: transparent;
 }
 
 .task-date b,
