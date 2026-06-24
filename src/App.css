@@ -1428,6 +1428,53 @@ button {
   line-height: 1.4;
 }
 
+/* 状态配色主题开关 */
+.row-theme-toggle {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.row-theme-toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
+}
+
+.row-theme-toggle.on {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+/* 关闭主题：任务行还原中性绿（不随状态联动） */
+.no-row-theme .task-row {
+  background: var(--color-surface-alt);
+}
+
+.no-row-theme .task-row:hover,
+.no-row-theme .task-row:focus-visible {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-alt));
+}
+
+.no-row-theme .task-row.selected {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-alt));
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
 .dashboard-task-search {
   width: min(580px, 100%);
   min-width: 0;

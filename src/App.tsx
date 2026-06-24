@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Archive,
   ArrowRightLeft,
+  Palette,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -692,6 +693,99 @@ async function createVideoPreviewFile(file: File) {
   }
 }
 
+// 把离屏渲染好的 DOM 栅格化成 PNG 预览；空白/过小则放弃（回退到类型角标）
+async function rasterizeElementToPreviewFile(target: HTMLElement, baseName: string, options?: { width?: number; height?: number }) {
+  const html2canvas = (await import('html2canvas')).default
+  const canvas = await html2canvas(target, {
+    backgroundColor: '#ffffff',
+    scale: 1,
+    logging: false,
+    useCORS: true,
+    width: options?.width,
+    height: options?.height,
+    windowWidth: options?.width ?? target.scrollWidth ?? 960,
+  })
+  if (canvas.width < 8 || canvas.height < 8) {
+    return undefined
+  }
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), 'image/png'))
+  if (!blob || blob.size < 300) {
+    return undefined
+  }
+  return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
+}
+
+// Word / PPT / Excel 缩略图：用现有预览库离屏渲染首页 / 首张幻灯片 / 首个工作表，再栅格化为图片
+async function createOfficePreviewFile(file: File, fileType: 'DOCX' | 'PPTX' | 'XLSX') {
+  const buffer = await file.arrayBuffer()
+  const base = file.name.replace(/\.[^.]+$/, '')
+  const host = document.createElement('div')
+  host.style.cssText = 'position:fixed;left:-100000px;top:0;background:#ffffff;z-index:-1;overflow:hidden;'
+  document.body.appendChild(host)
+  try {
+    if (fileType === 'DOCX') {
+      host.style.width = '794px'
+      const { renderAsync } = await import('docx-preview')
+      await renderAsync(buffer, host, undefined, { className: 'docx-preview-document', inWrapper: true, breakPages: true, useBase64URL: true })
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      const page = (host.querySelector('section') as HTMLElement | null) ?? host
+      const fullHeight = page.offsetHeight || 1123
+      return await rasterizeElementToPreviewFile(page, base, { width: 794, height: Math.min(fullHeight, 1123) })
+    }
+    if (fileType === 'PPTX') {
+      host.style.width = '960px'
+      host.style.height = '540px'
+      const { init } = await import('pptx-preview')
+      const previewer = init(host, { width: 960, height: 540 })
+      await previewer.preview(buffer)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      return await rasterizeElementToPreviewFile(host, base, { width: 960, height: 540 })
+    }
+    // XLSX：自建首个工作表的表格再栅格化，稳定可控
+    const ExcelJS = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer)
+    const sheet = workbook.worksheets[0]
+    if (!sheet) {
+      return undefined
+    }
+    host.style.width = '900px'
+    host.style.padding = '18px'
+    host.style.fontFamily = '-apple-system, "PingFang SC", "Segoe UI", sans-serif'
+    const table = document.createElement('table')
+    table.style.cssText = 'border-collapse:collapse;font-size:13px;color:#1f2a27;'
+    let rowCount = 0
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber > 22) {
+        return
+      }
+      rowCount += 1
+      const tr = document.createElement('tr')
+      const values = Array.isArray(row.values) ? row.values.slice(1, 11) : []
+      const cellCount = Math.max(values.length, 1)
+      for (let index = 0; index < cellCount; index += 1) {
+        const isHead = rowNumber === 1
+        const cell = document.createElement(isHead ? 'th' : 'td')
+        cell.textContent = stringifyCellValue(values[index]).slice(0, 30)
+        cell.style.cssText = `border:1px solid #e3e3dd;padding:6px 10px;text-align:left;white-space:nowrap;${isHead ? 'background:#f4f4ee;font-weight:600;' : ''}`
+        tr.appendChild(cell)
+      }
+      table.appendChild(tr)
+    })
+    if (rowCount === 0) {
+      return undefined
+    }
+    host.appendChild(table)
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    return await rasterizeElementToPreviewFile(host, base, { width: host.offsetWidth || 900 })
+  } catch (error) {
+    console.warn('office preview generation failed', fileType, error)
+    return undefined
+  } finally {
+    host.remove()
+  }
+}
+
 async function createOptionalPreviewFile(file: File) {
   const lower = file.name.toLowerCase()
   try {
@@ -703,6 +797,15 @@ async function createOptionalPreviewFile(file: File) {
     }
     if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|ogv)$/i.test(lower)) {
       return await createVideoPreviewFile(file)
+    }
+    if (lower.endsWith('.docx')) {
+      return await createOfficePreviewFile(file, 'DOCX')
+    }
+    if (lower.endsWith('.pptx')) {
+      return await createOfficePreviewFile(file, 'PPTX')
+    }
+    if (lower.endsWith('.xlsx')) {
+      return await createOfficePreviewFile(file, 'XLSX')
     }
   } catch (error) {
     console.warn('preview generation failed', error)
@@ -2844,6 +2947,24 @@ function App() {
   const [dashboardPendingShowAll, setDashboardPendingShowAll] = useState(false)
   const [dashboardAcceptedOpen, setDashboardAcceptedOpen] = useState(false)
   const [dashboardAcceptedShowAll, setDashboardAcceptedShowAll] = useState(false)
+  // 任务行状态配色主题开关：关闭后行颜色还原成中性绿（默认开）
+  const [rowThemeOn, setRowThemeOn] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true
+    }
+    return window.localStorage.getItem('giverny-row-theme') !== 'off'
+  })
+  const toggleRowTheme = () => {
+    setRowThemeOn((current) => {
+      const next = !current
+      try {
+        window.localStorage.setItem('giverny-row-theme', next ? 'on' : 'off')
+      } catch {
+        // 忽略持久化失败
+      }
+      return next
+    })
+  }
   const navigationChordRef = useRef<number | null>(null)
   const dailyKnowledgeRequestedRef = useRef(false)
   const dailyKnowledgeRef = useRef(dailyKnowledge)
@@ -3148,7 +3269,7 @@ function App() {
       return
     }
     const canBackfill = (name: string, type: string) =>
-      type === 'PDF' || /\.(pdf|mp4|mov|webm|m4v|ogv|psd|ai)$/i.test(name)
+      type === 'PDF' || /\.(pdf|mp4|mov|webm|m4v|ogv|psd|ai|docx|pptx|xlsx)$/i.test(name)
     const targets = fileItems.filter(
       (file) =>
         !file.deletedAt &&
@@ -4870,6 +4991,16 @@ function App() {
                 <div className="dashboard-task-heading-row">
                   <h2>任务明细</h2>
                   <p>按月份汇总工作内容、工时与验收</p>
+                  <button
+                    type="button"
+                    className={`row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
+                    aria-pressed={rowThemeOn}
+                    title={rowThemeOn ? '关闭状态配色主题，行颜色还原中性' : '开启状态配色主题，行颜色随状态联动'}
+                    onClick={toggleRowTheme}
+                  >
+                    <Palette size={14} />
+                    {rowThemeOn ? '关闭主题' : '开启主题'}
+                  </button>
                 </div>
                 <label className="search-box dashboard-task-search">
                   <Search size={20} />
@@ -4885,7 +5016,7 @@ function App() {
                 ))}
               </div>
 
-              <div className="task-list" onContextMenu={openDashboardCreateMenu}>
+              <div className={`task-list ${rowThemeOn ? '' : 'no-row-theme'}`} onContextMenu={openDashboardCreateMenu}>
                 {visibleTasks.length === 0 && (
                   <div className="empty-state">
                     <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
