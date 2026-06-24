@@ -5140,6 +5140,27 @@ button {
   opacity: 0.78;
 }
 
+/* 边添加边上传：附件卡片内的细进度条 */
+.progress-attachment-desktop-item .attachment-upload-bar {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-strong));
+}
+
+.progress-attachment-desktop-item .attachment-upload-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+  transition: width 0.18s ease;
+}
+
+.progress-attachment-desktop-item .attachment-upload-done {
+  color: color-mix(in srgb, var(--color-primary) 78%, var(--color-text));
+}
+
 .progress-existing-attachments,
 .progress-pending-attachments {
   display: grid;

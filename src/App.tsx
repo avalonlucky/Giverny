@@ -965,9 +965,17 @@ type PendingProgressAttachment = {
   aiSuggestion?: AttachmentNameSuggestion
   aiLoading?: boolean
   aiError?: string
+  // 边添加边上传：文件一加入即后台上传，保存时直接复用，无需再等。
+  uploadStatus?: 'uploading' | 'done' | 'error'
+  uploadProgress?: number // 0..1
+  uploadedFile?: FileAsset
+  uploadError?: string
 }
 
 const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
+// 同一份草稿（task+mode+entry）复用同一个 entryId，保证「关闭后重开再保存」时
+// 预上传文件仍能正确挂到最终生成的进展条目上。
+const stagedEntryIdCache = new Map<string, string>()
 
 function splitFileName(value: string) {
   const trimmed = value.trim()
@@ -6829,6 +6837,15 @@ function TaskProgressModal({
   const [pendingAttachments, setPendingAttachments] = useState<PendingProgressAttachment[]>(
     () => progressAttachmentDraftCache.get(progressDraftKey) ?? [],
   )
+  // 本次草稿对应的稳定 entryId：预上传与最终生成的进展条目共用，确保文件挂到正确条目。
+  const stagedEntryIdRef = useRef<string>(
+    editEntryId ?? stagedEntryIdCache.get(progressDraftKey) ?? crypto.randomUUID(),
+  )
+  if (!editEntryId && !stagedEntryIdCache.has(progressDraftKey)) {
+    stagedEntryIdCache.set(progressDraftKey, stagedEntryIdRef.current)
+  }
+  // 进行中的预上传 Promise（按附件 id 索引），保存时若仍在传则等待其完成。
+  const uploadPromisesRef = useRef<Map<string, Promise<FileAsset>>>(new Map())
   const [existingAttachmentDrafts, setExistingAttachmentDrafts] = useState<Record<number, string>>({})
   const [existingAttachmentAiState, setExistingAttachmentAiState] = useState<Record<number, {
     loading?: boolean
@@ -6962,7 +6979,7 @@ function TaskProgressModal({
       const nowDate = isoDate()
       const nowTime = isoDateTime().slice(11, 16) || '00:00'
       const entry: TimeEntry = {
-        id: editEntryId ?? crypto.randomUUID(),
+        id: editEntryId ?? stagedEntryIdRef.current,
         date: hasPicked ? activeStartDate : nowDate,
         endDate: hasPicked ? (activeEndDate || activeStartDate) : nowDate,
         start: hasPicked ? start : nowTime,
@@ -6978,7 +6995,7 @@ function TaskProgressModal({
     if (!start || !end || draftEntryMinutes <= 0) {
       return null
     }
-    const entry: TimeEntry = { id: editEntryId ?? crypto.randomUUID(), date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
+    const entry: TimeEntry = { id: editEntryId ?? stagedEntryIdRef.current, date: activeStartDate, endDate: activeEndDate, start, end, note: noteText }
     if (options?.isAcceptanceProgress) {
       entry.isAcceptanceProgress = true
     }
@@ -6987,6 +7004,105 @@ function TaskProgressModal({
       entry.isRevision = true
     }
     return entry
+  }
+
+  // 把附件直接上传到后台（带预览生成 + 进度回调），返回服务端文件记录。
+  // 不触发全局刷新/通知——这些副作用留到保存时统一处理。
+  const stageUploadAttachment = async (
+    attachment: PendingProgressAttachment,
+    onProgress: (ratio: number) => void,
+  ): Promise<FileAsset> => {
+    const acceptance = isAcceptanceMode
+    const uploadFile = acceptance
+      ? renamedFile(attachment.file, attachment.name)
+      : await compressProgressImageFile(renamedFile(attachment.file, attachment.name))
+    const extension = uploadFile.name.split('.').pop()?.toUpperCase() || 'FILE'
+    const preview = await createOptionalPreviewFile(uploadFile)
+    return api.uploadFile(
+      {
+        taskId: task.id,
+        entryId: stagedEntryIdRef.current,
+        scope: acceptance ? 'acceptance' : 'progress',
+        file: uploadFile,
+        preview,
+        type: extension,
+        size: formatFileSize(uploadFile.size),
+        final: acceptance,
+        visible: true,
+        tag: acceptance ? '验收文件' : undefined,
+        analyze: true,
+      },
+      onProgress,
+    )
+  }
+
+  // 文件一加入即后台预上传；保存时若已传完则秒过，无需再等。
+  const startEagerUpload = (attachment: PendingProgressAttachment) => {
+    setPendingAttachments((current) => current.map((item) =>
+      item.id === attachment.id ? { ...item, uploadStatus: 'uploading', uploadProgress: 0, uploadError: undefined } : item,
+    ))
+    const promise = stageUploadAttachment(attachment, (ratio) => {
+      setPendingAttachments((current) => current.map((item) =>
+        item.id === attachment.id ? { ...item, uploadProgress: ratio } : item,
+      ))
+    })
+      .then((saved) => {
+        setPendingAttachments((current) => current.map((item) =>
+          item.id === attachment.id ? { ...item, uploadStatus: 'done', uploadProgress: 1, uploadedFile: saved, uploadError: undefined } : item,
+        ))
+        return saved
+      })
+      .catch((error) => {
+        setPendingAttachments((current) => current.map((item) =>
+          item.id === attachment.id
+            ? { ...item, uploadStatus: 'error', uploadError: error instanceof Error ? error.message : '上传失败' }
+            : item,
+        ))
+        throw error
+      })
+    uploadPromisesRef.current.set(attachment.id, promise)
+    // 吞掉未捕获 rejection 噪声；真正的错误已写入 attachment.uploadError，保存时再处理。
+    promise.catch(() => {})
+  }
+
+  // 移除某个待上传附件：若已传到后台则顺手删除，避免产生孤儿文件。
+  const discardStagedFile = (fileId?: number) => {
+    if (typeof fileId === 'number') {
+      void api.deleteFile(fileId).catch(() => {})
+    }
+  }
+
+  // 保存时定稿：等待在传的预上传完成，必要时改名（不重传），返回已上传的文件名。
+  const finalizeStagedAttachments = async (): Promise<{ names: string[]; failures: string[] }> => {
+    const names: string[] = []
+    const failures: string[] = []
+    for (const attachment of pendingAttachments) {
+      let saved = attachment.uploadedFile
+      if (!saved) {
+        const pending = uploadPromisesRef.current.get(attachment.id)
+        if (pending) {
+          try {
+            saved = await pending
+          } catch {
+            saved = undefined
+          }
+        }
+      }
+      const finalName = sanitizeAttachmentName(attachment.name, attachment.originalName)
+      if (!saved) {
+        failures.push(`${finalName}：上传失败，请重试`)
+        continue
+      }
+      if (finalName !== saved.name) {
+        try {
+          await onUpdateFile(saved.id, { name: finalName })
+        } catch {
+          // 改名失败不阻断保存：文件已在，仅显示名沿用上传时的名字。
+        }
+      }
+      names.push(finalName)
+    }
+    return { names, failures }
   }
 
   const addPendingFiles = (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
@@ -7006,6 +7122,8 @@ function TaskProgressModal({
           file,
           name: displayName,
           originalName: file.name,
+          uploadStatus: 'uploading',
+          uploadProgress: 0,
         })
       } catch (error) {
         nextErrors.push(error instanceof Error ? error.message : `${file.name}：文件无法添加`)
@@ -7013,11 +7131,12 @@ function TaskProgressModal({
     })
     if (nextAttachments.length > 0) {
       setPendingAttachments((current) => [...current, ...nextAttachments])
-      nextAttachments
-        .filter((attachment) => looksLikeUntidyFileName(attachment.name))
-        .forEach((attachment) => {
+      nextAttachments.forEach((attachment) => {
+        startEagerUpload(attachment)
+        if (looksLikeUntidyFileName(attachment.name)) {
           window.setTimeout(() => void requestAttachmentNameSuggestion(attachment.id, attachment), 0)
-        })
+        }
+      })
     }
     if (nextErrors.length > 0) {
       setUploadErrors(nextErrors)
@@ -7034,11 +7153,21 @@ function TaskProgressModal({
     }
     try {
       validateUploadFile(file)
+      const previous = pendingAttachments.find((item) => item.id === replacementAttachmentId)
+      discardStagedFile(previous?.uploadedFile?.id)
+      uploadPromisesRef.current.delete(replacementAttachmentId)
+      const replaced: PendingProgressAttachment = {
+        id: replacementAttachmentId,
+        file,
+        name: file.name,
+        originalName: file.name,
+        uploadStatus: 'uploading',
+        uploadProgress: 0,
+      }
       setPendingAttachments((current) => current.map((attachment) =>
-        attachment.id === replacementAttachmentId
-          ? { ...attachment, file, name: file.name, originalName: file.name, aiSuggestion: undefined, aiError: undefined }
-          : attachment,
+        attachment.id === replacementAttachmentId ? replaced : attachment,
       ))
+      startEagerUpload(replaced)
       setUploadErrors([])
     } catch (error) {
       setUploadErrors([error instanceof Error ? error.message : `${file.name}：文件无法替换`])
@@ -7171,17 +7300,6 @@ function TaskProgressModal({
     })
   }
 
-  const uploadProgressAttachmentsInBackground = (attachments: PendingProgressAttachment[], entryId?: string) => {
-    if (attachments.length === 0) {
-      return
-    }
-    void Promise.allSettled(attachments.map(async (attachment) => {
-      const uploadFile = renamedFile(attachment.file, attachment.name)
-      await onUploadImage(task.id, uploadFile, undefined, entryId)
-      return uploadFile.name
-    }))
-  }
-
   // 验收态：工时汇总计算（复用现有工具函数）
   const acceptanceTimeEntries = task.timeEntries ?? []
   const acceptanceWaitingEntries = task.waitingEntries ?? []
@@ -7228,7 +7346,12 @@ function TaskProgressModal({
         }
       }
       await saveDirtyExistingAttachmentNames()
-      const finalizedUploadedNames = pendingAttachments.map((attachment) => sanitizeAttachmentName(attachment.name, attachment.originalName))
+      // 附件在添加时已后台预上传，这里只需等待收尾 + 必要时改名，通常瞬间完成。
+      const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
+      if (uploadFailures.length > 0) {
+        setUploadErrors(uploadFailures)
+        return
+      }
       const nextTimeEntries = !isWaitingMode && nextEntry
         ? isEditingEntry ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftTimeEntries, nextEntry]
         : draftTimeEntries
@@ -7268,7 +7391,7 @@ function TaskProgressModal({
       }
       clearDraftCache(progressDraftKey)
       progressAttachmentDraftCache.delete(progressDraftKey)
-      uploadProgressAttachmentsInBackground(pendingAttachments, nextEntry?.id)
+      stagedEntryIdCache.delete(progressDraftKey)
       onClose()
     } finally {
       setIsSaving(false)
@@ -7294,22 +7417,9 @@ function TaskProgressModal({
         }
       }
       await saveDirtyExistingAttachmentNames()
-      // 上传附件（验收态用 onUploadAcceptanceFile，自动打「验收文件」标签）
-      const finalizedUploadedNames: string[] = []
-      const uploadFailures: string[] = []
-      for (const attachment of pendingAttachments) {
-        const uploadFile = renamedFile(attachment.file, attachment.name)
-        try {
-          if (onUploadAcceptanceFile) {
-            await onUploadAcceptanceFile(task.id, uploadFile, undefined, nextEntry?.id)
-          } else {
-            await onUploadImage(task.id, uploadFile, undefined, nextEntry?.id)
-          }
-          finalizedUploadedNames.push(uploadFile.name)
-        } catch (error) {
-          uploadFailures.push(`${uploadFile.name}：${error instanceof Error ? error.message : '上传失败'}`)
-        }
-      }
+      // 验收附件已在添加时后台预上传（scope=acceptance，自动带「验收文件」标签）。
+      // 这里只需等待收尾 + 必要时改名，保存因此基本秒回，不再卡 30 秒。
+      const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
       if (uploadFailures.length > 0) {
         setUploadErrors(uploadFailures)
         return
@@ -7344,6 +7454,7 @@ function TaskProgressModal({
       })
       clearDraftCache(progressDraftKey)
       progressAttachmentDraftCache.delete(progressDraftKey)
+      stagedEntryIdCache.delete(progressDraftKey)
       onClose()
     } finally {
       setIsSaving(false)
@@ -7971,6 +8082,17 @@ function TaskProgressModal({
                             {splitFileName(attachment.originalName).extension}
                           </span>
                         </div>
+                        {attachment.uploadStatus === 'uploading' && (
+                          <div className="attachment-upload-bar" role="progressbar" aria-label="上传进度" title="上传中">
+                            <span style={{ width: `${Math.max(6, Math.round((attachment.uploadProgress ?? 0) * 100))}%` }} />
+                          </div>
+                        )}
+                        {attachment.uploadStatus === 'done' && (
+                          <small className="attachment-upload-done">已上传，保存即用</small>
+                        )}
+                        {attachment.uploadStatus === 'error' && (
+                          <small className="attachment-ai-error">上传失败：{attachment.uploadError ?? '请重试'}（保存时会自动重试）</small>
+                        )}
                         {attachment.aiLoading && <small>视觉模型正在识别文件内容并整理名称...</small>}
                         {attachment.aiError && <small className="attachment-ai-error">{attachment.aiError}</small>}
                         {attachment.aiSuggestion && (
@@ -8023,7 +8145,11 @@ function TaskProgressModal({
                             aria-label="删除附件"
                             title="删除附件"
                             className="danger"
-                            onClick={() => setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                            onClick={() => {
+                              discardStagedFile(attachment.uploadedFile?.id)
+                              uploadPromisesRef.current.delete(attachment.id)
+                              setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))
+                            }}
                           >
                             <Trash2 size={14} />
                           </button>
