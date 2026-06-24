@@ -18,15 +18,16 @@
   --color-status-warning: #94652f;
   --color-status-planning: #949c96;
   --color-status-active: #4b7ba8;
-  /* 待验收：低饱和马卡龙玫瑰（干净、舒服，区别于绿/蓝/紫） */
-  --color-status-pending: #c79bb0;
+  /* 待验收：马卡龙玫瑰（Nectarine #D7897F），干净舒服、区别于绿/蓝/紫 */
+  --color-status-pending: #d7897f;
   --color-status-accepted: #3c6b61;
   --color-status-hold: #7a6e94;
   --color-status-stopped: #97474a;
   --color-status-disabled: #949c96;
-  /* 临期 vs 逾期是两个概念，用两种马卡龙色区分：临期=琥珀（将到期），逾期=珊瑚（已超期） */
-  --color-due-soon: #d9b06a;
-  --color-due-overdue: #d98a78;
+  /* 临期 vs 逾期是两个概念，用色卡里的两种马卡龙橙区分浓淡：
+     临期=蜜桃 Pêche #F9B95C（将到期，浅），逾期=万寿菊 Marigold #E59D2C（已超期，更深更急） */
+  --color-due-soon: #f9b95c;
+  --color-due-overdue: #e59d2c;
   --color-alert-surface: #f2ebdf;
   --color-alert-accent: #94652f;
   --color-editorial-surface: #fbfbf8;

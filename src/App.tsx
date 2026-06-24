@@ -6056,7 +6056,7 @@ function DashboardTaskSidebar({
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          <em>计时 {formatSignedHours(minutes)}</em>
+                          <em>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                               {entryFiles.map((file) => {
@@ -6653,6 +6653,9 @@ function TaskProgressModal({
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
   const [countAcceptanceTime, setCountAcceptanceTime] = useState(true)
+  // 普通进展是否计入工时：默认计入；关闭后本次进展计 0 工时（仅记录进展/反馈，不进结算）。
+  // 适用于「对方只给了点修改反馈，想留个进展记录但不算工时」等场景。
+  const [countProgressTime, setCountProgressTime] = useState(!editingEntry || minutesForTimeEntry(editingEntry) > 0)
   // 本次进展是否为「改稿轮次」：显式开关，开 = 计入需求人画像的改稿轮次；
   // 关 = 只是把任务分阶段提交，不算改稿。仅用于画像/AI 分析，不影响计时与结算。
   const [isRevisionRound, setIsRevisionRound] = useState(Boolean(editingEntry?.isRevision))
@@ -6698,6 +6701,11 @@ function TaskProgressModal({
   const canToggleAcceptanceMode = Boolean(onConfirmAcceptance) && !isWaitingMode && !hasAnotherAcceptanceProgress && (task.status !== '已验收' || isEditingAcceptanceEntry)
   const isConvertingEntryToAcceptance = isAcceptanceMode && isEditingEntry && !editingEntry?.isAcceptanceProgress && task.status !== '已验收'
   const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
+  // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
+  const timeCounts = isWaitingMode ? true : isAcceptanceMode ? countAcceptanceTime : countProgressTime
+  // 不计工时的普通进展：没有有效时间段也能保存，只要有备注或附件（计 0 工时，仅作进展记录）
+  const isZeroTimeProgress = !isWaitingMode && !isAcceptanceMode && !countProgressTime
+  const canSaveZeroTimeProgress = isZeroTimeProgress && (note.trim().length > 0 || (activeDraft.note ?? '').trim().length > 0 || pendingAttachments.length > 0)
   const suggestedTimeSlot = draftConflict ? findNearestAvailableTimeSlot(draftEntry, comparableEntries) : null
   const applySuggestedTimeSlot = () => {
     if (!suggestedTimeSlot) {
@@ -6752,6 +6760,19 @@ function TaskProgressModal({
     const start = activeDraft.start.trim()
     const end = activeDraft.end.trim()
     const noteText = (isAcceptanceMode ? note : activeDraft.note)?.trim() ?? ''
+    // 不计工时的普通进展：生成 0 时长记录，仅承载进展备注，让它照常出现在时间轴（计 0 工时）
+    if (isZeroTimeProgress) {
+      if (!noteText && pendingAttachments.length === 0) {
+        return null
+      }
+      const anchorDate = (start && activeStartDate) || isoDate()
+      const anchorTime = start || isoDateTime().slice(11, 16) || '00:00'
+      const entry: TimeEntry = { id: editEntryId ?? crypto.randomUUID(), date: anchorDate, endDate: anchorDate, start: anchorTime, end: anchorTime, note: noteText }
+      if (isRevisionRound) {
+        entry.isRevision = true
+      }
+      return entry
+    }
     if (!start || !end || draftEntryMinutes <= 0) {
       return null
     }
@@ -6996,7 +7017,8 @@ function TaskProgressModal({
       const shouldKeepAcceptanceProgress = isEditingAcceptanceEntry && isAcceptanceMode
       const shouldAllowAcceptedTimeEdit = isEditingAcceptanceEntry && task.status === '已验收'
       const nextEntry = buildDraftTimeEntry({ isAcceptanceProgress: shouldKeepAcceptanceProgress })
-      if (nextEntry) {
+      // 0 时长进展不占时间段，跳过重叠校验
+      if (nextEntry && minutesForTimeEntry(nextEntry) > 0) {
         const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
         if (conflict) {
           setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
@@ -7269,7 +7291,7 @@ function TaskProgressModal({
       <div className="progress-lite-time-heading">
         <div>
           <span>时间与工时</span>
-          <small>{countAcceptanceTime ? '三项同时只激活两项，第三项自动推算（灰色）' : '本次验收不计入工时'}</small>
+          <small>{timeCounts ? '三项同时只激活两项，第三项自动推算（灰色）' : isAcceptanceMode ? '本次验收不计入工时' : '本次不计工时，仅记录进展'}</small>
         </div>
         <div className="progress-lite-time-heading-actions">
           {isAcceptanceMode && (
@@ -7285,19 +7307,32 @@ function TaskProgressModal({
               <span>{countAcceptanceTime ? '计入工时' : '不计入工时'}</span>
             </button>
           )}
+          {!isAcceptanceMode && !isWaitingMode && (
+            <button
+              type="button"
+              className={`switch-control progress-lite-time-toggle ${countProgressTime ? 'active' : ''}`}
+              aria-pressed={countProgressTime}
+              aria-label={countProgressTime ? '本次计入工时，点击关闭则计 0 工时' : '本次不计工时，点击开启则计入'}
+              title={countProgressTime ? '本次计入工时，点击关闭则计 0 工时' : '本次不计工时，点击开启则计入'}
+              onClick={() => setCountProgressTime((value) => !value)}
+            >
+              <i />
+              <span>{countProgressTime ? '计入工时' : '不计工时'}</span>
+            </button>
+          )}
           <button
             type="button"
             className="progress-lite-time-swap"
             aria-label="交换开始时间和结束时间"
             title="交换开始时间和结束时间"
             onClick={swapDraftTimes}
-            disabled={!countAcceptanceTime || !activeDraft.start.trim() || !activeDraft.end.trim()}
+            disabled={!timeCounts || !activeDraft.start.trim() || !activeDraft.end.trim()}
           >
             <ArrowRightLeft size={15} />
           </button>
         </div>
       </div>
-      <div className={`new-task-schedule-row progress-lite-schedule-row ${countAcceptanceTime ? '' : 'is-uncounted'}`} aria-disabled={!countAcceptanceTime}>
+      <div className={`new-task-schedule-row progress-lite-schedule-row ${timeCounts ? '' : 'is-uncounted'}`} aria-disabled={!timeCounts}>
         <PlanDateTimeField
           label="开始时间"
           value={progressStartValue}
@@ -7345,9 +7380,11 @@ function TaskProgressModal({
           onActivePickerChange={setActiveDatePickerId}
         />
       </div>
-      <p className={`progress-lite-duration ${!countAcceptanceTime || hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
-        {!countAcceptanceTime
-          ? '本次验收不计入工时，已汇总工时保留不变，可直接保存 / 验收'
+      <p className={`progress-lite-duration ${!timeCounts || hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
+        {!timeCounts
+          ? isAcceptanceMode
+            ? '本次验收不计入工时，已汇总工时保留不变，可直接保存 / 验收'
+            : '本次计 0 工时，仅记录进展（填写备注或上传附件即可保存）'
           : hasDraftTimeEntry
             ? isAcceptanceMode && !hasTouchedSchedule
               ? '如本次没有新增工时，可直接验收；调整时间后才会计入本次工时与结算'
@@ -7935,7 +7972,7 @@ function TaskProgressModal({
             {isSaving ? '保存中…' : isAcceptanceRevisionMode ? '保存修改' : '确认验收通过'}
           </button>
         ) : (
-          <button data-modal-save="true" className="primary-button" disabled={isSaving || !hasDraftTimeEntry || Boolean(draftConflict)} onClick={() => void saveProgress()}>
+          <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (!hasDraftTimeEntry && !canSaveZeroTimeProgress)} onClick={() => void saveProgress()}>
             {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
           </button>
         )}
