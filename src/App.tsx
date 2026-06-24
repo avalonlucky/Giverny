@@ -5219,6 +5219,8 @@ function App() {
             onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
             onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
+            rowThemeOn={rowThemeOn}
+            onToggleRowTheme={toggleRowTheme}
           />
         )}
 
@@ -6369,6 +6371,8 @@ function TasksView({
   onConfirmAcceptance,
   onCreateTaskUpdate,
   onCreateTask,
+  rowThemeOn,
+  onToggleRowTheme,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -6407,6 +6411,8 @@ function TasksView({
   onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
+  rowThemeOn: boolean
+  onToggleRowTheme: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -6545,10 +6551,21 @@ function TasksView({
       </section>
 
       <section className="management-grid">
-        <div className="panel task-management-list">
+        <div className={`panel task-management-list ${rowThemeOn ? '' : 'no-row-theme'}`}>
           <div className="management-list-toolbar">
             <span>共 {tasks.length} 条</span>
-            <small>悬停显示快捷操作，右键可打开完整菜单</small>
+            <div className="management-list-toolbar-end">
+              <button
+                type="button"
+                className={`row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
+                aria-pressed={rowThemeOn}
+                title={rowThemeOn ? '关闭状态配色主题，行颜色还原中性' : '开启状态配色主题，行颜色随状态联动'}
+                onClick={onToggleRowTheme}
+              >
+                {rowThemeOn ? '关闭主题' : '开启主题'}
+              </button>
+              <small>悬停显示快捷操作，右键可打开完整菜单</small>
+            </div>
           </div>
           <div className="table-head">
             <span>日期</span>
@@ -6566,6 +6583,8 @@ function TasksView({
             return (
             <article
               className={`task-row management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
+              data-status={task.status}
+              data-due={dueState || undefined}
               key={task.id}
               role="button"
               tabIndex={0}

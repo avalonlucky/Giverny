@@ -16,18 +16,23 @@
   --color-supplement-bg: rgba(60, 107, 97, 0.1);
   --color-status-danger: #97474a;
   --color-status-warning: #94652f;
-  --color-status-planning: #949c96;
-  --color-status-active: #4b7ba8;
-  /* 待验收：暖奶油黄（平静的「待办」信号，区别于绿/蓝/紫，不偏粉） */
-  --color-status-pending: #c99a3a;
+  /* 状态点配色（方案B）：色相明确拉开，低饱和 */
+  --color-status-planning: #7a8590;
+  --color-status-active: #3a7bb5;
+  /* 待验收：哑琥珀（平静的「待办」信号，区别于绿/蓝/灰，不偏粉） */
+  --color-status-pending: #b08438;
   --color-status-accepted: #3c6b61;
   --color-status-hold: #7a6e94;
   --color-status-stopped: #97474a;
   --color-status-disabled: #949c96;
-  /* 暖色递进：临期=橙（提醒），逾期=红（紧迫）。用于角标，行填充另用更浅的 --row-fill */
-  --color-due-soon: #e2912f;
-  --color-due-overdue: #d9503d;
+  /* 暖色递进：临期=哑橙（提醒），逾期=干净红（紧迫）。用于角标，行填充另用更浅的 --row-fill */
+  --color-due-soon: #cf8b3e;
+  --color-due-overdue: #c25450;
   --color-alert-surface: #f2ebdf;
+  /* 任务行状态填充（方案B）：每状态独立低饱和底色，底色即可区分状态 */
+  --row-fill-plan: #eef0f1;
+  --row-fill-active: #eaf0f4;
+  --row-fill-pending: #f5f0e6;
   --color-alert-accent: #94652f;
   --color-editorial-surface: #fbfbf8;
   --color-editorial-surface-alt: #f4f4ee;
@@ -2160,9 +2165,10 @@ button {
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--color-text);
-  /* 任务行默认复用「最近任务」那条的暖米色填充；已验收复用「科普小知识」那条的绿色。
-     统一、低饱和、不分深浅，无边框无标记。 */
-  --row-fill: var(--color-alert-surface);
+  /* 行填充随状态联动（方案B）：默认=中性浅灰（计划中/静默/其他状态），
+     进行中=淡蓝、待验收=淡米、已验收=淡绿；临期/逾期再覆盖为暖橙/干净红。
+     低饱和、无边框无标记，底色即可区分状态。 */
+  --row-fill: var(--row-fill-plan);
   background: var(--row-fill);
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
@@ -2174,8 +2180,25 @@ button {
   transition: background 0.16s ease;
 }
 
+.task-row[data-status="进行中"] {
+  --row-fill: var(--row-fill-active);
+}
+
+.task-row[data-status="待验收"] {
+  --row-fill: var(--row-fill-pending);
+}
+
 .task-row[data-status="已验收"] {
   --row-fill: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-strong));
+}
+
+/* 临期/逾期覆盖状态填充（放在 data-status 之后，靠源码顺序取胜） */
+.task-row[data-due="soon"] {
+  --row-fill: color-mix(in srgb, var(--color-due-soon) 14%, transparent);
+}
+
+.task-row[data-due="overdue"] {
+  --row-fill: color-mix(in srgb, var(--color-due-overdue) 12%, transparent);
 }
 
 .task-row:hover,
@@ -4499,6 +4522,12 @@ button {
 .management-list-toolbar small {
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+.management-list-toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .table-head,
@@ -12571,13 +12600,13 @@ textarea:focus-visible {
 }
 
 .due-tag.overdue {
-  color: color-mix(in srgb, var(--color-due-overdue) 66%, #3a1410);
-  background: color-mix(in srgb, var(--color-due-overdue) 22%, transparent);
+  color: color-mix(in srgb, var(--color-due-overdue) 64%, #3a1410);
+  background: color-mix(in srgb, var(--color-due-overdue) 20%, transparent);
 }
 
 .due-tag.soon {
-  color: color-mix(in srgb, var(--color-due-soon) 62%, #3a1410);
-  background: color-mix(in srgb, var(--color-due-soon) 24%, transparent);
+  color: color-mix(in srgb, var(--color-due-soon) 60%, #3a1410);
+  background: color-mix(in srgb, var(--color-due-soon) 22%, transparent);
 }
 
 .annual-panel .panel-header {
