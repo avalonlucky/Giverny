@@ -2177,13 +2177,13 @@ button {
 .task-row[data-status="已验收"] { --row-fill: #eef6f1; --row-strong: #dcebe2; --row-mark: #6fae93; }
 .task-row[data-status="进行中"] { --row-fill: #eef4fb; --row-strong: #dae8f6; --row-mark: #7aa6d0; }
 .task-row[data-status="计划中"] { --row-fill: #f2fce9; --row-strong: #e6fbda; --row-mark: #9cc77f; }
-.task-row[data-status="待验收"] { --row-fill: #fcf1ef; --row-strong: #f7e1de; --row-mark: #d7897f; }
+.task-row[data-status="待验收"] { --row-fill: #fbe9ec; --row-strong: #f4d2da; --row-mark: #d57f97; }
 .task-row[data-status="挂起"] { --row-fill: #f3f0f7; --row-strong: #e7e0ee; --row-mark: #9a8fb4; }
-.task-row[data-status="终止"] { --row-fill: #fbeae7; --row-strong: #f3d6d1; --row-mark: #c87a6e; }
+.task-row[data-status="终止"] { --row-fill: #ffe9e3; --row-strong: #ffd2c6; --row-mark: #e3725c; }
 .task-row[data-status="不计费"] { --row-fill: #f1f3ee; --row-strong: #e4e7df; --row-mark: #aab3a3; }
-/* 临期 / 逾期是时间紧迫信号，优先于状态色；统一红色系，逾期更红更急 */
-.task-row[data-due="soon"] { --row-fill: #fdeeeb; --row-strong: #fbdedb; --row-mark: #e8938a; }
-.task-row[data-due="overdue"] { --row-fill: #fde7e3; --row-strong: #fad1cb; --row-mark: #dd6f5f; }
+/* 临期 / 逾期是时间紧迫信号，优先于状态色；统一干净珊瑚红，逾期更红更急 */
+.task-row[data-due="soon"] { --row-fill: #ffe9e1; --row-strong: #ffd2c4; --row-mark: #f08e72; }
+.task-row[data-due="overdue"] { --row-fill: #ffdace; --row-strong: #fbb6a3; --row-mark: #e26c51; }
 
 .task-row:hover,
 .task-row:focus-visible {
