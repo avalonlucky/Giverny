@@ -3,6 +3,12 @@ main = "src/worker.ts"
 compatibility_date = "2026-06-10"
 account_id = "ccd312f47f0dca574199fa6e33758c6d"
 
+# 生产仍只走自定义域名 mayeai.com；workers_dev 关闭，避免把生产暴露到 workers.dev。
+# preview_urls 开启后，每次 `wrangler versions upload` 会生成独立的版本预览链接，
+# 用于在不影响生产流量的情况下预览升级分支。
+workers_dev = false
+preview_urls = true
+
 routes = [
   { pattern = "mayeai.com/*", zone_name = "mayeai.com" },
   { pattern = "www.mayeai.com/*", zone_name = "mayeai.com" }
