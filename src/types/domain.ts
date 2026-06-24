@@ -57,6 +57,8 @@ export type TimeEntry = {
   /** 本段是否为「改稿轮次」。仅用于需求人画像/AI 分析，不影响计时与结算。
    *  显式开关判定，避免把「任务分阶段提交」误判为改稿。 */
   isRevision?: boolean
+  /** 本段是否「不计工时」：时间仍可自选（用于记录与排序），但计 0 工时、不进结算。 */
+  isUncounted?: boolean
 }
 
 export type WaitingReason = '等待甲方意见' | '等待补充资料' | '等待排期' | '其他'

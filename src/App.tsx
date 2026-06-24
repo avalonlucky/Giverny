@@ -645,6 +645,53 @@ async function createPdfPreviewFile(file: File) {
   return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
 }
 
+// 把视频首帧渲染成 PNG 预览图（MP4 / MOV / WebM 等）
+async function createVideoPreviewFile(file: File) {
+  const url = URL.createObjectURL(file)
+  try {
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.src = url
+    await new Promise<void>((resolve, reject) => {
+      video.onloadeddata = () => resolve()
+      video.onerror = () => reject(new Error('视频加载失败'))
+    })
+    await new Promise<void>((resolve) => {
+      video.onseeked = () => resolve()
+      try {
+        video.currentTime = Math.min(0.1, (video.duration || 1) / 2)
+      } catch {
+        resolve()
+      }
+      setTimeout(() => resolve(), 1200)
+    })
+    const width = video.videoWidth
+    const height = video.videoHeight
+    if (!width || !height) {
+      return undefined
+    }
+    const scale = Math.min(1, 600 / Math.max(width, height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return undefined
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), 'image/png'))
+    if (!blob) {
+      return undefined
+    }
+    const base = file.name.replace(/\.[^.]+$/, '')
+    return new File([blob], `${base}-preview.png`, { type: 'image/png' })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 async function createOptionalPreviewFile(file: File) {
   const lower = file.name.toLowerCase()
   try {
@@ -653,6 +700,9 @@ async function createOptionalPreviewFile(file: File) {
     }
     if (lower.endsWith('.pdf') || file.type === 'application/pdf') {
       return await createPdfPreviewFile(file)
+    }
+    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|ogv)$/i.test(lower)) {
+      return await createVideoPreviewFile(file)
     }
   } catch (error) {
     console.warn('preview generation failed', error)
@@ -1236,7 +1286,11 @@ function dateTimeMinuteStamp(date: string, time: string) {
   return Math.round(value.getTime() / 60000)
 }
 
-function minutesForTimeEntry(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
+function minutesForTimeEntry(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end' | 'isUncounted'>) {
+  // 不计工时的分段：时间仅用于记录与排序，工时恒为 0
+  if (entry.isUncounted) {
+    return 0
+  }
   const startDate = entry.date
   const endDate = entry.endDate || startDate
   if (!startDate || !endDate) {
@@ -1364,10 +1418,11 @@ function findNearestAvailableTimeSlot<T extends Pick<TimeEntry, 'date' | 'endDat
 }
 
 function sortTimeEntriesDesc<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(entries: T[]) {
+  // 按开始时间戳倒序（最新在上）。直接取 start 时刻，避免 0 时长记录（end==start）被当成无效排到末尾。
   return [...entries].sort((a, b) => {
-    const aBounds = timeEntryBounds(a)
-    const bBounds = timeEntryBounds(b)
-    return (bBounds?.start ?? 0) - (aBounds?.start ?? 0)
+    const aStart = dateTimeMinuteStamp(a.date || '', a.start)
+    const bStart = dateTimeMinuteStamp(b.date || '', b.start)
+    return (Number.isFinite(bStart) ? bStart : 0) - (Number.isFinite(aStart) ? aStart : 0)
   })
 }
 
@@ -3085,20 +3140,22 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, role])
 
-  // PDF 缩略图自愈：对缺少预览图的 PDF（如早期上传的），后台渲染首页并回传持久化，
-  // 之后所有视图（时间轴 / 文件库 / 分享回单）都会显示真实缩略图。
-  const pdfPreviewBackfillRef = useRef<Set<number>>(new Set())
+  // 缩略图自愈：对缺少预览图、但可客户端生成首帧/首页的文件（PDF、视频、PSD/AI），
+  // 后台渲染并回传持久化，之后所有视图（时间轴 / 文件库 / 分享回单）都会显示真实缩略图。
+  const previewBackfillRef = useRef<Set<number>>(new Set())
   useEffect(() => {
     if (role !== 'admin') {
       return
     }
+    const canBackfill = (name: string, type: string) =>
+      type === 'PDF' || /\.(pdf|mp4|mov|webm|m4v|ogv|psd|ai)$/i.test(name)
     const targets = fileItems.filter(
       (file) =>
         !file.deletedAt &&
         !file.previewUrl &&
         file.sourceUrl &&
-        (file.type === 'PDF' || file.name.toLowerCase().endsWith('.pdf')) &&
-        !pdfPreviewBackfillRef.current.has(file.id),
+        canBackfill(file.name, file.type) &&
+        !previewBackfillRef.current.has(file.id),
     )
     if (targets.length === 0) {
       return
@@ -3109,7 +3166,7 @@ function App() {
         if (cancelled) {
           break
         }
-        pdfPreviewBackfillRef.current.add(file.id)
+        previewBackfillRef.current.add(file.id)
         try {
           const sourceUrl = authedPreviewUrl(file.sourceUrl)
           if (!sourceUrl) {
@@ -3120,14 +3177,17 @@ function App() {
             continue
           }
           const blob = await response.blob()
-          const pdfFile = new File([blob], file.name, { type: 'application/pdf' })
-          const preview = await createPdfPreviewFile(pdfFile)
+          const sourceFile = new File([blob], file.name, { type: blob.type || '' })
+          const preview = await createOptionalPreviewFile(sourceFile)
+          if (!preview) {
+            continue
+          }
           const result = await api.setFilePreview(file.id, preview)
           if (!cancelled && result?.previewUrl) {
             setFileItems((current) => current.map((item) => (item.id === file.id ? { ...item, previewUrl: result.previewUrl } : item)))
           }
         } catch (error) {
-          console.warn('PDF 预览补全失败', file.name, error)
+          console.warn('缩略图补全失败', file.name, error)
         }
       }
     })()
@@ -6056,7 +6116,7 @@ function DashboardTaskSidebar({
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          <em>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
+                          <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                               {entryFiles.map((file) => {
@@ -6703,6 +6763,8 @@ function TaskProgressModal({
   const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
   // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
   const timeCounts = isWaitingMode ? true : isAcceptanceMode ? countAcceptanceTime : countProgressTime
+  // 只有「验收且不计工时」才锁定时间输入；普通进展即便不计工时，时间仍可自选
+  const lockSchedule = isAcceptanceMode && !countAcceptanceTime
   // 不计工时的普通进展：没有有效时间段也能保存，只要有备注或附件（计 0 工时，仅作进展记录）
   const isZeroTimeProgress = !isWaitingMode && !isAcceptanceMode && !countProgressTime
   const canSaveZeroTimeProgress = isZeroTimeProgress && (note.trim().length > 0 || (activeDraft.note ?? '').trim().length > 0 || pendingAttachments.length > 0)
@@ -6760,14 +6822,23 @@ function TaskProgressModal({
     const start = activeDraft.start.trim()
     const end = activeDraft.end.trim()
     const noteText = (isAcceptanceMode ? note : activeDraft.note)?.trim() ?? ''
-    // 不计工时的普通进展：生成 0 时长记录，仅承载进展备注，让它照常出现在时间轴（计 0 工时）
+    // 不计工时的普通进展：时间由用户自选（用于记录与排序），计 0 工时。未选时间则锚到当前时刻。
     if (isZeroTimeProgress) {
       if (!noteText && pendingAttachments.length === 0) {
         return null
       }
-      const anchorDate = (start && activeStartDate) || isoDate()
-      const anchorTime = start || isoDateTime().slice(11, 16) || '00:00'
-      const entry: TimeEntry = { id: editEntryId ?? crypto.randomUUID(), date: anchorDate, endDate: anchorDate, start: anchorTime, end: anchorTime, note: noteText }
+      const hasPicked = Boolean(start && activeStartDate)
+      const nowDate = isoDate()
+      const nowTime = isoDateTime().slice(11, 16) || '00:00'
+      const entry: TimeEntry = {
+        id: editEntryId ?? crypto.randomUUID(),
+        date: hasPicked ? activeStartDate : nowDate,
+        endDate: hasPicked ? (activeEndDate || activeStartDate) : nowDate,
+        start: hasPicked ? start : nowTime,
+        end: hasPicked ? (end || start) : nowTime,
+        note: noteText,
+        isUncounted: true,
+      }
       if (isRevisionRound) {
         entry.isRevision = true
       }
@@ -7326,13 +7397,13 @@ function TaskProgressModal({
             aria-label="交换开始时间和结束时间"
             title="交换开始时间和结束时间"
             onClick={swapDraftTimes}
-            disabled={!timeCounts || !activeDraft.start.trim() || !activeDraft.end.trim()}
+            disabled={lockSchedule || !activeDraft.start.trim() || !activeDraft.end.trim()}
           >
             <ArrowRightLeft size={15} />
           </button>
         </div>
       </div>
-      <div className={`new-task-schedule-row progress-lite-schedule-row ${timeCounts ? '' : 'is-uncounted'}`} aria-disabled={!timeCounts}>
+      <div className={`new-task-schedule-row progress-lite-schedule-row ${lockSchedule ? 'is-uncounted' : ''}`} aria-disabled={lockSchedule}>
         <PlanDateTimeField
           label="开始时间"
           value={progressStartValue}
