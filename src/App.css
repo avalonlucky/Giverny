@@ -120,14 +120,14 @@
   --color-sidebar: #f4f0e7;
   --color-border: rgba(74, 60, 40, 0.08);
   --color-border-soft: rgba(74, 60, 40, 0.05);
-  /* 主色：睡莲叶绿，比工具模式更沉、更湿润 */
-  --color-primary: #4a7a64;
-  --color-primary-strong: #3a6450;
-  --color-primary-hover: #3a6450;
+  /* 主色：睡莲叶绿，比工具模式更沉、更湿润；仍跟季节走（见下方花园四季块）。 */
   --brand-primary: #4a7a64;
   --brand-primary-strong: #3a6450;
   --brand-glow: rgba(74, 122, 100, 0.12);
   --brand-glow-soft: rgba(74, 122, 100, 0.06);
+  --color-primary: var(--brand-primary);
+  --color-primary-strong: var(--brand-primary-strong);
+  --color-primary-hover: var(--brand-primary-strong);
   /* 状态色融入花园：饱和度再降、色相偏自然 */
   --color-status-planning: #8a8a78;  /* 橄榄灰 */
   --color-status-active: #5a7e94;    /* 雾蓝 */
@@ -136,6 +136,33 @@
   --row-fill-plan: #eeece4;
   --row-fill-active: #e8edea;
   --row-fill-pending: #f0ebe0;
+}
+
+/* 吉维尼模式下的四季睡莲绿：在「花园」里季节感才有意义，故幅度比工具模式明显些。
+   选择器更具体(0,3,0)，胜过上面的 :root[data-giverny=on]。 */
+:root[data-giverny="on"][data-season="spring"] {
+  --brand-primary: #5a8a6a;        /* 萌芽：明亮湿润 */
+  --brand-primary-strong: #48715a;
+  --brand-glow: rgba(90, 138, 106, 0.12);
+  --brand-glow-soft: rgba(90, 138, 106, 0.06);
+}
+:root[data-giverny="on"][data-season="summer"] {
+  --brand-primary: #4a7a64;        /* 盛放：睡莲叶绿 */
+  --brand-primary-strong: #3a6450;
+  --brand-glow: rgba(74, 122, 100, 0.12);
+  --brand-glow-soft: rgba(74, 122, 100, 0.06);
+}
+:root[data-giverny="on"][data-season="autumn"] {
+  --brand-primary: #6b7d54;        /* 暮光：暖橄榄绿 */
+  --brand-primary-strong: #566542;
+  --brand-glow: rgba(107, 125, 84, 0.12);
+  --brand-glow-soft: rgba(107, 125, 84, 0.06);
+}
+:root[data-giverny="on"][data-season="winter"] {
+  --brand-primary: #43726c;        /* 冷静：偏冷的青绿 */
+  --brand-primary-strong: #345a55;
+  --brand-glow: rgba(67, 114, 108, 0.12);
+  --brand-glow-soft: rgba(67, 114, 108, 0.06);
 }
 
 /* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
@@ -11965,26 +11992,37 @@ textarea:focus-visible {
   100% { transform: translate(-50%, -50%) scale(26); opacity: 0; }
 }
 
-/* 吉维尼模式开关（仅预览站可见；正式版会移进设置） */
-.giverny-mode-switcher {
+/* 设计预览面板（仅预览站可见；正式版会移进设置）。右下角，避免遮住左侧「设置」。 */
+.giverny-dev-panel {
   position: fixed;
-  left: 16px;
+  right: 16px;
   bottom: 16px;
   z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface-strong) 94%, transparent);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 8px 24px rgba(31, 42, 39, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.giverny-mode-switcher {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1.5px solid var(--color-primary);
-  background: color-mix(in srgb, var(--color-surface-strong) 92%, transparent);
+  background: transparent;
   color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(31, 42, 39, 0.10);
-  backdrop-filter: blur(6px);
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -12022,6 +12060,44 @@ textarea:focus-visible {
 
 .giverny-mode-switcher.on .gm-switch::after {
   transform: translateX(14px);
+}
+
+/* 面板内的季节切换行 */
+.season-dev-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px;
+}
+
+.season-dev-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  padding-right: 5px;
+}
+
+.season-dev-row button {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.season-dev-row button:hover {
+  background: var(--brand-glow);
+}
+
+.season-dev-row button.active {
+  background: var(--brand-primary);
+  color: #fff;
+  font-weight: 700;
 }
 
 .admin-login-modal .modal-header small {

@@ -5488,7 +5488,7 @@ function App() {
         />
       )}
       {showFireworks && <Fireworks />}
-      <GivernyModeSwitcher />
+      <GivernyDevPanel />
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">
           {toastQueue.map((item) => (
@@ -5741,17 +5741,20 @@ function Fireworks() {
   )
 }
 
-// 吉维尼模式开关：一键把整套色系切到莫奈花园。预览/本地可见，生产(mayeai.com)隐藏
-// （正式上线时会移进「设置」里做成正式选项）。状态持久化在 localStorage。
-function GivernyModeSwitcher() {
+// 设计预览面板：吉维尼模式开关 + 季节切换并存。预览/本地可见，生产(mayeai.com)隐藏
+// （正式上线时会移进「设置」里）。放右下角，避免遮住左侧「设置」导航。
+function GivernyDevPanel() {
   const isProd = typeof location !== 'undefined' && /(^|\.)mayeai\.com$/i.test(location.hostname)
   const [on, setOn] = useState<boolean>(() =>
     typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
+  const [season, setSeason] = useState<string>(() =>
+    (typeof document !== 'undefined' && document.documentElement.dataset.season) || 'summer',
+  )
   if (isProd) {
     return null
   }
-  const toggle = () => {
+  const toggleMode = () => {
     const next = !on
     setOn(next)
     if (next) {
@@ -5765,17 +5768,42 @@ function GivernyModeSwitcher() {
       // 忽略持久化失败
     }
   }
+  const pickSeason = (next: string) => {
+    document.documentElement.dataset.season = next
+    setSeason(next)
+  }
+  const seasons: Array<[string, string]> = [
+    ['spring', '春'],
+    ['summer', '夏'],
+    ['autumn', '秋'],
+    ['winter', '冬'],
+  ]
   return (
-    <button
-      type="button"
-      className={`giverny-mode-switcher ${on ? 'on' : ''}`}
-      aria-pressed={on}
-      onClick={toggle}
-      title={on ? '切回冷静的工具模式' : '切换到莫奈花园氛围'}
-    >
-      <span className="gm-switch" aria-hidden="true" />
-      {on ? '吉维尼模式 · 已开启' : '开启吉维尼模式'}
-    </button>
+    <div className="giverny-dev-panel" role="group" aria-label="设计预览（临时）">
+      <button
+        type="button"
+        className={`giverny-mode-switcher ${on ? 'on' : ''}`}
+        aria-pressed={on}
+        onClick={toggleMode}
+        title={on ? '切回冷静的工具模式' : '切换到莫奈花园氛围'}
+      >
+        <span className="gm-switch" aria-hidden="true" />
+        {on ? '吉维尼模式 · 已开启' : '开启吉维尼模式'}
+      </button>
+      <div className="season-dev-row">
+        <span className="season-dev-label">季节</span>
+        {seasons.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={season === key ? 'active' : ''}
+            onClick={() => pickSeason(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
