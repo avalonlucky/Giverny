@@ -85,6 +85,18 @@ import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, Insigh
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
+// 品牌随真实季节呼吸：按当前月份给根元素打 data-season，CSS 据此在「青绿带」内微移主色。
+// 北半球：3-5 春、6-8 夏、9-11 秋、12/1/2 冬。模块加载即执行，先于首帧渲染，无闪烁。
+function seasonOfMonth(month1to12: number): 'spring' | 'summer' | 'autumn' | 'winter' {
+  if (month1to12 >= 3 && month1to12 <= 5) return 'spring'
+  if (month1to12 >= 6 && month1to12 <= 8) return 'summer'
+  if (month1to12 >= 9 && month1to12 <= 11) return 'autumn'
+  return 'winter'
+}
+if (typeof document !== 'undefined') {
+  document.documentElement.dataset.season = seasonOfMonth(new Date().getMonth() + 1)
+}
+
 const navItems = [
   { label: '工作台', icon: LayoutDashboard },
   { label: '任务', icon: FolderKanban },
@@ -5772,7 +5784,7 @@ function AdminLoginModal({
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
         <button className="primary-button" onClick={() => void submit()} disabled={!key.trim() || isSubmitting}>
-          {isSubmitting ? '登录中…' : '登录管理员'}
+          {isSubmitting ? '正在进入…' : '进入工作台'}
         </button>
       </footer>
     </ModalShell>

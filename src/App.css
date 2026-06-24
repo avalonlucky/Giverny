@@ -8,9 +8,18 @@
   --color-surface-strong: #fbfbf8;
   --color-surface-alt: #f4f4ee;
   --color-sidebar: #fbfbf8;
-  --color-primary: #3c6b61;
-  --color-primary-strong: #2f564e;
-  --color-primary-hover: #2f564e;
+  /* ===== 品牌季节主色 =====
+     莫奈的睡莲池在四季捕捉不同的光。品牌主色随真实当前季节在「青绿带」内冷暖微移，
+     幅度刻意很小：用户说不出哪变了，但能感觉到网站在跟着季节呼吸。默认=夏。
+     语义状态色（已验收绿/进行中蓝/待验收琥珀/临期橙/逾期红）不在此列，永远钉死、不漂移。 */
+  --brand-primary: #3c6b61;
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.10);
+  --brand-glow-soft: rgba(60, 107, 97, 0.05);
+  /* 全站 --color-primary 统一引用品牌主色 → 一处定义，全站跟着季节呼吸 */
+  --color-primary: var(--brand-primary);
+  --color-primary-strong: var(--brand-primary-strong);
+  --color-primary-hover: var(--brand-primary-strong);
   --color-admin-only: #94652f;
   --color-supplement: #3c6b61;
   --color-supplement-bg: rgba(60, 107, 97, 0.1);
@@ -68,6 +77,33 @@
   --z-modal: 100;
   --z-overlay-effect: 110;
   accent-color: var(--color-primary);
+}
+
+/* ===== 四季品牌主色（青绿带内冷暖微移，由 data-season 触发，跟真实当前日期）=====
+   过渡很慢（见下方 transition），换季时几乎无感。 */
+:root[data-season="spring"] {
+  --brand-primary: #5f7d63;        /* 萌芽嫩绿：偏暖偏亮 */
+  --brand-primary-strong: #4d6651;
+  --brand-glow: rgba(95, 125, 99, 0.10);
+  --brand-glow-soft: rgba(95, 125, 99, 0.05);
+}
+:root[data-season="summer"] {
+  --brand-primary: #3c6b61;        /* 睡莲盛放：正青绿（现有主色） */
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.10);
+  --brand-glow-soft: rgba(60, 107, 97, 0.05);
+}
+:root[data-season="autumn"] {
+  --brand-primary: #4e7058;        /* 暮光：青绿里渗一点暖 */
+  --brand-primary-strong: #3e5a46;
+  --brand-glow: rgba(78, 112, 88, 0.10);
+  --brand-glow-soft: rgba(78, 112, 88, 0.05);
+}
+:root[data-season="winter"] {
+  --brand-primary: #3f6b6e;        /* 冷静：青绿里渗一点冷蓝 */
+  --brand-primary-strong: #325659;
+  --brand-glow: rgba(63, 107, 110, 0.10);
+  --brand-glow-soft: rgba(63, 107, 110, 0.05);
 }
 
 .app-shell {
@@ -11739,6 +11775,61 @@ textarea:focus-visible {
 
 .admin-login-modal {
   width: min(460px, calc(100vw - 40px));
+  position: relative;
+  overflow: hidden;
+}
+
+/* 进入吉维尼的门：极淡水彩晕染（纯 CSS，无图片），随季节主色微变，不抢内容。 */
+.admin-login-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 42% at 16% 10%, var(--brand-glow), transparent 70%),
+    radial-gradient(ellipse 52% 48% at 90% 88%, var(--brand-glow-soft), transparent 66%);
+}
+
+.admin-login-modal > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 登录 CTA · B印章（宽字距实心）+ 悬停一缕微光横掠 */
+.admin-login-modal .modal-footer .primary-button {
+  border-radius: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  position: relative;
+  overflow: hidden;
+  transition: filter 0.2s ease, transform 0.2s ease, background 0.6s ease;
+}
+
+.admin-login-modal .modal-footer .primary-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.admin-login-modal .modal-footer .primary-button::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 60%;
+  height: 100%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  transform: skewX(-20deg);
+}
+
+.admin-login-modal .modal-footer .primary-button:not(:disabled):hover::after {
+  animation: login-sheen 1.1s ease;
+}
+
+@keyframes login-sheen {
+  0% { left: -60%; }
+  100% { left: 120%; }
 }
 
 .admin-login-modal .modal-header small {
