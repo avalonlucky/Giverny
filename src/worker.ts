@@ -3341,6 +3341,23 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
   return Boolean(row)
 }
 
+// 为已上传但缺少预览图的文件（如早期上传的 PDF）补一张预览图。前端客户端渲染 PDF 首页后回传。
+async function setFilePreview(env: Env, id: string, request: Request) {
+  const row = await env.DB.prepare('SELECT id, task_id FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ id: string; task_id: string }>()
+  if (!row) {
+    return fail('文件不存在或已删除', 404)
+  }
+  const form = await request.formData()
+  const preview = form.get('preview')
+  if (!(preview instanceof File) || preview.size === 0) {
+    return fail('缺少预览图')
+  }
+  const previewKey = `previews/${row.task_id}/${id}/${sanitizeFileName(preview.name || 'preview.png')}`
+  await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'image/png' } })
+  await env.DB.prepare('UPDATE attachments SET preview_r2_key = ? WHERE id = ?').bind(previewKey, id).run()
+  return ok({ previewUrl: `/api/files/${id}/preview` })
+}
+
 async function getFilePreview(env: Env, id: string, request: Request) {
   const row = await env.DB.prepare('SELECT preview_r2_key, mime_type, visible_to_client FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{
     preview_r2_key: string | null
@@ -4713,6 +4730,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/files/') && path.endsWith('/analysis/retry') && request.method === 'POST') {
     return retryAttachmentAnalysis(env, path.split('/')[3], ctx)
+  }
+  if (path.startsWith('/api/files/') && path.endsWith('/preview') && request.method === 'POST') {
+    return setFilePreview(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/files/') && path.endsWith('/preview') && request.method === 'GET') {
     return getFilePreview(env, path.split('/')[3], request)

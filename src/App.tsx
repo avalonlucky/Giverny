@@ -3085,6 +3085,57 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, role])
 
+  // PDF 缩略图自愈：对缺少预览图的 PDF（如早期上传的），后台渲染首页并回传持久化，
+  // 之后所有视图（时间轴 / 文件库 / 分享回单）都会显示真实缩略图。
+  const pdfPreviewBackfillRef = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    if (role !== 'admin') {
+      return
+    }
+    const targets = fileItems.filter(
+      (file) =>
+        !file.deletedAt &&
+        !file.previewUrl &&
+        file.sourceUrl &&
+        (file.type === 'PDF' || file.name.toLowerCase().endsWith('.pdf')) &&
+        !pdfPreviewBackfillRef.current.has(file.id),
+    )
+    if (targets.length === 0) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      for (const file of targets.slice(0, 6)) {
+        if (cancelled) {
+          break
+        }
+        pdfPreviewBackfillRef.current.add(file.id)
+        try {
+          const sourceUrl = authedPreviewUrl(file.sourceUrl)
+          if (!sourceUrl) {
+            continue
+          }
+          const response = await fetch(sourceUrl)
+          if (!response.ok) {
+            continue
+          }
+          const blob = await response.blob()
+          const pdfFile = new File([blob], file.name, { type: 'application/pdf' })
+          const preview = await createPdfPreviewFile(pdfFile)
+          const result = await api.setFilePreview(file.id, preview)
+          if (!cancelled && result?.previewUrl) {
+            setFileItems((current) => current.map((item) => (item.id === file.id ? { ...item, previewUrl: result.previewUrl } : item)))
+          }
+        } catch (error) {
+          console.warn('PDF 预览补全失败', file.name, error)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fileItems, role])
+
   const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
 
   const filterTasks = (tasks: Task[], filter: TaskFilter = taskFilter) =>
@@ -3120,6 +3171,8 @@ function App() {
     return (
       <article
         className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
+        data-status={task.status}
+        data-due={dueState || undefined}
         key={task.id}
         role="button"
         tabIndex={0}
