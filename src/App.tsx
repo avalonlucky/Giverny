@@ -95,6 +95,14 @@ function seasonOfMonth(month1to12: number): 'spring' | 'summer' | 'autumn' | 'wi
 }
 if (typeof document !== 'undefined') {
   document.documentElement.dataset.season = seasonOfMonth(new Date().getMonth() + 1)
+  // 吉维尼模式：可选的莫奈花园整套色系。默认关（冷静工具模式），用户主动开启。
+  try {
+    if (window.localStorage.getItem('giverny-mode') === 'on') {
+      document.documentElement.dataset.giverny = 'on'
+    }
+  } catch {
+    // 忽略隐私模式下的 localStorage 异常
+  }
 }
 
 const navItems = [
@@ -4837,7 +4845,16 @@ function App() {
             <img className="brand-logo" src="/giverny-logo.png" alt="" />
           </div>
           <div>
-            <strong>Giverny</strong>
+            <strong>
+              Giverny
+              <span className="brand-watermark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.2">
+                  <path d="M12 8C9 8 6 9 6 12C6 14 8 15 12 15C16 15 18 14 18 12C18 9 15 8 12 8Z" />
+                  <path d="M12 8C12 6 13 5 14 5" />
+                  <circle cx="12" cy="11" r="1.2" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+            </strong>
             <span className={`brand-status ${backendStatus === '后端异常' ? 'error' : backendStatus === '已接入 D1/R2' ? 'ok' : 'pending'}`} title={backendStatus}>
               <i aria-hidden="true" />
               让创作在自己的花园里生长
@@ -5471,7 +5488,7 @@ function App() {
         />
       )}
       {showFireworks && <Fireworks />}
-      <SeasonDevSwitcher />
+      <GivernyModeSwitcher />
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">
           {toastQueue.map((item) => (
@@ -5724,40 +5741,41 @@ function Fireworks() {
   )
 }
 
-// 临时季节预览开关：仅在预览/本地环境出现（生产域名 mayeai.com 上自动隐藏），
-// 用于设计阶段逐季对比品牌主色。上线前可随这段一起移除。
-function SeasonDevSwitcher() {
+// 吉维尼模式开关：一键把整套色系切到莫奈花园。预览/本地可见，生产(mayeai.com)隐藏
+// （正式上线时会移进「设置」里做成正式选项）。状态持久化在 localStorage。
+function GivernyModeSwitcher() {
   const isProd = typeof location !== 'undefined' && /(^|\.)mayeai\.com$/i.test(location.hostname)
-  const [season, setSeason] = useState<string>(() =>
-    (typeof document !== 'undefined' && document.documentElement.dataset.season) || 'summer',
+  const [on, setOn] = useState<boolean>(() =>
+    typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
   if (isProd) {
     return null
   }
-  const seasons: Array<[string, string]> = [
-    ['spring', '春'],
-    ['summer', '夏'],
-    ['autumn', '秋'],
-    ['winter', '冬'],
-  ]
-  const pick = (next: string) => {
-    document.documentElement.dataset.season = next
-    setSeason(next)
+  const toggle = () => {
+    const next = !on
+    setOn(next)
+    if (next) {
+      document.documentElement.dataset.giverny = 'on'
+    } else {
+      delete document.documentElement.dataset.giverny
+    }
+    try {
+      window.localStorage.setItem('giverny-mode', next ? 'on' : 'off')
+    } catch {
+      // 忽略持久化失败
+    }
   }
   return (
-    <div className="season-dev-switcher" role="group" aria-label="季节预览（临时）">
-      <span className="season-dev-label">季节预览</span>
-      {seasons.map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          className={season === key ? 'active' : ''}
-          onClick={() => pick(key)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <button
+      type="button"
+      className={`giverny-mode-switcher ${on ? 'on' : ''}`}
+      aria-pressed={on}
+      onClick={toggle}
+      title={on ? '切回冷静的工具模式' : '切换到莫奈花园氛围'}
+    >
+      <span className="gm-switch" aria-hidden="true" />
+      {on ? '吉维尼模式 · 已开启' : '开启吉维尼模式'}
+    </button>
   )
 }
 

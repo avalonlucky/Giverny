@@ -106,6 +106,69 @@
   --brand-glow-soft: rgba(63, 107, 110, 0.05);
 }
 
+/* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
+   默认是冷静的工具模式；开启后背景变暖润亚麻、主色变湿润睡莲绿、文字变暖墨，
+   状态色饱和度再降、色相更自然，并叠一层极淡画布纹理 + logo 旁睡莲签名。
+   这是「可选模式」，给用户在想要氛围时主动打开。 */
+:root[data-giverny="on"] {
+  --color-text: #2a2620;
+  --color-text-secondary: #6b6358;
+  --color-text-muted: #9a9488;
+  --color-surface: #f6f3ec;
+  --color-surface-strong: #f9f6ef;
+  --color-surface-alt: #efeae0;
+  --color-sidebar: #f4f0e7;
+  --color-border: rgba(74, 60, 40, 0.08);
+  --color-border-soft: rgba(74, 60, 40, 0.05);
+  /* 主色：睡莲叶绿，比工具模式更沉、更湿润 */
+  --color-primary: #4a7a64;
+  --color-primary-strong: #3a6450;
+  --color-primary-hover: #3a6450;
+  --brand-primary: #4a7a64;
+  --brand-primary-strong: #3a6450;
+  --brand-glow: rgba(74, 122, 100, 0.12);
+  --brand-glow-soft: rgba(74, 122, 100, 0.06);
+  /* 状态色融入花园：饱和度再降、色相偏自然 */
+  --color-status-planning: #8a8a78;  /* 橄榄灰 */
+  --color-status-active: #5a7e94;    /* 雾蓝 */
+  --color-status-pending: #b08e4e;   /* 麦金 */
+  --color-status-accepted: #4a7a64;  /* 睡莲叶绿 */
+  --row-fill-plan: #eeece4;
+  --row-fill-active: #e8edea;
+  --row-fill-pending: #f0ebe0;
+}
+
+/* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
+:root[data-giverny="on"] .app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.07;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18  0 0 0 0 0.14  0 0 0 0 0.08  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 200px 200px;
+}
+
+/* logo 旁的睡莲签名（侧栏只有文字 logo，故放在 Giverny 字标后）：仅吉维尼模式显示 */
+.brand-watermark {
+  display: inline-flex;
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  opacity: 0;
+  color: var(--color-primary);
+  transition: opacity 0.5s ease, width 0.5s ease, margin 0.5s ease;
+  vertical-align: middle;
+}
+
+:root[data-giverny="on"] .brand-watermark {
+  width: 16px;
+  margin-left: 6px;
+  opacity: 0.55;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -11902,50 +11965,63 @@ textarea:focus-visible {
   100% { transform: translate(-50%, -50%) scale(26); opacity: 0; }
 }
 
-/* 临时季节预览开关（仅预览站可见） */
-.season-dev-switcher {
+/* 吉维尼模式开关（仅预览站可见；正式版会移进设置） */
+.giverny-mode-switcher {
   position: fixed;
   left: 16px;
   bottom: 16px;
   z-index: 200;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
+  gap: 9px;
+  padding: 8px 16px;
   border-radius: 999px;
+  border: 1.5px solid var(--color-primary);
   background: color-mix(in srgb, var(--color-surface-strong) 92%, transparent);
-  border: 1px solid var(--color-border);
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
   box-shadow: 0 6px 20px rgba(31, 42, 39, 0.10);
   backdrop-filter: blur(6px);
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
-.season-dev-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  padding: 0 6px 0 4px;
-}
-
-.season-dev-switcher button {
-  width: 30px;
-  height: 28px;
-  border-radius: 999px;
-  border: 0;
-  background: transparent;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-
-.season-dev-switcher button:hover {
-  background: var(--brand-glow);
-}
-
-.season-dev-switcher button.active {
-  background: var(--brand-primary);
+.giverny-mode-switcher.on {
+  background: var(--color-primary);
   color: var(--color-surface-strong);
-  font-weight: 700;
+}
+
+.giverny-mode-switcher .gm-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: #cdd3ce;
+  flex: 0 0 auto;
+  transition: background 0.3s ease;
+}
+
+.giverny-mode-switcher .gm-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s ease;
+}
+
+.giverny-mode-switcher.on .gm-switch {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.giverny-mode-switcher.on .gm-switch::after {
+  transform: translateX(14px);
 }
 
 .admin-login-modal .modal-header small {
