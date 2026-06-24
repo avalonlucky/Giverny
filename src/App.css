@@ -2158,10 +2158,9 @@ button {
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--color-text);
-  /* 填充色随状态联动：统一的低饱和度单色底（--row-fill），不分深浅；
-     悬停/选中不加深底色，仅靠 2px 同色左标记 + 极淡边框区分。 */
-  --row-fill: var(--color-surface-alt);
-  --row-mark: var(--color-text-muted);
+  /* 任务行默认复用「最近任务」那条的暖米色填充；已验收复用「科普小知识」那条的绿色。
+     统一、低饱和、不分深浅，无边框无标记。 */
+  --row-fill: var(--color-alert-surface);
   background: var(--row-fill);
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
@@ -2170,19 +2169,12 @@ button {
   row-gap: 10px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  transition: background 0.16s ease;
 }
 
-.task-row[data-status="已验收"] { --row-fill: #eff5f1; --row-mark: #6fae93; }
-.task-row[data-status="进行中"] { --row-fill: #eff3f8; --row-mark: #7aa6d0; }
-.task-row[data-status="计划中"] { --row-fill: #f2f7eb; --row-mark: #9cc77f; }
-.task-row[data-status="待验收"] { --row-fill: #f9f5e4; --row-mark: #cdab52; }
-.task-row[data-status="挂起"] { --row-fill: #f3f1f6; --row-mark: #9a8fb4; }
-.task-row[data-status="终止"] { --row-fill: #faedea; --row-mark: #d9503d; }
-.task-row[data-status="不计费"] { --row-fill: #f1f3ee; --row-mark: #aab3a3; }
-/* 时间紧迫信号，优先于状态色：临期=橙，逾期=红（同样低饱和） */
-.task-row[data-due="soon"] { --row-fill: #fcf2e2; --row-mark: #e2912f; }
-.task-row[data-due="overdue"] { --row-fill: #fbeee9; --row-mark: #d9503d; }
+.task-row[data-status="已验收"] {
+  --row-fill: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-strong));
+}
 
 .task-row:hover,
 .task-row:focus-visible {
