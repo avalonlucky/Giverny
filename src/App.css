@@ -111,20 +111,22 @@
    状态色饱和度再降、色相更自然，并叠一层极淡画布纹理 + logo 旁睡莲签名。
    这是「可选模式」，给用户在想要氛围时主动打开。 */
 :root[data-giverny="on"] {
-  --color-text: #2a2620;
-  --color-text-secondary: #6b6358;
-  --color-text-muted: #9a9488;
-  --color-surface: #f6f3ec;
-  --color-surface-strong: #f9f6ef;
-  --color-surface-alt: #efeae0;
-  --color-sidebar: #f4f0e7;
-  --color-border: rgba(74, 60, 40, 0.08);
-  --color-border-soft: rgba(74, 60, 40, 0.05);
-  /* 主色：睡莲叶绿，比工具模式更沉、更湿润；仍跟季节走（见下方花园四季块）。 */
-  --brand-primary: #4a7a64;
-  --brand-primary-strong: #3a6450;
-  --brand-glow: rgba(74, 122, 100, 0.12);
-  --brand-glow-soft: rgba(74, 122, 100, 0.06);
+  --color-text: #28302c;
+  --color-text-secondary: #5d6863;
+  --color-text-muted: #939c96;
+  /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
+     基底是近白，季节色按很低比例渗入，所以底色干净、可读，但能看出春绿/夏青/秋金/冬蓝。 */
+  --color-surface: color-mix(in srgb, var(--brand-primary) 7%, #fcfcfa);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 4%, #fdfdfc);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 13%, #f7f8f5);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 10%, #fafbf8);
+  --color-border: color-mix(in srgb, var(--brand-primary) 16%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 9%, transparent);
+  /* 主色随季节走（见下方花园四季块）。默认夏。 */
+  --brand-primary: #3c6b61;
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.12);
+  --brand-glow-soft: rgba(60, 107, 97, 0.06);
   --color-primary: var(--brand-primary);
   --color-primary-strong: var(--brand-primary-strong);
   --color-primary-hover: var(--brand-primary-strong);
@@ -141,28 +143,28 @@
 /* 吉维尼模式下的四季睡莲绿：在「花园」里季节感才有意义，故幅度比工具模式明显些。
    选择器更具体(0,3,0)，胜过上面的 :root[data-giverny=on]。 */
 :root[data-giverny="on"][data-season="spring"] {
-  --brand-primary: #5a8a6a;        /* 萌芽：明亮湿润 */
-  --brand-primary-strong: #48715a;
-  --brand-glow: rgba(90, 138, 106, 0.12);
-  --brand-glow-soft: rgba(90, 138, 106, 0.06);
+  --brand-primary: #6b8a6e;        /* 春 · 萌芽嫩绿：水里透出新绿与暖光 */
+  --brand-primary-strong: #557058;
+  --brand-glow: rgba(107, 138, 110, 0.12);
+  --brand-glow-soft: rgba(107, 138, 110, 0.06);
 }
 :root[data-giverny="on"][data-season="summer"] {
-  --brand-primary: #4a7a64;        /* 盛放：睡莲叶绿 */
-  --brand-primary-strong: #3a6450;
-  --brand-glow: rgba(74, 122, 100, 0.12);
-  --brand-glow-soft: rgba(74, 122, 100, 0.06);
+  --brand-primary: #3c6b61;        /* 夏 · 睡莲盛放：青绿水色 */
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.12);
+  --brand-glow-soft: rgba(60, 107, 97, 0.06);
 }
 :root[data-giverny="on"][data-season="autumn"] {
-  --brand-primary: #6b7d54;        /* 暮光：暖橄榄绿 */
-  --brand-primary-strong: #566542;
-  --brand-glow: rgba(107, 125, 84, 0.12);
-  --brand-glow-soft: rgba(107, 125, 84, 0.06);
+  --brand-primary: #a8845a;        /* 秋 · 暮光暖金：金色天光落在水面 */
+  --brand-primary-strong: #8a6a44;
+  --brand-glow: rgba(168, 132, 90, 0.12);
+  --brand-glow-soft: rgba(168, 132, 90, 0.06);
 }
 :root[data-giverny="on"][data-season="winter"] {
-  --brand-primary: #43726c;        /* 冷静：偏冷的青绿 */
-  --brand-primary-strong: #345a55;
-  --brand-glow: rgba(67, 114, 108, 0.12);
-  --brand-glow-soft: rgba(67, 114, 108, 0.06);
+  --brand-primary: #5a7a86;        /* 冬 · 冷静水蓝：冷天光下的池水 */
+  --brand-primary-strong: #46626c;
+  --brand-glow: rgba(90, 122, 134, 0.12);
+  --brand-glow-soft: rgba(90, 122, 134, 0.06);
 }
 
 /* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
@@ -201,6 +203,13 @@
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   background: var(--color-surface);
+}
+
+/* 季节换水色：整片「水面」的色调过渡要缓、不生硬。换季（或预览切季）时柔和淡入。 */
+.app-shell,
+.sidebar,
+.panel {
+  transition: background-color 0.9s ease, border-color 0.9s ease;
 }
 
 .sidebar {
@@ -1246,7 +1255,7 @@ button {
   display: flex;
   align-items: center;
   gap: 14px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.9s ease;
 }
 
 .stat-card:hover {
