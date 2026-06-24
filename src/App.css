@@ -24,10 +24,9 @@
   --color-status-hold: #7a6e94;
   --color-status-stopped: #97474a;
   --color-status-disabled: #949c96;
-  /* 临期 vs 逾期是两个概念，用色卡里的两种马卡龙橙区分浓淡：
-     临期=蜜桃 Pêche #F9B95C（将到期，浅），逾期=万寿菊 Marigold #E59D2C（已超期，更深更急） */
-  --color-due-soon: #f9b95c;
-  --color-due-overdue: #e59d2c;
+  /* 临期 / 逾期统一红色系（#FAD3CE 色系）：临期浅、逾期更红更急（用于角标，行填充另用更浅的 --row-fill） */
+  --color-due-soon: #e89384;
+  --color-due-overdue: #db6a58;
   --color-alert-surface: #f2ebdf;
   --color-alert-accent: #94652f;
   --color-editorial-surface: #fbfbf8;
@@ -2093,9 +2092,9 @@ button {
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--color-text);
-  /* 填充色随状态联动：低饱和度状态色叠在纸面上，悬停 / 选中加深 */
-  --row-tint: var(--color-status-planning);
-  background: color-mix(in srgb, var(--row-tint) 8%, var(--color-surface-alt));
+  /* 填充色随状态联动：直接用柔和马卡龙实色（浅色也能干净显示），悬停 / 选中混入少量墨色加深 */
+  --row-fill: var(--color-surface-alt);
+  background: var(--row-fill);
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
   align-items: center;
@@ -2106,27 +2105,27 @@ button {
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.task-row[data-status="已验收"] { --row-tint: var(--color-status-accepted); }
-.task-row[data-status="进行中"] { --row-tint: var(--color-status-active); }
-.task-row[data-status="计划中"] { --row-tint: var(--color-status-hold); }
-.task-row[data-status="待验收"] { --row-tint: var(--color-status-pending); }
-.task-row[data-status="挂起"] { --row-tint: var(--color-status-hold); }
-.task-row[data-status="终止"] { --row-tint: var(--color-status-stopped); }
-.task-row[data-status="不计费"] { --row-tint: var(--color-status-disabled); }
-/* 临期 / 逾期是时间紧迫信号，优先于状态色；两者用不同马卡龙色区分 */
-.task-row[data-due="soon"] { --row-tint: var(--color-due-soon); }
-.task-row[data-due="overdue"] { --row-tint: var(--color-due-overdue); }
+.task-row[data-status="已验收"] { --row-fill: #e4f0ea; }
+.task-row[data-status="进行中"] { --row-fill: #e5edf6; }
+.task-row[data-status="计划中"] { --row-fill: #e6fbda; }
+.task-row[data-status="待验收"] { --row-fill: #f5e7e5; }
+.task-row[data-status="挂起"] { --row-fill: #ece8f0; }
+.task-row[data-status="终止"] { --row-fill: #f2dedb; }
+.task-row[data-status="不计费"] { --row-fill: #eceee9; }
+/* 临期 / 逾期是时间紧迫信号，优先于状态色；统一红色系，逾期更深更急 */
+.task-row[data-due="soon"] { --row-fill: #fad3ce; }
+.task-row[data-due="overdue"] { --row-fill: #f4aba2; }
 
 .task-row:hover,
 .task-row:focus-visible {
-  border-color: color-mix(in srgb, var(--row-tint) 24%, transparent);
-  background: color-mix(in srgb, var(--row-tint) 14%, var(--color-surface-alt));
+  border-color: color-mix(in srgb, var(--color-text) 12%, transparent);
+  background: color-mix(in srgb, var(--row-fill) 90%, var(--color-text));
   outline: none;
 }
 
 .task-row.selected {
-  border-color: color-mix(in srgb, var(--row-tint) 38%, transparent);
-  background: color-mix(in srgb, var(--row-tint) 18%, var(--color-surface-alt));
+  border-color: color-mix(in srgb, var(--color-text) 22%, transparent);
+  background: color-mix(in srgb, var(--row-fill) 83%, var(--color-text));
   box-shadow: none;
 }
 
@@ -12490,13 +12489,13 @@ textarea:focus-visible {
 }
 
 .due-tag.overdue {
-  color: color-mix(in srgb, var(--color-due-overdue) 64%, #3a1d16);
-  background: color-mix(in srgb, var(--color-due-overdue) 24%, transparent);
+  color: color-mix(in srgb, var(--color-due-overdue) 66%, #3a1410);
+  background: color-mix(in srgb, var(--color-due-overdue) 22%, transparent);
 }
 
 .due-tag.soon {
-  color: color-mix(in srgb, var(--color-due-soon) 60%, #3d2c0f);
-  background: color-mix(in srgb, var(--color-due-soon) 26%, transparent);
+  color: color-mix(in srgb, var(--color-due-soon) 62%, #3a1410);
+  background: color-mix(in srgb, var(--color-due-soon) 24%, transparent);
 }
 
 .annual-panel .panel-header {
