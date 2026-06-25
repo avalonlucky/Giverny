@@ -6906,6 +6906,7 @@ function TasksView({
               <div className="task-row-end">
                 <div className="task-state">
                   <div className="task-state-badges">
+                    {task.voidedAt && <span className="voided-tag">作废</span>}
                     {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
                     <StatusBadge status={task.status} />
                   </div>

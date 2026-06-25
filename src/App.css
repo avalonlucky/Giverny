@@ -532,8 +532,24 @@ button {
   color: var(--color-text);
 }
 
-.topbar-create-button {
-  min-width: 108px;
+/* 新建任务：极简描边胶囊，去掉厚重实心深绿，融入整体极简风 */
+button.topbar-create-button {
+  min-width: auto;
+  min-height: 38px;
+  padding: 0 16px;
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+button.topbar-create-button:hover {
+  color: var(--color-primary-strong);
+  background: var(--brand-glow);
+  border-color: var(--color-primary);
+  box-shadow: none;
 }
 
 .command-overlay {
@@ -1381,32 +1397,35 @@ button {
 .segment-tabs {
   width: max-content;
   max-width: 100%;
-  padding: 4px;
+  padding: 0;
   margin-bottom: 12px;
-  border-radius: 8px;
-  background: #edeFE9;
+  background: transparent;
+  display: inline-flex;
+  gap: 4px;
   overflow-x: auto;
 }
 
 .segment-tabs button {
   height: 32px;
-  padding: 0 13px;
+  padding: 0 12px;
   border: 0;
   border-radius: 7px;
-  color: #667174;
+  color: var(--color-text-muted);
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  transition: color 0.16s ease, background 0.16s ease;
 }
 
 .segment-tabs button:hover {
   color: var(--color-text);
+  background: var(--brand-glow-soft);
 }
 
+/* 选中：仅靠主色 + 加粗区分，不再用灰底填充块 */
 .segment-tabs button.active {
-  color: var(--color-text);
-  background: var(--color-surface-strong);
+  color: var(--color-primary);
+  background: transparent;
   box-shadow: none;
   font-weight: 700;
 }
@@ -1429,25 +1448,44 @@ button {
 
 .voided-toggle {
   min-height: 32px;
-  padding: 0 11px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
-  border-radius: 8px;
-  color: #617073;
-  background: var(--color-surface-strong);
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  background: transparent;
   display: inline-flex;
   align-items: center;
   gap: 7px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease;
 }
 
-.voided-toggle:hover,
+.voided-toggle:hover {
+  color: var(--color-text);
+  background: var(--brand-glow-soft);
+}
+
 .voided-toggle.active {
-  color: #263b42;
-  border-color: rgba(47, 111, 109, 0.22);
-  background: #edf1e9;
+  color: var(--color-primary);
+  background: var(--brand-glow);
+}
+
+/* 作废任务在列表上的明确标签 */
+.voided-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 16%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .task-list {
@@ -11344,13 +11382,12 @@ textarea:focus-visible {
 }
 
 .view-mode-tabs {
-  min-height: 42px;
-  padding: 4px;
-  border-radius: 8px;
-  background: #eef2ea;
+  min-height: 36px;
+  padding: 0;
+  background: transparent;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .view-mode-tabs button {
@@ -11370,9 +11407,9 @@ textarea:focus-visible {
 }
 
 .view-mode-tabs button.active {
-  color: var(--color-text);
-  background: var(--color-surface-strong);
-  font-weight: 800;
+  color: var(--color-primary);
+  background: transparent;
+  font-weight: 700;
 }
 
 .month-picker {
