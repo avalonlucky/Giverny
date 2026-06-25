@@ -12261,6 +12261,40 @@ textarea:focus-visible {
   width: max-content;
 }
 
+/* 轻量主按钮：用于页内（非弹窗）动作，比实心 primary-button 更克制，贴合全站极简调性。 */
+.soft-primary-button {
+  min-height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+}
+
+.soft-primary-button:hover {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+
+.soft-primary-button:active {
+  transform: scale(0.98);
+}
+
+.soft-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 .danger-icon {
   color: #a4393c;
 }
@@ -12567,6 +12601,88 @@ textarea:focus-visible {
 .settings-ai-model-select {
   margin-top: 6px;
   width: 100%;
+}
+
+.settings-workers-ai {
+  margin-top: 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.settings-workers-ai > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.settings-workers-ai > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-workers-ai > summary > span {
+  flex: 1 1 auto;
+}
+
+.settings-workers-ai > summary svg:last-child {
+  transition: transform 0.18s ease;
+  color: var(--color-text-secondary);
+}
+
+.settings-workers-ai[open] > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.settings-workers-ai-body {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.settings-workers-ai-body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-workers-ai-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-surface-strong);
+  font-size: 12px;
+}
+
+.settings-ai-baseurl-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-ai-url-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-primary-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-ai-url-toggle:hover {
+  text-decoration: underline;
 }
 
 .settings-ai-routes {
@@ -12891,6 +13007,33 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 大类删除按钮去掉外框/底色，只留图标，hover 时才显意图——减少视觉负担。 */
+.design-type-group-actions .icon-button {
+  min-height: auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.design-type-group-actions .icon-button:hover {
+  background: rgba(242, 95, 92, 0.1);
+  border-color: transparent;
+}
+
+/* 「添加子类」按钮同样去框，保持轻量。 */
+.design-type-create.nested .ghost-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-primary-strong);
+}
+
+.design-type-create.nested .ghost-button:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border-color: transparent;
 }
 
 .design-type-create.nested {

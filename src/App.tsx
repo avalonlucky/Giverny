@@ -11013,7 +11013,8 @@ const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string
   { value: 'custom-openai', label: 'OpenAI 兼容网关' },
 ]
 
-function baseUrlForProvider(provider: AiModelConfig['provider']): string {
+// 该供应商在 Cloudflare AI Gateway 上的命名路径；网关不支持的供应商返回 ''（只能直连）。
+function gatewayBaseUrlForProvider(provider: AiModelConfig['provider']): string {
   switch (provider) {
     case 'deepseek':
       return `${AI_GATEWAY_BASE}/deepseek`
@@ -11021,6 +11022,25 @@ function baseUrlForProvider(provider: AiModelConfig['provider']): string {
       return `${AI_GATEWAY_BASE}/google-ai-studio/v1beta`
     case 'openai':
       return `${AI_GATEWAY_BASE}/openai`
+    case 'openrouter':
+      return `${AI_GATEWAY_BASE}/openrouter`
+    case 'anthropic':
+      return `${AI_GATEWAY_BASE}/anthropic`
+    default:
+      // Kimi/Moonshot 等：网关暂无命名 provider，只能直连。
+      return ''
+  }
+}
+
+// 该供应商的官方直连地址。
+function directBaseUrlForProvider(provider: AiModelConfig['provider']): string {
+  switch (provider) {
+    case 'deepseek':
+      return 'https://api.deepseek.com'
+    case 'gemini':
+      return 'https://generativelanguage.googleapis.com/v1beta'
+    case 'openai':
+      return 'https://api.openai.com/v1'
     case 'kimi':
       return 'https://api.moonshot.cn/v1'
     case 'openrouter':
@@ -11031,6 +11051,15 @@ function baseUrlForProvider(provider: AiModelConfig['provider']): string {
     default:
       return ''
   }
+}
+
+// 切换供应商时默认优先走网关（拿缓存/重试/用量看板），网关不支持的回退直连。
+function baseUrlForProvider(provider: AiModelConfig['provider']): string {
+  return gatewayBaseUrlForProvider(provider) || directBaseUrlForProvider(provider)
+}
+
+function isGatewayBaseUrl(url: string): boolean {
+  return url.includes('gateway.ai.cloudflare.com')
 }
 
 function defaultModelForProvider(provider: AiModelConfig['provider']): string {
@@ -11614,8 +11643,28 @@ function SettingsView({
                           </select>
                         </label>
                         <label className="field">
-                          <span>Base URL</span>
+                          <span className="settings-ai-baseurl-label">
+                            Base URL
+                            {gatewayBaseUrlForProvider(draft.provider) && (
+                              <button
+                                type="button"
+                                className="settings-ai-url-toggle"
+                                onClick={() =>
+                                  updateAiRouteDraft(route.key, {
+                                    baseUrl: isGatewayBaseUrl(draft.baseUrl)
+                                      ? directBaseUrlForProvider(draft.provider)
+                                      : gatewayBaseUrlForProvider(draft.provider),
+                                  })
+                                }
+                              >
+                                {isGatewayBaseUrl(draft.baseUrl) ? '改为直连' : '改走网关'}
+                              </button>
+                            )}
+                          </span>
                           <input value={draft.baseUrl} onChange={(event) => updateAiRouteDraft(route.key, { baseUrl: event.target.value })} />
+                          <small className="settings-ai-model-hint">
+                            {isGatewayBaseUrl(draft.baseUrl) ? '当前走 AI Gateway（缓存 / 重试 / 用量看板）' : '当前为官方直连'}，改完点「测试」确认是否可用
+                          </small>
                         </label>
                         <label className="field">
                           <span>模型</span>
@@ -11701,12 +11750,34 @@ function SettingsView({
                       清除 Key
                     </button>
                   )}
-                  <button className="primary-button" type="button" onClick={() => void saveAiModelConfig()} disabled={isAiModelSaving || !aiModelDraft.trim()}>
+                  <button className="soft-primary-button" type="button" onClick={() => void saveAiModelConfig()} disabled={isAiModelSaving || !aiModelDraft.trim()}>
                     <Sparkles size={17} />
                     {isAiModelSaving ? '保存中…' : '保存 AI 设置'}
                   </button>
                 </div>
               </div>
+              <details className="settings-workers-ai">
+                <summary>
+                  <Sparkles size={15} />
+                  <span>Workers AI · Cloudflare 自带模型（终极兜底 / 未来全量迁移）</span>
+                  <ChevronDown size={16} />
+                </summary>
+                <div className="settings-workers-ai-body">
+                  <p>
+                    Workers AI 是 Cloudflare 在边缘 GPU 上托管的一批开源模型（Llama、Qwen、Mistral、Flux 文生图、Whisper 语音、Embedding 等），
+                    <strong>无需任何外部厂商账号或 API Key</strong>，从 Worker 里一行 <code>env.AI.run(...)</code> 即可调用，按用量计费且每天有免费额度。
+                  </p>
+                  <ul>
+                    <li><strong>计费单位：Neurons</strong>，<strong>$0.011 / 1,000 Neurons</strong>；每个模型把 token / 生成步数 / 音频秒数折算成 Neurons。</li>
+                    <li><strong>每天免费 10,000 Neurons</strong>（Free 与 Paid 计划都送，按天重置），轻量任务基本白嫖。</li>
+                    <li>示例：Llama 3.1 8B 约 $0.03 / 百万输入 token、$0.20 / 百万输出 token；Embedding 极便宜；Flux 文生图按张/步计费；Whisper 按音频时长。</li>
+                  </ul>
+                  <p className="settings-tool-note">
+                    规划：等外部付费模型用完后，把全站 AI 切到 Workers AI，省去逐家采购对接。当前可作为「DeepSeek/Gemini → Kimi → Workers AI」链路的<strong>最后一道兜底</strong>，
+                    需要时由开发侧在 Worker 加 <code>[ai]</code> 绑定即可启用（暂未开启）。
+                  </p>
+                </div>
+              </details>
             </section>
           )}
           {role === 'admin' && (
@@ -11728,7 +11799,7 @@ function SettingsView({
                     }
                   }}
                 />
-                <button className="primary-button" onClick={addDesignTypeGroup}>
+                <button className="soft-primary-button" onClick={addDesignTypeGroup}>
                   <Plus size={17} />
                   添加大类
                 </button>
@@ -11870,7 +11941,7 @@ function SettingsView({
                     <option value="90">90 天</option>
                   </select>
                 </label>
-                <button className="primary-button" onClick={handleCreate}>
+                <button className="soft-primary-button" onClick={handleCreate}>
                   <KeyRound size={17} />
                   申请口令
                 </button>
