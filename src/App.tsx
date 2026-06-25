@@ -11158,6 +11158,8 @@ function SettingsView({
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupItems, setNewGroupItems] = useState<Record<string, string>>({})
   const [addingItemGroup, setAddingItemGroup] = useState<string | null>(null)
+  const [activeDesignGroup, setActiveDesignGroup] = useState('')
+  const [isAddingGroup, setIsAddingGroup] = useState(false)
   const [groupNameDrafts, setGroupNameDrafts] = useState<Record<string, string>>({})
   const [serviceCompanyDraft, setServiceCompanyDraft] = useState(serviceCompanyName)
   const [pdfTitleDraft, setPdfTitleDraft] = useState(pdfTitle)
@@ -11177,7 +11179,6 @@ function SettingsView({
   const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteModelError, setAiRouteModelError] = useState<Partial<Record<AiModelRouteKey, string>>>({})
   const [isAiModelSaving, setIsAiModelSaving] = useState(false)
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [draggingGroupName, setDraggingGroupName] = useState('')
   const [draggingItem, setDraggingItem] = useState<{ groupName: string; item: string } | null>(null)
   const [settingsConfirmDialog, setSettingsConfirmDialog] = useState<ConfirmDialogState | null>(null)
@@ -11250,11 +11251,7 @@ function SettingsView({
       delete next[name]
       return next
     })
-    setCollapsedGroups((current) => {
-      const next = { ...current }
-      delete next[name]
-      return next
-    })
+    setActiveDesignGroup((current) => (current === name ? '' : current))
   }
 
   const requestDeleteDesignTypeGroup = (name: string) => {
@@ -11289,11 +11286,8 @@ function SettingsView({
       const { [oldName]: oldDraft, ...rest } = current
       return oldDraft === undefined ? rest : { ...rest, [nextName]: oldDraft }
     })
-    setCollapsedGroups((current) => {
-      const { [oldName]: oldCollapsed, ...rest } = current
-      return oldCollapsed === undefined ? rest : { ...rest, [nextName]: oldCollapsed }
-    })
     setDraggingGroupName((current) => (current === oldName ? nextName : current))
+    setActiveDesignGroup((current) => (current === oldName ? nextName : current))
     setDraggingItem((current) => (current?.groupName === oldName ? { ...current, groupName: nextName } : current))
   }
 
@@ -11497,6 +11491,8 @@ function SettingsView({
     })
     onDesignTypeGroupsChange(nextGroups)
   }
+
+  const activeGroup = designTypeGroups.find((group) => group.name === activeDesignGroup) ?? designTypeGroups[0]
 
   return (
     <section className="settings-grid">
@@ -11803,135 +11799,133 @@ function SettingsView({
                   <p>新建任务时使用二级选择器：大类 / 子类，管理员可自定义增删</p>
                 </div>
               </div>
-              <div className="design-type-create">
-                <input
-                  value={newGroupName}
-                  placeholder="新增大类，例如：展会类"
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      addDesignTypeGroup()
-                    }
-                  }}
-                />
-                <button className="soft-primary-button" onClick={addDesignTypeGroup}>
-                  <Plus size={17} />
-                  添加大类
-                </button>
-              </div>
-              <div className="design-type-groups">
+              <div className="design-type-tabs" role="tablist">
                 {designTypeGroups.map((group) => (
-                  <div
-                    className={`design-type-group-row ${draggingGroupName === group.name ? 'dragging' : ''}`}
+                  <button
+                    type="button"
+                    role="tab"
                     key={group.name}
+                    aria-selected={activeGroup?.name === group.name}
+                    className={`design-type-tab ${activeGroup?.name === group.name ? 'active' : ''} ${draggingGroupName === group.name ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={() => setDraggingGroupName(group.name)}
+                    onDragEnd={() => setDraggingGroupName('')}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={() => moveDesignTypeGroup(group.name)}
+                    onClick={() => setActiveDesignGroup(group.name)}
                   >
-                    <button
-                      type="button"
-                      className="design-type-drag-handle"
-                      draggable
-                      aria-label={`拖动排序 ${group.name}`}
-                      onDragStart={() => setDraggingGroupName(group.name)}
-                      onDragEnd={() => setDraggingGroupName('')}
-                    >
-                      <GripVertical size={18} />
-                    </button>
-                    <div className="design-type-group">
-                      <div className="design-type-group-header">
-                        <div className="design-type-group-title">
-                          <button
-                            type="button"
-                            className="design-type-collapse-trigger"
-                            aria-label={`${collapsedGroups[group.name] ? '展开' : '折叠'}设计类型大类 ${group.name}`}
-                            onClick={() => setCollapsedGroups((current) => ({ ...current, [group.name]: !current[group.name] }))}
-                          >
-                            {collapsedGroups[group.name] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
-                          </button>
-                          <input
-                            className="design-type-group-name-input"
-                            aria-label={`设计类型大类名称：${group.name}`}
-                            value={groupNameDrafts[group.name] ?? group.name}
-                            onChange={(event) => setGroupNameDrafts((current) => ({ ...current, [group.name]: event.target.value }))}
-                            onBlur={() => renameDesignTypeGroup(group.name)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.currentTarget.blur()
-                              }
-                              if (event.key === 'Escape') {
-                                setGroupNameDrafts((current) => ({ ...current, [group.name]: group.name }))
-                                event.currentTarget.blur()
-                              }
-                            }}
-                          />
-                          <small>{group.items.length} 个子类</small>
-                        </div>
-                        <div className="design-type-group-actions">
-                          <button
-                            className="icon-button danger-icon"
-                            aria-label={`删除设计类型大类 ${group.name}`}
-                            disabled={designTypeGroups.length <= 1}
-                            onClick={() => requestDeleteDesignTypeGroup(group.name)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                      {!collapsedGroups[group.name] && (
-                        <div className="design-type-list plain">
-                          {group.items.map((item) => (
-                            <span
-                              className={`design-type-item ${draggingItem?.groupName === group.name && draggingItem.item === item ? 'dragging' : ''}`}
-                              draggable
-                              key={item}
-                              onDragStart={() => setDraggingItem({ groupName: group.name, item })}
-                              onDragOver={(event) => event.preventDefault()}
-                              onDrop={() => moveDesignTypeItem(group.name, item)}
-                              onDragEnd={() => setDraggingItem(null)}
-                            >
-                              {item}
-                              <button aria-label={`删除设计类型 ${group.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(group.name, item)}>
-                                <X size={12} />
-                              </button>
-                            </span>
-                          ))}
-                          {addingItemGroup === group.name ? (
-                            <input
-                              className="design-type-item-add-input"
-                              autoFocus
-                              value={newGroupItems[group.name] ?? ''}
-                              placeholder="子类名称，回车添加"
-                              onChange={(event) => setNewGroupItems((current) => ({ ...current, [group.name]: event.target.value }))}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  addDesignTypeItem(group.name)
-                                }
-                                if (event.key === 'Escape') {
-                                  setNewGroupItems((current) => ({ ...current, [group.name]: '' }))
-                                  setAddingItemGroup(null)
-                                }
-                              }}
-                              onBlur={() => {
-                                addDesignTypeItem(group.name)
-                                setAddingItemGroup(null)
-                              }}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="design-type-item-add"
-                              aria-label={`为 ${group.name} 添加子类`}
-                              onClick={() => setAddingItemGroup(group.name)}
-                            >
-                              <Plus size={14} />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    <GripVertical size={13} />
+                    <span>{group.name}</span>
+                    <em>{group.items.length}</em>
+                  </button>
                 ))}
+                {isAddingGroup ? (
+                  <input
+                    className="design-type-tab-add-input"
+                    autoFocus
+                    value={newGroupName}
+                    placeholder="大类名称，回车添加"
+                    onChange={(event) => setNewGroupName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        addDesignTypeGroup()
+                      }
+                      if (event.key === 'Escape') {
+                        setNewGroupName('')
+                        setIsAddingGroup(false)
+                      }
+                    }}
+                    onBlur={() => {
+                      addDesignTypeGroup()
+                      setIsAddingGroup(false)
+                    }}
+                  />
+                ) : (
+                  <button type="button" className="design-type-tab-add" aria-label="添加大类" onClick={() => setIsAddingGroup(true)}>
+                    <Plus size={15} />
+                  </button>
+                )}
               </div>
+              {activeGroup && (
+                <div className="design-type-active">
+                  <div className="design-type-active-head">
+                    <input
+                      className="design-type-group-name-input"
+                      aria-label={`设计类型大类名称：${activeGroup.name}`}
+                      value={groupNameDrafts[activeGroup.name] ?? activeGroup.name}
+                      onChange={(event) => setGroupNameDrafts((current) => ({ ...current, [activeGroup.name]: event.target.value }))}
+                      onBlur={() => renameDesignTypeGroup(activeGroup.name)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur()
+                        }
+                        if (event.key === 'Escape') {
+                          setGroupNameDrafts((current) => ({ ...current, [activeGroup.name]: activeGroup.name }))
+                          event.currentTarget.blur()
+                        }
+                      }}
+                    />
+                    <small>{activeGroup.items.length} 个子类</small>
+                    <button
+                      className="icon-button danger-icon"
+                      aria-label={`删除设计类型大类 ${activeGroup.name}`}
+                      disabled={designTypeGroups.length <= 1}
+                      onClick={() => requestDeleteDesignTypeGroup(activeGroup.name)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="design-type-list plain">
+                    {activeGroup.items.map((item) => (
+                      <span
+                        className={`design-type-item ${draggingItem?.groupName === activeGroup.name && draggingItem.item === item ? 'dragging' : ''}`}
+                        draggable
+                        key={item}
+                        onDragStart={() => setDraggingItem({ groupName: activeGroup.name, item })}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => moveDesignTypeItem(activeGroup.name, item)}
+                        onDragEnd={() => setDraggingItem(null)}
+                      >
+                        {item}
+                        <button aria-label={`删除设计类型 ${activeGroup.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(activeGroup.name, item)}>
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                    {addingItemGroup === activeGroup.name ? (
+                      <input
+                        className="design-type-item-add-input"
+                        autoFocus
+                        value={newGroupItems[activeGroup.name] ?? ''}
+                        placeholder="子类名称，回车添加"
+                        onChange={(event) => setNewGroupItems((current) => ({ ...current, [activeGroup.name]: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            addDesignTypeItem(activeGroup.name)
+                          }
+                          if (event.key === 'Escape') {
+                            setNewGroupItems((current) => ({ ...current, [activeGroup.name]: '' }))
+                            setAddingItemGroup(null)
+                          }
+                        }}
+                        onBlur={() => {
+                          addDesignTypeItem(activeGroup.name)
+                          setAddingItemGroup(null)
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="design-type-item-add"
+                        aria-label={`为 ${activeGroup.name} 添加子类`}
+                        onClick={() => setAddingItemGroup(activeGroup.name)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </section>
           )}
         </div>

@@ -12904,6 +12904,140 @@ textarea:focus-visible {
   outline: 0;
 }
 
+/* 大类：左右滑动的选项卡（可拖动排序，谁在前谁第一）。 */
+.design-type-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-soft);
+  scrollbar-width: thin;
+}
+
+.design-type-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667477;
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: grab;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.design-type-tab > svg {
+  color: #c0c7c8;
+}
+
+.design-type-tab span {
+  font-weight: 600;
+}
+
+.design-type-tab em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9aa4a6;
+  background: rgba(39, 54, 58, 0.06);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.design-type-tab:hover {
+  color: var(--color-text);
+}
+
+.design-type-tab.active {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
+}
+
+.design-type-tab.active span {
+  font-weight: 700;
+}
+
+.design-type-tab.active > svg {
+  color: color-mix(in srgb, var(--color-primary) 55%, #c0c7c8);
+}
+
+.design-type-tab.active em {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.design-type-tab.dragging {
+  opacity: 0.5;
+}
+
+.design-type-tab-add {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-primary);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.design-type-tab-add:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.design-type-tab-add-input {
+  flex: 0 0 auto;
+  width: 160px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(47, 111, 109, 0.32);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 14px;
+  outline: 0;
+}
+
+.design-type-active-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.design-type-active-head small {
+  color: #7d898b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.design-type-active-head .icon-button {
+  margin-left: auto;
+  min-height: auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.design-type-active-head .icon-button:hover:not(:disabled) {
+  background: rgba(242, 95, 92, 0.1);
+  border-color: transparent;
+}
+
 .design-type-list {
   display: flex;
   flex-wrap: wrap;
