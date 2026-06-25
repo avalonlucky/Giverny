@@ -2554,12 +2554,70 @@ async function resolveRole(env: Env, key: string, email: string): Promise<AuthRo
   return 'member'
 }
 
+// ===== 登录防爆破（撞库/暴力破解）限流 =====
+// 按来源 IP 统计失败次数：10 分钟内失败达 6 次即临时锁定 10 分钟，期间该 IP 一律拒绝登录。
+// 登录成功立即清零。纯 worker + D1 实现，不依赖任何后台配置。
+const LOGIN_FAIL_WINDOW_MS = 10 * 60 * 1000
+const LOGIN_MAX_FAILS = 6
+const LOGIN_LOCK_MS = 10 * 60 * 1000
+
+async function ensureLoginAttemptsTable(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS login_attempts (
+      ip TEXT PRIMARY KEY,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      window_start_ms INTEGER NOT NULL DEFAULT 0,
+      locked_until_ms INTEGER NOT NULL DEFAULT 0
+    )`,
+  ).run()
+}
+
+async function loginRateGuard(env: Env, ip: string): Promise<{ allowed: boolean; retryAfterSec: number }> {
+  await ensureLoginAttemptsTable(env)
+  const now = Date.now()
+  const row = await env.DB.prepare('SELECT locked_until_ms FROM login_attempts WHERE ip = ?').bind(ip).first<{ locked_until_ms: number }>()
+  const lockedUntil = Number(row?.locked_until_ms) || 0
+  return lockedUntil > now ? { allowed: false, retryAfterSec: Math.ceil((lockedUntil - now) / 1000) } : { allowed: true, retryAfterSec: 0 }
+}
+
+async function registerLoginFailure(env: Env, ip: string): Promise<boolean> {
+  const now = Date.now()
+  const row = await env.DB.prepare('SELECT failed_count, window_start_ms FROM login_attempts WHERE ip = ?').bind(ip).first<{ failed_count: number; window_start_ms: number }>()
+  let failedCount = Number(row?.failed_count) || 0
+  let windowStart = Number(row?.window_start_ms) || 0
+  if (now - windowStart > LOGIN_FAIL_WINDOW_MS) {
+    failedCount = 0
+    windowStart = now
+  }
+  failedCount += 1
+  const locked = failedCount >= LOGIN_MAX_FAILS
+  const lockedUntil = locked ? now + LOGIN_LOCK_MS : 0
+  await env.DB.prepare(
+    `INSERT INTO login_attempts (ip, failed_count, window_start_ms, locked_until_ms) VALUES (?, ?, ?, ?)
+     ON CONFLICT(ip) DO UPDATE SET failed_count = excluded.failed_count, window_start_ms = excluded.window_start_ms, locked_until_ms = excluded.locked_until_ms`,
+  ).bind(ip, failedCount, windowStart, lockedUntil).run()
+  return locked
+}
+
+async function clearLoginFailures(env: Env, ip: string) {
+  await env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run()
+}
+
 async function login(env: Env, request: Request) {
+  const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown'
+  const guard = await loginRateGuard(env, ip)
+  if (!guard.allowed) {
+    await audit(env, 'login_blocked', 'auth', ip, { retryAfterSec: guard.retryAfterSec })
+    return fail(`登录尝试过于频繁，请约 ${Math.ceil(guard.retryAfterSec / 60)} 分钟后再试`, 429)
+  }
   const body = (await request.json().catch(() => ({}))) as { email?: string; key?: string }
   const role = await resolveRole(env, body.key ?? '', body.email ?? '')
   if (!role) {
-    return fail('账号或密码不正确', 401)
+    const locked = await registerLoginFailure(env, ip)
+    await audit(env, 'login_failed', 'auth', ip, { email: body.email ?? '', locked })
+    return fail(locked ? '失败次数过多，已临时锁定 10 分钟，请稍后再试' : '账号或密码不正确', locked ? 429 : 401)
   }
+  await clearLoginFailures(env, ip)
   await audit(env, 'login', 'auth', role, { email: body.email ?? '' })
   return ok({ role })
 }
