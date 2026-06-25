@@ -7644,6 +7644,8 @@ button.file-chip:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, minmax(145px, 1fr));
   gap: 26px 18px;
+  /* 卡片高度由各自的图决定，不再被同行最高的卡片拉伸（消除短图上下留白） */
+  align-items: start;
 }
 
 .file-thumb-card {
@@ -7667,6 +7669,10 @@ button.file-chip:focus-visible {
   min-height: 0;
   aspect-ratio: auto;
   height: auto;
+  /* 超长图（如超长海报）在文件库里只显示顶部一段，常规尺寸海报仍完整显示；
+     双击放大的预览弹窗是另一套组件，不受影响，仍然全显。 */
+  max-height: 420px;
+  overflow: hidden;
 }
 
 .file-thumb-card:hover .file-thumb-preview {
@@ -14717,6 +14723,8 @@ textarea:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, minmax(145px, 1fr));
   gap: 26px 18px;
+  /* 卡片高度由各自的图决定，不再被同行最高的卡片拉伸（消除短图上下留白） */
+  align-items: start;
 }
 
 .file-thumb-card {
