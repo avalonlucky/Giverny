@@ -13097,6 +13097,82 @@ textarea:focus-visible {
   opacity: 0.35;
 }
 
+/* 子类：去掉圆角框，纯文字呈现；删除按钮悬停才出现，更清爽。 */
+.design-type-list.plain {
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.design-type-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 0;
+  color: #244347;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: grab;
+}
+
+.design-type-item.dragging {
+  opacity: 0.5;
+}
+
+.design-type-item button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 6px;
+  color: #9aa4a6;
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.design-type-item:hover button {
+  opacity: 1;
+}
+
+.design-type-item button:hover {
+  color: #c2484b;
+  background: rgba(194, 72, 75, 0.1);
+}
+
+/* 行尾「+」：点一下即可内联添加子类，无需独立的输入框和「添加」文字。 */
+.design-type-item-add {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.design-type-item-add:hover {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.design-type-item-add-input {
+  width: 130px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(47, 111, 109, 0.32);
+  border-radius: 7px;
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
 .token-row {
   padding: 12px;
   border: 1px solid transparent;

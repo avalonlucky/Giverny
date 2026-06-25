@@ -11157,6 +11157,7 @@ function SettingsView({
   const [tokenExpiry, setTokenExpiry] = useState('permanent')
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupItems, setNewGroupItems] = useState<Record<string, string>>({})
+  const [addingItemGroup, setAddingItemGroup] = useState<string | null>(null)
   const [groupNameDrafts, setGroupNameDrafts] = useState<Record<string, string>>({})
   const [serviceCompanyDraft, setServiceCompanyDraft] = useState(serviceCompanyName)
   const [pdfTitleDraft, setPdfTitleDraft] = useState(pdfTitle)
@@ -11877,43 +11878,55 @@ function SettingsView({
                         </div>
                       </div>
                       {!collapsedGroups[group.name] && (
-                        <>
-                          <div className="design-type-create nested">
+                        <div className="design-type-list plain">
+                          {group.items.map((item) => (
+                            <span
+                              className={`design-type-item ${draggingItem?.groupName === group.name && draggingItem.item === item ? 'dragging' : ''}`}
+                              draggable
+                              key={item}
+                              onDragStart={() => setDraggingItem({ groupName: group.name, item })}
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={() => moveDesignTypeItem(group.name, item)}
+                              onDragEnd={() => setDraggingItem(null)}
+                            >
+                              {item}
+                              <button aria-label={`删除设计类型 ${group.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(group.name, item)}>
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ))}
+                          {addingItemGroup === group.name ? (
                             <input
+                              className="design-type-item-add-input"
+                              autoFocus
                               value={newGroupItems[group.name] ?? ''}
-                              placeholder="新增子类，例如：邀请函长图"
+                              placeholder="子类名称，回车添加"
                               onChange={(event) => setNewGroupItems((current) => ({ ...current, [group.name]: event.target.value }))}
                               onKeyDown={(event) => {
                                 if (event.key === 'Enter') {
                                   addDesignTypeItem(group.name)
                                 }
+                                if (event.key === 'Escape') {
+                                  setNewGroupItems((current) => ({ ...current, [group.name]: '' }))
+                                  setAddingItemGroup(null)
+                                }
+                              }}
+                              onBlur={() => {
+                                addDesignTypeItem(group.name)
+                                setAddingItemGroup(null)
                               }}
                             />
-                            <button className="ghost-button compact-button" onClick={() => addDesignTypeItem(group.name)}>
-                              <Plus size={15} />
-                              添加
+                          ) : (
+                            <button
+                              type="button"
+                              className="design-type-item-add"
+                              aria-label={`为 ${group.name} 添加子类`}
+                              onClick={() => setAddingItemGroup(group.name)}
+                            >
+                              <Plus size={14} />
                             </button>
-                          </div>
-                          <div className="design-type-list">
-                            {group.items.map((item) => (
-                              <span
-                                className={`design-type-chip ${draggingItem?.groupName === group.name && draggingItem.item === item ? 'dragging' : ''}`}
-                                draggable
-                                key={item}
-                                onDragStart={() => setDraggingItem({ groupName: group.name, item })}
-                                onDragOver={(event) => event.preventDefault()}
-                                onDrop={() => moveDesignTypeItem(group.name, item)}
-                                onDragEnd={() => setDraggingItem(null)}
-                              >
-                                {item}
-                                <button aria-label={`删除设计类型 ${group.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(group.name, item)}>
-                                  <Trash2 size={13} />
-                                </button>
-                              </span>
-                            ))}
-                            {group.items.length === 0 && <p className="calendar-empty-hint">这个大类还没有子类。</p>}
-                          </div>
-                        </>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
