@@ -11593,7 +11593,6 @@ function SettingsView({
                   const testResult = aiRouteTestResults[route.key]
                   const modelOptions = aiRouteModelOptions[route.key]
                   const modelError = aiRouteModelError[route.key]
-                  const modelListId = `ai-models-${route.key}`
                   return (
                     <article className="settings-ai-route-card" key={route.key}>
                       <div className="settings-ai-route-head">
@@ -11623,7 +11622,13 @@ function SettingsView({
                           <div className="settings-ai-model-pick">
                             <input
                               value={draft.model}
-                              list={modelOptions && modelOptions.length ? modelListId : undefined}
+                              name={`ai-model-${route.key}`}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              spellCheck={false}
+                              data-1p-ignore="true"
+                              data-lpignore="true"
                               placeholder={defaultModelForProvider(draft.provider) || '输入模型名称'}
                               onChange={(event) => updateAiRouteDraft(route.key, { model: event.target.value })}
                             />
@@ -11637,14 +11642,20 @@ function SettingsView({
                             </button>
                           </div>
                           {modelOptions && modelOptions.length > 0 && (
-                            <datalist id={modelListId}>
+                            <select
+                              className="settings-ai-model-select"
+                              value={modelOptions.includes(draft.model) ? draft.model : ''}
+                              onChange={(event) => {
+                                if (event.target.value) {
+                                  updateAiRouteDraft(route.key, { model: event.target.value })
+                                }
+                              }}
+                            >
+                              <option value="">已拉取 {modelOptions.length} 个模型，选择以填入…</option>
                               {modelOptions.map((model) => (
-                                <option key={model} value={model} />
+                                <option key={model} value={model}>{model}</option>
                               ))}
-                            </datalist>
-                          )}
-                          {modelOptions && modelOptions.length > 0 && (
-                            <small className="settings-ai-model-hint">已拉取 {modelOptions.length} 个模型，点输入框可下拉选择</small>
+                            </select>
                           )}
                           {modelError && <small className="settings-inline-error">{modelError}</small>}
                         </label>

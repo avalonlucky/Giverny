@@ -12564,6 +12564,11 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.settings-ai-model-select {
+  margin-top: 6px;
+  width: 100%;
+}
+
 .settings-ai-routes {
   padding: 0 0 12px;
   display: grid;
