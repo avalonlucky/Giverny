@@ -80,6 +80,7 @@ import {
   type StoredAuth,
   type TaskAssistantSuggestion,
   type TextAssistantSuggestion,
+  type TokenScope,
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
@@ -2898,7 +2899,7 @@ function App() {
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
-  const [role, setRole] = useState<AuthRole>(bootCache?.role ?? 'member')
+  const [role, setRole] = useState<AuthRole>(bootCache?.role ?? 'guest')
   const [accessTokens, setAccessTokens] = useState<AccessToken[]>(bootCache?.accessTokens ?? [])
   const [newTokenId, setNewTokenId] = useState('')
   const [authError, setAuthError] = useState('')
@@ -2981,6 +2982,10 @@ function App() {
   const dailyKnowledgeQueueRef = useRef(dailyKnowledgeQueue)
   const dailyKnowledgePrefetchRef = useRef(false)
   const isAdmin = role === 'admin' && Boolean(auth)
+  // 角色能力分级（前端展示用；后端是真正的安全边界）
+  const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
+  const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
+  const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
   const taskMonthValues = useMemo(
     () => new Set(taskItems.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value))),
@@ -3245,7 +3250,7 @@ function App() {
       if (error instanceof ApiError && error.status === 401) {
         clearStoredAuth()
         setAuth(null)
-        setRole('member')
+        setRole('guest')
         setAuthError('登录已失效（口令可能被停用或已过期），已切换为游客只读')
         void refreshState().catch((publicError) => {
           setBackendStatus('后端异常')
@@ -4335,7 +4340,7 @@ function App() {
     clearStoredAuth()
     clearDraftCache(STATE_CACHE_KEY)
     setAuth(null)
-    setRole('member')
+    setRole('guest')
     setAccessTokens([])
     setAuthError('')
     setIsAccountMenuOpen(false)
@@ -4361,9 +4366,9 @@ function App() {
     }
   }
 
-  const handleCreateAccessToken = async (label: string, expiresInDays: number | null) => {
+  const handleCreateAccessToken = async (label: string, expiresInDays: number | null, scope: TokenScope) => {
     try {
-      const created = await api.createAccessToken({ label, expiresInDays })
+      const created = await api.createAccessToken({ label, expiresInDays, scope })
       setAccessTokens((current) => [created, ...current])
       setNewTokenId(created.id)
       try {
@@ -4525,7 +4530,7 @@ function App() {
     setIsLoginModalOpen(true)
   }
   const openCreateTask = (supplemental = false) => {
-    if (isAdmin) {
+    if (canWrite) {
       setNewTaskSupplemental(supplemental)
       setIsModalOpen(true)
       return
@@ -4587,6 +4592,7 @@ function App() {
       detail: '记录一条新的设计任务',
       shortcut: 'N',
       keywords: '创建 新任务',
+      disabled: !canWrite,
       run: () => openCreateTask(false),
     },
     {
@@ -4596,6 +4602,7 @@ function App() {
       detail: '补录过去三个月内的任务',
       shortcut: '⇧ N',
       keywords: '补录 历史任务',
+      disabled: !canWrite,
       run: () => openCreateTask(true),
     },
     ...(selectedTask
@@ -4616,7 +4623,7 @@ function App() {
             detail: selectedTask.title,
             shortcut: 'E',
             keywords: '修改 编辑',
-            disabled: !isAdmin,
+            disabled: !canWrite,
             run: () => handleOpenTaskEdit(selectedTask.id),
           },
           {
@@ -4626,7 +4633,7 @@ function App() {
             detail: selectedTask.title,
             shortcut: 'P',
             keywords: '进展 工时 附件',
-            disabled: !isAdmin,
+            disabled: !canWrite,
             run: () => handleOpenTaskProgress(selectedTask.id),
           },
           {
@@ -4933,7 +4940,13 @@ function App() {
                 <UserCircle size={18} />
                 <div>
                   <strong>{auth?.email || '游客访问'}</strong>
-                  <span>{isAdmin ? '最终管理员' : auth ? '访问成员（只读）' : '游客只读'}</span>
+                  <span>{
+                    isAdmin ? '最终管理员'
+                      : role === 'collaborator' ? '协作者（可录入）'
+                      : role === 'viewer' ? '只读全局'
+                      : role === 'client' ? '甲方（当月可见）'
+                      : auth ? '访问口令（只读）' : '游客只读'
+                  }</span>
                 </div>
               </div>
               {isAdmin ? (
@@ -5017,15 +5030,17 @@ function App() {
             >
               <kbd>?</kbd>
             </button>
-            <button
-              className="primary-button topbar-create-button"
-              title="新建任务（N）"
-              aria-keyshortcuts="N"
-              onClick={() => openCreateTask(false)}
-            >
-              <span>新建任务</span>
-              <kbd>N</kbd>
-            </button>
+            {canWrite && (
+              <button
+                className="primary-button topbar-create-button"
+                title="新建任务（N）"
+                aria-keyshortcuts="N"
+                onClick={() => openCreateTask(false)}
+              >
+                <span>新建任务</span>
+                <kbd>N</kbd>
+              </button>
+            )}
           </div>
         </header>
 
@@ -5044,8 +5059,8 @@ function App() {
           </article>
           <article className="dashboard-metric">
             <span>预计收入</span>
-            <strong>{isAdmin ? `¥${formatYuan(stats.amount)}` : '仅管理员'}</strong>
-            <p>{isAdmin ? `按 ¥${hourlyRate} / 小时` : '游客与甲方不可见'}</p>
+            <strong>{canSeeFull || isClient ? `¥${formatYuan(stats.amount)}` : '仅管理员'}</strong>
+            <p>{canSeeFull || isClient ? `按 ¥${hourlyRate} / 小时` : '游客只读不可见'}</p>
           </article>
           <article className="dashboard-metric">
             <span>验收情况</span>
@@ -5178,8 +5193,8 @@ function App() {
                     onOpenEditTask={handleOpenTaskEdit}
                     onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
                     onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
-                    onRequestStatus={isAdmin ? handleRequestTaskStatus : readOnlyUpdateTask}
-                    onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
+                    onRequestStatus={canWrite ? handleRequestTaskStatus : readOnlyUpdateTask}
+                    onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
                     onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
                     onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
                     onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
@@ -5279,7 +5294,7 @@ function App() {
             onDeleteAcceptanceProgress={handleDeleteAcceptanceProgress}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
-            onAutoEstimateProgress={isAdmin ? handleAutoEstimateProgress : undefined}
+            onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
           />
         </section>
           </div>
@@ -5300,13 +5315,13 @@ function App() {
             taskQuery={taskQuery}
             showVoidedTasks={showVoidedTasks}
             voidedTaskCount={voidedMonthTaskCount}
-            onUploadAcceptanceFile={isAdmin ? handleAcceptanceFileUpload : readOnlyUploadFile}
+            onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : readOnlyUploadFile}
             onFilterChange={setTaskFilter}
             onQueryChange={setTaskQuery}
             onShowVoidedChange={setShowVoidedTasks}
             onSelectTask={setSelectedTaskId}
-            onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
-            onRequestStatus={isAdmin ? handleRequestTaskStatus : readOnlyUpdateTask}
+            onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+            onRequestStatus={canWrite ? handleRequestTaskStatus : readOnlyUpdateTask}
             onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
             onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
             onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
@@ -5318,15 +5333,15 @@ function App() {
             onPreviewFile={setPreviewFile}
             activity={taskActivity}
             hourlyRate={hourlyRate}
-            onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
-            onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+            onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
+            onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
-            onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+            onConfirmAcceptance={canWrite ? handleConfirmTaskAcceptance : undefined}
+            onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
             onToggleRowTheme={toggleRowTheme}
-            onAutoEstimateProgress={isAdmin ? handleAutoEstimateProgress : undefined}
+            onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
           />
         )}
 
@@ -5339,13 +5354,13 @@ function App() {
             onPreviewFile={setPreviewFile}
             onDeleteFile={isAdmin ? handleDeleteFile : readOnlyUpdateTask}
             onDownloadFile={handleDownloadFile}
-            onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+            onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onRetryAnalysis={handleRetryAttachmentAnalysis}
           />
         )}
 
         {activeView === '洞察' && (
-          isAdmin ? (
+          canSeeFull || isClient ? (
             <InsightsView
               tasks={activeTaskItems}
               updates={updateItems}
@@ -5361,7 +5376,7 @@ function App() {
         )}
 
         {activeView === '收入' && (
-          isAdmin ? (
+          canSeeFull ? (
             <IncomeView
               annualData={annualData}
               currentMonth={currentMonth}
@@ -5374,7 +5389,7 @@ function App() {
         )}
 
         {activeView === '结算' && (
-          isAdmin ? (
+          canSeeFull || isClient ? (
             <ReportsView
               stats={stats}
               tasks={activeMonthTasks}
@@ -5517,14 +5532,14 @@ function App() {
             files={fileItems}
             activity={taskActivity}
             onClose={() => setProgressModalTarget(null)}
-            onUpdateTask={isAdmin ? handleUpdateTask : readOnlyUpdateTask}
-            onCreateTaskUpdate={isAdmin ? handleCreateTaskUpdate : readOnlyCreateUpdate}
-            onUploadImage={isAdmin ? handleQuickUploadImage : readOnlyUploadImage}
+            onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+            onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+            onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
             onPreviewFile={setPreviewFile}
-            onUpdateFile={isAdmin ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+            onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
-            onUploadAcceptanceFile={isAdmin ? handleAcceptanceFileUpload : undefined}
+            onConfirmAcceptance={canWrite ? handleConfirmTaskAcceptance : undefined}
+            onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
             initialAcceptanceMode={progressModalTarget.initialAcceptanceMode}
             hourlyRate={hourlyRate}
           />
@@ -11293,13 +11308,14 @@ function SettingsView({
   onExportBackup: () => void
   onSignOut: () => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
-  onCreateToken: (label: string, expiresInDays: number | null) => void
+  onCreateToken: (label: string, expiresInDays: number | null, scope: TokenScope) => void
   onToggleToken: (tokenId: string, disabled: boolean) => void
   onDeleteToken: (tokenId: string) => void
   onCopyToken: (token: string) => void
 }) {
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenExpiry, setTokenExpiry] = useState('permanent')
+  const [tokenScope, setTokenScope] = useState<TokenScope>('viewer')
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupItems, setNewGroupItems] = useState<Record<string, string>>({})
   const [addingItemGroup, setAddingItemGroup] = useState<string | null>(null)
@@ -11345,9 +11361,18 @@ function SettingsView({
     return { label: '有效', className: 'status-已验收' }
   }
 
+  const tokenScopeOptions: Array<{ value: TokenScope; label: string; desc: string }> = [
+    { value: 'collaborator', label: '协作者', desc: '看管理员所见的全部数据，可记进展、传附件、改任务基本信息；不能删除/作废任务、锁定结算、改 AI Key、管理口令、改密码、导出或清空数据。' },
+    { value: 'viewer', label: '只读全局', desc: '看管理员所见的全部数据，但完全只读——什么都改不了。适合给对接测试或老板审阅。' },
+    { value: 'client', label: '甲方', desc: '看当月任务、进展、交付件和当月结算回单（含金额），只读；看不到往月与全年财务、看不到后台配置。' },
+    { value: 'guest', label: '对客访客', desc: '只看进展和对客可见的交付件，只读。适合对外分享。' },
+  ]
+  const tokenScopeLabel = (scope: TokenScope) => tokenScopeOptions.find((option) => option.value === scope)?.label ?? scope
+  const activeTokenScope = tokenScopeOptions.find((option) => option.value === tokenScope)
+
   const handleCreate = () => {
     const expiresInDays = tokenExpiry === 'permanent' ? null : Number(tokenExpiry)
-    onCreateToken(tokenLabel.trim() || '未命名口令', expiresInDays)
+    onCreateToken(tokenLabel.trim() || '未命名口令', expiresInDays, tokenScope)
     setTokenLabel('')
   }
 
@@ -12118,7 +12143,15 @@ function SettingsView({
               <div className="token-create">
                 <label className="field">
                   <span>备注</span>
-                  <input value={tokenLabel} placeholder="例如：手机 / iPad / 协作设计师" onChange={(event) => setTokenLabel(event.target.value)} />
+                  <input value={tokenLabel} placeholder="例如：协作设计师 / 甲方财务 / 对接测试" onChange={(event) => setTokenLabel(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>权限</span>
+                  <select value={tokenScope} onChange={(event) => setTokenScope(event.target.value as TokenScope)}>
+                    {tokenScopeOptions.map((option) => (
+                      <option key={option.value} value={option.value} title={option.desc}>{option.label}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="field">
                   <span>有效期</span>
@@ -12134,6 +12167,7 @@ function SettingsView({
                   申请口令
                 </button>
               </div>
+              {activeTokenScope && <p className="token-scope-hint"><strong>{activeTokenScope.label}</strong>：{activeTokenScope.desc}</p>}
               <div className="token-list">
                 {accessTokens.length === 0 && <p className="calendar-empty-hint">还没有生成过口令。</p>}
                 {accessTokens.map((token) => {
@@ -12141,7 +12175,7 @@ function SettingsView({
                   return (
                     <div className={`token-row ${token.id === newTokenId ? 'fresh' : ''}`} key={token.id}>
                       <div className="token-row-main">
-                        <strong>{token.label}</strong>
+                        <strong>{token.label} <em className="token-scope-badge">{tokenScopeLabel(token.scope)}</em></strong>
                         <code>{token.token}</code>
                         <small>
                           创建于 {token.createdAt} · {token.expiresAt ? `${token.expiresAt} 到期` : '永久有效'}

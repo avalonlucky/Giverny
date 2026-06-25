@@ -23,12 +23,15 @@ export type ActivityItem = {
   createdAt: string
 }
 
-export type AuthRole = 'admin' | 'member'
+export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
+
+export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
 
 export type AccessToken = {
   id: string
   token: string
   label: string
+  scope: TokenScope
   expiresAt: string
   disabled: boolean
   expired: boolean
@@ -187,7 +190,7 @@ export type StoredAuth = {
   email: string
   key: string
   /** 登录时拿到的角色，用于在重新加载时检测「管理员凭证已失效被降级」 */
-  role?: 'admin' | 'member'
+  role?: AuthRole
 }
 
 export function getStoredAuth(): StoredAuth | null {
@@ -329,7 +332,7 @@ export const api = {
     ),
   getState: () => requestJson<BackendState>('/api/state'),
   getSharedReport: (token: string) => requestJson<SharedReportState>(`/api/shared/${token}`, undefined, false),
-  createAccessToken: (payload: { label: string; expiresInDays: number | null }) =>
+  createAccessToken: (payload: { label: string; expiresInDays: number | null; scope: TokenScope }) =>
     requestJson<AccessToken>('/api/tokens', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

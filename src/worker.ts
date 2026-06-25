@@ -123,12 +123,58 @@ type PublicAiModelConfig = {
   visionFallback: PublicAiModelEndpointConfig
 }
 
-type AuthRole = 'admin' | 'member'
+// 角色分级：
+// admin        管理员（账号密码）——最高权限
+// collaborator 协作者（口令）——见管理员所见全量数据，可记进展/传附件/改任务基本信息，不能做敏感操作
+// viewer       只读全局（口令）——见管理员所见全量数据，只读
+// client       甲方（口令）——见当月任务/进展/交付件 + 当月结算，只读，看不到往月与全年财务、看不到后台配置
+// guest        对客访客（口令/匿名）——只看进展和对客可见交付件，只读
+type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
+type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
+
+function scopeToRole(scope: string | null | undefined): AuthRole {
+  return scope === 'collaborator' || scope === 'viewer' || scope === 'client' ? scope : 'guest'
+}
+
+// 能看到管理员级全量数据（含作废任务、全部交付件与分析）
+function canSeeFullData(role: AuthRole): boolean {
+  return role === 'admin' || role === 'collaborator' || role === 'viewer'
+}
+
+// 协作者可写的非敏感接口（创建/编辑任务、记进展、传附件、AI 助手）；删除/作废/结算/配置/口令/密码一律排除
+function isCollaboratorWritablePath(path: string, method: string): boolean {
+  if (method === 'DELETE') {
+    return false
+  }
+  if (
+    path.endsWith('/void') ||
+    path.endsWith('/restore') ||
+    path.startsWith('/api/tokens') ||
+    path.startsWith('/api/settings/') ||
+    path.startsWith('/api/reports/') ||
+    path.startsWith('/api/auth/') ||
+    path.startsWith('/api/insights/') ||
+    path === '/api/ai/model-test' ||
+    path === '/api/ai/models' ||
+    path.endsWith('/analysis/retry')
+  ) {
+    return false
+  }
+  return (
+    path === '/api/tasks' ||
+    (path.startsWith('/api/tasks/') && method === 'PATCH') ||
+    path === '/api/updates' ||
+    (path.startsWith('/api/updates/') && method === 'PATCH') ||
+    path.startsWith('/api/files') ||
+    path.startsWith('/api/ai/')
+  )
+}
 
 type DbAccessToken = {
   id: string
   token: string
   label: string | null
+  scope: string | null
   expires_at: string | null
   disabled: number
   created_at: string
@@ -2620,6 +2666,7 @@ const toAccessToken = (row: DbAccessToken) => ({
   id: row.id,
   token: row.token,
   label: row.label ?? '',
+  scope: scopeToRole(row.scope) as TokenScope,
   expiresAt: formatBeijing(row.expires_at),
   disabled: Boolean(row.disabled),
   expired: Boolean(row.expires_at && row.expires_at < nowIso()),
@@ -2627,7 +2674,21 @@ const toAccessToken = (row: DbAccessToken) => ({
   lastUsedAt: formatBeijing(row.last_used_at),
 })
 
-/** 校验登录凭证：管理员邮箱 + 平台密码 → admin；有效的访问口令 → member */
+// 给 access_tokens 懒加 scope 列（老库无该列时自动补），默认 guest 保持历史口令行为不变。
+let accessTokenScopeEnsured = false
+async function ensureAccessTokenScope(env: Env) {
+  if (accessTokenScopeEnsured) {
+    return
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE access_tokens ADD COLUMN scope TEXT DEFAULT 'guest'").run()
+  } catch {
+    // 列已存在则忽略
+  }
+  accessTokenScopeEnsured = true
+}
+
+/** 校验登录凭证：管理员邮箱 + 平台密码 → admin；有效的访问口令 → 该口令的分级角色 */
 async function resolveRole(env: Env, key: string, email: string): Promise<AuthRole | null> {
   const normalizedEmail = email.trim().toLowerCase()
   const trimmedKey = key.trim()
@@ -2638,6 +2699,7 @@ async function resolveRole(env: Env, key: string, email: string): Promise<AuthRo
     return (await verifyAdminPassword(env, trimmedKey)) ? 'admin' : null
   }
 
+  await ensureAccessTokenScope(env)
   const row = await env.DB.prepare('SELECT * FROM access_tokens WHERE token = ?').bind(trimmedKey).first<DbAccessToken>()
   if (!row || row.disabled) {
     return null
@@ -2646,7 +2708,7 @@ async function resolveRole(env: Env, key: string, email: string): Promise<AuthRo
     return null
   }
   await env.DB.prepare('UPDATE access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?').bind(row.id).run()
-  return 'member'
+  return scopeToRole(row.scope)
 }
 
 // ===== 登录防爆破（撞库/暴力破解）限流 =====
@@ -2831,25 +2893,28 @@ async function confirmPasswordReset(env: Env, request: Request) {
 }
 
 async function listAccessTokens(env: Env) {
+  await ensureAccessTokenScope(env)
   const rows = await env.DB.prepare('SELECT * FROM access_tokens ORDER BY created_at DESC').all<DbAccessToken>()
   return (rows.results ?? []).map(toAccessToken)
 }
 
 async function createAccessToken(env: Env, request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { label?: string; expiresInDays?: number | null }
+  const body = (await request.json().catch(() => ({}))) as { label?: string; expiresInDays?: number | null; scope?: string }
+  await ensureAccessTokenScope(env)
   const id = crypto.randomUUID()
   const randomBytes = crypto.getRandomValues(new Uint8Array(16))
   const token = `wk_${Array.from(randomBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   const days = Number(body.expiresInDays)
   const expiresAt = Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null
+  const scope = scopeToRole(body.scope) as TokenScope
 
   await env.DB.prepare(
-    `INSERT INTO access_tokens (id, token, label, expires_at, disabled) VALUES (?, ?, ?, ?, 0)`,
+    `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled) VALUES (?, ?, ?, ?, ?, 0)`,
   )
-    .bind(id, token, (body.label ?? '').trim() || '未命名口令', expiresAt)
+    .bind(id, token, (body.label ?? '').trim() || '未命名口令', scope, expiresAt)
     .run()
 
-  await audit(env, 'create', 'access_token', id, { label: body.label ?? '', expiresInDays: body.expiresInDays ?? null })
+  await audit(env, 'create', 'access_token', id, { label: body.label ?? '', scope, expiresInDays: body.expiresInDays ?? null })
   const row = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ?').bind(id).first<DbAccessToken>()
   return ok(row ? toAccessToken(row) : { id, token }, 201)
 }
@@ -2926,23 +2991,36 @@ async function ensureSeedData(env: Env) {
 async function getState(env: Env, role: AuthRole) {
   await ensureSeedData(env)
 
+  // 数据可见范围分级：
+  const full = canSeeFullData(role) // admin/collaborator/viewer：看全量（含作废）
+  const seeAllAttachments = full || role === 'client' // 甲方也能看到交付件（非对客限制）
+  const seeAnalyses = full || role === 'client' // 甲方需要看到「交付件理解」摘要
+  // 甲方只看当月：任务/进展/结算都限制在当月，看不到往月与全年财务
+  const currentMonth = beijingNowDate().toISOString().slice(0, 7)
+  const taskWhereVoided = full ? '' : 'AND voided_at IS NULL'
+  const clientTaskMonth = role === 'client' ? `AND settlement_month = '${currentMonth}'` : ''
+  const updateVoided = full ? '' : 'AND tasks.voided_at IS NULL'
+  const clientUpdateMonth = role === 'client' ? `AND tasks.settlement_month = '${currentMonth}'` : ''
+  const attachVoided = full ? '' : 'AND tasks.voided_at IS NULL'
+  const attachClientVisible = seeAllAttachments ? '' : 'AND attachments.visible_to_client = 1'
+
   const [taskRows, updateRows, fileRows, analysisRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig, reportRows] = await Promise.all([
-    env.DB.prepare(`SELECT * FROM tasks WHERE deleted_at IS NULL ${role === 'admin' ? '' : 'AND voided_at IS NULL'} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).all<DbTask>(),
+    env.DB.prepare(`SELECT * FROM tasks WHERE deleted_at IS NULL ${taskWhereVoided} ${clientTaskMonth} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.*
        FROM task_updates
        INNER JOIN tasks ON tasks.id = task_updates.task_id
-       WHERE tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL'}
+       WHERE tasks.deleted_at IS NULL ${updateVoided} ${clientUpdateMonth}
        ORDER BY task_updates.update_date DESC, task_updates.created_at DESC`,
     ).all<DbUpdate>(),
     env.DB.prepare(
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        LEFT JOIN tasks ON tasks.id = attachments.task_id
-       WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${role === 'admin' ? '' : 'AND tasks.voided_at IS NULL AND attachments.visible_to_client = 1'}
+       WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${attachVoided} ${attachClientVisible}
        ORDER BY uploaded_at DESC`,
     ).all<DbAttachment>(),
-    role === 'admin'
+    seeAnalyses
       ? env.DB.prepare(
           `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
            FROM attachment_analyses
@@ -2958,7 +3036,9 @@ async function getState(env: Env, role: AuthRole) {
     getTaxMode(env),
     getDesignTypeGroups(env),
     getStoredAiModelConfig(env),
-    env.DB.prepare('SELECT * FROM monthly_reports ORDER BY month DESC').all<DbReport>(),
+    role === 'client'
+      ? env.DB.prepare('SELECT * FROM monthly_reports WHERE month = ? ORDER BY month DESC').bind(currentMonth).all<DbReport>()
+      : env.DB.prepare('SELECT * FROM monthly_reports ORDER BY month DESC').all<DbReport>(),
   ])
 
   const filesByTask = new Map<string, string[]>()
@@ -5002,8 +5082,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     (isGet && path.startsWith('/api/shared/')) ||
     (isGet && path.startsWith('/api/files/') && (path.endsWith('/preview') || path.endsWith('/source')))
 
-  // 读取接口默认允许游客以只读成员身份访问；写入接口仍需管理员邮箱 + 平台密码。
-  let role: AuthRole = 'member'
+  // 读取接口默认允许游客以只读身份访问；写入接口按角色分级（见下方守卫）。
+  let role: AuthRole = 'guest'
   const authEnabled = Boolean(env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING)))
   if (authEnabled && !isPublic) {
     const resolved = await resolveRole(
@@ -5039,7 +5119,11 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
-    return fail('需要管理员权限', 403)
+    // 协作者可写非敏感接口（记进展/传附件/改任务/AI 助手）；其余角色一律只读。
+    const collaboratorAllowed = role === 'collaborator' && isCollaboratorWritablePath(path, request.method)
+    if (!collaboratorAllowed) {
+      return fail('当前口令没有该操作权限（敏感操作仅管理员可用）', 403)
+    }
   }
 
   if (path === '/api/health') {
