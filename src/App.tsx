@@ -2703,6 +2703,10 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
 }
 
+function isQuestionShortcut(event: KeyboardEvent) {
+  return event.key === '?' || (event.key === '/' && event.shiftKey)
+}
+
 function CommandPalette({
   actions,
   initialQuery,
@@ -2834,7 +2838,7 @@ function CommandPalette({
 function ShortcutHelpModal({ groups, onClose }: { groups: ShortcutHelpGroup[]; onClose: () => void }) {
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' || event.key === '?') {
+      if (event.key === 'Escape' || isQuestionShortcut(event)) {
         event.preventDefault()
         onClose()
       }
@@ -4722,7 +4726,7 @@ function App() {
       if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
         return
       }
-      if (event.key === '?') {
+      if (isQuestionShortcut(event)) {
         event.preventDefault()
         setIsShortcutHelpOpen(true)
         return
@@ -4776,7 +4780,7 @@ function App() {
         handleOpenTaskProgress(selectedTask.id)
         return
       }
-      if (event.key === '/') {
+      if (event.key === '/' && !event.shiftKey) {
         const searchInput = document.querySelector<HTMLInputElement>('.dashboard-task-search input, .task-search-inline input')
         if (searchInput) {
           event.preventDefault()
@@ -4988,6 +4992,16 @@ function App() {
               onClick={() => openCommandPalette()}
             >
               <kbd>⌘K</kbd>
+            </button>
+            <button
+              type="button"
+              className="topbar-shortcut"
+              title="查看快捷键（?）"
+              aria-label="查看快捷键"
+              aria-keyshortcuts="Shift+/"
+              onClick={() => setIsShortcutHelpOpen(true)}
+            >
+              <kbd>?</kbd>
             </button>
             <button
               className="primary-button topbar-create-button"
