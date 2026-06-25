@@ -2040,7 +2040,7 @@ button {
 
 .dashboard-side-timeline {
   display: grid;
-  gap: 18px;
+  gap: 28px;
 }
 
 .dashboard-side-time-item {
@@ -2052,7 +2052,7 @@ button {
 .dashboard-side-time-item::before {
   position: absolute;
   top: 18px;
-  bottom: -19px;
+  bottom: -29px;
   left: 5px;
   width: 1px;
   background: var(--color-border);
@@ -2135,7 +2135,7 @@ button {
 
 .dashboard-side-time-item em {
   display: block;
-  margin-top: 5px;
+  margin-top: 10px;
   color: var(--color-text-muted);
   font-size: 13px;
   font-style: normal;
@@ -2163,10 +2163,10 @@ button {
 }
 
 .dashboard-side-entry-files {
-  margin-top: 9px;
+  margin-top: 14px;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dashboard-side-entry-actions {
