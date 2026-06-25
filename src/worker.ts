@@ -4724,6 +4724,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     headers: {
       authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
       'content-type': 'application/json',
+      // 冷知识「换一条」需要每次新内容，跳过 AI Gateway 缓存（其他 AI 调用保留缓存以提速省钱）
+      'cf-aig-skip-cache': 'true',
     },
     body: JSON.stringify({
       model,
