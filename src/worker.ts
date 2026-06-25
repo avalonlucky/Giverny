@@ -1058,6 +1058,74 @@ async function markAnalysisFailure(env: Env, attachmentId: string, error: unknow
   ).bind(unsupported ? 'unsupported' : 'failed', message.slice(0, 500), attachmentId).run()
 }
 
+// 超长图垂直切片：用 Cloudflare Image Resizing 的 trim 把长图切成 2-3 段（小字更清晰、读得准）。
+// 若 zone 未开 Image Resizing（返回原图而非裁切结果），返回 null，让上层回退为整图单次分析。
+async function sliceLongImageViaCfImage(attachmentId: number | string, baseUrl: string): Promise<MultimodalAsset[] | null> {
+  const srcUrl = `${baseUrl}/api/files/${attachmentId}/source`
+  let width = 0
+  let height = 0
+  try {
+    const meta = await fetch(srcUrl, { cf: { image: { format: 'json' } } } as RequestInit & { cf: unknown })
+    if (!meta.ok || !(meta.headers.get('content-type') || '').includes('json')) {
+      return null
+    }
+    const data = (await meta.json()) as { width?: number; height?: number }
+    width = Number(data?.width) || 0
+    height = Number(data?.height) || 0
+  } catch {
+    return null
+  }
+  if (!width || !height || height / width < 2.4) {
+    return null
+  }
+  const segmentCount = height / width >= 4.2 ? 3 : 2
+  const segmentHeight = Math.ceil(height / segmentCount)
+  const overlap = Math.round(segmentHeight * 0.05) // 段间留一点重叠，避免把一行字从中间切断
+  const segments: MultimodalAsset[] = []
+  for (let i = 0; i < segmentCount; i += 1) {
+    const top = Math.max(0, i * segmentHeight - (i > 0 ? overlap : 0))
+    const cutBottom = Math.min(height, (i + 1) * segmentHeight + overlap)
+    const bottom = Math.max(0, height - cutBottom)
+    try {
+      const resp = await fetch(srcUrl, { cf: { image: { trim: { top, bottom }, format: 'jpeg', quality: 82 } } } as RequestInit & { cf: unknown })
+      if (!resp.ok) {
+        return null
+      }
+      const bytes = new Uint8Array(await resp.arrayBuffer())
+      if (bytes.byteLength < 64) {
+        return null
+      }
+      segments.push({ base64: bytesToBase64(bytes), mimeType: 'image/jpeg' })
+    } catch {
+      return null
+    }
+  }
+  return segments.length === segmentCount ? segments : null
+}
+
+function mergeAnalysisPayloads(payloads: AnalysisPayload[]): AnalysisPayload {
+  const uniq = (values: string[]) => Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+  const collect = (key: 'findings' | 'qualityIssues' | 'requirementMatches' | 'risks' | 'suggestions') =>
+    uniq(payloads.flatMap((payload) => payload[key]))
+  const issues = collect('qualityIssues')
+  const summaries = payloads.map((payload) => payload.summary).filter(Boolean).join('；')
+  return {
+    summary: `${issues.length > 0 ? `（长图分段分析，发现 ${issues.length} 条错别字/质量问题）` : '（长图分段分析）'}${summaries}`.slice(0, 300),
+    contentType: payloads.find((payload) => payload.contentType)?.contentType || '',
+    extractedText: payloads
+      .map((payload, index) => (payload.extractedText ? `【第${index + 1}段】${payload.extractedText}` : ''))
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 12000),
+    findings: collect('findings').slice(0, 8),
+    qualityIssues: issues.slice(0, 16),
+    requirementMatches: collect('requirementMatches').slice(0, 6),
+    risks: collect('risks').slice(0, 6),
+    suggestions: collect('suggestions').slice(0, 6),
+    confidence: payloads.some((p) => p.confidence === '高') ? '高' : payloads.some((p) => p.confidence === '中') ? '中' : '低',
+  }
+}
+
 async function processAttachmentAnalysis(env: Env, attachmentId: string) {
   const claimed = await env.DB.prepare(
     `UPDATE attachment_analyses
@@ -1091,30 +1159,55 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
     }
     const prompt = attachmentAnalysisPrompt(row, source)
     let endpoint = await resolveAiEndpoint(env, 'visionPrimary')
-    let output = ''
-    try {
-      output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-    } catch (primaryError) {
-      if (isRetryableVisionError(primaryError)) {
-        await wait(1500)
-        try {
-          output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-        } catch {
-          output = ''
-        }
-      }
-      if (!output) {
-        endpoint = await resolveAiEndpoint(env, 'visionFallback')
-        try {
-          output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-        } catch (fallbackError) {
-          const primaryMessage = primaryError instanceof Error ? primaryError.message : '主模型失败'
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '备用模型失败'
-          throw new Error(`主模型：${primaryMessage}；备用模型：${fallbackMessage}`, { cause: fallbackError })
+
+    // 超长图：先尝试切片并行分析再合并（更准、更快、不截断）。切不了（zone 未开 Image Resizing）就回退整图。
+    let payload: AnalysisPayload | null = null
+    if (source.parserKind === 'image-direct') {
+      const segments = await sliceLongImageViaCfImage(row.id, 'https://mayeai.com').catch(() => null)
+      if (segments && segments.length > 1) {
+        const segmentOutputs = await Promise.all(segments.map(async (segment, index) => {
+          const segmentPrompt = `${prompt}\n\n（这是同一张长图垂直切分后的第 ${index + 1}/${segments.length} 段，只分析本段可见内容；错别字与文案不符照常列出。）`
+          try {
+            return await callAiEndpointMultimodal(endpoint, segmentPrompt, [segment])
+          } catch {
+            return ''
+          }
+        }))
+        const segmentPayloads = segmentOutputs
+          .map((segmentOutput) => normalizeAnalysisPayload(parseLooseJsonObject(segmentOutput)))
+          .filter((segmentPayload) => segmentPayload.summary)
+        if (segmentPayloads.length > 0) {
+          payload = mergeAnalysisPayloads(segmentPayloads)
         }
       }
     }
-    const payload = normalizeAnalysisPayload(parseLooseJsonObject(output))
+
+    if (!payload) {
+      let output = ''
+      try {
+        output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+      } catch (primaryError) {
+        if (isRetryableVisionError(primaryError)) {
+          await wait(1500)
+          try {
+            output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+          } catch {
+            output = ''
+          }
+        }
+        if (!output) {
+          endpoint = await resolveAiEndpoint(env, 'visionFallback')
+          try {
+            output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
+          } catch (fallbackError) {
+            const primaryMessage = primaryError instanceof Error ? primaryError.message : '主模型失败'
+            const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '备用模型失败'
+            throw new Error(`主模型：${primaryMessage}；备用模型：${fallbackMessage}`, { cause: fallbackError })
+          }
+        }
+      }
+      payload = normalizeAnalysisPayload(parseLooseJsonObject(output))
+    }
     if (!payload.summary) {
       throw new Error('模型返回内容缺少有效摘要')
     }
