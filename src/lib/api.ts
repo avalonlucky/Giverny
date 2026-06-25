@@ -572,6 +572,12 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
+    requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   suggestTaskAssistant: (payload: { title: string; requirement: string; selectedType: string; designTypeGroups: DesignTypeGroup[]; attachmentText?: string; attachmentName?: string }) =>
     requestJson<TaskAssistantSuggestion>('/api/ai/task-assistant', {
       method: 'POST',

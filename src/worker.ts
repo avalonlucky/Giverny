@@ -3667,6 +3667,46 @@ async function callBamlRuntime<T>(env: Env, endpoint: 'suggest-task' | 'optimize
   return (await response.json().catch(() => null)) as T | null
 }
 
+// AI 估算任务整体进度：只依据进展记录文字，弱化预计时间权重。返回 10 的倍数(0-100)。
+async function estimateTaskProgressWithAi(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    title?: string
+    requirement?: string
+    status?: string
+    entries?: Array<{ date?: string; note?: string; isAcceptance?: boolean }>
+  }
+  const entries = (Array.isArray(body.entries) ? body.entries : [])
+    .map((entry) => ({
+      date: String(entry?.date ?? '').slice(0, 40),
+      note: String(entry?.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 400),
+      isAcceptance: Boolean(entry?.isAcceptance),
+    }))
+    .filter((entry) => entry.note)
+    .slice(0, 40)
+  if (entries.length === 0) {
+    return ok({ progress: 0, reason: '暂无进展记录' })
+  }
+  const status = String(body.status ?? '').trim()
+  if (status === '已验收') {
+    return ok({ progress: 100, reason: '任务已验收' })
+  }
+  const payload = {
+    taskTitle: String(body.title ?? '').slice(0, 120),
+    requirement: String(body.requirement ?? '').slice(0, 1000),
+    status,
+    progressEntries: entries,
+  }
+  const systemPrompt =
+    '你是设计任务进度评估助手。请只依据「进展记录」(progressEntries，按时间从新到旧或从旧到新均可，每条是一段工作记录文字) 估算这条任务的整体完成度，输出 0-100 的整数且必须是 10 的倍数。\n\n判断依据(按权重从高到低)：\n1. 进展记录的语义：出现「初稿完成/第一版完成/已完成第一版」约 50-60；之后每完成一轮甲方反馈修改再加 10-20；出现「定稿/终稿/最终版/已上传最终文件/准备验收/待验收」约 85-95；出现「验收通过/已验收」为 100。\n2. 任务状态 status：计划中通常 0，但若已有实质进展记录则按记录推断（不要因为状态是计划中就判 0）；进行中按记录推断；待验收≥85。\n3. 修改轮次越多、且最近的记录越接近定稿，完成度越高；只有零星几条早期记录则给中低值。\n\n不要参考预计开始/预计工时/预计交付等计划时间——它们权重极低、常不准，本输入也不提供。\n请给出一个 progress 整数和一句简短中文理由。'
+  const parsed = await callTextFallbackJson<{ progress?: number; reason?: string }>(env, systemPrompt, payload, 'progress:number(0-100,10的倍数), reason:string')
+  if (!parsed || typeof parsed.progress !== 'number' || Number.isNaN(parsed.progress)) {
+    return fail('AI 进度评估暂时不可用', 503)
+  }
+  const progress = Math.max(0, Math.min(100, Math.round(parsed.progress / 10) * 10))
+  await audit(env, 'suggest', 'ai_progress_estimate', payload.taskTitle || 'untitled', { progress, entryCount: entries.length })
+  return ok({ progress, reason: String(parsed.reason ?? '').slice(0, 200) })
+}
+
 async function suggestTaskWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
@@ -4766,6 +4806,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
     return suggestHourEstimateWithAi(env, request)
+  }
+  if (path === '/api/ai/progress-estimate' && request.method === 'POST') {
+    return estimateTaskProgressWithAi(env, request)
   }
   if (path === '/api/ai/daily-knowledge' && request.method === 'POST') {
     return suggestDailyKnowledgeWithAi(env, request)

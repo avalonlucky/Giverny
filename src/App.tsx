@@ -4058,6 +4058,49 @@ function App() {
     return savedFile
   }
 
+  // AI 自动估算整体进度：依据进展记录文字。按「条目签名」去重，避免重复调用/死循环。
+  const autoEstimateSigRef = useRef<Map<number, string>>(new Map())
+  const handleAutoEstimateProgress = async (task: Task) => {
+    if (!isAdmin) {
+      return
+    }
+    if (['已验收', '终止', '挂起', '不计费'].includes(task.status)) {
+      return
+    }
+    const entries = (task.timeEntries ?? []).filter((entry) => (entry.note ?? '').trim())
+    if (entries.length === 0) {
+      return
+    }
+    const signature = `${entries.length}:` + entries.map((entry) => `${entry.id}.${(entry.note ?? '').length}`).join('|')
+    if (autoEstimateSigRef.current.get(task.id) === signature) {
+      return
+    }
+    autoEstimateSigRef.current.set(task.id, signature)
+    try {
+      const result = await api.estimateTaskProgress({
+        title: task.title,
+        requirement: task.requirement,
+        status: task.status,
+        entries: entries.map((entry) => ({
+          date: entry.date ?? '',
+          note: entry.note ?? '',
+          isAcceptance: Boolean(entry.isAcceptanceProgress),
+        })),
+      })
+      const next = snapProgress(result.progress)
+      const current = taskItemsRef.current.find((item) => item.id === task.id)
+      if (!current || ['已验收', '终止', '挂起', '不计费'].includes(current.status)) {
+        return
+      }
+      if (snapProgress(current.progress) !== next) {
+        await handleUpdateTask(task.id, { progress: next })
+      }
+    } catch {
+      // 失败则清掉签名，下次再试
+      autoEstimateSigRef.current.delete(task.id)
+    }
+  }
+
   const handleUpdateTask = async (taskId: number, changes: TaskUpdateChanges) => {
     if (updatingTaskIdsRef.current.has(taskId)) {
       pendingTaskChangesRef.current.set(taskId, { ...(pendingTaskChangesRef.current.get(taskId) ?? {}), ...changes })
@@ -5278,6 +5321,7 @@ function App() {
             onDeleteAcceptanceProgress={handleDeleteAcceptanceProgress}
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
+            onAutoEstimateProgress={isAdmin ? handleAutoEstimateProgress : undefined}
           />
         </section>
           </div>
@@ -5324,6 +5368,7 @@ function App() {
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
             onToggleRowTheme={toggleRowTheme}
+            onAutoEstimateProgress={isAdmin ? handleAutoEstimateProgress : undefined}
           />
         )}
 
@@ -6187,6 +6232,7 @@ function DashboardTaskSidebar({
   onDeleteAcceptanceProgress,
   onOpenEdit,
   onOpenAcceptance,
+  onAutoEstimateProgress,
 }: {
   task: Task | undefined
   files: FileAsset[]
@@ -6197,6 +6243,7 @@ function DashboardTaskSidebar({
   onDeleteAcceptanceProgress: (taskId: number, entryId?: string) => void
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
+  onAutoEstimateProgress?: (task: Task) => void
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
   const [expandedEntryNotes, setExpandedEntryNotes] = useState<Record<string, boolean>>({})
@@ -6206,6 +6253,20 @@ function DashboardTaskSidebar({
     expandedProgress: false,
     expandedWaiting: false,
   })
+
+  // 查看「进展」且有带文字的进展记录时，自动让 AI 估算整体进度（内部按签名去重，不会重复调用）
+  const taskId = task?.id
+  const entriesSignature = (task?.timeEntries ?? [])
+    .filter((entry) => (entry.note ?? '').trim())
+    .map((entry) => `${entry.id}.${(entry.note ?? '').length}`)
+    .join('|')
+  useEffect(() => {
+    if (!task || activeTab !== 'progress' || !onAutoEstimateProgress || !entriesSignature) {
+      return
+    }
+    onAutoEstimateProgress(task)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, activeTab, entriesSignature])
 
   if (!task) {
     return (
@@ -6580,6 +6641,7 @@ function TasksView({
   onCreateTask,
   rowThemeOn,
   onToggleRowTheme,
+  onAutoEstimateProgress,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -6618,6 +6680,7 @@ function TasksView({
   onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
+  onAutoEstimateProgress?: (task: Task) => void
   rowThemeOn: boolean
   onToggleRowTheme: () => void
 }) {
@@ -6936,6 +6999,7 @@ function TasksView({
               openAcceptance(task)
             }
           }}
+          onAutoEstimateProgress={onAutoEstimateProgress}
         />
       </section>
       {progressTarget && (
