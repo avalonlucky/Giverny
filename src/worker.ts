@@ -736,7 +736,7 @@ async function callAiEndpointMultimodal(
             ...assets.map((asset) => ({ inline_data: { mime_type: asset.mimeType, data: asset.base64 } })),
           ],
         }],
-        generationConfig: { maxOutputTokens: 1800, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 3200, temperature: 0.2 },
       }),
     })
     const data = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> } | null
@@ -759,7 +759,7 @@ async function callAiEndpointMultimodal(
     body: JSON.stringify({
       model: endpoint.model,
       temperature: kimiTemperature(endpoint.provider, endpoint.model),
-      max_tokens: 1800,
+      max_tokens: 3200,
       messages: [{
         role: 'user',
         content: [
@@ -982,16 +982,16 @@ ${source.extractedText || '无，需直接读取文件视觉内容'}
 4. 版式、可读性、层级、清晰度、素材完整性等其他质量问题。
 5. 对进度、交付、复用和后续效率的风险与建议。
 
-只返回 JSON 对象，不要 Markdown：
+只返回一个【完整、可解析】的 JSON 对象，不要 Markdown，不要在 JSON 外写任何文字。为保证不被截断，请控制总长度、每个数组都精炼：
 {
   "summary": "80-160字中文总结，若发现错别字或文案不符需在开头点明数量",
   "contentType": "交付件类型",
-  "extractedText": "关键文字/OCR摘要，最多1000字",
-  "findings": ["内容与视觉发现"],
-  "qualityIssues": ["错别字与文案不符优先列在最前，再列其他质量问题；没有则空数组"],
-  "requirementMatches": ["与需求吻合或不吻合的依据"],
-  "risks": ["风险，没有则空数组"],
-  "suggestions": ["可执行建议"],
+  "extractedText": "关键文字摘要，最多300字（不要整图逐字誊抄）",
+  "findings": ["内容与视觉发现，最多4条，每条一句"],
+  "qualityIssues": ["错别字与文案不符优先列在最前；最多列8条最重要的，每条一句；没有则空数组"],
+  "requirementMatches": ["与需求吻合或不吻合的依据，最多3条"],
+  "risks": ["风险，最多3条，没有则空数组"],
+  "suggestions": ["可执行建议，最多3条"],
   "confidence": "低|中|高"
 }`
 }
