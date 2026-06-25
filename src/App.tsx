@@ -10999,6 +10999,60 @@ const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'prov
   visionFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
 }
 
+// AI 调用统一走 Cloudflare AI Gateway（缓存 / 失败重试 / 用量看板 / 抗 503）。
+// 选择供应商时自动把 Base URL 填成该供应商对应的网关路径；网关未代理的供应商回退官方直连。
+const AI_GATEWAY_BASE = 'https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e33758c6d/mayeai-gateway'
+
+const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string }> = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'custom-openai', label: 'OpenAI 兼容网关' },
+]
+
+function baseUrlForProvider(provider: AiModelConfig['provider']): string {
+  switch (provider) {
+    case 'deepseek':
+      return `${AI_GATEWAY_BASE}/deepseek`
+    case 'gemini':
+      return `${AI_GATEWAY_BASE}/google-ai-studio/v1beta`
+    case 'openai':
+      return `${AI_GATEWAY_BASE}/openai`
+    case 'kimi':
+      return 'https://api.moonshot.cn/v1'
+    case 'openrouter':
+      return 'https://openrouter.ai/api/v1'
+    case 'anthropic':
+      return 'https://api.anthropic.com/v1'
+    case 'custom-openai':
+    default:
+      return ''
+  }
+}
+
+function defaultModelForProvider(provider: AiModelConfig['provider']): string {
+  switch (provider) {
+    case 'deepseek':
+      return 'deepseek-chat'
+    case 'gemini':
+      return 'gemini-3-flash-preview'
+    case 'kimi':
+      return 'kimi-k2.6'
+    case 'openai':
+      return 'gpt-4o-mini'
+    case 'openrouter':
+      return ''
+    case 'anthropic':
+      return 'claude-sonnet-4-6'
+    case 'custom-openai':
+    default:
+      return ''
+  }
+}
+
 function aiRoutesFromConfig(config: AiModelConfig | null): Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> {
   return aiRouteMeta.reduce((map, route) => {
     const item = config?.[route.key] ?? aiRouteDefaults[route.key]
@@ -11085,6 +11139,10 @@ function SettingsView({
   const [aiRouteKeyDrafts, setAiRouteKeyDrafts] = useState<Partial<Record<AiModelRouteKey, string>>>({})
   const [testingAiRoute, setTestingAiRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
+  const [aiCapabilityTab, setAiCapabilityTab] = useState<'text' | 'vision'>('text')
+  const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
+  const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
+  const [aiRouteModelError, setAiRouteModelError] = useState<Partial<Record<AiModelRouteKey, string>>>({})
   const [isAiModelSaving, setIsAiModelSaving] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [draggingGroupName, setDraggingGroupName] = useState('')
@@ -11260,13 +11318,42 @@ function SettingsView({
   }, [aiModelConfig])
 
   const updateAiRouteDraft = (route: AiModelRouteKey, changes: Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>) => {
-    setAiRouteDrafts((current) => ({
-      ...current,
-      [route]: {
-        ...current[route],
-        ...changes,
-      },
-    }))
+    setAiRouteDrafts((current) => {
+      const next = { ...current[route], ...changes }
+      if (changes.provider && changes.provider !== current[route].provider) {
+        // 切换供应商时自动联动 Base URL（默认走 AI Gateway）与默认模型，省去手填。
+        next.baseUrl = baseUrlForProvider(changes.provider)
+        const fallbackModel = defaultModelForProvider(changes.provider)
+        if (fallbackModel) {
+          next.model = fallbackModel
+        }
+      }
+      return { ...current, [route]: next }
+    })
+    if (changes.provider) {
+      // 供应商变了，之前拉取的模型列表失效，清空避免误导。
+      setAiRouteModelOptions((options) => ({ ...options, [route]: undefined }))
+      setAiRouteModelError((errors) => ({ ...errors, [route]: undefined }))
+    }
+  }
+
+  const fetchRouteModels = async (route: AiModelRouteKey) => {
+    if (fetchingModelsRoute) {
+      return
+    }
+    setFetchingModelsRoute(route)
+    setAiRouteModelError((errors) => ({ ...errors, [route]: undefined }))
+    try {
+      const result = await api.listAiModels(route)
+      setAiRouteModelOptions((options) => ({ ...options, [route]: result.models }))
+      if (!result.models.length) {
+        setAiRouteModelError((errors) => ({ ...errors, [route]: '该供应商没有返回可用模型' }))
+      }
+    } catch (error) {
+      setAiRouteModelError((errors) => ({ ...errors, [route]: error instanceof Error ? error.message : '获取模型失败' }))
+    } finally {
+      setFetchingModelsRoute(null)
+    }
   }
 
   const saveAiModelConfig = async (clearApiKey = false, clearRouteApiKey?: AiModelRouteKey) => {
@@ -11450,64 +11537,63 @@ function SettingsView({
               <div className="panel-header compact">
                 <div>
                   <h2>AI 模型设置</h2>
-                  <p>文字和识图都保留主模型与备用模型，后续多租户可自行替换 Key</p>
+                  <p>按「文字模型 / 识图模型」分类，各自配置主力与备用；切换供应商会自动联动 Base URL（默认走 AI Gateway）</p>
                 </div>
+              </div>
+              <div className="settings-ai-tabs">
+                <button
+                  type="button"
+                  className={aiCapabilityTab === 'text' ? 'active' : ''}
+                  onClick={() => setAiCapabilityTab('text')}
+                >
+                  文字模型
+                </button>
+                <button
+                  type="button"
+                  className={aiCapabilityTab === 'vision' ? 'active' : ''}
+                  onClick={() => setAiCapabilityTab('vision')}
+                >
+                  识图模型
+                </button>
               </div>
               <div className="form-grid settings-form settings-ai-form">
                 <label className="field">
                   <span>运行模式</span>
                   <select value={aiModeDraft} onChange={(event) => setAiModeDraft(event.target.value as AiModelConfig['mode'])}>
-                    <option value="deepseek-direct">DeepSeek 直连</option>
+                    <option value="deepseek-direct">直连 / AI Gateway</option>
                     <option value="baml-runtime">BAML Runtime</option>
                   </select>
                 </label>
-                <label className="field">
-                  <span>模型供应商</span>
-                  <select value={aiProviderDraft} onChange={(event) => setAiProviderDraft(event.target.value as AiModelConfig['provider'])}>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="gemini">Gemini</option>
-                    <option value="kimi">Kimi</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="anthropic">Anthropic Claude</option>
-                    <option value="custom-openai">OpenAI 兼容网关</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Base URL</span>
-                  <input
-                    value={aiBaseUrlDraft}
-                    placeholder="https://api.deepseek.com"
-                    onChange={(event) => setAiBaseUrlDraft(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>模型名称</span>
-                  <input value={aiModelDraft} placeholder="deepseek-chat" onChange={(event) => setAiModelDraft(event.target.value)} />
-                </label>
-                <label className="field wide">
-                  <span>BAML Runtime URL</span>
-                  <input
-                    value={aiRuntimeUrlDraft}
-                    placeholder="例如：https://ai-runtime.example.com"
-                    onChange={(event) => setAiRuntimeUrlDraft(event.target.value)}
-                  />
-                </label>
-                <label className="field wide">
-                  <span>BAML Runtime 模型 Key</span>
-                  <input
-                    type="password"
-                    value={aiApiKeyDraft}
-                    placeholder={aiModelConfig?.hasApiKey ? `已保存：${aiModelConfig.apiKeyPreview ?? '已保存'}` : '可选，输入后加密保存'}
-                    onChange={(event) => setAiApiKeyDraft(event.target.value)}
-                  />
-                </label>
+                {aiModeDraft === 'baml-runtime' && (
+                  <>
+                    <label className="field wide">
+                      <span>BAML Runtime URL</span>
+                      <input
+                        value={aiRuntimeUrlDraft}
+                        placeholder="例如：https://ai-runtime.example.com"
+                        onChange={(event) => setAiRuntimeUrlDraft(event.target.value)}
+                      />
+                    </label>
+                    <label className="field wide">
+                      <span>BAML Runtime 模型 Key</span>
+                      <input
+                        type="password"
+                        value={aiApiKeyDraft}
+                        placeholder={aiModelConfig?.hasApiKey ? `已保存：${aiModelConfig.apiKeyPreview ?? '已保存'}` : '可选，输入后加密保存'}
+                        onChange={(event) => setAiApiKeyDraft(event.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
               <div className="settings-ai-routes">
-                {aiRouteMeta.map((route) => {
+                {aiRouteMeta.filter((route) => route.capability === aiCapabilityTab).map((route) => {
                   const draft = aiRouteDrafts[route.key]
                   const saved = aiModelConfig?.[route.key]
                   const testResult = aiRouteTestResults[route.key]
+                  const modelOptions = aiRouteModelOptions[route.key]
+                  const modelError = aiRouteModelError[route.key]
+                  const modelListId = `ai-models-${route.key}`
                   return (
                     <article className="settings-ai-route-card" key={route.key}>
                       <div className="settings-ai-route-head">
@@ -11523,13 +11609,9 @@ function SettingsView({
                         <label className="field">
                           <span>供应商</span>
                           <select value={draft.provider} onChange={(event) => updateAiRouteDraft(route.key, { provider: event.target.value as AiModelConfig['provider'] })}>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="gemini">Gemini</option>
-                            <option value="kimi">Kimi</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="anthropic">Anthropic Claude</option>
-                            <option value="custom-openai">OpenAI 兼容网关</option>
+                            {aiProviderOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                           </select>
                         </label>
                         <label className="field">
@@ -11538,7 +11620,33 @@ function SettingsView({
                         </label>
                         <label className="field">
                           <span>模型</span>
-                          <input value={draft.model} onChange={(event) => updateAiRouteDraft(route.key, { model: event.target.value })} />
+                          <div className="settings-ai-model-pick">
+                            <input
+                              value={draft.model}
+                              list={modelOptions && modelOptions.length ? modelListId : undefined}
+                              placeholder={defaultModelForProvider(draft.provider) || '输入模型名称'}
+                              onChange={(event) => updateAiRouteDraft(route.key, { model: event.target.value })}
+                            />
+                            <button
+                              type="button"
+                              className="ghost-button compact-button"
+                              onClick={() => void fetchRouteModels(route.key)}
+                              disabled={fetchingModelsRoute === route.key}
+                            >
+                              {fetchingModelsRoute === route.key ? '获取中…' : '获取模型'}
+                            </button>
+                          </div>
+                          {modelOptions && modelOptions.length > 0 && (
+                            <datalist id={modelListId}>
+                              {modelOptions.map((model) => (
+                                <option key={model} value={model} />
+                              ))}
+                            </datalist>
+                          )}
+                          {modelOptions && modelOptions.length > 0 && (
+                            <small className="settings-ai-model-hint">已拉取 {modelOptions.length} 个模型，点输入框可下拉选择</small>
+                          )}
+                          {modelError && <small className="settings-inline-error">{modelError}</small>}
                         </label>
                         <label className="field">
                           <span>API Key</span>

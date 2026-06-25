@@ -12514,6 +12514,56 @@ textarea:focus-visible {
   padding-bottom: 10px;
 }
 
+.settings-ai-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0 14px;
+}
+
+.settings-ai-tabs button {
+  appearance: none;
+  border: 1px solid var(--color-border-soft);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 7px 16px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.settings-ai-tabs button:hover {
+  color: var(--color-text);
+}
+
+.settings-ai-tabs button.active {
+  color: var(--color-primary-strong);
+  border-color: color-mix(in srgb, var(--color-primary) 36%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.settings-ai-model-pick {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.settings-ai-model-pick input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-ai-model-pick .compact-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.settings-ai-model-hint {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
 .settings-ai-routes {
   padding: 0 0 12px;
   display: grid;

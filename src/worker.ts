@@ -2004,6 +2004,52 @@ async function testAiModelRoute(env: Env, request: Request) {
   }
 }
 
+async function listAiModelsForRoute(env: Env, request: Request) {
+  let route: AiModelRouteKey | null = null
+  try {
+    const url = new URL(request.url)
+    route = parseAiRouteKey(url.searchParams.get('route'))
+  } catch {
+    route = null
+  }
+  if (!route) {
+    return fail('未知的模型路由')
+  }
+  const endpoint = await resolveAiEndpoint(env, route)
+  if (endpoint.keySource === 'missing') {
+    return fail('该路由还没有可用的 API Key，请先填写并保存或在环境变量中配置')
+  }
+  const baseUrl = endpoint.baseUrl.replace(/\/$/, '')
+  try {
+    if (endpoint.provider === 'gemini') {
+      // Gemini / google-ai-studio：GET /models，列出可用生成模型
+      const url = `${baseUrl}/models?key=${encodeURIComponent(endpoint.apiKey || '')}&pageSize=200`
+      const response = await fetch(url, { headers: { 'x-goog-api-key': endpoint.apiKey || '' } })
+      const data = (await response.json().catch(() => null)) as { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>; error?: { message?: string } } | null
+      if (!response.ok) {
+        return fail(data?.error?.message || `获取模型失败（${response.status}）`, 502)
+      }
+      const models = (data?.models || [])
+        .filter((item) => !item.supportedGenerationMethods || item.supportedGenerationMethods.includes('generateContent'))
+        .map((item) => (item.name || '').replace(/^models\//, ''))
+        .filter(Boolean)
+      return ok({ provider: endpoint.provider, models: Array.from(new Set(models)).sort() })
+    }
+    // OpenAI 兼容（DeepSeek / Kimi / OpenAI / OpenRouter / 自定义网关）：GET /models
+    const response = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${endpoint.apiKey || ''}` },
+    })
+    const data = (await response.json().catch(() => null)) as { data?: Array<{ id?: string }>; error?: { message?: string } } | null
+    if (!response.ok) {
+      return fail(data?.error?.message || `获取模型失败（${response.status}）`, 502)
+    }
+    const models = (data?.data || []).map((item) => item.id || '').filter(Boolean)
+    return ok({ provider: endpoint.provider, models: Array.from(new Set(models)).sort() })
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '获取模型失败', 502)
+  }
+}
+
 async function setAiModelConfig(env: Env, request: Request) {
   const existing = await getStoredAiModelConfig(env)
   const body = (await request.json().catch(() => ({}))) as {
@@ -4934,6 +4980,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/design-type-groups' ||
       path === '/api/settings/ai-model' ||
       path === '/api/ai/model-test' ||
+      path === '/api/ai/models' ||
       path === '/api/insights/attachment-analyses/backfill' ||
       path === '/api/insights/diagnose' ||
       path === '/api/insights/history' ||
@@ -5060,6 +5107,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)
+  }
+  if (path === '/api/ai/models' && request.method === 'GET') {
+    return listAiModelsForRoute(env, request)
   }
   if (path === '/api/insights/attachment-analyses/backfill' && request.method === 'POST') {
     return backfillAttachmentAnalyses(env, ctx)

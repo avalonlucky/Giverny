@@ -572,6 +572,8 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  listAiModels: (route: AiModelRouteKey) =>
+    requestJson<{ provider: AiModelProvider; models: string[] }>(`/api/ai/models?route=${encodeURIComponent(route)}`),
   estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
     requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
       method: 'POST',
