@@ -4581,6 +4581,8 @@ button {
 
 .view-toolbar {
   padding-bottom: 14px;
+  border: 0;
+  background: transparent;
 }
 
 .report-workspace {
@@ -4608,6 +4610,8 @@ button {
   position: relative;
   display: grid;
   gap: 8px;
+  border: 0;
+  background: transparent;
 }
 
 .task-row-upload-input {
@@ -12026,9 +12030,14 @@ textarea:focus-visible {
   color: var(--color-primary-strong);
 }
 
+.giverny-settings-panel {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .giverny-season-pref {
-  padding: 14px 16px 16px;
-  border-top: 1px solid var(--color-border-soft);
+  padding: 16px 0 0;
 }
 
 .giverny-season-pref-title {
@@ -12233,7 +12242,6 @@ textarea:focus-visible {
   min-height: 50px;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   background: transparent;
   color: var(--color-text);
