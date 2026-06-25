@@ -85,19 +85,40 @@ import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, Insigh
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
-// 品牌随真实季节呼吸：按当前月份给根元素打 data-season，CSS 据此在「青绿带」内微移主色。
-// 北半球：3-5 春、6-8 夏、9-11 秋、12/1/2 冬。模块加载即执行，先于首帧渲染，无闪烁。
-function seasonOfMonth(month1to12: number): 'spring' | 'summer' | 'autumn' | 'winter' {
+// 吉维尼模式：可选的莫奈花园整套色系（默认关，用户在设置里手动开启）。开启后主题随季节走，
+// 季节默认「跟随当前日期」，也可手动指定。仅吉维尼模式下季节才影响主题；工具模式主色恒定。
+type SeasonKey = 'spring' | 'summer' | 'autumn' | 'winter'
+type SeasonPref = 'auto' | SeasonKey
+const GIVERNY_MODE_KEY = 'giverny-mode'
+const GIVERNY_SEASON_KEY = 'giverny-season'
+
+// 北半球：3-5 春、6-8 夏、9-11 秋、12/1/2 冬。
+function seasonOfMonth(month1to12: number): SeasonKey {
   if (month1to12 >= 3 && month1to12 <= 5) return 'spring'
   if (month1to12 >= 6 && month1to12 <= 8) return 'summer'
   if (month1to12 >= 9 && month1to12 <= 11) return 'autumn'
   return 'winter'
 }
-if (typeof document !== 'undefined') {
-  document.documentElement.dataset.season = seasonOfMonth(new Date().getMonth() + 1)
-  // 吉维尼模式：可选的莫奈花园整套色系。默认关（冷静工具模式），用户主动开启。
+function currentSeason(): SeasonKey {
+  return seasonOfMonth(new Date().getMonth() + 1)
+}
+function readSeasonPref(): SeasonPref {
   try {
-    if (window.localStorage.getItem('giverny-mode') === 'on') {
+    const raw = window.localStorage.getItem(GIVERNY_SEASON_KEY)
+    if (raw === 'spring' || raw === 'summer' || raw === 'autumn' || raw === 'winter') return raw
+  } catch {
+    // 忽略
+  }
+  return 'auto'
+}
+function resolveSeason(pref: SeasonPref = readSeasonPref()): SeasonKey {
+  return pref === 'auto' ? currentSeason() : pref
+}
+// 模块加载即执行，先于首帧渲染，无闪烁。
+if (typeof document !== 'undefined') {
+  document.documentElement.dataset.season = resolveSeason()
+  try {
+    if (window.localStorage.getItem(GIVERNY_MODE_KEY) === 'on') {
       document.documentElement.dataset.giverny = 'on'
     }
   } catch {
@@ -2975,12 +2996,12 @@ function App() {
   const [dashboardPendingShowAll, setDashboardPendingShowAll] = useState(false)
   const [dashboardAcceptedOpen, setDashboardAcceptedOpen] = useState(false)
   const [dashboardAcceptedShowAll, setDashboardAcceptedShowAll] = useState(false)
-  // 任务行状态配色主题开关：关闭后行颜色还原成中性绿（默认开）
+  // 任务行状态配色主题开关：默认关闭，用户手动打开后才生效（持久化在 localStorage）
   const [rowThemeOn, setRowThemeOn] = useState(() => {
     if (typeof window === 'undefined') {
-      return true
+      return false
     }
-    return window.localStorage.getItem('giverny-row-theme') !== 'off'
+    return window.localStorage.getItem('giverny-row-theme') === 'on'
   })
   const toggleRowTheme = () => {
     setRowThemeOn((current) => {
@@ -5488,7 +5509,6 @@ function App() {
         />
       )}
       {showFireworks && <Fireworks />}
-      <GivernyDevPanel />
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">
           {toastQueue.map((item) => (
@@ -5741,21 +5761,13 @@ function Fireworks() {
   )
 }
 
-// 设计预览面板：吉维尼模式开关 + 季节切换并存。预览/本地可见，生产(mayeai.com)隐藏
-// （正式上线时会移进「设置」里）。放右下角，避免遮住左侧「设置」导航。
-function GivernyDevPanel() {
-  const isProd = typeof location !== 'undefined' && /(^|\.)mayeai\.com$/i.test(location.hostname)
+// 设置页 · 吉维尼模式：默认关闭，用户手动开启。开启后主题随季节自动流转，也可手动指定季节。
+function GivernyModeSettings() {
   const [on, setOn] = useState<boolean>(() =>
     typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
-  const [season, setSeason] = useState<string>(() =>
-    (typeof document !== 'undefined' && document.documentElement.dataset.season) || 'summer',
-  )
-  if (isProd) {
-    return null
-  }
-  const toggleMode = () => {
-    const next = !on
+  const [seasonPref, setSeasonPref] = useState<SeasonPref>(() => readSeasonPref())
+  const applyMode = (next: boolean) => {
     setOn(next)
     if (next) {
       document.documentElement.dataset.giverny = 'on'
@@ -5763,47 +5775,86 @@ function GivernyDevPanel() {
       delete document.documentElement.dataset.giverny
     }
     try {
-      window.localStorage.setItem('giverny-mode', next ? 'on' : 'off')
+      window.localStorage.setItem(GIVERNY_MODE_KEY, next ? 'on' : 'off')
     } catch {
       // 忽略持久化失败
     }
   }
-  const pickSeason = (next: string) => {
-    document.documentElement.dataset.season = next
-    setSeason(next)
+  const applySeason = (pref: SeasonPref) => {
+    setSeasonPref(pref)
+    try {
+      if (pref === 'auto') {
+        window.localStorage.removeItem(GIVERNY_SEASON_KEY)
+      } else {
+        window.localStorage.setItem(GIVERNY_SEASON_KEY, pref)
+      }
+    } catch {
+      // 忽略
+    }
+    document.documentElement.dataset.season = resolveSeason(pref)
   }
-  const seasons: Array<[string, string]> = [
-    ['spring', '春'],
-    ['summer', '夏'],
-    ['autumn', '秋'],
-    ['winter', '冬'],
+  const seasons: Array<[SeasonKey, string]> = [
+    ['spring', '春 · 萌芽'],
+    ['summer', '夏 · 盛放'],
+    ['autumn', '秋 · 暮光'],
+    ['winter', '冬 · 冷静'],
   ]
+  const autoLabel: Record<SeasonKey, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
   return (
-    <div className="giverny-dev-panel" role="group" aria-label="设计预览（临时）">
-      <button
-        type="button"
-        className={`giverny-mode-switcher ${on ? 'on' : ''}`}
-        aria-pressed={on}
-        onClick={toggleMode}
-        title={on ? '切回冷静的工具模式' : '切换到莫奈花园氛围'}
-      >
-        <span className="gm-switch" aria-hidden="true" />
-        {on ? '吉维尼模式 · 已开启' : '开启吉维尼模式'}
-      </button>
-      <div className="season-dev-row">
-        <span className="season-dev-label">季节</span>
-        {seasons.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={season === key ? 'active' : ''}
-            onClick={() => pickSeason(key)}
-          >
-            {label}
-          </button>
-        ))}
+    <details className="settings-group-panel" open>
+      <summary className="settings-group-summary">
+        <div>
+          <h2>外观 · 吉维尼模式</h2>
+          <p>莫奈花园主题，随季节自然流转</p>
+        </div>
+        <ChevronDown size={18} />
+      </summary>
+      <div className="settings-group-body">
+        <section className="panel giverny-settings-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>吉维尼模式</h2>
+              <p>致敬莫奈的睡莲池。开启后整站切换到莫奈花园色系，主题随季节流转。默认关闭，冷静的工具模式不受影响。</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              className={`giverny-toggle ${on ? 'on' : ''}`}
+              onClick={() => applyMode(!on)}
+            >
+              <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
+              <span className="giverny-toggle-label">{on ? '已开启' : '已关闭'}</span>
+            </button>
+          </div>
+          {on && (
+            <div className="giverny-season-pref">
+              <span className="giverny-season-pref-title">季节</span>
+              <div className="giverny-season-options" role="group" aria-label="季节选择">
+                <button
+                  type="button"
+                  className={seasonPref === 'auto' ? 'active' : ''}
+                  onClick={() => applySeason('auto')}
+                >
+                  跟随当前季节（{autoLabel[currentSeason()]}）
+                </button>
+                {seasons.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={seasonPref === key ? 'active' : ''}
+                    onClick={() => applySeason(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="giverny-season-hint">默认跟随当前真实季节；也可手动锁定某一季。</p>
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </details>
   )
 }
 
@@ -11149,6 +11200,7 @@ function SettingsView({
 
   return (
     <section className="settings-grid">
+      <GivernyModeSettings />
       <details className="settings-group-panel settings-business-group" open>
         <summary className="settings-group-summary">
           <div>

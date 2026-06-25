@@ -79,32 +79,7 @@
   accent-color: var(--color-primary);
 }
 
-/* ===== 四季品牌主色（青绿带内冷暖微移，由 data-season 触发，跟真实当前日期）=====
-   过渡很慢（见下方 transition），换季时几乎无感。 */
-:root[data-season="spring"] {
-  --brand-primary: #5f7d63;        /* 萌芽嫩绿：偏暖偏亮 */
-  --brand-primary-strong: #4d6651;
-  --brand-glow: rgba(95, 125, 99, 0.10);
-  --brand-glow-soft: rgba(95, 125, 99, 0.05);
-}
-:root[data-season="summer"] {
-  --brand-primary: #3c6b61;        /* 睡莲盛放：正青绿（现有主色） */
-  --brand-primary-strong: #2f564e;
-  --brand-glow: rgba(60, 107, 97, 0.10);
-  --brand-glow-soft: rgba(60, 107, 97, 0.05);
-}
-:root[data-season="autumn"] {
-  --brand-primary: #4e7058;        /* 暮光：青绿里渗一点暖 */
-  --brand-primary-strong: #3e5a46;
-  --brand-glow: rgba(78, 112, 88, 0.10);
-  --brand-glow-soft: rgba(78, 112, 88, 0.05);
-}
-:root[data-season="winter"] {
-  --brand-primary: #3f6b6e;        /* 冷静：青绿里渗一点冷蓝 */
-  --brand-primary-strong: #325659;
-  --brand-glow: rgba(63, 107, 110, 0.10);
-  --brand-glow-soft: rgba(63, 107, 110, 0.05);
-}
+/* 工具模式（默认）主色固定为 #3c6b61，不随季节漂移——季节只在「吉维尼模式」里生效。 */
 
 /* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
    默认是冷静的工具模式；开启后背景变暖润亚麻、主色变湿润睡莲绿、文字变暖墨，
@@ -12002,112 +11977,102 @@ textarea:focus-visible {
   100% { transform: translate(-50%, -50%) scale(26); opacity: 0; }
 }
 
-/* 设计预览面板（仅预览站可见；正式版会移进设置）。右下角，避免遮住左侧「设置」。 */
-.giverny-dev-panel {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--color-surface-strong) 94%, transparent);
-  border: 1px solid var(--color-border);
-  box-shadow: 0 8px 24px rgba(31, 42, 39, 0.12);
-  backdrop-filter: blur(8px);
-}
-
-.giverny-mode-switcher {
+/* 设置页 · 吉维尼模式开关 + 季节选择 */
+.giverny-toggle {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1.5px solid var(--color-primary);
+  border: 0;
   background: transparent;
-  color: var(--color-primary);
-  font-size: 13px;
-  font-weight: 700;
   font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  flex: 0 0 auto;
 }
 
-.giverny-mode-switcher.on {
-  background: var(--color-primary);
-  color: var(--color-surface-strong);
-}
-
-.giverny-mode-switcher .gm-switch {
+.giverny-toggle-track {
   position: relative;
-  width: 32px;
-  height: 18px;
+  width: 38px;
+  height: 22px;
   border-radius: 999px;
   background: #cdd3ce;
   flex: 0 0 auto;
   transition: background 0.3s ease;
 }
 
-.giverny-mode-switcher .gm-switch::after {
-  content: "";
+.giverny-toggle-thumb {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.3s ease;
 }
 
-.giverny-mode-switcher.on .gm-switch {
-  background: rgba(255, 255, 255, 0.35);
+.giverny-toggle.on .giverny-toggle-track {
+  background: var(--color-primary);
 }
 
-.giverny-mode-switcher.on .gm-switch::after {
-  transform: translateX(14px);
+.giverny-toggle.on .giverny-toggle-thumb {
+  transform: translateX(16px);
 }
 
-/* 面板内的季节切换行 */
-.season-dev-row {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 2px;
+.giverny-toggle.on .giverny-toggle-label {
+  color: var(--color-primary-strong);
 }
 
-.season-dev-label {
-  font-size: 11px;
+.giverny-season-pref {
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.giverny-season-pref-title {
+  display: block;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--color-text-muted);
-  padding-right: 5px;
+  color: var(--color-text-secondary);
+  margin-bottom: 10px;
 }
 
-.season-dev-row button {
-  flex: 1;
-  height: 28px;
-  border-radius: 8px;
-  border: 0;
-  background: transparent;
+.giverny-season-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.giverny-season-options button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: inherit;
   font-size: 13px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-family: inherit;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
-.season-dev-row button:hover {
-  background: var(--brand-glow);
+.giverny-season-options button:hover {
+  border-color: var(--color-primary);
 }
 
-.season-dev-row button.active {
-  background: var(--brand-primary);
-  color: #fff;
+.giverny-season-options button.active {
+  background: var(--color-primary);
+  color: var(--color-surface-strong);
+  border-color: var(--color-primary);
   font-weight: 700;
+}
+
+.giverny-season-hint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
 }
 
 .admin-login-modal .modal-header small {
