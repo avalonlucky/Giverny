@@ -2388,36 +2388,6 @@ function describeActivity(item: ActivityItem): string {
   return '其他操作'
 }
 
-function getActivityFileNames(item: ActivityItem) {
-  const payload = item.payload ?? {}
-  const entries: Array<{ id?: number; name: string }> = []
-  if (item.entityType === 'attachment' && item.action === 'create' && typeof payload.fileName === 'string') {
-    entries.push({ id: Number(item.entityId) || undefined, name: payload.fileName })
-  }
-  if (item.entityType === 'task' && Array.isArray(payload.acceptanceFiles)) {
-    entries.push(...payload.acceptanceFiles.map((name) => ({ name: String(name) })))
-  }
-  if (item.entityType === 'update' && item.action === 'create') {
-    if (Array.isArray(payload.files)) {
-      entries.push(...payload.files.map((name) => ({ name: String(name) })))
-    }
-    const body = typeof payload.body === 'string' ? payload.body.trim() : ''
-    const attachmentText = body.match(/^上传过程附件[:：](.+)$/)?.[1]
-    if (attachmentText) {
-      entries.push(...attachmentText.split(/[、,，\n]/).map((name) => ({ name: name.trim() })).filter((entry) => entry.name))
-    }
-  }
-  const seen = new Set<string>()
-  return entries.filter((entry) => {
-    const key = `${entry.id ?? ''}:${entry.name}`
-    if (!entry.name || seen.has(key)) {
-      return false
-    }
-    seen.add(key)
-    return true
-  })
-}
-
 function fileTypeFromName(name: string) {
   const extension = name.split('.').pop()?.trim().toUpperCase() ?? ''
   return extension === 'JPEG' ? 'JPG' : extension
@@ -2529,68 +2499,6 @@ const writeStateCache = (state: BackendState) => {
   } catch {
     // 配额超限等忽略：快照仅用于加速首屏，缺失只是退回到原来的加载态
   }
-}
-
-function ActivityFileChips({
-  item,
-  files = [],
-  onPreviewFile,
-}: {
-  item: ActivityItem
-  files?: FileAsset[]
-  onPreviewFile?: (file: FileAsset) => void
-}) {
-  const fileEntries = getActivityFileNames(item)
-  if (fileEntries.length === 0) {
-    return null
-  }
-  return (
-    <div className="activity-file-row">
-      {fileEntries.map((entry) => {
-        const file = files.find((candidate) => candidate.id === entry.id) ?? files.find((candidate) => candidate.name === entry.name)
-        const fileType = (file?.type || fileTypeFromName(entry.name) || 'FILE').toUpperCase()
-        const isImage = isInlineImageFileType(fileType)
-        const isDesignFile = ['PSD', 'PSB', 'AI'].includes(fileType)
-        const thumbUrl = file ? authedPreviewUrl(file.previewUrl ?? (isImage ? file.sourceUrl : undefined)) : undefined
-        const documentPreviewUrl = file && isInlineDocumentFileType(fileType) ? fileDocumentPreviewSource(file) : undefined
-        const isOfficePreview = isOfficeFileType(fileType)
-        const previewCard = (
-          <>
-            <span className={`activity-file-preview-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
-            {thumbUrl ? (
-              <img src={thumbUrl} alt={entry.name} loading="lazy" />
-            ) : documentPreviewUrl ? (
-              <iframe className="activity-file-preview-frame" src={documentPreviewUrl} title={entry.name} loading="lazy" />
-            ) : (
-              <div className="activity-file-preview-placeholder">
-                {isImage || isDesignFile ? <FileImage size={24} /> : isOfficePreview || fileType === 'PDF' ? <FileText size={24} /> : <FileArchive size={24} />}
-                <strong>{fileType}</strong>
-                <span>{isOfficePreview ? '可预览' : '文件'}</span>
-              </div>
-            )}
-          </>
-        )
-        if (file && onPreviewFile) {
-          return (
-            <button type="button" className="activity-file-preview-card clickable" key={`${entry.id ?? ''}-${entry.name}`} onClick={() => onPreviewFile(file)} title="点击预览附件">
-              <span className={`activity-file-preview-thumb ${thumbUrl || documentPreviewUrl ? 'visual-preview' : ''}`}>
-                {previewCard}
-              </span>
-              <span className="activity-file-preview-name">{entry.name}</span>
-            </button>
-          )
-        }
-        return (
-          <span className="activity-file-preview-card" key={`${entry.id ?? ''}-${entry.name}`}>
-            <span className={`activity-file-preview-thumb ${thumbUrl || documentPreviewUrl ? 'visual-preview' : ''}`}>
-              {previewCard}
-            </span>
-            <span className="activity-file-preview-name">{entry.name}</span>
-          </span>
-        )
-      })}
-    </div>
-  )
 }
 
 function AttachmentHoverThumbnail({
@@ -2720,26 +2628,6 @@ function PendingAttachmentThumbnail({
       previewUrl={imagePreviewUrl || (isImage ? '' : generatedPreviewUrl)}
       onOpen={onOpen}
     />
-  )
-}
-
-function timelineTimePart(value: string) {
-  if (value.length <= 10) {
-    return ''
-  }
-  if (value.includes('T')) {
-    return value.slice(11, 16)
-  }
-  return value.slice(11, 16).trim()
-}
-
-function TimelineStamp({ value, audience }: { value: string; audience: 'admin' | 'public' }) {
-  const privateTime = audience === 'admin' ? timelineTimePart(value) : ''
-  return (
-    <time>
-      {datePart(value)}
-      {privateTime && <span className="admin-only-data"> {privateTime}</span>}
-    </time>
   )
 }
 
@@ -4640,6 +4528,15 @@ function App() {
     throw new Error('需要管理员权限')
   }
   const visibleNavItems = navItems
+  const navShortcutHints: Partial<Record<AppView, string>> = {
+    工作台: 'G D',
+    任务: 'G T',
+    文件库: 'F',
+    洞察: 'G I',
+    结算: 'G S',
+    收入: 'G R',
+    设置: ',',
+  }
   const openCommandPalette = (initialQuery = '') => {
     setCommandPaletteInitialQuery(initialQuery)
     setIsShortcutHelpOpen(false)
@@ -4647,20 +4544,12 @@ function App() {
   }
   const commandActions: CommandPaletteAction[] = [
     ...visibleNavItems.map((item) => {
-      const shortcuts: Partial<Record<AppView, string>> = {
-        工作台: 'G D',
-        任务: 'G T',
-        文件库: 'G F',
-        洞察: 'G I',
-        结算: 'G S',
-        收入: 'G R',
-      }
       return {
         id: `view-${item.label}`,
         group: '快速导航',
         label: `前往${item.label}`,
         detail: item.label === activeView ? '当前页面' : undefined,
-        shortcut: shortcuts[item.label as AppView],
+        shortcut: item.label === '文件库' ? 'F / G F' : navShortcutHints[item.label as AppView],
         keywords: `页面 导航 ${item.label}`,
         run: () => navigateView(item.label as AppView),
       }
@@ -4669,7 +4558,7 @@ function App() {
       id: 'view-settings',
       group: '快速导航',
       label: '前往设置',
-      shortcut: 'G O',
+      shortcut: ', / G O',
       keywords: '设置 配置 API 模型',
       run: () => navigateView('设置'),
     },
@@ -4765,6 +4654,9 @@ function App() {
         { keys: '?', action: '查看快捷键' },
         { keys: 'N', action: '新建任务' },
         { keys: '⇧ N', action: '补录任务' },
+        { keys: 'P', action: '记录选中任务进展' },
+        { keys: 'F', action: '打开文件库' },
+        { keys: ',', action: '打开设置' },
         { keys: '/', action: '聚焦任务搜索' },
         { keys: 'Esc', action: '关闭当前浮层' },
       ],
@@ -4774,11 +4666,11 @@ function App() {
       items: [
         { keys: 'G D', action: '工作台' },
         { keys: 'G T', action: '任务' },
-        { keys: 'G F', action: '文件库' },
+        { keys: 'F / G F', action: '文件库' },
         { keys: 'G I', action: '洞察' },
         { keys: 'G S', action: '结算' },
         { keys: 'G R', action: '收入' },
-        { keys: 'G O', action: '设置' },
+        { keys: ', / G O', action: '设置' },
       ],
     },
     {
@@ -4867,6 +4759,21 @@ function App() {
       if (key === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
         openCreateTask(event.shiftKey)
+        return
+      }
+      if (key === 'f' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        navigateView('文件库')
+        return
+      }
+      if (event.key === ',' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        navigateView('设置')
+        return
+      }
+      if (key === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && selectedTask && isAdmin) {
+        event.preventDefault()
+        handleOpenTaskProgress(selectedTask.id)
         return
       }
       if (event.key === '/') {
@@ -4982,17 +4889,23 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="主导航">
-          {visibleNavItems.map((item) => (
-            <div key={item.label}>
-              <button
-                className={`nav-item ${activeView === item.label ? 'active' : ''}`}
-                aria-label={`切换到${item.label}`}
-                onClick={() => navigateView(item.label as AppView)}
-              >
-                <span>{item.label}</span>
-              </button>
-            </div>
-          ))}
+          {visibleNavItems.map((item) => {
+            const shortcut = navShortcutHints[item.label as AppView]
+            return (
+              <div key={item.label}>
+                <button
+                  className={`nav-item ${activeView === item.label ? 'active' : ''}`}
+                  aria-label={`切换到${item.label}`}
+                  aria-keyshortcuts={item.label === '文件库' ? 'F' : undefined}
+                  title={shortcut ? `${item.label}（${shortcut}）` : item.label}
+                  onClick={() => navigateView(item.label as AppView)}
+                >
+                  <span>{item.label}</span>
+                  {shortcut && <kbd>{shortcut}</kbd>}
+                </button>
+              </div>
+            )
+          })}
         </nav>
 
         <div className="sidebar-account" ref={accountMenuRef}>
@@ -5041,8 +4954,15 @@ function App() {
               <div className="account-menu-version" title={`发布于 ${appReleaseDate}`}>v{appVersion}</div>
             </div>
           )}
-          <button className={`sidebar-account-trigger ${isAccountMenuOpen || activeView === '设置' ? 'active' : ''}`} type="button" onClick={() => setIsAccountMenuOpen((value) => !value)}>
+          <button
+            className={`sidebar-account-trigger ${isAccountMenuOpen || activeView === '设置' ? 'active' : ''}`}
+            type="button"
+            title="设置（,）"
+            aria-keyshortcuts=","
+            onClick={() => setIsAccountMenuOpen((value) => !value)}
+          >
             <span>设置</span>
+            <kbd>,</kbd>
           </button>
         </div>
       </aside>
@@ -5069,7 +4989,15 @@ function App() {
             >
               <kbd>⌘K</kbd>
             </button>
-            <button className="primary-button topbar-create-button" onClick={() => openCreateTask(false)}>新建任务</button>
+            <button
+              className="primary-button topbar-create-button"
+              title="新建任务（N）"
+              aria-keyshortcuts="N"
+              onClick={() => openCreateTask(false)}
+            >
+              <span>新建任务</span>
+              <kbd>N</kbd>
+            </button>
           </div>
         </header>
 
@@ -5519,8 +5447,6 @@ function App() {
           <TaskDetailModal
             key={detailTask.id}
             task={detailTask}
-            role={role}
-            activity={taskActivity}
             files={fileItems}
             onClose={() => setDetailTaskId(0)}
             onPreviewFile={setPreviewFile}
@@ -8669,8 +8595,6 @@ function TaskProgressModal({
 
 function TaskDetailModal({
   task,
-  role,
-  activity,
   files,
   onClose,
   onPreviewFile,
@@ -8679,8 +8603,6 @@ function TaskDetailModal({
   onOpenProgress,
 }: {
   task: Task
-  role: AuthRole
-  activity: ActivityItem[]
   files: FileAsset[]
   onClose: () => void
   onPreviewFile: (file: FileAsset) => void
@@ -8693,7 +8615,9 @@ function TaskDetailModal({
   const waitingMinutes = sumTimeEntries(task.waitingEntries ?? [])
   const actualHoursText = actualMinutes > 0 ? `${(actualMinutes / 60).toFixed(2)} h（共 ${(task.timeEntries ?? []).length} 段）` : `${task.actualHours.toFixed(2)} h`
   const waitingHoursText = `${(waitingMinutes / 60).toFixed(2)} h（共 ${(task.waitingEntries ?? []).length} 段）`
-  const recentActivity = activity.slice(0, 4)
+  // 用「进展分段计时」（按真实工作日期）替代审计流水，避免补录任务显示成「确认验收=补录当天」的误导时间。
+  const detailTimeEntries = [...(task.timeEntries ?? [])].sort((a, b) => `${b.date ?? ''}${b.start ?? ''}`.localeCompare(`${a.date ?? ''}${a.start ?? ''}`))
+  const acceptanceFileNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
 
   return (
     <ModalShell className="task-detail-modal" labelledBy="task-detail-title" onClose={onClose}>
@@ -8818,20 +8742,53 @@ function TaskDetailModal({
 
         <section className="task-detail-log">
           <div className="section-heading">
-            <h3>最近进展</h3>
+            <h3>进展分段计时</h3>
             <Clock3 size={15} />
           </div>
-          {recentActivity.length === 0 && <p className="calendar-empty-hint">暂无操作记录。</p>}
-          {recentActivity.length > 0 && (
+          {detailTimeEntries.length === 0 && <p className="calendar-empty-hint">暂无分段计时。</p>}
+          {detailTimeEntries.length > 0 && (
             <div className="timeline activity-timeline">
-              {recentActivity.map((item) => (
-                <article className="timeline-item" key={item.id}>
-                  <span className="dot" />
-                  <TimelineStamp value={item.createdAt} audience={role === 'admin' ? 'admin' : 'public'} />
-                  <p>{describeActivity(item)}</p>
-                  <ActivityFileChips item={item} files={files} onPreviewFile={onPreviewFile} />
-                </article>
-              ))}
+              {detailTimeEntries.map((entry) => {
+                const minutes = minutesForTimeEntry(entry)
+                const entryFiles = files.filter((file) => {
+                  if (file.taskId !== task.id || file.deletedAt) {
+                    return false
+                  }
+                  if (file.entryId === entry.id) {
+                    return true
+                  }
+                  return Boolean(entry.isAcceptanceProgress) && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
+                })
+                return (
+                  <article className="timeline-item" key={entry.id}>
+                    <span className="dot" />
+                    <div className="task-detail-entry-time">
+                      <time>{formatEntryDateTimeRange(task, entry)}</time>
+                      {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
+                      <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
+                    </div>
+                    {entry.note && <p>{entry.note}</p>}
+                    {entryFiles.length > 0 && (
+                      <div className="dashboard-side-entry-files" aria-label="本段进展附件">
+                        {entryFiles.map((file) => {
+                          const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                          const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                          return (
+                            <AttachmentHoverThumbnail
+                              key={file.id}
+                              name={file.name}
+                              type={fileType}
+                              previewUrl={previewUrl}
+                              compact
+                              onOpen={() => onPreviewFile(file)}
+                            />
+                          )
+                        })}
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           )}
         </section>
@@ -9828,6 +9785,30 @@ function InsightsView({
     waitingHours > 0 ? '把等待原因写入等待记录，避免复盘时误判为设计耗时' : '等待记录较少，可继续用分段计时沉淀真实工作链路',
     leadingType ? `沉淀「${leadingType.label}」的交付模板和报价基线` : '先积累 3 条以上同类任务后再判断报价结构',
   ]
+  const summaryReportStats = [
+    ['任务', `${periodTasks.length} 个`],
+    ['计费工时', `${totalHours.toFixed(1)}h`],
+    ['验收', `${acceptedTasks.length} / ${periodTasks.length}`],
+    ['等待', `${waitingHours.toFixed(1)}h`],
+    ['可预览附件', `${visualReadyCount} 个`],
+    ['异常信号', `${riskRows.length} 条`],
+  ]
+  const summaryReportHighlights = [
+    periodTasks.length > 0
+      ? `${rangeLabel} 共纳入 ${periodTasks.length} 个任务，计费工时 ${totalHours.toFixed(1)}h，验收率 ${acceptedRate}%。`
+      : `${rangeLabel} 暂无进入复盘范围的任务，可先从任务记录和附件完整度开始积累。`,
+    leadingType
+      ? `主要工作类型为「${leadingType.label}」，占本期计费工时 ${Math.round((leadingType.value / Math.max(typeDistribution.total, 1)) * 100)}%。`
+      : '本期暂未形成稳定的设计类型结构。',
+    riskRows.length > 0
+      ? `发现 ${riskRows.length} 条需要复核的链路信号，建议先处理逾期、超时或交付附件缺口。`
+      : '暂未发现明显逾期、超时或附件缺口，当前记录链路较稳定。',
+  ]
+  const summaryReportActions = [
+    riskRows.length > 0 ? '先打开项目诊断逐条核对异常任务，修正进展、附件或验收状态。' : '继续保持分段计时和验收附件留存，方便后续结算复盘。',
+    waitingHours > 0 ? '等待原因要写入等待记录，避免 AI 把甲方反馈等待误判为设计执行时间。' : '若后续出现甲方反馈停滞，及时补一条等待记录。',
+    leadingType ? `把「${leadingType.label}」沉淀成报价和交付模板，下次同类任务直接复用。` : '先积累 3 条以上同类任务，再判断报价与排期模板。',
+  ]
   const projectDiagnosisRows = periodTasks
     .slice()
     .sort((a, b) => {
@@ -9974,6 +9955,18 @@ function InsightsView({
         <aside className="insight-tree" aria-label="洞察目录">
           <div className="insight-tree-group">
             <button type="button" className="insight-tree-head">
+              <span>总结报告</span>
+            </button>
+            <button
+              type="button"
+              className={`insight-tree-item ${selectedInsightKind === 'sr' ? 'active' : ''}`}
+              onClick={() => setActiveInsightKey(`sr:${period}`)}
+            >
+              <span>{insightPeriods.find((item) => item.value === period)?.label ?? '周期'}总结</span>
+            </button>
+          </div>
+          <div className="insight-tree-group">
+            <button type="button" className="insight-tree-head">
               <span>周期复盘</span>
             </button>
             {insightPeriods.map((item) => (
@@ -10023,6 +10016,56 @@ function InsightsView({
         </aside>
 
         <section className="insight-document">
+          {selectedInsightKind === 'sr' && (
+            <>
+              <div className="sec-head">
+                <h2>{insightPeriods.find((item) => item.value === period)?.label ?? '周期'}总结报告</h2>
+                <p>{rangeLabel} · 面向结算、排期和下次协作的简要复盘</p>
+              </div>
+              <article className="summary-report" aria-label="洞察总结报告">
+                <p className="summary-report-lead">
+                  {summaryReportHighlights[0]}
+                  {leadingType ? ` 本期最主要的工作集中在「${leadingType.label}」。` : ''}
+                  {riskRows.length > 0 ? ' 需要先完成异常任务复核，再进入结算确认。' : ' 当前可以继续沿用这套记录节奏。'}
+                </p>
+                <dl className="summary-report-metrics">
+                  {summaryReportStats.map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="summary-report-grid">
+                  <section>
+                    <h3>本期结论</h3>
+                    <ul>
+                      {summaryReportHighlights.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </section>
+                  <section>
+                    <h3>下一步动作</h3>
+                    <ul>
+                      {summaryReportActions.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </section>
+                </div>
+                {riskRows.length > 0 && (
+                  <section className="summary-report-risks">
+                    <h3>优先复核</h3>
+                    {riskRows.slice(0, 4).map((risk) => (
+                      <div className="summary-risk-row" key={`${risk.task.id}-${risk.label}`}>
+                        <span>{risk.label}</span>
+                        <b>{risk.task.title}</b>
+                        <p>{risk.detail}</p>
+                      </div>
+                    ))}
+                  </section>
+                )}
+              </article>
+            </>
+          )}
+
           {selectedInsightKind === 'rv' && (
             <>
               <div className="sec-head">
