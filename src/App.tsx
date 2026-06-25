@@ -660,6 +660,59 @@ function snapPlanDateTime(value: string, direction: 'nearest' | 'up' | 'down' = 
 type ScheduleAnchor = 'start' | 'hours' | 'end'
 
 // 把 PDF 第一页渲染成 PNG 预览图，便于进展/验收附件直接显示缩略图（而不是「PDF」文字角标）
+// 新建任务时，就地从甲方文案附件抽取纯文本（Word/PDF/txt），喂给「任务需求」AI。
+// 任务尚未创建、没有 taskId，所以在浏览器本地抽取，不走上传。
+const ATTACHMENT_TEXT_LIMIT = 16000
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+}
+
+async function extractAttachmentText(file: File): Promise<string> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') || file.type.startsWith('text/')) {
+    return (await file.text()).slice(0, ATTACHMENT_TEXT_LIMIT)
+  }
+  if (name.endsWith('.docx')) {
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const docXml = await zip.file('word/document.xml')?.async('string')
+    if (!docXml) {
+      return ''
+    }
+    const withBreaks = docXml
+      .replace(/<\/w:p>/g, '\n')
+      .replace(/<w:tab\b[^>]*\/>/g, '\t')
+      .replace(/<w:br\b[^>]*\/>/g, '\n')
+    return decodeXmlEntities(withBreaks.replace(/<[^>]+>/g, ''))
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, ATTACHMENT_TEXT_LIMIT)
+  }
+  if (name.endsWith('.pdf')) {
+    const data = await file.arrayBuffer()
+    const pdfjs = await import('pdfjs-dist')
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+    const doc = await pdfjs.getDocument({ data }).promise
+    const maxPages = Math.min(doc.numPages, 20)
+    const parts: string[] = []
+    for (let i = 1; i <= maxPages; i += 1) {
+      const page = await doc.getPage(i)
+      const content = await page.getTextContent()
+      parts.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' '))
+    }
+    return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, ATTACHMENT_TEXT_LIMIT)
+  }
+  // .doc（旧二进制）等无法可靠在前端解析
+  return ''
+}
+
 async function createPdfPreviewFile(file: File) {
   const data = await file.arrayBuffer()
   const pdfjs = await import('pdfjs-dist')
@@ -12331,6 +12384,11 @@ function NewTaskModal({
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
   const [aiError, setAiError] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
+  // 甲方文案附件：仅用于 AI 需求分析（前端就地抽取文字），不随任务持久化
+  const [briefFile, setBriefFile] = useState<{ name: string; text: string; chars: number } | null>(null)
+  const [briefError, setBriefError] = useState('')
+  const [isBriefLoading, setIsBriefLoading] = useState(false)
+  const briefInputRef = useRef<HTMLInputElement | null>(null)
   const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
   const [hourSuggestionError, setHourSuggestionError] = useState('')
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
@@ -12512,6 +12570,31 @@ function NewTaskModal({
     }
   }
 
+  const loadBriefFile = async (file: File | undefined) => {
+    if (!file) {
+      return
+    }
+    setBriefError('')
+    setIsBriefLoading(true)
+    try {
+      const text = await extractAttachmentText(file)
+      if (!text.trim()) {
+        setBriefFile(null)
+        setBriefError('没能从这个文件里读到文字（支持 Word .docx、PDF、txt；旧版 .doc 请另存为 .docx）')
+        return
+      }
+      setBriefFile({ name: file.name, text, chars: text.length })
+    } catch {
+      setBriefFile(null)
+      setBriefError('读取附件失败，请换个文件或稍后重试')
+    } finally {
+      setIsBriefLoading(false)
+      if (briefInputRef.current) {
+        briefInputRef.current.value = ''
+      }
+    }
+  }
+
   const requestAiSuggestion = async () => {
     setAiError('')
     setAiSuggestion(null)
@@ -12522,6 +12605,8 @@ function NewTaskModal({
         requirement,
         selectedType: type,
         designTypeGroups: availableDesignTypeGroups,
+        attachmentText: briefFile?.text,
+        attachmentName: briefFile?.name,
       })
       setAiSuggestion(suggestion)
     } catch (error) {
@@ -12666,7 +12751,7 @@ function NewTaskModal({
                   event.stopPropagation()
                   void requestAiSuggestion()
                 }}
-                disabled={isAiLoading || (!title.trim() && !requirement.trim())}
+                disabled={isAiLoading || (!title.trim() && !requirement.trim() && !briefFile)}
               >
                 <Sparkles size={16} />
               </button>
@@ -12679,6 +12764,48 @@ function NewTaskModal({
               aria-required="true"
             />
             {formErrors.requirement && <small className="field-error">{formErrors.requirement}</small>}
+          </div>
+          <div className="field wide new-task-brief-field">
+            <span className="field-label-row">
+              <span>甲方文案附件（选填）</span>
+            </span>
+            {briefFile ? (
+              <div className="brief-file-chip">
+                <FileText size={16} />
+                <div className="brief-file-meta">
+                  <strong>{briefFile.name}</strong>
+                  <small>已读取约 {briefFile.chars} 字 · 点上方 ✦ 让 AI 结合文案分析需求</small>
+                </div>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="移除附件"
+                  title="移除"
+                  onClick={() => { setBriefFile(null); setBriefError('') }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="brief-upload-box"
+                onClick={() => briefInputRef.current?.click()}
+                disabled={isBriefLoading}
+              >
+                <Plus size={15} />
+                {isBriefLoading ? '正在读取文字…' : '上传甲方文案 让 AI 一起分析'}
+                <small>支持 Word .docx / PDF / txt（甲方发的文案稿）</small>
+              </button>
+            )}
+            {briefError && <small className="field-error">{briefError}</small>}
+            <input
+              ref={briefInputRef}
+              type="file"
+              className="task-row-upload-input"
+              accept=".docx,.pdf,.txt,.md,.csv"
+              onChange={(event) => void loadBriefFile(event.target.files?.[0])}
+            />
           </div>
           {(aiSuggestion || aiError || isAiLoading) && (
             <div className="ai-suggestion-panel wide">

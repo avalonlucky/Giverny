@@ -5159,6 +5159,78 @@ button {
   margin-top: -10px;
 }
 
+/* 新建任务 · 甲方文案附件框 */
+.brief-upload-box {
+  width: 100%;
+  min-height: 76px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.brief-upload-box small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.brief-upload-box:hover:not(:disabled) {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.brief-upload-box:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.brief-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+}
+
+.brief-file-meta {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.brief-file-meta strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-file-meta small {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.brief-file-chip .icon-button {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
 .progress-lite-upload-box {
   width: 100%;
   min-height: 104px;

@@ -51,6 +51,11 @@ function SuggestTaskAssistant(payload_json: string) -> TaskAssistantOutput {
   prompt #"
     你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。
 
+    输入可能带 attachmentText（甲方以 Word/PDF 等形式提供的文案，已抽取为纯文本）：
+    - rawRequirement 为空时：直接依据 attachmentText 分析出设计背景、设计要求、输出文件。
+    - rawRequirement 非空时：把它与 attachmentText 结合，以用户写的需求为主导意图，用附件补全背景与文案要点，冲突时以用户需求为准。
+    - attachmentText 是甲方原始文案，要提炼成任务单语言，不要照抄整段，也不要编造附件里没有的交付物或规范。
+
     改写目标：
     - 不是只排版，而是把口语化表达改成专业任务单语言。
     - 把模糊描述整理成可执行要求。

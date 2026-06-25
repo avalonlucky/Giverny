@@ -3673,11 +3673,16 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     requirement?: string
     selectedType?: string
     designTypeGroups?: DesignTypeGroup[]
+    attachmentText?: string
+    attachmentName?: string
   }
   const title = String(body.title ?? '').trim()
   const requirement = String(body.requirement ?? '').trim()
-  if (!title && !requirement) {
-    return fail('请先填写项目名称或任务具体需求')
+  // 甲方附件文案（Word/PDF/txt 等，前端就地抽取的纯文本，截断以控制 token）
+  const attachmentText = String(body.attachmentText ?? '').trim().slice(0, 8000)
+  const attachmentName = String(body.attachmentName ?? '').trim().slice(0, 120)
+  if (!title && !requirement && !attachmentText) {
+    return fail('请先填写项目名称、任务需求，或上传甲方文案附件')
   }
 
   const storedGroups = await getDesignTypeGroups(env)
@@ -3687,6 +3692,9 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     rawRequirement: requirement,
     selectedType: body.selectedType ?? '',
     availableDesignTypeGroups: designTypeGroups,
+    // 甲方提供的文案附件内容：需求为空时直接据此分析；需求非空时与之结合
+    attachmentName,
+    attachmentText,
   }
 
   const runtimeSuggestion = await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
@@ -3706,7 +3714,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TaskAssistantToolArgs>(
       env,
-      '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。不要编造用户没有提供的事实。',
+      '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。输入可能带 attachmentText（甲方提供的文案附件，已抽取为纯文本）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。不要编造用户和附件都没有提供的事实。',
       aiPayload,
       'optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
     )
@@ -3744,7 +3752,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。若确实没有合适分类，可以建议新分类，但不要编造不必要的新分类。\n\n改写目标：不是只排版，而是把口语化表达改成专业任务单语言；把模糊描述整理成可执行要求；把散乱信息归并到对应模块。\n\n允许：修正语病；归并重复信息；把用户已经表达的需求整理成明确动作；基于原文把“用途/场景/对接背景/必须包含内容/输出清单”补全到对应模块。\n禁止：凭空编造用户没提过的交付物、尺寸、品牌规范、交付承诺或验收标准；丢失用户提到的背景、约束、文件名、版本号、数量；写客套话或解释你做了什么。\n\n输出必须严格使用以下三段固定模板，段标题一字不改，用换行 \\n 分隔：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[风格/调性/必须包含的元素/区域]\n3、输出文件：[交付物清单]\n\n方括号只是提示含义，最终不要保留方括号。用户没有提供的信息写“未明确，可在对接时确认”，不要自己编。整体读起来像一条专业的内部设计任务单。',
+            '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。若确实没有合适分类，可以建议新分类，但不要编造不必要的新分类。\n\n【附件文案】输入里可能带 attachmentText（甲方以 Word/PDF 等形式提供的文案，已抽取为纯文本）：\n- 若 rawRequirement 为空：直接依据 attachmentText 分析出设计背景、设计要求、输出文件。\n- 若 rawRequirement 非空：把 rawRequirement 与 attachmentText 结合分析，以用户写的需求为主导意图，用附件补全背景/必须包含的文案要点/交付物，二者冲突时以用户需求为准。\n- attachmentText 只是甲方原始文案，不要把整段文案照抄进结果，要提炼成任务单语言；不要编造附件里没有的交付物或规范。\n\n改写目标：不是只排版，而是把口语化表达改成专业任务单语言；把模糊描述整理成可执行要求；把散乱信息归并到对应模块。\n\n允许：修正语病；归并重复信息；把用户已经表达的需求整理成明确动作；基于原文/附件把“用途/场景/对接背景/必须包含内容/输出清单”补全到对应模块。\n禁止：凭空编造用户和附件都没提过的交付物、尺寸、品牌规范、交付承诺或验收标准；丢失用户或附件提到的背景、约束、文件名、版本号、数量；写客套话或解释你做了什么。\n\n输出必须严格使用以下三段固定模板，段标题一字不改，用换行 \\n 分隔：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[风格/调性/必须包含的元素/区域]\n3、输出文件：[交付物清单]\n\n方括号只是提示含义，最终不要保留方括号。用户和附件都没有提供的信息写“未明确，可在对接时确认”，不要自己编。整体读起来像一条专业的内部设计任务单。',
         },
         {
           role: 'user',
