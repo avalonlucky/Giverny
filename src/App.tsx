@@ -10624,7 +10624,7 @@ function ReportsView({
   onLockReport: () => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
-  const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail' | 'formal'>('min')
+  const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail'>('min')
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const selectedMonth = selectedReportMonth || currentMonth.value
   const selectedMonthLabel = monthLabelOf(selectedMonth)
@@ -10658,7 +10658,7 @@ function ReportsView({
   const plannedCount = selectedTasks.filter((task) => task.status === '计划中').length
   const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
   // 不计时清单：① 整单不计费的任务；② 计费任务里「不计工时」的分段（如仅改名）。两者都要让甲方看到做了什么、为何不计时。
-  const uncountedItems: Array<{ key: string; title: string; type: string; reason: string }> = []
+  const uncountedItems: Array<{ key: string; title: string; type: string; reason: string; formula: string }> = []
   freeTasks.forEach((task) => {
     uncountedItems.push({
       key: `task-${task.id}`,
@@ -10669,6 +10669,9 @@ function ReportsView({
         : task.status === '终止'
           ? task.terminateReason || '终止'
           : '整单不计费',
+      formula: task.actualHours > 0
+        ? `${task.actualHours.toFixed(1)}h × ¥${hourlyRate} = ¥0（不计费）`
+        : '不计费',
     })
   })
   selectedTasks.forEach((task) => {
@@ -10684,6 +10687,7 @@ function ReportsView({
         title: task.title,
         type: task.type,
         reason: entry.note?.trim() || '该分段不计工时',
+        formula: '0h · 不计工时',
       })
     })
   })
@@ -10692,7 +10696,6 @@ function ReportsView({
   const templateOptions = [
     { value: 'min' as const, label: '简约' },
     { value: 'detail' as const, label: '编辑式 Excel' },
-    { value: 'formal' as const, label: '正式函' },
   ]
   const latestUpdatesByTask = useMemo(() => {
     const result = new Map<number, TaskUpdate>()
@@ -10923,15 +10926,6 @@ function ReportsView({
           </div>
         )}
         <header className="receipt-header">
-          <div className="receipt-brand">
-            <span className="receipt-mark">
-              <Sparkles size={16} />
-            </span>
-            <div>
-              <strong>{serviceCompanyName}</strong>
-              <small>ANKKI TECHNOLOGY</small>
-            </div>
-          </div>
           <div className="receipt-title">
             <h2>{pdfTitle}</h2>
             <span>MONTHLY SETTLEMENT RECEIPT</span>
@@ -10943,16 +10937,6 @@ function ReportsView({
         </header>
 
         <div className="receipt-rule" />
-
-        {receiptTemplate === 'formal' && (
-          <div className="receipt-formal-intro">
-            <strong>致：{serviceCompanyName}</strong>
-            <p>
-              兹就 {selectedMonthLabel} 平面设计服务进行结算。按约定单价 ¥{hourlyRate} / 小时计，本月计费工时合计 {selectedStats.billableHours.toFixed(1)} 小时，
-              金额合计 ¥{formatYuan(selectedStats.amount)}（{toChineseAmount(selectedStats.amount)}）。
-            </p>
-          </div>
-        )}
 
         <dl className="receipt-info">
           <div>
@@ -10991,9 +10975,9 @@ function ReportsView({
             ) : (
               <tr>
                 <th>序号</th>
-                <th>结算月份</th>
                 <th>项目名称</th>
                 <th>类型</th>
+                <th>具体任务需求</th>
                 <th className="num">工时</th>
                 <th className="num">金额（元）</th>
               </tr>
@@ -11017,9 +11001,9 @@ function ReportsView({
               ) : (
                 <tr key={task.id}>
                   <td>{String(index + 1).padStart(2, '0')}</td>
-                  <td>{monthLabelOf(taskSettlementMonth(task))}{isSupplementalTask(task) ? '（补录）' : ''}</td>
-                  <td className="receipt-task-name">{task.title}</td>
+                  <td className="receipt-task-name">{task.title}{isSupplementalTask(task) ? '（补录）' : ''}</td>
                   <td>{task.type}</td>
+                  <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
                   <td className="num">{task.actualHours.toFixed(1)}</td>
                   <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
                 </tr>
@@ -11042,9 +11026,9 @@ function ReportsView({
               ) : (
                 <tr>
                   <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
-                  <td>—</td>
                   <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
                   <td>导入</td>
+                  <td>—</td>
                   <td className="num">{selectedImportedHours.toFixed(1)}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
                 </tr>
@@ -11068,14 +11052,6 @@ function ReportsView({
             </tr>
           </tfoot>
         </table>
-
-
-        {receiptTemplate === 'formal' && (
-          <div className="receipt-formal-sign">
-            <span>设计师签字</span>
-            <span>甲方确认 / 盖章</span>
-          </div>
-        )}
 
         <div className="receipt-amount">
           <span>人民币（大写）</span>
@@ -11103,6 +11079,7 @@ function ReportsView({
                   <span className="receipt-uncounted-name">{item.title}</span>
                   <span className="receipt-uncounted-type">{item.type}</span>
                   <span className="receipt-uncounted-reason">{item.reason}</span>
+                  <span className="receipt-uncounted-formula">{item.formula}</span>
                 </li>
               ))}
             </ul>

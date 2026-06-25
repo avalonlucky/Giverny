@@ -16045,34 +16045,22 @@ textarea:focus-visible {
 /* 简约回单：参考小票排版（居中抬头、虚线分隔、左名右额），但不做成热敏小票。
    关键：透明底——让页面奶油色直接透出，不再套白色卡片框（用户多次强调「去底色」）。 */
 .receipt-template-min {
-  width: min(620px, 100%);
+  width: 100%;
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding: 26px 6px 20px;
+  padding: 22px 4px 18px;
 }
 
-.receipt-template-min .receipt-header {
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-}
-
-.receipt-template-min .receipt-brand {
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.receipt-template-min .receipt-no {
-  align-items: center;
+/* 抬头标题居中；全宽下不再换行 */
+.receipt-template-min .receipt-title {
   text-align: center;
 }
 
 .receipt-template-min .receipt-title h2 {
   letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 /* 分隔线一律改虚线 */
@@ -16082,21 +16070,6 @@ textarea:focus-visible {
   background: transparent;
   height: 0;
   margin: 14px 0;
-}
-
-/* 客户信息竖排成 label-value 行 */
-.receipt-template-min .receipt-info {
-  grid-template-columns: 1fr;
-  gap: 7px;
-}
-
-.receipt-template-min .receipt-info > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px dashed rgba(39, 54, 58, 0.16);
-  padding-bottom: 5px;
 }
 
 /* 任务表去边框、透明底，行间虚线，更接近小票排版 */
@@ -16126,8 +16099,9 @@ textarea:focus-visible {
   background: transparent;
 }
 
-/* 编辑式 Excel：保留近似表格的浅底，但去掉卡片外框与圆角阴影，扁平干净。 */
+/* 编辑式 Excel：全宽充分利用横向空间，去掉卡片外框与圆角阴影，扁平干净。 */
 .receipt-template-detail {
+  width: 100%;
   background: #fff;
   border: 0;
   border-radius: 0;
@@ -16136,18 +16110,27 @@ textarea:focus-visible {
 
 /* 编辑式：任务需求列限制高度，默认最多 3 行省略，鼠标悬停看全文（标题属性），行不再被撑高。 */
 .receipt-requirement-cell {
-  max-width: 360px;
   vertical-align: top;
+}
+
+/* 全宽下任务需求列尽量展示更多文字（约 5 行），超出省略，悬停看全文。 */
+.receipt-template-detail .receipt-requirement-cell {
+  min-width: 320px;
 }
 
 .receipt-requirement-cell span {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: help;
+}
+
+.receipt-template-min .receipt-requirement-cell span {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 /* 本月不计时板块：列出已完成但不计费的任务及原因，让甲方知道活干了。 */
@@ -16185,7 +16168,7 @@ textarea:focus-visible {
 
 .receipt-uncounted li {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) minmax(70px, 0.6fr) minmax(0, 2fr);
+  grid-template-columns: minmax(120px, 1.3fr) minmax(70px, 0.6fr) minmax(0, 2fr) minmax(120px, 0.9fr);
   gap: 12px;
   align-items: baseline;
   font-size: 13px;
@@ -16199,6 +16182,13 @@ textarea:focus-visible {
 
 .receipt-uncounted-reason {
   color: var(--color-text-secondary);
+}
+
+.receipt-uncounted-formula {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .receipt-template-min .receipt-task-name {
