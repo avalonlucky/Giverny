@@ -11174,7 +11174,7 @@ function SettingsView({
   const [testingAiRoute, setTestingAiRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
   const [aiCapabilityTab, setAiCapabilityTab] = useState<'text' | 'vision'>('text')
-  const [settingsTab, setSettingsTab] = useState<'business' | 'security' | 'system' | 'appearance'>('business')
+  const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'design' | 'security' | 'system'>('settlement')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
   const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteModelError, setAiRouteModelError] = useState<Partial<Record<AiModelRouteKey, string>>>({})
@@ -11497,10 +11497,26 @@ function SettingsView({
   return (
     <section className="settings-grid">
       <div className="settings-tabs view-mode-tabs">
-        <button type="button" className={settingsTab === 'business' ? 'active' : ''} onClick={() => setSettingsTab('business')}>
-          <Briefcase size={16} />
-          业务设置
+        <button type="button" className={settingsTab === 'appearance' ? 'active' : ''} onClick={() => setSettingsTab('appearance')}>
+          <Palette size={16} />
+          外观
         </button>
+        <button type="button" className={settingsTab === 'settlement' ? 'active' : ''} onClick={() => setSettingsTab('settlement')}>
+          <Briefcase size={16} />
+          结算设置
+        </button>
+        {role === 'admin' && (
+          <button type="button" className={settingsTab === 'ai' ? 'active' : ''} onClick={() => setSettingsTab('ai')}>
+            <Sparkles size={16} />
+            AI 模型设置
+          </button>
+        )}
+        {role === 'admin' && (
+          <button type="button" className={settingsTab === 'design' ? 'active' : ''} onClick={() => setSettingsTab('design')}>
+            <Tag size={16} />
+            设计类型
+          </button>
+        )}
         <button type="button" className={settingsTab === 'security' ? 'active' : ''} onClick={() => setSettingsTab('security')}>
           <ShieldCheck size={16} />
           权限安全
@@ -11509,13 +11525,9 @@ function SettingsView({
           <Settings size={16} />
           系统
         </button>
-        <button type="button" className={settingsTab === 'appearance' ? 'active' : ''} onClick={() => setSettingsTab('appearance')}>
-          <Palette size={16} />
-          外观
-        </button>
       </div>
       {settingsTab === 'appearance' && <GivernyModeSettings />}
-      {settingsTab === 'business' && (
+      {settingsTab === 'settlement' && (
         <div className="settings-group-body settings-tab-body">
           <section className="panel settings-settlement-panel">
             <div className="panel-header compact">
@@ -11572,7 +11584,10 @@ function SettingsView({
               </label>
             </div>
           </section>
-          {role === 'admin' && (
+        </div>
+      )}
+      {settingsTab === 'ai' && role === 'admin' && (
+        <div className="settings-group-body settings-tab-body">
             <section className="panel settings-ai-panel">
               <div className="panel-header compact">
                 <div>
@@ -11790,8 +11805,10 @@ function SettingsView({
                 </div>
               </details>
             </section>
-          )}
-          {role === 'admin' && (
+        </div>
+      )}
+      {settingsTab === 'design' && role === 'admin' && (
+        <div className="settings-group-body settings-tab-body">
             <section className="panel settings-design-panel">
               <div className="panel-header compact">
                 <div>
@@ -11927,7 +11944,6 @@ function SettingsView({
                 </div>
               )}
             </section>
-          )}
         </div>
       )}
 

@@ -12603,16 +12603,21 @@ textarea:focus-visible {
   width: 100%;
 }
 
-/* 设置页分类切换卡：复用 view-mode-tabs（无填充无描边、选中绿色加粗），下加分割线。 */
+/* 设置页分类切换卡：复用 view-mode-tabs（无填充无描边、选中绿色加粗），下加分割线，超宽可横向滑动。 */
 .settings-tabs {
+  display: flex;
+  flex-wrap: nowrap;
   width: 100%;
   gap: 4px;
   margin-bottom: 6px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--color-border-soft);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .settings-tabs button {
+  flex: 0 0 auto;
   height: 38px;
   padding: 0 14px;
   font-size: 14px;
