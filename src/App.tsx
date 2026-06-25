@@ -5387,6 +5387,8 @@ function App() {
               pdfTitle={pdfTitle}
               serviceCompanyName={serviceCompanyName}
               reports={reports}
+              files={fileItems}
+              attachmentAnalyses={attachmentAnalyses}
               onCopyShareLink={handleCopyShareLink}
               onRotateReportToken={handleRotateReportToken}
               onLockReport={handleLockMonthlyReport}
@@ -10598,6 +10600,8 @@ function ReportsView({
   pdfTitle,
   serviceCompanyName,
   reports,
+  files,
+  attachmentAnalyses,
   onCopyShareLink,
   onRotateReportToken,
   onLockReport,
@@ -10619,6 +10623,8 @@ function ReportsView({
   pdfTitle: string
   serviceCompanyName: string
   reports: ReportRecord[]
+  files: FileAsset[]
+  attachmentAnalyses: AttachmentAnalysis[]
   onCopyShareLink: (token: string) => void
   onRotateReportToken: (report: ReportRecord) => void
   onLockReport: () => void
@@ -10697,6 +10703,24 @@ function ReportsView({
     { value: 'min' as const, label: '简约' },
     { value: 'detail' as const, label: '编辑式 Excel' },
   ]
+  // 交付件理解：取该任务验收交付件的 AI 分析摘要，放进回单让甲方看到我们对成果的理解。
+  const analysisByAttachment = useMemo(
+    () => new Map(attachmentAnalyses.map((analysis) => [analysis.attachmentId, analysis])),
+    [attachmentAnalyses],
+  )
+  const getDeliveryUnderstanding = (task: Task): string => {
+    const acceptanceNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
+    const taskFiles = files.filter(
+      (file) => file.taskId === task.id && !file.deletedAt && (file.scope === 'acceptance' || acceptanceNames.has(file.name)),
+    )
+    for (const file of taskFiles) {
+      const summary = analysisByAttachment.get(file.id)?.summary?.trim()
+      if (summary) {
+        return summary
+      }
+    }
+    return ''
+  }
   const latestUpdatesByTask = useMemo(() => {
     const result = new Map<number, TaskUpdate>()
     selectedUpdates
@@ -10971,13 +10995,16 @@ function ReportsView({
                 <th className="num">单价</th>
                 <th className="num">小计</th>
                 <th>验收备注</th>
+                <th>交付件理解</th>
               </tr>
             ) : (
               <tr>
                 <th>序号</th>
                 <th>项目名称</th>
                 <th>类型</th>
+                <th>验收状态</th>
                 <th>具体任务需求</th>
+                <th>交付件理解</th>
                 <th className="num">工时</th>
                 <th className="num">金额（元）</th>
               </tr>
@@ -10997,13 +11024,16 @@ function ReportsView({
                   <td className="num">¥{hourlyRate}</td>
                   <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
                   <td>{task.acceptanceNote || '—'}</td>
+                  <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
                 </tr>
               ) : (
                 <tr key={task.id}>
                   <td>{String(index + 1).padStart(2, '0')}</td>
                   <td className="receipt-task-name">{task.title}{isSupplementalTask(task) ? '（补录）' : ''}</td>
                   <td>{task.type}</td>
+                  <td>{task.status}</td>
                   <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
+                  <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
                   <td className="num">{task.actualHours.toFixed(1)}</td>
                   <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
                 </tr>
@@ -11022,12 +11052,15 @@ function ReportsView({
                   <td className="num">¥{hourlyRate}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
                   <td>—</td>
+                  <td>—</td>
                 </tr>
               ) : (
                 <tr>
                   <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
                   <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
                   <td>导入</td>
+                  <td>—</td>
+                  <td>—</td>
                   <td>—</td>
                   <td className="num">{selectedImportedHours.toFixed(1)}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
@@ -11036,7 +11069,7 @@ function ReportsView({
             )}
             {billableTasks.length === 0 && selectedImportedHours === 0 && freeTasks.length === 0 && (
               <tr>
-                <td colSpan={receiptTemplate === 'detail' ? 10 : 6} className="receipt-empty">
+                <td colSpan={receiptTemplate === 'detail' ? 11 : 8} className="receipt-empty">
                   本月暂无任务
                 </td>
               </tr>
@@ -11044,11 +11077,16 @@ function ReportsView({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={receiptTemplate === 'detail' ? 6 : 4}>合计</td>
+              <td colSpan={6}>合计</td>
               <td className="num">{selectedStats.billableHours.toFixed(1)}</td>
               {receiptTemplate === 'detail' && <td />}
               <td className="num">¥{formatYuan(selectedStats.amount)}</td>
-              {receiptTemplate === 'detail' && <td />}
+              {receiptTemplate === 'detail' && (
+                <>
+                  <td />
+                  <td />
+                </>
+              )}
             </tr>
           </tfoot>
         </table>

@@ -16113,9 +16113,29 @@ textarea:focus-visible {
   vertical-align: top;
 }
 
-/* 全宽下任务需求列尽量展示更多文字（约 5 行），超出省略，悬停看全文。 */
+/* 全宽下任务需求列展示更多文字，超出省略，悬停看全文；交付件理解新增到最后一栏后，需求列稍收窄。 */
 .receipt-template-detail .receipt-requirement-cell {
-  min-width: 320px;
+  min-width: 220px;
+}
+
+/* 交付件理解列：与任务需求同样的限高省略 + 悬停看全文。 */
+.receipt-delivery-cell {
+  vertical-align: top;
+}
+
+.receipt-delivery-cell span {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+  color: var(--color-text-secondary);
+}
+
+.receipt-template-detail .receipt-delivery-cell {
+  min-width: 200px;
 }
 
 .receipt-requirement-cell span {
