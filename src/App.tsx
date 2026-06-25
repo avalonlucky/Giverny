@@ -11175,6 +11175,7 @@ function SettingsView({
   const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
   const [aiCapabilityTab, setAiCapabilityTab] = useState<'text' | 'vision'>('text')
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'design' | 'security' | 'system'>('settlement')
+  const [securityTab, setSecurityTab] = useState<'tokens' | 'account'>('tokens')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
   const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteModelError, setAiRouteModelError] = useState<Partial<Record<AiModelRouteKey, string>>>({})
@@ -11948,8 +11949,20 @@ function SettingsView({
       )}
 
       {settingsTab === 'security' && (
-        <div className="settings-group-body settings-security-body settings-tab-body">
+        <div className="settings-tab-body">
           {role === 'admin' && (
+            <div className="settings-tabs view-mode-tabs settings-subtabs">
+              <button type="button" className={securityTab === 'tokens' ? 'active' : ''} onClick={() => setSecurityTab('tokens')}>
+                <KeyRound size={15} />
+                口令管理
+              </button>
+              <button type="button" className={securityTab === 'account' ? 'active' : ''} onClick={() => setSecurityTab('account')}>
+                <UserCircle size={15} />
+                账号安全
+              </button>
+            </div>
+          )}
+          {role === 'admin' && securityTab === 'tokens' && (
             <section className="settings-subsection settings-permission-panel">
               <div className="panel-header compact">
                 <div>
@@ -12011,55 +12024,64 @@ function SettingsView({
               </div>
             </section>
           )}
-          <section className="settings-subsection settings-security-panel">
-            <div className="panel-header compact">
-              <div>
-                <h2>账号安全</h2>
-                <p>当前登录身份和退出操作</p>
+          {(role !== 'admin' || securityTab === 'account') && (
+            <section className="settings-subsection settings-security-panel">
+              <div className="panel-header compact">
+                <div>
+                  <h2>账号安全</h2>
+                  <p>当前登录身份和退出操作</p>
+                </div>
               </div>
-            </div>
-            <p className="settings-tool-note">当前身份：{role === 'admin' ? '管理员（最高权限）' : '访问口令用户'}；公共电脑用完请退出。</p>
-            {role === 'admin' && (
-              <div className="password-change-form">
-                <label className="field">
-                  <span>当前密码</span>
-                  <input
-                    type="password"
-                    value={currentPassword}
-                    placeholder="输入当前密码"
-                    onChange={(event) => setCurrentPassword(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>新密码</span>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    placeholder="至少 8 位"
-                    onChange={(event) => setNewPassword(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>确认新密码</span>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    placeholder="再次输入新密码"
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                  />
-                </label>
-                {passwordError && <p className="settings-inline-error">{passwordError}</p>}
-                <button className="ghost-button" onClick={() => void submitPasswordChange()} disabled={!currentPassword || !newPassword || !confirmPassword || isPasswordSaving}>
-                  <KeyRound size={16} />
-                  {isPasswordSaving ? '保存中…' : '修改密码'}
-                </button>
-              </div>
-            )}
-            <button className="danger-button" onClick={onSignOut}>
-              <LogOut size={17} />
-              退出登录
-            </button>
-          </section>
+              <p className="settings-tool-note">当前身份：{role === 'admin' ? '管理员（最高权限）' : '访问口令用户'}；公共电脑用完请退出。</p>
+              {role === 'admin' && (
+                <details className="settings-password-collapse">
+                  <summary>
+                    <KeyRound size={15} />
+                    <span>修改密码</span>
+                    <ChevronDown size={16} />
+                  </summary>
+                  <div className="password-change-form">
+                    <label className="field">
+                      <span>当前密码</span>
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        placeholder="输入当前密码"
+                        onChange={(event) => setCurrentPassword(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>新密码</span>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        placeholder="至少 8 位"
+                        onChange={(event) => setNewPassword(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>确认新密码</span>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        placeholder="再次输入新密码"
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                      />
+                    </label>
+                    {passwordError && <p className="settings-inline-error">{passwordError}</p>}
+                    <button className="ghost-button" onClick={() => void submitPasswordChange()} disabled={!currentPassword || !newPassword || !confirmPassword || isPasswordSaving}>
+                      <KeyRound size={16} />
+                      {isPasswordSaving ? '保存中…' : '修改密码'}
+                    </button>
+                  </div>
+                </details>
+              )}
+              <button className="danger-button" onClick={onSignOut}>
+                <LogOut size={17} />
+                退出登录
+              </button>
+            </section>
+          )}
         </div>
       )}
 

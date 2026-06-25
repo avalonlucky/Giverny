@@ -12627,6 +12627,59 @@ textarea:focus-visible {
   padding-top: 4px;
 }
 
+/* 二级切换卡（口令管理 / 账号安全）：比顶部 Tab 更轻，无下分割线。 */
+.settings-subtabs {
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: 16px;
+}
+
+.settings-subtabs button {
+  height: 34px;
+  font-size: 13px;
+}
+
+/* 修改密码：默认收起，点开才展开三段输入，账号安全区不再占地方。 */
+.settings-password-collapse {
+  margin: 12px 0;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.settings-password-collapse > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.settings-password-collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-password-collapse > summary > span {
+  flex: 1 1 auto;
+}
+
+.settings-password-collapse > summary svg:last-child {
+  color: var(--color-text-secondary);
+  transition: transform 0.18s ease;
+}
+
+.settings-password-collapse[open] > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.settings-password-collapse .password-change-form {
+  padding: 0 14px 14px;
+}
+
 /* Workers AI 卡：参考「税务估算参数」的展开样式——浅绿色块底、无描边、靠色块区分。 */
 .settings-workers-ai {
   margin-top: 14px;
