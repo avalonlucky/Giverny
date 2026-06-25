@@ -525,7 +525,21 @@ function formatDueDateCompact(value: string) {
 }
 
 function formatTimePart(value: string) {
-  return value.includes('T') ? value.slice(11, 16) : ''
+  const match = value.match(/(?:T|\s)(\d{2}:\d{2})/)
+  return match?.[1] ?? ''
+}
+
+function clockMinutes(value: string) {
+  const [hour, minute] = value.split(':').map(Number)
+  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : Number.NaN
+}
+
+function lateNightScore(clock: string) {
+  const minutes = clockMinutes(clock)
+  if (!Number.isFinite(minutes)) {
+    return Number.NaN
+  }
+  return minutes < 6 * 60 ? minutes + 24 * 60 : minutes
 }
 
 function formatTaskRowDateTime(value: string) {
@@ -9823,6 +9837,110 @@ function InsightsView({
     waitingHours > 0 ? '等待原因要写入等待记录，避免 AI 把甲方反馈等待误判为设计执行时间。' : '若后续出现甲方反馈停滞，及时补一条等待记录。',
     leadingType ? `把「${leadingType.label}」沉淀成报价和交付模板，下次同类任务直接复用。` : '先积累 3 条以上同类任务，再判断报价与排期模板。',
   ]
+  const reportUnit = period === 'week' ? '本周' : period === 'month' ? '本月' : '本期'
+  const periodTimeSegments = periodTasks.flatMap((task) => (task.timeEntries ?? [])
+    .map((entry) => {
+      const startDate = entry.date || datePart(task.date)
+      const endDate = entry.endDate || startDate
+      const startStamp = dateTimeMinuteStamp(startDate, entry.start)
+      const endStamp = dateTimeMinuteStamp(endDate, entry.end)
+      const score = lateNightScore(entry.end)
+      if (!Number.isFinite(startStamp) || !Number.isFinite(endStamp) || !Number.isFinite(score)) {
+        return null
+      }
+      return { task, entry, startDate, endDate, startStamp, endStamp, score }
+    })
+    .filter((item): item is {
+      task: Task
+      entry: TimeEntry
+      startDate: string
+      endDate: string
+      startStamp: number
+      endStamp: number
+      score: number
+    } => Boolean(item))
+    .filter((item) => isDateInRange(`${item.endDate}T${item.entry.end}`, range)))
+  const latestWorkMoment = periodTimeSegments
+    .slice()
+    .sort((a, b) => b.score - a.score || b.endStamp - a.endStamp)[0]
+  const eventMoments = [
+    ...periodTasks.map((task) => ({
+      kind: '新建任务',
+      label: task.title,
+      value: task.date,
+      detail: task.requester ? `需求人 ${task.requester}` : task.type,
+    })),
+    ...periodTimeSegments
+      .filter(({ entry }) => entry.isAcceptanceProgress)
+      .map(({ task, entry, endDate }) => ({
+        kind: '验收进展',
+        label: task.title,
+        value: `${endDate}T${entry.end}`,
+        detail: entry.note || '完成验收确认',
+      })),
+    ...periodFiles.map((file) => ({
+      kind: file.scope === 'acceptance' ? '上传验收附件' : '上传过程附件',
+      label: file.name,
+      value: file.uploadedAt,
+      detail: file.task,
+    })),
+  ]
+    .map((item) => {
+      const clock = formatTimePart(item.value)
+      const score = lateNightScore(clock)
+      return clock && Number.isFinite(score) && isDateInRange(item.value, range) ? { ...item, clock, score } : null
+    })
+    .filter((item): item is {
+      kind: string
+      label: string
+      value: string
+      detail: string
+      clock: string
+      score: number
+    } => Boolean(item))
+  const nightMoments = eventMoments
+    .filter((item) => {
+      const minutes = clockMinutes(item.clock)
+      return Number.isFinite(minutes) && (minutes >= 22 * 60 || minutes < 6 * 60)
+    })
+    .sort((a, b) => b.score - a.score || b.value.localeCompare(a.value))
+    .slice(0, 3)
+  const busiestTask = periodTasks
+    .slice()
+    .sort((a, b) => b.actualHours - a.actualHours)[0]
+  const reportStoryLines = [
+    periodTasks.length > 0
+      ? `${reportUnit}推进了 ${periodTasks.length} 个任务，完成 ${acceptedTasks.length} 个验收，沉淀 ${periodFiles.length} 个附件；计费工时 ${totalHours.toFixed(1)}h，预计收入 ¥${formatYuan(totalHours * hourlyRate)}。`
+      : `${reportUnit}还没有进入复盘范围的任务，建议先从新建任务、记录进展和上传附件开始沉淀数据。`,
+    leadingType
+      ? `工作重心集中在「${leadingType.label}」，占计费工时 ${Math.round((leadingType.value / Math.max(typeDistribution.total, 1)) * 100)}%，可以作为下一轮报价和模板复用的重点。`
+      : '当前还没有形成稳定的设计类型结构，先积累 3 条以上同类任务，再判断报价和排期基线。',
+    latestWorkMoment
+      ? `${reportUnit}最晚一次收工停在 ${formatMonthDay(latestWorkMoment.endDate)} ${latestWorkMoment.entry.end}，来自「${latestWorkMoment.task.title}」。`
+      : `${reportUnit}暂未记录可用于判断最晚收工的分段计时。`,
+  ]
+  const recapMoments = [
+    {
+      label: '最晚奋斗时间',
+      value: latestWorkMoment ? `${latestWorkMoment.entry.end}` : '暂无',
+      detail: latestWorkMoment ? `${formatMonthDay(latestWorkMoment.endDate)} · ${latestWorkMoment.task.title}` : '记录分段计时后自动生成',
+    },
+    {
+      label: '最吃工时任务',
+      value: busiestTask ? `${busiestTask.actualHours.toFixed(1)}h` : '暂无',
+      detail: busiestTask ? busiestTask.title : '暂无计费任务',
+    },
+    {
+      label: '深夜仍在线',
+      value: nightMoments.length > 0 ? `${nightMoments.length} 次` : '0 次',
+      detail: nightMoments[0] ? `${formatMonthDayTime(nightMoments[0].value)} · ${nightMoments[0].kind}` : '本期没有 22:00 后或 06:00 前的关键动作',
+    },
+  ]
+  const weeklyReportLines = [
+    `${reportUnit}主要完成：${acceptedTasks.length > 0 ? acceptedTasks.slice(0, 3).map((task) => `「${task.title}」`).join('、') : '继续推进任务记录和交付准备'}。`,
+    `投入情况：计费 ${totalHours.toFixed(1)}h，等待 ${waitingHours.toFixed(1)}h，${riskRows.length > 0 ? `有 ${riskRows.length} 条链路信号需要复核` : '暂无明显逾期、超时或附件缺口'}。`,
+    `下步计划：${riskRows.length > 0 ? '先处理异常信号，再锁定结算与验收附件' : leadingType ? `沉淀「${leadingType.label}」模板，继续保持分段计时和验收附件留存` : '继续积累同类任务样本，补齐进展与附件记录'}。`,
+  ]
   const projectDiagnosisRows = periodTasks
     .slice()
     .sort((a, b) => {
@@ -10038,10 +10156,34 @@ function InsightsView({
               </div>
               <article className="summary-report" aria-label="洞察总结报告">
                 <p className="summary-report-lead">
-                  {summaryReportHighlights[0]}
-                  {leadingType ? ` 本期最主要的工作集中在「${leadingType.label}」。` : ''}
-                  {riskRows.length > 0 ? ' 需要先完成异常任务复核，再进入结算确认。' : ' 当前可以继续沿用这套记录节奏。'}
+                  {reportStoryLines.join(' ')}
                 </p>
+                <section className="summary-report-weekly">
+                  <h3>可直接放进周报</h3>
+                  {weeklyReportLines.map((line, index) => (
+                    <p key={line}><strong>{index === 0 ? '完成' : index === 1 ? '投入' : '下步'}</strong>{line}</p>
+                  ))}
+                </section>
+                <dl className="summary-report-moments">
+                  {recapMoments.map((item) => (
+                    <div key={item.label}>
+                      <dt>{item.label}</dt>
+                      <dd>{item.value}</dd>
+                      <small>{item.detail}</small>
+                    </div>
+                  ))}
+                </dl>
+                {nightMoments.length > 0 && (
+                  <section className="summary-report-night">
+                    <h3>夜间小传记</h3>
+                    {nightMoments.map((item) => (
+                      <p key={`${item.kind}-${item.value}-${item.label}`}>
+                        <strong>{formatMonthDayTime(item.value)}</strong>
+                        <span>{item.kind} · {item.label}</span>
+                      </p>
+                    ))}
+                  </section>
+                )}
                 <dl className="summary-report-metrics">
                   {summaryReportStats.map(([label, value]) => (
                     <div key={label}>
@@ -10482,7 +10624,7 @@ function ReportsView({
   onLockReport: () => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
-  const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'excel' | 'detail' | 'formal'>('min')
+  const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail' | 'formal'>('min')
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const selectedMonth = selectedReportMonth || currentMonth.value
   const selectedMonthLabel = monthLabelOf(selectedMonth)
@@ -10515,12 +10657,41 @@ function ReportsView({
   const receiptDetailTasks = billableTasks
   const plannedCount = selectedTasks.filter((task) => task.status === '计划中').length
   const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
+  // 不计时清单：① 整单不计费的任务；② 计费任务里「不计工时」的分段（如仅改名）。两者都要让甲方看到做了什么、为何不计时。
+  const uncountedItems: Array<{ key: string; title: string; type: string; reason: string }> = []
+  freeTasks.forEach((task) => {
+    uncountedItems.push({
+      key: `task-${task.id}`,
+      title: task.title,
+      type: task.type,
+      reason: task.status === '挂起'
+        ? task.suspendReason || '挂起'
+        : task.status === '终止'
+          ? task.terminateReason || '终止'
+          : '整单不计费',
+    })
+  })
+  selectedTasks.forEach((task) => {
+    if (!isTaskBillable(task)) {
+      return
+    }
+    ;(task.timeEntries ?? []).forEach((entry) => {
+      if (entry.isAcceptanceProgress || minutesForTimeEntry(entry) > 0) {
+        return
+      }
+      uncountedItems.push({
+        key: `entry-${task.id}-${entry.id}`,
+        title: task.title,
+        type: task.type,
+        reason: entry.note?.trim() || '该分段不计工时',
+      })
+    })
+  })
   const visibleReports = isHistoryExpanded ? reports : reports.slice(0, Math.max(3, Math.min(reports.length, 5)))
   const receiptNo = `AK-${selectedMonth.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
   const templateOptions = [
     { value: 'min' as const, label: '简约' },
-    { value: 'excel' as const, label: '编辑式 · Excel' },
-    { value: 'detail' as const, label: '明细表' },
+    { value: 'detail' as const, label: '编辑式 Excel' },
     { value: 'formal' as const, label: '正式函' },
   ]
   const latestUpdatesByTask = useMemo(() => {
@@ -10625,12 +10796,10 @@ function ReportsView({
     })
     sheet.getRow(1).font = { bold: true }
     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
-    // 固定行高 + 不自动换行：长需求/进展默认不撑高表格，甲方双击单元格即可看全文。
-    sheet.eachRow((row, rowNumber) => {
-      row.alignment = { vertical: 'middle', wrapText: false }
-      if (rowNumber > 1) {
-        row.height = 22
-      }
+    // 「进展」列自动换行便于甲方阅读；「具体任务需求」列不换行（默认裁切，双击单元格看全文），
+    // 不设固定行高，由 Excel 按「进展」内容自动调整，避免长需求把每一行都撑得很高。
+    sheet.columns.forEach((col) => {
+      col.alignment = { vertical: 'top', wrapText: col.key === 'progress' }
     })
     const buffer = await workbook.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
@@ -10747,12 +10916,10 @@ function ReportsView({
       </div>
 
       <section className={`receipt receipt-template-${receiptTemplate}`} aria-label="月度结算回单" data-company={serviceCompanyName}>
-        {receiptTemplate === 'excel' && (
+        {receiptTemplate === 'detail' && (
           <div className="receipt-excel-bar">
-            <span />
-            <span />
-            <span />
-            结算回单_{selectedMonthLabel.replace(/\s/g, '')}.xlsx · 在线表格预览
+            <FileText size={14} />
+            <span>结算回单_{selectedMonthLabel.replace(/\s/g, '')}.xlsx</span>
           </div>
         )}
         <header className="receipt-header">
@@ -10924,26 +11091,18 @@ function ReportsView({
           <p>本回单由系统根据任务与工时记录自动生成，验收状态以甲方确认为准。</p>
         </div>
 
-        {freeTasks.length > 0 && (
+        {uncountedItems.length > 0 && (
           <div className="receipt-uncounted">
             <div className="receipt-uncounted-head">
               <h3>{selectedMonthLabel} · 不计时</h3>
               <span>已完成但不计入计费工时，仅作说明</span>
             </div>
             <ul>
-              {freeTasks.map((task) => (
-                <li key={task.id}>
-                  <span className="receipt-uncounted-name">{task.title}</span>
-                  <span className="receipt-uncounted-type">{task.type}</span>
-                  <span className="receipt-uncounted-reason">
-                    {task.status === '挂起'
-                      ? task.suspendReason || '挂起'
-                      : task.status === '终止'
-                        ? task.terminateReason || '终止'
-                        : task.requirement
-                          ? task.requirement.replace(/\s+/g, ' ').slice(0, 40)
-                          : '不计费协助'}
-                  </span>
+              {uncountedItems.map((item) => (
+                <li key={item.key}>
+                  <span className="receipt-uncounted-name">{item.title}</span>
+                  <span className="receipt-uncounted-type">{item.type}</span>
+                  <span className="receipt-uncounted-reason">{item.reason}</span>
                 </li>
               ))}
             </ul>

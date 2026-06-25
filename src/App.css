@@ -7894,9 +7894,9 @@ button.file-chip:focus-visible {
 }
 
 .report-summary-chips div {
-  padding: 13px;
-  border-radius: 8px;
-  background: #f2f4ee;
+  padding: 4px 0 11px;
+  background: transparent;
+  border-bottom: 1px solid var(--color-border-soft);
 }
 
 .report-summary-chips span {
@@ -7995,22 +7995,23 @@ button.file-chip:focus-visible {
   background: var(--color-surface-alt);
 }
 
+/* 「编辑式 Excel」清爽文件标签：去掉旧的仿窗口红绿灯圆点，改用图标 + 文件名。 */
 .receipt-excel-bar {
-  margin: 0 -42px 28px;
-  padding: 10px 14px;
-  background: var(--color-editorial-menu);
-  color: var(--color-surface);
-  display: flex;
+  width: fit-content;
+  margin: 0 0 16px;
+  padding: 7px 12px;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--color-primary) 10%, #fff);
+  color: var(--color-primary-strong);
+  display: inline-flex;
   align-items: center;
   gap: 7px;
   font-size: 12px;
+  font-weight: 700;
 }
 
 .receipt-excel-bar span {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  letter-spacing: 0.2px;
 }
 
 .receipt-template-detail {
@@ -16041,15 +16042,96 @@ textarea:focus-visible {
   width: min(1380px, 100%);
 }
 
-/* 简约 / 编辑式回单：去掉卡片式外框、米白底色与圆角阴影，纯白扁平更清爽（印章已移除）。 */
-.receipt-template-min,
+/* 简约回单：参考小票排版（居中抬头、虚线分隔、左名右额），但不做成热敏小票。
+   关键：透明底——让页面奶油色直接透出，不再套白色卡片框（用户多次强调「去底色」）。 */
+.receipt-template-min {
+  width: min(620px, 100%);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 26px 6px 20px;
+}
+
+.receipt-template-min .receipt-header {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.receipt-template-min .receipt-brand {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.receipt-template-min .receipt-no {
+  align-items: center;
+  text-align: center;
+}
+
+.receipt-template-min .receipt-title h2 {
+  letter-spacing: 1px;
+}
+
+/* 分隔线一律改虚线 */
+.receipt-template-min .receipt-rule {
+  border: 0;
+  border-top: 1.5px dashed rgba(39, 54, 58, 0.32);
+  background: transparent;
+  height: 0;
+  margin: 14px 0;
+}
+
+/* 客户信息竖排成 label-value 行 */
+.receipt-template-min .receipt-info {
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.receipt-template-min .receipt-info > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px dashed rgba(39, 54, 58, 0.16);
+  padding-bottom: 5px;
+}
+
+/* 任务表去边框、透明底，行间虚线，更接近小票排版 */
+.receipt-template-min .receipt-table,
+.receipt-template-min .receipt-table th,
+.receipt-template-min .receipt-table td {
+  border-color: transparent;
+  background: transparent;
+}
+
+.receipt-template-min .receipt-table thead th {
+  border-bottom: 1.5px dashed rgba(39, 54, 58, 0.32);
+}
+
+.receipt-template-min .receipt-table tbody tr td {
+  border-bottom: 1px dashed rgba(39, 54, 58, 0.14);
+}
+
+.receipt-template-min .receipt-table tfoot td {
+  border-top: 1.5px dashed rgba(39, 54, 58, 0.32);
+  font-weight: 800;
+}
+
+.receipt-template-min .receipt-amount,
+.receipt-template-min .receipt-remarks,
+.receipt-template-min .receipt-uncounted {
+  background: transparent;
+}
+
+/* 编辑式 Excel：保留近似表格的浅底，但去掉卡片外框与圆角阴影，扁平干净。 */
 .receipt-template-detail {
   background: #fff;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding-left: 0;
-  padding-right: 0;
 }
 
 /* 编辑式：任务需求列限制高度，默认最多 3 行省略，鼠标悬停看全文（标题属性），行不再被撑高。 */
@@ -16570,6 +16652,96 @@ button.topbar-create-button kbd {
   line-height: 1.75;
 }
 
+.summary-report-weekly {
+  max-width: 860px;
+  padding-top: 4px;
+}
+
+.summary-report-weekly p {
+  margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.summary-report-weekly strong {
+  display: inline-block;
+  min-width: 42px;
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.summary-report-moments {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.summary-report-moments div {
+  min-width: 0;
+  padding: 18px 18px 18px 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.summary-report-moments div:last-child {
+  border-right: 0;
+}
+
+.summary-report-moments dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.summary-report-moments dd {
+  margin: 7px 0 0;
+  color: var(--color-text);
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.summary-report-moments small {
+  display: block;
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-report-night {
+  max-width: 860px;
+}
+
+.summary-report-night p {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 18px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.summary-report-night strong {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.summary-report-night span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .summary-report-metrics {
   margin: 0;
   display: grid;
@@ -16675,6 +16847,26 @@ button.topbar-create-button kbd {
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .summary-report-moments,
+  .summary-report-metrics,
+  .summary-report-grid,
+  .summary-report-night p {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-report-moments div,
+  .summary-report-metrics div {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .summary-report-moments div:last-child,
+  .summary-report-metrics div:last-child {
+    border-bottom: 0;
+  }
 }
 
 .review-grid {
