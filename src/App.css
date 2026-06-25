@@ -16041,6 +16041,63 @@ textarea:focus-visible {
   width: min(1380px, 100%);
 }
 
+/* 简约 / 编辑式回单：去掉米白卡片底色，纯白更清爽（印章已在结构上移除）。 */
+.receipt-template-min,
+.receipt-template-detail {
+  background: #fff;
+}
+
+/* 本月不计时板块：列出已完成但不计费的任务及原因，让甲方知道活干了。 */
+.receipt-uncounted {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(39, 54, 58, 0.18);
+}
+
+.receipt-uncounted-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.receipt-uncounted-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.receipt-uncounted-head span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.receipt-uncounted ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.receipt-uncounted li {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) minmax(70px, 0.6fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.receipt-uncounted-type {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.receipt-uncounted-reason {
+  color: var(--color-text-secondary);
+}
+
 .receipt-template-min .receipt-task-name {
   max-width: 360px;
   overflow: hidden;

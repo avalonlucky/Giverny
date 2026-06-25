@@ -10530,16 +10530,6 @@ function ReportsView({
     }
     return '—'
   }
-  const getTaskStage = (task: Task) => task.stage || (task.status === '已验收' ? '完成' : task.status)
-  const getTaskRisk = (task: Task) => {
-    if (task.status === '挂起') {
-      return task.suspendReason || '挂起，原因未记录'
-    }
-    if (task.status === '终止') {
-      return task.terminateReason || '终止，原因未记录'
-    }
-    return '无'
-  }
   const getTaskProgressText = (task: Task) => {
     const latestUpdate = latestUpdatesByTask.get(task.id)
     const parts: string[] = []
@@ -10594,14 +10584,12 @@ function ReportsView({
       { header: '项目/任务名称', key: 'title', width: 34 },
       { header: '具体任务需求', key: 'requirement', width: 46 },
       { header: '需求人', key: 'requester', width: 14 },
-      { header: '工作阶段', key: 'stage', width: 14 },
       { header: '参考预估工时', key: 'estimatedHours', width: 14 },
       { header: '实际工时', key: 'actualHours', width: 12 },
       { header: '参考交付日期', key: 'estimatedDate', width: 16 },
       { header: '实际交付日期', key: 'actualDeliveryDate', width: 16 },
       { header: '状态', key: 'status', width: 12 },
       { header: '验收人/确认', key: 'reviewer', width: 14 },
-      { header: '风险/阻塞', key: 'risk', width: 24 },
       { header: '进展', key: 'progress', width: 52 },
     ]
     targetTasks.forEach((task) => {
@@ -10612,14 +10600,12 @@ function ReportsView({
         title: task.title,
         requirement: task.requirement || '',
         requester: task.requester || task.contact || '',
-        stage: getTaskStage(task),
         estimatedHours: task.estimatedHours,
         actualHours: task.actualHours,
         estimatedDate: formatReceiptDate(task.estimatedDate),
         actualDeliveryDate: task.status === '已验收' ? formatReceiptDate(latestUpdate?.date ?? '') : '',
         status: task.status,
         reviewer: task.reviewer || task.requester || '',
-        risk: getTaskRisk(task),
         progress: getTaskProgressText(task),
       })
     })
@@ -10631,8 +10617,12 @@ function ReportsView({
     })
     sheet.getRow(1).font = { bold: true }
     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
-    sheet.eachRow((row) => {
-      row.alignment = { vertical: 'top', wrapText: true }
+    // 固定行高 + 不自动换行：长需求/进展默认不撑高表格，甲方双击单元格即可看全文。
+    sheet.eachRow((row, rowNumber) => {
+      row.alignment = { vertical: 'middle', wrapText: false }
+      if (rowNumber > 1) {
+        row.height = 22
+      }
     })
     const buffer = await workbook.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
@@ -10942,15 +10932,12 @@ function ReportsView({
                   <th>项目/任务名称</th>
                   <th>具体任务需求</th>
                   <th>需求人</th>
-                  <th>工作阶段</th>
                   <th className="num">参考预估工时</th>
                   <th className="num">实际工时</th>
                   <th>参考交付日期</th>
                   <th>实际交付日期</th>
-                  <th>修改轮次上限</th>
                   <th>状态</th>
                   <th>验收人/确认</th>
-                  <th>风险/阻塞</th>
                   <th>进展</th>
                 </tr>
               </thead>
@@ -10963,21 +10950,18 @@ function ReportsView({
                     <td>{task.title}</td>
                     <td>{task.requirement || '—'}</td>
                     <td>{task.requester || task.contact || '—'}</td>
-                    <td>{getTaskStage(task)}</td>
                     <td className="num">{formatReceiptHours(task.estimatedHours)}</td>
                     <td className="num">{formatReceiptHours(task.actualHours)}</td>
                     <td>{formatReceiptDate(task.estimatedDate)}</td>
                     <td>{getActualDeliveryDate(task)}</td>
-                    <td>—</td>
                     <td>{task.status}</td>
                     <td>{task.reviewer || task.requester || '—'}</td>
-                    <td>{getTaskRisk(task)}</td>
                     <td>{getTaskProgressText(task)}</td>
                   </tr>
                 ))}
                 {receiptDetailTasks.length === 0 && (
                   <tr>
-                    <td colSpan={16} className="receipt-empty">
+                    <td colSpan={13} className="receipt-empty">
                       本月暂无可纳入结算明细的任务
                     </td>
                   </tr>
@@ -10985,10 +10969,10 @@ function ReportsView({
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={7}>合计</td>
+                  <td colSpan={6}>合计</td>
                   <td className="num">—</td>
                   <td className="num">{receiptDetailTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1)}</td>
-                  <td colSpan={7}>计费金额以已验收/计费任务摘要为准</td>
+                  <td colSpan={5}>计费金额以已验收/计费任务摘要为准</td>
                 </tr>
               </tfoot>
             </table>
@@ -11015,12 +10999,33 @@ function ReportsView({
             {freeTasks.length > 0 ? `，另含 ${freeTasks.length} 项不计费协助` : ''}。
           </p>
           <p>本回单由系统根据任务与工时记录自动生成，验收状态以甲方确认为准。</p>
-          <div className="receipt-stamp" aria-hidden="true">
-            <span>{serviceCompanyName}</span>
-            <em>★</em>
-            <span>工时结算确认</span>
-          </div>
         </div>
+
+        {freeTasks.length > 0 && (
+          <div className="receipt-uncounted">
+            <div className="receipt-uncounted-head">
+              <h3>{selectedMonthLabel} · 不计时</h3>
+              <span>已完成但不计入计费工时，仅作说明</span>
+            </div>
+            <ul>
+              {freeTasks.map((task) => (
+                <li key={task.id}>
+                  <span className="receipt-uncounted-name">{task.title}</span>
+                  <span className="receipt-uncounted-type">{task.type}</span>
+                  <span className="receipt-uncounted-reason">
+                    {task.status === '挂起'
+                      ? task.suspendReason || '挂起'
+                      : task.status === '终止'
+                        ? task.terminateReason || '终止'
+                        : task.requirement
+                          ? task.requirement.replace(/\s+/g, ' ').slice(0, 40)
+                          : '不计费协助'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="receipt-cutline">
           <span>✂</span>
