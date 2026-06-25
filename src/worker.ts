@@ -3698,7 +3698,58 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
   }
   const systemPrompt =
     '你是设计任务进度评估助手。请只依据「进展记录」(progressEntries，按时间从新到旧或从旧到新均可，每条是一段工作记录文字) 估算这条任务的整体完成度，输出 0-100 的整数且必须是 10 的倍数。\n\n判断依据(按权重从高到低)：\n1. 进展记录的语义：出现「初稿完成/第一版完成/已完成第一版」约 50-60；之后每完成一轮甲方反馈修改再加 10-20；出现「定稿/终稿/最终版/已上传最终文件/准备验收/待验收」约 85-95；出现「验收通过/已验收」为 100。\n2. 任务状态 status：计划中通常 0，但若已有实质进展记录则按记录推断（不要因为状态是计划中就判 0）；进行中按记录推断；待验收≥85。\n3. 修改轮次越多、且最近的记录越接近定稿，完成度越高；只有零星几条早期记录则给中低值。\n\n不要参考预计开始/预计工时/预计交付等计划时间——它们权重极低、常不准，本输入也不提供。\n请给出一个 progress 整数和一句简短中文理由。'
-  const parsed = await callTextFallbackJson<{ progress?: number; reason?: string }>(env, systemPrompt, payload, 'progress:number(0-100,10的倍数), reason:string')
+  let parsed: { progress?: number; reason?: string } | null = null
+  if (env.DEEPSEEK_API_KEY) {
+    const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+    const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
+    const toolName = 'report_task_progress'
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.1,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: JSON.stringify(payload) },
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              description: '返回任务整体完成度',
+              parameters: {
+                type: 'object',
+                properties: {
+                  progress: { type: 'integer', description: '整体完成度 0-100，必须是 10 的倍数' },
+                  reason: { type: 'string', description: '一句简短中文理由' },
+                },
+                required: ['progress', 'reason'],
+              },
+            },
+          },
+        ],
+        tool_choice: { type: 'function', function: { name: toolName } },
+      }),
+    })
+    if (response.ok) {
+      const data = (await response.json().catch(() => null)) as {
+        choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>
+      } | null
+      const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments
+      if (args) {
+        try {
+          parsed = JSON.parse(args)
+        } catch {
+          parsed = null
+        }
+      }
+    }
+  }
+  if (!parsed) {
+    parsed = await callTextFallbackJson<{ progress?: number; reason?: string }>(env, systemPrompt, payload, 'progress:number(0-100,10的倍数), reason:string')
+  }
   if (!parsed || typeof parsed.progress !== 'number' || Number.isNaN(parsed.progress)) {
     return fail('AI 进度评估暂时不可用', 503)
   }

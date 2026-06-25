@@ -7100,6 +7100,9 @@ function TaskProgressModal({
         waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
         segmentMinutes: Math.max(1, minutesForTimeEntry(entryDraft)),
         scheduleAnchor: 'hours' as ScheduleAnchor,
+        feedbackRating: (task.feedbackRating ?? '') as TaskFeedbackRating | '',
+        feedbackTags: (task.feedbackTags ?? []) as TaskFeedbackTag[],
+        feedbackNote: task.feedbackNote ?? '',
       })
       return {
         ...cachedDraft,
@@ -7111,7 +7114,7 @@ function TaskProgressModal({
           : 'hours',
       }
     },
-    [editingEntry, initialAcceptanceFlag, isWaitingMode, progressDraftKey, task.acceptanceNote, task.timeEntries, task.waitingEntries],
+    [editingEntry, initialAcceptanceFlag, isWaitingMode, progressDraftKey, task.acceptanceNote, task.feedbackNote, task.feedbackRating, task.feedbackTags, task.timeEntries, task.waitingEntries],
   )
   const [note, setNote] = useState(initialProgressDraft.note)
   const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
@@ -7158,9 +7161,9 @@ function TaskProgressModal({
   // 关 = 只是把任务分阶段提交，不算改稿。仅用于画像/AI 分析，不影响计时与结算。
   const [isRevisionRound, setIsRevisionRound] = useState(Boolean(editingEntry?.isRevision))
   const [isAcceptanceBaseExpanded, setIsAcceptanceBaseExpanded] = useState(false)
-  const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(task.feedbackRating ?? '')
-  const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(task.feedbackTags ?? [])
-  const [feedbackNote, setFeedbackNote] = useState(task.feedbackNote ?? '')
+  const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialProgressDraft.feedbackRating ?? '')
+  const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialProgressDraft.feedbackTags ?? [])
+  const [feedbackNote, setFeedbackNote] = useState(initialProgressDraft.feedbackNote ?? '')
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
@@ -7238,8 +7241,11 @@ function TaskProgressModal({
       waitingEntries: draftWaitingEntries,
       segmentMinutes,
       scheduleAnchor: scheduleDerivedField,
+      feedbackRating,
+      feedbackTags,
+      feedbackNote,
     })
-  }, [draftTimeEntries, draftWaitingEntries, note, progressDraftKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
+  }, [draftTimeEntries, draftWaitingEntries, feedbackNote, feedbackRating, feedbackTags, note, progressDraftKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
 
   useEffect(() => {
     progressAttachmentDraftCache.set(progressDraftKey, pendingAttachments)
@@ -8981,7 +8987,16 @@ function FilesView({
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
   onRetryAnalysis: (attachmentId: number) => Promise<void>
 }) {
-  const acceptanceFiles = useMemo(() => files.filter((file) => file.scope === 'acceptance'), [files])
+  // 仅展示「已验收」任务的验收文件——未验收任务（进行中/待验收）即便预上传了验收稿也不显示，
+  // 避免「还没验收却出现验收文件」。任务回到待验收（撤回验收）时也会自动隐藏。
+  const acceptedTaskIds = useMemo(
+    () => new Set(tasks.filter((task) => task.status === '已验收').map((task) => task.id)),
+    [tasks],
+  )
+  const acceptanceFiles = useMemo(
+    () => files.filter((file) => file.scope === 'acceptance' && acceptedTaskIds.has(file.taskId)),
+    [files, acceptedTaskIds],
+  )
   const analysisByAttachment = useMemo(
     () => new Map(attachmentAnalyses.map((analysis) => [analysis.attachmentId, analysis])),
     [attachmentAnalyses],
@@ -9207,7 +9222,7 @@ function FilesView({
                     <p>{file.size} · {file.uploadedAt.slice(0, 10)}</p>
                     <div className="file-thumb-tags">
                       <span>验收文件</span>
-                      {parseFileTags(file.tag).slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}
+                      {parseFileTags(file.tag).filter((tag) => tag !== '验收文件').slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}
                     </div>
                   </div>
                 </article>
