@@ -150,22 +150,22 @@
   --brand-glow-soft: rgba(107, 138, 110, 0.06);
 }
 :root[data-giverny="on"][data-season="summer"] {
-  --brand-primary: #3e7c63;        /* 夏 · 睡莲盛放：更饱满清透的睡莲绿（比旧版亮、更"活"）*/
-  --brand-primary-strong: #2f5f4c;
-  --brand-glow: rgba(62, 124, 99, 0.12);
-  --brand-glow-soft: rgba(62, 124, 99, 0.06);
+  --brand-primary: #5b8a7e;        /* 夏 · 睡莲盛放：柔和的海沫青绿（与春同档低饱和，更偏蓝绿）*/
+  --brand-primary-strong: #466e63;
+  --brand-glow: rgba(91, 138, 126, 0.12);
+  --brand-glow-soft: rgba(91, 138, 126, 0.06);
 }
 :root[data-giverny="on"][data-season="autumn"] {
-  --brand-primary: #c2724b;        /* 秋 · 暮光暖陶：参考 Claude 网页的干净陶土/珊瑚色 */
-  --brand-primary-strong: #a45a36;
-  --brand-glow: rgba(194, 114, 75, 0.12);
-  --brand-glow-soft: rgba(194, 114, 75, 0.06);
+  --brand-primary: #ad8a78;        /* 秋 · 暮光暖陶：Claude 那种柔和陶土（低饱和，绝不刺眼）*/
+  --brand-primary-strong: #8f6d5b;
+  --brand-glow: rgba(173, 138, 120, 0.12);
+  --brand-glow-soft: rgba(173, 138, 120, 0.06);
 }
 :root[data-giverny="on"][data-season="winter"] {
-  --brand-primary: #54808f;        /* 冬 · 冷静水蓝：更清透、去掉旧版的灰浊 */
-  --brand-primary-strong: #3f6573;
-  --brand-glow: rgba(84, 128, 143, 0.12);
-  --brand-glow-soft: rgba(84, 128, 143, 0.06);
+  --brand-primary: #6d8896;        /* 冬 · 冷静水蓝：柔和的雾霭蓝（与春同档低饱和）*/
+  --brand-primary-strong: #556d7a;
+  --brand-glow: rgba(109, 136, 150, 0.12);
+  --brand-glow-soft: rgba(109, 136, 150, 0.06);
 }
 
 /* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
