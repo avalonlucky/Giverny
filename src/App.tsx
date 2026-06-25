@@ -8134,6 +8134,11 @@ function TaskProgressModal({
                 <div className="ai-suggestion-panel task-text-ai-panel">
                   <div className="ai-suggestion-head">
                     <span>{isProgressAiLoading ? (isAcceptanceMode ? 'AI 正在整理验收备注' : 'AI 正在整理进展') : 'AI 建议'}</span>
+                    {!isProgressAiLoading && (progressAiSuggestion || progressAiError) && (
+                      <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setProgressAiSuggestion(null); setProgressAiError('') }}>
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
                   {isProgressAiLoading && <p>{isAcceptanceMode ? '正在结合任务需求、已上传文件和当前备注优化文案...' : '正在结合当前输入、任务附件和最近进展优化文案...'}</p>}
                   {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
@@ -12892,6 +12897,11 @@ function NewTaskModal({
               <div className="ai-suggestion-head">
                 <span>{isAiLoading ? 'AI 正在整理需求' : 'AI 建议'}</span>
                 {aiSuggestion && <em>{aiSuggestion.suggestedType}</em>}
+                {!isAiLoading && (aiSuggestion || aiError) && (
+                  <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setAiSuggestion(null); setAiError('') }}>
+                    <X size={14} />
+                  </button>
+                )}
               </div>
               {isAiLoading && <p>正在优化文案并匹配设计类型...</p>}
               {aiError && <p className="ai-suggestion-error">{aiError}</p>}
@@ -13037,15 +13047,22 @@ function NewTaskModal({
                 <strong>工时建议</strong>
                 <span>基于同类型历史任务、实际工时和验收备注分析</span>
               </div>
-              <button
-                type="button"
-                className="ghost-button compact-button"
-                onClick={() => void requestHourSuggestion()}
-                disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
-              >
-                <Sparkles size={14} />
-                {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
-              </button>
+              <div className="hour-estimate-head-actions">
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={() => void requestHourSuggestion()}
+                  disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
+                >
+                  <Sparkles size={14} />
+                  {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
+                </button>
+                {!isHourSuggestionLoading && (hourSuggestion || hourSuggestionError) && (
+                  <button type="button" className="ai-suggestion-dismiss" aria-label="关闭工时建议" title="关闭工时建议" onClick={() => { setHourSuggestion(null); setHourSuggestionError('') }}>
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
             </div>
             {isHourSuggestionLoading && <p>正在读取历史任务并生成工时建议...</p>}
             {hourSuggestionError && <p className="ai-suggestion-error">{hourSuggestionError}</p>}

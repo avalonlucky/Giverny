@@ -532,23 +532,24 @@ button {
   color: var(--color-text);
 }
 
-/* 新建任务：极简描边胶囊，去掉厚重实心深绿，融入整体极简风 */
+/* 新建任务：极简文字按钮，无描边框；悬停只淡淡填充 + 字变粗（参照「显示作废」） */
 button.topbar-create-button {
   min-width: auto;
-  min-height: 38px;
-  padding: 0 16px;
-  color: var(--color-primary);
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--color-text-secondary);
   background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 8px;
   font-weight: 600;
   box-shadow: none;
+  transition: color 0.16s ease, background 0.16s ease;
 }
 
 button.topbar-create-button:hover {
-  color: var(--color-primary-strong);
-  background: var(--brand-glow);
-  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--brand-glow-soft);
+  font-weight: 700;
   box-shadow: none;
 }
 
@@ -4620,6 +4621,9 @@ button.topbar-create-button:hover {
 .view-toolbar {
   padding-bottom: 14px;
   border: 0;
+  /* 保留工具条与列表之间的这一条分割线（其余多余的框已去掉） */
+  border-bottom: 1px solid var(--color-border-soft);
+  border-radius: 0;
   background: transparent;
 }
 
@@ -5201,7 +5205,7 @@ button.topbar-create-button:hover {
 .brief-upload-box {
   width: 100%;
   min-height: 76px;
-  border: 1px dashed var(--color-border);
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--color-text-muted);
   background: var(--color-surface-alt);
@@ -9284,6 +9288,34 @@ button.file-chip:focus-visible {
   color: #4c5a5f;
   font-size: 13px;
   font-weight: 800;
+}
+
+/* AI 建议的轻量关闭按钮（不采纳也能关掉） */
+.ai-suggestion-dismiss {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease;
+}
+
+.ai-suggestion-dismiss:hover {
+  color: var(--color-text);
+  background: var(--brand-glow-soft);
+}
+
+.hour-estimate-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .ai-suggestion-head em {
