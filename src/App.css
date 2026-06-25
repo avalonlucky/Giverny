@@ -12245,6 +12245,12 @@ textarea:focus-visible {
   gap: 12px;
 }
 
+.login-turnstile {
+  display: flex;
+  justify-content: center;
+  min-height: 4px;
+}
+
 .read-only-settings-panel {
   max-width: 680px;
   display: grid;

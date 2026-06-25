@@ -4403,9 +4403,9 @@ function App() {
     notify('备份已导出到下载目录')
   }
 
-  const handleUnlock = async (email: string, key: string) => {
+  const handleUnlock = async (email: string, key: string, turnstileToken?: string) => {
     try {
-      const result = await api.login(email, key)
+      const result = await api.login(email, key, turnstileToken)
       const credentials = { email, key, role: result.role }
       setStoredAuth(credentials)
       setAuthError('')
@@ -5956,6 +5956,9 @@ function GivernyModeSettings() {
   )
 }
 
+// Cloudflare Turnstile 站点密钥（公开，可放前端）；密钥(secret)只在 Worker 后端环境变量里。
+const TURNSTILE_SITE_KEY = '0x4AAAAAADq6J7chw6N3buxI'
+
 function AdminLoginModal({
   error,
   onClose,
@@ -5963,11 +5966,43 @@ function AdminLoginModal({
 }: {
   error: string
   onClose: () => void
-  onSubmit: (email: string, key: string) => void
+  onSubmit: (email: string, key: string, turnstileToken?: string) => void
 }) {
   const [email, setEmail] = useState('')
   const [key, setKey] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState('')
+  const turnstileRef = useRef<HTMLDivElement | null>(null)
+  const turnstileWidgetId = useRef<string | null>(null)
+
+  // 渲染 Cloudflare Turnstile 人机验证小组件，拿到 token 后才允许登录
+  useEffect(() => {
+    let cancelled = false
+    let timer: number | undefined
+    const renderWidget = () => {
+      const ts = (window as unknown as { turnstile?: { render: (el: HTMLElement, opts: Record<string, unknown>) => string; reset: (id: string) => void } }).turnstile
+      if (cancelled || !ts || !turnstileRef.current || turnstileWidgetId.current) {
+        return
+      }
+      turnstileWidgetId.current = ts.render(turnstileRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token: string) => setTurnstileToken(token),
+        'error-callback': () => setTurnstileToken(''),
+        'expired-callback': () => setTurnstileToken(''),
+      })
+    }
+    if ((window as unknown as { turnstile?: unknown }).turnstile) {
+      renderWidget()
+    } else {
+      timer = window.setInterval(() => {
+        if ((window as unknown as { turnstile?: unknown }).turnstile) {
+          window.clearInterval(timer)
+          renderWidget()
+        }
+      }, 200)
+    }
+    return () => { cancelled = true; if (timer) window.clearInterval(timer) }
+  }, [])
 
   const submit = async () => {
     if (!key.trim() || isSubmitting) {
@@ -5975,7 +6010,13 @@ function AdminLoginModal({
     }
     setIsSubmitting(true)
     try {
-      await onSubmit(email.trim(), key.trim())
+      await onSubmit(email.trim(), key.trim(), turnstileToken)
+      // 重置验证码：token 一次性，失败重试需要新 token（成功则弹窗已关闭，无影响）
+      const ts = (window as unknown as { turnstile?: { reset: (id: string) => void } }).turnstile
+      if (ts && turnstileWidgetId.current) {
+        ts.reset(turnstileWidgetId.current)
+        setTurnstileToken('')
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -6019,11 +6060,12 @@ function AdminLoginModal({
             }}
           />
         </label>
+        <div ref={turnstileRef} className="login-turnstile" />
         {error && <p className="lock-error">{error}</p>}
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" onClick={() => void submit()} disabled={!key.trim() || isSubmitting}>
+        <button className="primary-button" onClick={() => void submit()} disabled={!key.trim() || !turnstileToken || isSubmitting} title={!turnstileToken ? '请先完成人机验证' : undefined}>
           {isSubmitting ? '正在进入…' : '进入工作台'}
         </button>
       </footer>

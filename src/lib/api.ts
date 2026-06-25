@@ -291,13 +291,13 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, with
 }
 
 export const api = {
-  login: (email: string, key: string) =>
+  login: (email: string, key: string, turnstileToken?: string) =>
     requestJson<{ role: AuthRole }>(
       '/api/auth/login',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, key }),
+        body: JSON.stringify({ email, key, turnstileToken }),
       },
       false,
     ),

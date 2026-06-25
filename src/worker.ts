@@ -50,6 +50,7 @@ type Env = {
   AI_SETTINGS_SECRET?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
+  TURNSTILE_SECRET_KEY?: string
 }
 
 type WorkerExecutionContext = {
@@ -2603,6 +2604,30 @@ async function clearLoginFailures(env: Env, ip: string) {
   await env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run()
 }
 
+// Cloudflare Turnstile 人机验证：校验前端提交的 token，挡住自动化机器人的登录尝试。
+// 未配置 TURNSTILE_SECRET_KEY 时跳过（不阻断），便于环境缺失时仍可登录。
+async function verifyTurnstile(env: Env, token: string, ip: string): Promise<boolean> {
+  if (!env.TURNSTILE_SECRET_KEY) {
+    return true
+  }
+  if (!token) {
+    return false
+  }
+  try {
+    const form = new FormData()
+    form.set('secret', env.TURNSTILE_SECRET_KEY)
+    form.set('response', token)
+    if (ip && ip !== 'unknown') {
+      form.set('remoteip', ip)
+    }
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form })
+    const data = (await resp.json().catch(() => null)) as { success?: boolean } | null
+    return Boolean(data?.success)
+  } catch {
+    return false
+  }
+}
+
 async function login(env: Env, request: Request) {
   const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown'
   const guard = await loginRateGuard(env, ip)
@@ -2610,7 +2635,12 @@ async function login(env: Env, request: Request) {
     await audit(env, 'login_blocked', 'auth', ip, { retryAfterSec: guard.retryAfterSec })
     return fail(`登录尝试过于频繁，请约 ${Math.ceil(guard.retryAfterSec / 60)} 分钟后再试`, 429)
   }
-  const body = (await request.json().catch(() => ({}))) as { email?: string; key?: string }
+  const body = (await request.json().catch(() => ({}))) as { email?: string; key?: string; turnstileToken?: string }
+  // 人机验证不通过直接挡掉（不计入失败次数，避免验证码问题误锁正常用户）
+  if (!(await verifyTurnstile(env, String(body.turnstileToken ?? ''), ip))) {
+    await audit(env, 'login_captcha_failed', 'auth', ip, { email: body.email ?? '' })
+    return fail('人机验证未通过，请刷新验证后重试', 403)
+  }
   const role = await resolveRole(env, body.key ?? '', body.email ?? '')
   if (!role) {
     const locked = await registerLoginFailure(env, ip)
