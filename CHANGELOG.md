@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-25 · v0.13.2（网关/直连一键切换 + Workers AI 说明 + 按钮轻量化）
+
+### 设置 · AI 模型
+- **修复**：「获取模型」后的候选改用原生下拉 `<select>`（替换 datalist），并给模型输入框加 `autocomplete=off`，修复下拉被浏览器密码自动填充弹窗遮挡导致无法选择的问题。
+- **Base URL 一键「改走网关 / 改为直连」**：网关支持的供应商（DeepSeek / Gemini / OpenAI / OpenRouter / Anthropic）可在「AI Gateway 路径」与「官方直连地址」间一键互换，配合「测试」按钮分别验证哪种可用；底部实时标注当前走网关还是直连。
+- **Workers AI 说明卡**：介绍 Cloudflare 自带模型（Llama / Qwen / Flux 文生图 / Whisper / Embedding）、Neurons 计费（$0.011/1000 Neurons、每天免费 1 万 Neurons），规划为「DeepSeek/Gemini → Kimi → Workers AI」的终极兜底与未来全量迁移。
+
+### UI · 按钮轻量化
+- 新增轻量主按钮样式，应用于「保存 AI 设置 / 添加大类 / 申请口令」，从实心重彩改为淡色描边 + 极浅底，贴合全站极简调性。
+- 设计类型大类的删除、添加子类按钮去掉外框与底色，只留图标/文字，hover 才显意图。
+
 ## 2026-06-25 · v0.13.1（AI 模型设置面板重做 · 供应商联动 + 在线拉取模型）
 
 ### 设置 · AI 模型设置重做（更清晰、更易切换、更少手填）
