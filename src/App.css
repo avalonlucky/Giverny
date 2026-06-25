@@ -79,6 +79,57 @@
   accent-color: var(--color-primary);
 }
 
+/* ===== 明暗主题（与吉维尼模式两轴独立）=====
+   白天 = 纯白底；暗黑 = macOS/iOS 风格深灰（非全黑）。
+   只覆盖底色/文字/描边等基础 token；吉维尼模式的色块在其后定义，会自然取胜（即吉维尼仍是花园浅色）。 */
+:root[data-theme="light"] {
+  --color-text: #1d1d1f;
+  --color-text-secondary: #555a5f;
+  --color-text-muted: #8a9196;
+  --color-surface: #ffffff;
+  --color-surface-strong: #ffffff;
+  --color-surface-alt: #f5f5f3;
+  --color-sidebar: #ffffff;
+  --color-border: rgba(31, 42, 39, 0.10);
+  --color-border-soft: rgba(31, 42, 39, 0.055);
+}
+
+:root[data-theme="dark"] {
+  /* 文字：Apple 暗色 label 体系 */
+  --color-text: #ebebf0;
+  --color-text-secondary: #a6a6ac;
+  --color-text-muted: #79797f;
+  /* 底色：深灰而非全黑（macOS 窗口 / iOS grouped background 取色） */
+  --color-surface: #2a2a2c;        /* 卡片 */
+  --color-surface-strong: #333335; /* 浮起元素/弹窗 */
+  --color-surface-alt: #1f1f21;    /* 页底/凹陷 */
+  --color-sidebar: #1c1c1e;
+  --color-border: rgba(255, 255, 255, 0.11);
+  --color-border-soft: rgba(255, 255, 255, 0.06);
+  /* 主色在暗底提亮，保证按钮/文字可读 */
+  --color-primary: #6fa595;
+  --color-primary-strong: #5c9384;
+  --color-primary-hover: #5c9384;
+  --brand-primary: #6fa595;
+  --brand-primary-strong: #5c9384;
+  --brand-glow: rgba(111, 165, 149, 0.16);
+  --brand-glow-soft: rgba(111, 165, 149, 0.08);
+  /* 状态色在暗底略提亮 */
+  --color-status-planning: #9aa3ad;
+  --color-status-active: #5e9ad0;
+  --color-status-pending: #d3a45e;
+  --color-status-accepted: #6fa595;
+  --color-alert-surface: #3a3326;
+}
+
+/* 暗黑模式下页底比卡片更深，卡片浮起；并给 body 兜底深色避免白边 */
+:root[data-theme="dark"] body {
+  background: var(--color-surface-alt);
+}
+:root[data-theme="dark"] .app-shell {
+  background: var(--color-surface-alt);
+}
+
 /* 工具模式（默认）主色固定为 #3c6b61，不随季节漂移——季节只在「吉维尼模式」里生效。 */
 
 /* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
@@ -12082,6 +12133,34 @@ textarea:focus-visible {
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--color-text-muted);
+}
+
+.theme-options {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+}
+
+.theme-options button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.theme-options button.active {
+  background: var(--color-primary);
+  color: var(--color-surface-strong);
+  font-weight: 700;
 }
 
 .admin-login-modal .modal-header small {

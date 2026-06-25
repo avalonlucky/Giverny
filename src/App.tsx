@@ -114,9 +114,30 @@ function readSeasonPref(): SeasonPref {
 function resolveSeason(pref: SeasonPref = readSeasonPref()): SeasonKey {
   return pref === 'auto' ? currentSeason() : pref
 }
+// 明暗主题（与吉维尼模式两轴独立）：白天 / 暗黑 / 跟随系统。默认白天。
+type ThemePref = 'light' | 'dark' | 'system'
+const APP_THEME_KEY = 'app-theme'
+function readThemePref(): ThemePref {
+  try {
+    const v = window.localStorage.getItem(APP_THEME_KEY)
+    if (v === 'light' || v === 'dark' || v === 'system') return v
+  } catch {
+    // 忽略
+  }
+  return 'light'
+}
+function systemPrefersDark(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+function resolveTheme(pref: ThemePref = readThemePref()): 'light' | 'dark' {
+  return pref === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : pref
+}
+
 // 模块加载即执行，先于首帧渲染，无闪烁。
 if (typeof document !== 'undefined') {
   document.documentElement.dataset.season = resolveSeason()
+  document.documentElement.dataset.theme = resolveTheme()
   try {
     if (window.localStorage.getItem(GIVERNY_MODE_KEY) === 'on') {
       document.documentElement.dataset.giverny = 'on'
@@ -5767,6 +5788,16 @@ function GivernyModeSettings() {
     typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
   const [seasonPref, setSeasonPref] = useState<SeasonPref>(() => readSeasonPref())
+  const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref())
+  const applyTheme = (pref: ThemePref) => {
+    setThemePref(pref)
+    try {
+      window.localStorage.setItem(APP_THEME_KEY, pref)
+    } catch {
+      // 忽略
+    }
+    document.documentElement.dataset.theme = resolveTheme(pref)
+  }
   const applyMode = (next: boolean) => {
     setOn(next)
     if (next) {
@@ -5804,12 +5835,32 @@ function GivernyModeSettings() {
     <details className="settings-group-panel" open>
       <summary className="settings-group-summary">
         <div>
-          <h2>外观 · 吉维尼模式</h2>
-          <p>莫奈花园主题，随季节自然流转</p>
+          <h2>外观</h2>
+          <p>主题明暗与莫奈花园模式</p>
         </div>
         <ChevronDown size={18} />
       </summary>
       <div className="settings-group-body">
+        <section className="panel giverny-settings-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>主题</h2>
+              <p>白天为纯白底，暗黑为 macOS / iOS 风格的深灰（非全黑）。可跟随系统。</p>
+            </div>
+            <div className="theme-options" role="group" aria-label="明暗主题">
+              {([['light', '白天'], ['dark', '暗黑'], ['system', '跟随系统']] as Array<[ThemePref, string]>).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={themePref === key ? 'active' : ''}
+                  onClick={() => applyTheme(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
         <section className="panel giverny-settings-panel">
           <div className="panel-header compact">
             <div>
