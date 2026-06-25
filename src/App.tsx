@@ -10537,13 +10537,6 @@ function ReportsView({
   }, [selectedUpdates])
 
   const formatReceiptDate = (value: string) => (value ? datePart(value).replaceAll('-', '/') : '—')
-  const formatReceiptHours = (value: number) => (Number.isFinite(value) ? Number(value.toFixed(2)).toString() : '0')
-  const getActualDeliveryDate = (task: Task) => {
-    if (task.status === '已验收') {
-      return formatReceiptDate(latestUpdatesByTask.get(task.id)?.date ?? '')
-    }
-    return '—'
-  }
   const getTaskProgressText = (task: Task) => {
     const latestUpdate = latestUpdatesByTask.get(task.id)
     const parts: string[] = []
@@ -10570,6 +10563,7 @@ function ReportsView({
   }
 
   const handleExportUserSheet = async (month = selectedMonth) => {
+    try {
     const targetReport = reports.find((report) => report.month === month)
     const targetTasks = month === selectedMonth
       ? receiptDetailTasks
@@ -10648,6 +10642,10 @@ function ReportsView({
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('User 表导出失败', error)
+      window.alert(error instanceof Error ? `User 表导出失败：${error.message}` : 'User 表导出失败，请重试')
+    }
   }
 
   return (
@@ -10840,7 +10838,7 @@ function ReportsView({
                 <tr key={task.id}>
                   <td>{String(index + 1).padStart(2, '0')}</td>
                   <td className="receipt-task-name"><b>{task.title}</b><span>{task.type}</span></td>
-                  <td>{task.requirement || '—'}</td>
+                  <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
                   <td>{task.requester || task.contact || '—'}</td>
                   <td>{task.status}</td>
                   <td className="num">{task.estimatedHours.toFixed(1)}h</td>
@@ -10885,32 +10883,6 @@ function ReportsView({
                 </tr>
               )
             )}
-            {freeTasks.map((task, index) => {
-              const seq = String(billableTasks.length + (selectedImportedHours > 0 ? 1 : 0) + index + 1).padStart(2, '0')
-              return receiptTemplate === 'detail' ? (
-                <tr key={task.id} className="receipt-free-row">
-                  <td>{seq}</td>
-                  <td className="receipt-task-name"><b>{task.title}</b><span>{task.type}</span></td>
-                  <td>{task.requirement || '—'}</td>
-                  <td>{task.requester || task.contact || '—'}</td>
-                  <td>不计费</td>
-                  <td className="num">{task.estimatedHours.toFixed(1)}h</td>
-                  <td className="num">{task.actualHours.toFixed(1)}h</td>
-                  <td className="num">—</td>
-                  <td className="num">¥0</td>
-                  <td>{task.acceptanceNote || '免费协助，不计入结算金额'}</td>
-                </tr>
-              ) : (
-                <tr key={task.id} className="receipt-free-row">
-                  <td>{seq}</td>
-                  <td>{monthLabelOf(taskSettlementMonth(task))}</td>
-                  <td className="receipt-task-name">{task.title} <em className="receipt-free-tag">不计费</em></td>
-                  <td>{task.type}</td>
-                  <td className="num">{task.actualHours.toFixed(1)}</td>
-                  <td className="num">¥0</td>
-                </tr>
-              )
-            })}
             {billableTasks.length === 0 && selectedImportedHours === 0 && freeTasks.length === 0 && (
               <tr>
                 <td colSpan={receiptTemplate === 'detail' ? 10 : 6} className="receipt-empty">
@@ -10930,69 +10902,6 @@ function ReportsView({
           </tfoot>
         </table>
 
-        {(receiptTemplate === 'excel' || receiptTemplate === 'detail') && (
-        <section className="receipt-detail-section" aria-label="工时明细附表">
-          <div className="receipt-detail-title">
-            <h3>工时明细附表</h3>
-            <span>字段对应 Excel「6月」工时明细表，由平台任务、验收和进展记录自动生成。</span>
-          </div>
-          <div className="receipt-detail-table-wrap">
-            <table className="receipt-table receipt-detail-table">
-              <thead>
-                <tr>
-                  <th>序号</th>
-                  <th>参考开始日期</th>
-                  <th>设计类型</th>
-                  <th>项目/任务名称</th>
-                  <th>具体任务需求</th>
-                  <th>需求人</th>
-                  <th className="num">参考预估工时</th>
-                  <th className="num">实际工时</th>
-                  <th>参考交付日期</th>
-                  <th>实际交付日期</th>
-                  <th>状态</th>
-                  <th>验收人/确认</th>
-                  <th>进展</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receiptDetailTasks.map((task, index) => (
-                  <tr key={task.id}>
-                    <td>{String(index + 1).padStart(2, '0')}</td>
-                    <td>{formatReceiptDate(task.date)}{isSupplementalTask(task) ? '（补录）' : ''}</td>
-                    <td>{task.type}</td>
-                    <td>{task.title}</td>
-                    <td>{task.requirement || '—'}</td>
-                    <td>{task.requester || task.contact || '—'}</td>
-                    <td className="num">{formatReceiptHours(task.estimatedHours)}</td>
-                    <td className="num">{formatReceiptHours(task.actualHours)}</td>
-                    <td>{formatReceiptDate(task.estimatedDate)}</td>
-                    <td>{getActualDeliveryDate(task)}</td>
-                    <td>{task.status}</td>
-                    <td>{task.reviewer || task.requester || '—'}</td>
-                    <td>{getTaskProgressText(task)}</td>
-                  </tr>
-                ))}
-                {receiptDetailTasks.length === 0 && (
-                  <tr>
-                    <td colSpan={13} className="receipt-empty">
-                      本月暂无可纳入结算明细的任务
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={6}>合计</td>
-                  <td className="num">—</td>
-                  <td className="num">{receiptDetailTasks.reduce((sum, task) => sum + task.actualHours, 0).toFixed(1)}</td>
-                  <td colSpan={5}>计费金额以已验收/计费任务摘要为准</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </section>
-        )}
 
         {receiptTemplate === 'formal' && (
           <div className="receipt-formal-sign">

@@ -16041,10 +16041,31 @@ textarea:focus-visible {
   width: min(1380px, 100%);
 }
 
-/* 简约 / 编辑式回单：去掉米白卡片底色，纯白更清爽（印章已在结构上移除）。 */
+/* 简约 / 编辑式回单：去掉卡片式外框、米白底色与圆角阴影，纯白扁平更清爽（印章已移除）。 */
 .receipt-template-min,
 .receipt-template-detail {
   background: #fff;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 编辑式：任务需求列限制高度，默认最多 3 行省略，鼠标悬停看全文（标题属性），行不再被撑高。 */
+.receipt-requirement-cell {
+  max-width: 360px;
+  vertical-align: top;
+}
+
+.receipt-requirement-cell span {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
 }
 
 /* 本月不计时板块：列出已完成但不计费的任务及原因，让甲方知道活干了。 */
