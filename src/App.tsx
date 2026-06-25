@@ -4655,7 +4655,7 @@ function App() {
       label: '全局',
       items: [
         { keys: '⌘ K / Ctrl K', action: '打开命令面板' },
-        { keys: '?', action: '查看快捷键' },
+        { keys: '? / ⇧ /', action: '查看快捷键' },
         { keys: 'N', action: '新建任务' },
         { keys: '⇧ N', action: '补录任务' },
         { keys: 'P', action: '记录选中任务进展' },
