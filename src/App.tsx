@@ -6,6 +6,8 @@ import {
   Archive,
   ArrowRightLeft,
   Palette,
+  Briefcase,
+  ShieldCheck,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -11169,6 +11171,7 @@ function SettingsView({
   const [testingAiRoute, setTestingAiRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
   const [aiCapabilityTab, setAiCapabilityTab] = useState<'text' | 'vision'>('text')
+  const [settingsTab, setSettingsTab] = useState<'business' | 'security' | 'system' | 'appearance'>('business')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
   const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteModelError, setAiRouteModelError] = useState<Partial<Record<AiModelRouteKey, string>>>({})
@@ -11496,16 +11499,27 @@ function SettingsView({
 
   return (
     <section className="settings-grid">
-      <GivernyModeSettings />
-      <details className="settings-group-panel settings-business-group" open>
-        <summary className="settings-group-summary">
-          <div>
-            <h2>业务设置</h2>
-            <p>结算口径、服务公司和设计类型</p>
-          </div>
-          <ChevronDown size={18} />
-        </summary>
-        <div className="settings-group-body">
+      <div className="settings-tabs view-mode-tabs">
+        <button type="button" className={settingsTab === 'business' ? 'active' : ''} onClick={() => setSettingsTab('business')}>
+          <Briefcase size={16} />
+          业务设置
+        </button>
+        <button type="button" className={settingsTab === 'security' ? 'active' : ''} onClick={() => setSettingsTab('security')}>
+          <ShieldCheck size={16} />
+          权限安全
+        </button>
+        <button type="button" className={settingsTab === 'system' ? 'active' : ''} onClick={() => setSettingsTab('system')}>
+          <Settings size={16} />
+          系统
+        </button>
+        <button type="button" className={settingsTab === 'appearance' ? 'active' : ''} onClick={() => setSettingsTab('appearance')}>
+          <Palette size={16} />
+          外观
+        </button>
+      </div>
+      {settingsTab === 'appearance' && <GivernyModeSettings />}
+      {settingsTab === 'business' && (
+        <div className="settings-group-body settings-tab-body">
           <section className="panel settings-settlement-panel">
             <div className="panel-header compact">
               <div>
@@ -11908,17 +11922,10 @@ function SettingsView({
             </section>
           )}
         </div>
-      </details>
+      )}
 
-      <details className="settings-group-panel settings-security-group">
-        <summary className="settings-group-summary">
-          <div>
-            <h2>权限安全</h2>
-            <p>访问口令、账号状态和退出登录</p>
-          </div>
-          <ChevronDown size={18} />
-        </summary>
-        <div className="settings-group-body settings-security-body">
+      {settingsTab === 'security' && (
+        <div className="settings-group-body settings-security-body settings-tab-body">
           {role === 'admin' && (
             <section className="settings-subsection settings-permission-panel">
               <div className="panel-header compact">
@@ -12031,17 +12038,10 @@ function SettingsView({
             </button>
           </section>
         </div>
-      </details>
+      )}
 
-      <details className="settings-group-panel settings-system-group">
-        <summary className="settings-group-summary">
-          <div>
-            <h2>系统信息</h2>
-            <p>备份、版本和 Cloudflare 资源</p>
-          </div>
-          <ChevronDown size={18} />
-        </summary>
-        <div className="settings-group-body settings-system-body">
+      {settingsTab === 'system' && (
+        <div className="settings-group-body settings-system-body settings-tab-body">
           <section className="settings-subsection settings-backup-panel">
             <div className="panel-header compact">
               <div>
@@ -12087,7 +12087,7 @@ function SettingsView({
             </div>
           </section>
         </div>
-      </details>
+      )}
       {settingsConfirmDialog && (
         <ConfirmDialogModal
           dialog={settingsConfirmDialog}

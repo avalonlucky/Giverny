@@ -20,6 +20,10 @@ routes = [
 DEEPSEEK_BASE_URL = "https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e33758c6d/mayeai-gateway/deepseek"
 GEMINI_BASE_URL = "https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e33758c6d/mayeai-gateway/google-ai-studio/v1beta"
 
+# Workers AI：Cloudflare 边缘自带开源模型，作为「文字主模型 → 备用模型 → Workers AI」链路的最后一道兜底。
+[ai]
+binding = "AI"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

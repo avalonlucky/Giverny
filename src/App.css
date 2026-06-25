@@ -12261,28 +12261,28 @@ textarea:focus-visible {
   width: max-content;
 }
 
-/* 轻量主按钮：用于页内（非弹窗）动作，比实心 primary-button 更克制，贴合全站极简调性。 */
+/* 轻量动作按钮：对齐「列表视图 / 日历视图」切换卡的语言——无填充无描边，左侧线性图标 + 绿色加粗文字，一眼可辨且极简。 */
 .soft-primary-button {
-  min-height: 40px;
-  padding: 0 16px;
+  min-height: 38px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   white-space: nowrap;
   cursor: pointer;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   font: inherit;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--color-primary-strong);
-  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  color: var(--color-primary);
+  transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
 }
 
 .soft-primary-button:hover {
-  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
 }
 
 .soft-primary-button:active {
@@ -12291,7 +12291,7 @@ textarea:focus-visible {
 
 .soft-primary-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
   transform: none;
 }
 
@@ -12603,11 +12603,31 @@ textarea:focus-visible {
   width: 100%;
 }
 
+/* 设置页分类切换卡：复用 view-mode-tabs（无填充无描边、选中绿色加粗），下加分割线。 */
+.settings-tabs {
+  width: 100%;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.settings-tabs button {
+  height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.settings-tab-body {
+  padding-top: 4px;
+}
+
+/* Workers AI 卡：参考「税务估算参数」的展开样式——浅绿色块底、无描边、靠色块区分。 */
 .settings-workers-ai {
   margin-top: 14px;
-  border: 1px solid var(--color-border-soft);
+  border: 0;
   border-radius: var(--radius-control);
-  background: var(--color-surface-alt);
+  background: rgba(47, 111, 109, 0.06);
   overflow: hidden;
 }
 

@@ -51,6 +51,13 @@ type Env = {
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
+  AI?: WorkersAiBinding
+  WORKERS_AI_MODEL?: string
+}
+
+// Workers AI 绑定的最小类型：env.AI.run(model, input) 返回带 response 文本的结果。
+type WorkersAiBinding = {
+  run: (model: string, input: { messages: Array<{ role: string; content: string }>; max_tokens?: number }) => Promise<{ response?: string }>
 }
 
 type WorkerExecutionContext = {
@@ -615,11 +622,46 @@ async function callAiEndpointText(
   return extractOpenAiText(data)
 }
 
+// Workers AI：Cloudflare 边缘自带开源模型，无需外部厂商 Key，作为全链路最后一道兜底。
+const WORKERS_AI_DEFAULT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+
+async function callWorkersAiText(env: Env, prompt: string, maxOutputTokens: number): Promise<string> {
+  if (!env.AI) {
+    throw new Error('Workers AI 未绑定')
+  }
+  const model = env.WORKERS_AI_MODEL || WORKERS_AI_DEFAULT_MODEL
+  const result = await env.AI.run(model, {
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: maxOutputTokens,
+  })
+  return (result?.response || '').trim()
+}
+
+// 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
+async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal): Promise<string> {
+  try {
+    return await callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, maxOutputTokens, signal)
+  } catch (primaryError) {
+    try {
+      return await callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, maxOutputTokens, signal)
+    } catch (fallbackError) {
+      if (env.AI) {
+        try {
+          const output = await callWorkersAiText(env, prompt, maxOutputTokens)
+          if (output) {
+            return output
+          }
+        } catch {
+          // Workers AI 也失败则抛出上一层错误
+        }
+      }
+      throw fallbackError instanceof Error ? fallbackError : primaryError
+    }
+  }
+}
+
 async function callTextFallbackJson<T extends object>(env: Env, systemPrompt: string, payload: unknown, outputShape: string): Promise<T | null> {
   const endpoint = await resolveAiEndpoint(env, 'textFallback')
-  if (!endpoint.apiKey) {
-    return null
-  }
   const prompt = `${systemPrompt}
 
 请只返回一个 JSON 对象，不要解释，不要使用 Markdown 代码块。
@@ -627,13 +669,28 @@ JSON 字段要求：${outputShape}
 
 输入数据：
 ${JSON.stringify(payload)}`
-  try {
-    const output = await callAiEndpointText(endpoint, prompt)
-    const parsed = parseLooseJsonObject(output)
-    return Object.keys(parsed).length > 0 ? (parsed as T) : null
-  } catch {
-    return null
+  // 备用模型有 Key 就先用它；失败或无 Key 时回落到 Workers AI 兜底。
+  if (endpoint.apiKey) {
+    try {
+      const output = await callAiEndpointText(endpoint, prompt)
+      const parsed = parseLooseJsonObject(output)
+      if (Object.keys(parsed).length > 0) {
+        return parsed as T
+      }
+    } catch {
+      // 落到 Workers AI
+    }
   }
+  if (env.AI) {
+    try {
+      const output = await callWorkersAiText(env, prompt, 512)
+      const parsed = parseLooseJsonObject(output)
+      return Object.keys(parsed).length > 0 ? (parsed as T) : null
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 async function callAiEndpointVision(
@@ -1836,12 +1893,7 @@ async function runEventDrivenInsights(env: Env, limit = 2) {
       `事件触发：${JSON.stringify(trigger)}`,
       `历史追踪：${JSON.stringify(previousAdvice)}`,
     ].join('\n\n')
-    let output: string
-    try {
-      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, 900)
-    } catch {
-      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, 900)
-    }
+    const output = await callTextWithFallback(env, prompt, 900)
     const insight = normalizeEventInsight(parseLooseJsonObject(output), trigger)
     if (insight.status === 'resolved') {
       await env.DB.prepare("UPDATE insights_history SET status = 'resolved' WHERE trigger_key = ? AND status IN ('open', 'improved')")
@@ -1938,13 +1990,9 @@ async function diagnoseInsights(env: Env, request: Request) {
   ].join('\n\n')
   let output: string
   try {
-    output = await callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, 1800)
-  } catch {
-    try {
-      output = await callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, 1800)
-    } catch (error) {
-      return fail(error instanceof Error ? `洞察诊断暂不可用：${error.message}` : '洞察诊断暂不可用', 502)
-    }
+    output = await callTextWithFallback(env, prompt, 1800)
+  } catch (error) {
+    return fail(error instanceof Error ? `洞察诊断暂不可用：${error.message}` : '洞察诊断暂不可用', 502)
   }
   const diagnosis = normalizeInsightDiagnosis(parseLooseJsonObject(output), periodKey, period, comparedWith)
   await env.DB.prepare('INSERT INTO insight_diagnoses (id, period_key, period_type, data_fingerprint, result_json) VALUES (?, ?, ?, ?, ?)')
