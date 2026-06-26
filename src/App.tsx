@@ -8245,11 +8245,26 @@ function TaskCanvasView({
     )
   }
 
+  const projectTask = canvasProjectTaskId && canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId) : undefined
+  const projectBillable = projectTask ? projectTask.billable !== false : true
+  const projectEstimatedAmount = projectBillable ? (projectTask?.estimatedHours ?? 0) * hourlyRate : 0
+  const projectCurrentAmount = projectBillable ? (projectTask?.actualHours ?? 0) * hourlyRate : 0
+  const projectProgress = projectTask ? taskDisplayProgress(projectTask) : 0
+  const projectAccepted = projectTask?.status === '已验收'
+
   return (
     <section className="task-node-canvas-shell">
       <div className="task-node-canvas-topbar">
         <button type="button" onClick={returnToProjectFolders}>‹ 项目</button>
         <span>{canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId)?.title ?? '项目画布' : '新项目草稿'}</span>
+        {projectTask && (
+          <div className="canvas-lane-summary" aria-label="项目链路汇总">
+            <div><span>当前工时</span><strong>{projectTask.actualHours.toFixed(1)}<em>h</em></strong></div>
+            <div><span>进度</span><strong>{projectProgress}<em>%</em></strong></div>
+            <div><span>预估金额</span><strong>{projectBillable ? `¥${formatYuan(projectEstimatedAmount)}` : '不计费'}</strong></div>
+            <div className={projectAccepted ? 'accent' : ''}><span>{projectAccepted ? '结算金额' : '当前金额'}</span><strong>{projectBillable ? `¥${formatYuan(projectCurrentAmount)}` : '¥0'}</strong></div>
+          </div>
+        )}
       </div>
       <div
         ref={canvasRef}
@@ -8287,9 +8302,13 @@ function TaskCanvasView({
               )
             })}
           </svg>
-          {nodes.map((node) => (
+          {nodes.map((node) => {
+            const nodeTask = node.taskId ? taskById.get(node.taskId) : projectTask
+            const nodeStatus = nodeTask?.status ?? '计划中'
+            return (
             <article
               key={node.id}
+              data-status={nodeStatus}
               className={`canvas-work-node canvas-work-node-${node.kind} ${node.taskId && selectedTask?.id === node.taskId ? 'selected' : ''}`}
               style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
               onPointerDown={(event) => startDragging(event, node)}
@@ -8301,7 +8320,8 @@ function TaskCanvasView({
                 <Plus size={18} />
               </button>
             </article>
-          ))}
+            )
+          })}
         </div>
       </div>
       <div className="canvas-bottom-toolbar" aria-label="画布工具栏">

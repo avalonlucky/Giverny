@@ -5093,6 +5093,66 @@ button.topbar-create-button:hover {
   border-bottom: 1px solid var(--color-border);
 }
 
+/* 项目链路实时汇总条（工时 / 进度 / 预估金额 / 当前·结算金额） */
+.canvas-lane-summary {
+  margin-left: auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.canvas-lane-summary > div {
+  padding: 6px 14px;
+  display: grid;
+  gap: 1px;
+  border-right: 1px solid var(--color-border-soft);
+}
+
+.canvas-lane-summary > div:last-child {
+  border-right: 0;
+}
+
+.canvas-lane-summary span {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.canvas-lane-summary strong {
+  font-size: 16px;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-lane-summary strong em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-left: 1px;
+}
+
+.canvas-lane-summary > div.accent {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.canvas-lane-summary > div.accent strong {
+  color: var(--color-primary-strong);
+}
+
+/* 节点按任务状态着色（左侧色条 + 边框微染），整条泳道一眼看状态 */
+.canvas-work-node[data-status] {
+  border-left: 3px solid var(--color-border);
+}
+.canvas-work-node[data-status="进行中"] { border-left-color: #3a7bb5; }
+.canvas-work-node[data-status="待验收"] { border-left-color: #b08438; }
+.canvas-work-node[data-status="已验收"] { border-left-color: var(--color-primary); }
+.canvas-work-node[data-status="挂起"],
+.canvas-work-node[data-status="终止"] { border-left-color: #c25450; }
+.canvas-work-node[data-status="计划中"] { border-left-color: #9aa4a6; }
+
 .task-canvas-project-head {
   display: flex;
   align-items: end;
