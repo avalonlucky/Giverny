@@ -27,6 +27,15 @@ export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
 
 export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
 
+export type OpenRouterFreeModel = {
+  id: string
+  name: string
+  context: number
+  vision: boolean
+  status: 'ok' | 'limited' | 'unavailable' | 'error'
+}
+export type OpenRouterFreeModelsResult = { scannedAt: string; models: OpenRouterFreeModel[] }
+
 export type AccessToken = {
   id: string
   token: string
@@ -596,6 +605,10 @@ export const api = {
     }),
   listAiModels: (route: AiModelRouteKey) =>
     requestJson<{ provider: AiModelProvider; models: string[] }>(`/api/ai/models?route=${encodeURIComponent(route)}`),
+  getOpenRouterFreeModels: () =>
+    requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models'),
+  scanOpenRouterFreeModels: () =>
+    requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models/scan', { method: 'POST' }),
   estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
     requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
       method: 'POST',

@@ -82,6 +82,7 @@ import {
   type TaskAssistantSuggestion,
   type TextAssistantSuggestion,
   type TokenScope,
+  type OpenRouterFreeModel,
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
@@ -12676,6 +12677,10 @@ function SettingsView({
   const [testingAiRoute, setTestingAiRoute] = useState<AiModelRouteKey | null>(null)
   const [aiRouteTestResults, setAiRouteTestResults] = useState<Partial<Record<AiModelRouteKey, { ok: boolean; message: string }>>>({})
   const [aiCapabilityTab, setAiCapabilityTab] = useState<'text' | 'vision'>('text')
+  const [orFreeModels, setOrFreeModels] = useState<OpenRouterFreeModel[]>([])
+  const [orScannedAt, setOrScannedAt] = useState('')
+  const [orScanning, setOrScanning] = useState(false)
+  const [orError, setOrError] = useState('')
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'design' | 'security' | 'system'>('settlement')
   const [securityTab, setSecurityTab] = useState<'tokens' | 'account'>('tokens')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
@@ -12893,6 +12898,43 @@ function SettingsView({
     } finally {
       setFetchingModelsRoute(null)
     }
+  }
+
+  useEffect(() => {
+    // 进入设置即加载已缓存的 OpenRouter 免费模型扫描结果（cron 每日刷新）
+    api.getOpenRouterFreeModels()
+      .then((result) => {
+        setOrFreeModels(result.models)
+        setOrScannedAt(result.scannedAt)
+      })
+      .catch(() => {})
+  }, [])
+
+  const scanFreeModels = async () => {
+    if (orScanning) {
+      return
+    }
+    setOrScanning(true)
+    setOrError('')
+    try {
+      const result = await api.scanOpenRouterFreeModels()
+      setOrFreeModels(result.models)
+      setOrScannedAt(result.scannedAt)
+      if (!result.models.length) {
+        setOrError('没拉到免费模型，请确认已配置 OpenRouter Key')
+      }
+    } catch (error) {
+      setOrError(error instanceof Error ? error.message : '扫描失败')
+    } finally {
+      setOrScanning(false)
+    }
+  }
+
+  const applyFreeModelToRoute = (routeKey: AiModelRouteKey, modelId: string) => {
+    setAiRouteDrafts((current) => ({
+      ...current,
+      [routeKey]: { provider: 'openrouter', baseUrl: directBaseUrlForProvider('openrouter'), model: modelId },
+    }))
   }
 
   const saveAiModelConfig = async (clearApiKey = false, clearRouteApiKey?: AiModelRouteKey) => {
@@ -13314,6 +13356,55 @@ function SettingsView({
                     规划：等外部付费模型用完后，把全站 AI 切到 Workers AI，省去逐家采购对接。当前可作为「DeepSeek/Gemini → Kimi → Workers AI」链路的<strong>最后一道兜底</strong>，
                     需要时由开发侧在 Worker 加 <code>[ai]</code> 绑定即可启用（暂未开启）。
                   </p>
+                </div>
+              </details>
+              <details className="settings-workers-ai" open>
+                <summary>
+                  <Sparkles size={15} />
+                  <span>OpenRouter 免费模型（每日自动实测可用性）</span>
+                  <ChevronDown size={16} />
+                </summary>
+                <div className="settings-workers-ai-body">
+                  <div className="or-free-head">
+                    <p className="settings-tool-note">
+                      一个 OpenRouter Key 即可调大量 <code>:free</code> 免费模型，但它们经常变动。系统每天自动「拉取 + 逐个实测」，下面只标出真实可用的；点「立即扫描」可手动刷新。
+                      {orScannedAt ? <> 上次扫描：{orScannedAt}。</> : null}
+                    </p>
+                    <button type="button" className="ghost-button compact-button" onClick={() => void scanFreeModels()} disabled={orScanning}>
+                      <RotateCcw size={14} />
+                      {orScanning ? '扫描中…（约 10-20 秒）' : '立即扫描'}
+                    </button>
+                  </div>
+                  {orError && <p className="settings-inline-error">{orError}</p>}
+                  {orFreeModels.length === 0 && !orScanning && <p className="calendar-empty-hint">还没有扫描结果，点「立即扫描」获取。</p>}
+                  {orFreeModels.length > 0 && (
+                    <div className="or-free-list">
+                      {orFreeModels.map((model) => {
+                        const statusLabel = model.status === 'ok' ? '可用' : model.status === 'limited' ? '限流' : model.status === 'unavailable' ? '已下架' : '异常'
+                        return (
+                          <div className={`or-free-row status-${model.status}`} key={model.id}>
+                            <div className="or-free-main">
+                              <code>{model.id}</code>
+                              <div className="or-free-meta">
+                                <span className={`or-free-status status-${model.status}`}>{statusLabel}</span>
+                                {model.vision && <span className="or-free-vision">可识图</span>}
+                                {model.context > 0 && <span>{Math.round(model.context / 1000)}K 上下文</span>}
+                              </div>
+                            </div>
+                            {model.status === 'ok' && (
+                              <div className="or-free-actions">
+                                <button type="button" className="ghost-button compact-button" onClick={() => applyFreeModelToRoute('textFallback', model.id)}>设为文字备用</button>
+                                {model.vision && (
+                                  <button type="button" className="ghost-button compact-button" onClick={() => applyFreeModelToRoute('visionFallback', model.id)}>设为识图备用</button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <p className="settings-tool-note">提示：点「设为文字/识图备用」会把对应路由切到该免费模型，记得在上方点「保存 AI 设置」。免费档有速率上限，建议只作备用兜底。</p>
                 </div>
               </details>
             </section>

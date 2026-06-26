@@ -1071,6 +1071,93 @@ async function exportReportPdf(env: Env, month: string): Promise<Response> {
   }
 }
 
+// ===== OpenRouter 免费模型每日扫描（拉取 + 实测可用性，供选择）=====
+const OPENROUTER_FREE_SETTING = 'openrouterFreeModels'
+type OpenRouterFreeStatus = 'ok' | 'limited' | 'unavailable' | 'error'
+type OpenRouterFreeModel = { id: string; name: string; context: number; vision: boolean; status: OpenRouterFreeStatus }
+
+async function pingOpenRouterModel(key: string, id: string): Promise<OpenRouterFreeStatus> {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: id, messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 }),
+    })
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as { choices?: unknown[] } | null
+      return data?.choices?.length ? 'ok' : 'error'
+    }
+    if (res.status === 429) {
+      return 'limited'
+    }
+    if (res.status === 404) {
+      return 'unavailable'
+    }
+    return 'error'
+  } catch {
+    return 'error'
+  }
+}
+
+async function scanOpenRouterFreeModels(env: Env): Promise<{ scannedAt: string; models: OpenRouterFreeModel[] }> {
+  const key = env.OPENROUTER_API_KEY
+  if (!key) {
+    return { scannedAt: '', models: [] }
+  }
+  const res = await fetch('https://openrouter.ai/api/v1/models', { headers: { authorization: `Bearer ${key}` } })
+  const data = (await res.json().catch(() => null)) as {
+    data?: Array<{ id: string; name?: string; context_length?: number; architecture?: { input_modalities?: string[] } }>
+  } | null
+  const free = (data?.data ?? []).filter((m) => typeof m.id === 'string' && m.id.endsWith(':free'))
+  const models: OpenRouterFreeModel[] = free.map((m) => ({
+    id: m.id,
+    name: m.name || m.id,
+    context: m.context_length || 0,
+    vision: (m.architecture?.input_modalities ?? []).includes('image'),
+    status: 'error',
+  }))
+  // 分批实测可用性（每批 5 个并行 + 间隔，规避免费档速率上限）
+  const batchSize = 5
+  for (let i = 0; i < models.length; i += batchSize) {
+    const batch = models.slice(i, i + batchSize)
+    await Promise.all(batch.map(async (model) => {
+      model.status = await pingOpenRouterModel(key, model.id)
+    }))
+    if (i + batchSize < models.length) {
+      await new Promise((resolve) => setTimeout(resolve, 350))
+    }
+  }
+  models.sort((a, b) => (a.status === b.status ? a.id.localeCompare(b.id) : a.status === 'ok' ? -1 : b.status === 'ok' ? 1 : 0))
+  const result = { scannedAt: nowIso(), models }
+  await setSettingValue(env, OPENROUTER_FREE_SETTING, JSON.stringify(result))
+  await audit(env, 'scan', 'openrouter_free', '', { count: models.length, ok: models.filter((m) => m.status === 'ok').length })
+  return result
+}
+
+async function getOpenRouterFreeModelsCache(env: Env): Promise<{ scannedAt: string; models: OpenRouterFreeModel[] }> {
+  const raw = await getSettingValue(env, OPENROUTER_FREE_SETTING)
+  if (raw) {
+    try {
+      return JSON.parse(raw) as { scannedAt: string; models: OpenRouterFreeModel[] }
+    } catch {
+      // 损坏则返回空
+    }
+  }
+  return { scannedAt: '', models: [] }
+}
+
+// cron 每日刷新：缓存超过约 20 小时才重新扫描，避免每 5 分钟都打一遍。
+async function maybeRefreshOpenRouterFreeModels(env: Env): Promise<void> {
+  if (!env.OPENROUTER_API_KEY) {
+    return
+  }
+  const cache = await getOpenRouterFreeModelsCache(env)
+  const stale = !cache.scannedAt || Date.now() - new Date(cache.scannedAt).getTime() > 20 * 3600 * 1000
+  if (stale) {
+    await scanOpenRouterFreeModels(env).catch((error) => console.error('OpenRouter 免费模型扫描失败', error))
+  }
+}
+
 // 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
 async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal): Promise<string> {
   try {
@@ -5508,6 +5595,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/ai-model' ||
       path === '/api/ai/model-test' ||
       path === '/api/ai/models' ||
+      path === '/api/ai/openrouter/free-models' ||
+      path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/search' ||
       path === '/api/search/reindex' ||
       (path.startsWith('/api/reports/') && path.endsWith('/pdf')) ||
@@ -5651,6 +5740,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)
   }
+  if (path === '/api/ai/openrouter/free-models' && request.method === 'GET') {
+    return ok(await getOpenRouterFreeModelsCache(env))
+  }
+  if (path === '/api/ai/openrouter/free-models/scan' && request.method === 'POST') {
+    return ok(await scanOpenRouterFreeModels(env))
+  }
   if (path === '/api/ai/models' && request.method === 'GET') {
     return listAiModelsForRoute(env, request)
   }
@@ -5729,6 +5824,9 @@ export default {
     await processPendingAttachmentAnalyses(env, 1)
     await runEventDrivenInsights(env, 1).catch((error) => {
       console.error('insight event trigger failed', error)
+    })
+    await maybeRefreshOpenRouterFreeModels(env).catch((error) => {
+      console.error('openrouter free model refresh failed', error)
     })
   },
   // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。
