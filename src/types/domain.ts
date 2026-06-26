@@ -4,7 +4,7 @@ export type AppView = '工作台' | '任务' | '文件库' | '洞察' | '收入'
 
 export type TaskFilter = '全部' | '计划中' | '进行中' | '挂起' | '待验收' | '已验收' | '终止'
 
-export type TaskViewMode = '列表' | '日历'
+export type TaskViewMode = '列表' | '日历' | '画布'
 
 export type TaxMode = 'salary' | 'labor'
 

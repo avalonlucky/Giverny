@@ -53,11 +53,24 @@ type Env = {
   TURNSTILE_SECRET_KEY?: string
   AI?: WorkersAiBinding
   WORKERS_AI_MODEL?: string
+  VECTORIZE?: VectorizeBinding
 }
 
-// Workers AI 绑定的最小类型：env.AI.run(model, input) 返回带 response 文本的结果。
+// Workers AI 绑定的最小类型：文本生成返回 response；向量化返回 data（number[][]）。
 type WorkersAiBinding = {
-  run: (model: string, input: { messages: Array<{ role: string; content: string }>; max_tokens?: number }) => Promise<{ response?: string }>
+  run: (
+    model: string,
+    input: { messages?: Array<{ role: string; content: string }>; max_tokens?: number; text?: string | string[] },
+  ) => Promise<{ response?: string; data?: number[][] }>
+}
+
+// Vectorize 绑定的最小类型。
+type VectorizeVector = { id: string; values: number[]; metadata?: Record<string, string | number | boolean> }
+type VectorizeMatch = { id: string; score: number; metadata?: Record<string, string | number | boolean> }
+type VectorizeBinding = {
+  upsert: (vectors: VectorizeVector[]) => Promise<unknown>
+  query: (vector: number[], options?: { topK?: number; returnMetadata?: 'all' | 'indexed' | boolean }) => Promise<{ matches?: VectorizeMatch[] }>
+  deleteByIds: (ids: string[]) => Promise<unknown>
 }
 
 type WorkerExecutionContext = {
@@ -681,6 +694,123 @@ async function callWorkersAiText(env: Env, prompt: string, maxOutputTokens: numb
     max_tokens: maxOutputTokens,
   })
   return (result?.response || '').trim()
+}
+
+// ===== 历史语义搜索（Vectorize + Workers AI bge-m3 多语向量）=====
+const SEARCH_EMBED_MODEL = '@cf/baai/bge-m3'
+
+type SearchTaskRow = {
+  id: string
+  title: string | null
+  requirement: string | null
+  design_type: string | null
+  acceptance_note: string | null
+  settlement_month: string | null
+  deleted_at?: string | null
+}
+
+function buildTaskSearchText(row: SearchTaskRow): string {
+  return [row.title, row.design_type, row.requirement, row.acceptance_note]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 2000)
+}
+
+async function embedTexts(env: Env, texts: string[]): Promise<number[][]> {
+  if (!env.AI || texts.length === 0) {
+    return []
+  }
+  const result = await env.AI.run(SEARCH_EMBED_MODEL, { text: texts })
+  return result?.data ?? []
+}
+
+function taskVectorMetadata(row: SearchTaskRow): Record<string, string | number> {
+  return {
+    taskId: Number(row.id),
+    title: (row.title || '').slice(0, 200),
+    month: row.settlement_month || '',
+    type: row.design_type || '',
+  }
+}
+
+// 单任务增量入库（创建/编辑后调用）：删除态则从索引移除。
+async function indexTaskSearch(env: Env, id: string): Promise<void> {
+  if (!env.VECTORIZE || !env.AI) {
+    return
+  }
+  try {
+    const row = await env.DB.prepare(
+      'SELECT id, title, requirement, design_type, acceptance_note, settlement_month, deleted_at FROM tasks WHERE id = ?',
+    ).bind(id).first<SearchTaskRow>()
+    if (!row) {
+      return
+    }
+    if (row.deleted_at) {
+      await env.VECTORIZE.deleteByIds([`task-${id}`])
+      return
+    }
+    const [values] = await embedTexts(env, [buildTaskSearchText(row)])
+    if (values) {
+      await env.VECTORIZE.upsert([{ id: `task-${id}`, values, metadata: taskVectorMetadata(row) }])
+    }
+  } catch {
+    // 索引失败不影响主流程
+  }
+}
+
+async function reindexAllTasks(env: Env): Promise<Response> {
+  if (!env.VECTORIZE || !env.AI) {
+    return fail('Vectorize / Workers AI 未启用', 503)
+  }
+  const rows = await env.DB.prepare(
+    'SELECT id, title, requirement, design_type, acceptance_note, settlement_month FROM tasks WHERE deleted_at IS NULL',
+  ).all<SearchTaskRow>()
+  const list = rows.results ?? []
+  let indexed = 0
+  const batchSize = 40
+  for (let i = 0; i < list.length; i += batchSize) {
+    const batch = list.slice(i, i + batchSize)
+    const vectors = await embedTexts(env, batch.map(buildTaskSearchText))
+    const upserts: VectorizeVector[] = []
+    batch.forEach((row, j) => {
+      if (vectors[j]) {
+        upserts.push({ id: `task-${row.id}`, values: vectors[j], metadata: taskVectorMetadata(row) })
+      }
+    })
+    if (upserts.length) {
+      await env.VECTORIZE.upsert(upserts)
+      indexed += upserts.length
+    }
+  }
+  await audit(env, 'reindex', 'search', 'tasks', { indexed })
+  return ok({ ok: true, indexed, total: list.length })
+}
+
+async function searchTasks(env: Env, query: string): Promise<Response> {
+  if (!env.VECTORIZE || !env.AI) {
+    return fail('Vectorize / Workers AI 未启用', 503)
+  }
+  const q = (query || '').trim()
+  if (!q) {
+    return ok({ results: [] })
+  }
+  const [vector] = await embedTexts(env, [q])
+  if (!vector) {
+    return fail('查询向量化失败', 502)
+  }
+  const res = await env.VECTORIZE.query(vector, { topK: 20, returnMetadata: 'all' })
+  const results = (res.matches ?? [])
+    .filter((match) => match.score >= 0.4)
+    .map((match) => ({
+      taskId: Number(match.metadata?.taskId ?? match.id.replace('task-', '')),
+      score: Math.round(match.score * 100) / 100,
+      title: String(match.metadata?.title ?? ''),
+      month: String(match.metadata?.month ?? ''),
+      type: String(match.metadata?.type ?? ''),
+    }))
+    .filter((item) => Number.isFinite(item.taskId))
+  return ok({ results })
 }
 
 // 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
@@ -3120,7 +3250,7 @@ async function getSharedReport(env: Env, token: string) {
   })
 }
 
-async function createTask(env: Env, request: Request) {
+async function createTask(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const task = (await request.json()) as Task
   const id = toId(task.id || Date.now())
   const hourlyRate = await getHourlyRate(env)
@@ -3182,10 +3312,11 @@ async function createTask(env: Env, request: Request) {
     .run()
 
   await audit(env, 'create', 'task', id, task)
+  ctx?.waitUntil(indexTaskSearch(env, id))
   return ok({ ...task, id: Number(id), status: initialStatus, progress: 0, files: [] }, 201)
 }
 
-async function updateTask(env: Env, id: string, request: Request) {
+async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerExecutionContext) {
   const changes = (await request.json()) as Partial<Task>
   const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
   if (!current) {
@@ -3285,6 +3416,7 @@ async function updateTask(env: Env, id: string, request: Request) {
 
   await audit(env, 'update', 'task', id, changes)
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
+  ctx?.waitUntil(indexTaskSearch(env, id))
   return ok(saved ? toTask(saved) : toTask(current))
 }
 
@@ -5109,6 +5241,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/ai-model' ||
       path === '/api/ai/model-test' ||
       path === '/api/ai/models' ||
+      path === '/api/search' ||
+      path === '/api/search/reindex' ||
       path === '/api/insights/attachment-analyses/backfill' ||
       path === '/api/insights/diagnose' ||
       path === '/api/insights/history' ||
@@ -5157,13 +5291,13 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return getState(env, role)
   }
   if (path === '/api/tasks' && request.method === 'POST') {
-    return createTask(env, request)
+    return createTask(env, request, ctx)
   }
   if (path.startsWith('/api/tasks/') && path.endsWith('/entry-attachments') && request.method === 'PATCH') {
     return setEntryAttachmentsArchived(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/tasks/') && request.method === 'PATCH') {
-    return updateTask(env, path.split('/').pop() ?? '', request)
+    return updateTask(env, path.split('/').pop() ?? '', request, ctx)
   }
   if (path.startsWith('/api/tasks/') && path.endsWith('/void') && request.method === 'POST') {
     return voidTask(env, path.split('/')[3], request)
@@ -5236,6 +5370,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/daily-knowledge' && request.method === 'POST') {
     return suggestDailyKnowledgeWithAi(env, request)
+  }
+  if (path === '/api/search' && request.method === 'GET') {
+    return searchTasks(env, url.searchParams.get('q') ?? '')
+  }
+  if (path === '/api/search/reindex' && request.method === 'POST') {
+    return reindexAllTasks(env)
   }
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)

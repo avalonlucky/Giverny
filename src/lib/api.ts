@@ -331,6 +331,11 @@ export const api = {
       false,
     ),
   getState: () => requestJson<BackendState>('/api/state'),
+  searchTasks: (q: string) =>
+    requestJson<{ results: Array<{ taskId: number; score: number; title: string; month: string; type: string }> }>(
+      `/api/search?q=${encodeURIComponent(q)}`,
+    ),
+  reindexSearch: () => requestJson<{ ok: boolean; indexed: number; total: number }>('/api/search/reindex', { method: 'POST' }),
   getSharedReport: (token: string) => requestJson<SharedReportState>(`/api/shared/${token}`, undefined, false),
   createAccessToken: (payload: { label: string; expiresInDays: number | null; scope: TokenScope }) =>
     requestJson<AccessToken>('/api/tokens', {

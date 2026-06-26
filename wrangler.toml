@@ -24,6 +24,11 @@ GEMINI_BASE_URL = "https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e
 [ai]
 binding = "AI"
 
+# Vectorize：历史任务/交付件的语义搜索向量库（bge-m3 多语向量，1024 维，cosine）。
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "worklog-search"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
