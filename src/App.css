@@ -5079,10 +5079,11 @@ button.topbar-create-button:hover {
   overflow: hidden;
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
+  /* 浅色主调画布：极淡主色底 + 柔和绿点阵网格 */
   background:
-    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--color-text-muted) 42%, transparent) 1px, transparent 1px),
-    color-mix(in srgb, var(--color-text) 94%, var(--color-surface) 6%);
-  background-size: 22px 22px;
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--color-primary) 22%, transparent) 1px, transparent 1px),
+    color-mix(in srgb, var(--color-primary) 4%, var(--color-surface));
+  background-size: 24px 24px;
 }
 
 .task-canvas-project-shell {
