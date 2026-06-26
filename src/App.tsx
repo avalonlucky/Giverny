@@ -2901,16 +2901,20 @@ function ShortcutHelpModal({ groups, onClose }: { groups: ShortcutHelpGroup[]; o
 function SemanticSearchModal({
   isAdmin,
   files,
+  tasks,
   onClose,
   onOpenTask,
-  onOpenFile,
+  onJumpToFile,
 }: {
   isAdmin: boolean
   files: FileAsset[]
+  tasks: Task[]
   onClose: () => void
   onOpenTask: (taskId: number) => void
-  onOpenFile: (file: FileAsset) => void
+  onJumpToFile: (file: FileAsset) => void
 }) {
+  // 文件库只收录「已验收」任务的验收文件，故搜索里的「文件库」缩略图也只展示这些，确保点击能跳到库里对应位置。
+  const acceptedTaskIds = new Set(tasks.filter((task) => task.status === '已验收').map((task) => task.id))
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<{ taskId: number; score: number; title: string; month: string; type: string }>>([])
   const [loading, setLoading] = useState(false)
@@ -2998,8 +3002,8 @@ function SemanticSearchModal({
             <p className="calendar-empty-hint">没有找到相关任务。如果是刚新建的任务，可点下方「重建索引」后再搜。</p>
           )}
           {results.map((item) => {
-            const acceptanceFiles = files.filter(
-              (file) => file.taskId === item.taskId && !file.deletedAt && file.scope === 'acceptance',
+            const libraryFiles = files.filter(
+              (file) => file.taskId === item.taskId && !file.deletedAt && file.scope === 'acceptance' && acceptedTaskIds.has(item.taskId),
             )
             return (
               <div className="semantic-search-result" key={item.taskId}>
@@ -3010,22 +3014,25 @@ function SemanticSearchModal({
                   </div>
                   <em>{Math.round(item.score * 100)}%</em>
                 </button>
-                {acceptanceFiles.length > 0 && (
-                  <div className="semantic-search-result-files" aria-label="验收文件">
-                    {acceptanceFiles.map((file) => {
-                      const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
-                      const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                      return (
-                        <AttachmentHoverThumbnail
-                          key={file.id}
-                          name={file.name}
-                          type={fileType}
-                          previewUrl={previewUrl}
-                          compact
-                          onOpen={() => onOpenFile(file)}
-                        />
-                      )
-                    })}
+                {libraryFiles.length > 0 && (
+                  <div className="semantic-search-result-files">
+                    <span className="semantic-search-files-label">文件库</span>
+                    <div className="semantic-search-files-row">
+                      {libraryFiles.map((file) => {
+                        const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                        const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                        return (
+                          <AttachmentHoverThumbnail
+                            key={file.id}
+                            name={file.name}
+                            type={fileType}
+                            previewUrl={previewUrl}
+                            compact
+                            onOpen={() => onJumpToFile(file)}
+                          />
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -3082,6 +3089,7 @@ function App() {
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('')
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
+  const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
   const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge())
   const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() =>
     fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize),
@@ -5520,6 +5528,8 @@ function App() {
             tasks={taskItems}
             attachmentAnalyses={attachmentAnalyses}
             currentMonthValue={currentMonth.value}
+            focusFileId={fileLibraryFocusId}
+            onFocusHandled={() => setFileLibraryFocusId(0)}
             onPreviewFile={setPreviewFile}
             onDeleteFile={isAdmin ? handleDeleteFile : readOnlyUpdateTask}
             onDownloadFile={handleDownloadFile}
@@ -5649,14 +5659,16 @@ function App() {
         <SemanticSearchModal
           isAdmin={isAdmin}
           files={fileItems}
+          tasks={taskItems}
           onClose={() => setIsSemanticSearchOpen(false)}
           onOpenTask={(taskId) => {
             setIsSemanticSearchOpen(false)
             handleOpenTaskDetail(taskId)
           }}
-          onOpenFile={(file) => {
+          onJumpToFile={(file) => {
             setIsSemanticSearchOpen(false)
-            setPreviewFile(file)
+            setFileLibraryFocusId(file.id)
+            navigateView('文件库')
           }}
         />
       )}
@@ -10306,6 +10318,8 @@ function FilesView({
   tasks,
   attachmentAnalyses,
   currentMonthValue,
+  focusFileId = 0,
+  onFocusHandled,
   onPreviewFile,
   onDeleteFile,
   onDownloadFile,
@@ -10316,6 +10330,8 @@ function FilesView({
   tasks: Task[]
   attachmentAnalyses: AttachmentAnalysis[]
   currentMonthValue: string
+  focusFileId?: number
+  onFocusHandled?: () => void
   onPreviewFile: (file: FileAsset) => void
   onDeleteFile: (fileId: number) => void
   onDownloadFile: (file: FileAsset) => void
@@ -10397,6 +10413,27 @@ function FilesView({
   const selectedFiles = selectedProject?.files ?? []
   const [selectedFileId, setSelectedFileId] = useState(0)
   const selectedFile = selectedFiles.find((file) => file.id === selectedFileId)
+
+  // 从语义搜索跳转过来：定位到该文件所属项目文件夹并选中它，自动展开月份、滚动到位、高亮其 AI 分析。
+  useEffect(() => {
+    if (!focusFileId) {
+      return
+    }
+    const target = acceptanceFiles.find((file) => file.id === focusFileId)
+    if (target) {
+      const project = projectRecords.find((record) => record.id === target.taskId)
+      if (project) {
+        setOpenMonths((current) => new Set(current).add(project.month))
+      }
+      setSelectedProjectId(target.taskId)
+      setSelectedFileId(focusFileId)
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-file-id="${focusFileId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+    }
+    onFocusHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusFileId])
 
   const openFileSource = (file: FileAsset) => {
     const sourceUrl = authedPreviewUrl(file.sourceUrl)
@@ -10536,6 +10573,7 @@ function FilesView({
                 <article
                   className={`file-thumb-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
                   key={file.id}
+                  data-file-id={file.id}
                   role="button"
                   tabIndex={0}
                   onClick={() => setSelectedFileId(file.id)}

@@ -681,9 +681,26 @@ button.topbar-create-button:hover {
 
 .semantic-search-result-files {
   display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 10px;
+}
+
+.semantic-search-files-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.semantic-search-files-row {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 12px 10px;
+  min-width: 0;
 }
 
 .semantic-search-result strong {
