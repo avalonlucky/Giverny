@@ -56,7 +56,14 @@ type Env = {
   WORKERS_AI_MODEL?: string
   VECTORIZE?: VectorizeBinding
   BROWSER?: BrowserWorker
+  ANALYSIS_QUEUE?: AnalysisQueue
 }
+
+// Queues 生产者绑定的最小类型。
+type AnalysisMessage = { attachmentId: string }
+type AnalysisQueue = { send: (body: AnalysisMessage) => Promise<void> }
+type QueueMessage = { body: AnalysisMessage; ack: () => void; retry: () => void }
+type QueueBatch = { messages: QueueMessage[] }
 
 // Workers AI 绑定的最小类型：文本生成返回 response；向量化返回 data（number[][]）。
 type WorkersAiBinding = {
@@ -1528,6 +1535,15 @@ async function createAttachmentAnalysisJob(env: Env, attachmentId: string, taskI
     reset ? 1 : 0,
     reset ? 1 : 0,
   ).run()
+}
+
+// 触发一次交付件分析：优先入队（专用消费者 + 自动重试 + 独立预算）；无队列时回退到请求内 waitUntil 处理。
+function enqueueAnalysis(env: Env, ctx: WorkerExecutionContext | undefined, attachmentId: string) {
+  if (env.ANALYSIS_QUEUE) {
+    ctx?.waitUntil(env.ANALYSIS_QUEUE.send({ attachmentId }).catch((error) => console.error('分析入队失败，等待 cron 兜底', error)))
+  } else {
+    ctx?.waitUntil(processAttachmentAnalysis(env, attachmentId))
+  }
 }
 
 async function markAnalysisFailure(env: Env, attachmentId: string, error: unknown, unsupported = false) {
@@ -3889,7 +3905,7 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
     return saved
   }
   if (form.get('analyze') !== 'false') {
-    ctx?.waitUntil(processAttachmentAnalysis(env, id))
+    enqueueAnalysis(env, ctx, id)
   }
   return ok(saved, 201)
 }
@@ -4057,7 +4073,7 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
     return saved
   }
   if (form.get('analyze') !== 'false') {
-    ctx?.waitUntil(processAttachmentAnalysis(env, fileId))
+    enqueueAnalysis(env, ctx, fileId)
   }
   return ok(saved, 201)
 }
@@ -4277,7 +4293,7 @@ async function retryAttachmentAnalysis(env: Env, attachmentId: string, ctx?: Wor
     return fail('附件不存在', 404)
   }
   await createAttachmentAnalysisJob(env, attachmentId, row.task_id, true)
-  ctx?.waitUntil(processAttachmentAnalysis(env, attachmentId))
+  enqueueAnalysis(env, ctx, attachmentId)
   return ok({ ok: true, attachmentId: Number(attachmentId) })
 }
 
@@ -5710,5 +5726,17 @@ export default {
     await runEventDrivenInsights(env, 1).catch((error) => {
       console.error('insight event trigger failed', error)
     })
+  },
+  // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。
+  async queue(batch: QueueBatch, env: Env) {
+    for (const message of batch.messages) {
+      try {
+        await processAttachmentAnalysis(env, String(message.body.attachmentId))
+        message.ack()
+      } catch (error) {
+        console.error('队列分析失败，将重试', error)
+        message.retry()
+      }
+    }
   },
 }

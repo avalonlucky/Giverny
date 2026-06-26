@@ -34,6 +34,18 @@ index_name = "worklog-search"
 [browser]
 binding = "BROWSER"
 
+# Queues：交付件 AI 分析异步队列。上传后入队，专用消费者用独立 CPU 预算逐条分析、失败自动重试，
+# 不再占用上传请求的预算；cron 仍作兜底。
+[[queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "worklog-analysis"
+
+[[queues.consumers]]
+queue = "worklog-analysis"
+max_batch_size = 3
+max_batch_timeout = 10
+max_retries = 3
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
