@@ -12527,12 +12527,10 @@ function gatewayBaseUrlForProvider(provider: AiModelConfig['provider']): string 
       return `${AI_GATEWAY_BASE}/google-ai-studio/v1beta`
     case 'openai':
       return `${AI_GATEWAY_BASE}/openai`
-    case 'openrouter':
-      return `${AI_GATEWAY_BASE}/openrouter`
     case 'anthropic':
       return `${AI_GATEWAY_BASE}/anthropic`
     default:
-      // Kimi/Moonshot 等：网关暂无命名 provider，只能直连。
+      // Kimi/Moonshot、OpenRouter 等：直连最稳（OpenRouter 自身已是聚合路由），不强制走网关。
       return ''
   }
 }
@@ -12578,7 +12576,7 @@ function defaultModelForProvider(provider: AiModelConfig['provider']): string {
     case 'openai':
       return 'gpt-4o-mini'
     case 'openrouter':
-      return ''
+      return 'deepseek/deepseek-chat-v3-0324:free'
     case 'anthropic':
       return 'claude-sonnet-4-6'
     case 'custom-openai':

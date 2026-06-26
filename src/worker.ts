@@ -45,6 +45,7 @@ type Env = {
   KIMI_API_KEY?: string
   KIMI_BASE_URL?: string
   KIMI_MODEL?: string
+  OPENROUTER_API_KEY?: string
   AI_PROVIDER?: string
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
@@ -490,6 +491,9 @@ function providerEnvironmentKey(env: Env, provider: AiModelProvider) {
   }
   if (provider === 'deepseek') {
     return env.DEEPSEEK_API_KEY || ''
+  }
+  if (provider === 'openrouter') {
+    return env.OPENROUTER_API_KEY || ''
   }
   return ''
 }
