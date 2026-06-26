@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-26 · v0.15.6（OpenRouter 接入 · 一个 Key 通吃）
+
+- AI 模型设置支持 **OpenRouter**：一个 key 即可调 GPT / Claude / Gemini / DeepSeek / Kimi 等主流模型，以及大量 `:free` 免费模型（限流但低频够用）。
+- 后端支持 `OPENROUTER_API_KEY` Worker secret；OpenRouter 默认官方直连，默认模型给一个免费模型，可「获取模型」拉全量再选。
+
 ## 2026-06-26 · v0.15.5（交付件分析改用队列异步处理）
 
 - 交付件 AI 分析接入 Cloudflare Queues：上传/重试时入队，由专用消费者用**独立 CPU 预算**逐条分析，不再占用上传请求自身的预算；分析更稳、不易因超时失败。
