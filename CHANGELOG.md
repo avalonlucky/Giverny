@@ -1,9 +1,10 @@
 # Changelog
 
-## 2026-06-26 · v0.15.6（OpenRouter 接入 · 一个 Key 通吃）
+## 2026-06-26 · v0.15.6（OpenRouter 接入 · 一个 Key 通吃 + 免费模型每日实测）
 
-- AI 模型设置支持 **OpenRouter**：一个 key 即可调 GPT / Claude / Gemini / DeepSeek / Kimi 等主流模型，以及大量 `:free` 免费模型（限流但低频够用）。
-- 后端支持 `OPENROUTER_API_KEY` Worker secret；OpenRouter 默认官方直连，默认模型给一个免费模型，可「获取模型」拉全量再选。
+- AI 模型设置支持 **OpenRouter**：一个 key 即可调 GPT / Claude / Gemini / DeepSeek / Kimi 等主流模型，以及大量 `:free` 免费模型。
+- 后端支持 `OPENROUTER_API_KEY` Worker secret；OpenRouter 默认官方直连。
+- 新增「OpenRouter 免费模型」面板：**每天自动拉取全部免费模型并逐个实测可用性**（可用/限流/已下架），标注文字/识图与上下文长度；可「立即扫描」手动刷新，可用模型一键「设为文字/识图备用」。解决免费模型经常变动、不知道哪个还能用的问题。
 
 ## 2026-06-26 · v0.15.5（交付件分析改用队列异步处理）
 
