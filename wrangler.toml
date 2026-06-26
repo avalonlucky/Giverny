@@ -1,6 +1,7 @@
 name = "designer-worklog"
 main = "src/worker.ts"
 compatibility_date = "2026-06-10"
+compatibility_flags = ["nodejs_compat"]
 account_id = "ccd312f47f0dca574199fa6e33758c6d"
 
 # 生产仍只走自定义域名 mayeai.com；workers_dev 关闭，避免把生产暴露到 workers.dev。
@@ -28,6 +29,10 @@ binding = "AI"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "worklog-search"
+
+# Browser Rendering：服务端无头浏览器，把结算回单渲染成清晰矢量 PDF。
+[browser]
+binding = "BROWSER"
 
 [assets]
 directory = "./dist"

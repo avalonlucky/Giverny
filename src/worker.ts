@@ -1,4 +1,5 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
+import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import JSZip from 'jszip'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
@@ -54,6 +55,7 @@ type Env = {
   AI?: WorkersAiBinding
   WORKERS_AI_MODEL?: string
   VECTORIZE?: VectorizeBinding
+  BROWSER?: BrowserWorker
 }
 
 // Workers AI 绑定的最小类型：文本生成返回 response；向量化返回 data（number[][]）。
@@ -811,6 +813,251 @@ async function searchTasks(env: Env, query: string): Promise<Response> {
     }))
     .filter((item) => Number.isFinite(item.taskId))
   return ok({ results })
+}
+
+// ===== 结算回单服务端 PDF（Cloudflare Browser Rendering 无头浏览器，输出清晰矢量 PDF）=====
+function escapeHtml(value: string): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function monthLabelCn(month: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month)
+  return match ? `${match[1]} 年 ${Number(match[2])} 月` : month
+}
+
+function formatYuanServer(value: number): string {
+  return (Math.round(value * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: value % 1 === 0 ? 0 : 1 })
+}
+
+function toChineseAmountCny(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return ''
+  }
+  const cents = Math.round(value * 100)
+  if (cents === 0) {
+    return '零元整'
+  }
+  const digits = '零壹贰叁肆伍陆柒捌玖'
+  const units = ['', '拾', '佰', '仟']
+  const bigUnits = ['', '万', '亿', '兆']
+  const yuan = Math.floor(cents / 100)
+  const jiao = Math.floor((cents % 100) / 10)
+  const fen = cents % 10
+  const groups: string[] = []
+  let rest = String(yuan)
+  while (rest.length > 0) {
+    groups.unshift(rest.slice(-4))
+    rest = rest.slice(0, -4)
+  }
+  let intStr = ''
+  groups.forEach((group, gi) => {
+    let groupStr = ''
+    let pendingZero = false
+    const len = group.length
+    for (let i = 0; i < len; i++) {
+      const digit = Number(group[i])
+      if (digit === 0) {
+        pendingZero = true
+      } else {
+        if (pendingZero && groupStr) {
+          groupStr += '零'
+        }
+        pendingZero = false
+        groupStr += digits[digit] + units[len - 1 - i]
+      }
+    }
+    if (groupStr) {
+      intStr += groupStr + bigUnits[groups.length - 1 - gi]
+    } else if (intStr && !intStr.endsWith('零')) {
+      intStr += '零'
+    }
+  })
+  intStr = (intStr || '零') + '元'
+  let decStr = ''
+  if (jiao === 0 && fen === 0) {
+    decStr = '整'
+  } else {
+    if (jiao > 0) {
+      decStr += digits[jiao] + '角'
+    }
+    if (fen > 0) {
+      decStr += digits[fen] + '分'
+    }
+  }
+  return intStr + decStr
+}
+
+function buildReceiptHtml(data: {
+  pdfTitle: string
+  company: string
+  month: string
+  hourlyRate: number
+  receiptNo: string
+  now: string
+  rows: Array<{ title: string; type: string; status: string; requirement: string; hours: number; amount: number; supplemental: boolean }>
+  uncounted: Array<{ title: string; type: string; reason: string }>
+  totalHours: number
+  totalAmount: number
+  acceptedCount: number
+  pendingCount: number
+  taskCount: number
+}): string {
+  const rowsHtml = data.rows
+    .map(
+      (row, index) => `
+      <tr>
+        <td>${String(index + 1).padStart(2, '0')}</td>
+        <td class="name"><b>${escapeHtml(row.title)}</b>${row.supplemental ? '<span class="supp">补录</span>' : ''}<div class="req">${escapeHtml(row.requirement)}</div></td>
+        <td>${escapeHtml(row.type)}</td>
+        <td>${escapeHtml(row.status)}</td>
+        <td class="num">${row.hours.toFixed(1)}</td>
+        <td class="num">${formatYuanServer(row.amount)}</td>
+      </tr>`,
+    )
+    .join('')
+  const uncountedHtml = data.uncounted.length
+    ? `<div class="uncounted">
+        <div class="uncounted-head"><h3>${escapeHtml(monthLabelCn(data.month))} · 不计时</h3><span>已完成但不计入计费工时，仅作说明</span></div>
+        <ul>${data.uncounted
+          .map((item) => `<li><span class="u-name">${escapeHtml(item.title)}</span><span class="u-type">${escapeHtml(item.type)}</span><span class="u-reason">${escapeHtml(item.reason)}</span></li>`)
+          .join('')}</ul>
+      </div>`
+    : ''
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #243033; font-variant-numeric: tabular-nums; }
+    .sheet { padding: 4px 8px; }
+    .head { text-align: center; padding: 6px 0 2px; }
+    .head h1 { margin: 0; font-size: 20px; letter-spacing: 1px; }
+    .head .en { color: #97a3a5; font-size: 10px; letter-spacing: 3px; }
+    .meta { display: flex; justify-content: space-between; color: #6b7679; font-size: 11px; margin-top: 8px; }
+    .rule { border-top: 1.4px dashed rgba(39,54,58,0.34); margin: 12px 0; }
+    .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .info .cell { border-bottom: 1px dashed rgba(39,54,58,0.18); padding-bottom: 6px; }
+    .info dt { color: #8a9598; font-size: 11px; margin: 0 0 3px; }
+    .info dd { margin: 0; font-weight: 700; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+    thead th { text-align: left; color: #6b7679; font-weight: 700; border-bottom: 1.4px dashed rgba(39,54,58,0.34); padding: 6px 8px; }
+    tbody td { padding: 8px; border-bottom: 1px dashed rgba(39,54,58,0.14); vertical-align: top; }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    td.name b { font-size: 13px; }
+    td.name .supp { margin-left: 6px; font-size: 10px; color: #b08438; }
+    td.name .req { color: #8a9598; font-size: 11px; margin-top: 3px; line-height: 1.5; }
+    tfoot td { padding: 8px; border-top: 1.4px dashed rgba(39,54,58,0.34); font-weight: 800; }
+    .amount { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; padding: 10px 0; border-top: 1px dashed rgba(39,54,58,0.18); }
+    .amount span { color: #8a9598; font-size: 12px; }
+    .amount strong { font-size: 16px; }
+    .uncounted { margin-top: 16px; padding-top: 12px; border-top: 1px dashed rgba(39,54,58,0.22); }
+    .uncounted-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+    .uncounted-head h3 { margin: 0; font-size: 13px; }
+    .uncounted-head span { color: #8a9598; font-size: 11px; }
+    .uncounted ul { margin: 0; padding: 0; list-style: none; }
+    .uncounted li { display: grid; grid-template-columns: 1.3fr 0.6fr 2fr; gap: 12px; font-size: 12px; padding: 3px 0; }
+    .u-type, .u-reason { color: #8a9598; }
+    .remarks { margin-top: 14px; color: #6b7679; font-size: 11px; line-height: 1.7; }
+  </style></head>
+  <body>
+    <div class="sheet">
+      <div class="head">
+        <h1>${escapeHtml(data.pdfTitle)}</h1>
+        <div class="en">MONTHLY SETTLEMENT RECEIPT</div>
+      </div>
+      <div class="meta"><span>回单编号：${escapeHtml(data.receiptNo)}</span><span>出单时间：${escapeHtml(data.now)}</span></div>
+      <div class="rule"></div>
+      <dl class="info">
+        <div class="cell"><dt>客户名称</dt><dd>${escapeHtml(data.company)}</dd></div>
+        <div class="cell"><dt>服务内容</dt><dd>平面设计兼职</dd></div>
+        <div class="cell"><dt>结算月份</dt><dd>${escapeHtml(monthLabelCn(data.month))}</dd></div>
+        <div class="cell"><dt>结算单价</dt><dd>¥${data.hourlyRate} / 小时</dd></div>
+      </dl>
+      <table>
+        <thead><tr><th>序号</th><th>项目名称</th><th>类型</th><th>状态</th><th class="num">工时</th><th class="num">金额（元）</th></tr></thead>
+        <tbody>${rowsHtml || '<tr><td colspan="6" style="text-align:center;color:#97a3a5;padding:18px;">本月暂无可结算任务</td></tr>'}</tbody>
+        <tfoot><tr><td colspan="4">合计</td><td class="num">${data.totalHours.toFixed(1)}</td><td class="num">¥${formatYuanServer(data.totalAmount)}</td></tr></tfoot>
+      </table>
+      <div class="amount"><span>人民币（大写）</span><strong>${escapeHtml(toChineseAmountCny(data.totalAmount))}</strong></div>
+      ${uncountedHtml}
+      <div class="remarks">
+        <p>备注：本月共 ${data.taskCount} 项任务，已验收 ${data.acceptedCount} 项，待验收 ${data.pendingCount} 项。</p>
+        <p>本回单由系统根据任务与工时记录自动生成，验收状态以甲方确认为准。</p>
+      </div>
+    </div>
+  </body></html>`
+}
+
+async function exportReportPdf(env: Env, month: string): Promise<Response> {
+  if (!env.BROWSER) {
+    return fail('Browser Rendering 未启用', 503)
+  }
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return fail('月份格式不正确', 400)
+  }
+  const [hourlyRate, pdfTitle, company, taskRows] = await Promise.all([
+    getHourlyRate(env),
+    getPdfTitle(env),
+    getServiceCompanyName(env),
+    env.DB.prepare('SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC').bind(month).all<DbTask>(),
+  ])
+  const tasks = (taskRows.results ?? []).map((row) => toTask(row))
+  const isBillable = (task: Task) => task.billable !== false && task.status !== '不计费'
+  const billable = tasks.filter((task) => isBillable(task) && task.actualHours > 0)
+  const rows = billable.map((task) => ({
+    title: task.title || '未命名任务',
+    type: task.type || '未分类',
+    status: task.status,
+    requirement: (task.requirement || '').replace(/\s+/g, ' ').slice(0, 90),
+    hours: task.actualHours,
+    amount: task.actualHours * hourlyRate,
+    supplemental: Boolean(task.isSupplemental),
+  }))
+  const uncounted = tasks
+    .filter((task) => !isBillable(task))
+    .map((task) => ({
+      title: task.title || '未命名任务',
+      type: task.type || '未分类',
+      reason: task.status === '挂起' ? task.suspendReason || '挂起' : task.status === '终止' ? task.terminateReason || '终止' : '整单不计费',
+    }))
+  const totalHours = Math.round(billable.reduce((sum, task) => sum + task.actualHours, 0) * 10) / 10
+  const totalAmount = billable.reduce((sum, task) => sum + task.actualHours * hourlyRate, 0)
+  const html = buildReceiptHtml({
+    pdfTitle,
+    company,
+    month,
+    hourlyRate,
+    receiptNo: `AK-${month.replace('-', '')}-${String(billable.length + 1).padStart(3, '0')}`,
+    now: formatBeijing(nowIso()),
+    rows,
+    uncounted,
+    totalHours,
+    totalAmount,
+    acceptedCount: tasks.filter((task) => task.status === '已验收').length,
+    pendingCount: tasks.filter((task) => task.status === '待验收').length,
+    taskCount: tasks.length,
+  })
+  const browser = await puppeteer.launch(env.BROWSER)
+  try {
+    const page = await browser.newPage()
+    await page.setContent(html, { waitUntil: 'networkidle0' })
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '14mm', bottom: '14mm', left: '12mm', right: '12mm' },
+    })
+    await audit(env, 'export', 'report_pdf', month, { rows: rows.length })
+    return new Response(new Uint8Array(pdf), {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': `attachment; filename="settlement-${month}.pdf"`,
+      },
+    })
+  } finally {
+    await browser.close()
+  }
 }
 
 // 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
@@ -5243,6 +5490,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/models' ||
       path === '/api/search' ||
       path === '/api/search/reindex' ||
+      (path.startsWith('/api/reports/') && path.endsWith('/pdf')) ||
       path === '/api/insights/attachment-analyses/backfill' ||
       path === '/api/insights/diagnose' ||
       path === '/api/insights/history' ||
@@ -5376,6 +5624,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/search/reindex' && request.method === 'POST') {
     return reindexAllTasks(env)
+  }
+  if (path.startsWith('/api/reports/') && path.endsWith('/pdf') && request.method === 'GET') {
+    return exportReportPdf(env, path.split('/')[3] ?? '')
   }
   if (path === '/api/ai/model-test' && request.method === 'POST') {
     return testAiModelRoute(env, request)

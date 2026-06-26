@@ -12089,11 +12089,33 @@ function ReportsView({
     return parts.join('；')
   }
 
-  const handleExportPdf = () => {
-    const previousTitle = document.title
-    document.title = `${pdfTitle}_${selectedMonth}`
-    window.print()
-    document.title = previousTitle
+  const [isPdfExporting, setIsPdfExporting] = useState(false)
+  const handleExportPdf = async () => {
+    if (isPdfExporting) {
+      return
+    }
+    setIsPdfExporting(true)
+    try {
+      // 服务端无头浏览器渲染清晰矢量 PDF
+      const blob = await api.exportReportPdf(selectedMonth)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${pdfTitle}_${selectedMonthLabel.replace(/\s/g, '')}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      // 服务端不可用时回退浏览器打印
+      console.error('服务端 PDF 导出失败，回退浏览器打印', error)
+      const previousTitle = document.title
+      document.title = `${pdfTitle}_${selectedMonth}`
+      window.print()
+      document.title = previousTitle
+    } finally {
+      setIsPdfExporting(false)
+    }
   }
 
   const handleExportUserSheet = async (month = selectedMonth) => {
@@ -12209,9 +12231,9 @@ function ReportsView({
             <CheckCircle2 size={18} />
             {selectedMonth === currentMonth.value ? '锁定结算并生成甲方链接' : '历史结算已锁定'}
           </button>
-          <button className="ghost-button" onClick={handleExportPdf}>
+          <button className="ghost-button" onClick={() => void handleExportPdf()} disabled={isPdfExporting}>
             <Download size={18} />
-            导出 PDF
+            {isPdfExporting ? '生成中…' : '导出 PDF'}
           </button>
           <button className="ghost-button" onClick={() => void handleExportUserSheet()}>
             <Download size={18} />

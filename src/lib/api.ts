@@ -336,6 +336,20 @@ export const api = {
       `/api/search?q=${encodeURIComponent(q)}`,
     ),
   reindexSearch: () => requestJson<{ ok: boolean; indexed: number; total: number }>('/api/search/reindex', { method: 'POST' }),
+  exportReportPdf: async (month: string): Promise<Blob> => {
+    const headers = new Headers()
+    const auth = getStoredAuth()
+    if (auth) {
+      headers.set('x-auth-key', auth.key)
+      headers.set('x-auth-email', auth.email)
+    }
+    const response = await fetch(`/api/reports/${month}/pdf`, { headers })
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null
+      throw new ApiError(body?.error ?? `PDF 导出失败：${response.status}`, response.status)
+    }
+    return response.blob()
+  },
   getSharedReport: (token: string) => requestJson<SharedReportState>(`/api/shared/${token}`, undefined, false),
   createAccessToken: (payload: { label: string; expiresInDays: number | null; scope: TokenScope }) =>
     requestJson<AccessToken>('/api/tokens', {
