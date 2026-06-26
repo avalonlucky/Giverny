@@ -2900,12 +2900,16 @@ function ShortcutHelpModal({ groups, onClose }: { groups: ShortcutHelpGroup[]; o
 
 function SemanticSearchModal({
   isAdmin,
+  files,
   onClose,
   onOpenTask,
+  onOpenFile,
 }: {
   isAdmin: boolean
+  files: FileAsset[]
   onClose: () => void
   onOpenTask: (taskId: number) => void
+  onOpenFile: (file: FileAsset) => void
 }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<{ taskId: number; score: number; title: string; month: string; type: string }>>([])
@@ -2993,15 +2997,40 @@ function SemanticSearchModal({
           {searched && !loading && results.length === 0 && !note && (
             <p className="calendar-empty-hint">没有找到相关任务。如果是刚新建的任务，可点下方「重建索引」后再搜。</p>
           )}
-          {results.map((item) => (
-            <button type="button" className="semantic-search-result" key={item.taskId} onClick={() => onOpenTask(item.taskId)}>
-              <div>
-                <strong>{item.title || '未命名任务'}</strong>
-                <span>{item.type || '未分类'}{item.month ? ` · ${item.month}` : ''}</span>
+          {results.map((item) => {
+            const acceptanceFiles = files.filter(
+              (file) => file.taskId === item.taskId && !file.deletedAt && file.scope === 'acceptance',
+            )
+            return (
+              <div className="semantic-search-result" key={item.taskId}>
+                <button type="button" className="semantic-search-result-main" onClick={() => onOpenTask(item.taskId)}>
+                  <div>
+                    <strong>{item.title || '未命名任务'}</strong>
+                    <span>{item.type || '未分类'}{item.month ? ` · ${item.month}` : ''}</span>
+                  </div>
+                  <em>{Math.round(item.score * 100)}%</em>
+                </button>
+                {acceptanceFiles.length > 0 && (
+                  <div className="semantic-search-result-files" aria-label="验收文件">
+                    {acceptanceFiles.map((file) => {
+                      const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                      const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                      return (
+                        <AttachmentHoverThumbnail
+                          key={file.id}
+                          name={file.name}
+                          type={fileType}
+                          previewUrl={previewUrl}
+                          compact
+                          onOpen={() => onOpenFile(file)}
+                        />
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-              <em>{Math.round(item.score * 100)}%</em>
-            </button>
-          ))}
+            )
+          })}
         </div>
         <footer className="semantic-search-footer">
           <span>按语义匹配，非关键词；中英文均可。</span>
@@ -5619,10 +5648,15 @@ function App() {
       {isSemanticSearchOpen && (
         <SemanticSearchModal
           isAdmin={isAdmin}
+          files={fileItems}
           onClose={() => setIsSemanticSearchOpen(false)}
           onOpenTask={(taskId) => {
             setIsSemanticSearchOpen(false)
             handleOpenTaskDetail(taskId)
+          }}
+          onOpenFile={(file) => {
+            setIsSemanticSearchOpen(false)
+            setPreviewFile(file)
           }}
         />
       )}

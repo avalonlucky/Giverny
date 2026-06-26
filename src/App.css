@@ -651,6 +651,17 @@ button.topbar-create-button:hover {
 }
 
 .semantic-search-result {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 9px;
+  overflow: hidden;
+  transition: border-color 0.14s ease;
+}
+
+.semantic-search-result:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.semantic-search-result-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -658,16 +669,21 @@ button.topbar-create-button:hover {
   width: 100%;
   text-align: left;
   padding: 10px 12px;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 9px;
+  border: 0;
   background: transparent;
   cursor: pointer;
-  transition: background 0.14s ease, border-color 0.14s ease;
+  transition: background 0.14s ease;
 }
 
-.semantic-search-result:hover {
+.semantic-search-result-main:hover {
   background: color-mix(in srgb, var(--color-primary) 7%, transparent);
-  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.semantic-search-result-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 10px;
 }
 
 .semantic-search-result strong {
