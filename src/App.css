@@ -5142,6 +5142,97 @@ button.topbar-create-button:hover {
   color: var(--color-primary-strong);
 }
 
+/* 画布上的新建任务节点：紧凑核心（名称/类型/需求预览 + 详情按钮） */
+.canvas-task-compact {
+  display: grid;
+  gap: 10px;
+}
+
+.canvas-task-compact label {
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-task-compact label span {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+
+.canvas-req-preview {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 右侧 Inspector 详情面板：完整表单挪到这里，编辑时仍能看到整条泳道 */
+.canvas-inspector {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 92%);
+  z-index: 30;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -16px 0 40px rgba(20, 28, 30, 0.12);
+  display: flex;
+  flex-direction: column;
+  animation: inspector-in 0.18s ease;
+}
+
+@keyframes inspector-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.canvas-inspector-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.canvas-inspector-head strong {
+  font-size: 15px;
+  color: var(--color-text);
+}
+
+.canvas-inspector-head button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border-radius: 7px;
+}
+
+.canvas-inspector-head button:hover {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+.canvas-inspector-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* Inspector 里的任务表单铺满面板（去掉节点卡的浮动定位/宽度限制） */
+.canvas-inspector-body .canvas-node-head span {
+  display: none;
+}
+
 /* 节点按任务状态着色（左侧色条 + 边框微染），整条泳道一眼看状态 */
 .canvas-work-node[data-status] {
   border-left: 3px solid var(--color-border);
