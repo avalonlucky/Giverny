@@ -5072,25 +5072,30 @@ button.topbar-create-button:hover {
   width: 100%;
 }
 
+.task-canvas-stack {
+  gap: 0 !important;
+}
+
+.task-canvas-outer {
+  display: flex;
+  flex-direction: column;
+  min-height: 560px;
+  height: calc(100vh - 100px);
+}
+
+/* 保留旧 class 兼容性（部分 CSS 继承此壳） */
 .task-node-canvas-shell {
-  position: relative;
-  height: min(780px, calc(100vh - 210px));
-  min-height: 620px;
-  overflow: hidden;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  /* 浅色主调画布：极淡主色底 + 柔和绿点阵网格 */
-  background:
-    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--color-primary) 22%, transparent) 1px, transparent 1px),
-    color-mix(in srgb, var(--color-primary) 4%, var(--color-surface));
-  background-size: 24px 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 560px;
+  height: calc(100vh - 100px);
 }
 
 .task-canvas-project-shell {
-  min-height: 620px;
-  padding: 28px 0;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 28px;
+  overflow-y: auto;
 }
 
 /* 项目链路实时汇总条（工时 / 进度 / 预估金额 / 当前·结算金额） */
@@ -5143,16 +5148,6 @@ button.topbar-create-button:hover {
 }
 
 
-/* 节点按任务状态着色（左侧色条 + 边框微染），整条泳道一眼看状态 */
-.canvas-work-node[data-status] {
-  border-left: 3px solid var(--color-border);
-}
-.canvas-work-node[data-status="进行中"] { border-left-color: #3a7bb5; }
-.canvas-work-node[data-status="待验收"] { border-left-color: #b08438; }
-.canvas-work-node[data-status="已验收"] { border-left-color: var(--color-primary); }
-.canvas-work-node[data-status="挂起"],
-.canvas-work-node[data-status="终止"] { border-left-color: #c25450; }
-.canvas-work-node[data-status="计划中"] { border-left-color: #9aa4a6; }
 
 .task-canvas-project-head {
   display: flex;
@@ -5270,56 +5265,65 @@ button.topbar-create-button:hover {
 }
 
 .task-node-canvas-topbar {
-  position: absolute;
-  z-index: 2;
-  top: 18px;
-  left: 18px;
-  display: inline-flex;
+  flex: 0 0 auto;
+  display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 8px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
+  gap: 12px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-surface);
   color: var(--color-text);
-  box-shadow: 0 2px 12px rgba(20, 28, 30, 0.06);
 }
 
-.task-node-canvas-topbar button {
-  border: 0;
-  background: transparent;
-  color: var(--color-primary);
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.task-node-canvas-topbar span {
-  max-width: 320px;
+.canvas-topbar-title {
+  max-width: 260px;
   overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: 13px;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.canvas-topbar-hint {
+.canvas-topbar-tail {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-node-canvas-topbar > button {
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.canvas-topbar-hint {
   padding: 2px 7px;
   border: 1px solid var(--color-border);
   border-radius: 5px;
   background: var(--color-surface-strong);
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   cursor: default;
 }
 
 .task-node-canvas {
-  width: 100%;
-  height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   color: var(--color-border);
+  /* 浅色点阵背景，融入页面底色 */
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--color-primary) 18%, transparent) 1px, transparent 1px),
+    var(--color-surface);
+  background-size: 24px 24px;
 }
 
 .task-node-canvas-space {
@@ -5467,11 +5471,16 @@ button.topbar-create-button:hover {
 }
 
 .canvas-task-form textarea {
-  min-height: 120px;
-  padding: 12px;
-  border-bottom: 0;
-  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  min-height: 100px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 22%, transparent);
+  background: transparent;
   resize: vertical;
+}
+
+/* 画布节点内隐藏排期推导开关，保持表单干净 */
+.canvas-task-form .schedule-anchor-switch {
+  display: none;
 }
 
 .canvas-ai-suggestion {
@@ -5601,16 +5610,28 @@ button.topbar-create-button:hover {
   font-weight: 700;
 }
 
-.canvas-brief-upload,
+.canvas-brief-upload {
+  min-height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  color: var(--color-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .canvas-brief-chip {
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
   gap: 10px;
-  border: 1px dashed color-mix(in srgb, var(--color-text) 16%, transparent);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 6px;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
-  cursor: pointer;
+  cursor: default;
 }
 
 .canvas-brief-upload input {
@@ -5796,32 +5817,6 @@ button.topbar-create-button:hover {
   border-bottom: 1px solid currentColor;
 }
 
-.canvas-node-port {
-  position: absolute;
-  top: 50%;
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 2px solid color-mix(in srgb, var(--color-text) 70%, transparent);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--color-text) 90%, var(--color-text) 10%);
-  color: var(--color-text);
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-
-.canvas-node-port:hover {
-  border-color: var(--color-text);
-}
-
-.input-port {
-  left: -52px;
-}
-
-.output-port {
-  right: -52px;
-}
 
 
 .canvas-add-menu {
@@ -5878,27 +5873,27 @@ button.topbar-create-button:hover {
   padding-top: 4px !important;
 }
 
-/* 沉浸式画布模式：按 ~ 收起侧边栏 + 顶栏，整屏成画布 */
-.canvas-immersive {
-  grid-template-columns: 0 minmax(0, 1fr);
-}
-
+/* 沉浸式画布模式：按 ~ 全屏画布 */
 .canvas-immersive > .sidebar {
   display: none;
 }
 
-.canvas-immersive > .workspace > .topbar,
-.canvas-immersive .view-toolbar {
+.canvas-immersive > .workspace > .topbar {
   display: none !important;
 }
 
-.canvas-immersive .task-node-canvas-shell {
-  height: 100dvh;
+/* 整个 workspace 宽度补齐 */
+.canvas-immersive > .workspace {
+  padding: 0;
 }
 
-.canvas-immersive .task-node-canvas-topbar {
-  top: 14px;
-  left: 14px;
+/* 画布外壳撑满全视口 */
+.canvas-immersive .task-canvas-outer,
+.canvas-immersive .task-node-canvas-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  height: auto;
 }
 
 .settings-grid {

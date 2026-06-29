@@ -7023,24 +7023,14 @@ function TasksView({
   if (viewMode === '画布') {
     return (
       <section className="view-stack task-canvas-stack">
-        <section className="panel view-toolbar">
-          <div className="panel-header compact">
-            <div>
-              <h2>任务画布</h2>
-              <p>用同一套任务、进展、等待和验收数据串起完整交付链路</p>
-            </div>
-            <div className="panel-tools calendar-toolbar-actions">
-              <MonthPicker value={monthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} />
-              {viewTabs}
-            </div>
-          </div>
-        </section>
         <TaskCanvasView
           tasks={tasks}
           selectedTask={selectedTask}
           files={files}
           hourlyRate={hourlyRate}
           monthValue={monthValue}
+          taskMonthValues={taskMonthValues}
+          onMonthChange={onMonthChange}
           designTypeGroups={designTypeGroups}
           onSelectTask={onSelectTask}
           onCreateTask={onCreateCanvasTask}
@@ -7049,6 +7039,7 @@ function TasksView({
           onOpenProgress={openProgress}
           onOpenAcceptance={openAcceptance}
           onRequestStatus={onRequestStatus}
+          viewTabsNode={viewTabs}
         />
         {progressTarget && (
           <TaskProgressModal
@@ -7381,6 +7372,8 @@ function TaskCanvasView({
   files,
   hourlyRate,
   monthValue,
+  taskMonthValues,
+  onMonthChange,
   designTypeGroups,
   onSelectTask,
   onCreateTask,
@@ -7389,12 +7382,15 @@ function TaskCanvasView({
   onOpenProgress,
   onOpenAcceptance,
   onRequestStatus,
+  viewTabsNode,
 }: {
   tasks: Task[]
   selectedTask: Task | undefined
   files: FileAsset[]
   hourlyRate: number
   monthValue: string
+  taskMonthValues: Set<string>
+  onMonthChange: (v: string) => void
   designTypeGroups: DesignTypeGroup[]
   onSelectTask: (id: number) => void
   onCreateTask: (task: Task) => Promise<Task | undefined>
@@ -7403,6 +7399,7 @@ function TaskCanvasView({
   onOpenProgress: (task: Task, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
   onOpenAcceptance: (task: Task) => void
   onRequestStatus: (taskId: number, status: TaskStatus) => void
+  viewTabsNode?: React.ReactNode
 }) {
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const nodeSequenceRef = useRef(0)
@@ -7422,6 +7419,8 @@ function TaskCanvasView({
   const [expandedTaskNodes, setExpandedTaskNodes] = useState<Record<string, boolean>>({})
   const [canvasProjectTaskId, setCanvasProjectTaskId] = useState<number | null>(null)
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
+  const [canvasScale, setCanvasScale] = useState(1)
+  const canvasScaleRef = useRef(1)
 
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
   const activeProjectTasks = useMemo(
@@ -7435,9 +7434,10 @@ function TaskCanvasView({
     if (!rect || !canvasRef.current) {
       return { x: 420, y: 240 }
     }
+    const scale = canvasScaleRef.current
     return {
-      x: clientX - rect.left + canvasRef.current.scrollLeft,
-      y: clientY - rect.top + canvasRef.current.scrollTop,
+      x: (clientX - rect.left + canvasRef.current.scrollLeft) / scale,
+      y: (clientY - rect.top + canvasRef.current.scrollTop) / scale,
     }
   }
 
@@ -7556,6 +7556,41 @@ function TaskCanvasView({
       window.removeEventListener('keydown', handleKeydown)
     }
   })
+
+  useEffect(() => {
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return
+      event.preventDefault()
+      const next = Math.min(2, Math.max(0.25, canvasScaleRef.current - event.deltaY * 0.001))
+      canvasScaleRef.current = next
+      setCanvasScale(next)
+    }
+    const handleZoomKey = (event: KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault()
+        const next = Math.min(2, canvasScaleRef.current + 0.1)
+        canvasScaleRef.current = next
+        setCanvasScale(next)
+      } else if (event.key === '-') {
+        event.preventDefault()
+        const next = Math.max(0.25, canvasScaleRef.current - 0.1)
+        canvasScaleRef.current = next
+        setCanvasScale(next)
+      } else if (event.key === '0') {
+        event.preventDefault()
+        canvasScaleRef.current = 1
+        setCanvasScale(1)
+      }
+    }
+    const el = canvasRef.current
+    el?.addEventListener('wheel', handleWheel, { passive: false })
+    window.addEventListener('keydown', handleZoomKey)
+    return () => {
+      el?.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('keydown', handleZoomKey)
+    }
+  }, [])
 
   useEffect(() => {
     if (!dragging) {
@@ -8052,11 +8087,12 @@ function TaskCanvasView({
                   )}
                   <button
                     type="button"
+                    aria-label={hourState.loading ? '分析中' : 'AI 工时建议'}
+                    title={hourState.loading ? '分析中' : 'AI 工时建议'}
                     disabled={hourState.loading || (!draft.type.trim() && !draft.title.trim() && !draft.requirement.trim())}
                     onClick={() => void requestTaskNodeHourSuggestion(node)}
                   >
                     <Sparkles size={14} />
-                    {hourState.loading ? '分析中' : 'AI 工时'}
                   </button>
                 </div>
               </label>
@@ -8108,11 +8144,12 @@ function TaskCanvasView({
             <div className="canvas-node-actions">
               <button
                 type="button"
+                aria-label="AI 整理需求"
+                title="AI 整理需求"
                 disabled={aiState.loading || (!draft.title.trim() && !draft.requirement.trim())}
                 onClick={() => void requestTaskNodeAiSuggestion(node)}
               >
                 <Sparkles size={14} />
-                AI 整理
               </button>
               <button type="button" className="canvas-primary-action" disabled={!canSave || savingNodeId === node.id} onClick={() => void saveTaskNode(node)}>
                 {savingNodeId === node.id ? '保存中' : '保存为任务'}
@@ -8221,47 +8258,55 @@ function TaskCanvasView({
 
   if (canvasProjectTaskId === null) {
     return (
-      <section className="task-canvas-project-shell">
-        <header className="task-canvas-project-head">
-          <div>
-            <span>画布模式</span>
-            <h3>项目文件夹</h3>
-            <p>{activeProjectTasks.length} 个项目 · 双击进入项目工作流画布</p>
+      <div className="task-canvas-outer">
+        <div className="task-node-canvas-topbar">
+          <span className="canvas-topbar-title">任务画布</span>
+          <div className="canvas-topbar-tail">
+            <MonthPicker value={monthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} minimal />
+            {viewTabsNode}
           </div>
-          <button type="button" className="canvas-project-primary" onClick={openNewProjectCanvas}>
-            <Plus size={16} />
-            新建项目
-            <kbd>Shift</kbd><kbd>N</kbd>
-          </button>
-        </header>
-        <div className="task-canvas-project-grid">
-          {activeProjectTasks.map((task) => {
-            const progressEntries = task.timeEntries?.filter((entry) => !entry.isAcceptanceProgress).length ?? 0
-            const revenue = task.billable === false ? 0 : task.actualHours * hourlyRate
-            return (
-              <button
-                type="button"
-                key={task.id}
-                className="canvas-project-folder"
-                onDoubleClick={() => openProjectCanvas(task)}
-                onClick={() => onSelectTask(task.id)}
-              >
-                <Folder size={38} />
-                <strong>{task.title}</strong>
-                <span>{task.status} · {task.actualHours.toFixed(1)}h · ¥{formatYuan(revenue)} · 进展 {progressEntries}</span>
-                <i aria-hidden="true">
-                  <em style={{ width: `${taskDisplayProgress(task)}%` }} />
-                </i>
-              </button>
-            )
-          })}
-          <button type="button" className="canvas-project-folder add-folder" onClick={openNewProjectCanvas}>
-            <Plus size={24} />
-            <strong>新建项目</strong>
-            <span>从空白任务节点开始</span>
-          </button>
         </div>
-      </section>
+        <section className="task-canvas-project-shell">
+          <header className="task-canvas-project-head">
+            <div>
+              <span>画布模式</span>
+              <h3>项目文件夹</h3>
+              <p>{activeProjectTasks.length} 个项目 · 双击进入项目工作流画布</p>
+            </div>
+            <button type="button" className="canvas-project-primary" onClick={openNewProjectCanvas}>
+              <Plus size={16} />
+              新建项目
+            </button>
+          </header>
+          <div className="task-canvas-project-grid">
+            {activeProjectTasks.map((task) => {
+              const progressEntries = task.timeEntries?.filter((entry) => !entry.isAcceptanceProgress).length ?? 0
+              const revenue = task.billable === false ? 0 : task.actualHours * hourlyRate
+              return (
+                <button
+                  type="button"
+                  key={task.id}
+                  className="canvas-project-folder"
+                  onDoubleClick={() => openProjectCanvas(task)}
+                  onClick={() => onSelectTask(task.id)}
+                >
+                  <Folder size={38} />
+                  <strong>{task.title}</strong>
+                  <span>{task.status} · {task.actualHours.toFixed(1)}h · ¥{formatYuan(revenue)} · 进展 {progressEntries}</span>
+                  <i aria-hidden="true">
+                    <em style={{ width: `${taskDisplayProgress(task)}%` }} />
+                  </i>
+                </button>
+              )
+            })}
+            <button type="button" className="canvas-project-folder add-folder" onClick={openNewProjectCanvas}>
+              <Plus size={24} />
+              <strong>新建项目</strong>
+              <span>从空白任务节点开始</span>
+            </button>
+          </div>
+        </section>
+      </div>
     )
   }
 
@@ -8273,11 +8318,10 @@ function TaskCanvasView({
   const projectAccepted = projectTask?.status === '已验收'
 
   return (
-    <section className="task-node-canvas-shell">
+    <div className="task-canvas-outer">
       <div className="task-node-canvas-topbar">
         <button type="button" onClick={returnToProjectFolders}>‹ 项目</button>
-        <span>{canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId)?.title ?? '项目画布' : '新项目草稿'}</span>
-        <kbd className="canvas-topbar-hint" title="按 ~ 切换沉浸式全屏">~</kbd>
+        <span className="canvas-topbar-title">{canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId)?.title ?? '项目画布' : '新项目草稿'}</span>
         {projectTask && (
           <div className="canvas-lane-summary" aria-label="项目链路汇总">
             <div><span>当前工时</span><strong>{projectTask.actualHours.toFixed(1)}<em>h</em></strong></div>
@@ -8286,6 +8330,10 @@ function TaskCanvasView({
             <div className={projectAccepted ? 'accent' : ''}><span>{projectAccepted ? '结算金额' : '当前金额'}</span><strong>{projectBillable ? `¥${formatYuan(projectCurrentAmount)}` : '¥0'}</strong></div>
           </div>
         )}
+        <div className="canvas-topbar-tail">
+          {viewTabsNode}
+          <kbd className="canvas-topbar-hint" title="按 ~ 切换沉浸式全屏">~</kbd>
+        </div>
       </div>
       <div
         ref={canvasRef}
@@ -8293,7 +8341,7 @@ function TaskCanvasView({
         aria-label="任务节点画布"
         onContextMenu={(event) => openMenu(event)}
       >
-        <div className="task-node-canvas-space">
+        <div className="task-node-canvas-space" style={{ transform: `scale(${canvasScale})`, transformOrigin: '0 0' }}>
           {nodes.length === 0 && (
             <div className="canvas-empty-hint">
               <strong>空白画布</strong>
@@ -8324,12 +8372,9 @@ function TaskCanvasView({
             })}
           </svg>
           {nodes.map((node) => {
-            const nodeTask = node.taskId ? taskById.get(node.taskId) : projectTask
-            const nodeStatus = nodeTask?.status ?? '计划中'
             return (
             <article
               key={node.id}
-              data-status={nodeStatus}
               className={`canvas-work-node canvas-work-node-${node.kind} ${node.taskId && selectedTask?.id === node.taskId ? 'selected' : ''}`}
               style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
               onPointerDown={(event) => startDragging(event, node)}
@@ -8337,10 +8382,6 @@ function TaskCanvasView({
               onContextMenu={(event) => openMenu(event, node.id)}
             >
               {node.kind === 'task' ? renderTaskNode(node) : renderActionNode(node)}
-              <button type="button" className="canvas-node-port input-port" aria-label="连接到此节点" />
-              <button type="button" className="canvas-node-port output-port" aria-label="添加后续节点" onClick={(event) => openMenu(event, node.id)}>
-                <Plus size={18} />
-              </button>
             </article>
             )
           })}
@@ -8373,7 +8414,7 @@ function TaskCanvasView({
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 }
 
