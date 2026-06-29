@@ -45,7 +45,6 @@ import {
   Tag,
   Trash2,
   UserCircle,
-  Workflow,
   X,
 } from 'lucide-react'
 import {
@@ -3057,6 +3056,7 @@ function SemanticSearchModal({
 function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
   const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
+  const [canvasImmersive, setCanvasImmersive] = useState(false)
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
@@ -3373,6 +3373,10 @@ function App() {
       window.history.replaceState({ view: activeView, taskViewMode }, '', nextPath)
     }
   }, [activeView, taskViewMode])
+
+  useEffect(() => {
+    if (taskViewMode !== '画布') setCanvasImmersive(false)
+  }, [taskViewMode])
 
   const refreshState = async () => {
     const state = await api.getState()
@@ -4881,6 +4885,13 @@ function App() {
         { keys: ']', action: '切换到下个月' },
       ],
     },
+    {
+      label: '画布模式',
+      items: [
+        { keys: '~', action: '切换沉浸式全屏画布（收起左导航 + 顶栏）' },
+        { keys: '右键', action: '添加节点 / 删除节点' },
+      ],
+    },
   ]
   const hasBlockingModal = Boolean(
     isModalOpen
@@ -4907,6 +4918,11 @@ function App() {
         } else {
           openCommandPalette()
         }
+        return
+      }
+      if ((event.key === '`' || event.key === '~') && taskViewMode === '画布') {
+        event.preventDefault()
+        setCanvasImmersive((v) => !v)
         return
       }
       if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
@@ -5054,7 +5070,11 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${activeView === '工作台' ? 'dashboard-layout' : ''}`.trim()}>
+    <main className={[
+      'app-shell',
+      activeView === '工作台' ? 'dashboard-layout' : '',
+      canvasImmersive && taskViewMode === '画布' ? 'canvas-immersive' : '',
+    ].filter(Boolean).join(' ')}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -7402,7 +7422,6 @@ function TaskCanvasView({
   const [expandedTaskNodes, setExpandedTaskNodes] = useState<Record<string, boolean>>({})
   const [canvasProjectTaskId, setCanvasProjectTaskId] = useState<number | null>(null)
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
-  const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null)
 
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
   const activeProjectTasks = useMemo(
@@ -7444,7 +7463,6 @@ function TaskCanvasView({
     setMenu(null)
     setNodes([{ id: 'draft-task', kind: 'task', x: 160, y: 150, draft: createTaskCanvasDraft(fallbackType, monthValue) }])
     setConnections([])
-    setInspectorNodeId('draft-task')
   }
 
   const returnToProjectFolders = () => {
@@ -7452,11 +7470,9 @@ function TaskCanvasView({
     setMenu(null)
     setNodes([])
     setConnections([])
-    setInspectorNodeId(null)
   }
 
   const deleteNode = (nodeId: string) => {
-    setInspectorNodeId((current) => (current === nodeId ? null : current))
     setNodes((current) => current.filter((node) => node.id !== nodeId))
     setConnections((current) => current.filter((connection) => connection.from !== nodeId && connection.to !== nodeId))
     setTaskAiState((current) => {
@@ -8108,46 +8124,6 @@ function TaskCanvasView({
     )
   }
 
-  // 画布上的任务节点：已保存任务沿用完整渲染；新建草稿只显示紧凑核心（名称/类型/需求预览）+「填写详情」按钮，
-  // 完整表单挪到右侧 Inspector，避免节点被撑得很高、长文本难编辑。
-  const renderTaskNodeCompactDraft = (node: TaskCanvasNode) => {
-    const draft = node.draft ?? createTaskCanvasDraft(fallbackType, monthValue)
-    return (
-      <>
-        <header className="canvas-node-head">
-          <span>任务节点</span>
-          <strong>{draft.title.trim() || '新建任务'}</strong>
-          <button
-            type="button"
-            className="canvas-node-delete"
-            aria-label="删除这个任务节点"
-            title="删除节点"
-            onClick={() => { deleteNode(node.id); if (canvasProjectTaskId === 0) returnToProjectFolders() }}
-          >
-            <Trash2 size={14} />
-          </button>
-        </header>
-        <div className="canvas-task-compact">
-          <label>
-            <span>任务名称</span>
-            <input value={draft.title} onChange={(event) => updateDraft(node.id, { title: event.target.value })} placeholder="输入任务名称" />
-          </label>
-          <label>
-            <span>设计类型</span>
-            <select value={draft.type} onChange={(event) => updateDraft(node.id, { type: event.target.value })}>
-              {typeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          {draft.requirement.trim() && <p className="canvas-req-preview">{draft.requirement.trim()}</p>}
-          <button type="button" className="canvas-primary-action" onClick={() => setInspectorNodeId(node.id)}>
-            <Pencil size={14} />
-            填写详情并创建
-          </button>
-        </div>
-      </>
-    )
-  }
-
   const renderActionNode = (node: TaskCanvasNode) => {
     const task = node.taskId ? taskById.get(node.taskId) : undefined
     const progressEntries = task?.timeEntries?.filter((entry) => !entry.isAcceptanceProgress) ?? []
@@ -8301,6 +8277,7 @@ function TaskCanvasView({
       <div className="task-node-canvas-topbar">
         <button type="button" onClick={returnToProjectFolders}>‹ 项目</button>
         <span>{canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId)?.title ?? '项目画布' : '新项目草稿'}</span>
+        <kbd className="canvas-topbar-hint" title="按 ~ 切换沉浸式全屏">~</kbd>
         {projectTask && (
           <div className="canvas-lane-summary" aria-label="项目链路汇总">
             <div><span>当前工时</span><strong>{projectTask.actualHours.toFixed(1)}<em>h</em></strong></div>
@@ -8320,7 +8297,7 @@ function TaskCanvasView({
           {nodes.length === 0 && (
             <div className="canvas-empty-hint">
               <strong>空白画布</strong>
-              <span>Shift + N 新建任务节点，或右键添加节点。</span>
+              <span>右键添加节点，或在项目列表双击项目打开。</span>
             </div>
           )}
           <svg className="task-canvas-connections" width="2600" height="1500" aria-hidden="true">
@@ -8357,8 +8334,9 @@ function TaskCanvasView({
               style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
               onPointerDown={(event) => startDragging(event, node)}
               onClick={() => node.taskId && onSelectTask(node.taskId)}
+              onContextMenu={(event) => openMenu(event, node.id)}
             >
-              {node.kind === 'task' ? (node.taskId ? renderTaskNode(node) : renderTaskNodeCompactDraft(node)) : renderActionNode(node)}
+              {node.kind === 'task' ? renderTaskNode(node) : renderActionNode(node)}
               <button type="button" className="canvas-node-port input-port" aria-label="连接到此节点" />
               <button type="button" className="canvas-node-port output-port" aria-label="添加后续节点" onClick={(event) => openMenu(event, node.id)}>
                 <Plus size={18} />
@@ -8367,15 +8345,6 @@ function TaskCanvasView({
             )
           })}
         </div>
-      </div>
-      <div className="canvas-bottom-toolbar" aria-label="画布工具栏">
-        <button type="button" title="新建任务节点 Shift+N" disabled={nodes.some((node) => node.kind === 'task')} onClick={() => addNode('task')}>
-          <Plus size={18} />
-        </button>
-        <button type="button" title="右键画布也可以添加节点" onClick={() => setMenu({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}>
-          <Workflow size={17} />
-        </button>
-        <span>Shift + N</span>
       </div>
       {menu && (
         <div className="canvas-add-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
@@ -8396,27 +8365,14 @@ function TaskCanvasView({
             <BarChart3 size={18} />
             结算节点
           </button>
+          {menu.sourceId && (
+            <button type="button" className="canvas-add-menu-delete" onClick={() => { deleteNode(menu.sourceId as string); setMenu(null); if (canvasProjectTaskId === 0 && !nodes.some((node) => node.kind === 'task' && node.id !== menu.sourceId)) returnToProjectFolders() }}>
+              <Trash2 size={18} />
+              删除此节点
+            </button>
+          )}
         </div>
       )}
-      {(() => {
-        const inspectorNode = inspectorNodeId ? nodes.find((node) => node.id === inspectorNodeId && node.kind === 'task' && !node.taskId) : undefined
-        if (!inspectorNode) {
-          return null
-        }
-        return (
-          <div className="canvas-inspector" role="dialog" aria-label="任务详情编辑">
-            <div className="canvas-inspector-head">
-              <strong>新建任务 · 详情</strong>
-              <button type="button" aria-label="关闭详情面板" title="收起" onClick={() => setInspectorNodeId(null)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="canvas-inspector-body">
-              {renderTaskNode(inspectorNode)}
-            </div>
-          </div>
-        )
-      })()}
     </section>
   )
 }
