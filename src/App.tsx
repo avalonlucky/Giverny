@@ -374,12 +374,166 @@ const dailyKnowledgePool: DailyKnowledgeItem[] = [
   {
     category: '未解之谜',
     source: '深海声音',
-    title: '海底传来的“Bloop”是什么？',
+    title: '海底传来的”Bloop”是什么？',
     teaser: '它曾被误认为神秘生物，后来被解释为冰裂声。',
     body: [
       '1997 年，美国海洋探测设备记录到一个极低频、传播距离很远的声音，后来被称为 Bloop。',
       '它一度激发许多猜测：有人想象它来自未知巨型生物。后续研究更倾向认为，它是 **冰山破裂或摩擦** 产生的声音。',
       '未解之谜吸引人的地方，不只是答案神秘，也在于它让我们意识到世界还有很多尺度超出日常经验。',
+    ],
+  },
+  {
+    category: '世界未解之谜',
+    source: '百慕大三角',
+    title: '百慕大三角真的更危险吗？',
+    teaser: '数据显示它并不比其他繁忙航线更危险，但传说已经深入人心。',
+    body: [
+      '百慕大三角位于佛罗里达、百慕大和波多黎各之间，数十年来与船只和飞机失踪的故事紧密绑定。',
+      '然而，当研究者对比世界各地航线的事故数据后，**这片区域并没有统计上的异常**。它只是一条繁忙的交通要道。',
+      '许多”神秘失踪”案例在重新梳理后，都能找到天气、导航错误或人为因素的解释。集中讲述一个地方的故事，会让普通事件看起来不寻常。',
+    ],
+  },
+  {
+    category: '历史・冷知识',
+    source: '拿破仑身高',
+    title: '拿破仑其实不矮',
+    teaser: '他被叫做小个子，很可能是一场英国宣传战的遗产。',
+    body: [
+      '拿破仑的身高约 1.68 米，在 19 世纪法国男性中属于中等偏上。但英国漫画家将他画得很矮小，配合夸张的表情，讽刺效果极强。',
+      '这些形象广泛流传，以至于后人真的以为他是个矮子。这是历史上 **宣传战改写形象** 的典型案例。',
+      '我们接收到的许多”事实”，在第一次传播时就已经带有目的。历史印象值得多问一句：这个故事最初是谁讲的？',
+    ],
+  },
+  {
+    category: '商业故事',
+    source: '耐克',
+    title: 'Nike 的”√”只花了 35 美元',
+    teaser: '世界上最著名的商标之一，来自一个大学生的课堂作业。',
+    body: [
+      '1971 年，耐克创始人菲尔·奈特委托设计系学生卡洛琳·戴维森设计一个标志，预算极为有限，最终支付了 35 美元。',
+      '那个向右扬起的”√”形——Swoosh——后来成为全球最知名的品牌符号之一。卡洛琳后来也获得了额外的股票作为补偿。',
+      '创意的价值很难在诞生之初就被准确评估。有些作品之所以伟大，是因为它遇见了合适的时代和产品。',
+    ],
+  },
+  {
+    category: '科技冷知识',
+    source: 'GPS',
+    title: 'GPS 卫星每天都在”说谎”',
+    teaser: '如果不修正相对论效应，你的导航会每天偏移 10 公里。',
+    body: [
+      'GPS 卫星在高空高速运动，根据相对论，它们的时钟比地面走得略快。这个误差看似微小，但累积一天后会导致 **定位偏差约 10 公里**。',
+      '工程师在卫星出发前就对时钟做了预置调慢，让它在轨道上运行时”刚好正确”。爱因斯坦的方程式因此悄悄进入了每一次导航。',
+      '物理学并不总是存在于实验室里。它在你每次打开地图时就已经在运作了。',
+    ],
+  },
+  {
+    category: '动物冷知识',
+    source: '章鱼研究',
+    title: '章鱼有三个心脏和蓝色血液',
+    teaser: '它的血液用铜而不是铁来携带氧气，因此是蓝色的。',
+    body: [
+      '章鱼拥有三个心脏：两个负责把血液泵向鳃，一个负责向全身供血。当它游泳时，主心脏会停跳，所以它们不喜欢长途游动。',
+      '它的血液含有 **血蓝蛋白**，用铜原子来结合氧气，这让血液在氧合状态下呈蓝色。人类血液用铁来结合氧，因此是红色的。',
+      '进化给出了不止一种解决方案。我们习以为常的结构，换一种生命形式就完全不同了。',
+    ],
+  },
+  {
+    category: '心理学',
+    source: '峰终定律',
+    title: '人记住的不是全程，而是最高点和结尾',
+    teaser: '这解释了为什么旅行的最后一天很重要。',
+    body: [
+      '心理学家卡尼曼提出了 **峰终定律**：人们对一段体验的记忆，主要由两个时刻决定——情绪最强烈的峰值时刻，以及体验结束时的感受。',
+      '过程有多漫长、大部分时间有多平淡，对记忆的影响反而有限。这也是为什么差评常常来自最后一次互动体验不佳。',
+      '如果你想让别人对一段经历留下好印象，最值得用心的不是全程均衡，而是 **制造一个令人难忘的高点，并以好的方式结束**。',
+    ],
+  },
+  {
+    category: '爱情故事',
+    source: '克里奥帕特拉',
+    title: '埃及艳后不是埃及人',
+    teaser: '她是希腊裔，却是第一个真正学会古埃及语的托勒密王朝法老。',
+    body: [
+      '克里奥帕特拉七世出身于亚历山大大帝去世后建立的托勒密王朝，家族实际上是马其顿希腊裔。她之前的历代法老都不学埃及语，只说希腊语。',
+      '她却精通至少九种语言，包括古埃及语、阿拉伯语、希伯来语等，这让她能与各国使节直接交流。与凯撒和马克·安东尼的关系，也与她的外交才能密不可分。',
+      '历史上的传奇人物，往往有一项被忽视的普通才能：极度努力地工作和学习。',
+    ],
+  },
+  {
+    category: '食物史',
+    source: '番茄旅程',
+    title: '番茄曾在欧洲被当毒药',
+    teaser: '它原产南美洲，传入欧洲后用了两百年才被接受为食物。',
+    body: [
+      '番茄在 16 世纪随殖民者传入欧洲，但因为属于颠茄科，外观又鲜艳，欧洲人长期把它当作观赏植物或毒草。',
+      '有贵族用锡制餐具吃番茄后中毒，但原因是 **锡中的铅被番茄的酸性析出**，并非番茄本身有毒。穷人用木制餐具吃，反而安然无事。',
+      '偏见和误解常常有一个”不完全错误”的起源。理解它的来历，比直接否定它更有意义。',
+    ],
+  },
+  {
+    category: '语言・文化',
+    source: '汉字来历',
+    title: '为什么”东西”可以表示”物品”？',
+    teaser: '一个常见的说法把它和集市的方位联系在一起。',
+    body: [
+      '汉语里用”东西”来指代一切物品，这个用法流传已久，来历众说纷纭。',
+      '流传较广的一种说法是：古代长安有东市和西市，买卖物品都集中在这两个方向的市场里。去买东西，慢慢就代指了买卖行为本身，进而代指物品。',
+      '语言里的词语，像化石一样保存着历史的痕迹。很多我们每天说的话，背后藏着已经消失的场景。',
+    ],
+  },
+  {
+    category: '体育冷知识',
+    source: '马拉松',
+    title: '马拉松 42.195 公里从哪来的？',
+    teaser: '这个奇怪的数字源自 1908 年英国王室的一个临时请求。',
+    body: [
+      '马拉松项目在 1896 年首届现代奥运会时约为 40 公里，并不统一。直到 1908 年伦敦奥运会，距离才被固定下来。',
+      '当时的路线设计本为 26 英里（约 42 公里），但为了让终点对准王室包厢，**路线被调整延长了 385 码**，也就是约 352 米。这个”将就”的数字就此沿用下来。',
+      '很多我们视为标准的东西，都来自某个历史瞬间的偶然妥协。',
+    ],
+  },
+  {
+    category: '天文小知识',
+    source: '光的旅程',
+    title: '我们看到的太阳，是 8 分钟前的太阳',
+    teaser: '光从太阳到地球需要大约 8 分 20 秒。',
+    body: [
+      '光在真空中的速度约为每秒 30 万公里，但太阳距地球约 1.5 亿公里，所以阳光抵达地球需要大约 **8 分 20 秒**。',
+      '这意味着我们永远看不到”现在”的太阳——而是 8 分钟之前的它。如果太阳此刻消失，我们还要再过 8 分多钟才会察觉。',
+      '宇宙的尺度让”现在”变得复杂。我们仰望星空时，看到的是光出发时那一刻，而不是它到达时的样子。',
+    ],
+  },
+  {
+    category: '金融冷知识',
+    source: '信用卡历史',
+    title: '信用卡诞生于一次忘带现金的尴尬',
+    teaser: '1950 年，一位商人餐后发现没带钱包，由此催生了第一张通用信用卡。',
+    body: [
+      '弗兰克·麦克纳马拉在纽约请客吃饭，结账时发现钱包忘在家里，场面相当难堪。这件事让他萌生了一个想法：用一张卡片来代替现金。',
+      '1950 年，他和合伙人创立了 **大莱俱乐部卡（Diners Club）**，最初只被 27 家餐厅接受，持卡人仅 200 人左右。',
+      '一次社交上的尴尬，推动了改变整个消费金融体系的发明。很多大事的起点，都比想象中普通。',
+    ],
+  },
+  {
+    category: '考古发现',
+    source: '庞贝古城',
+    title: '庞贝人留下的最后一顿饭',
+    teaser: '火山灰封存了一座城市，也封存了一个普通早晨的细节。',
+    body: [
+      '公元 79 年，维苏威火山爆发，将庞贝城覆盖在厚厚的火山灰之下。这场灾难同时也成为一次无意的”封存”——街道、壁画、食物，甚至面包炉里的碳化面包都保留下来了。',
+      '考古学家发现了快餐店（thermopolium）遗址，里面有用于盛汤和热食的陶罐凹槽。人们在这里买现做的食物，类似今天的外卖窗口。',
+      '历史不总是由大事件组成的。**那些保留下来的普通早晨，让两千年前的生活变得具体可感。**',
+    ],
+  },
+  {
+    category: '治愈系',
+    source: '小事的力量',
+    title: '为什么整理书桌会让人感觉好一点？',
+    teaser: '控制小事，能在混乱中找到一点可以掌控的感觉。',
+    body: [
+      '当生活里有很多无法控制的事情时，人们常常会去做一件很小但能完全掌控的事——整理一个角落、叠好一件衣服、清洗一个杯子。',
+      '心理学上这叫 **补偿性控制**：通过掌控小事，恢复一点对生活的掌控感。这不是逃避，而是一种低成本的自我调节。',
+      '不需要等到状态好了再行动。行动本身就会带来一点好转。',
     ],
   },
 ]
@@ -390,7 +544,7 @@ const dailyKnowledgeQueueSize = 10
 function readDailyKnowledgeHistory() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeHistoryKey) ?? '[]') as unknown
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(-30) : []
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(-60) : []
   } catch {
     return []
   }
@@ -398,7 +552,7 @@ function readDailyKnowledgeHistory() {
 
 function rememberDailyKnowledgeTitle(title: string) {
   const history = readDailyKnowledgeHistory().filter((item) => item !== title)
-  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-30)))
+  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-60)))
 }
 
 function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
@@ -3625,10 +3779,11 @@ function App() {
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
-  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge())
-  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() =>
-    fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize),
-  )
+  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge(readDailyKnowledgeHistory()))
+  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() => {
+    const history = readDailyKnowledgeHistory()
+    return fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, history)
+  })
   const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
   const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
   const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
@@ -3737,16 +3892,18 @@ function App() {
   }, [dailyKnowledgeQueue])
 
   const seedDailyKnowledgeQueue = useCallback((baseQueue: DailyKnowledgeItem[] = dailyKnowledgeQueueRef.current) => {
+    const history = readDailyKnowledgeHistory()
     const currentTitle = dailyKnowledgeRef.current.title
-    const merged = mergeDailyKnowledgeQueue(baseQueue, [currentTitle])
+    const excluded = [currentTitle, ...history]
+    const merged = mergeDailyKnowledgeQueue(baseQueue, excluded)
     const missingCount = dailyKnowledgeQueueSize - merged.length
     const filled = missingCount > 0
       ? mergeDailyKnowledgeQueue(
         [
           ...merged,
-          ...fallbackDailyKnowledgeBatch(missingCount, [currentTitle, ...merged.map((item) => item.title)]),
+          ...fallbackDailyKnowledgeBatch(missingCount, [...excluded, ...merged.map((item) => item.title)]),
         ],
-        [currentTitle],
+        excluded,
       )
       : merged
     const nextQueue = filled.slice(0, dailyKnowledgeQueueSize)
@@ -13532,16 +13689,40 @@ function ModalShell({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [closeOnEscape, onClose])
 
-  // Drag: grab from the top header area of any modal (top ~96px), skip interactive elements
+  // Drag: only the visible top grab handle moves the modal.
   useEffect(() => {
     const modal = modalRef.current
     if (!modal) return
 
-    const handlePointerDown = (e: PointerEvent) => {
-      const target = e.target as HTMLElement
-      if (target.closest('button, input, select, textarea, a, [role="button"], [contenteditable="true"]')) return
+    const clampOffset = (nextOffset: { x: number; y: number }) => {
       const rect = modal.getBoundingClientRect()
-      if (e.clientY - rect.top > 96) return
+      const currentOffset = offsetRef.current
+      const deltaX = nextOffset.x - currentOffset.x
+      const deltaY = nextOffset.y - currentOffset.y
+      const nextRect = {
+        left: rect.left + deltaX,
+        right: rect.right + deltaX,
+        top: rect.top + deltaY,
+        bottom: rect.bottom + deltaY,
+      }
+      const minVisibleX = Math.min(180, rect.width * 0.5)
+      const minVisibleY = Math.min(120, rect.height * 0.35)
+      let x = nextOffset.x
+      let y = nextOffset.y
+
+      if (nextRect.right < minVisibleX) x += minVisibleX - nextRect.right
+      if (nextRect.left > window.innerWidth - minVisibleX) x -= nextRect.left - (window.innerWidth - minVisibleX)
+      if (nextRect.bottom < minVisibleY) y += minVisibleY - nextRect.bottom
+      if (nextRect.top > window.innerHeight - minVisibleY) y -= nextRect.top - (window.innerHeight - minVisibleY)
+
+      return { x, y }
+    }
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const target = e.target as HTMLElement | null
+      const handle = target?.closest('[data-modal-drag-handle="true"]')
+      if (!handle || !modal.contains(handle)) return
       e.preventDefault()
       dragStateRef.current = {
         startX: e.clientX,
@@ -13549,19 +13730,23 @@ function ModalShell({
         originX: offsetRef.current.x,
         originY: offsetRef.current.y,
       }
+      modal.classList.add('is-dragging')
     }
 
     const handlePointerMove = (e: PointerEvent) => {
       if (!dragStateRef.current) return
-      const newOffset = {
+      const newOffset = clampOffset({
         x: dragStateRef.current.originX + (e.clientX - dragStateRef.current.startX),
         y: dragStateRef.current.originY + (e.clientY - dragStateRef.current.startY),
-      }
+      })
       offsetRef.current = newOffset
       setOffset(newOffset)
     }
 
-    const handlePointerUp = () => { dragStateRef.current = null }
+    const handlePointerUp = () => {
+      dragStateRef.current = null
+      modal.classList.remove('is-dragging')
+    }
 
     modal.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('pointermove', handlePointerMove)
@@ -13570,6 +13755,7 @@ function ModalShell({
       modal.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
+      modal.classList.remove('is-dragging')
     }
   }, [])
 
@@ -13596,6 +13782,15 @@ function ModalShell({
         aria-labelledby={labelledBy}
         style={(offset.x !== 0 || offset.y !== 0) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
       >
+        <button
+          type="button"
+          className="modal-drag-handle"
+          data-modal-drag-handle="true"
+          aria-label="拖动弹窗"
+          title="拖动弹窗"
+        >
+          <GripVertical size={16} aria-hidden="true" />
+        </button>
         {children}
       </section>
     </div>
