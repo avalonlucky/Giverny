@@ -55,6 +55,8 @@ import {
   History,
   Globe,
   SlidersHorizontal,
+  Heart,
+  Star,
 } from 'lucide-react'
 import {
   appReleaseDate,
@@ -1095,6 +1097,7 @@ type PendingProgressAttachment = {
   uploadProgress?: number // 0..1
   uploadedFile?: FileAsset
   uploadError?: string
+  isAcceptanceFile?: boolean
 }
 
 const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
@@ -3092,7 +3095,7 @@ function SemanticSearchModal({
 
 // ─── 知识库全页 ────────────────────────────────────────────────────────────────
 
-type KnowledgeNote = { id: string; title: string; content: string; tags: string; created_at: string }
+type KnowledgeNote = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
 
 function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }) {
   const [notes, setNotes] = useState<KnowledgeNote[]>([])
@@ -3102,6 +3105,7 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
   const [tags, setTags] = useState('')
   const [saving, setSaving] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'user' | 'ai-tip'>('user')
 
   const authHeaders = (): Record<string, string> => {
     const h: Record<string, string> = { 'content-type': 'application/json' }
@@ -3134,6 +3138,7 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
 
   const startEdit = (n: KnowledgeNote) => {
     setEditId(n.id); setTitle(n.title); setContent(n.content); setTags(n.tags)
+    setActiveTab('user')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -3143,42 +3148,65 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
     if (editId === id) reset()
   }
 
+  const userNotes = notes.filter((n) => !n.source || n.source === 'user')
+  const aiTipNotes = notes.filter((n) => n.source === 'ai-tip')
+
   return (
     <div className="knowledge-page">
-      <div className="knowledge-page-form">
-        <h2 className="knowledge-page-title">{editId ? '编辑笔记' : '添加笔记'}</h2>
-        <input className="knowledge-input" placeholder="标题（可选）" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <textarea
-          className="knowledge-textarea"
-          placeholder="写下你的知识、定价逻辑、甲方话术、行业笔记… AI 对话时会自动参考"
-          value={content}
-          rows={6}
-          onChange={(e) => setContent(e.target.value)}
-        />
-        <div className="knowledge-add-footer">
-          <input className="knowledge-input knowledge-tags" placeholder="标签（逗号分隔，可选）" value={tags} onChange={(e) => setTags(e.target.value)} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            {editId && <button type="button" className="knowledge-cancel-btn" onClick={reset}>取消</button>}
-            <button type="button" className="knowledge-save-btn" disabled={!content.trim() || saving} onClick={() => void save()}>
-              {saving ? '保存中…' : editId ? '保存修改' : '添加'}
-            </button>
+      {activeTab === 'user' && (
+        <div className="knowledge-page-form">
+          <h2 className="knowledge-page-title">{editId ? '编辑笔记' : '添加笔记'}</h2>
+          <input className="knowledge-input" placeholder="标题（可选）" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <textarea
+            className="knowledge-textarea"
+            placeholder="写下你的知识、定价逻辑、甲方话术、行业笔记… AI 对话时会自动参考"
+            value={content}
+            rows={6}
+            onChange={(e) => setContent(e.target.value)}
+          />
+          <div className="knowledge-add-footer">
+            <input className="knowledge-input knowledge-tags" placeholder="标签（逗号分隔，可选）" value={tags} onChange={(e) => setTags(e.target.value)} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              {editId && <button type="button" className="knowledge-cancel-btn" onClick={reset}>取消</button>}
+              <button type="button" className="knowledge-save-btn" disabled={!content.trim() || saving} onClick={() => void save()}>
+                {saving ? '保存中…' : editId ? '保存修改' : '添加'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="knowledge-page-list">
+        <div className="settings-tabs view-mode-tabs knowledge-source-tabs">
+          <button type="button" className={activeTab === 'user' ? 'active' : ''} onClick={() => setActiveTab('user')}>
+            <BookOpen size={14} />
+            我的笔记
+            {userNotes.length > 0 && <span className="knowledge-tab-count">{userNotes.length}</span>}
+          </button>
+          <button type="button" className={activeTab === 'ai-tip' ? 'active' : ''} onClick={() => setActiveTab('ai-tip')}>
+            <Heart size={14} />
+            AI 收藏
+            {aiTipNotes.length > 0 && <span className="knowledge-tab-count">{aiTipNotes.length}</span>}
+          </button>
+        </div>
+
         {loading && <p className="knowledge-empty">加载中…</p>}
-        {!loading && notes.length === 0 && (
+        {!loading && activeTab === 'user' && userNotes.length === 0 && (
           <p className="knowledge-empty">还没有笔记。添加后，AI 工作助手对话时会自动参考这里的内容。</p>
         )}
-        {notes.map((n) => (
-          <div key={n.id} className="knowledge-item">
+        {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
+          <p className="knowledge-empty">还没有收藏。在每日小知识里点击 ♥ 收藏感兴趣的内容。</p>
+        )}
+        {(activeTab === 'user' ? userNotes : aiTipNotes).map((n) => (
+          <div key={n.id} className={`knowledge-item ${n.source === 'ai-tip' ? 'knowledge-item-ai-tip' : ''}`}>
             <div className="knowledge-item-header">
               <span className="knowledge-item-title">{n.title || '无标题'}</span>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" className="knowledge-item-delete" onClick={() => startEdit(n)} aria-label="编辑" title="编辑">
-                  <Pencil size={13} />
-                </button>
+                {n.source !== 'ai-tip' && (
+                  <button type="button" className="knowledge-item-delete" onClick={() => startEdit(n)} aria-label="编辑" title="编辑">
+                    <Pencil size={13} />
+                  </button>
+                )}
                 <button type="button" className="knowledge-item-delete" onClick={() => void remove(n.id)} aria-label="删除" title="删除">
                   <Trash2 size={13} />
                 </button>
@@ -6179,6 +6207,18 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           canRefresh={isAdmin}
           onRefresh={() => void showNextDailyKnowledge()}
           onClose={() => setIsDailyKnowledgeOpen(false)}
+          onFavorite={isAdmin ? async (item) => {
+            const h: Record<string, string> = { 'content-type': 'application/json' }
+            if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
+            const body = {
+              title: item.title,
+              content: item.body.join('\n\n'),
+              tags: item.category,
+              source: 'ai-tip',
+            }
+            const res = await fetch('/api/knowledge', { method: 'POST', headers: h, body: JSON.stringify(body) })
+            return res.ok
+          } : undefined}
         />
       )}
       {isCommandPaletteOpen && (
@@ -7809,7 +7849,7 @@ function TaskProgressModal({
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
   onPreviewFile: (file: FileAsset) => void
-  onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
+  onUpdateFile: (fileId: number, changes: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) => Promise<FileAsset>
   onDeleteFile: (fileId: number) => void
   onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
   onUploadAcceptanceFile?: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<FileAsset>
@@ -8431,6 +8471,19 @@ function TaskProgressModal({
       if (isWaitingMode && (waitingDirty || nextEntry)) {
         onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
       }
+      // 单独标记为验收文件的附件：更新 scope/tag，并追加到 task.acceptanceFiles
+      const perAcceptanceAttachments = !isAcceptanceMode
+        ? pendingAttachments.filter((a) => a.isAcceptanceFile && a.uploadedFile)
+        : []
+      if (perAcceptanceAttachments.length > 0) {
+        await Promise.all(perAcceptanceAttachments.map((a) =>
+          onUpdateFile(a.uploadedFile!.id, { tag: '验收文件', scope: 'acceptance' }),
+        ))
+        const perAcceptanceNames = perAcceptanceAttachments.map((a) => sanitizeAttachmentName(a.name, a.originalName))
+        onUpdateTask(task.id, {
+          acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...perAcceptanceNames])),
+        })
+      }
       const body = note.trim() || nextEntry?.note?.trim() || ''
       if (body || finalizedUploadedNames.length > 0) {
         await onCreateTaskUpdate(task.id, {
@@ -8770,8 +8823,8 @@ function TaskProgressModal({
   )
 
   return (
-    <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
-      <header className="progress-lite-header">
+    <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose} draggable>
+      <header className="progress-lite-header" data-drag-handle>
         <div>
           <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : isAcceptanceRevisionMode ? '编辑验收进展' : isAcceptanceMode ? '记录验收进展' : '记录进展'}</h2>
           {progressHeaderHint && <small>{progressHeaderHint}</small>}
@@ -9174,6 +9227,20 @@ function TaskProgressModal({
                               采用
                             </button>
                           </div>
+                        )}
+                        {!isAcceptanceMode && (
+                          <button
+                            type="button"
+                            className={`attachment-acceptance-toggle ${attachment.isAcceptanceFile ? 'active' : ''}`}
+                            aria-label={attachment.isAcceptanceFile ? '取消标记为验收文件' : '标记为验收文件'}
+                            title={attachment.isAcceptanceFile ? '取消标记为验收文件' : '标记为验收文件'}
+                            onClick={() => setPendingAttachments((current) => current.map((item) =>
+                              item.id === attachment.id ? { ...item, isAcceptanceFile: !item.isAcceptanceFile } : item,
+                            ))}
+                          >
+                            <Star size={12} fill={attachment.isAcceptanceFile ? 'currentColor' : 'none'} />
+                            {attachment.isAcceptanceFile ? '验收文件' : '标为验收文件'}
+                          </button>
                         )}
                         <div className="progress-attachment-actions">
                           <button
@@ -13433,6 +13500,7 @@ function ModalShell({
   onClose,
   closeOnBackdrop = false,
   closeOnEscape = false,
+  draggable = false,
   children,
 }: {
   className?: string
@@ -13440,9 +13508,13 @@ function ModalShell({
   onClose: () => void
   closeOnBackdrop?: boolean
   closeOnEscape?: boolean
+  draggable?: boolean
   children: React.ReactNode
 }) {
   const modalRef = useRef<HTMLElement | null>(null)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const dragStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (closeOnEscape && event.key === 'Escape') {
@@ -13460,6 +13532,23 @@ function ModalShell({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [closeOnEscape, onClose])
 
+  useEffect(() => {
+    if (!draggable) return
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!dragStateRef.current) return
+      const dx = e.clientX - dragStateRef.current.startX
+      const dy = e.clientY - dragStateRef.current.startY
+      setOffset({ x: dragStateRef.current.originX + dx, y: dragStateRef.current.originY + dy })
+    }
+    const handlePointerUp = () => { dragStateRef.current = null }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggable])
+
   return (
     <div
       className="modal-backdrop"
@@ -13475,7 +13564,20 @@ function ModalShell({
         }
       }}
     >
-      <section ref={modalRef} className={`task-modal ${className ?? ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
+      <section
+        ref={modalRef}
+        className={`task-modal ${className ?? ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        style={(offset.x !== 0 || offset.y !== 0) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
+        onPointerDown={draggable ? (e) => {
+          const target = e.target as HTMLElement
+          if (!target.closest('[data-drag-handle]')) return
+          e.preventDefault()
+          dragStateRef.current = { startX: e.clientX, startY: e.clientY, originX: offset.x, originY: offset.y }
+        } : undefined}
+      >
         {children}
       </section>
     </div>
@@ -13497,14 +13599,29 @@ function DailyKnowledgeModal({
   canRefresh,
   onRefresh,
   onClose,
+  onFavorite,
 }: {
   item: DailyKnowledgeItem
   isLoading: boolean
   canRefresh: boolean
   onRefresh: () => void
   onClose: () => void
+  onFavorite?: (item: DailyKnowledgeItem) => Promise<boolean>
 }) {
   const sourceLabel = item.source.startsWith('AI · ') ? `AI 生成（${item.source.replace('AI · ', '')}）` : item.source
+  const [favorited, setFavorited] = useState(false)
+  const [favoriteSaving, setFavoriteSaving] = useState(false)
+
+  const handleFavorite = async () => {
+    if (!onFavorite || favoriteSaving || favorited) return
+    setFavoriteSaving(true)
+    try {
+      const ok = await onFavorite(item)
+      if (ok) setFavorited(true)
+    } finally {
+      setFavoriteSaving(false)
+    }
+  }
 
   return (
     <ModalShell className="daily-knowledge-modal" labelledBy="daily-knowledge-title" onClose={onClose}>
@@ -13519,11 +13636,26 @@ function DailyKnowledgeModal({
       </div>
       <footer className="daily-knowledge-modal-footer">
         <button className="daily-knowledge-ghost" type="button" onClick={onClose}>关闭</button>
-        {canRefresh && (
-          <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
-            {isLoading ? '生成中' : '换一篇'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {onFavorite && (
+            <button
+              className={`daily-knowledge-favorite-btn ${favorited ? 'favorited' : ''}`}
+              type="button"
+              disabled={favoriteSaving || favorited}
+              onClick={() => void handleFavorite()}
+              title={favorited ? '已收藏到知识库' : '收藏到知识库'}
+              aria-label={favorited ? '已收藏' : '收藏'}
+            >
+              <Heart size={15} fill={favorited ? 'currentColor' : 'none'} />
+              {favorited ? '已收藏' : favoriteSaving ? '收藏中…' : '收藏'}
+            </button>
+          )}
+          {canRefresh && (
+            <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
+              {isLoading ? '生成中' : '换一篇'}
+            </button>
+          )}
+        </div>
       </footer>
     </ModalShell>
   )

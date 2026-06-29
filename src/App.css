@@ -1391,6 +1391,34 @@ button.topbar-create-button:hover {
   cursor: wait;
 }
 
+.daily-knowledge-favorite-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.daily-knowledge-favorite-btn:hover:not(:disabled) {
+  border-color: #e05a7a;
+  color: #e05a7a;
+}
+.daily-knowledge-favorite-btn.favorited {
+  border-color: #e05a7a;
+  color: #e05a7a;
+  background: color-mix(in srgb, #e05a7a 8%, transparent);
+}
+.daily-knowledge-favorite-btn:disabled:not(.favorited) {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .stat-card,
 .panel {
   border: 1px solid var(--color-border-soft);
@@ -5053,6 +5081,11 @@ button.topbar-create-button:hover {
   justify-content: space-between;
   gap: 18px;
   padding: 36px 36px 18px;
+  cursor: grab;
+  user-select: none;
+}
+.progress-lite-header:active {
+  cursor: grabbing;
 }
 
 .progress-lite-header > div {
@@ -5673,6 +5706,33 @@ button.topbar-create-button:hover {
 
 .progress-attachment-desktop-item .attachment-upload-done {
   color: color-mix(in srgb, var(--color-primary) 78%, var(--color-text));
+}
+
+/* 单独标记为验收文件的切换按钮 */
+.attachment-acceptance-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-soft);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.attachment-acceptance-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.attachment-acceptance-toggle.active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary-strong);
+  font-weight: 600;
 }
 
 .progress-existing-attachments,
@@ -18378,6 +18438,30 @@ button.topbar-create-button kbd {
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--color-surface);
+}
+
+.knowledge-item-ai-tip {
+  border-color: color-mix(in srgb, #e05a7a 25%, var(--color-border));
+  background: color-mix(in srgb, #e05a7a 4%, var(--color-surface));
+}
+
+.knowledge-source-tabs {
+  margin-bottom: 12px;
+}
+
+.knowledge-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-border-soft);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .knowledge-item-header {

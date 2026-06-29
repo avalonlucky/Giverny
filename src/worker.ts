@@ -4291,7 +4291,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
 }
 
 async function updateFileMetadata(env: Env, id: string, request: Request) {
-  const body = (await request.json()) as { name?: string; tag?: string }
+  const body = (await request.json()) as { name?: string; tag?: string; scope?: string }
   const current = await env.DB.prepare('SELECT file_name, file_tag FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ file_name: string; file_tag: string | null }>()
   if (!current) {
     return fail('文件不存在', 404)
@@ -4299,7 +4299,12 @@ async function updateFileMetadata(env: Env, id: string, request: Request) {
 
   const nextName = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : current.file_name
   const nextTag = typeof body.tag === 'string' ? body.tag.trim().slice(0, 240) : (current.file_tag ?? '')
-  await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ? WHERE id = ?').bind(nextName, nextTag, id).run()
+  const nextScope = body.scope === 'acceptance' || body.scope === 'progress' ? body.scope : null
+  if (nextScope) {
+    await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ?, attachment_scope = ? WHERE id = ?').bind(nextName, nextTag, nextScope, id).run()
+  } else {
+    await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ? WHERE id = ?').bind(nextName, nextTag, id).run()
+  }
   await audit(env, 'update', 'attachment', id, { fileName: nextName, tag: nextTag })
 
   const row = await env.DB.prepare(`
@@ -5465,7 +5470,7 @@ async function getOrBuildStyleGuide(env: Env, field: 'requirement' | 'title', de
 
 // ─── 个人知识库 ───────────────────────────────────────────────────────────────
 
-type KnowledgeNoteRow = { id: string; title: string; content: string; tags: string; created_at: string }
+type KnowledgeNoteRow = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
 
 async function ensureKnowledgeTable(env: Env) {
   await env.DB.prepare(
@@ -5474,33 +5479,37 @@ async function ensureKnowledgeTable(env: Env) {
       title TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       tags TEXT DEFAULT '',
+      source TEXT DEFAULT 'user',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
   ).run()
+  // Migration for existing tables
+  await env.DB.prepare(`ALTER TABLE knowledge_notes ADD COLUMN source TEXT DEFAULT 'user'`).run().catch(() => {})
 }
 
 async function listKnowledgeNotes(env: Env): Promise<KnowledgeNoteRow[]> {
   await ensureKnowledgeTable(env)
   const { results } = await env.DB.prepare(
-    'SELECT id, title, content, tags, created_at FROM knowledge_notes ORDER BY updated_at DESC',
+    'SELECT id, title, content, tags, source, created_at FROM knowledge_notes ORDER BY updated_at DESC',
   ).all<KnowledgeNoteRow>()
   return results ?? []
 }
 
 async function upsertKnowledgeNote(env: Env, request: Request): Promise<Response> {
   await ensureKnowledgeTable(env)
-  const body = (await request.json().catch(() => ({}))) as { id?: string; title?: string; content?: string; tags?: string }
+  const body = (await request.json().catch(() => ({}))) as { id?: string; title?: string; content?: string; tags?: string; source?: string }
   const id = String(body.id ?? '').trim() || crypto.randomUUID()
   const title = String(body.title ?? '').trim().slice(0, 200)
   const content = String(body.content ?? '').trim().slice(0, 8000)
   const tags = String(body.tags ?? '').trim().slice(0, 200)
+  const source = body.source === 'ai-tip' ? 'ai-tip' : 'user'
   if (!content) return fail('content 不能为空', 400)
   await env.DB.prepare(
-    `INSERT INTO knowledge_notes (id, title, content, tags, updated_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content, tags = excluded.tags, updated_at = CURRENT_TIMESTAMP`,
-  ).bind(id, title, content, tags).run()
+    `INSERT INTO knowledge_notes (id, title, content, tags, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content, tags = excluded.tags, source = excluded.source, updated_at = CURRENT_TIMESTAMP`,
+  ).bind(id, title, content, tags, source).run()
   return ok({ id })
 }
 

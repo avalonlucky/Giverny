@@ -511,7 +511,7 @@ export const api = {
     onProgress?.(1)
     return saved
   },
-  updateFile: (fileId: number, payload: { name?: string; tag?: string }) =>
+  updateFile: (fileId: number, payload: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) =>
     requestJson<FileAsset>(`/api/files/${fileId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
