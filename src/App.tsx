@@ -544,7 +544,7 @@ const dailyKnowledgeQueueSize = 10
 function readDailyKnowledgeHistory() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeHistoryKey) ?? '[]') as unknown
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(-60) : []
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
   } catch {
     return []
   }
@@ -552,7 +552,7 @@ function readDailyKnowledgeHistory() {
 
 function rememberDailyKnowledgeTitle(title: string) {
   const history = readDailyKnowledgeHistory().filter((item) => item !== title)
-  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-60)))
+  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title]))
 }
 
 function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
@@ -3919,7 +3919,7 @@ function App() {
       dailyKnowledgeRef.current.title,
       ...dailyKnowledgeQueueRef.current.map((item) => item.title),
       ...extraTitles,
-    ].filter(Boolean).slice(-30)
+    ].filter(Boolean)
     const suggestion: DailyKnowledgeSuggestion = await api.suggestDailyKnowledge({
       currentMonth: currentMonth.value,
       taskThemes,
