@@ -53,6 +53,7 @@ type Env = {
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
+  TAVILY_API_KEY?: string
   AI?: WorkersAiBinding
   WORKERS_AI_MODEL?: string
   VECTORIZE?: VectorizeBinding
@@ -2957,6 +2958,7 @@ const normalizeDesignTypeGroups = (values: unknown): DesignTypeGroup[] => {
 }
 
 type TaskAssistantToolArgs = {
+  suggestedTitle?: string
   optimizedRequirement?: string
   suggestedParentType?: string
   suggestedChildType?: string
@@ -3008,6 +3010,7 @@ function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTy
   const matchedGroup = groups.find((group) => group.name === suggestedParentType)
   const categoryExists = Boolean(matchedGroup?.items.includes(suggestedChildType))
   return {
+    suggestedTitle: String(args.suggestedTitle ?? '').trim(),
     optimizedRequirement: String(args.optimizedRequirement ?? '').trim(),
     suggestedParentType,
     suggestedChildType,
@@ -4618,18 +4621,50 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     designTypeGroups?: DesignTypeGroup[]
     attachmentText?: string
     attachmentName?: string
+    attachmentImages?: Array<{ base64: string; mimeType: string; name: string }>
   }
   const title = String(body.title ?? '').trim()
   const requirement = String(body.requirement ?? '').trim()
-  // 甲方附件文案（Word/PDF/txt 等，前端就地抽取的纯文本，截断以控制 token）
-  const attachmentText = String(body.attachmentText ?? '').trim().slice(0, 8000)
   const attachmentName = String(body.attachmentName ?? '').trim().slice(0, 120)
+  const attachmentImages = Array.isArray(body.attachmentImages) ? body.attachmentImages.slice(0, 6) : []
+
+  // 图片附件：用视觉模型描述后作为文案文本
+  let attachmentText = String(body.attachmentText ?? '').trim().slice(0, 8000)
+  if (attachmentImages.length > 0 && !attachmentText) {
+    const visionEndpoint = await resolveAiEndpoint(env, 'visionPrimary')
+    if (visionEndpoint.apiKey) {
+      const assets = attachmentImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType }))
+      const visionPrompt = `你在辅助设计任务需求分析。请对这${assets.length > 1 ? `${assets.length}张` : '张'}图片做完整内容提取，重点要求：
+1. 【完整名称】所有标题、产品名、品牌名、项目名、页面名必须一字不漏地完整抄录，绝对不能缩写或截断
+2. 【正文内容】记录页面各区块的文字内容、数据指标、功能模块名称
+3. 【视觉结构】描述布局、配色、设计风格等视觉特征
+每张图片单独描述，用"【图片N】"分隔。`
+      const desc = await callAiEndpointMultimodal(visionEndpoint, visionPrompt, assets)
+      if (desc) attachmentText = `【图片内容识别】\n${desc}`.slice(0, 8000)
+    }
+  }
+
   if (!title && !requirement && !attachmentText) {
     return fail('请先填写项目名称、任务需求，或上传甲方文案附件')
   }
 
   const storedGroups = await getDesignTypeGroups(env)
   const designTypeGroups = normalizeDesignTypeGroups(body.designTypeGroups?.length ? body.designTypeGroups : storedGroups)
+
+  // 并行获取需求文案和任务名称的风格指南（按类型独立归纳，样本不足时退回通用）
+  const currentType = body.selectedType ?? ''
+  const [reqStyleGuide, titleStyleGuide] = await Promise.all([
+    getOrBuildStyleGuide(env, 'requirement', currentType),
+    getOrBuildStyleGuide(env, 'title', currentType),
+  ])
+  const styleGuideBlock = [
+    reqStyleGuide ? `【需求文案风格指导】以下是根据该用户历史修改行为归纳的需求文案偏好，请严格贴近这个风格：\n${reqStyleGuide}` : '',
+    titleStyleGuide ? `【任务名称命名指导】以下是该用户对任务名称的命名偏好，建议任务名称时请遵循：\n${titleStyleGuide}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const styleGuideInjection = styleGuideBlock ? `\n\n${styleGuideBlock}` : ''
+
   const aiPayload = {
     taskTitle: title,
     rawRequirement: requirement,
@@ -4657,9 +4692,9 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TaskAssistantToolArgs>(
       env,
-      '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。输入可能带 attachmentText（甲方提供的文案附件，已抽取为纯文本）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。不要编造用户和附件都没有提供的事实。',
+      `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。输入可能带 attachmentText（甲方提供的文案附件，已抽取为纯文本或图片识别内容）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。图片识别内容以「图片内容识别」开头，请充分理解图片整体含义，用图片中的完整准确信息补全用户的简写或不完整描述。不要编造用户和附件都没有提供的事实。${styleGuideInjection}`,
       aiPayload,
-      'optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
+      'suggestedTitle:string, optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
     )
     const suggestion = toTaskAssistantSuggestion(fallbackParsed ?? {}, designTypeGroups)
     if (!suggestion.optimizedRequirement) {
@@ -4695,7 +4730,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            '你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。若确实没有合适分类，可以建议新分类，但不要编造不必要的新分类。\n\n【附件文案】输入里可能带 attachmentText（甲方以 Word/PDF 等提供的文案，已抽取为纯文本）。\n附件只是「低权重参考」，绝不是需求本身——以用户写的 rawRequirement 为绝对主导：\n- 若 rawRequirement 非空：以它为准定义任务范围与意图；附件只用来补一两句背景。**设计要求控制在 2-3 句**：只写整体风格/调性 + 最多 2-3 个最关键约束。凡是附件里成体系的明细（产品清单/各模块/卖点/副标题/口令/每条文案等）**一律不要逐条罗列或照抄**，而是用一句话带过并注明「详见甲方文案附件」，设计时再查附件即可——任务单要短，不是文案搬运。\n- 若 rawRequirement 为空：才依据 attachmentText 提炼一份简洁的任务单（背景一句、要求几条、输出文件），同样不要照抄全部文案。\n- 二者冲突时一律以 rawRequirement 为准。不要编造附件里没有的交付物或规范。\n\n改写目标：不是只排版，而是把口语化表达改成专业任务单语言；把模糊描述整理成可执行要求；把散乱信息归并到对应模块。\n\n允许：修正语病；归并重复信息；把用户已经表达的需求整理成明确动作；基于原文/附件把“用途/场景/对接背景/必须包含内容/输出清单”补全到对应模块。\n禁止：凭空编造用户和附件都没提过的交付物、尺寸、品牌规范、交付承诺或验收标准；丢失用户或附件提到的背景、约束、文件名、版本号、数量；写客套话或解释你做了什么。\n\n输出必须严格使用以下三段固定模板，段标题一字不改，用换行 \\n 分隔：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[风格/调性/必须包含的元素/区域]\n3、输出文件：[交付物清单]\n\n方括号只是提示含义，最终不要保留方括号。用户和附件都没有提供的信息写“未明确，可在对接时确认”，不要自己编。整体读起来像一条专业的内部设计任务单。',
+            `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴切的大类和子类。\n\n【附件参考规则】attachmentText 可能来自 Word/PDF 文案（纯文本），也可能来自图片识别（以「图片内容识别」开头）。以用户写的 rawRequirement 为绝对主导，附件是帮你更深理解用户意图的背景材料：\n- rawRequirement 非空时：以它定义任务范围和设计目的；附件帮助你补全、纠正、丰富用户描述里不完整的地方。\n- rawRequirement 为空时：从附件中提炼简洁任务单，不照抄大段文案。\n\n【图片理解与意图识别】当 attachmentText 来自图片识别时，你的核心任务是：充分理解图片的整体内容（产品功能、信息结构、视觉风格、核心主题），然后结合图片内容重新理解用户 rawRequirement 的真实意图——用户的描述往往是口语化、简写或不完整的，图片才是最准确的信息源。\n具体要做的事：\n1. 先完整理解图片：这是什么产品/项目，核心价值是什么，内容结构怎么组织，视觉风格如何\n2. 用图片内容校准用户描述：用户写的简称、模糊表达、不完整的名字，用图片中对应的准确内容补全（如用户写”融合防勒索与零信任”，图片完整标题是”融合防勒索与零信任的一体化办公终端安全软件—星点御河”，则用完整名称）\n3. 识别用户意图的延伸信息：图片中有但用户未提及、却对设计任务有帮助的信息（如产品定位、目标受众、核心卖点），可以用一句话补入设计背景\n4. 图片视觉风格可参考写入设计要求，但只写”参考附件样式”而非自行规定具体颜色\n\n【设计要求的写法】只写甲方明确指定的约束（如甲方说了”要用科技蓝””横版A4”才写）；无明确视觉指定时，设计要求写”参考附件样式，具体视觉方向对接时确认”，不要自行规定主色调或风格。\n\n禁止：逐条照抄附件里的产品清单/功能列表（一句话带过并注”详见甲方附件”）；凭空编造交付物、尺寸、品牌规范；写客套话。\n允许：修正语病；归并信息；用图片中的完整名称替换用户简写；用图片理解到的产品背景补充设计背景。\n\n输出严格使用三段固定模板，段标题一字不改：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[甲方明确指定的约束；无明确要求则写”参考附件样式，具体视觉方向对接时确认”]\n3、输出文件：[交付物清单]\n\n方括号只是提示，最终不要保留。用户和附件都没有提供的信息写”未明确，可在对接时确认”。${styleGuideInjection}`,
         },
         {
           role: 'user',
@@ -4711,9 +4746,13 @@ async function suggestTaskWithAi(env: Env, request: Request) {
             parameters: {
               type: 'object',
               properties: {
+                suggestedTitle: {
+                  type: 'string',
+                  description: '建议的任务名称。根据任务内容提炼出简洁、清晰、可识别的中文名称，通常包含：客户/项目名 + 设计物类型（如”某品牌X产品宣传海报”）。若用户已填写 taskTitle 且已经清晰，可在其基础上微调；若为空或过于模糊，结合需求和附件内容重新命名。',
+                },
                 optimizedRequirement: {
                   type: 'string',
-                  description: '优化后的中文任务需求。必须严格使用三段：1、设计背景；2、设计要求；3、输出文件。把口语化表达改为专业可执行任务单语言；模糊处基于用户原文整理，不明确的信息写“未明确，可在对接时确认”；不要凭空编造交付物、尺寸、品牌规范或验收承诺。',
+                  description: '优化后的中文任务需求。必须严格使用三段：1、设计背景；2、设计要求；3、输出文件。把口语化表达改为专业可执行任务单语言；模糊处基于用户原文整理，不明确的信息写”未明确，可在对接时确认”；不要凭空编造交付物、尺寸、品牌规范或验收承诺。',
                 },
                 suggestedParentType: {
                   type: 'string',
@@ -4728,7 +4767,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
                   description: '一句话说明为什么推荐该类型。',
                 },
               },
-              required: ['optimizedRequirement', 'suggestedParentType', 'suggestedChildType', 'reason'],
+              required: ['suggestedTitle', 'optimizedRequirement', 'suggestedParentType', 'suggestedChildType', 'reason'],
             },
           },
         },
@@ -5183,6 +5222,538 @@ ${JSON.stringify(payload)}`
   return fail('AI 暂时没有生成可用内容', 503)
 }
 
+// ─── AI 任务建议编辑记录（用户行为学习）─────────────────────────────────────
+//
+// 设计思路：样本永久保留，不做数量上限。
+// 归纳采用增量蒸馏：每次只处理「上次归纳之后的新增样本」，将新发现合并进现有风格指导，
+// 而非每次从头重读全量样本。这样无论积累多少条，注入 prompt 的始终是一份精炼指导，
+// 且精度随时间持续提升。
+//
+// task_style_summaries.last_processed_id 记录每个 summary_key 上次处理的最大样本 id，
+// 每次归纳只取 id > last_processed_id 的新记录（批次最多 30 条，避免 prompt 过长）。
+
+async function ensureTaskLearningTables(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS task_requirement_edits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ai_output TEXT NOT NULL,
+      user_final TEXT NOT NULL,
+      design_type TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS task_title_edits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ai_output TEXT NOT NULL,
+      user_final TEXT NOT NULL,
+      design_type TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS task_style_summaries (
+      summary_key TEXT PRIMARY KEY,
+      summary TEXT NOT NULL,
+      last_processed_id INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )`,
+  ).run()
+  // 兼容旧表结构：若 last_processed_id 列不存在则添加
+  try {
+    await env.DB.prepare('ALTER TABLE task_style_summaries ADD COLUMN last_processed_id INTEGER NOT NULL DEFAULT 0').run()
+  } catch { /* 列已存在，忽略 */ }
+}
+
+async function saveTaskEditPair(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { aiOutput?: string; userFinal?: string; designType?: string }
+  const aiOutput = String(body.aiOutput ?? '').trim()
+  const userFinal = String(body.userFinal ?? '').trim()
+  const designType = String(body.designType ?? '').trim().slice(0, 120)
+  if (!aiOutput || !userFinal || aiOutput === userFinal) {
+    return ok({ saved: false })
+  }
+  await ensureTaskLearningTables(env)
+  // 样本永久保留，不做删除
+  await env.DB.prepare(
+    'INSERT INTO task_requirement_edits (ai_output, user_final, design_type, created_at) VALUES (?, ?, ?, ?)',
+  )
+    .bind(aiOutput, userFinal, designType, Date.now())
+    .run()
+  return ok({ saved: true })
+}
+
+async function saveTaskTitleEditPair(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { aiOutput?: string; userFinal?: string; designType?: string }
+  const aiOutput = String(body.aiOutput ?? '').trim()
+  const userFinal = String(body.userFinal ?? '').trim()
+  const designType = String(body.designType ?? '').trim().slice(0, 120)
+  if (!aiOutput || !userFinal || aiOutput === userFinal) {
+    return ok({ saved: false })
+  }
+  await ensureTaskLearningTables(env)
+  await env.DB.prepare(
+    'INSERT INTO task_title_edits (ai_output, user_final, design_type, created_at) VALUES (?, ?, ?, ?)',
+  )
+    .bind(aiOutput, userFinal, designType, Date.now())
+    .run()
+  return ok({ saved: true })
+}
+
+type EditRow = { id: number; ai_output: string; user_final: string; design_type: string }
+
+async function fetchNewEdits(
+  env: Env,
+  table: 'task_requirement_edits' | 'task_title_edits',
+  designType: string | null,
+  afterId: number,
+  batchSize: number,
+): Promise<EditRow[]> {
+  const rows = designType !== null
+    ? await env.DB.prepare(
+        `SELECT id, ai_output, user_final, design_type FROM ${table} WHERE design_type = ? AND id > ? ORDER BY id ASC LIMIT ?`,
+      )
+        .bind(designType, afterId, batchSize)
+        .all<EditRow>()
+    : await env.DB.prepare(
+        `SELECT id, ai_output, user_final, design_type FROM ${table} WHERE id > ? ORDER BY id ASC LIMIT ?`,
+      )
+        .bind(afterId, batchSize)
+        .all<EditRow>()
+  return rows.results ?? []
+}
+
+async function countEditsForType(
+  env: Env,
+  table: 'task_requirement_edits' | 'task_title_edits',
+  designType: string,
+): Promise<number> {
+  const row = await env.DB.prepare(`SELECT COUNT(*) as cnt FROM ${table} WHERE design_type = ?`)
+    .bind(designType)
+    .first<{ cnt: number }>()
+  return row?.cnt ?? 0
+}
+
+async function mergeStyleSummary(
+  env: Env,
+  field: 'requirement' | 'title',
+  designType: string | null,
+  existingSummary: string,
+  newSamples: EditRow[],
+): Promise<string> {
+  const typeLabel = designType && designType !== '__general__' ? `「${designType}」类` : '各类'
+  const isTitle = field === 'title'
+  const samplesText = newSamples
+    .map(
+      (e, i) =>
+        `---新样本${i + 1}${e.design_type && designType === '__general__' ? `（${e.design_type}）` : ''}\n[AI建议]\n${e.ai_output}\n[用户改为]\n${e.user_final}`,
+    )
+    .join('\n')
+
+  const prompt = existingSummary
+    ? (isTitle
+        ? `你是写作风格分析助手。请在以下「已有命名风格指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（150 字以内）。若新样本与已有指导一致则强化，若有新规律则补充，若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
+
+已有命名风格指导：
+${existingSummary}
+
+新增${typeLabel}任务名称修改样本：
+${samplesText}`
+        : `你是写作风格分析助手。请在以下「已有需求文案风格指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（200 字以内）。若新样本与已有指导一致则强化，若有新规律则补充，若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
+
+已有需求文案风格指导：
+${existingSummary}
+
+新增${typeLabel}任务需求文案修改样本：
+${samplesText}`)
+    : (isTitle
+        ? `你是写作风格分析助手。以下是一位设计师在新建${typeLabel}任务时，对 AI 建议任务名称的修改记录（共 ${newSamples.length} 条）。分析用户的命名偏好，生成「命名风格指导」（150 字以内）：偏好哪些成分（客户名/物料类型/尺寸等）、格式风格、惯用词。只输出指导文字，不要编号和标题。
+
+样本：
+${samplesText}`
+        : `你是写作风格分析助手。以下是一位设计师在新建${typeLabel}任务时，对 AI 建议需求文案的修改记录（共 ${newSamples.length} 条）。分析用户的文案偏好，生成「风格指导」（200 字以内）：倾向删除/添加什么、偏好措辞风格、三段各有什么习惯写法、有无惯用表达。只输出指导文字，不要编号和标题。
+
+样本：
+${samplesText}`)
+
+  try {
+    const result = await callTextWithFallback(env, prompt, 450)
+    return result.trim()
+  } catch {
+    return existingSummary
+  }
+}
+
+async function getOrBuildStyleGuide(env: Env, field: 'requirement' | 'title', designType: string): Promise<string> {
+  const table = field === 'title' ? 'task_title_edits' : 'task_requirement_edits'
+  const keyPrefix = field === 'title' ? 'title' : 'req'
+  const BATCH_SIZE = 30  // 每次最多处理 30 条新样本，避免 prompt 过长
+  const MIN_TOTAL = 3    // 至少 3 条样本才开始归纳
+
+  try {
+    await ensureTaskLearningTables(env)
+
+    // 优先处理当前类型
+    if (designType) {
+      const typeCount = await countEditsForType(env, table, designType)
+      if (typeCount >= MIN_TOTAL) {
+        const typeKey = `${keyPrefix}:${designType}`
+        const cached = await env.DB.prepare(
+          'SELECT summary, last_processed_id FROM task_style_summaries WHERE summary_key = ?',
+        )
+          .bind(typeKey)
+          .first<{ summary: string; last_processed_id: number }>()
+
+        const lastId = cached?.last_processed_id ?? 0
+        const newSamples = await fetchNewEdits(env, table, designType, lastId, BATCH_SIZE)
+
+        if (newSamples.length === 0) {
+          // 无新样本，直接返回缓存
+          return cached?.summary ?? ''
+        }
+
+        const maxId = Math.max(...newSamples.map((r) => r.id))
+        const updated = await mergeStyleSummary(env, field, designType, cached?.summary ?? '', newSamples)
+        if (updated) {
+          await env.DB.prepare(
+            'INSERT OR REPLACE INTO task_style_summaries (summary_key, summary, last_processed_id, updated_at) VALUES (?, ?, ?, ?)',
+          )
+            .bind(typeKey, updated, maxId, Date.now())
+            .run()
+          return updated
+        }
+        return cached?.summary ?? ''
+      }
+    }
+
+    // 类型样本不足，退而使用全类型通用归纳
+    const generalKey = `${keyPrefix}:__general__`
+    const cachedGeneral = await env.DB.prepare(
+      'SELECT summary, last_processed_id FROM task_style_summaries WHERE summary_key = ?',
+    )
+      .bind(generalKey)
+      .first<{ summary: string; last_processed_id: number }>()
+
+    const lastGeneralId = cachedGeneral?.last_processed_id ?? 0
+    const generalTotalRow = await env.DB.prepare(`SELECT COUNT(*) as cnt FROM ${table}`).first<{ cnt: number }>()
+    const generalTotal = generalTotalRow?.cnt ?? 0
+
+    if (generalTotal < MIN_TOTAL) {
+      return '' // 样本太少，暂不归纳
+    }
+
+    const newGeneralSamples = await fetchNewEdits(env, table, null, lastGeneralId, BATCH_SIZE)
+    if (newGeneralSamples.length === 0) {
+      return cachedGeneral?.summary ?? ''
+    }
+
+    const maxGeneralId = Math.max(...newGeneralSamples.map((r) => r.id))
+    const updatedGeneral = await mergeStyleSummary(env, field, '__general__', cachedGeneral?.summary ?? '', newGeneralSamples)
+    if (updatedGeneral) {
+      await env.DB.prepare(
+        'INSERT OR REPLACE INTO task_style_summaries (summary_key, summary, last_processed_id, updated_at) VALUES (?, ?, ?, ?)',
+      )
+        .bind(generalKey, updatedGeneral, maxGeneralId, Date.now())
+        .run()
+      return updatedGeneral
+    }
+    return cachedGeneral?.summary ?? ''
+  } catch {
+    return ''
+  }
+}
+
+// ─── 个人知识库 ───────────────────────────────────────────────────────────────
+
+type KnowledgeNoteRow = { id: string; title: string; content: string; tags: string; created_at: string }
+
+async function ensureKnowledgeTable(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS knowledge_notes (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      tags TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+}
+
+async function listKnowledgeNotes(env: Env): Promise<KnowledgeNoteRow[]> {
+  await ensureKnowledgeTable(env)
+  const { results } = await env.DB.prepare(
+    'SELECT id, title, content, tags, created_at FROM knowledge_notes ORDER BY updated_at DESC',
+  ).all<KnowledgeNoteRow>()
+  return results ?? []
+}
+
+async function upsertKnowledgeNote(env: Env, request: Request): Promise<Response> {
+  await ensureKnowledgeTable(env)
+  const body = (await request.json().catch(() => ({}))) as { id?: string; title?: string; content?: string; tags?: string }
+  const id = String(body.id ?? '').trim() || crypto.randomUUID()
+  const title = String(body.title ?? '').trim().slice(0, 200)
+  const content = String(body.content ?? '').trim().slice(0, 8000)
+  const tags = String(body.tags ?? '').trim().slice(0, 200)
+  if (!content) return fail('content 不能为空', 400)
+  await env.DB.prepare(
+    `INSERT INTO knowledge_notes (id, title, content, tags, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content, tags = excluded.tags, updated_at = CURRENT_TIMESTAMP`,
+  ).bind(id, title, content, tags).run()
+  return ok({ id })
+}
+
+async function deleteKnowledgeNote(env: Env, id: string): Promise<Response> {
+  await ensureKnowledgeTable(env)
+  await env.DB.prepare('DELETE FROM knowledge_notes WHERE id = ?').bind(id).run()
+  return ok({ deleted: true })
+}
+
+// ─── Tavily 网络搜索 ────────────────────────────────────────────────────────
+
+async function searchTavily(apiKey: string, query: string): Promise<string> {
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, query, max_results: 4, search_depth: 'basic', include_answer: true }),
+    })
+    if (!res.ok) return ''
+    const data = (await res.json()) as {
+      answer?: string
+      results?: Array<{ title: string; url: string; content: string }>
+    }
+    const parts: string[] = []
+    if (data.answer) parts.push(`搜索概要：${data.answer}`)
+    ;(data.results ?? []).slice(0, 3).forEach((r, i) => {
+      parts.push(`[${i + 1}] ${r.title}\n${String(r.content ?? '').slice(0, 250)}`)
+    })
+    return parts.join('\n\n')
+  } catch {
+    return ''
+  }
+}
+
+async function chatWithAi(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    messages?: Array<{ role: string; content: string }>
+    month?: string
+    useKnowledge?: boolean
+    useWebSearch?: boolean
+    attachments?: Array<{ type: 'image' | 'text'; name: string; data: string; mimeType: string }>
+  }
+  const messages = Array.isArray(body.messages)
+    ? body.messages.filter((m) => m?.role && m?.content).slice(-20)
+    : []
+  const month = String(body.month ?? '').trim().slice(0, 7)
+  const useKnowledge = body.useKnowledge !== false
+  const useWebSearch = body.useWebSearch !== false
+  const today = nowIso().slice(0, 10)
+  const attachments = Array.isArray(body.attachments) ? body.attachments : []
+  const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
+  const textAttachments = attachments.filter((a) => a.type === 'text').slice(0, 3)
+
+  const endpoint = await resolveAiEndpoint(env, 'textPrimary')
+  if (!endpoint.apiKey) {
+    return fail('未配置 AI 模型，请先在设置页配置 API Key', 503)
+  }
+
+  // 判断是否需要联网搜索（用户在问自身数据则不搜）
+  const lastMsg = messages.at(-1)?.content ?? ''
+  const DATA_KW = ['今天', '今日', '本月', '上月', '工时', '任务', '收入', '赚', '计时', '结算', '明细', '近期', '最近', '历史', '验收']
+  const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && !DATA_KW.some((kw) => lastMsg.includes(kw))
+
+  const [hourlyRate, monthRows, recentRows, knowledgeNotes, webSearchResult] = await Promise.all([
+    getHourlyRate(env),
+    month
+      ? env.DB.prepare(
+          'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC',
+        )
+          .bind(month)
+          .all<DbTask>()
+      : Promise.resolve({ results: [] as DbTask[] }),
+    env.DB.prepare(
+      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT 50',
+    ).all<DbTask>(),
+    useKnowledge ? listKnowledgeNotes(env) : Promise.resolve([] as KnowledgeNoteRow[]),
+    needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
+  ])
+
+  // 将 "HH:MM" 时间字符串 + 日期字符串转换为分钟戳（与前端 dateTimeMinuteStamp 一致）
+  function timeStrToMinutes(date: string, time: string): number {
+    const parts = String(time ?? '').split(':')
+    const h = parseInt(parts[0] ?? '', 10)
+    const m = parseInt(parts[1] ?? '', 10)
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return 0
+    const d = new Date(String(date ?? ''))
+    if (isNaN(d.getTime())) return 0
+    return Math.floor(d.getTime() / 60000) + h * 60 + m
+  }
+
+  // 计算今日工时：扫描本月任务 + 近期任务（去重），避免结算月不同导致遗漏
+  let todayMinutes = 0
+  const todayTasks: string[] = []
+  const seenTaskIds = new Set<string>()
+  const allTasksForToday = [...(monthRows.results ?? []), ...(recentRows.results ?? [])]
+  allTasksForToday.forEach((task) => {
+    const taskKey = task.title + '|' + task.start_date
+    if (seenTaskIds.has(taskKey)) return
+    seenTaskIds.add(taskKey)
+    let entries: Array<{ date?: string; endDate?: string; start?: string; end?: string; isUncounted?: boolean }> = []
+    try { entries = JSON.parse(task.time_entries_json ?? '[]') } catch {}
+    let taskTodayMinutes = 0
+    entries.forEach((e) => {
+      if (e.isUncounted) return
+      const eDay = String(e.date ?? '').slice(0, 10)
+      if (eDay !== today) return
+      const endDay = String(e.endDate ?? e.date ?? '').slice(0, 10)
+      const startMin = timeStrToMinutes(eDay, e.start ?? '')
+      const endMin = timeStrToMinutes(endDay, e.end ?? '')
+      if (endMin > startMin) taskTodayMinutes += endMin - startMin
+    })
+    if (taskTodayMinutes > 0) {
+      todayMinutes += taskTodayMinutes
+      if (task.title) todayTasks.push(task.title)
+    }
+  })
+  const todayHours = Number((todayMinutes / 60).toFixed(1))
+  const todayIncome = Math.round(todayHours * hourlyRate)
+
+  // 本月汇总
+  const billableTasks = (monthRows.results ?? []).filter((t) => t.is_billable !== 0 && t.status !== '不计费' && t.status !== '终止')
+  const monthHours = Number(billableTasks.reduce((s, t) => s + (Number(t.actual_hours) || 0), 0).toFixed(1))
+  const monthIncome = Math.round(monthHours * hourlyRate)
+
+  // 本月任务列表（最多 30 条，精简字段）
+  const taskLines = billableTasks.slice(0, 30).map((t) => {
+    const h = Number(t.actual_hours || 0).toFixed(1)
+    const amt = Math.round(Number(t.actual_hours || 0) * hourlyRate)
+    return `- ${t.title || '未命名'}（${t.design_type || '未分类'}）${t.status} ${h}h ¥${amt}`
+  }).join('\n')
+
+  // 近期历史（非本月，最多 10 条有工时的）
+  const historyLines = (recentRows.results ?? [])
+    .filter((t) => t.settlement_month !== month && (Number(t.actual_hours) || 0) > 0 && t.is_billable !== 0)
+    .slice(0, 10)
+    .map((t) => `- ${t.settlement_month} ${t.title || '未命名'} ${Number(t.actual_hours).toFixed(1)}h`)
+    .join('\n')
+
+  const textAttachmentSection = textAttachments.length
+    ? `\n=== 用户上传的文档 ===\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
+    : ''
+
+  const systemPrompt = `你是 Giverny 工作数据助手，帮助这位独立设计师分析任务、工时、收入，也能回答设计行业问题。
+若数据中有相关信息则优先引用；若没有且开启了联网搜索，则参考搜索结果；都没有则诚实说明。
+回答简洁自然，像了解对方工作节奏的助理。
+
+今天：${today}
+当前月份：${month || '未指定'}
+时薪：¥${hourlyRate}/h
+联网搜索：${webSearchResult ? '已执行（结果附后）' : env.TAVILY_API_KEY ? '已配置，本次未触发或无结果' : '未配置 TAVILY_API_KEY'}
+
+=== 今日（${today}）===
+工时：${todayHours}h
+估算收入：¥${todayIncome}
+${todayTasks.length ? `任务：${todayTasks.join('、')}` : '暂无计时记录'}
+
+=== ${month} 本月汇总 ===
+计费工时：${monthHours}h
+估算税前收入：¥${monthIncome}
+
+=== 本月任务明细 ===
+${taskLines || '暂无任务'}
+
+=== 近期历史任务（其他月份） ===
+${historyLines || '暂无'}
+${knowledgeNotes.length ? `\n=== 个人知识库 ===\n${knowledgeNotes.map((n) => `【${n.title || '笔记'}】\n${n.content}`).join('\n\n')}` : ''}
+${webSearchResult ? `\n=== 网络搜索结果 ===\n${webSearchResult}` : ''}
+${textAttachmentSection}
+`
+
+  // 对 Gemini 用普通请求（不支持 SSE）
+  // 有图片附件：调用视觉模型（非流式，返回 JSON）
+  if (imageAttachments.length > 0) {
+    const visionEndpoint = await resolveAiEndpoint(env, 'visionPrimary')
+    if (!visionEndpoint.apiKey) {
+      return fail('未配置视觉模型（visionPrimary），请在设置页配置后重试', 503)
+    }
+    const lastUserContent = messages.at(-1)?.content ?? ''
+    const visionPrompt = `${systemPrompt}\n\n用户问题：${lastUserContent}`
+    const assets: MultimodalAsset[] = imageAttachments.map((a) => ({ base64: a.data, mimeType: a.mimeType }))
+    try {
+      const text = await callAiEndpointMultimodal(visionEndpoint, visionPrompt, assets)
+      return ok({ content: text })
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : '视觉模型调用失败', 500)
+    }
+  }
+
+  if (endpoint.provider === 'gemini') {
+    const allMessages = [{ role: 'user', content: `[系统提示]\n${systemPrompt}\n\n[用户]\n${messages.at(-1)?.content ?? ''}` }]
+    const text = await callAiEndpointText(endpoint, allMessages[0].content, 1500).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : '调用失败')
+    })
+    return ok({ content: text })
+  }
+
+  // OpenAI 兼容流式
+  const aiRes = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${endpoint.apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: endpoint.model,
+      stream: true,
+      max_tokens: 1500,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    }),
+  })
+
+  if (!aiRes.ok || !aiRes.body) {
+    const err = (await aiRes.json().catch(() => null)) as { error?: { message?: string } } | null
+    return fail(err?.error?.message ?? `AI 调用失败：${aiRes.status}`, 500)
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+  const writer = writable.getWriter()
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+
+  void (async () => {
+    const reader = aiRes.body!.getReader()
+    let buf = ''
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const data = trimmed.slice(5).trim()
+          if (data === '[DONE]') {
+            await writer.write(encoder.encode('data:[DONE]\n\n'))
+            return
+          }
+          try {
+            const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
+            const content = chunk.choices?.[0]?.delta?.content
+            if (content) await writer.write(encoder.encode(`data:${JSON.stringify({ t: content })}\n\n`))
+          } catch { /* skip malformed */ }
+        }
+      }
+    } finally {
+      await writer.close().catch(() => {})
+    }
+  })()
+
+  return new Response(readable, {
+    headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' },
+  })
+}
+
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
@@ -5597,6 +6168,11 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/models' ||
       path === '/api/ai/openrouter/free-models' ||
       path === '/api/ai/openrouter/free-models/scan' ||
+      path === '/api/ai/chat' ||
+      path === '/api/ai/task-edits' ||
+      path === '/api/ai/task-title-edits' ||
+      path === '/api/knowledge' ||
+      path.startsWith('/api/knowledge/') ||
       path === '/api/search' ||
       path === '/api/search/reindex' ||
       (path.startsWith('/api/reports/') && path.endsWith('/pdf')) ||
@@ -5713,6 +6289,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/task-assistant' && request.method === 'POST') {
     return suggestTaskWithAi(env, request)
   }
+  if (path === '/api/ai/task-edits' && request.method === 'POST') {
+    return saveTaskEditPair(env, request)
+  }
+  if (path === '/api/ai/task-title-edits' && request.method === 'POST') {
+    return saveTaskTitleEditPair(env, request)
+  }
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)
   }
@@ -5727,6 +6309,20 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/daily-knowledge' && request.method === 'POST') {
     return suggestDailyKnowledgeWithAi(env, request)
+  }
+  if (path === '/api/ai/chat' && request.method === 'POST') {
+    return chatWithAi(env, request)
+  }
+  if (path === '/api/knowledge' && request.method === 'GET') {
+    const notes = await listKnowledgeNotes(env)
+    return ok(notes)
+  }
+  if (path === '/api/knowledge' && request.method === 'POST') {
+    return upsertKnowledgeNote(env, request)
+  }
+  if (path.startsWith('/api/knowledge/') && request.method === 'DELETE') {
+    const id = path.slice('/api/knowledge/'.length)
+    return id ? deleteKnowledgeNote(env, id) : fail('缺少 id', 400)
   }
   if (path === '/api/search' && request.method === 'GET') {
     return searchTasks(env, url.searchParams.get('q') ?? '')

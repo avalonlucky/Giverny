@@ -26,8 +26,11 @@ import {
   FileText,
   Folder,
   FolderKanban,
+  Bot,
   GripVertical,
+  HelpCircle,
   KeyRound,
+  Send,
   LayoutDashboard,
   List,
   ListChecks,
@@ -46,6 +49,12 @@ import {
   Trash2,
   UserCircle,
   X,
+  BookOpen,
+  Paperclip,
+  FileText as FileTextIcon,
+  History,
+  Globe,
+  SlidersHorizontal,
 } from 'lucide-react'
 import {
   appReleaseDate,
@@ -137,6 +146,7 @@ const navItems = [
   { label: '洞察', icon: Sparkles },
   { label: '结算', icon: FileText },
   { label: '收入', icon: BarChart3 },
+  { label: '知识库', icon: BookOpen, adminOnly: true },
 ]
 
 const viewRoutes: Record<AppView, string> = {
@@ -147,6 +157,7 @@ const viewRoutes: Record<AppView, string> = {
   收入: '/income',
   结算: '/reports',
   设置: '/settings',
+  知识库: '/knowledge',
 }
 
 const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
@@ -431,7 +442,6 @@ function viewFromPath(pathname: string): AppView {
 function taskViewModeFromSearch(search = window.location.search): TaskViewMode {
   const value = new URLSearchParams(search).get('taskView')
   if (value === 'calendar' || value === '日历') return '日历'
-  if (value === 'canvas' || value === '画布') return '画布'
   return '列表'
 }
 
@@ -440,7 +450,6 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
     return viewRoutes[view]
   }
   if (mode === '日历') return `${viewRoutes[view]}?taskView=calendar`
-  if (mode === '画布') return `${viewRoutes[view]}?taskView=canvas`
   return viewRoutes[view]
 }
 
@@ -1777,11 +1786,13 @@ function MonthPicker({
   taskMonthValues,
   onChange,
   minimal = false,
+  iconOnly = false,
 }: {
   value: string
   taskMonthValues: Set<string>
   onChange: (value: string) => void
   minimal?: boolean
+  iconOnly?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const selectedYear = Number(value.slice(0, 4)) || new Date().getFullYear()
@@ -1804,9 +1815,13 @@ function MonthPicker({
     >
       <button
         type="button"
-        className={`select-button month-trigger ${minimal ? 'minimal' : ''} ${isOpen ? 'active' : ''}`.trim()}
+        className={iconOnly
+          ? `topbar-shortcut month-trigger ${isOpen ? 'active' : ''}`.trim()
+          : `select-button month-trigger ${minimal ? 'minimal' : ''} ${isOpen ? 'active' : ''}`.trim()
+        }
         aria-label="选择年份和月份"
         aria-expanded={isOpen}
+        title={iconOnly ? monthLabelOf(value) : undefined}
         onClick={() => {
           if (!isOpen) {
             setDisplayYear(selectedYear)
@@ -1814,9 +1829,16 @@ function MonthPicker({
           setIsOpen((open) => !open)
         }}
       >
-        {!minimal && <CalendarDays size={17} />}
-        <span>{monthLabelOf(value)}</span>
-        <ChevronDown size={16} />
+        {iconOnly
+          ? <CalendarDays size={16} />
+          : (
+            <>
+              {!minimal && <CalendarDays size={17} />}
+              <span>{monthLabelOf(value)}</span>
+              <ChevronDown size={16} />
+            </>
+          )
+        }
       </button>
 
       {isOpen && (
@@ -2855,6 +2877,21 @@ function CommandPalette({
   )
 }
 
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+  return createPortal(
+    <div className="img-lightbox-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="图片预览">
+      <button type="button" className="img-lightbox-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+      <img className="img-lightbox-img" src={src} alt={alt} onClick={(e) => e.stopPropagation()} />
+    </div>,
+    document.body,
+  )
+}
+
 function ShortcutHelpModal({ groups, onClose }: { groups: ShortcutHelpGroup[]; onClose: () => void }) {
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -3053,10 +3090,478 @@ function SemanticSearchModal({
   )
 }
 
+// ─── 知识库全页 ────────────────────────────────────────────────────────────────
+
+type KnowledgeNote = { id: string; title: string; content: string; tags: string; created_at: string }
+
+function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }) {
+  const [notes, setNotes] = useState<KnowledgeNote[]>([])
+  const [loading, setLoading] = useState(true)
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [tags, setTags] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+
+  const authHeaders = (): Record<string, string> => {
+    const h: Record<string, string> = { 'content-type': 'application/json' }
+    if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
+    return h
+  }
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/knowledge', { headers: authHeaders() })
+      if (res.ok) setNotes((await res.json()) as KnowledgeNote[])
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  const reset = () => { setTitle(''); setContent(''); setTags(''); setEditId(null) }
+
+  const save = async () => {
+    if (!content.trim() || saving) return
+    setSaving(true)
+    try {
+      const body: Record<string, string> = { title: title.trim(), content: content.trim(), tags: tags.trim() }
+      if (editId) body.id = editId
+      const res = await fetch('/api/knowledge', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
+      if (res.ok) { reset(); await load() }
+    } finally { setSaving(false) }
+  }
+
+  const startEdit = (n: KnowledgeNote) => {
+    setEditId(n.id); setTitle(n.title); setContent(n.content); setTags(n.tags)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const remove = async (id: string) => {
+    await fetch(`/api/knowledge/${id}`, { method: 'DELETE', headers: authHeaders() })
+    setNotes((prev) => prev.filter((n) => n.id !== id))
+    if (editId === id) reset()
+  }
+
+  return (
+    <div className="knowledge-page">
+      <div className="knowledge-page-form">
+        <h2 className="knowledge-page-title">{editId ? '编辑笔记' : '添加笔记'}</h2>
+        <input className="knowledge-input" placeholder="标题（可选）" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <textarea
+          className="knowledge-textarea"
+          placeholder="写下你的知识、定价逻辑、甲方话术、行业笔记… AI 对话时会自动参考"
+          value={content}
+          rows={6}
+          onChange={(e) => setContent(e.target.value)}
+        />
+        <div className="knowledge-add-footer">
+          <input className="knowledge-input knowledge-tags" placeholder="标签（逗号分隔，可选）" value={tags} onChange={(e) => setTags(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            {editId && <button type="button" className="knowledge-cancel-btn" onClick={reset}>取消</button>}
+            <button type="button" className="knowledge-save-btn" disabled={!content.trim() || saving} onClick={() => void save()}>
+              {saving ? '保存中…' : editId ? '保存修改' : '添加'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="knowledge-page-list">
+        {loading && <p className="knowledge-empty">加载中…</p>}
+        {!loading && notes.length === 0 && (
+          <p className="knowledge-empty">还没有笔记。添加后，AI 工作助手对话时会自动参考这里的内容。</p>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} className="knowledge-item">
+            <div className="knowledge-item-header">
+              <span className="knowledge-item-title">{n.title || '无标题'}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" className="knowledge-item-delete" onClick={() => startEdit(n)} aria-label="编辑" title="编辑">
+                  <Pencil size={13} />
+                </button>
+                <button type="button" className="knowledge-item-delete" onClick={() => void remove(n.id)} aria-label="删除" title="删除">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+            {n.tags && <div className="knowledge-item-tags">{n.tags}</div>}
+            <p className="knowledge-item-content">{n.content}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── AI 工作助手 ──────────────────────────────────────────────────────────────
+
+type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string }
+type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
+type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number }
+
+const CHAT_HISTORY_KEY = 'alice_chat_history'
+
+function loadChatHistory(): ConversationRecord[] {
+  try { return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) ?? '[]') as ConversationRecord[] }
+  catch { return [] }
+}
+
+function saveToChatHistory(msgs: ChatMessage[]) {
+  const userMsgs = msgs.filter((m) => m.role === 'user')
+  if (userMsgs.length === 0) return
+  const title = userMsgs[0].content.slice(0, 30) + (userMsgs[0].content.length > 30 ? '…' : '')
+  const record: ConversationRecord = { id: crypto.randomUUID(), title, messages: msgs, savedAt: Date.now() }
+  const prev = loadChatHistory().slice(0, 19)
+  localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([record, ...prev]))
+}
+
+const ALICE_WELCOME_ID = 'alice-welcome'
+const ALICE_SUGGESTED = ['今天完成了哪些工作？', '帮我分析本月收入', '我的效率怎么样？']
+
+function ChatPanel({
+  currentMonthValue,
+  onClose,
+}: {
+  currentMonthValue: string
+  onClose: () => void
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [useKnowledge, setUseKnowledge] = useState(true)
+  const [useWebSearch, setUseWebSearch] = useState(false)
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [showScopePopup, setShowScopePopup] = useState(false)
+  const [historyList, setHistoryList] = useState<ConversationRecord[]>([])
+
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const isWelcome = messages.length === 1 && messages[0].id === ALICE_WELCOME_ID
+
+  useEffect(() => { setHistoryList(loadChatHistory()) }, [])
+  useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  useEffect(() => {
+    if (!showScopePopup) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.alice-scope-popup') && !(e.target as HTMLElement).closest('.alice-scope-btn')) {
+        setShowScopePopup(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showScopePopup])
+
+  const newConversation = () => {
+    if (!isWelcome) saveToChatHistory(messages)
+    setHistoryList(loadChatHistory())
+    setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+    setInput('')
+    setAttachments([])
+    setShowHistory(false)
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const openHistory = () => {
+    setHistoryList(loadChatHistory())
+    setShowHistory(true)
+  }
+
+  const loadConversation = (record: ConversationRecord) => {
+    setMessages(record.messages)
+    setShowHistory(false)
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const deleteHistoryItem = (id: string) => {
+    const updated = historyList.filter((r) => r.id !== id)
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(updated))
+    setHistoryList(updated)
+  }
+
+  const authHeaders = (): Record<string, string> => {
+    const auth = getStoredAuth()
+    const h: Record<string, string> = { 'content-type': 'application/json' }
+    if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
+    return h
+  }
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files) return
+    const added: ChatAttachment[] = []
+    for (const file of Array.from(files).slice(0, 4)) {
+      const isImage = file.type.startsWith('image/')
+      const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name)
+      if (!isImage && !isText) continue
+      const data = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        if (isImage) {
+          reader.onload = () => { resolve((reader.result as string).split(',')[1] ?? '') }
+          reader.readAsDataURL(file)
+        } else {
+          reader.onload = () => resolve(reader.result as string)
+          reader.readAsText(file)
+        }
+      })
+      added.push({
+        id: crypto.randomUUID(),
+        type: isImage ? 'image' : 'text',
+        name: file.name,
+        data,
+        mimeType: file.type || 'text/plain',
+        preview: isImage ? URL.createObjectURL(file) : undefined,
+      })
+    }
+    setAttachments((prev) => [...prev, ...added].slice(0, 4))
+  }
+
+  const send = async (overrideText?: string) => {
+    const text = (overrideText !== undefined ? overrideText : input).trim()
+    if ((!text && attachments.length === 0) || loading) return
+    const displayText = text || `[附件：${attachments.map((a) => a.name).join('、')}]`
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
+    const assistantId = crypto.randomUUID()
+    const baseMessages = isWelcome ? [] : messages
+    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '' }])
+    if (overrideText === undefined) setInput('')
+    const sentAttachments = [...attachments]
+    setAttachments([])
+    setLoading(true)
+    try {
+      const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          messages: allMessages,
+          month: currentMonthValue,
+          useKnowledge,
+          useWebSearch,
+          attachments: sentAttachments.map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
+        }),
+      })
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(err?.error ?? `请求失败：${res.status}`)
+      }
+      const ct = res.headers.get('content-type') ?? ''
+      if (!ct.includes('text/event-stream')) {
+        const data = (await res.json()) as { content?: string }
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: data.content ?? '（无回复）' } : m))
+        return
+      }
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (payload === '[DONE]') break
+          try {
+            const { t } = JSON.parse(payload) as { t?: string }
+            if (t) setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: m.content + t } : m))
+          } catch { /* skip */ }
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '请求失败，请重试'
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `⚠️ ${msg}` } : m))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const scopeActive = useKnowledge || useWebSearch
+
+  return (
+    <div className="chat-panel" role="dialog" aria-label="爱丽丝">
+      {/* header */}
+      <div className="chat-panel-header">
+        <div className="chat-panel-title">
+          <img className="alice-avatar" src="/alice-avatar.jpg" alt="爱丽丝" />
+          <span>爱丽丝</span>
+        </div>
+        <div className="chat-panel-header-actions">
+          <button type="button" className="chat-panel-icon-btn" onClick={newConversation} title="新建对话" aria-label="新建对话">
+            <Plus size={15} />
+          </button>
+          <button type="button" className="chat-panel-icon-btn" onClick={openHistory} title="历史记录" aria-label="历史记录">
+            <History size={15} />
+          </button>
+          <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭">
+            <X size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* messages / welcome screen */}
+      <div className="chat-panel-messages">
+        {isWelcome ? (
+          <div className="alice-welcome">
+            <img className="alice-welcome-avatar" src="/alice-avatar.jpg" alt="爱丽丝" />
+            <h2 className="alice-welcome-title">嗨，来和爱丽丝聊一聊</h2>
+            <p className="alice-welcome-sub">查工作数据、分析收入，或者聊聊设计行业问题</p>
+            <div className="alice-suggested">
+              {ALICE_SUGGESTED.map((s) => (
+                <button key={s} type="button" className="alice-suggested-btn" onClick={() => void send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`chat-bubble ${msg.role}`}>
+                {msg.content || (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </>
+        )}
+      </div>
+
+      {/* attachment preview chips */}
+      {attachments.length > 0 && (
+        <div className="chat-attachments">
+          {attachments.map((a) => (
+            <div key={a.id} className="chat-attachment-chip">
+              {a.type === 'image' && a.preview
+                ? <img src={a.preview} className="chat-attachment-thumb" alt={a.name} onClick={() => setLightboxSrc(a.preview ?? null)} style={{ cursor: 'zoom-in' }} />
+                : <FileTextIcon size={13} />}
+              <span>{a.name}</span>
+              <button type="button" className="chat-attachment-remove" onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}>
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* input card */}
+      <div className="alice-input-wrap">
+        {showScopePopup && (
+          <div className="alice-scope-popup">
+            <div className="alice-scope-popup-title">内容范围</div>
+            <label className="alice-scope-row">
+              <BookOpen size={14} />
+              <span>个人知识库</span>
+              <div className={`alice-toggle ${useKnowledge ? 'on' : ''}`} onClick={() => setUseKnowledge((v) => !v)} role="switch" aria-checked={useKnowledge} />
+            </label>
+            <label className="alice-scope-row">
+              <Globe size={14} />
+              <span>全网搜索</span>
+              <div className={`alice-toggle ${useWebSearch ? 'on' : ''}`} onClick={() => setUseWebSearch((v) => !v)} role="switch" aria-checked={useWebSearch} />
+            </label>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.txt,.md,.json,.csv"
+          style={{ display: 'none' }}
+          onChange={(e) => void handleFiles(e.target.files)}
+        />
+        <div className="alice-input-card">
+          <textarea
+            ref={inputRef}
+            className="alice-textarea"
+            value={input}
+            rows={1}
+            placeholder="向爱丽丝提问…"
+            onChange={(e) => {
+              setInput(e.target.value)
+              e.target.style.height = 'auto'
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+          />
+          <div className="alice-input-toolbar">
+            <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件（图片、txt、md…）" aria-label="添加附件">
+              <Paperclip size={15} />
+            </button>
+            <button
+              type="button"
+              className={`alice-tool-btn alice-scope-btn ${scopeActive ? 'active' : ''}`}
+              onClick={() => setShowScopePopup((v) => !v)}
+              title="选择内容范围"
+              aria-label="内容范围"
+            >
+              <SlidersHorizontal size={15} />
+              {scopeActive && (
+                <span className="alice-scope-badge">
+                  {[useKnowledge && '知识库', useWebSearch && '全网'].filter(Boolean).join('+')}
+                </span>
+              )}
+            </button>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="alice-send-btn"
+              onClick={() => void send()}
+              disabled={(!input.trim() && attachments.length === 0) || loading}
+              aria-label="发送"
+            >
+              <Send size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {lightboxSrc && <ImageLightbox src={lightboxSrc} alt="附件预览" onClose={() => setLightboxSrc(null)} />}
+
+      {/* history panel (absolute overlay within chat-panel) */}
+      {showHistory && (
+        <div className="chat-history-panel">
+          <div className="chat-history-header">
+            <span>历史对话</span>
+            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowHistory(false)} aria-label="关闭历史">
+              <X size={15} />
+            </button>
+          </div>
+          <div className="chat-history-list">
+            {historyList.length === 0 ? (
+              <p className="chat-history-empty">暂无历史记录</p>
+            ) : historyList.map((r) => (
+              <div key={r.id} className="chat-history-item" onClick={() => loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && loadConversation(r)}>
+                <span className="chat-history-item-title">{r.title}</span>
+                <div className="chat-history-item-meta">
+                  <span>{new Date(r.savedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <button
+                    type="button"
+                    className="chat-history-del"
+                    onClick={(e) => { e.stopPropagation(); deleteHistoryItem(r.id) }}
+                    title="删除"
+                    aria-label="删除"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
   const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
-  const [canvasImmersive, setCanvasImmersive] = useState(false)
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
@@ -3090,6 +3595,7 @@ function App() {
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('')
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
   const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge())
   const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() =>
@@ -3140,6 +3646,7 @@ function App() {
     })
   }
   const navigationChordRef = useRef<number | null>(null)
+  const lastAltPressRef = useRef<number>(0)
   const dailyKnowledgeRequestedRef = useRef(false)
   const dailyKnowledgeRef = useRef(dailyKnowledge)
   const dailyKnowledgeQueueRef = useRef(dailyKnowledgeQueue)
@@ -3374,9 +3881,6 @@ function App() {
     }
   }, [activeView, taskViewMode])
 
-  useEffect(() => {
-    if (taskViewMode !== '画布') setCanvasImmersive(false)
-  }, [taskViewMode])
 
   const refreshState = async () => {
     const state = await api.getState()
@@ -4719,7 +5223,7 @@ function App() {
     requireAdmin()
     throw new Error('需要管理员权限')
   }
-  const visibleNavItems = navItems
+  const visibleNavItems = navItems.filter((item) => !('adminOnly' in item) || !item.adminOnly || isAdmin)
   const navShortcutHints: Partial<Record<AppView, string>> = {
     工作台: 'G D',
     任务: 'G T',
@@ -4727,6 +5231,7 @@ function App() {
     洞察: 'G I',
     结算: 'G S',
     收入: 'G R',
+    知识库: '⌥K',
     设置: ',',
   }
   const openCommandPalette = (initialQuery = '') => {
@@ -4845,7 +5350,8 @@ function App() {
       label: '全局',
       items: [
         { keys: '⌘ K / Ctrl K', action: '打开命令面板' },
-        { keys: '? / ⇧ /', action: '查看快捷键' },
+        { keys: '⌥ ⌥', action: '查看快捷键' },
+        { keys: '⌥ A', action: '打开 / 关闭爱丽丝 AI 助手（管理员）' },
         { keys: 'N', action: '新建任务' },
         { keys: '⇧ N', action: '补录任务' },
         { keys: 'P', action: '记录选中任务进展' },
@@ -4865,6 +5371,7 @@ function App() {
         { keys: 'G S', action: '结算' },
         { keys: 'G R', action: '收入' },
         { keys: ', / G O', action: '设置' },
+        { keys: '⌥ K', action: '跳转到知识库（管理员）' },
       ],
     },
     {
@@ -4883,13 +5390,6 @@ function App() {
       items: [
         { keys: '[', action: '切换到上个月' },
         { keys: ']', action: '切换到下个月' },
-      ],
-    },
-    {
-      label: '画布模式',
-      items: [
-        { keys: '~', action: '切换沉浸式全屏画布（收起左导航 + 顶栏）' },
-        { keys: '右键', action: '添加节点 / 删除节点' },
       ],
     },
   ]
@@ -4920,18 +5420,35 @@ function App() {
         }
         return
       }
-      if ((event.key === '`' || event.key === '~') && taskViewMode === '画布') {
-        event.preventDefault()
-        setCanvasImmersive((v) => !v)
+      // 双击 Option/Alt 打开快捷键面板
+      if (event.key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+        if (!isCommandPaletteOpen && !isShortcutHelpOpen && !hasBlockingModal) {
+          const now = Date.now()
+          if (now - lastAltPressRef.current < 380) {
+            event.preventDefault()
+            lastAltPressRef.current = 0
+            setIsShortcutHelpOpen(true)
+          } else {
+            lastAltPressRef.current = now
+          }
+        }
         return
       }
-      if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
+if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
         return
       }
-      if (isQuestionShortcut(event)) {
-        event.preventDefault()
-        setIsShortcutHelpOpen(true)
-        return
+      // ⌥A = 工作助手，⌥K = 知识库（Option 键，不与文字输入冲突）
+      if (event.altKey && !event.metaKey && !event.shiftKey) {
+        if (event.code === 'KeyA' && isAdmin) {
+          event.preventDefault()
+          setIsChatOpen((v) => !v)
+          return
+        }
+        if (event.code === 'KeyK' && isAdmin) {
+          event.preventDefault()
+          navigateView('知识库')
+          return
+        }
       }
       if (key === 'g' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
@@ -5070,11 +5587,7 @@ function App() {
   }
 
   return (
-    <main className={[
-      'app-shell',
-      activeView === '工作台' ? 'dashboard-layout' : '',
-      canvasImmersive && taskViewMode === '画布' ? 'canvas-immersive' : '',
-    ].filter(Boolean).join(' ')}>
+    <main className={`app-shell ${activeView === '工作台' ? 'dashboard-layout' : ''}`.trim()}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -5111,7 +5624,6 @@ function App() {
                   onClick={() => navigateView(item.label as AppView)}
                 >
                   <span>{item.label}</span>
-                  {shortcut && <kbd>{shortcut}</kbd>}
                 </button>
               </div>
             )
@@ -5178,7 +5690,6 @@ function App() {
             onClick={() => setIsAccountMenuOpen((value) => !value)}
           >
             <span>设置</span>
-            <kbd>,</kbd>
           </button>
         </div>
       </aside>
@@ -5194,7 +5705,7 @@ function App() {
             )}
           </div>
           <div className="topbar-actions">
-            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} minimal />
+            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} iconOnly />
             {canSeeFull && (
               <button
                 type="button"
@@ -5206,25 +5717,26 @@ function App() {
                 <Search size={16} />
               </button>
             )}
+            {isAdmin && (
+              <button
+                type="button"
+                className={`topbar-shortcut ${isChatOpen ? 'active' : ''}`}
+                title="工作助手 AI 对话"
+                aria-label="打开工作助手"
+                onClick={() => setIsChatOpen((v) => !v)}
+              >
+                <Bot size={16} />
+              </button>
+            )}
             <button
               type="button"
               className="topbar-shortcut"
-              title="打开命令面板（Command + K）"
-              aria-label="打开命令面板"
-              aria-keyshortcuts="Meta+K Control+K"
-              onClick={() => openCommandPalette()}
-            >
-              <kbd>⌘K</kbd>
-            </button>
-            <button
-              type="button"
-              className="topbar-shortcut"
-              title="查看快捷键（?）"
+              title="查看键盘快捷键（?）"
               aria-label="查看快捷键"
               aria-keyshortcuts="Shift+/"
               onClick={() => setIsShortcutHelpOpen(true)}
             >
-              <kbd>?</kbd>
+              <HelpCircle size={16} />
             </button>
             {canWrite && (
               <button
@@ -5535,8 +6047,6 @@ function App() {
             onConfirmAcceptance={canWrite ? handleConfirmTaskAcceptance : undefined}
             onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
-            onCreateCanvasTask={canWrite ? handleCreateTask : async () => { requireAdmin(); return undefined }}
-            designTypeGroups={designTypeGroups}
             rowThemeOn={rowThemeOn}
             onToggleRowTheme={toggleRowTheme}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
@@ -5582,6 +6092,8 @@ function App() {
               currentMonth={currentMonth}
               taxMode={taxMode}
               onMonthChange={setMonthValue}
+              activeMonthTasks={activeMonthTasks}
+              hourlyRate={hourlyRate}
             />
           ) : (
             adminOnlyPanel
@@ -5611,6 +6123,10 @@ function App() {
           ) : (
             adminOnlyPanel
           )
+        )}
+
+        {activeView === '知识库' && isAdmin && (
+          <KnowledgeView auth={auth} />
         )}
 
         {activeView === '设置' && (
@@ -5675,6 +6191,12 @@ function App() {
       )}
       {isShortcutHelpOpen && (
         <ShortcutHelpModal groups={shortcutHelpGroups} onClose={() => setIsShortcutHelpOpen(false)} />
+      )}
+      {isChatOpen && isAdmin && (
+        <>
+          <div className="chat-backdrop" onDoubleClick={() => setIsChatOpen(false)} />
+          <ChatPanel currentMonthValue={currentMonth.value} onClose={() => setIsChatOpen(false)} />
+        </>
       )}
       {isSemanticSearchOpen && (
         <SemanticSearchModal
@@ -6871,8 +7393,6 @@ function TasksView({
   onConfirmAcceptance,
   onCreateTaskUpdate,
   onCreateTask,
-  onCreateCanvasTask,
-  designTypeGroups,
   rowThemeOn,
   onToggleRowTheme,
   onAutoEstimateProgress,
@@ -6914,8 +7434,6 @@ function TasksView({
   onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
-  onCreateCanvasTask: (task: Task) => Promise<Task | undefined>
-  designTypeGroups: DesignTypeGroup[]
   onAutoEstimateProgress?: (task: Task) => void
   rowThemeOn: boolean
   onToggleRowTheme: () => void
@@ -6932,10 +7450,6 @@ function TasksView({
       <button className={viewMode === '日历' ? 'active' : ''} onClick={() => onViewModeChange('日历')}>
         <CalendarDays size={15} />
         日历视图
-      </button>
-      <button className={viewMode === '画布' ? 'active' : ''} onClick={() => onViewModeChange('画布')}>
-        <ListChecks size={15} />
-        画布模式
       </button>
     </div>
   )
@@ -7020,52 +7534,7 @@ function TasksView({
     )
   }
 
-  if (viewMode === '画布') {
-    return (
-      <section className="view-stack task-canvas-stack">
-        <TaskCanvasView
-          tasks={tasks}
-          selectedTask={selectedTask}
-          files={files}
-          hourlyRate={hourlyRate}
-          monthValue={monthValue}
-          taskMonthValues={taskMonthValues}
-          onMonthChange={onMonthChange}
-          designTypeGroups={designTypeGroups}
-          onSelectTask={onSelectTask}
-          onCreateTask={onCreateCanvasTask}
-          onOpenTask={onOpenTask}
-          onOpenEditTask={onOpenEditTask}
-          onOpenProgress={openProgress}
-          onOpenAcceptance={openAcceptance}
-          onRequestStatus={onRequestStatus}
-          viewTabsNode={viewTabs}
-        />
-        {progressTarget && (
-          <TaskProgressModal
-            task={tasks.find((task) => task.id === progressTarget.task.id) ?? progressTarget.task}
-            mode={progressTarget.mode}
-            editEntryId={progressTarget.editEntryId}
-            files={files}
-            activity={activity}
-            onClose={() => setProgressTarget(null)}
-            onUpdateTask={onUpdateTask}
-            onCreateTaskUpdate={onCreateTaskUpdate}
-            onUploadImage={onUploadImage}
-            onPreviewFile={onPreviewFile}
-            onUpdateFile={onUpdateFile}
-            onDeleteFile={onDeleteFile}
-            onConfirmAcceptance={onConfirmAcceptance}
-            onUploadAcceptanceFile={onUploadAcceptanceFile}
-            initialAcceptanceMode={progressTarget.initialAcceptanceMode}
-            hourlyRate={hourlyRate}
-          />
-        )}
-      </section>
-    )
-  }
-
-  return (
+return (
     <section className="view-stack task-create-context-surface" onContextMenu={openCreateMenu}>
       <section className="panel view-toolbar">
         <div className="panel-header compact task-panel-header">
@@ -7309,1112 +7778,6 @@ function TasksView({
         />
       )}
     </section>
-  )
-}
-
-type TaskCanvasNodeKind = 'task' | 'progress' | 'acceptance' | 'settlement'
-
-type TaskCanvasNodeDraft = {
-  title: string
-  type: string
-  requester: string
-  contact: string
-  reviewer: string
-  requirement: string
-  startDate: string
-  estimatedDate: string
-  estimatedMinutes: number
-  scheduleAnchor: ScheduleAnchor
-  isFree: boolean
-  isSupplemental: boolean
-  settlementMonth: string
-  supplementalNote: string
-}
-
-type TaskCanvasNode = {
-  id: string
-  kind: TaskCanvasNodeKind
-  x: number
-  y: number
-  taskId?: number
-  draft?: TaskCanvasNodeDraft
-}
-
-type TaskCanvasConnection = {
-  id: string
-  from: string
-  to: string
-}
-
-function createTaskCanvasDraft(fallbackType: string, fallbackSettlementMonth = monthPart(isoDate())): TaskCanvasNodeDraft {
-  const startDate = isoDateTime()
-  return {
-    title: '',
-    type: fallbackType,
-    requester: '',
-    contact: '',
-    reviewer: '',
-    requirement: '',
-    startDate,
-    estimatedDate: addMinutesToPlanDateTime(startDate, 120),
-    estimatedMinutes: 120,
-    scheduleAnchor: 'end',
-    isFree: false,
-    isSupplemental: false,
-    settlementMonth: fallbackSettlementMonth,
-    supplementalNote: '',
-  }
-}
-
-function TaskCanvasView({
-  tasks,
-  selectedTask,
-  files,
-  hourlyRate,
-  monthValue,
-  taskMonthValues,
-  onMonthChange,
-  designTypeGroups,
-  onSelectTask,
-  onCreateTask,
-  onOpenTask,
-  onOpenEditTask,
-  onOpenProgress,
-  onOpenAcceptance,
-  onRequestStatus,
-  viewTabsNode,
-}: {
-  tasks: Task[]
-  selectedTask: Task | undefined
-  files: FileAsset[]
-  hourlyRate: number
-  monthValue: string
-  taskMonthValues: Set<string>
-  onMonthChange: (v: string) => void
-  designTypeGroups: DesignTypeGroup[]
-  onSelectTask: (id: number) => void
-  onCreateTask: (task: Task) => Promise<Task | undefined>
-  onOpenTask: (taskId: number) => void
-  onOpenEditTask: (taskId: number) => void
-  onOpenProgress: (task: Task, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
-  onOpenAcceptance: (task: Task) => void
-  onRequestStatus: (taskId: number, status: TaskStatus) => void
-  viewTabsNode?: React.ReactNode
-}) {
-  const canvasRef = useRef<HTMLDivElement | null>(null)
-  const nodeSequenceRef = useRef(0)
-  const safeGroups = normalizeDesignTypeGroups(designTypeGroups)
-  const typeOptions = flattenDesignTypeGroups(safeGroups)
-  const fallbackType = typeOptions[0] ?? defaultDesignTypes[0]
-  const [nodes, setNodes] = useState<TaskCanvasNode[]>([])
-  const [connections, setConnections] = useState<TaskCanvasConnection[]>([])
-  const [menu, setMenu] = useState<{ x: number; y: number; sourceId?: string } | null>(null)
-  const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null)
-  const [savingNodeId, setSavingNodeId] = useState<string | null>(null)
-  const [taskAiState, setTaskAiState] = useState<Record<string, { loading?: boolean; suggestion?: TaskAssistantSuggestion; error?: string }>>({})
-  const [hourAiState, setHourAiState] = useState<Record<string, { loading?: boolean; suggestion?: HourEstimateSuggestion; error?: string }>>({})
-  const [briefFiles, setBriefFiles] = useState<Record<string, { name: string; text: string; chars: number }>>({})
-  const [briefErrors, setBriefErrors] = useState<Record<string, string>>({})
-  const [briefLoadingNodeId, setBriefLoadingNodeId] = useState<string | null>(null)
-  const [expandedTaskNodes, setExpandedTaskNodes] = useState<Record<string, boolean>>({})
-  const [canvasProjectTaskId, setCanvasProjectTaskId] = useState<number | null>(null)
-  const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
-  const [canvasScale, setCanvasScale] = useState(1)
-  const canvasScaleRef = useRef(1)
-
-  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
-  const activeProjectTasks = useMemo(
-    () => tasks.filter((task) => !task.voidedAt && taskSettlementMonth(task) === monthValue),
-    [monthValue, tasks],
-  )
-  const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
-
-  const canvasPointFromClient = (clientX: number, clientY: number) => {
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect || !canvasRef.current) {
-      return { x: 420, y: 240 }
-    }
-    const scale = canvasScaleRef.current
-    return {
-      x: (clientX - rect.left + canvasRef.current.scrollLeft) / scale,
-      y: (clientY - rect.top + canvasRef.current.scrollTop) / scale,
-    }
-  }
-
-  const openProjectCanvas = (task: Task) => {
-    onSelectTask(task.id)
-    setCanvasProjectTaskId(task.id)
-    setMenu(null)
-    setNodes([
-      { id: 'project-task', kind: 'task', x: 160, y: 150, taskId: task.id },
-      { id: 'project-status', kind: 'progress', x: 760, y: 150, taskId: task.id },
-      { id: 'project-acceptance', kind: 'acceptance', x: 1220, y: 150, taskId: task.id },
-      { id: 'project-settlement', kind: 'settlement', x: 1680, y: 150, taskId: task.id },
-    ])
-    setConnections([
-      { id: 'project-task-project-status', from: 'project-task', to: 'project-status' },
-      { id: 'project-status-project-acceptance', from: 'project-status', to: 'project-acceptance' },
-      { id: 'project-acceptance-project-settlement', from: 'project-acceptance', to: 'project-settlement' },
-    ])
-  }
-
-  const openNewProjectCanvas = () => {
-    setCanvasProjectTaskId(0)
-    setMenu(null)
-    setNodes([{ id: 'draft-task', kind: 'task', x: 160, y: 150, draft: createTaskCanvasDraft(fallbackType, monthValue) }])
-    setConnections([])
-  }
-
-  const returnToProjectFolders = () => {
-    setCanvasProjectTaskId(null)
-    setMenu(null)
-    setNodes([])
-    setConnections([])
-  }
-
-  const deleteNode = (nodeId: string) => {
-    setNodes((current) => current.filter((node) => node.id !== nodeId))
-    setConnections((current) => current.filter((connection) => connection.from !== nodeId && connection.to !== nodeId))
-    setTaskAiState((current) => {
-      const next = { ...current }
-      delete next[nodeId]
-      return next
-    })
-    setHourAiState((current) => {
-      const next = { ...current }
-      delete next[nodeId]
-      return next
-    })
-    setBriefFiles((current) => {
-      const next = { ...current }
-      delete next[nodeId]
-      return next
-    })
-    setBriefErrors((current) => {
-      const next = { ...current }
-      delete next[nodeId]
-      return next
-    })
-  }
-
-  const addNode = (kind: TaskCanvasNodeKind, point?: { x: number; y: number }, sourceId?: string) => {
-    if (canvasProjectTaskId === null) {
-      if (kind === 'task') {
-        openNewProjectCanvas()
-      }
-      return
-    }
-    if (kind === 'task' && nodes.some((node) => node.kind === 'task')) {
-      setMenu(null)
-      return
-    }
-    const source = sourceId ? nodes.find((node) => node.id === sourceId) : undefined
-    const nextPoint = point ?? (source ? { x: source.x + 460, y: source.y } : { x: 520, y: 300 })
-    nodeSequenceRef.current += 1
-    const id = `canvas-${nodeSequenceRef.current}`
-    const inheritedTaskId = source?.taskId
-    const node: TaskCanvasNode = {
-      id,
-      kind,
-      x: nextPoint.x,
-      y: nextPoint.y,
-      taskId: kind === 'task' ? undefined : inheritedTaskId,
-      draft: kind === 'task' ? createTaskCanvasDraft(fallbackType, monthValue) : undefined,
-    }
-    setNodes((current) => [...current, node])
-    if (sourceId) {
-      setConnections((current) => [...current, { id: `${sourceId}-${id}`, from: sourceId, to: id }])
-    }
-    setMenu(null)
-  }
-
-  const openMenu = (event: React.MouseEvent, sourceId?: string) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setMenu({ x: event.clientX, y: event.clientY, sourceId })
-  }
-
-  useEffect(() => {
-    const closeMenu = () => setMenu(null)
-    const handleKeydown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) {
-        return
-      }
-      if (event.key === 'Escape') {
-        closeMenu()
-      }
-      if (event.shiftKey && event.key.toLowerCase() === 'n') {
-        event.preventDefault()
-        addNode('task')
-      }
-    }
-    window.addEventListener('click', closeMenu)
-    window.addEventListener('keydown', handleKeydown)
-    return () => {
-      window.removeEventListener('click', closeMenu)
-      window.removeEventListener('keydown', handleKeydown)
-    }
-  })
-
-  useEffect(() => {
-    const handleWheel = (event: WheelEvent) => {
-      if (!event.metaKey && !event.ctrlKey) return
-      event.preventDefault()
-      const next = Math.min(2, Math.max(0.25, canvasScaleRef.current - event.deltaY * 0.001))
-      canvasScaleRef.current = next
-      setCanvasScale(next)
-    }
-    const handleZoomKey = (event: KeyboardEvent) => {
-      if (!event.metaKey && !event.ctrlKey) return
-      if (event.key === '=' || event.key === '+') {
-        event.preventDefault()
-        const next = Math.min(2, canvasScaleRef.current + 0.1)
-        canvasScaleRef.current = next
-        setCanvasScale(next)
-      } else if (event.key === '-') {
-        event.preventDefault()
-        const next = Math.max(0.25, canvasScaleRef.current - 0.1)
-        canvasScaleRef.current = next
-        setCanvasScale(next)
-      } else if (event.key === '0') {
-        event.preventDefault()
-        canvasScaleRef.current = 1
-        setCanvasScale(1)
-      }
-    }
-    const el = canvasRef.current
-    el?.addEventListener('wheel', handleWheel, { passive: false })
-    window.addEventListener('keydown', handleZoomKey)
-    return () => {
-      el?.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('keydown', handleZoomKey)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!dragging) {
-      return
-    }
-    const handlePointerMove = (event: PointerEvent) => {
-      const point = canvasPointFromClient(event.clientX, event.clientY)
-      setNodes((current) => current.map((node) => node.id === dragging.id ? { ...node, x: point.x - dragging.offsetX, y: point.y - dragging.offsetY } : node))
-    }
-    const handlePointerUp = () => setDragging(null)
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-    }
-  }, [dragging])
-
-  const updateDraft = (nodeId: string, changes: Partial<TaskCanvasNodeDraft>) => {
-    setNodes((current) => current.map((node) => {
-      if (node.id !== nodeId || !node.draft) {
-        return node
-      }
-      return { ...node, draft: { ...node.draft, ...changes } }
-    }))
-  }
-
-  const updateTaskNodeStartDate = (nodeId: string, value: string) => {
-    const node = nodes.find((item) => item.id === nodeId)
-    const draft = node?.draft
-    if (!draft) {
-      return
-    }
-    const previousStartDate = datePart(draft.startDate)
-    const nextStartDate = datePart(value)
-    const dateChanged = Boolean(value && previousStartDate && nextStartDate && previousStartDate !== nextStartDate)
-    if (dateChanged && draft.estimatedDate) {
-      updateDraft(nodeId, { startDate: value, estimatedDate: withDatePart(draft.estimatedDate, nextStartDate) })
-      return
-    }
-    if (draft.scheduleAnchor === 'hours') {
-      const nextMinutes = exactDurationMinutesBetween(value, draft.estimatedDate)
-      updateDraft(nodeId, { startDate: value, estimatedMinutes: nextMinutes > 0 ? nextMinutes : draft.estimatedMinutes })
-      return
-    }
-    updateDraft(nodeId, { startDate: value, estimatedDate: addMinutesToPlanDateTime(value, draft.estimatedMinutes) })
-  }
-
-  const updateTaskNodeEstimatedDate = (nodeId: string, value: string) => {
-    const node = nodes.find((item) => item.id === nodeId)
-    const draft = node?.draft
-    if (!draft) {
-      return
-    }
-    const previousEstimatedDate = datePart(draft.estimatedDate)
-    const nextEstimatedDate = datePart(value)
-    const dateChanged = Boolean(value && previousEstimatedDate && nextEstimatedDate && previousEstimatedDate !== nextEstimatedDate)
-    if (dateChanged && draft.startDate) {
-      updateDraft(nodeId, { estimatedDate: value, startDate: withDatePart(draft.startDate, nextEstimatedDate) })
-      return
-    }
-    if (draft.scheduleAnchor === 'hours') {
-      const nextMinutes = exactDurationMinutesBetween(draft.startDate, value)
-      updateDraft(nodeId, { estimatedDate: value, estimatedMinutes: nextMinutes > 0 ? nextMinutes : draft.estimatedMinutes })
-      return
-    }
-    updateDraft(nodeId, { estimatedDate: value, startDate: addMinutesToPlanDateTime(value, -draft.estimatedMinutes) })
-  }
-
-  const updateTaskNodeEstimatedMinutes = (nodeId: string, value: number) => {
-    const node = nodes.find((item) => item.id === nodeId)
-    const draft = node?.draft
-    if (!draft) {
-      return
-    }
-    const nextMinutes = snapDurationMinutes(value)
-    if (draft.scheduleAnchor === 'start') {
-      updateDraft(nodeId, { estimatedMinutes: nextMinutes, startDate: addMinutesToPlanDateTime(draft.estimatedDate, -nextMinutes) })
-      return
-    }
-    updateDraft(nodeId, { estimatedMinutes: nextMinutes, estimatedDate: addMinutesToPlanDateTime(draft.startDate, nextMinutes) })
-  }
-
-  const toggleTaskNodeScheduleField = (nodeId: string, field: ScheduleAnchor) => {
-    const node = nodes.find((item) => item.id === nodeId)
-    const draft = node?.draft
-    if (!draft) {
-      return
-    }
-    updateDraft(nodeId, { scheduleAnchor: draft.scheduleAnchor === field ? (field === 'start' ? 'end' : 'start') : field })
-  }
-
-  const loadTaskNodeBriefFile = async (nodeId: string, file: File | undefined) => {
-    if (!file) {
-      return
-    }
-    setBriefErrors((current) => ({ ...current, [nodeId]: '' }))
-    setBriefLoadingNodeId(nodeId)
-    try {
-      const text = await extractAttachmentText(file)
-      if (!text.trim()) {
-        setBriefFiles((current) => {
-          const next = { ...current }
-          delete next[nodeId]
-          return next
-        })
-        setBriefErrors((current) => ({ ...current, [nodeId]: '没能从这个文件里读到文字（支持 Word .docx、PDF、txt）' }))
-        return
-      }
-      setBriefFiles((current) => ({ ...current, [nodeId]: { name: file.name, text, chars: text.length } }))
-    } catch {
-      setBriefFiles((current) => {
-        const next = { ...current }
-        delete next[nodeId]
-        return next
-      })
-      setBriefErrors((current) => ({ ...current, [nodeId]: '读取附件失败，请换个文件或稍后重试' }))
-    } finally {
-      setBriefLoadingNodeId(null)
-    }
-  }
-
-  const requestTaskNodeAiSuggestion = async (node: TaskCanvasNode) => {
-    if (!node.draft) {
-      return
-    }
-    const draft = node.draft
-    setTaskAiState((current) => ({ ...current, [node.id]: { loading: true } }))
-    try {
-      const suggestion = await api.suggestTaskAssistant({
-        title: draft.title,
-        requirement: draft.requirement,
-        selectedType: draft.type,
-        designTypeGroups: safeGroups,
-        attachmentText: briefFiles[node.id]?.text,
-        attachmentName: briefFiles[node.id]?.name,
-      })
-      setTaskAiState((current) => ({ ...current, [node.id]: { loading: false, suggestion } }))
-    } catch (error) {
-      setTaskAiState((current) => ({
-        ...current,
-        [node.id]: { loading: false, error: error instanceof Error ? error.message : 'AI 助手暂时不可用' },
-      }))
-    }
-  }
-
-  const applyTaskNodeAiSuggestion = (node: TaskCanvasNode) => {
-    const suggestion = taskAiState[node.id]?.suggestion
-    if (!suggestion) {
-      return
-    }
-    updateDraft(node.id, {
-      requirement: suggestion.optimizedRequirement,
-      type: suggestion.categoryExists ? suggestion.suggestedType : node.draft?.type,
-    })
-  }
-
-  const requestTaskNodeHourSuggestion = async (node: TaskCanvasNode) => {
-    if (!node.draft) {
-      return
-    }
-    const draft = node.draft
-    setHourAiState((current) => ({ ...current, [node.id]: { loading: true } }))
-    try {
-      const suggestion = await api.suggestHourEstimate({
-        title: draft.title,
-        requirement: draft.requirement,
-        selectedType: draft.type,
-        startDate: draft.startDate,
-        estimatedDate: draft.estimatedDate,
-      })
-      setHourAiState((current) => ({ ...current, [node.id]: { loading: false, suggestion } }))
-    } catch (error) {
-      setHourAiState((current) => ({
-        ...current,
-        [node.id]: { loading: false, error: error instanceof Error ? error.message : 'AI 工时建议暂时不可用' },
-      }))
-    }
-  }
-
-  const applyTaskNodeHourSuggestion = (node: TaskCanvasNode) => {
-    const suggestion = hourAiState[node.id]?.suggestion
-    if (!suggestion) {
-      return
-    }
-    updateTaskNodeEstimatedMinutes(node.id, suggestion.suggestedHours * 60)
-  }
-
-  const saveTaskNode = async (node: TaskCanvasNode) => {
-    if (!node.draft || node.taskId) {
-      return
-    }
-    const draft = node.draft
-    if (!draft.title.trim() || !draft.requirement.trim() || !draft.requester.trim() || !draft.contact.trim() || !draft.reviewer.trim()) {
-      return
-    }
-    const requester = draft.requester.trim()
-    const contact = draft.contact.trim()
-    const reviewer = draft.reviewer.trim()
-    setSavingNodeId(node.id)
-    const savedTask = await onCreateTask({
-      id: Date.now(),
-      date: draft.startDate,
-      estimatedDate: draft.estimatedDate,
-      settlementMonth: draft.isSupplemental ? draft.settlementMonth : '',
-      isSupplemental: draft.isSupplemental,
-      type: draft.type,
-      title: draft.title.trim(),
-      requirement: draft.requirement.trim(),
-      requester,
-      contact,
-      reviewer,
-      stage: '计划中',
-      estimatedHours: Math.round((draft.estimatedMinutes / 60) * 100) / 100,
-      actualHours: 0,
-      status: '计划中',
-      progress: 0,
-      billable: !draft.isFree,
-      supplementalNote: draft.isSupplemental ? draft.supplementalNote.trim() : '',
-      acceptanceNote: '',
-      files: [],
-    })
-    setSavingNodeId(null)
-    if (!savedTask) {
-      return
-    }
-    setCanvasProjectTaskId(savedTask.id)
-    const hasDownstreamNodes = nodes.some((currentNode) => currentNode.kind !== 'task')
-    if (!hasDownstreamNodes) {
-      setNodes([
-        { ...node, taskId: savedTask.id, draft: undefined },
-        { id: `${node.id}-progress`, kind: 'progress', x: node.x + 460, y: node.y, taskId: savedTask.id },
-        { id: `${node.id}-acceptance`, kind: 'acceptance', x: node.x + 920, y: node.y, taskId: savedTask.id },
-        { id: `${node.id}-settlement`, kind: 'settlement', x: node.x + 1380, y: node.y, taskId: savedTask.id },
-      ])
-      setConnections([
-        { id: `${node.id}-${node.id}-progress`, from: node.id, to: `${node.id}-progress` },
-        { id: `${node.id}-progress-${node.id}-acceptance`, from: `${node.id}-progress`, to: `${node.id}-acceptance` },
-        { id: `${node.id}-acceptance-${node.id}-settlement`, from: `${node.id}-acceptance`, to: `${node.id}-settlement` },
-      ])
-    } else {
-      setNodes((current) => current.map((currentNode) => {
-        if (currentNode.id === node.id) {
-          return { ...currentNode, taskId: savedTask.id, draft: undefined }
-        }
-        const isDirectDownstream = connections.some((connection) => connection.from === node.id && connection.to === currentNode.id)
-        if (isDirectDownstream && currentNode.kind !== 'task' && !currentNode.taskId) {
-          return { ...currentNode, taskId: savedTask.id }
-        }
-        return currentNode
-      }))
-    }
-    onSelectTask(savedTask.id)
-  }
-
-  const startDragging = (event: React.PointerEvent, node: TaskCanvasNode) => {
-    const target = event.target as HTMLElement
-    if (target.closest('input, textarea, select, button, label')) {
-      return
-    }
-    const point = canvasPointFromClient(event.clientX, event.clientY)
-    setDragging({ id: node.id, offsetX: point.x - node.x, offsetY: point.y - node.y })
-  }
-
-  const renderTaskNode = (node: TaskCanvasNode) => {
-    const savedTask = node.taskId ? taskById.get(node.taskId) : undefined
-    const draft = node.draft ?? createTaskCanvasDraft(fallbackType, monthValue)
-    const canSave = !node.taskId && draft.title.trim() && draft.requirement.trim() && draft.requester.trim() && draft.contact.trim() && draft.reviewer.trim()
-    const aiState = taskAiState[node.id] ?? {}
-    const hourState = hourAiState[node.id] ?? {}
-    const briefFile = briefFiles[node.id]
-    const isExpanded = expandedTaskNodes[node.id] ?? true
-    return (
-      <>
-        <header className="canvas-node-head">
-          <span>任务节点</span>
-          <strong>{savedTask ? savedTask.title : '新建任务'}</strong>
-          {!savedTask && (
-            <button
-              type="button"
-              className="canvas-node-delete"
-              aria-label="删除这个任务节点"
-              title="删除节点"
-              onClick={() => {
-                deleteNode(node.id)
-                if (canvasProjectTaskId === 0) {
-                  returnToProjectFolders()
-                }
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
-        </header>
-        {savedTask ? (
-          <div className="canvas-node-saved">
-            <p>{savedTask.requirement}</p>
-            <small>{savedTask.type} · 需求人 {savedTask.requester} · 对接人 {savedTask.contact} · 验收人 {savedTask.reviewer}</small>
-            <div className="canvas-status-steps" aria-label="任务状态流转">
-              <button type="button" className={savedTask.status === '计划中' ? 'active' : ''} disabled={savedTask.status === '已验收'} onClick={() => onRequestStatus(savedTask.id, '计划中')}>计划</button>
-              <button type="button" className={savedTask.status === '进行中' ? 'active' : ''} disabled={savedTask.status === '已验收'} onClick={() => onRequestStatus(savedTask.id, '进行中')}>执行</button>
-              <button type="button" className={savedTask.status === '待验收' ? 'active' : ''} disabled={savedTask.status === '已验收'} onClick={() => onRequestStatus(savedTask.id, '待验收')}>验收</button>
-              <button type="button" className={savedTask.status === '已验收' ? 'active' : ''} disabled={savedTask.status !== '待验收'} onClick={() => onOpenAcceptance(savedTask)}>闭环</button>
-            </div>
-            <div className="canvas-node-actions">
-              <button type="button" onClick={() => onOpenTask(savedTask.id)}>详情</button>
-              <button type="button" onClick={() => onOpenEditTask(savedTask.id)}>编辑</button>
-            </div>
-          </div>
-        ) : (
-          <div className="canvas-task-form">
-            <div className="canvas-task-flags" aria-label="任务标记">
-              <button type="button" className={draft.isFree ? 'active' : ''} aria-pressed={draft.isFree} onClick={() => updateDraft(node.id, { isFree: !draft.isFree })}>不计费</button>
-              <button
-                type="button"
-                className={draft.isSupplemental ? 'active' : ''}
-                aria-pressed={draft.isSupplemental}
-                onClick={() => updateDraft(node.id, {
-                  isSupplemental: !draft.isSupplemental,
-                  settlementMonth: supplementalMonthOptions.includes(draft.settlementMonth) ? draft.settlementMonth : supplementalMonthOptions[0],
-                  supplementalNote: draft.isSupplemental ? '' : draft.supplementalNote,
-                })}
-              >
-                补录
-              </button>
-              {draft.isSupplemental && (
-                <label>
-                  <span>记录月份</span>
-                  <select value={draft.settlementMonth} onChange={(event) => updateDraft(node.id, { settlementMonth: event.target.value })}>
-                    {supplementalMonthOptions.map((value) => <option key={value} value={value}>{monthLabelOf(value)}</option>)}
-                  </select>
-                </label>
-              )}
-            </div>
-            <label>
-              <span>任务名称</span>
-              <input value={draft.title} onChange={(event) => updateDraft(node.id, { title: event.target.value })} placeholder="输入任务名称" />
-            </label>
-            <label>
-              <span>设计类型</span>
-              <select value={draft.type} onChange={(event) => updateDraft(node.id, { type: event.target.value })}>
-                {typeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <div className="canvas-task-people">
-              <label>
-                <span>需求人</span>
-                <input
-                  value={draft.requester}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    updateDraft(node.id, {
-                      requester: value,
-                      contact: draft.contact || value,
-                      reviewer: draft.reviewer || value,
-                    })
-                  }}
-                  placeholder="必填"
-                />
-              </label>
-              <label>
-                <span>对接人</span>
-                <input value={draft.contact} onChange={(event) => updateDraft(node.id, { contact: event.target.value })} placeholder="默认同需求人" />
-              </label>
-              <label>
-                <span>验收人</span>
-                <input value={draft.reviewer} onChange={(event) => updateDraft(node.id, { reviewer: event.target.value })} placeholder="默认同需求人" />
-              </label>
-            </div>
-            <button
-              type="button"
-              className="canvas-task-more-toggle"
-              onClick={() => setExpandedTaskNodes((current) => ({ ...current, [node.id]: !isExpanded }))}
-            >
-              {isExpanded ? '收起详情' : '展开更多（需求 / 附件 / 工时）'}
-              <ChevronDown size={14} />
-            </button>
-            {isExpanded && (
-              <>
-                <label className="canvas-task-requirement">
-                  <span className="field-label-row">
-                    <span>任务需求</span>
-                    <button
-                      type="button"
-                      className="canvas-inline-icon-button"
-                      aria-label="AI 优化任务需求"
-                      title="AI 优化任务需求"
-                      disabled={aiState.loading || (!draft.title.trim() && !draft.requirement.trim() && !briefFile)}
-                      onClick={() => void requestTaskNodeAiSuggestion(node)}
-                    >
-                      <Sparkles size={15} />
-                    </button>
-                  </span>
-                  <textarea value={draft.requirement} onChange={(event) => updateDraft(node.id, { requirement: event.target.value })} placeholder="写下任务需求。这个节点保存后会进入工作台和任务列表。" />
-                </label>
-                <div className="canvas-brief-row">
-                  <span>甲方文案附件</span>
-                  {briefFile ? (
-                    <div className="canvas-brief-chip">
-                      <FileText size={15} />
-                      <strong>{briefFile.name}</strong>
-                      <small>{briefFile.chars} 字</small>
-                      <button
-                        type="button"
-                        aria-label="移除甲方文案附件"
-                        title="移除"
-                        onClick={() => setBriefFiles((current) => {
-                          const next = { ...current }
-                          delete next[node.id]
-                          return next
-                        })}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="canvas-brief-upload">
-                      <Plus size={14} />
-                      {briefLoadingNodeId === node.id ? '正在读取文字' : '上传甲方文案，让 AI 一起分析'}
-                      <input
-                        type="file"
-                        accept=".docx,.pdf,.txt,.md,.csv"
-                        onChange={(event) => void loadTaskNodeBriefFile(node.id, event.target.files?.[0])}
-                      />
-                    </label>
-                  )}
-                  {briefErrors[node.id] && <small className="canvas-ai-error">{briefErrors[node.id]}</small>}
-                </div>
-              </>
-            )}
-            {(aiState.loading || aiState.suggestion || aiState.error) && (
-              <div className="canvas-ai-suggestion">
-                <div className="canvas-ai-suggestion-head">
-                  <span>{aiState.loading ? 'AI 正在整理需求' : 'AI 建议'}</span>
-                  {aiState.suggestion && <em>{aiState.suggestion.suggestedType}</em>}
-                  {!aiState.loading && (
-                    <button
-                      type="button"
-                      aria-label="关闭 AI 建议"
-                      title="关闭"
-                      onClick={() => setTaskAiState((current) => ({ ...current, [node.id]: {} }))}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                {aiState.loading && <p>正在优化任务需求并匹配设计类型...</p>}
-                {aiState.error && <p className="canvas-ai-error">{aiState.error}</p>}
-                {aiState.suggestion && (
-                  <>
-                    <div className="canvas-ai-body">
-                      {renderTextAssistantBody(aiState.suggestion.optimizedRequirement)}
-                    </div>
-                    {aiState.suggestion.reason && <small>{aiState.suggestion.reason}</small>}
-                    {!aiState.suggestion.categoryExists && (
-                      <small>建议分类「{aiState.suggestion.suggestedType}」当前不在分类库中，本次先采用文案。</small>
-                    )}
-                    <button type="button" onClick={() => applyTaskNodeAiSuggestion(node)}>
-                      采用建议
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="canvas-task-date-grid">
-              <PlanDateTimeField
-                label="预计开始"
-                value={draft.startDate}
-                onChange={(value) => updateTaskNodeStartDate(node.id, value)}
-                isActive={draft.scheduleAnchor !== 'start'}
-                readOnly={draft.scheduleAnchor === 'start'}
-                control={<ScheduleAnchorSwitch active={draft.scheduleAnchor !== 'start'} label="切换预计开始时间" onClick={() => toggleTaskNodeScheduleField(node.id, 'start')} />}
-                pickerId={`${node.id}-start`}
-                activePickerId={activeDatePickerId}
-                onActivePickerChange={setActiveDatePickerId}
-              />
-              <label className="canvas-hour-field">
-                <span className="new-task-inline-label">
-                  <ScheduleAnchorSwitch active={draft.scheduleAnchor !== 'hours'} label="切换预估工时" onClick={() => toggleTaskNodeScheduleField(node.id, 'hours')} />
-                  预估工时
-                </span>
-                <div className="canvas-hour-row">
-                  {draft.scheduleAnchor === 'hours' ? (
-                    <output>{formatDuration(draft.estimatedMinutes)}</output>
-                  ) : (
-                    <input
-                      type="number"
-                      min="0.5"
-                      step="0.5"
-                      value={formatHoursInputValue(draft.estimatedMinutes)}
-                      onChange={(event) => updateTaskNodeEstimatedMinutes(node.id, Number(event.target.value || 0) * 60)}
-                      aria-label="预估工时"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    aria-label={hourState.loading ? '分析中' : 'AI 工时建议'}
-                    title={hourState.loading ? '分析中' : 'AI 工时建议'}
-                    disabled={hourState.loading || (!draft.type.trim() && !draft.title.trim() && !draft.requirement.trim())}
-                    onClick={() => void requestTaskNodeHourSuggestion(node)}
-                  >
-                    <Sparkles size={14} />
-                  </button>
-                </div>
-              </label>
-              <PlanDateTimeField
-                label="预计交付"
-                value={draft.estimatedDate}
-                onChange={(value) => updateTaskNodeEstimatedDate(node.id, value)}
-                isActive={draft.scheduleAnchor !== 'end'}
-                readOnly={draft.scheduleAnchor === 'end'}
-                control={<ScheduleAnchorSwitch active={draft.scheduleAnchor !== 'end'} label="切换预计交付时间" onClick={() => toggleTaskNodeScheduleField(node.id, 'end')} />}
-                pickerId={`${node.id}-end`}
-                activePickerId={activeDatePickerId}
-                onActivePickerChange={setActiveDatePickerId}
-              />
-            </div>
-            {(hourState.loading || hourState.suggestion || hourState.error) && (
-              <div className="canvas-ai-suggestion">
-                <div className="canvas-ai-suggestion-head">
-                  <span>{hourState.loading ? 'AI 正在分析工时' : '工时建议'}</span>
-                  {hourState.suggestion && <em>{hourState.suggestion.suggestedHours.toFixed(1)} h</em>}
-                  {!hourState.loading && (
-                    <button
-                      type="button"
-                      aria-label="关闭工时建议"
-                      title="关闭"
-                      onClick={() => setHourAiState((current) => ({ ...current, [node.id]: {} }))}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                {hourState.loading && <p>正在参考历史任务、任务类型和当前排期...</p>}
-                {hourState.error && <p className="canvas-ai-error">{hourState.error}</p>}
-                {hourState.suggestion && (
-                  <>
-                    <p>{hourState.suggestion.historicalSummary}</p>
-                    <small>{hourState.suggestion.sampleCount} 条样本 · 平均 {hourState.suggestion.averageHours.toFixed(1)}h · 中位 {hourState.suggestion.medianHours.toFixed(1)}h</small>
-                    <button type="button" onClick={() => applyTaskNodeHourSuggestion(node)}>采用建议</button>
-                  </>
-                )}
-              </div>
-            )}
-            {draft.isSupplemental && isExpanded && (
-              <label>
-                <span>补录说明</span>
-                <textarea value={draft.supplementalNote} onChange={(event) => updateDraft(node.id, { supplementalNote: event.target.value })} placeholder="例如：上月已完成，本月补充记录。" />
-              </label>
-            )}
-            <div className="canvas-node-actions">
-              <button
-                type="button"
-                aria-label="AI 整理需求"
-                title="AI 整理需求"
-                disabled={aiState.loading || (!draft.title.trim() && !draft.requirement.trim())}
-                onClick={() => void requestTaskNodeAiSuggestion(node)}
-              >
-                <Sparkles size={14} />
-              </button>
-              <button type="button" className="canvas-primary-action" disabled={!canSave || savingNodeId === node.id} onClick={() => void saveTaskNode(node)}>
-                {savingNodeId === node.id ? '保存中' : '保存为任务'}
-              </button>
-            </div>
-          </div>
-        )}
-      </>
-    )
-  }
-
-  const renderActionNode = (node: TaskCanvasNode) => {
-    const task = node.taskId ? taskById.get(node.taskId) : undefined
-    const progressEntries = task?.timeEntries?.filter((entry) => !entry.isAcceptanceProgress) ?? []
-    const waitingEntries = task?.waitingEntries ?? []
-    const acceptanceEntry = task?.timeEntries?.find((entry) => entry.isAcceptanceProgress)
-    const taskFiles = task ? files.filter((file) => file.taskId === task.id && !file.deletedAt) : []
-    if (node.kind === 'progress') {
-      const latestEntries = progressEntries.slice(0, 3)
-      const progressFiles = taskFiles.filter((file) => file.scope === 'progress')
-      return (
-        <>
-          <header className="canvas-node-head">
-            <span>过程节点</span>
-            <strong>{task ? `${progressEntries.length} 条进展 · ${waitingEntries.length} 条等待` : '等待任务节点'}</strong>
-          </header>
-          {task ? (
-            <>
-              <div className="canvas-progress-summary">
-                <span>可结算 {(sumTimeEntries(progressEntries) / 60).toFixed(1)}h</span>
-                <span>{progressFiles.length} 个过程附件</span>
-              </div>
-              {latestEntries.length > 0 ? (
-                <div className="canvas-progress-list">
-                  {latestEntries.map((entry) => {
-                    const entryFiles = progressFiles.filter((file) => file.entryId === entry.id)
-                    return (
-                      <article key={entry.id} className="canvas-progress-entry">
-                        <time>{formatEntryDateTimeRange(task, entry)}</time>
-                        <p>{entry.note || '未填写具体内容'}</p>
-                        <small>{minutesForTimeEntry(entry) > 0 ? `计时 ${formatSignedHours(minutesForTimeEntry(entry))}` : '不计工时'}</small>
-                        {entryFiles.length > 0 && (
-                          <div className="canvas-progress-files" aria-label="过程附件">
-                            {entryFiles.slice(0, 4).map((file) => {
-                              const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
-                              const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                              return (
-                                <AttachmentHoverThumbnail
-                                  key={file.id}
-                                  name={file.name}
-                                  type={fileType}
-                                  previewUrl={previewUrl}
-                                  compact
-                                />
-                              )
-                            })}
-                          </div>
-                        )}
-                      </article>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p>还没有过程记录。先启动任务，再沉淀第一条进展。</p>
-              )}
-            </>
-          ) : (
-            <p>请先从任务节点连接过来。</p>
-          )}
-          <div className="canvas-node-actions">
-            <button type="button" disabled={!task || !canRecordNewProgress(task)} onClick={() => task && onOpenProgress(task)}>记录进展</button>
-            <button type="button" disabled={!task || !isTaskStarted(task) || task.status === '已验收'} onClick={() => task && onOpenProgress(task, 'waiting')}>记录等待</button>
-          </div>
-        </>
-      )
-    }
-    if (node.kind === 'acceptance') {
-      return (
-        <>
-          <header className="canvas-node-head">
-            <span>验收节点</span>
-            <strong>{acceptanceEntry ? '已有验收进展' : task?.status === '待验收' ? '等待确认' : '未进入验收'}</strong>
-          </header>
-          <p>{acceptanceEntry?.note || task?.acceptanceNote || '把最终备注和验收附件放在这里。'}</p>
-          <div className="canvas-node-actions">
-            <button type="button" disabled={!task || task.status !== '进行中'} onClick={() => task && onRequestStatus(task.id, '待验收')}>改为待验收</button>
-            <button type="button" disabled={!task || task.status !== '待验收'} onClick={() => task && onOpenAcceptance(task)}>记录验收</button>
-          </div>
-          <small>{taskFiles.filter((file) => file.scope === 'acceptance').length} 个验收附件</small>
-        </>
-      )
-    }
-    return (
-      <>
-        <header className="canvas-node-head">
-          <span>结算节点</span>
-          <strong>{task ? `¥${formatYuan(task.actualHours * hourlyRate)}` : '等待任务节点'}</strong>
-        </header>
-        <p>{task ? `${taskSettlementMonth(task)} · ${task.actualHours.toFixed(1)}h · ${task.status === '已验收' ? '已进入闭环' : '待验收后进入结算口径'}` : '连接任务后自动读取工时和收入。'}</p>
-        <div className="mini-meter">
-          <span style={{ width: `${task ? taskDisplayProgress(task) : 0}%` }} />
-        </div>
-      </>
-    )
-  }
-
-  if (canvasProjectTaskId === null) {
-    return (
-      <div className="task-canvas-outer">
-        <div className="task-node-canvas-topbar">
-          <span className="canvas-topbar-title">任务画布</span>
-          <div className="canvas-topbar-tail">
-            <MonthPicker value={monthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} minimal />
-            {viewTabsNode}
-          </div>
-        </div>
-        <section className="task-canvas-project-shell">
-          <header className="task-canvas-project-head">
-            <div>
-              <span>画布模式</span>
-              <h3>项目文件夹</h3>
-              <p>{activeProjectTasks.length} 个项目 · 双击进入项目工作流画布</p>
-            </div>
-            <button type="button" className="canvas-project-primary" onClick={openNewProjectCanvas}>
-              <Plus size={16} />
-              新建项目
-            </button>
-          </header>
-          <div className="task-canvas-project-grid">
-            {activeProjectTasks.map((task) => {
-              const progressEntries = task.timeEntries?.filter((entry) => !entry.isAcceptanceProgress).length ?? 0
-              const revenue = task.billable === false ? 0 : task.actualHours * hourlyRate
-              return (
-                <button
-                  type="button"
-                  key={task.id}
-                  className="canvas-project-folder"
-                  onDoubleClick={() => openProjectCanvas(task)}
-                  onClick={() => onSelectTask(task.id)}
-                >
-                  <Folder size={38} />
-                  <strong>{task.title}</strong>
-                  <span>{task.status} · {task.actualHours.toFixed(1)}h · ¥{formatYuan(revenue)} · 进展 {progressEntries}</span>
-                  <i aria-hidden="true">
-                    <em style={{ width: `${taskDisplayProgress(task)}%` }} />
-                  </i>
-                </button>
-              )
-            })}
-            <button type="button" className="canvas-project-folder add-folder" onClick={openNewProjectCanvas}>
-              <Plus size={24} />
-              <strong>新建项目</strong>
-              <span>从空白任务节点开始</span>
-            </button>
-          </div>
-        </section>
-      </div>
-    )
-  }
-
-  const projectTask = canvasProjectTaskId && canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId) : undefined
-  const projectBillable = projectTask ? projectTask.billable !== false : true
-  const projectEstimatedAmount = projectBillable ? (projectTask?.estimatedHours ?? 0) * hourlyRate : 0
-  const projectCurrentAmount = projectBillable ? (projectTask?.actualHours ?? 0) * hourlyRate : 0
-  const projectProgress = projectTask ? taskDisplayProgress(projectTask) : 0
-  const projectAccepted = projectTask?.status === '已验收'
-
-  return (
-    <div className="task-canvas-outer">
-      <div className="task-node-canvas-topbar">
-        <button type="button" onClick={returnToProjectFolders}>‹ 项目</button>
-        <span className="canvas-topbar-title">{canvasProjectTaskId > 0 ? taskById.get(canvasProjectTaskId)?.title ?? '项目画布' : '新项目草稿'}</span>
-        {projectTask && (
-          <div className="canvas-lane-summary" aria-label="项目链路汇总">
-            <div><span>当前工时</span><strong>{projectTask.actualHours.toFixed(1)}<em>h</em></strong></div>
-            <div><span>进度</span><strong>{projectProgress}<em>%</em></strong></div>
-            <div><span>预估金额</span><strong>{projectBillable ? `¥${formatYuan(projectEstimatedAmount)}` : '不计费'}</strong></div>
-            <div className={projectAccepted ? 'accent' : ''}><span>{projectAccepted ? '结算金额' : '当前金额'}</span><strong>{projectBillable ? `¥${formatYuan(projectCurrentAmount)}` : '¥0'}</strong></div>
-          </div>
-        )}
-        <div className="canvas-topbar-tail">
-          {viewTabsNode}
-          <kbd className="canvas-topbar-hint" title="按 ~ 切换沉浸式全屏">~</kbd>
-        </div>
-      </div>
-      <div
-        ref={canvasRef}
-        className="task-node-canvas"
-        aria-label="任务节点画布"
-        onContextMenu={(event) => openMenu(event)}
-      >
-        <div className="task-node-canvas-space" style={{ transform: `scale(${canvasScale})`, transformOrigin: '0 0' }}>
-          {nodes.length === 0 && (
-            <div className="canvas-empty-hint">
-              <strong>空白画布</strong>
-              <span>右键添加节点，或在项目列表双击项目打开。</span>
-            </div>
-          )}
-          <svg className="task-canvas-connections" width="2600" height="1500" aria-hidden="true">
-            {connections.map((connection) => {
-              const from = nodes.find((node) => node.id === connection.from)
-              const to = nodes.find((node) => node.id === connection.to)
-              if (!from || !to) {
-                return null
-              }
-              const startX = from.x + (from.kind === 'task' ? 560 : 380)
-              const startY = from.y + 160
-              const endX = to.x
-              const endY = to.y + 160
-              const midX = startX + Math.max(80, (endX - startX) / 2)
-              return (
-                <path
-                  key={connection.id}
-                  d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-              )
-            })}
-          </svg>
-          {nodes.map((node) => {
-            return (
-            <article
-              key={node.id}
-              className={`canvas-work-node canvas-work-node-${node.kind} ${node.taskId && selectedTask?.id === node.taskId ? 'selected' : ''}`}
-              style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
-              onPointerDown={(event) => startDragging(event, node)}
-              onClick={() => node.taskId && onSelectTask(node.taskId)}
-              onContextMenu={(event) => openMenu(event, node.id)}
-            >
-              {node.kind === 'task' ? renderTaskNode(node) : renderActionNode(node)}
-            </article>
-            )
-          })}
-        </div>
-      </div>
-      {menu && (
-        <div className="canvas-add-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
-          <strong>{menu.sourceId ? '引用该节点生成' : '添加节点'}</strong>
-          <button type="button" disabled={nodes.some((node) => node.kind === 'task')} onClick={() => addNode('task', menu.sourceId ? undefined : canvasPointFromClient(menu.x, menu.y), menu.sourceId)}>
-            <FileText size={18} />
-            新建任务
-          </button>
-          <button type="button" disabled={!menu.sourceId} onClick={() => addNode('progress', undefined, menu.sourceId)}>
-            <ListChecks size={18} />
-            进展节点
-          </button>
-          <button type="button" disabled={!menu.sourceId} onClick={() => addNode('acceptance', undefined, menu.sourceId)}>
-            <CheckCircle2 size={18} />
-            验收节点
-          </button>
-          <button type="button" disabled={!menu.sourceId} onClick={() => addNode('settlement', undefined, menu.sourceId)}>
-            <BarChart3 size={18} />
-            结算节点
-          </button>
-          {menu.sourceId && (
-            <button type="button" className="canvas-add-menu-delete" onClick={() => { deleteNode(menu.sourceId as string); setMenu(null); if (canvasProjectTaskId === 0 && !nodes.some((node) => node.kind === 'task' && node.id !== menu.sourceId)) returnToProjectFolders() }}>
-              <Trash2 size={18} />
-              删除此节点
-            </button>
-          )}
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -11856,6 +11219,8 @@ function IncomeView({
   currentMonth,
   taxMode,
   onMonthChange,
+  activeMonthTasks,
+  hourlyRate,
 }: {
   annualData: {
     year: string
@@ -11866,6 +11231,8 @@ function IncomeView({
   currentMonth: { label: string; value: string }
   taxMode: TaxMode
   onMonthChange: (month: string) => void
+  activeMonthTasks: Task[]
+  hourlyRate: number
 }) {
   const [monthlySpecialDeduction, setMonthlySpecialDeduction] = useState(0)
   const [monthlyAdditionalDeduction, setMonthlyAdditionalDeduction] = useState(0)
@@ -11882,6 +11249,38 @@ function IncomeView({
   const totalNet = taxRows.reduce((sum, row) => sum + row.netIncome, 0)
   const realizedTaxRows = taxRows.filter((row) => row.hours > 0 || row.amount > 0 || row.locked)
   const maxAmount = Math.max(...realizedTaxRows.map((row) => row.amount), 1)
+
+  const today = datePart(isoDate())
+  const dailyGroups = useMemo(() => {
+    const dayMap = new Map<string, Map<number, { title: string; hours: number }>>()
+    activeMonthTasks.forEach((task) => {
+      ;(task.timeEntries ?? []).forEach((entry) => {
+        const minutes = minutesForTimeEntry(entry)
+        if (minutes <= 0) return
+        const day = datePart(entry.date || task.date || '')
+        if (!day.startsWith(currentMonth.value)) return
+        if (!dayMap.has(day)) dayMap.set(day, new Map())
+        const taskMap = dayMap.get(day)!
+        const existing = taskMap.get(task.id) ?? { title: task.title || '未命名', hours: 0 }
+        existing.hours = Number((existing.hours + minutes / 60).toFixed(2))
+        taskMap.set(task.id, existing)
+      })
+    })
+    return Array.from(dayMap.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([day, taskMap]) => {
+        const entries = Array.from(taskMap.entries()).map(([id, data]) => ({
+          id,
+          title: data.title,
+          hours: data.hours,
+          income: Math.round(data.hours * hourlyRate),
+        }))
+        const totalHours = Number(entries.reduce((s, e) => s + e.hours, 0).toFixed(1))
+        return { day, totalHours, totalIncome: Math.round(totalHours * hourlyRate), entries }
+      })
+  }, [activeMonthTasks, currentMonth.value, hourlyRate])
+
+  const todayGroup = dailyGroups.find((g) => g.day === today)
 
   return (
     <section className="income-view view-stack">
@@ -11996,6 +11395,53 @@ function IncomeView({
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="panel income-table-panel">
+        <div className="panel-header compact">
+          <div>
+            <h2>日收入明细 · {currentMonth.label}</h2>
+            <p>
+              {todayGroup
+                ? `今日已记录 ${todayGroup.totalHours.toFixed(1)}h，估算收入 ¥${todayGroup.totalIncome.toLocaleString()}`
+                : '基于分段计时记录，按时薪估算；今日暂无记录'}
+            </p>
+          </div>
+        </div>
+        {dailyGroups.length > 0 ? (
+          <div className="income-table-wrap">
+            <table className="income-table income-table-daily">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>任务</th>
+                  <th className="num">工时</th>
+                  <th className="num">估算收入</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyGroups.map((group) => (
+                  <Fragment key={group.day}>
+                    {group.entries.map((entry, i) => (
+                      <tr key={entry.id} className={group.day === today ? 'current' : ''}>
+                        {i === 0 && (
+                          <td rowSpan={group.entries.length} className="income-day-date">
+                            {group.day.slice(5).replace('-', '/')}
+                          </td>
+                        )}
+                        <td className="income-day-tasks">{entry.title}</td>
+                        <td className="num">{entry.hours.toFixed(1)}h</td>
+                        <td className="num">¥{entry.income.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="income-empty">本月暂无分段计时记录，在任务进展中添加计时后即可看到日明细。</p>
+        )}
       </section>
     </section>
   )
@@ -14437,10 +13883,15 @@ function NewTaskModal({
   const [aiSuggestion, setAiSuggestion] = useState<TaskAssistantSuggestion | null>(null)
   const [aiError, setAiError] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
-  // 甲方文案附件：仅用于 AI 需求分析（前端就地抽取文字），不随任务持久化
-  const [briefFile, setBriefFile] = useState<{ name: string; text: string; chars: number } | null>(null)
+  // 记录 AI 生成的建议文本（用于提交时对比用户最终输入，保存差异供学习）
+  const aiSuggestionAppliedRef = useRef<string | null>(null)
+  const aiTitleSuggestionAppliedRef = useRef<string | null>(null)
+  // 甲方文案附件：仅用于 AI 需求分析（前端就地抽取文字或图片 base64），不随任务持久化
+  type BriefItem = { id: string; name: string; text: string; chars: number; isImage?: boolean; base64?: string; mimeType?: string }
+  const [briefFiles, setBriefFiles] = useState<BriefItem[]>([])
   const [briefError, setBriefError] = useState('')
   const [isBriefLoading, setIsBriefLoading] = useState(false)
+  const [briefLightboxSrc, setBriefLightboxSrc] = useState<string | null>(null)
   const briefInputRef = useRef<HTMLInputElement | null>(null)
   const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
   const [hourSuggestionError, setHourSuggestionError] = useState('')
@@ -14584,6 +14035,18 @@ function NewTaskModal({
       })
       return
     }
+    // 若用户采用了 AI 建议后又做了修改，记录差异供 AI 持续学习
+    const appliedSuggestion = aiSuggestionAppliedRef.current
+    const finalRequirement = requirement.trim()
+    if (appliedSuggestion && appliedSuggestion !== finalRequirement) {
+      void api.recordTaskEditPair({ aiOutput: appliedSuggestion, userFinal: finalRequirement, designType: type.trim() })
+    }
+    const appliedTitle = aiTitleSuggestionAppliedRef.current
+    const finalTitle = title.trim()
+    if (appliedTitle && appliedTitle !== finalTitle) {
+      void api.recordTaskTitleEditPair({ aiOutput: appliedTitle, userFinal: finalTitle, designType: type.trim() })
+    }
+
     const status: TaskStatus = '计划中'
 
     onCreate({
@@ -14623,28 +14086,35 @@ function NewTaskModal({
     }
   }
 
-  const loadBriefFile = async (file: File | undefined) => {
-    if (!file) {
-      return
-    }
+  const loadBriefFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
     setBriefError('')
     setIsBriefLoading(true)
+    const added: BriefItem[] = []
     try {
-      const text = await extractAttachmentText(file)
-      if (!text.trim()) {
-        setBriefFile(null)
-        setBriefError('没能从这个文件里读到文字（支持 Word .docx、PDF、txt；旧版 .doc 请另存为 .docx）')
-        return
+      for (const file of Array.from(fileList).slice(0, 6)) {
+        if (file.type.startsWith('image/')) {
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '')
+            reader.readAsDataURL(file)
+          })
+          added.push({ id: crypto.randomUUID(), name: file.name, text: '', chars: 0, isImage: true, base64, mimeType: file.type || 'image/jpeg' })
+        } else {
+          const text = await extractAttachmentText(file)
+          if (text.trim()) {
+            added.push({ id: crypto.randomUUID(), name: file.name, text, chars: text.length })
+          } else {
+            setBriefError('部分文件没能读到文字（支持 Word .docx、PDF、txt；旧版 .doc 请另存为 .docx）')
+          }
+        }
       }
-      setBriefFile({ name: file.name, text, chars: text.length })
+      if (added.length > 0) setBriefFiles((prev) => [...prev, ...added].slice(0, 6))
     } catch {
-      setBriefFile(null)
       setBriefError('读取附件失败，请换个文件或稍后重试')
     } finally {
       setIsBriefLoading(false)
-      if (briefInputRef.current) {
-        briefInputRef.current.value = ''
-      }
+      if (briefInputRef.current) briefInputRef.current.value = ''
     }
   }
 
@@ -14653,13 +14123,16 @@ function NewTaskModal({
     setAiSuggestion(null)
     setIsAiLoading(true)
     try {
+      const textFiles = briefFiles.filter((f) => !f.isImage)
+      const imageFiles = briefFiles.filter((f) => f.isImage && f.base64)
       const suggestion = await api.suggestTaskAssistant({
         title,
         requirement,
         selectedType: type,
         designTypeGroups: availableDesignTypeGroups,
-        attachmentText: briefFile?.text,
-        attachmentName: briefFile?.name,
+        attachmentText: textFiles.map((f) => f.text).join('\n\n').slice(0, 8000) || undefined,
+        attachmentName: textFiles.map((f) => f.name).join('、') || undefined,
+        attachmentImages: imageFiles.map((f) => ({ base64: f.base64!, mimeType: f.mimeType ?? 'image/jpeg', name: f.name })),
       })
       setAiSuggestion(suggestion)
     } catch (error) {
@@ -14669,10 +14142,17 @@ function NewTaskModal({
     }
   }
 
+  const applyAiTitle = () => {
+    if (!aiSuggestion?.suggestedTitle) return
+    aiTitleSuggestionAppliedRef.current = aiSuggestion.suggestedTitle
+    setTitle(aiSuggestion.suggestedTitle)
+  }
+
   const applyAiSuggestion = () => {
     if (!aiSuggestion) {
       return
     }
+    aiSuggestionAppliedRef.current = aiSuggestion.optimizedRequirement
     setRequirement(aiSuggestion.optimizedRequirement)
     if (aiSuggestion.categoryExists) {
       setType(aiSuggestion.suggestedType)
@@ -14698,7 +14178,12 @@ function NewTaskModal({
     }
     await onDesignTypeGroupsChange(nextGroups)
     setType(`${parent} / ${child}`)
+    aiSuggestionAppliedRef.current = aiSuggestion.optimizedRequirement
     setRequirement(aiSuggestion.optimizedRequirement)
+    if (aiSuggestion.suggestedTitle) {
+      aiTitleSuggestionAppliedRef.current = aiSuggestion.suggestedTitle
+      setTitle(aiSuggestion.suggestedTitle)
+    }
     setAiSuggestion({ ...aiSuggestion, categoryExists: true, missingCategory: undefined })
   }
 
@@ -14804,7 +14289,7 @@ function NewTaskModal({
                   event.stopPropagation()
                   void requestAiSuggestion()
                 }}
-                disabled={isAiLoading || (!title.trim() && !requirement.trim() && !briefFile)}
+                disabled={isAiLoading || (!title.trim() && !requirement.trim() && briefFiles.length === 0)}
               >
                 <Sparkles size={16} />
               </button>
@@ -14822,44 +14307,59 @@ function NewTaskModal({
             <span className="field-label-row">
               <span>甲方文案附件（选填）</span>
             </span>
-            {briefFile ? (
-              <div className="brief-file-chip">
-                <FileText size={16} />
-                <div className="brief-file-meta">
-                  <strong>{briefFile.name}</strong>
-                  <small>已读取约 {briefFile.chars} 字 · 点上方 ✦ 让 AI 结合文案分析需求</small>
-                </div>
+            <div className="brief-files-list">
+              {briefFiles.map((f) => (
+                f.isImage && f.base64 ? (
+                  <div key={f.id} className="brief-img-chip">
+                    <img src={`data:${f.mimeType};base64,${f.base64}`} className="brief-img-thumb" alt={f.name} onClick={() => setBriefLightboxSrc(`data:${f.mimeType};base64,${f.base64}`)} style={{ cursor: 'zoom-in' }} />
+                    <button type="button" className="brief-img-remove" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
+                      <X size={10} />
+                    </button>
+                  </div>
+                ) : (
+                  <div key={f.id} className="brief-file-chip">
+                    <FileText size={14} />
+                    <div className="brief-file-meta">
+                      <strong>{f.name}</strong>
+                      <small>约 {f.chars} 字</small>
+                    </div>
+                    <button type="button" className="icon-button" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
+                      <X size={13} />
+                    </button>
+                  </div>
+                )
+              ))}
+              {briefFiles.length < 6 && (
                 <button
                   type="button"
-                  className="icon-button"
-                  aria-label="移除附件"
-                  title="移除"
-                  onClick={() => { setBriefFile(null); setBriefError('') }}
+                  className={`brief-upload-box ${briefFiles.length > 0 ? 'brief-upload-compact' : ''}`}
+                  onClick={() => briefInputRef.current?.click()}
+                  disabled={isBriefLoading}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over') }}
+                  onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.classList.remove('drag-over')
+                    void loadBriefFiles(e.dataTransfer.files)
+                  }}
                 >
-                  <X size={15} />
+                  <Plus size={14} />
+                  {briefFiles.length > 0 ? (isBriefLoading ? '读取中…' : '继续添加') : (isBriefLoading ? '正在读取…' : '上传或拖拽甲方文案到这里')}
+                  {briefFiles.length === 0 && <small>支持 Word .docx / PDF / txt / 图片（JPG、PNG），最多 6 个</small>}
                 </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="brief-upload-box"
-                onClick={() => briefInputRef.current?.click()}
-                disabled={isBriefLoading}
-              >
-                <Plus size={15} />
-                {isBriefLoading ? '正在读取文字…' : '上传甲方文案 让 AI 一起分析'}
-                <small>支持 Word .docx / PDF / txt（甲方发的文案稿）</small>
-              </button>
-            )}
+              )}
+            </div>
             {briefError && <small className="field-error">{briefError}</small>}
             <input
               ref={briefInputRef}
               type="file"
+              multiple
               className="task-row-upload-input"
-              accept=".docx,.pdf,.txt,.md,.csv"
-              onChange={(event) => void loadBriefFile(event.target.files?.[0])}
+              accept=".docx,.pdf,.txt,.md,.csv,.jpg,.jpeg,.png,.webp,.gif"
+              onChange={(event) => void loadBriefFiles(event.target.files)}
             />
           </div>
+          {briefLightboxSrc && <ImageLightbox src={briefLightboxSrc} alt="附件图片预览" onClose={() => setBriefLightboxSrc(null)} />}
           {(aiSuggestion || aiError || isAiLoading) && (
             <div className="ai-suggestion-panel wide">
               <div className="ai-suggestion-head">
@@ -14875,6 +14375,15 @@ function NewTaskModal({
               {aiError && <p className="ai-suggestion-error">{aiError}</p>}
               {aiSuggestion && (
                 <>
+                  {aiSuggestion.suggestedTitle && (
+                    <div className="ai-suggestion-title-row">
+                      <span className="ai-suggestion-title-label">建议名称</span>
+                      <span className="ai-suggestion-title-text">{aiSuggestion.suggestedTitle}</span>
+                      <button type="button" className="ghost-button compact-button" onClick={applyAiTitle}>
+                        采用
+                      </button>
+                    </div>
+                  )}
                   <div className="ai-suggestion-body">
                     {aiSuggestion.optimizedRequirement.split('\n').map((line, index) => {
                       const trimmed = line.trim()

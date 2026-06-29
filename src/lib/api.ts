@@ -111,6 +111,7 @@ export type SharedReportState = {
 }
 
 export type TaskAssistantSuggestion = {
+  suggestedTitle: string
   optimizedRequirement: string
   suggestedParentType: string
   suggestedChildType: string
@@ -615,12 +616,24 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  suggestTaskAssistant: (payload: { title: string; requirement: string; selectedType: string; designTypeGroups: DesignTypeGroup[]; attachmentText?: string; attachmentName?: string }) =>
+  suggestTaskAssistant: (payload: { title: string; requirement: string; selectedType: string; designTypeGroups: DesignTypeGroup[]; attachmentText?: string; attachmentName?: string; attachmentImages?: Array<{ base64: string; mimeType: string; name: string }> }) =>
     requestJson<TaskAssistantSuggestion>('/api/ai/task-assistant', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  recordTaskEditPair: (payload: { aiOutput: string; userFinal: string; designType?: string }) =>
+    fetch('/api/ai/task-edits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null),
+  recordTaskTitleEditPair: (payload: { aiOutput: string; userFinal: string; designType?: string }) =>
+    fetch('/api/ai/task-title-edits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null),
   optimizeTaskTextAssistant: (payload: TextAssistantPayload) =>
     requestJson<TextAssistantSuggestion>('/api/ai/text-assistant', {
       method: 'POST',
