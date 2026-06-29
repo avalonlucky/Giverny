@@ -1334,7 +1334,18 @@ button.topbar-create-button:hover {
 
 .daily-knowledge-close-btn {
   flex: 0 0 auto;
+  width: auto !important;
+  min-height: auto !important;
+  padding: 0;
+  border-radius: 0 !important;
+  background: transparent !important;
   color: var(--color-text-muted);
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.daily-knowledge-close-btn:hover {
+  background: transparent !important;
+  opacity: 1;
 }
 
 .daily-knowledge-article {
