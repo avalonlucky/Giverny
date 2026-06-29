@@ -8823,8 +8823,8 @@ function TaskProgressModal({
   )
 
   return (
-    <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose} draggable>
-      <header className="progress-lite-header" data-drag-handle>
+    <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
+      <header className="progress-lite-header">
         <div>
           <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : isAcceptanceRevisionMode ? '编辑验收进展' : isAcceptanceMode ? '记录验收进展' : '记录进展'}</h2>
           {progressHeaderHint && <small>{progressHeaderHint}</small>}
@@ -13500,7 +13500,6 @@ function ModalShell({
   onClose,
   closeOnBackdrop = false,
   closeOnEscape = false,
-  draggable = false,
   children,
 }: {
   className?: string
@@ -13508,11 +13507,12 @@ function ModalShell({
   onClose: () => void
   closeOnBackdrop?: boolean
   closeOnEscape?: boolean
-  draggable?: boolean
   children: React.ReactNode
 }) {
   const modalRef = useRef<HTMLElement | null>(null)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
+  // Ref tracks live offset so native event closures are never stale
+  const offsetRef = useRef({ x: 0, y: 0 })
   const dragStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
 
   useEffect(() => {
@@ -13532,22 +13532,46 @@ function ModalShell({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [closeOnEscape, onClose])
 
+  // Drag: grab from the top header area of any modal (top ~96px), skip interactive elements
   useEffect(() => {
-    if (!draggable) return
+    const modal = modalRef.current
+    if (!modal) return
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement
+      if (target.closest('button, input, select, textarea, a, [role="button"], [contenteditable="true"]')) return
+      const rect = modal.getBoundingClientRect()
+      if (e.clientY - rect.top > 96) return
+      e.preventDefault()
+      dragStateRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        originX: offsetRef.current.x,
+        originY: offsetRef.current.y,
+      }
+    }
+
     const handlePointerMove = (e: PointerEvent) => {
       if (!dragStateRef.current) return
-      const dx = e.clientX - dragStateRef.current.startX
-      const dy = e.clientY - dragStateRef.current.startY
-      setOffset({ x: dragStateRef.current.originX + dx, y: dragStateRef.current.originY + dy })
+      const newOffset = {
+        x: dragStateRef.current.originX + (e.clientX - dragStateRef.current.startX),
+        y: dragStateRef.current.originY + (e.clientY - dragStateRef.current.startY),
+      }
+      offsetRef.current = newOffset
+      setOffset(newOffset)
     }
+
     const handlePointerUp = () => { dragStateRef.current = null }
+
+    modal.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
     return () => {
+      modal.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggable])
+  }, [])
 
   return (
     <div
@@ -13571,12 +13595,6 @@ function ModalShell({
         aria-modal="true"
         aria-labelledby={labelledBy}
         style={(offset.x !== 0 || offset.y !== 0) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
-        onPointerDown={draggable ? (e) => {
-          const target = e.target as HTMLElement
-          if (!target.closest('[data-drag-handle]')) return
-          e.preventDefault()
-          dragStateRef.current = { startX: e.clientX, startY: e.clientY, originX: offset.x, originY: offset.y }
-        } : undefined}
       >
         {children}
       </section>
@@ -13626,8 +13644,13 @@ function DailyKnowledgeModal({
   return (
     <ModalShell className="daily-knowledge-modal" labelledBy="daily-knowledge-title" onClose={onClose}>
       <header className="daily-knowledge-modal-header">
-        <h2 id="daily-knowledge-title">{item.title}</h2>
-        <p>{item.category} · {sourceLabel}</p>
+        <div>
+          <h2 id="daily-knowledge-title">{item.title}</h2>
+          <p>{item.category} · {sourceLabel}</p>
+        </div>
+        <button className="icon-button daily-knowledge-close-btn" type="button" aria-label="关闭" onClick={onClose}>
+          <X size={16} />
+        </button>
       </header>
       <div className="daily-knowledge-article">
         {item.body.map((paragraph, index) => (
@@ -13635,27 +13658,23 @@ function DailyKnowledgeModal({
         ))}
       </div>
       <footer className="daily-knowledge-modal-footer">
-        <button className="daily-knowledge-ghost" type="button" onClick={onClose}>关闭</button>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {onFavorite && (
-            <button
-              className={`daily-knowledge-favorite-btn ${favorited ? 'favorited' : ''}`}
-              type="button"
-              disabled={favoriteSaving || favorited}
-              onClick={() => void handleFavorite()}
-              title={favorited ? '已收藏到知识库' : '收藏到知识库'}
-              aria-label={favorited ? '已收藏' : '收藏'}
-            >
-              <Heart size={15} fill={favorited ? 'currentColor' : 'none'} />
-              {favorited ? '已收藏' : favoriteSaving ? '收藏中…' : '收藏'}
-            </button>
-          )}
-          {canRefresh && (
-            <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
-              {isLoading ? '生成中' : '换一篇'}
-            </button>
-          )}
-        </div>
+        {onFavorite && (
+          <button
+            className={`daily-knowledge-favorite-btn ${favorited ? 'favorited' : ''}`}
+            type="button"
+            disabled={favoriteSaving || favorited}
+            onClick={() => void handleFavorite()}
+            title={favorited ? '已收藏到知识库' : '收藏到知识库'}
+            aria-label={favorited ? '已收藏' : '收藏'}
+          >
+            <Star size={15} fill={favorited ? 'currentColor' : 'none'} />
+          </button>
+        )}
+        {canRefresh && (
+          <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
+            {isLoading ? '生成中' : '换一篇'}
+          </button>
+        )}
       </footer>
     </ModalShell>
   )

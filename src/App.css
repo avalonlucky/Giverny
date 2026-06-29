@@ -1304,6 +1304,15 @@ button.topbar-create-button:hover {
 
 .daily-knowledge-modal-header {
   padding: 28px 32px 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: grab;
+  user-select: none;
+}
+.daily-knowledge-modal-header:active {
+  cursor: grabbing;
 }
 
 .daily-knowledge-modal-header h2 {
@@ -1321,6 +1330,11 @@ button.topbar-create-button:hover {
   color: var(--color-text-muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.daily-knowledge-close-btn {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
 }
 
 .daily-knowledge-article {
@@ -1394,28 +1408,24 @@ button.topbar-create-button:hover {
 .daily-knowledge-favorite-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 10px 14px;
-  border: 1px solid var(--color-border-soft);
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
   border-radius: var(--radius-control);
   background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--color-text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease;
 }
 .daily-knowledge-favorite-btn:hover:not(:disabled) {
-  border-color: #e05a7a;
-  color: #e05a7a;
+  color: #f59e0b;
 }
 .daily-knowledge-favorite-btn.favorited {
-  border-color: #e05a7a;
-  color: #e05a7a;
-  background: color-mix(in srgb, #e05a7a 8%, transparent);
+  color: #f59e0b;
 }
 .daily-knowledge-favorite-btn:disabled:not(.favorited) {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: wait;
 }
 
@@ -8888,6 +8898,11 @@ button.file-chip:focus-visible {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  cursor: grab;
+  user-select: none;
+}
+.modal-header:active {
+  cursor: grabbing;
 }
 
 .modal-header-actions {
