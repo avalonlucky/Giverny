@@ -2824,6 +2824,7 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
             isAcceptanceProgress: Boolean((entry as TimeEntry).isAcceptanceProgress),
             isRevision: Boolean((entry as TimeEntry).isRevision),
             isUncounted: Boolean((entry as TimeEntry).isUncounted),
+            ...((entry as TimeEntry).groupId ? { groupId: String((entry as TimeEntry).groupId) } : {}),
             reason: String((entry as WaitingEntry).reason ?? '') as WaitingReason,
           }))
           .filter((entry) => entry.start && entry.end)
