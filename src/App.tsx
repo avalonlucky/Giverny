@@ -8073,14 +8073,30 @@ function TaskProgressModal({
         feedbackTags: (task.feedbackTags ?? []) as TaskFeedbackTag[],
         feedbackNote: task.feedbackNote ?? '',
       })
+      const resolvedMinutes = Math.max(1, Math.round(Number.isFinite(cachedDraft.segmentMinutes) && cachedDraft.segmentMinutes > 0
+        ? cachedDraft.segmentMinutes
+        : minutesForTimeEntry(entryDraft)))
+      const resolvedAnchor: ScheduleAnchor = (['start', 'hours', 'end'] as ScheduleAnchor[]).includes(cachedDraft.scheduleAnchor)
+        ? cachedDraft.scheduleAnchor
+        : 'hours'
+      // 若缓存的派生字段值为空，在初始化时补全，避免打开弹窗时派生字段显示空白
+      const timeDraftWithDerived = { ...cachedDraft.timeDraft }
+      const startVal = timeDraftWithDerived.start?.trim()
+      const endVal = timeDraftWithDerived.end?.trim()
+      if (resolvedAnchor === 'end' && !endVal && startVal && timeDraftWithDerived.date) {
+        const computed = addMinutesToPlanDateTime(`${timeDraftWithDerived.date}T${startVal}`, resolvedMinutes)
+        timeDraftWithDerived.end = computed.slice(11, 16)
+        timeDraftWithDerived.endDate = computed.slice(0, 10)
+      } else if (resolvedAnchor === 'start' && !startVal && endVal && timeDraftWithDerived.endDate) {
+        const computed = addMinutesToPlanDateTime(`${timeDraftWithDerived.endDate}T${endVal}`, -resolvedMinutes)
+        timeDraftWithDerived.start = computed.slice(11, 16)
+        timeDraftWithDerived.date = computed.slice(0, 10)
+      }
       return {
         ...cachedDraft,
-        segmentMinutes: Math.max(1, Math.round(Number.isFinite(cachedDraft.segmentMinutes) && cachedDraft.segmentMinutes > 0
-          ? cachedDraft.segmentMinutes
-          : minutesForTimeEntry(entryDraft))),
-        scheduleAnchor: (['start', 'hours', 'end'] as ScheduleAnchor[]).includes(cachedDraft.scheduleAnchor)
-          ? cachedDraft.scheduleAnchor
-          : 'hours',
+        timeDraft: timeDraftWithDerived,
+        segmentMinutes: resolvedMinutes,
+        scheduleAnchor: resolvedAnchor,
       }
     },
     [editingEntry, initialAcceptanceFlag, isWaitingMode, progressDraftKey, task.acceptanceNote, task.feedbackNote, task.feedbackRating, task.feedbackTags, task.timeEntries, task.waitingEntries],
