@@ -5686,6 +5686,7 @@ button.topbar-create-button:hover {
 .brief-img-remove:hover { background: rgba(0,0,0,0.8); }
 
 .brief-file-chip {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5717,20 +5718,42 @@ button.topbar-create-button:hover {
   color: var(--color-text-muted);
 }
 
-.brief-file-chip .icon-button {
-  flex: 0 0 auto;
-  color: var(--color-text-muted);
+.brief-file-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  color: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
+
+.brief-file-chip:hover .brief-file-remove { opacity: 1; }
 
 .brief-upload-compact {
   min-height: unset !important;
-  height: 64px;
-  width: 64px;
+  height: 36px;
+  width: 36px;
   padding: 0 !important;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--color-text-muted) !important;
   flex: 0 0 auto;
+  align-self: center;
+}
+
+.brief-upload-compact:hover:not(:disabled) {
+  color: var(--color-primary) !important;
+  background: transparent !important;
 }
 
 .brief-upload-compact small { display: none; }

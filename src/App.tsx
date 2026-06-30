@@ -15051,14 +15051,14 @@ function NewTaskModal({
                   </div>
                 ) : (
                   <div key={f.id} className="brief-file-chip">
+                    <button type="button" className="brief-file-remove" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
+                      <X size={10} />
+                    </button>
                     <FileText size={14} />
                     <div className="brief-file-meta">
                       <strong>{f.name}</strong>
                       <small>约 {f.chars} 字</small>
                     </div>
-                    <button type="button" className="icon-button" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
-                      <X size={13} />
-                    </button>
                   </div>
                 )
               ))}
@@ -15076,8 +15076,9 @@ function NewTaskModal({
                     void loadBriefFiles(e.dataTransfer.files)
                   }}
                 >
-                  <Plus size={14} />
-                  {briefFiles.length > 0 ? (isBriefLoading ? '读取中…' : '继续添加') : (isBriefLoading ? '正在读取…' : '上传或拖拽甲方文案到这里')}
+                  <Plus size={briefFiles.length > 0 ? 16 : 14} />
+                  {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传或拖拽甲方文案到这里')}
+                  {briefFiles.length > 0 && isBriefLoading && <small>读取中…</small>}
                   {briefFiles.length === 0 && <small>支持 Word .docx / PPT .pptx / PDF / txt / 图片，最多 6 个</small>}
                 </button>
               )}
