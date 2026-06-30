@@ -5463,6 +5463,7 @@ button.topbar-create-button:hover {
   flex-shrink: 0;
 }
 
+.progress-extra-segment-edit,
 .progress-extra-segment-remove {
   display: flex;
   align-items: center;
@@ -5472,9 +5473,16 @@ button.topbar-create-button:hover {
   background: none;
   cursor: pointer;
   color: var(--color-text-secondary);
-  opacity: 0.5;
+  opacity: 0.4;
   border-radius: 4px;
   flex-shrink: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.progress-extra-segment-edit:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
 }
 
 .progress-extra-segment-remove:hover {

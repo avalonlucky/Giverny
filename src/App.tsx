@@ -8881,12 +8881,19 @@ function TaskProgressModal({
     setTimeEntryError('')
   }
 
+  const sortSegmentsByTime = (segs: TimeEntry[]) =>
+    [...segs].sort((a, b) => {
+      const ta = `${a.date}T${a.start}`
+      const tb = `${b.date}T${b.start}`
+      return tb.localeCompare(ta) // 降序：最新的排最上
+    })
+
   // 将当前输入段暂存，并将结束时间作为下一段的开始时间（方便连续填写）
   const stashCurrentSegment = () => {
     const entry = buildDraftTimeEntry()
     if (!entry || minutesForTimeEntry(entry) <= 0) return
     const stashedEntry = { ...entry, id: crypto.randomUUID() }
-    setPendingExtraSegments((current) => [...current, stashedEntry])
+    setPendingExtraSegments((current) => sortSegmentsByTime([...current, stashedEntry]))
     // 将当前结束时间作为下一段开始时间，清空结束时间
     const prevEnd = activeDraft.end
     const prevEndDate = activeDraft.endDate || activeDraft.date
@@ -8899,6 +8906,30 @@ function TaskProgressModal({
     }))
     setScheduleDerivedField('end')
     setSegmentMinutes(0)
+    setTimeEntryError('')
+  }
+
+  // 将一个暂存段装回当前输入框进行编辑；若当前草稿有效则先暂存它
+  const editStashedSegment = (seg: TimeEntry) => {
+    const currentEntry = buildDraftTimeEntry()
+    const currentValid = currentEntry && minutesForTimeEntry(currentEntry) > 0
+    setPendingExtraSegments((current) => {
+      const withoutTarget = current.filter((s) => s.id !== seg.id)
+      if (currentValid) {
+        return sortSegmentsByTime([...withoutTarget, { ...currentEntry, id: crypto.randomUUID() }])
+      }
+      return withoutTarget
+    })
+    // 将该段的时间填入当前草稿
+    updateActiveDraft((current) => ({
+      ...current,
+      date: seg.date ?? current.date,
+      endDate: seg.endDate ?? seg.date ?? current.endDate,
+      start: seg.start,
+      end: seg.end,
+    }))
+    setScheduleDerivedField('hours')
+    setSegmentMinutes(minutesForTimeEntry(seg))
     setTimeEntryError('')
   }
 
@@ -9008,6 +9039,15 @@ function TaskProgressModal({
                 {seg.start} – {seg.end}
               </span>
               <span className="progress-extra-segment-duration">{formatDuration(minutesForTimeEntry(seg))}</span>
+              <button
+                type="button"
+                className="progress-extra-segment-edit"
+                aria-label="编辑此段"
+                title="编辑此段"
+                onClick={() => editStashedSegment(seg)}
+              >
+                <Pencil size={11} />
+              </button>
               <button
                 type="button"
                 className="progress-extra-segment-remove"
