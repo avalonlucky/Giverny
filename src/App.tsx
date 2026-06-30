@@ -7540,8 +7540,6 @@ function DashboardTaskSidebar({
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
                           </div>
-                          {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
                           {isGrouped && (
                             <ul className="progress-group-siblings">
                               {siblings.map((sib) => (
@@ -7554,6 +7552,8 @@ function DashboardTaskSidebar({
                               ))}
                             </ul>
                           )}
+                          {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
+                          <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                               {entryFiles.map((file) => {
