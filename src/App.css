@@ -9666,60 +9666,55 @@ button.file-chip:focus-visible {
   justify-content: start;
 }
 
-/* 验收模式预计值参考 */
-.date-input-wrap-with-hint {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+/* 验收模式预计值参考行 */
+.progress-field-ref-wrap {
+  display: flex;
   align-items: center;
+  gap: 0;
 }
 
-.date-field-hint {
-  display: contents;
+.progress-field-ref-wrap > .field,
+.progress-field-ref-wrap > .date-field {
+  flex: 1;
+  min-width: 0;
 }
 
-.plan-ref-hint {
+.plan-ref-side {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--color-border);
-  height: 100%;
+  flex: 0 0 auto;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--color-border-soft);
+  margin-left: 8px;
 }
 
 .plan-ref-label {
   font-size: 11px;
   color: var(--color-text-muted);
   white-space: nowrap;
-  flex: 0 0 auto;
 }
 
 .plan-ref-input {
-  width: 110px;
-  height: 36px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 4px;
+  width: 108px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
   background: var(--color-surface-alt);
   color: var(--color-text);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   outline: 0;
-  cursor: text;
 }
 
 .plan-ref-input:focus {
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
-}
-
-.plan-ref-hint-hours {
-  padding: 0 6px;
-  border-bottom: none;
-  height: auto;
-  margin-left: 8px;
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-alt));
 }
 
 .plan-ref-input-hours {
-  width: 56px;
+  width: 52px;
 }
 
 .progress-lite-hours-unit {
