@@ -12767,6 +12767,20 @@ textarea:focus-visible {
   color: var(--color-primary);
 }
 
+.task-detail-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.task-detail-footer-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
 .lock-card .primary-button {
   width: 100%;
 }

@@ -10101,11 +10101,11 @@ function TaskDetailModal({
       </div>
 
       <footer className="modal-footer">
-        <button className="ghost-button" onClick={() => onOpenProgress(task.id)}>
+        <button className="text-button task-detail-footer-btn" onClick={() => onOpenProgress(task.id)}>
           <BarChart3 size={15} />
           进展
         </button>
-        <button className="primary-button" onClick={() => onOpenEdit(task.id)}>
+        <button className="text-button task-detail-footer-btn" onClick={() => onOpenEdit(task.id)}>
           <Pencil size={15} />
           去编辑
         </button>
