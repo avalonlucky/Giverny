@@ -898,7 +898,26 @@ async function extractAttachmentText(file: File): Promise<string> {
     }
     return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, ATTACHMENT_TEXT_LIMIT)
   }
-  // .doc（旧二进制）等无法可靠在前端解析
+  if (name.endsWith('.pptx')) {
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const slideFiles = Object.keys(zip.files)
+      .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
+      .sort((a, b) => {
+        const na = Number(a.match(/\d+/)?.[0] ?? 0)
+        const nb = Number(b.match(/\d+/)?.[0] ?? 0)
+        return na - nb
+      })
+    const parts: string[] = []
+    for (const path of slideFiles) {
+      const xml = await zip.file(path)?.async('string') ?? ''
+      const withBreaks = xml.replace(/<\/a:p>/g, '\n').replace(/<\/a:r>/g, ' ')
+      const text = decodeXmlEntities(withBreaks.replace(/<[^>]+>/g, '')).replace(/\n{3,}/g, '\n\n').trim()
+      if (text) parts.push(text)
+    }
+    return parts.join('\n\n').slice(0, ATTACHMENT_TEXT_LIMIT)
+  }
+  // .doc/.ppt（旧二进制）等无法可靠在前端解析
   return ''
 }
 
@@ -14773,7 +14792,7 @@ function NewTaskModal({
           if (text.trim()) {
             added.push({ id: crypto.randomUUID(), name: file.name, text, chars: text.length })
           } else {
-            setBriefError('部分文件没能读到文字（支持 Word .docx、PDF、txt；旧版 .doc 请另存为 .docx）')
+            setBriefError('部分文件没能读到文字（支持 Word .docx、PPT .pptx、PDF、txt；旧版 .doc/.ppt 请另存为新格式）')
           }
         }
       }
@@ -15013,7 +15032,7 @@ function NewTaskModal({
                 >
                   <Plus size={14} />
                   {briefFiles.length > 0 ? (isBriefLoading ? '读取中…' : '继续添加') : (isBriefLoading ? '正在读取…' : '上传或拖拽甲方文案到这里')}
-                  {briefFiles.length === 0 && <small>支持 Word .docx / PDF / txt / 图片（JPG、PNG），最多 6 个</small>}
+                  {briefFiles.length === 0 && <small>支持 Word .docx / PPT .pptx / PDF / txt / 图片，最多 6 个</small>}
                 </button>
               )}
             </div>
@@ -15023,7 +15042,7 @@ function NewTaskModal({
               type="file"
               multiple
               className="task-row-upload-input"
-              accept=".docx,.pdf,.txt,.md,.csv,.jpg,.jpeg,.png,.webp,.gif"
+              accept=".docx,.pptx,.pdf,.txt,.md,.csv,.jpg,.jpeg,.png,.webp,.gif"
               onChange={(event) => void loadBriefFiles(event.target.files)}
             />
           </div>
