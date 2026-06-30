@@ -2431,35 +2431,22 @@ button.topbar-create-button:hover {
   color: var(--color-surface-strong);
 }
 
-/* 多段工时合并展示 */
-.progress-group-siblings {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.progress-group-sibling-row {
-  display: flex;
+/* 多段工时合并展示（内联在时间行） */
+.progress-group-inline-sib {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  border-radius: 5px;
-  background: var(--color-surface-strong);
+  gap: 3px;
 }
 
-.progress-group-sibling-time {
+.progress-group-inline-sep {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin-right: 1px;
+}
+
+.progress-group-inline-time {
   font-size: 11px;
   color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-  flex: 1;
-}
-
-.progress-group-sibling-dur {
-  font-size: 11px;
-  color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 

@@ -7538,20 +7538,16 @@ function DashboardTaskSidebar({
                           </div>
                           <div className="dashboard-side-entry-time-row">
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
+                            {isGrouped && siblings.map((sib) => (
+                              <span key={sib.id} className="progress-group-inline-sib">
+                                <span className="progress-group-inline-sep">·</span>
+                                <span className="progress-group-inline-time">{sib.start}–{sib.end}</span>
+                                <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={10} /></button>
+                                <button type="button" className="progress-group-sibling-del danger" onClick={() => onDeleteEntry(task.id, 'progress', sib.id)} aria-label="删除此段"><X size={10} /></button>
+                              </span>
+                            ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
                           </div>
-                          {isGrouped && (
-                            <ul className="progress-group-siblings">
-                              {siblings.map((sib) => (
-                                <li key={sib.id} className="progress-group-sibling-row">
-                                  <span className="progress-group-sibling-time">{sib.start}–{sib.end}</span>
-                                  <span className="progress-group-sibling-dur">{formatDuration(minutesForTimeEntry(sib))}</span>
-                                  <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={11} /></button>
-                                  <button type="button" className="progress-group-sibling-del danger" onClick={() => onDeleteEntry(task.id, 'progress', sib.id)} aria-label="删除此段"><X size={11} /></button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
                           <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
