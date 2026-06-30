@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlarmClock,
@@ -20,6 +20,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   ExternalLink,
   FileArchive,
   FileImage,
@@ -3787,6 +3788,7 @@ function App() {
   const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
   const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
   const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
+  const [incomeVisible, setIncomeVisible] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
@@ -5952,7 +5954,21 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </article>
           <article className="dashboard-metric">
             <span>预计收入</span>
-            <strong>{canSeeFull || isClient ? `¥${formatYuan(stats.amount)}` : '仅管理员'}</strong>
+            <strong className="income-metric-value">
+              {canSeeFull || isClient
+                ? (incomeVisible ? `¥${formatYuan(stats.amount)}` : '¥ ****')
+                : '仅管理员'}
+              {(canSeeFull || isClient) && (
+                <button
+                  type="button"
+                  className="income-visibility-toggle"
+                  aria-label={incomeVisible ? '隐藏收入' : '显示收入'}
+                  onClick={() => setIncomeVisible((v) => !v)}
+                >
+                  {incomeVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              )}
+            </strong>
             <p>{canSeeFull || isClient ? `按 ¥${hourlyRate} / 小时` : '游客只读不可见'}</p>
           </article>
           <article className="dashboard-metric">
@@ -13671,6 +13687,7 @@ function ModalShell({
   // Ref tracks live offset so native event closures are never stale
   const offsetRef = useRef({ x: 0, y: 0 })
   const dragStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+  const dragPointerIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -13689,75 +13706,82 @@ function ModalShell({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [closeOnEscape, onClose])
 
-  // Drag: only the visible top grab handle moves the modal.
-  useEffect(() => {
+  const clampModalOffset = useCallback((nextOffset: { x: number; y: number }) => {
     const modal = modalRef.current
-    if (!modal) return
+    if (!modal) return nextOffset
 
-    const clampOffset = (nextOffset: { x: number; y: number }) => {
-      const rect = modal.getBoundingClientRect()
-      const currentOffset = offsetRef.current
-      const deltaX = nextOffset.x - currentOffset.x
-      const deltaY = nextOffset.y - currentOffset.y
-      const nextRect = {
-        left: rect.left + deltaX,
-        right: rect.right + deltaX,
-        top: rect.top + deltaY,
-        bottom: rect.bottom + deltaY,
-      }
-      const minVisibleX = Math.min(180, rect.width * 0.5)
-      const minVisibleY = Math.min(120, rect.height * 0.35)
-      let x = nextOffset.x
-      let y = nextOffset.y
-
-      if (nextRect.right < minVisibleX) x += minVisibleX - nextRect.right
-      if (nextRect.left > window.innerWidth - minVisibleX) x -= nextRect.left - (window.innerWidth - minVisibleX)
-      if (nextRect.bottom < minVisibleY) y += minVisibleY - nextRect.bottom
-      if (nextRect.top > window.innerHeight - minVisibleY) y -= nextRect.top - (window.innerHeight - minVisibleY)
-
-      return { x, y }
+    const rect = modal.getBoundingClientRect()
+    const currentOffset = offsetRef.current
+    const deltaX = nextOffset.x - currentOffset.x
+    const deltaY = nextOffset.y - currentOffset.y
+    const nextRect = {
+      left: rect.left + deltaX,
+      right: rect.right + deltaX,
+      top: rect.top + deltaY,
+      bottom: rect.bottom + deltaY,
     }
+    const minVisibleX = Math.min(180, rect.width * 0.5)
+    const minVisibleY = Math.min(120, rect.height * 0.35)
+    let x = nextOffset.x
+    let y = nextOffset.y
 
-    const handlePointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
-      const target = e.target as HTMLElement | null
-      const handle = target?.closest('[data-modal-drag-handle="true"]')
-      if (!handle || !modal.contains(handle)) return
-      e.preventDefault()
-      dragStateRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        originX: offsetRef.current.x,
-        originY: offsetRef.current.y,
-      }
-      modal.classList.add('is-dragging')
-    }
+    if (nextRect.right < minVisibleX) x += minVisibleX - nextRect.right
+    if (nextRect.left > window.innerWidth - minVisibleX) x -= nextRect.left - (window.innerWidth - minVisibleX)
+    if (nextRect.bottom < minVisibleY) y += minVisibleY - nextRect.bottom
+    if (nextRect.top > window.innerHeight - minVisibleY) y -= nextRect.top - (window.innerHeight - minVisibleY)
 
-    const handlePointerMove = (e: PointerEvent) => {
-      if (!dragStateRef.current) return
-      const newOffset = clampOffset({
-        x: dragStateRef.current.originX + (e.clientX - dragStateRef.current.startX),
-        y: dragStateRef.current.originY + (e.clientY - dragStateRef.current.startY),
-      })
-      offsetRef.current = newOffset
-      setOffset(newOffset)
-    }
-
-    const handlePointerUp = () => {
-      dragStateRef.current = null
-      modal.classList.remove('is-dragging')
-    }
-
-    modal.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    return () => {
-      modal.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      modal.classList.remove('is-dragging')
-    }
+    return { x, y }
   }, [])
+
+  const stopModalDrag = useCallback((event?: ReactPointerEvent<HTMLButtonElement>) => {
+    const pointerId = dragPointerIdRef.current
+    if (event && pointerId !== null) {
+      try {
+        if (event.currentTarget.hasPointerCapture(pointerId)) {
+          event.currentTarget.releasePointerCapture(pointerId)
+        }
+      } catch {
+        // Some synthetic or interrupted pointer sequences no longer have an active capture.
+      }
+    }
+    dragPointerIdRef.current = null
+    dragStateRef.current = null
+    modalRef.current?.classList.remove('is-dragging')
+  }, [])
+
+  const handleModalDragStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragPointerIdRef.current = event.pointerId
+    dragStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: offsetRef.current.x,
+      originY: offsetRef.current.y,
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Drag still works while the pointer remains over the handle; real pointer sequences capture normally.
+    }
+    modalRef.current?.classList.add('is-dragging')
+  }, [])
+
+  const handleModalDragMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!dragStateRef.current || dragPointerIdRef.current !== event.pointerId) return
+    event.preventDefault()
+    const newOffset = clampModalOffset({
+      x: dragStateRef.current.originX + (event.clientX - dragStateRef.current.startX),
+      y: dragStateRef.current.originY + (event.clientY - dragStateRef.current.startY),
+    })
+    offsetRef.current = newOffset
+    setOffset(newOffset)
+  }, [clampModalOffset])
+
+  const handleModalDragEnd = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    stopModalDrag(event)
+  }, [stopModalDrag])
 
   return (
     <div
@@ -13780,7 +13804,10 @@ function ModalShell({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        style={(offset.x !== 0 || offset.y !== 0) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
+        style={(offset.x !== 0 || offset.y !== 0) ? ({
+          '--modal-drag-x': `${offset.x}px`,
+          '--modal-drag-y': `${offset.y}px`,
+        } as CSSProperties) : undefined}
       >
         <button
           type="button"
@@ -13788,6 +13815,10 @@ function ModalShell({
           data-modal-drag-handle="true"
           aria-label="拖动弹窗"
           title="拖动弹窗"
+          onPointerDown={handleModalDragStart}
+          onPointerMove={handleModalDragMove}
+          onPointerUp={handleModalDragEnd}
+          onPointerCancel={handleModalDragEnd}
         >
           <GripVertical size={16} aria-hidden="true" />
         </button>

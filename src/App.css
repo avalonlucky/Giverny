@@ -1177,6 +1177,30 @@ button.topbar-create-button:hover {
   font-weight: 500;
 }
 
+.income-metric-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.income-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.income-visibility-toggle:hover {
+  opacity: 1;
+}
+
 .dashboard-metric p.attention {
   color: var(--color-alert-accent);
   font-weight: 700;
@@ -8794,6 +8818,9 @@ button.file-chip:focus-visible {
 }
 
 .task-modal {
+  --modal-drag-x: 0px;
+  --modal-drag-y: 0px;
+  position: relative;
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
   overflow: hidden;
@@ -8803,6 +8830,45 @@ button.file-chip:focus-visible {
   display: flex;
   flex-direction: column;
   animation: modal-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.modal-drag-handle {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 4;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  transform: translateX(-50%);
+}
+
+.modal-drag-handle:hover,
+.modal-drag-handle:focus-visible {
+  color: var(--color-primary);
+}
+
+.modal-drag-handle:focus-visible {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.task-modal.is-dragging,
+.task-modal.is-dragging .modal-drag-handle {
+  cursor: grabbing;
+}
+
+.task-modal.is-dragging * {
+  user-select: none;
 }
 
 /* 每日知识沿用参考稿的独立阅读纸张，不继承通用业务弹窗的圆角和阴影。 */
@@ -8894,11 +8960,11 @@ button.file-chip:focus-visible {
 @keyframes modal-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.985);
+    transform: translate(var(--modal-drag-x), calc(var(--modal-drag-y) + 14px)) scale(0.985);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate(var(--modal-drag-x), var(--modal-drag-y)) scale(1);
   }
 }
 
