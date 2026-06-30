@@ -4582,15 +4582,16 @@ function App() {
       hideIcon: true,
       details: [entry.note || (isWaiting ? '未填写等待说明' : '未填写进展内容'), isWaiting ? '不计结算' : `计时 ${formatDuration(minutesForTimeEntry(entry))}`],
       onConfirm: async () => {
-        await api.setEntryAttachmentsArchived(taskId, entry.id, true)
+        // 附件归档与 task update 并行，减少串行等待
+        const archivePromise = api.setEntryAttachmentsArchived(taskId, entry.id, true)
         if (isWaiting) {
           const deleted = await handleUpdateTask(taskId, { waitingEntries: entries.filter((item) => item.id !== entryId) })
           if (!deleted) {
-            await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+            archivePromise.then(() => api.setEntryAttachmentsArchived(taskId, entry.id, false)).catch(() => {})
             notify('等待记录删除失败，关联附件已保留', 'error')
             return
           }
-          await refreshState()
+          void refreshState()
           notify('等待记录已删除', 'success', {
             actionLabel: '撤回',
             durationMs: 7200,
@@ -4602,11 +4603,11 @@ function App() {
         const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
         const deleted = await handleUpdateTask(taskId, { timeEntries: nextEntries, actualHours: nextActualHours })
         if (!deleted) {
-          await api.setEntryAttachmentsArchived(taskId, entry.id, false)
+          archivePromise.then(() => api.setEntryAttachmentsArchived(taskId, entry.id, false)).catch(() => {})
           notify('分段计时删除失败，关联附件已保留', 'error')
           return
         }
-        await refreshState()
+        void refreshState()
         notify('分段计时已删除，实际工时已重新计算', 'success', {
           actionLabel: '撤回',
           durationMs: 7200,
