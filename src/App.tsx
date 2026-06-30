@@ -2489,7 +2489,7 @@ function NewTaskDesignTypeSelector({
   value: string
   onChange: (value: string) => void
 }) {
-  const availableGroups = normalizeDesignTypeGroups(groups)
+  const availableGroups = normalizeDesignTypeGroups(groups).filter((g) => g.items.length > 0)
   const selectedGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value))
 
   return (
@@ -14769,6 +14769,15 @@ function NewTaskModal({
     const finalTitle = title.trim()
     if (appliedTitle && appliedTitle !== finalTitle) {
       void api.recordTaskTitleEditPair({ aiOutput: appliedTitle, userFinal: finalTitle, designType: type.trim() })
+    }
+    // 无论是否使用 AI，每次提交都记录最终选择的设计类型，供分类建议模型学习
+    if (finalTitle || finalRequirement) {
+      void api.recordTaskTypeChoice({
+        requirement: finalRequirement,
+        title: finalTitle,
+        finalType: type.trim(),
+        aiSuggestedType: aiSuggestion?.suggestedType ?? undefined,
+      })
     }
 
     const status: TaskStatus = '计划中'

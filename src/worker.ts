@@ -4657,13 +4657,31 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const storedGroups = await getDesignTypeGroups(env)
   const designTypeGroups = normalizeDesignTypeGroups(body.designTypeGroups?.length ? body.designTypeGroups : storedGroups)
 
-  // 并行获取需求文案和任务名称的风格指南（按类型独立归纳，样本不足时退回通用）
+  // 并行获取需求文案风格指南 + 历史分类选择样本
   const currentType = body.selectedType ?? ''
-  const [reqStyleGuide, titleStyleGuide] = await Promise.all([
+  const [reqStyleGuide, titleStyleGuide, typeChoiceExamples] = await Promise.all([
     getOrBuildStyleGuide(env, 'requirement', currentType),
     getOrBuildStyleGuide(env, 'title', currentType),
+    getTypeChoiceExamples(env, 40),
   ])
+
+  // 按大类分组后，每类取最近 3 条作为 few-shot 示例，避免 prompt 过长
+  const examplesByType = new Map<string, Array<{ title: string; requirement: string }>>()
+  for (const row of typeChoiceExamples) {
+    const arr = examplesByType.get(row.final_type) ?? []
+    if (arr.length < 3) arr.push({ title: row.title, requirement: row.requirement.slice(0, 120) })
+    examplesByType.set(row.final_type, arr)
+  }
+  const typeExamplesBlock = examplesByType.size > 0
+    ? `【历史分类参考】以下是该用户过往任务的实际分类选择，请以此为最重要的分类依据：\n${
+        [...examplesByType.entries()]
+          .map(([t, exs]) => `▸ ${t}：${exs.map((e) => `"${e.title || e.requirement.slice(0, 40)}"`).join('、')}`)
+          .join('\n')
+      }`
+    : ''
+
   const styleGuideBlock = [
+    typeExamplesBlock,
     reqStyleGuide ? `【需求文案风格指导】以下是根据该用户历史修改行为归纳的需求文案偏好，请严格贴近这个风格：\n${reqStyleGuide}` : '',
     titleStyleGuide ? `【任务名称命名指导】以下是该用户对任务名称的命名偏好，建议任务名称时请遵循：\n${titleStyleGuide}` : '',
   ]
@@ -5269,6 +5287,16 @@ async function ensureTaskLearningTables(env: Env) {
   try {
     await env.DB.prepare('ALTER TABLE task_style_summaries ADD COLUMN last_processed_id INTEGER NOT NULL DEFAULT 0').run()
   } catch { /* 列已存在，忽略 */ }
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS task_type_choices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      requirement TEXT NOT NULL DEFAULT '',
+      final_type TEXT NOT NULL,
+      ai_suggested_type TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`,
+  ).run()
 }
 
 async function saveTaskEditPair(env: Env, request: Request) {
@@ -5304,6 +5332,39 @@ async function saveTaskTitleEditPair(env: Env, request: Request) {
     .bind(aiOutput, userFinal, designType, Date.now())
     .run()
   return ok({ saved: true })
+}
+
+async function saveTaskTypeChoice(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { requirement?: string; title?: string; finalType?: string; aiSuggestedType?: string }
+  const finalType = String(body.finalType ?? '').trim().slice(0, 120)
+  if (!finalType) return ok({ saved: false })
+  await ensureTaskLearningTables(env)
+  await env.DB.prepare(
+    'INSERT INTO task_type_choices (title, requirement, final_type, ai_suggested_type, created_at) VALUES (?, ?, ?, ?, ?)',
+  )
+    .bind(
+      String(body.title ?? '').trim().slice(0, 200),
+      String(body.requirement ?? '').trim().slice(0, 600),
+      finalType,
+      String(body.aiSuggestedType ?? '').trim().slice(0, 120),
+      Date.now(),
+    )
+    .run()
+  return ok({ saved: true })
+}
+
+async function getTypeChoiceExamples(env: Env, limit = 40): Promise<Array<{ title: string; requirement: string; final_type: string }>> {
+  try {
+    await ensureTaskLearningTables(env)
+    const rows = await env.DB.prepare(
+      'SELECT title, requirement, final_type FROM task_type_choices ORDER BY id DESC LIMIT ?',
+    )
+      .bind(limit)
+      .all<{ title: string; requirement: string; final_type: string }>()
+    return rows.results ?? []
+  } catch {
+    return []
+  }
 }
 
 type EditRow = { id: number; ai_output: string; user_final: string; design_type: string }
@@ -6202,6 +6263,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/chat' ||
       path === '/api/ai/task-edits' ||
       path === '/api/ai/task-title-edits' ||
+      path === '/api/ai/task-type-choices' ||
       path === '/api/knowledge' ||
       path.startsWith('/api/knowledge/') ||
       path === '/api/search' ||
@@ -6325,6 +6387,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/task-title-edits' && request.method === 'POST') {
     return saveTaskTitleEditPair(env, request)
+  }
+  if (path === '/api/ai/task-type-choices' && request.method === 'POST') {
+    return saveTaskTypeChoice(env, request)
   }
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)

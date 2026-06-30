@@ -634,6 +634,12 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(() => null),
+  recordTaskTypeChoice: (payload: { requirement: string; title: string; finalType: string; aiSuggestedType?: string }) =>
+    fetch('/api/ai/task-type-choices', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null),
   optimizeTaskTextAssistant: (payload: TextAssistantPayload) =>
     requestJson<TextAssistantSuggestion>('/api/ai/text-assistant', {
       method: 'POST',
