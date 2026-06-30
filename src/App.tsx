@@ -796,13 +796,14 @@ function addMinutesToPlanDateTime(value: string, minutes: number) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-const TIME_STEP_MINUTES = 30
+const TIME_STEP_MINUTES = 5   // 时间选择器分钟列步进（5分钟）
+const DURATION_STEP_MINUTES = 30  // 工时输入最小粒度（30分钟 = 0.5h）
 
-function snapDurationMinutes(value: number, minimum = TIME_STEP_MINUTES) {
+function snapDurationMinutes(value: number, minimum = DURATION_STEP_MINUTES) {
   if (!Number.isFinite(value)) {
     return minimum
   }
-  return Math.max(minimum, Math.round(value / TIME_STEP_MINUTES) * TIME_STEP_MINUTES)
+  return Math.max(minimum, Math.round(value / DURATION_STEP_MINUTES) * DURATION_STEP_MINUTES)
 }
 
 function formatHoursInputValue(minutes: number) {
