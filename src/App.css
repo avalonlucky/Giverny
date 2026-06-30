@@ -2362,6 +2362,11 @@ button.topbar-create-button:hover {
   font-weight: 700;
 }
 
+.progress-entry-tag.acceptance-file {
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  color: #b45309;
+}
+
 .dashboard-side-time-item p,
 .dashboard-side-waiting-item p {
   margin: 6px 0 0;

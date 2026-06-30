@@ -7521,6 +7521,7 @@ function DashboardTaskSidebar({
                         return entry.isAcceptanceProgress && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
                       })
                       const entryNote = entry.isAcceptanceProgress ? (task.acceptanceNote?.trim() || entry.note || '已完成验收确认。') : (entry.note || '未填写具体内容')
+                      const hasAcceptanceFiles = entryFiles.some((f) => f.scope === 'acceptance')
                       return (
                         <article className="dashboard-side-time-item" key={entry.id}>
                           <span className="dot" />
@@ -7543,10 +7544,10 @@ function DashboardTaskSidebar({
                                 <span className="progress-group-inline-sep">·</span>
                                 <span className="progress-group-inline-time">{sib.start}–{sib.end}</span>
                                 <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={10} /></button>
-                                <button type="button" className="progress-group-sibling-del danger" onClick={() => onDeleteEntry(task.id, 'progress', sib.id)} aria-label="删除此段"><X size={10} /></button>
                               </span>
                             ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
+                            {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
                           <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
