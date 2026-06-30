@@ -9167,7 +9167,7 @@ function TaskProgressModal({
                   aria-label="本段工时"
                 />
               )}
-              <span className="progress-lite-hours-unit">{scheduleDerivedField === 'hours' ? '自动计算' : '小时'}</span>
+              {scheduleDerivedField !== 'hours' && <span className="progress-lite-hours-unit">小时</span>}
             </div>
           </div>
           <PlanDateTimeField
@@ -9200,17 +9200,19 @@ function TaskProgressModal({
                 本段工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
+                <output className="new-task-hours-input new-task-hours-output" aria-label="预计工时">
+                  {task.estimatedHours > 0 ? formatDuration(Math.round(task.estimatedHours * 60)) : '—'}
+                </output>
                 <input
-                  className="new-task-hours-input"
+                  className="new-task-hours-input plan-hours-edit"
                   type="number"
                   min="0"
                   step="0.5"
                   value={planHoursDraft}
                   onChange={(e) => setPlanHoursDraft(e.target.value)}
                   onBlur={() => { const h = parseFloat(planHoursDraft); if (!isNaN(h) && h !== task.estimatedHours) onUpdateTask(task.id, { estimatedHours: h }) }}
-                  aria-label="预计工时"
+                  aria-label="修改预计工时"
                 />
-                <span className="progress-lite-hours-unit">小时</span>
               </div>
             </div>
             <PlanDateTimeField

@@ -9630,12 +9630,22 @@ button.file-chip:focus-visible {
   height: 40px;
   padding: 8px 0;
   border: 0;
-  border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   background: transparent;
   color: var(--color-editorial-text);
   font-size: 16px;
   box-shadow: none;
+}
+
+.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap input[type='text'],
+.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap > button {
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 工时下划线延伸到整列宽度 */
+.progress-lite-time-formula .progress-lite-schedule-row .progress-lite-hours-row {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1px;
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap > button {
@@ -9644,10 +9654,13 @@ button.file-chip:focus-visible {
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap:focus-within input[type='text'],
-.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap:focus-within > button,
-.progress-lite-time-formula .progress-lite-schedule-row .new-task-hours-input:focus {
+.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap:focus-within > button {
   border-color: var(--color-editorial-primary);
   box-shadow: none;
+}
+
+.progress-lite-time-formula .progress-lite-schedule-row .progress-lite-hours-row:focus-within {
+  border-color: var(--color-editorial-primary);
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row .new-task-hours-input {
@@ -9698,6 +9711,21 @@ button.file-chip:focus-visible {
   flex: 0 0 34px;
 }
 
+/* 右栏预计工时：output显示格式化值，input用于编辑（悬浮显示） */
+.plan-hours-edit {
+  width: 52px;
+  max-width: 52px;
+  font-size: 13px !important;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.progress-lite-hours-row:hover .plan-hours-edit,
+.progress-lite-hours-row:focus-within .plan-hours-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .progress-lite-hours-unit {
   color: var(--color-editorial-text-muted);
