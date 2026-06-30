@@ -5463,6 +5463,21 @@ button.topbar-create-button:hover {
   flex-shrink: 0;
 }
 
+.progress-extra-segment-row.is-current {
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.progress-extra-segment-editing {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-primary);
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
 .progress-extra-segment-edit,
 .progress-extra-segment-remove {
   display: flex;

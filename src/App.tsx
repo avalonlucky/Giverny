@@ -9122,40 +9122,58 @@ function TaskProgressModal({
           onActivePickerChange={setActiveDatePickerId}
         />
       </div>
-      {/* 已暂存的多段工时 */}
-      {pendingExtraSegments.length > 0 && (
-        <ul className="progress-extra-segments">
-          {pendingExtraSegments.map((seg, i) => (
-            <li key={seg.id} className="progress-extra-segment-row">
-              <span className="progress-extra-segment-label">第 {i + 1} 段</span>
-              <span className="progress-extra-segment-time">
-                {seg.start} – {seg.end}
-              </span>
-              <span className="progress-extra-segment-duration">{formatDuration(minutesForTimeEntry(seg))}</span>
-              <button
-                type="button"
-                className="progress-extra-segment-edit"
-                aria-label="编辑此段"
-                title="编辑此段"
-                onClick={() => editStashedSegment(seg)}
-              >
-                <Pencil size={11} />
-              </button>
-              <button
-                type="button"
-                className="progress-extra-segment-remove"
-                aria-label="移除此段"
-                onClick={() => setPendingExtraSegments((current) => current.filter((_, j) => j !== i))}
-              >
-                <X size={12} />
-              </button>
+      {/* 多段工时列表：已暂存段 + 当前正在填写的段（合并排序显示） */}
+      {pendingExtraSegments.length > 0 && (() => {
+        const currentDraftSeg = hasDraftTimeEntry ? {
+          id: '__current__',
+          date: activeStartDate,
+          endDate: activeEndDate,
+          start: activeDraft.start,
+          end: activeDraft.end,
+          isCurrent: true,
+        } : null
+        const allSegs = sortSegmentsByTime([
+          ...pendingExtraSegments.map((s) => ({ ...s, isCurrent: false as const })),
+          ...(currentDraftSeg ? [currentDraftSeg] : []),
+        ])
+        const totalMinutes = totalPendingMinutes + (hasDraftTimeEntry ? draftEntryMinutes : 0)
+        return (
+          <ul className="progress-extra-segments">
+            {allSegs.map((seg, i) => {
+              const isCurrent = (seg as { isCurrent?: boolean }).isCurrent
+              return (
+                <li key={seg.id} className={`progress-extra-segment-row ${isCurrent ? 'is-current' : ''}`}>
+                  <span className="progress-extra-segment-label">第 {i + 1} 段</span>
+                  <span className="progress-extra-segment-time">
+                    {seg.start} – {seg.end}
+                  </span>
+                  <span className="progress-extra-segment-duration">
+                    {formatDuration(minutesForTimeEntry(seg))}
+                  </span>
+                  {isCurrent
+                    ? <span className="progress-extra-segment-editing">编辑中</span>
+                    : (
+                      <>
+                        <button type="button" className="progress-extra-segment-edit" aria-label="编辑此段" title="编辑此段"
+                          onClick={() => editStashedSegment(seg as TimeEntry)}>
+                          <Pencil size={11} />
+                        </button>
+                        <button type="button" className="progress-extra-segment-remove" aria-label="移除此段"
+                          onClick={() => setPendingExtraSegments((current) => current.filter((s) => s.id !== seg.id))}>
+                          <X size={12} />
+                        </button>
+                      </>
+                    )
+                  }
+                </li>
+              )
+            })}
+            <li className="progress-extra-segment-total">
+              合计 {formatDuration(totalMinutes)}
             </li>
-          ))}
-          <li className="progress-extra-segment-total">
-            共 {pendingExtraSegments.length + (hasDraftTimeEntry ? 1 : 0)} 段 · 合计 {formatDuration(totalPendingMinutes + (hasDraftTimeEntry ? draftEntryMinutes : 0))}
-          </li>
-        </ul>
-      )}
+          </ul>
+        )
+      })()}
       <p className={`progress-lite-duration ${!timeCounts || hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
         {!timeCounts
           ? isAcceptanceMode
@@ -9164,7 +9182,9 @@ function TaskProgressModal({
           : hasDraftTimeEntry
             ? isAcceptanceMode && !hasTouchedSchedule
               ? '如本次没有新增工时，可直接验收；调整时间后才会计入本次工时与结算'
-              : `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '' : pendingExtraSegments.length > 0 ? '；点击"再加一段"继续' : '，保存后自动累计到实际工时与结算'}`
+              : pendingExtraSegments.length > 0
+                ? ''
+                : `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '' : '，保存后自动累计到实际工时与结算'}`
             : pendingExtraSegments.length > 0 ? '填写下一段的结束时间，或直接保存已暂存的时间段' : '结束时间需晚于开始时间'}
       </p>
       {!isWaitingMode && !isAcceptanceMode && !isEditingEntry && timeCounts && (
