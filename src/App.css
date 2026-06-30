@@ -5496,21 +5496,27 @@ button.topbar-create-button:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 12px;
-  border: 1.5px dashed var(--color-primary);
-  border-radius: var(--radius-pill);
+  padding: 4px 10px 4px 8px;
+  border: none;
+  border-radius: 6px;
   background: none;
   color: var(--color-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.15s;
+  opacity: 0.75;
+  transition: opacity 0.15s, background 0.15s;
 }
 
-.progress-add-segment-btn:hover {
+.progress-add-segment-btn:hover:not(:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.progress-add-segment-btn:disabled {
+  color: var(--color-text-secondary);
+  opacity: 0.4;
+  cursor: default;
 }
 
 .progress-lite-body.waiting-mode {

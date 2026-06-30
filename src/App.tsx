@@ -9033,13 +9033,15 @@ function TaskProgressModal({
               : `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '' : pendingExtraSegments.length > 0 ? '；点击"再加一段"继续' : '，保存后自动累计到实际工时与结算'}`
             : pendingExtraSegments.length > 0 ? '填写下一段的结束时间，或直接保存已暂存的时间段' : '结束时间需晚于开始时间'}
       </p>
-      {!isWaitingMode && !isAcceptanceMode && !isEditingEntry && timeCounts && hasDraftTimeEntry && !draftConflict && (
+      {!isWaitingMode && !isAcceptanceMode && !isEditingEntry && timeCounts && (hasDraftTimeEntry || pendingExtraSegments.length > 0) && (
         <button
           type="button"
           className="progress-add-segment-btn"
+          disabled={!hasDraftTimeEntry || Boolean(draftConflict)}
           onClick={stashCurrentSegment}
         >
-          <span>＋ 再加一段</span>
+          <Plus size={12} />
+          再加一段
         </button>
       )}
       {(timeEntryError || draftConflict) && (
