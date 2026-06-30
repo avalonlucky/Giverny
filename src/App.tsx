@@ -9905,6 +9905,9 @@ function TaskDetailModal({
   const actualMinutes = sumTimeEntries(task.timeEntries ?? [])
   const waitingMinutes = sumTimeEntries(task.waitingEntries ?? [])
   const actualHoursText = actualMinutes > 0 ? `${(actualMinutes / 60).toFixed(2)} h（共 ${(task.timeEntries ?? []).length} 段）` : `${task.actualHours.toFixed(2)} h`
+  const actualH = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
+  const estimatedH = task.estimatedHours
+  const hoursDevPct = estimatedH > 0 && actualH > 0 ? Math.round(((actualH - estimatedH) / estimatedH) * 100) : null
   const waitingHoursText = `${(waitingMinutes / 60).toFixed(2)} h（共 ${(task.waitingEntries ?? []).length} 段）`
   // 用「进展分段计时」（按真实工作日期）替代审计流水，避免补录任务显示成「确认验收=补录当天」的误导时间。
   const detailTimeEntries = [...(task.timeEntries ?? [])].sort((a, b) => `${b.date ?? ''}${b.start ?? ''}`.localeCompare(`${a.date ?? ''}${a.start ?? ''}`))
@@ -9992,7 +9995,19 @@ function TaskDetailModal({
             </div>
             <div>
               <dt>实际工时</dt>
-              <dd>{actualHoursText}</dd>
+              <dd>
+                {actualHoursText}
+                {estimatedH > 0 && (
+                  <span className="hours-vs-estimate">
+                    {' / 预估 '}{estimatedH.toFixed(2)} h
+                    {hoursDevPct !== null && (
+                      <span className={`hours-dev-badge ${hoursDevPct > 0 ? 'over' : 'under'}`}>
+                        {hoursDevPct > 0 ? `+${hoursDevPct}%` : `${hoursDevPct}%`}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </dd>
             </div>
             {waitingMinutes > 0 && (
               <div>

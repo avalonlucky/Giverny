@@ -14998,6 +14998,31 @@ textarea:focus-visible {
   padding: 0 0 14px;
 }
 
+.hours-vs-estimate {
+  color: var(--color-text-muted);
+  font-size: 0.9em;
+}
+
+.hours-dev-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.hours-dev-badge.over {
+  background: color-mix(in srgb, #e53e3e 12%, transparent);
+  color: #c53030;
+}
+
+.hours-dev-badge.under {
+  background: color-mix(in srgb, #38a169 12%, transparent);
+  color: #276749;
+}
+
 .task-detail-entry-time {
   display: flex;
   align-items: center;
