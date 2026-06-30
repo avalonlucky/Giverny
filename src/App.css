@@ -9666,6 +9666,62 @@ button.file-chip:focus-visible {
   justify-content: start;
 }
 
+/* 验收模式预计值参考 */
+.date-input-wrap-with-hint {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.date-field-hint {
+  display: contents;
+}
+
+.plan-ref-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--color-border);
+  height: 100%;
+}
+
+.plan-ref-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.plan-ref-input {
+  width: 110px;
+  height: 36px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+  cursor: text;
+}
+
+.plan-ref-input:focus {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-alt));
+}
+
+.plan-ref-hint-hours {
+  padding: 0 6px;
+  border-bottom: none;
+  height: auto;
+  margin-left: 8px;
+}
+
+.plan-ref-input-hours {
+  width: 56px;
+}
+
 .progress-lite-hours-unit {
   color: var(--color-editorial-text-muted);
   font-size: 12px;

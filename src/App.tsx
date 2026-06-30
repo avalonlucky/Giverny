@@ -2135,6 +2135,7 @@ function PlanDateTimeField({
   readOnly = false,
   saved = false,
   control,
+  hint,
   includeTime = true,
   pickerId,
   activePickerId,
@@ -2147,6 +2148,8 @@ function PlanDateTimeField({
   readOnly?: boolean
   saved?: boolean
   control?: ReactNode
+  /** 显示在输入框右侧（日历图标左侧）的参考内容，如预计时间 */
+  hint?: ReactNode
   /** Date-only fields reuse this picker without the hour/minute columns. */
   includeTime?: boolean
   pickerId?: string
@@ -2308,7 +2311,7 @@ function PlanDateTimeField({
         <span>{label}</span>
         {control}
       </span>
-      <div className="date-input-wrap">
+      <div className={`date-input-wrap ${hint ? 'date-input-wrap-with-hint' : ''}`}>
         <input
           type="text"
           inputMode="numeric"
@@ -2323,6 +2326,7 @@ function PlanDateTimeField({
             }
           }}
         />
+        {hint && <div className="date-field-hint">{hint}</div>}
         <button
           type="button"
           aria-label={`选择${label}`}
@@ -8208,6 +8212,10 @@ function TaskProgressModal({
   // 多段工时：用户在本次进展中预暂存的额外时间段（尚未提交到 DB）
   const [pendingExtraSegments, setPendingExtraSegments] = useState<TimeEntry[]>([])
   const [isAcceptanceMode, setIsAcceptanceMode] = useState(initialAcceptanceFlag)
+  // 验收面板：预计值参考编辑
+  const [planStartDraft, setPlanStartDraft] = useState(task.date ? datePart(task.date) : '')
+  const [planEndDraft, setPlanEndDraft] = useState(task.estimatedDate ? datePart(task.estimatedDate) : '')
+  const [planHoursDraft, setPlanHoursDraft] = useState(String(task.estimatedHours > 0 ? task.estimatedHours : ''))
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
   const [countAcceptanceTime, setCountAcceptanceTime] = useState(true)
@@ -9139,6 +9147,18 @@ function TaskProgressModal({
           pickerId="progress-start"
           activePickerId={activeDatePickerId}
           onActivePickerChange={setActiveDatePickerId}
+          hint={isAcceptanceMode && !isWaitingMode ? (
+            <div className="plan-ref-hint">
+              <span className="plan-ref-label">预计</span>
+              <input
+                className="plan-ref-input"
+                type="date"
+                value={planStartDraft}
+                onChange={(e) => setPlanStartDraft(e.target.value)}
+                onBlur={() => { if (planStartDraft && planStartDraft !== datePart(task.date)) onUpdateTask(task.id, { date: planStartDraft }) }}
+              />
+            </div>
+          ) : undefined}
         />
         <div className="field progress-lite-hours-field">
           <span className="new-task-inline-label">
@@ -9162,6 +9182,21 @@ function TaskProgressModal({
               />
             )}
             <span className="progress-lite-hours-unit">{scheduleDerivedField === 'hours' ? '自动计算' : '小时'}</span>
+            {isAcceptanceMode && !isWaitingMode && (
+              <div className="plan-ref-hint plan-ref-hint-hours">
+                <span className="plan-ref-label">预计</span>
+                <input
+                  className="plan-ref-input plan-ref-input-hours"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={planHoursDraft}
+                  onChange={(e) => setPlanHoursDraft(e.target.value)}
+                  onBlur={() => { const h = parseFloat(planHoursDraft); if (!isNaN(h) && h !== task.estimatedHours) onUpdateTask(task.id, { estimatedHours: h }) }}
+                />
+                <span className="plan-ref-label">h</span>
+              </div>
+            )}
           </div>
         </div>
         <PlanDateTimeField
@@ -9174,6 +9209,18 @@ function TaskProgressModal({
           pickerId="progress-end"
           activePickerId={activeDatePickerId}
           onActivePickerChange={setActiveDatePickerId}
+          hint={isAcceptanceMode && !isWaitingMode ? (
+            <div className="plan-ref-hint">
+              <span className="plan-ref-label">预计</span>
+              <input
+                className="plan-ref-input"
+                type="date"
+                value={planEndDraft}
+                onChange={(e) => setPlanEndDraft(e.target.value)}
+                onBlur={() => { if (planEndDraft && planEndDraft !== datePart(task.estimatedDate)) onUpdateTask(task.id, { estimatedDate: planEndDraft }) }}
+              />
+            </div>
+          ) : undefined}
         />
       </div>
       {/* 多段工时列表：已暂存段 + 当前正在填写的段（合并排序显示） */}
