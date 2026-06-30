@@ -9188,15 +9188,13 @@ function TaskProgressModal({
               label="开始时间"
               value={task.date ?? ''}
               onChange={(v) => onUpdateTask(task.id, { date: v })}
-              isActive={scheduleDerivedField !== 'start'}
-              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="" onClick={() => {}} />}
+              isActive={true}
               pickerId="plan-start"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
             />
             <div className="field progress-lite-hours-field">
-              <span className="new-task-inline-label">
-                <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="" onClick={() => {}} />
+              <span className="new-task-inline-label progress-lite-hours-label-plan">
                 本段工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
@@ -9219,8 +9217,7 @@ function TaskProgressModal({
               label="结束时间"
               value={task.estimatedDate ?? ''}
               onChange={(v) => onUpdateTask(task.id, { estimatedDate: v })}
-              isActive={scheduleDerivedField !== 'end'}
-              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="" onClick={() => {}} />}
+              isActive={true}
               pickerId="plan-end"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}

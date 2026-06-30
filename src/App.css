@@ -9711,6 +9711,12 @@ button.file-chip:focus-visible {
   flex: 0 0 34px;
 }
 
+/* 右栏标签无开关，补齐左侧空间与左栏对齐 */
+.progress-lite-schedule-row-plan .field-label-row,
+.progress-lite-hours-label-plan {
+  padding-left: 44px;
+}
+
 /* 右栏预计工时：output显示格式化值，input用于编辑（悬浮显示） */
 .plan-hours-edit {
   width: 52px;
