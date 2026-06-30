@@ -8234,6 +8234,29 @@ function TaskProgressModal({
     })
   }, [draftTimeEntries, draftWaitingEntries, feedbackNote, feedbackRating, feedbackTags, note, progressDraftKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
 
+  // mount 后修复：若派生字段（结束/开始时间）为空，立即补全并写回 state
+  const initRepairRef = useRef(false)
+  useEffect(() => {
+    if (initRepairRef.current) return
+    initRepairRef.current = true
+    const anchor = initialProgressDraft.scheduleAnchor
+    const mins = initialProgressDraft.segmentMinutes
+    setTimeDraft((current) => {
+      const startVal = current.start?.trim()
+      const endVal = current.end?.trim()
+      if (anchor === 'end' && !endVal && startVal && current.date) {
+        const computed = addMinutesToPlanDateTime(`${current.date}T${startVal}`, mins)
+        return { ...current, end: computed.slice(11, 16), endDate: computed.slice(0, 10) }
+      }
+      if (anchor === 'start' && !startVal && endVal && current.endDate) {
+        const computed = addMinutesToPlanDateTime(`${current.endDate}T${endVal}`, -mins)
+        return { ...current, start: computed.slice(11, 16), date: computed.slice(0, 10) }
+      }
+      return current
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     progressAttachmentDraftCache.set(progressDraftKey, pendingAttachments)
   }, [pendingAttachments, progressDraftKey])
