@@ -14260,6 +14260,19 @@ textarea:focus-visible {
   outline: 0;
 }
 
+.design-type-item-edit-input {
+  width: 110px;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(47, 111, 109, 0.4);
+  border-radius: 6px;
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 12px;
+  outline: 0;
+}
+
 .token-row {
   padding: 12px;
   border: 1px solid transparent;

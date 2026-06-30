@@ -12740,6 +12740,8 @@ function SettingsView({
   const [activeDesignGroup, setActiveDesignGroup] = useState('')
   const [isAddingGroup, setIsAddingGroup] = useState(false)
   const [groupNameDrafts, setGroupNameDrafts] = useState<Record<string, string>>({})
+  const [editingItem, setEditingItem] = useState<{ groupName: string; item: string } | null>(null)
+  const [itemEditDraft, setItemEditDraft] = useState('')
   const [serviceCompanyDraft, setServiceCompanyDraft] = useState(serviceCompanyName)
   const [pdfTitleDraft, setPdfTitleDraft] = useState(pdfTitle)
   const [aiModeDraft, setAiModeDraft] = useState<AiModelConfig['mode']>(aiModelConfig?.mode ?? 'deepseek-direct')
@@ -12882,6 +12884,19 @@ function SettingsView({
     setDraggingGroupName((current) => (current === oldName ? nextName : current))
     setActiveDesignGroup((current) => (current === oldName ? nextName : current))
     setDraggingItem((current) => (current?.groupName === oldName ? { ...current, groupName: nextName } : current))
+  }
+
+  const renameDesignTypeItem = (groupName: string, oldItem: string) => {
+    const nextItem = itemEditDraft.trim()
+    setEditingItem(null)
+    setItemEditDraft('')
+    if (!nextItem || nextItem === oldItem) return
+    if (designTypeGroups.find((g) => g.name === groupName)?.items.includes(nextItem)) return
+    onDesignTypeGroupsChange(
+      designTypeGroups.map((g) =>
+        g.name === groupName ? { ...g, items: g.items.map((it) => (it === oldItem ? nextItem : it)) } : g,
+      ),
+    )
   }
 
   const addDesignTypeItem = (groupName: string) => {
@@ -13572,22 +13587,44 @@ function SettingsView({
                     </button>
                   </div>
                   <div className="design-type-list plain">
-                    {activeGroup.items.map((item) => (
-                      <span
-                        className={`design-type-item ${draggingItem?.groupName === activeGroup.name && draggingItem.item === item ? 'dragging' : ''}`}
-                        draggable
-                        key={item}
-                        onDragStart={() => setDraggingItem({ groupName: activeGroup.name, item })}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => moveDesignTypeItem(activeGroup.name, item)}
-                        onDragEnd={() => setDraggingItem(null)}
-                      >
-                        {item}
-                        <button aria-label={`删除设计类型 ${activeGroup.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(activeGroup.name, item)}>
-                          <X size={12} />
-                        </button>
-                      </span>
-                    ))}
+                    {activeGroup.items.map((item) => {
+                      const isEditingThisItem = editingItem?.groupName === activeGroup.name && editingItem.item === item
+                      return isEditingThisItem ? (
+                        <input
+                          key={item}
+                          className="design-type-item-edit-input"
+                          autoFocus
+                          value={itemEditDraft}
+                          onChange={(e) => setItemEditDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') renameDesignTypeItem(activeGroup.name, item)
+                            if (e.key === 'Escape') { setEditingItem(null); setItemEditDraft('') }
+                          }}
+                          onBlur={() => renameDesignTypeItem(activeGroup.name, item)}
+                        />
+                      ) : (
+                        <span
+                          className={`design-type-item ${draggingItem?.groupName === activeGroup.name && draggingItem.item === item ? 'dragging' : ''}`}
+                          draggable
+                          key={item}
+                          onDragStart={() => setDraggingItem({ groupName: activeGroup.name, item })}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => moveDesignTypeItem(activeGroup.name, item)}
+                          onDragEnd={() => setDraggingItem(null)}
+                        >
+                          {item}
+                          <button
+                            aria-label={`重命名设计类型 ${activeGroup.name} / ${item}`}
+                            onClick={() => { setEditingItem({ groupName: activeGroup.name, item }); setItemEditDraft(item) }}
+                          >
+                            <Pencil size={10} />
+                          </button>
+                          <button aria-label={`删除设计类型 ${activeGroup.name} / ${item}`} onClick={() => requestDeleteDesignTypeItem(activeGroup.name, item)}>
+                            <X size={12} />
+                          </button>
+                        </span>
+                      )
+                    })}
                     {addingItemGroup === activeGroup.name ? (
                       <input
                         className="design-type-item-add-input"
