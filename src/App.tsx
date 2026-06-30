@@ -2134,7 +2134,7 @@ function PlanDateTimeField({
   activePickerId?: string | null
   onActivePickerChange?: (pickerId: string | null) => void
 }) {
-  const fieldRef = useRef<HTMLLabelElement | null>(null)
+  const fieldRef = useRef<HTMLDivElement | null>(null)
   const formatValue = (rawValue: string) => includeTime ? formatPlanDateTime(rawValue) : rawValue.replace(/-/g, '/')
   const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
@@ -2284,7 +2284,7 @@ function PlanDateTimeField({
   }
 
   return (
-    <label ref={fieldRef} className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
+    <div ref={fieldRef} className={`field date-field ${isActive ? 'active' : ''} ${readOnly ? 'readonly' : ''} ${saved ? 'field-saved' : ''}`}>
       <span className="field-label-row">
         <span>{label}</span>
         {control}
@@ -2434,7 +2434,7 @@ function PlanDateTimeField({
           </div>
         )}
       </div>
-    </label>
+    </div>
   )
 }
 
@@ -9121,7 +9121,7 @@ function TaskProgressModal({
           activePickerId={activeDatePickerId}
           onActivePickerChange={setActiveDatePickerId}
         />
-        <label className="field progress-lite-hours-field">
+        <div className="field progress-lite-hours-field">
           <span className="new-task-inline-label">
             <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换本段工时" onClick={() => toggleProgressScheduleField('hours')} />
             本段工时
@@ -9144,7 +9144,7 @@ function TaskProgressModal({
             )}
             <span className="progress-lite-hours-unit">{scheduleDerivedField === 'hours' ? '自动计算' : '小时'}</span>
           </div>
-        </label>
+        </div>
         <PlanDateTimeField
           label="结束时间"
           value={progressEndValue}
@@ -15117,7 +15117,7 @@ function NewTaskModal({
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
             />
-            <label className="field">
+            <div className="field">
               <span className="new-task-inline-label">
                 <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换预估工时" onClick={() => toggleScheduleField('hours')} />
                 预估工时
@@ -15148,7 +15148,7 @@ function NewTaskModal({
                   {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
                 </button>
               </div>
-            </label>
+            </div>
             <PlanDateTimeField
               label="预计交付"
               value={estimatedDate}
