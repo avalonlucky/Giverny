@@ -7332,7 +7332,23 @@ function DashboardTaskSidebar({
   const acceptanceSummaryFiles = shouldShowAcceptanceSummary
     ? files.filter((file) => file.taskId === task.id && file.scope === 'acceptance' && !file.deletedAt).slice(0, 6)
     : []
-  const shownTimeEntries = expandedProgressEntries ? sortedTimeEntries : sortedTimeEntries.slice(0, 5)
+  const groupedTimeEntries = (() => {
+    const groups: Array<{ primary: TimeEntry; siblings: TimeEntry[]; totalMinutes: number }> = []
+    const seen = new Set<string>()
+    for (const entry of sortedTimeEntries) {
+      if (seen.has(entry.id)) continue
+      seen.add(entry.id)
+      if (entry.groupId) {
+        const siblings = sortedTimeEntries.filter((e) => e.groupId === entry.groupId && e.id !== entry.id)
+        siblings.forEach((s) => seen.add(s.id))
+        groups.push({ primary: entry, siblings, totalMinutes: [entry, ...siblings].reduce((sum, e) => sum + minutesForTimeEntry(e), 0) })
+      } else {
+        groups.push({ primary: entry, siblings: [], totalMinutes: minutesForTimeEntry(entry) })
+      }
+    }
+    return groups
+  })()
+  const shownGroups = expandedProgressEntries ? groupedTimeEntries : groupedTimeEntries.slice(0, 5)
   const shownWaitingEntries = expandedWaitingEntries ? sortedWaitingEntries : sortedWaitingEntries.slice(0, 5)
   return (
     <aside className="dashboard-task-sidebar">
@@ -7489,17 +7505,18 @@ function DashboardTaskSidebar({
                         )}
                       </article>
                     )}
-                    {shownTimeEntries.map((entry) => {
-                      const minutes = minutesForTimeEntry(entry)
+                    {shownGroups.map(({ primary: entry, siblings, totalMinutes }) => {
+                      const isGrouped = siblings.length > 0
+                      const displayMinutes = isGrouped ? totalMinutes : minutesForTimeEntry(entry)
                       const acceptanceFileNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
+                      const groupEntryIds = new Set([entry.id, ...siblings.map((s) => s.id)])
                       const entryFiles = files.filter((file) => {
                         if (file.taskId !== task.id || file.deletedAt) {
                           return false
                         }
-                        if (file.entryId === entry.id) {
+                        if (groupEntryIds.has(file.entryId ?? '')) {
                           return true
                         }
-                        // 验收附件上传时这条验收进展往往还没创建，entryId 为空；一个任务只有一条验收进展，未绑定的验收附件都归属到它
                         return entry.isAcceptanceProgress && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
                       })
                       const entryNote = entry.isAcceptanceProgress ? (task.acceptanceNote?.trim() || entry.note || '已完成验收确认。') : (entry.note || '未填写具体内容')
@@ -7523,7 +7540,19 @@ function DashboardTaskSidebar({
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
+                          <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
+                          {isGrouped && (
+                            <ul className="progress-group-siblings">
+                              {siblings.map((sib) => (
+                                <li key={sib.id} className="progress-group-sibling-row">
+                                  <span className="progress-group-sibling-time">{sib.start}–{sib.end}</span>
+                                  <span className="progress-group-sibling-dur">{formatDuration(minutesForTimeEntry(sib))}</span>
+                                  <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={11} /></button>
+                                  <button type="button" className="progress-group-sibling-del danger" onClick={() => onDeleteEntry(task.id, 'progress', sib.id)} aria-label="删除此段"><X size={11} /></button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                               {entryFiles.map((file) => {
@@ -7546,9 +7575,9 @@ function DashboardTaskSidebar({
                       )
                     })}
                   </div>
-                  {timeEntries.length > 5 && (
+                  {groupedTimeEntries.length > 5 && (
                     <button type="button" className="dashboard-side-expand" onClick={toggleProgressEntries}>
-                      {expandedProgressEntries ? '收起记录' : `展开 ${timeEntries.length - 5} 条`}
+                      {expandedProgressEntries ? '收起记录' : `展开 ${groupedTimeEntries.length - 5} 条`}
                     </button>
                   )}
                 </>
@@ -8670,7 +8699,12 @@ function TaskProgressModal({
       const nextTimeEntries = !isWaitingMode
         ? isEditingEntry && nextEntry
           ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
-          : [...draftTimeEntries, ...pendingExtraSegments, ...(nextEntry ? [nextEntry] : [])]
+          : (() => {
+              const newSegs = [...pendingExtraSegments, ...(nextEntry ? [nextEntry] : [])]
+              const batchGroupId = newSegs.length > 1 ? crypto.randomUUID() : undefined
+              const taggedSegs = batchGroupId ? newSegs.map((s) => ({ ...s, groupId: batchGroupId })) : newSegs
+              return [...draftTimeEntries, ...taggedSegs]
+            })()
         : draftTimeEntries
       const nextWaitingEntries = isWaitingMode && nextEntry
         ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]

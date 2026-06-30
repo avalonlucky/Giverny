@@ -2431,6 +2431,65 @@ button.topbar-create-button:hover {
   color: var(--color-surface-strong);
 }
 
+/* 多段工时合并展示 */
+.progress-group-siblings {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.progress-group-sibling-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--color-surface-strong);
+}
+
+.progress-group-sibling-time {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+
+.progress-group-sibling-dur {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-group-sibling-edit,
+.progress-group-sibling-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  padding: 2px 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.progress-group-sibling-edit:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.progress-group-sibling-del:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-danger, #e53e3e) 12%, transparent);
+  color: var(--color-danger, #e53e3e);
+}
+
 .dashboard-side-entry-files {
   margin-top: 14px;
   display: flex;
