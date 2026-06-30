@@ -5567,6 +5567,8 @@ button.topbar-create-button:hover {
 /* "再加一段"按钮 */
 .progress-add-segment-btn {
   align-self: flex-start;
+  justify-self: start;
+  width: fit-content;
   display: inline-flex;
   align-items: center;
   gap: 4px;

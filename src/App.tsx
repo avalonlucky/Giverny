@@ -9186,7 +9186,22 @@ function TaskProgressModal({
                     {formatDuration(minutesForTimeEntry(seg))}
                   </span>
                   {isCurrent
-                    ? <span className="progress-extra-segment-editing">编辑中</span>
+                    ? <>
+                        <span className="progress-extra-segment-editing">编辑中</span>
+                        <button
+                          type="button"
+                          className="progress-extra-segment-remove"
+                          aria-label="取消这一段"
+                          title="取消这一段"
+                          onClick={() => {
+                            updateActiveDraft((d) => ({ ...d, start: '', end: '' }))
+                            setSegmentMinutes(DURATION_STEP_MINUTES * 2)
+                            setTimeEntryError('')
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </>
                     : (
                       <>
                         <button type="button" className="progress-extra-segment-edit" aria-label="编辑此段" title="编辑此段"
