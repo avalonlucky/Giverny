@@ -8904,24 +8904,25 @@ function TaskProgressModal({
       return tb.localeCompare(ta) // 降序：最新的排最上
     })
 
-  // 将当前输入段暂存，并将结束时间作为下一段的开始时间（方便连续填写）
+  // 将当前输入段暂存，并用「上段结束时间 + 1h」预填下一段
   const stashCurrentSegment = () => {
     const entry = buildDraftTimeEntry()
     if (!entry || minutesForTimeEntry(entry) <= 0) return
     const stashedEntry = { ...entry, id: crypto.randomUUID() }
     setPendingExtraSegments((current) => sortSegmentsByTime([...current, stashedEntry]))
-    // 将当前结束时间作为下一段开始时间，清空结束时间
     const prevEnd = activeDraft.end
     const prevEndDate = activeDraft.endDate || activeDraft.date
+    const nextStartFull = `${prevEndDate || activeDraft.date}T${prevEnd}`
+    const nextEndFull = addMinutesToPlanDateTime(nextStartFull, DURATION_STEP_MINUTES * 2) // 默认 1h
     updateActiveDraft((current) => ({
       ...current,
       date: prevEndDate || current.date,
+      endDate: nextEndFull.slice(0, 10),
       start: prevEnd,
-      end: '',
-      endDate: prevEndDate || current.date,
+      end: nextEndFull.slice(11, 16),
     }))
-    setScheduleDerivedField('end')
-    setSegmentMinutes(0)
+    setScheduleDerivedField('hours') // 工时派生，start/end 均可见
+    setSegmentMinutes(DURATION_STEP_MINUTES * 2)
     setTimeEntryError('')
   }
 
