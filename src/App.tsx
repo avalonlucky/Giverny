@@ -8144,6 +8144,9 @@ function TaskProgressModal({
       const waitingDraftWithDerived = fillTimeDraftFromDuration(cachedDraft.waitingDraft, resolvedMinutes)
       return {
         ...cachedDraft,
+        // 始终从 task 取最新快照，避免缓存里的旧 timeEntries/waitingEntries 造成误判冲突
+        timeEntries: (task.timeEntries ?? []) as TimeEntry[],
+        waitingEntries: (task.waitingEntries ?? []) as WaitingEntry[],
         timeDraft: timeDraftWithDerived,
         waitingDraft: waitingDraftWithDerived,
         segmentMinutes: resolvedMinutes,
