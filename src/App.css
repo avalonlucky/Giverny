@@ -14815,6 +14815,19 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.income-supplemental-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+  vertical-align: middle;
+}
+
 .income-table-daily .income-day-date {
   vertical-align: middle;
   border-right: 1px solid var(--color-border);

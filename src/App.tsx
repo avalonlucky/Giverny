@@ -11774,16 +11774,21 @@ function IncomeView({
 
   const today = datePart(isoDate())
   const dailyGroups = useMemo(() => {
-    const dayMap = new Map<string, Map<number, { title: string; hours: number }>>()
+    const dayMap = new Map<string, Map<number, { title: string; hours: number; isSupplemental: boolean }>>()
     activeMonthTasks.forEach((task) => {
+      const isSuppl = isSupplementalTask(task)
       ;(task.timeEntries ?? []).forEach((entry) => {
         const minutes = minutesForTimeEntry(entry)
         if (minutes <= 0) return
-        const day = datePart(entry.date || task.date || '')
+        const entryDay = datePart(entry.date || task.date || '')
+        // 补录任务的工时条目日期在原月份，归入结算月的第一天作为虚拟显示日期
+        const day = isSuppl && !entryDay.startsWith(currentMonth.value)
+          ? `${currentMonth.value}-01`
+          : entryDay
         if (!day.startsWith(currentMonth.value)) return
         if (!dayMap.has(day)) dayMap.set(day, new Map())
         const taskMap = dayMap.get(day)!
-        const existing = taskMap.get(task.id) ?? { title: task.title || '未命名', hours: 0 }
+        const existing = taskMap.get(task.id) ?? { title: task.title || '未命名', hours: 0, isSupplemental: isSuppl }
         existing.hours = Number((existing.hours + minutes / 60).toFixed(2))
         taskMap.set(task.id, existing)
       })
@@ -11796,6 +11801,7 @@ function IncomeView({
           title: data.title,
           hours: data.hours,
           income: Math.round(data.hours * hourlyRate),
+          isSupplemental: data.isSupplemental,
         }))
         const totalHours = Number(entries.reduce((s, e) => s + e.hours, 0).toFixed(1))
         return { day, totalHours, totalIncome: Math.round(totalHours * hourlyRate), entries }
@@ -11951,7 +11957,10 @@ function IncomeView({
                             {group.day.slice(5).replace('-', '/')}
                           </td>
                         )}
-                        <td className="income-day-tasks">{entry.title}</td>
+                        <td className="income-day-tasks">
+                          {entry.title}
+                          {entry.isSupplemental && <em className="income-supplemental-tag">补录</em>}
+                        </td>
                         <td className="num">{entry.hours.toFixed(1)}h</td>
                         <td className="num">¥{entry.income.toLocaleString()}</td>
                       </tr>
