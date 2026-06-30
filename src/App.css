@@ -9666,57 +9666,38 @@ button.file-chip:focus-visible {
   justify-content: start;
 }
 
-/* 验收模式：日期字段内嵌预计值（3列网格：input 1fr | 预计ref auto | calendar 34px） */
-.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap-with-ref {
-  grid-template-columns: minmax(0, 1fr) auto 34px;
+/* 验收模式：左右两栏对比布局（左=实际，右=预计） */
+.progress-schedule-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
 }
 
-.plan-ref-inline {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px 0 10px;
+/* 覆盖 new-task-schedule-row 的 grid-column: 1/-1，让两栏真正并排 */
+.progress-schedule-two-col > .new-task-schedule-row {
+  grid-column: auto;
+}
+
+.progress-schedule-two-col > .new-task-schedule-row:last-child {
   border-left: 1px solid var(--color-border-soft);
-  height: 40px;
+  padding-left: 20px;
 }
 
-.plan-ref-inline-hours {
-  height: auto;
-  padding: 0 0 0 10px;
+/* 两栏内日期输入改为 flex，日历图标紧跟值右侧，不撑满整列 */
+.progress-schedule-two-col .date-input-wrap {
+  display: flex;
+  align-items: stretch;
 }
 
-.plan-ref-label {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+.progress-schedule-two-col .date-input-wrap input[type='text'] {
+  flex: 1 1 auto;
+  max-width: 164px;
 }
 
-.plan-ref-input {
-  width: 108px;
-  height: 28px;
-  padding: 0 6px;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-  font: inherit;
-  font-size: 12px;
-  outline: 0;
+.progress-schedule-two-col .date-input-wrap > button {
+  flex: 0 0 34px;
 }
 
-.plan-ref-input:focus {
-  border-color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-alt));
-}
-
-/* 工时行内嵌预计值 */
-.progress-lite-hours-row-with-ref {
-  grid-template-columns: minmax(0, 90px) auto auto;
-}
-
-.plan-ref-input-hours {
-  width: 52px;
-}
 
 .progress-lite-hours-unit {
   color: var(--color-editorial-text-muted);

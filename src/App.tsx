@@ -8211,9 +8211,7 @@ function TaskProgressModal({
   // 多段工时：用户在本次进展中预暂存的额外时间段（尚未提交到 DB）
   const [pendingExtraSegments, setPendingExtraSegments] = useState<TimeEntry[]>([])
   const [isAcceptanceMode, setIsAcceptanceMode] = useState(initialAcceptanceFlag)
-  // 验收面板：预计值参考编辑
-  const [planStartDraft, setPlanStartDraft] = useState(task.date ? datePart(task.date) : '')
-  const [planEndDraft, setPlanEndDraft] = useState(task.estimatedDate ? datePart(task.estimatedDate) : '')
+  // 验收面板：预计工时草稿（日期字段直接用 PlanDateTimeField onChange 保存）
   const [planHoursDraft, setPlanHoursDraft] = useState(String(task.estimatedHours > 0 ? task.estimatedHours : ''))
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
@@ -9135,81 +9133,98 @@ function TaskProgressModal({
           </button>
         </div>
       </div>
-      <div className={`new-task-schedule-row progress-lite-schedule-row ${lockSchedule ? 'is-uncounted' : ''}`} aria-disabled={lockSchedule}>
-        <PlanDateTimeField
-          label="开始时间"
-          value={progressStartValue}
-          onChange={updateProgressStart}
-          isActive={scheduleDerivedField !== 'start'}
-          readOnly={scheduleDerivedField === 'start'}
-          control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="切换开始时间" onClick={() => toggleProgressScheduleField('start')} />}
-          pickerId="progress-start"
-          activePickerId={activeDatePickerId}
-          onActivePickerChange={setActiveDatePickerId}
-          afterInput={isAcceptanceMode && !isWaitingMode ? (
-            <div className="plan-ref-inline">
-              <span className="plan-ref-label">预计</span>
-              <input className="plan-ref-input" type="date" value={planStartDraft}
-                onChange={(e) => setPlanStartDraft(e.target.value)}
-                onBlur={() => { if (planStartDraft && planStartDraft !== datePart(task.date)) onUpdateTask(task.id, { date: planStartDraft }) }}
-              />
+      <div className={`progress-schedule-wrap${isAcceptanceMode && !isWaitingMode ? ' progress-schedule-two-col' : ''}`}>
+        <div className={`new-task-schedule-row progress-lite-schedule-row ${lockSchedule ? 'is-uncounted' : ''}`} aria-disabled={lockSchedule}>
+          <PlanDateTimeField
+            label="开始时间"
+            value={progressStartValue}
+            onChange={updateProgressStart}
+            isActive={scheduleDerivedField !== 'start'}
+            readOnly={scheduleDerivedField === 'start'}
+            control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="切换开始时间" onClick={() => toggleProgressScheduleField('start')} />}
+            pickerId="progress-start"
+            activePickerId={activeDatePickerId}
+            onActivePickerChange={setActiveDatePickerId}
+          />
+          <div className="field progress-lite-hours-field">
+            <span className="new-task-inline-label">
+              <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换本段工时" onClick={() => toggleProgressScheduleField('hours')} />
+              本段工时
+            </span>
+            <div className="new-task-hours-row progress-lite-hours-row">
+              {scheduleDerivedField === 'hours' ? (
+                <output className="new-task-hours-input new-task-hours-output" aria-label="本段工时">
+                  {formatDuration(segmentMinutes)}
+                </output>
+              ) : (
+                <input
+                  className="new-task-hours-input"
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={formatHoursInputValue(segmentMinutes)}
+                  onChange={(event) => updateProgressMinutes(Number(event.target.value || 0) * 60)}
+                  aria-label="本段工时"
+                />
+              )}
+              <span className="progress-lite-hours-unit">{scheduleDerivedField === 'hours' ? '自动计算' : '小时'}</span>
             </div>
-          ) : undefined}
-        />
-        <div className="field progress-lite-hours-field">
-          <span className="new-task-inline-label">
-            <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="切换本段工时" onClick={() => toggleProgressScheduleField('hours')} />
-            本段工时
-          </span>
-          <div className={`new-task-hours-row progress-lite-hours-row${isAcceptanceMode && !isWaitingMode ? ' progress-lite-hours-row-with-ref' : ''}`}>
-            {scheduleDerivedField === 'hours' ? (
-              <output className="new-task-hours-input new-task-hours-output" aria-label="本段工时">
-                {formatDuration(segmentMinutes)}
-              </output>
-            ) : (
-              <input
-                className="new-task-hours-input"
-                type="number"
-                min="0.5"
-                step="0.5"
-                value={formatHoursInputValue(segmentMinutes)}
-                onChange={(event) => updateProgressMinutes(Number(event.target.value || 0) * 60)}
-                aria-label="本段工时"
-              />
-            )}
-            <span className="progress-lite-hours-unit">{scheduleDerivedField === 'hours' ? '自动计算' : '小时'}</span>
-            {isAcceptanceMode && !isWaitingMode && (
-              <div className="plan-ref-inline plan-ref-inline-hours">
-                <span className="plan-ref-label">预计</span>
-                <input className="plan-ref-input plan-ref-input-hours" type="number" min="0" step="0.5" value={planHoursDraft}
+          </div>
+          <PlanDateTimeField
+            label="结束时间"
+            value={progressEndValue}
+            onChange={updateProgressEnd}
+            isActive={scheduleDerivedField !== 'end'}
+            readOnly={scheduleDerivedField === 'end'}
+            control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="切换结束时间" onClick={() => toggleProgressScheduleField('end')} />}
+            pickerId="progress-end"
+            activePickerId={activeDatePickerId}
+            onActivePickerChange={setActiveDatePickerId}
+          />
+        </div>
+        {isAcceptanceMode && !isWaitingMode && (
+          <div className="new-task-schedule-row progress-lite-schedule-row progress-lite-schedule-row-plan">
+            <PlanDateTimeField
+              label="开始时间"
+              value={task.date ?? ''}
+              onChange={(v) => onUpdateTask(task.id, { date: v })}
+              isActive={scheduleDerivedField !== 'start'}
+              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'start'} label="" onClick={() => {}} />}
+              pickerId="plan-start"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
+            />
+            <div className="field progress-lite-hours-field">
+              <span className="new-task-inline-label">
+                <ScheduleAnchorSwitch active={scheduleDerivedField !== 'hours'} label="" onClick={() => {}} />
+                本段工时
+              </span>
+              <div className="new-task-hours-row progress-lite-hours-row">
+                <input
+                  className="new-task-hours-input"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={planHoursDraft}
                   onChange={(e) => setPlanHoursDraft(e.target.value)}
                   onBlur={() => { const h = parseFloat(planHoursDraft); if (!isNaN(h) && h !== task.estimatedHours) onUpdateTask(task.id, { estimatedHours: h }) }}
+                  aria-label="预计工时"
                 />
-                <span className="plan-ref-label">h</span>
+                <span className="progress-lite-hours-unit">小时</span>
               </div>
-            )}
-          </div>
-        </div>
-        <PlanDateTimeField
-          label="结束时间"
-          value={progressEndValue}
-          onChange={updateProgressEnd}
-          isActive={scheduleDerivedField !== 'end'}
-          readOnly={scheduleDerivedField === 'end'}
-          control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="切换结束时间" onClick={() => toggleProgressScheduleField('end')} />}
-          pickerId="progress-end"
-          activePickerId={activeDatePickerId}
-          onActivePickerChange={setActiveDatePickerId}
-          afterInput={isAcceptanceMode && !isWaitingMode ? (
-            <div className="plan-ref-inline">
-              <span className="plan-ref-label">预计</span>
-              <input className="plan-ref-input" type="date" value={planEndDraft}
-                onChange={(e) => setPlanEndDraft(e.target.value)}
-                onBlur={() => { if (planEndDraft && planEndDraft !== datePart(task.estimatedDate)) onUpdateTask(task.id, { estimatedDate: planEndDraft }) }}
-              />
             </div>
-          ) : undefined}
-        />
+            <PlanDateTimeField
+              label="结束时间"
+              value={task.estimatedDate ?? ''}
+              onChange={(v) => onUpdateTask(task.id, { estimatedDate: v })}
+              isActive={scheduleDerivedField !== 'end'}
+              control={<ScheduleAnchorSwitch active={scheduleDerivedField !== 'end'} label="" onClick={() => {}} />}
+              pickerId="plan-end"
+              activePickerId={activeDatePickerId}
+              onActivePickerChange={setActiveDatePickerId}
+            />
+          </div>
+        )}
       </div>
       {/* 多段工时列表：已暂存段 + 当前正在填写的段（合并排序显示） */}
       {pendingExtraSegments.length > 0 && (() => {
