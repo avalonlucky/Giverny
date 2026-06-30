@@ -9666,27 +9666,23 @@ button.file-chip:focus-visible {
   justify-content: start;
 }
 
-/* 验收模式预计值参考行 */
-.progress-field-ref-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0;
+/* 验收模式：日期字段内嵌预计值（3列网格：input 1fr | 预计ref auto | calendar 34px） */
+.progress-lite-time-formula .progress-lite-schedule-row .date-input-wrap-with-ref {
+  grid-template-columns: minmax(0, 1fr) auto 34px;
 }
 
-.progress-field-ref-wrap > .field,
-.progress-field-ref-wrap > .date-field {
-  flex: 1;
-  min-width: 0;
-}
-
-.plan-ref-side {
+.plan-ref-inline {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex: 0 0 auto;
-  padding: 0 0 0 12px;
+  padding: 0 8px 0 10px;
   border-left: 1px solid var(--color-border-soft);
-  margin-left: 8px;
+  height: 40px;
+}
+
+.plan-ref-inline-hours {
+  height: auto;
+  padding: 0 0 0 10px;
 }
 
 .plan-ref-label {
@@ -9697,7 +9693,7 @@ button.file-chip:focus-visible {
 
 .plan-ref-input {
   width: 108px;
-  height: 32px;
+  height: 28px;
   padding: 0 6px;
   border: 1px solid var(--color-border);
   border-radius: 5px;
@@ -9711,6 +9707,11 @@ button.file-chip:focus-visible {
 .plan-ref-input:focus {
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-alt));
+}
+
+/* 工时行内嵌预计值 */
+.progress-lite-hours-row-with-ref {
+  grid-template-columns: minmax(0, 90px) auto auto;
 }
 
 .plan-ref-input-hours {
