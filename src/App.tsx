@@ -1851,6 +1851,36 @@ const laborTaxBrackets = [
 
 type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
 
+function fillTimeDraftFromDuration(draft: TimeEntryDraft, minutes: number) {
+  const safeMinutes = Math.max(1, Math.round(minutes))
+  const startVal = normalizeClockInput(draft.start)
+  const endVal = normalizeClockInput(draft.end)
+  if (!endVal && startVal && draft.date) {
+    const computed = addMinutesToPlanDateTime(`${draft.date}T${startVal}`, safeMinutes)
+    return {
+      ...draft,
+      start: startVal,
+      endDate: computed.slice(0, 10),
+      end: computed.slice(11, 16),
+    }
+  }
+  if (!startVal && endVal && (draft.endDate || draft.date)) {
+    const computed = addMinutesToPlanDateTime(`${draft.endDate || draft.date}T${endVal}`, -safeMinutes)
+    return {
+      ...draft,
+      date: computed.slice(0, 10),
+      start: computed.slice(11, 16),
+      endDate: draft.endDate || draft.date,
+      end: endVal,
+    }
+  }
+  return {
+    ...draft,
+    start: startVal || draft.start,
+    end: endVal || draft.end,
+  }
+}
+
 type ProgressRecordMode = 'progress' | 'waiting'
 
 type ProgressModalTarget = {
@@ -8079,22 +8109,13 @@ function TaskProgressModal({
       const resolvedAnchor: ScheduleAnchor = (['start', 'hours', 'end'] as ScheduleAnchor[]).includes(cachedDraft.scheduleAnchor)
         ? cachedDraft.scheduleAnchor
         : 'hours'
-      // 若缓存的派生字段值为空，在初始化时补全，避免打开弹窗时派生字段显示空白
-      const timeDraftWithDerived = { ...cachedDraft.timeDraft }
-      const startVal = timeDraftWithDerived.start?.trim()
-      const endVal = timeDraftWithDerived.end?.trim()
-      if (resolvedAnchor === 'end' && !endVal && startVal && timeDraftWithDerived.date) {
-        const computed = addMinutesToPlanDateTime(`${timeDraftWithDerived.date}T${startVal}`, resolvedMinutes)
-        timeDraftWithDerived.end = computed.slice(11, 16)
-        timeDraftWithDerived.endDate = computed.slice(0, 10)
-      } else if (resolvedAnchor === 'start' && !startVal && endVal && timeDraftWithDerived.endDate) {
-        const computed = addMinutesToPlanDateTime(`${timeDraftWithDerived.endDate}T${endVal}`, -resolvedMinutes)
-        timeDraftWithDerived.start = computed.slice(11, 16)
-        timeDraftWithDerived.date = computed.slice(0, 10)
-      }
+      // 若缓存里某一端时间为空，在初始化时用「另一端 + 本段工时」补全，避免打开弹窗时显示空白。
+      const timeDraftWithDerived = fillTimeDraftFromDuration(cachedDraft.timeDraft, resolvedMinutes)
+      const waitingDraftWithDerived = fillTimeDraftFromDuration(cachedDraft.waitingDraft, resolvedMinutes)
       return {
         ...cachedDraft,
         timeDraft: timeDraftWithDerived,
+        waitingDraft: waitingDraftWithDerived,
         segmentMinutes: resolvedMinutes,
         scheduleAnchor: resolvedAnchor,
       }
@@ -8239,21 +8260,9 @@ function TaskProgressModal({
   useEffect(() => {
     if (initRepairRef.current) return
     initRepairRef.current = true
-    const anchor = initialProgressDraft.scheduleAnchor
     const mins = initialProgressDraft.segmentMinutes
-    setTimeDraft((current) => {
-      const startVal = current.start?.trim()
-      const endVal = current.end?.trim()
-      if (anchor === 'end' && !endVal && startVal && current.date) {
-        const computed = addMinutesToPlanDateTime(`${current.date}T${startVal}`, mins)
-        return { ...current, end: computed.slice(11, 16), endDate: computed.slice(0, 10) }
-      }
-      if (anchor === 'start' && !startVal && endVal && current.endDate) {
-        const computed = addMinutesToPlanDateTime(`${current.endDate}T${endVal}`, -mins)
-        return { ...current, start: computed.slice(11, 16), date: computed.slice(0, 10) }
-      }
-      return current
-    })
+    setTimeDraft((current) => fillTimeDraftFromDuration(current, mins))
+    setWaitingDraft((current) => fillTimeDraftFromDuration(current, mins))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -8823,6 +8832,38 @@ function TaskProgressModal({
     ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}`
     : ''
 
+  useEffect(() => {
+    if (lockSchedule || segmentMinutes <= 0) {
+      return
+    }
+    const startVal = normalizeClockInput(activeDraft.start)
+    const endVal = normalizeClockInput(activeDraft.end)
+    if (!endVal && startVal && activeDraft.date) {
+      const computed = addMinutesToPlanDateTime(`${activeDraft.date}T${startVal}`, segmentMinutes)
+      updateActiveDraft((current) => {
+        const currentStart = normalizeClockInput(current.start)
+        const currentEnd = normalizeClockInput(current.end)
+        if (currentEnd || currentStart !== startVal || current.date !== activeDraft.date) {
+          return current
+        }
+        return { ...current, start: startVal, endDate: computed.slice(0, 10), end: computed.slice(11, 16) }
+      })
+      return
+    }
+    if (!startVal && endVal && (activeDraft.endDate || activeDraft.date)) {
+      const computed = addMinutesToPlanDateTime(`${activeDraft.endDate || activeDraft.date}T${endVal}`, -segmentMinutes)
+      updateActiveDraft((current) => {
+        const currentStart = normalizeClockInput(current.start)
+        const currentEnd = normalizeClockInput(current.end)
+        if (currentStart || currentEnd !== endVal || (current.endDate || current.date) !== (activeDraft.endDate || activeDraft.date)) {
+          return current
+        }
+        return { ...current, date: computed.slice(0, 10), start: computed.slice(11, 16), endDate: current.endDate || current.date, end: endVal }
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDraft.date, activeDraft.end, activeDraft.endDate, activeDraft.start, lockSchedule, segmentMinutes])
+
   const writeProgressStart = (value: string) => {
     updateActiveDraft((current) => ({
       ...current,
@@ -8897,16 +8938,28 @@ function TaskProgressModal({
       writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -nextMinutes))
       return
     }
+    if (scheduleDerivedField === 'start' && progressStartValue) {
+      writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, nextMinutes))
+      return
+    }
     if (scheduleDerivedField === 'end' && progressStartValue) {
       writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, nextMinutes))
+      return
+    }
+    if (scheduleDerivedField === 'end' && progressEndValue) {
+      writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -nextMinutes))
     }
   }
 
   const applyProgressDerivedField = (field: ScheduleAnchor) => {
     if (field === 'start' && progressEndValue) {
       writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -segmentMinutes))
+    } else if (field === 'start' && progressStartValue) {
+      writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, segmentMinutes))
     } else if (field === 'end' && progressStartValue) {
       writeProgressEnd(addMinutesToPlanDateTime(progressStartValue, segmentMinutes))
+    } else if (field === 'end' && progressEndValue) {
+      writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -segmentMinutes))
     } else if (field === 'hours' && draftEntryMinutes > 0) {
       setSegmentMinutes(draftEntryMinutes)
     }

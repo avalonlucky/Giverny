@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-30 · v0.27.5（时间字段空白终极修复）
+
+- 提取 `fillTimeDraftFromDuration` 工具函数，统一处理「只有一端时间时自动补全另一端」
+- 新增 reactive useEffect 监听 activeDraft 变化，任何时候一端为空都即时补全
+- 修复 `updateProgressMinutes` 和 `applyProgressDerivedField` 的多处边界情况处理
+- 等待模式草稿同样做补全修复
+
 ## 2026-06-30 · v0.27.4（修复缓存草稿派生字段空白问题）
 
 - 修复：从缓存恢复草稿后，结束时间（或开始时间）显示为空占位符的问题
