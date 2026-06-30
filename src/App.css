@@ -5425,6 +5425,94 @@ button.topbar-create-button:hover {
   background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-strong));
 }
 
+/* 多段工时：已暂存列表 */
+.progress-extra-segments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-extra-segment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.progress-extra-segment-label {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  min-width: 32px;
+}
+
+.progress-extra-segment-time {
+  color: var(--color-text);
+  font-weight: 600;
+  flex: 1;
+}
+
+.progress-extra-segment-duration {
+  color: var(--color-primary);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.progress-extra-segment-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.progress-extra-segment-remove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-status-danger) 12%, transparent);
+  color: var(--color-status-danger);
+}
+
+.progress-extra-segment-total {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+/* "再加一段"按钮 */
+.progress-add-segment-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1.5px dashed var(--color-primary);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.progress-add-segment-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
 .progress-lite-body.waiting-mode {
   gap: 30px;
 }

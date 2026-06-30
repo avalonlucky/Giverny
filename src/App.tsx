@@ -8118,6 +8118,8 @@ function TaskProgressModal({
   const [previewAttachment, setPreviewAttachment] = useState<PendingProgressAttachment | null>(null)
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const dragDepthRef = useRef(0)
+  // 多段工时：用户在本次进展中预暂存的额外时间段（尚未提交到 DB）
+  const [pendingExtraSegments, setPendingExtraSegments] = useState<TimeEntry[]>([])
   const [isAcceptanceMode, setIsAcceptanceMode] = useState(initialAcceptanceFlag)
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
@@ -8159,7 +8161,7 @@ function TaskProgressModal({
   const draftEntryMinutes = minutesForTimeEntry(draftEntry)
   const hasDraftTimeEntry = activeDraft.start.trim() !== '' && activeDraft.end.trim() !== '' && draftEntryMinutes > 0
   const isEditingEntry = Boolean(editEntryId && editingEntry)
-  const comparableEntries = [...draftTimeEntries, ...draftWaitingEntries].filter((entry) => entry.id !== editEntryId)
+  const comparableEntries = [...draftTimeEntries, ...draftWaitingEntries, ...pendingExtraSegments].filter((entry) => entry.id !== editEntryId)
   const draftConflict = activeDraft.start.trim() && activeDraft.end.trim() && draftEntryMinutes > 0
     ? comparableEntries.find((entry) => timeEntriesOverlap(draftEntry, entry))
     : undefined
@@ -8616,13 +8618,15 @@ function TaskProgressModal({
         setUploadErrors(uploadFailures)
         return
       }
-      const nextTimeEntries = !isWaitingMode && nextEntry
-        ? isEditingEntry ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftTimeEntries, nextEntry]
+      const nextTimeEntries = !isWaitingMode
+        ? isEditingEntry && nextEntry
+          ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
+          : [...draftTimeEntries, ...pendingExtraSegments, ...(nextEntry ? [nextEntry] : [])]
         : draftTimeEntries
       const nextWaitingEntries = isWaitingMode && nextEntry
         ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]
         : draftWaitingEntries
-      if (!isWaitingMode && (timeDirty || nextEntry)) {
+      if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0)) {
         const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
         onUpdateTask(task.id, {
           timeEntries: nextTimeEntries,
@@ -8876,6 +8880,29 @@ function TaskProgressModal({
     setTimeEntryError('')
   }
 
+  // 将当前输入段暂存，并将结束时间作为下一段的开始时间（方便连续填写）
+  const stashCurrentSegment = () => {
+    const entry = buildDraftTimeEntry()
+    if (!entry || minutesForTimeEntry(entry) <= 0) return
+    const stashedEntry = { ...entry, id: crypto.randomUUID() }
+    setPendingExtraSegments((current) => [...current, stashedEntry])
+    // 将当前结束时间作为下一段开始时间，清空结束时间
+    const prevEnd = activeDraft.end
+    const prevEndDate = activeDraft.endDate || activeDraft.date
+    updateActiveDraft((current) => ({
+      ...current,
+      date: prevEndDate || current.date,
+      start: prevEnd,
+      end: '',
+      endDate: prevEndDate || current.date,
+    }))
+    setScheduleDerivedField('end')
+    setSegmentMinutes(0)
+    setTimeEntryError('')
+  }
+
+  const totalPendingMinutes = pendingExtraSegments.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+
   const timeFields = (
     <section className="progress-lite-time-formula">
       <div className="progress-lite-time-heading">
@@ -8970,6 +8997,31 @@ function TaskProgressModal({
           onActivePickerChange={setActiveDatePickerId}
         />
       </div>
+      {/* 已暂存的多段工时 */}
+      {pendingExtraSegments.length > 0 && (
+        <ul className="progress-extra-segments">
+          {pendingExtraSegments.map((seg, i) => (
+            <li key={seg.id} className="progress-extra-segment-row">
+              <span className="progress-extra-segment-label">第 {i + 1} 段</span>
+              <span className="progress-extra-segment-time">
+                {seg.start} – {seg.end}
+              </span>
+              <span className="progress-extra-segment-duration">{formatDuration(minutesForTimeEntry(seg))}</span>
+              <button
+                type="button"
+                className="progress-extra-segment-remove"
+                aria-label="移除此段"
+                onClick={() => setPendingExtraSegments((current) => current.filter((_, j) => j !== i))}
+              >
+                <X size={12} />
+              </button>
+            </li>
+          ))}
+          <li className="progress-extra-segment-total">
+            共 {pendingExtraSegments.length + (hasDraftTimeEntry ? 1 : 0)} 段 · 合计 {formatDuration(totalPendingMinutes + (hasDraftTimeEntry ? draftEntryMinutes : 0))}
+          </li>
+        </ul>
+      )}
       <p className={`progress-lite-duration ${!timeCounts || hasDraftTimeEntry ? '' : 'invalid'}`} role="status">
         {!timeCounts
           ? isAcceptanceMode
@@ -8978,9 +9030,18 @@ function TaskProgressModal({
           : hasDraftTimeEntry
             ? isAcceptanceMode && !hasTouchedSchedule
               ? '如本次没有新增工时，可直接验收；调整时间后才会计入本次工时与结算'
-              : `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '，不计入结算' : '，保存后自动累计到实际工时与结算'}`
-            : '结束时间需晚于开始时间'}
+              : `${isWaitingMode ? '等待' : '本段计时'} ${formatDuration(draftEntryMinutes)}${isWaitingMode ? '' : pendingExtraSegments.length > 0 ? '；点击"再加一段"继续' : '，保存后自动累计到实际工时与结算'}`
+            : pendingExtraSegments.length > 0 ? '填写下一段的结束时间，或直接保存已暂存的时间段' : '结束时间需晚于开始时间'}
       </p>
+      {!isWaitingMode && !isAcceptanceMode && !isEditingEntry && timeCounts && hasDraftTimeEntry && !draftConflict && (
+        <button
+          type="button"
+          className="progress-add-segment-btn"
+          onClick={stashCurrentSegment}
+        >
+          <span>＋ 再加一段</span>
+        </button>
+      )}
       {(timeEntryError || draftConflict) && (
         <p className="progress-lite-entry-error" role="alert">
           <span>{timeEntryError || (draftConflict ? `这个时间段和 ${formatEntryDateTimeRange(task, draftConflict)} 已有记录重叠，请改到前后相邻的空档。` : '')}</span>
@@ -9596,7 +9657,7 @@ function TaskProgressModal({
             {isSaving ? '保存中…' : isAcceptanceRevisionMode ? '保存修改' : '确认验收通过'}
           </button>
         ) : (
-          <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (!hasDraftTimeEntry && !canSaveZeroTimeProgress)} onClick={() => void saveProgress()}>
+          <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (!hasDraftTimeEntry && !canSaveZeroTimeProgress && pendingExtraSegments.length === 0)} onClick={() => void saveProgress()}>
             {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
           </button>
         )}
