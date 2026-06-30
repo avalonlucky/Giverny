@@ -9696,6 +9696,57 @@ button.file-chip:focus-visible {
   padding-left: 20px;
 }
 
+.progress-lite-schedule-row .field-label-row,
+.progress-lite-schedule-row .new-task-inline-label {
+  position: relative;
+  z-index: 2;
+}
+
+.progress-lite-schedule-row .schedule-anchor-switch {
+  position: relative;
+  z-index: 3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.progress-lite-schedule-row-plan {
+  color: var(--color-text-muted);
+}
+
+.progress-lite-time-formula .progress-lite-schedule-row-plan .date-field > .field-label-row,
+.progress-lite-time-formula .progress-lite-schedule-row-plan > .field > span {
+  color: var(--color-text-muted);
+}
+
+.progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap input[type='text'],
+.progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap > button,
+.progress-lite-time-formula .progress-lite-schedule-row-plan .new-task-hours-input {
+  color: var(--color-text-muted);
+}
+
+.progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap input[type='text'][readonly],
+.progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap > button:disabled,
+.progress-lite-time-formula .progress-lite-schedule-row-plan .new-task-hours-input[readonly] {
+  color: color-mix(in srgb, var(--color-text-muted) 62%, transparent);
+}
+
+.progress-lite-schedule-row-plan .schedule-anchor-switch.active {
+  background: color-mix(in srgb, var(--color-text-muted) 13%, var(--color-surface-alt));
+}
+
+.progress-lite-schedule-row-plan .schedule-anchor-switch.active i {
+  background: var(--color-text-muted);
+}
+
+.progress-lite-schedule-row-plan .schedule-anchor-switch:not(.active) i {
+  border-color: var(--color-border);
+}
+
+.progress-lite-schedule-row-plan .schedule-anchor-switch:hover i,
+.progress-lite-schedule-row-plan .schedule-anchor-switch:focus-visible i {
+  border-color: var(--color-text-secondary);
+}
+
 /* 两栏内日期输入改为 flex，日历图标紧跟值右侧，不撑满整列 */
 .progress-schedule-two-col .date-input-wrap {
   display: flex;
@@ -9711,22 +9762,6 @@ button.file-chip:focus-visible {
   flex: 0 0 34px;
 }
 
-
-/* 右栏预计工时：output显示格式化值，input用于编辑（悬浮显示） */
-.plan-hours-edit {
-  width: 52px;
-  max-width: 52px;
-  font-size: 13px !important;
-  opacity: 0;
-  transition: opacity 0.15s;
-  pointer-events: none;
-}
-
-.progress-lite-hours-row:hover .plan-hours-edit,
-.progress-lite-hours-row:focus-within .plan-hours-edit {
-  opacity: 1;
-  pointer-events: auto;
-}
 
 .progress-lite-hours-unit {
   color: var(--color-editorial-text-muted);

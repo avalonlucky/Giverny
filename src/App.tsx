@@ -1241,7 +1241,7 @@ type AcceptancePayload = {
   timeEntries: TimeEntry[]
   waitingEntries?: WaitingEntry[]
   acceptanceFiles?: string[]
-  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'progress'>>
+  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'estimatedHours' | 'progress'>>
 }
 
 type TaskUpdateChanges = Partial<Task> & {
@@ -2476,7 +2476,13 @@ function ScheduleAnchorSwitch({
       aria-label={label}
       aria-pressed={active}
       title={label}
-      onClick={onClick}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onClick()
+      }}
     >
       <i />
     </button>
@@ -8211,8 +8217,26 @@ function TaskProgressModal({
   // 多段工时：用户在本次进展中预暂存的额外时间段（尚未提交到 DB）
   const [pendingExtraSegments, setPendingExtraSegments] = useState<TimeEntry[]>([])
   const [isAcceptanceMode, setIsAcceptanceMode] = useState(initialAcceptanceFlag)
-  // 验收面板：预计工时草稿（日期字段直接用 PlanDateTimeField onChange 保存）
-  const [planHoursDraft, setPlanHoursDraft] = useState(String(task.estimatedHours > 0 ? task.estimatedHours : ''))
+  const initialPlanStartValue = toDateTimeInputValue(task.date || isoDateTime())
+  const fallbackPlanEndValue = addMinutesToPlanDateTime(
+    initialPlanStartValue || isoDateTime(),
+    Math.max(1, Math.round((task.estimatedHours > 0 ? task.estimatedHours : 1) * 60)),
+  )
+  const initialPlanEndValue = toDateTimeInputValue(task.estimatedDate || fallbackPlanEndValue)
+  const initialPlanDuration = exactDurationMinutesBetween(initialPlanStartValue, initialPlanEndValue)
+  const initialPlanMinutes = Math.max(
+    1,
+    Math.round(task.estimatedHours > 0 ? task.estimatedHours * 60 : initialPlanDuration > 0 ? initialPlanDuration : 60),
+  )
+  const [planReferenceDraft, setPlanReferenceDraft] = useState<TimeEntryDraft>(() => ({
+    date: datePart(initialPlanStartValue || isoDateTime()),
+    start: initialPlanStartValue ? initialPlanStartValue.slice(11, 16) : '09:00',
+    endDate: datePart(initialPlanEndValue || fallbackPlanEndValue),
+    end: (initialPlanEndValue || fallbackPlanEndValue).slice(11, 16),
+    note: '',
+  }))
+  const [planReferenceMinutes, setPlanReferenceMinutes] = useState(initialPlanMinutes)
+  const [planReferenceDerivedField, setPlanReferenceDerivedField] = useState<ScheduleAnchor>('hours')
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
   const [countAcceptanceTime, setCountAcceptanceTime] = useState(true)
@@ -8721,6 +8745,8 @@ function TaskProgressModal({
         setUploadErrors(uploadFailures)
         return
       }
+      const planScheduleChanges = buildPlanScheduleChanges()
+      const hasPlanScheduleChanges = Object.keys(planScheduleChanges).length > 0
       const nextTimeEntries = !isWaitingMode
         ? isEditingEntry && nextEntry
           ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
@@ -8737,6 +8763,7 @@ function TaskProgressModal({
       if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0)) {
         const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
         onUpdateTask(task.id, {
+          ...planScheduleChanges,
           timeEntries: nextTimeEntries,
           actualHours: nextActualHours,
           ...(shouldAllowAcceptedTimeEdit ? { allowAcceptedTimeEdit: true } : {}),
@@ -8752,6 +8779,8 @@ function TaskProgressModal({
             allowAcceptanceRollback: true,
           } : {}),
         })
+      } else if (hasPlanScheduleChanges) {
+        onUpdateTask(task.id, planScheduleChanges)
       }
       if (isWaitingMode && (waitingDirty || nextEntry)) {
         onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
@@ -8820,6 +8849,10 @@ function TaskProgressModal({
       const nextActualHours = nextTimeEntries.length > 0
         ? Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
         : task.actualHours
+      const planScheduleChanges = buildPlanScheduleChanges()
+      const taskForAcceptance = Object.keys(planScheduleChanges).length > 0
+        ? { ...task, ...planScheduleChanges }
+        : task
       // 记录本次进展动态
       const body = note.trim() || nextEntry?.note?.trim() || ''
       if (body || finalizedUploadedNames.length > 0) {
@@ -8831,7 +8864,7 @@ function TaskProgressModal({
         })
       }
       // 触发验收确认（复用现有 handleConfirmTaskAcceptance 逻辑）
-      onConfirmAcceptance(task, {
+      onConfirmAcceptance(taskForAcceptance, {
         actualHours: nextActualHours,
         acceptanceNote: note.trim() || task.acceptanceNote || '',
         feedbackRating,
@@ -8840,6 +8873,7 @@ function TaskProgressModal({
         timeEntries: nextTimeEntries,
         waitingEntries: acceptanceWaitingEntries,
         acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...existingEntryAttachments.map((file) => file.name), ...finalizedUploadedNames])),
+        taskChanges: planScheduleChanges,
       })
       clearDraftCache(progressDraftKey)
       progressAttachmentDraftCache.delete(progressDraftKey)
@@ -8890,6 +8924,136 @@ function TaskProgressModal({
   const progressEndValue = activeDraft.endDate && normalizeClockInput(activeDraft.end)
     ? `${activeDraft.endDate}T${normalizeClockInput(activeDraft.end)}`
     : ''
+  const planReferenceStartValue = planReferenceDraft.date && normalizeClockInput(planReferenceDraft.start)
+    ? `${planReferenceDraft.date}T${normalizeClockInput(planReferenceDraft.start)}`
+    : ''
+  const planReferenceEndValue = planReferenceDraft.endDate && normalizeClockInput(planReferenceDraft.end)
+    ? `${planReferenceDraft.endDate}T${normalizeClockInput(planReferenceDraft.end)}`
+    : ''
+
+  const writePlanReferenceStart = (value: string) => {
+    setPlanReferenceDraft((current) => ({
+      ...current,
+      date: value ? datePart(value) : '',
+      start: value ? value.slice(11, 16) : '',
+    }))
+  }
+
+  const writePlanReferenceEnd = (value: string) => {
+    setPlanReferenceDraft((current) => ({
+      ...current,
+      endDate: value ? datePart(value) : '',
+      end: value ? value.slice(11, 16) : '',
+    }))
+  }
+
+  const updatePlanReferenceStart = (value: string) => {
+    const previousStartDate = datePart(planReferenceStartValue)
+    const nextStartDate = datePart(value)
+    const dateChanged = Boolean(value && previousStartDate && nextStartDate && previousStartDate !== nextStartDate)
+    writePlanReferenceStart(value)
+    if (!value) {
+      return
+    }
+    if (dateChanged && planReferenceEndValue) {
+      writePlanReferenceEnd(withDatePart(planReferenceEndValue, nextStartDate))
+      return
+    }
+    if (planReferenceDerivedField === 'hours' && planReferenceEndValue) {
+      const nextMinutes = exactDurationMinutesBetween(value, planReferenceEndValue)
+      if (nextMinutes > 0) {
+        setPlanReferenceMinutes(nextMinutes)
+      }
+      return
+    }
+    if (planReferenceDerivedField === 'end') {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(value, planReferenceMinutes))
+    }
+  }
+
+  const updatePlanReferenceEnd = (value: string) => {
+    const previousEndDate = datePart(planReferenceEndValue)
+    const nextEndDate = datePart(value)
+    const dateChanged = Boolean(value && previousEndDate && nextEndDate && previousEndDate !== nextEndDate)
+    writePlanReferenceEnd(value)
+    if (!value) {
+      return
+    }
+    if (dateChanged && planReferenceStartValue) {
+      writePlanReferenceStart(withDatePart(planReferenceStartValue, nextEndDate))
+      return
+    }
+    if (planReferenceDerivedField === 'hours' && planReferenceStartValue) {
+      const nextMinutes = exactDurationMinutesBetween(planReferenceStartValue, value)
+      if (nextMinutes > 0) {
+        setPlanReferenceMinutes(nextMinutes)
+      }
+      return
+    }
+    if (planReferenceDerivedField === 'start') {
+      writePlanReferenceStart(addMinutesToPlanDateTime(value, -planReferenceMinutes))
+    }
+  }
+
+  const updatePlanReferenceMinutes = (value: number) => {
+    const nextMinutes = snapDurationMinutes(value)
+    setPlanReferenceMinutes(nextMinutes)
+    if (planReferenceDerivedField === 'start' && planReferenceEndValue) {
+      writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -nextMinutes))
+      return
+    }
+    if (planReferenceDerivedField === 'start' && planReferenceStartValue) {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, nextMinutes))
+      return
+    }
+    if (planReferenceDerivedField === 'end' && planReferenceStartValue) {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, nextMinutes))
+      return
+    }
+    if (planReferenceDerivedField === 'end' && planReferenceEndValue) {
+      writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -nextMinutes))
+    }
+  }
+
+  const applyPlanReferenceDerivedField = (field: ScheduleAnchor) => {
+    const currentReferenceMinutes = exactDurationMinutesBetween(planReferenceStartValue, planReferenceEndValue)
+    if (field === 'start' && planReferenceEndValue) {
+      writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -planReferenceMinutes))
+    } else if (field === 'start' && planReferenceStartValue) {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, planReferenceMinutes))
+    } else if (field === 'end' && planReferenceStartValue) {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, planReferenceMinutes))
+    } else if (field === 'end' && planReferenceEndValue) {
+      writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -planReferenceMinutes))
+    } else if (field === 'hours' && currentReferenceMinutes > 0) {
+      setPlanReferenceMinutes(currentReferenceMinutes)
+    }
+  }
+
+  const togglePlanReferenceScheduleField = (field: ScheduleAnchor) => {
+    const nextField = planReferenceDerivedField !== field ? field : field === 'start' ? 'end' : 'start'
+    setPlanReferenceDerivedField(nextField)
+    applyPlanReferenceDerivedField(nextField)
+    setActiveDatePickerId(null)
+  }
+
+  const buildPlanScheduleChanges = (): TaskUpdateChanges => {
+    if (!isAcceptanceMode || isWaitingMode) {
+      return {}
+    }
+    const changes: TaskUpdateChanges = {}
+    const nextEstimatedHours = planReferenceMinutes / 60
+    if (planReferenceStartValue && planReferenceStartValue !== toDateTimeInputValue(task.date || '')) {
+      changes.date = planReferenceStartValue
+    }
+    if (planReferenceEndValue && planReferenceEndValue !== toDateTimeInputValue(task.estimatedDate || '')) {
+      changes.estimatedDate = planReferenceEndValue
+    }
+    if (Number.isFinite(nextEstimatedHours) && nextEstimatedHours > 0 && Math.round(nextEstimatedHours * 1000) / 1000 !== Math.round((task.estimatedHours || 0) * 1000) / 1000) {
+      changes.estimatedHours = nextEstimatedHours
+    }
+    return changes
+  }
 
   useEffect(() => {
     if (lockSchedule || segmentMinutes <= 0) {
@@ -9186,41 +9350,46 @@ function TaskProgressModal({
           <div className="new-task-schedule-row progress-lite-schedule-row progress-lite-schedule-row-plan">
             <PlanDateTimeField
               label="开始时间"
-              value={task.date ?? ''}
-              onChange={(v) => onUpdateTask(task.id, { date: v })}
-              isActive={true}
-              control={<ScheduleAnchorSwitch active={true} label="预计开始时间" onClick={() => {}} />}
+              value={planReferenceStartValue}
+              onChange={updatePlanReferenceStart}
+              isActive={planReferenceDerivedField !== 'start'}
+              readOnly={planReferenceDerivedField === 'start'}
+              control={<ScheduleAnchorSwitch active={planReferenceDerivedField !== 'start'} label="切换预计开始时间" onClick={() => togglePlanReferenceScheduleField('start')} />}
               pickerId="plan-start"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
             />
             <div className="field progress-lite-hours-field">
               <span className="new-task-inline-label">
-                <ScheduleAnchorSwitch active={false} label="预计工时" onClick={() => {}} />
+                <ScheduleAnchorSwitch active={planReferenceDerivedField !== 'hours'} label="切换预计工时" onClick={() => togglePlanReferenceScheduleField('hours')} />
                 本段工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
-                <output className="new-task-hours-input new-task-hours-output" aria-label="预计工时">
-                  {task.estimatedHours > 0 ? formatDuration(Math.round(task.estimatedHours * 60)) : '—'}
-                </output>
-                <input
-                  className="new-task-hours-input plan-hours-edit"
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  value={planHoursDraft}
-                  onChange={(e) => setPlanHoursDraft(e.target.value)}
-                  onBlur={() => { const h = parseFloat(planHoursDraft); if (!isNaN(h) && h !== task.estimatedHours) onUpdateTask(task.id, { estimatedHours: h }) }}
-                  aria-label="修改预计工时"
-                />
+                {planReferenceDerivedField === 'hours' ? (
+                  <output className="new-task-hours-input new-task-hours-output" aria-label="预计工时">
+                    {formatDuration(planReferenceMinutes)}
+                  </output>
+                ) : (
+                  <input
+                    className="new-task-hours-input"
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={formatHoursInputValue(planReferenceMinutes)}
+                    onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
+                    aria-label="预计工时"
+                  />
+                )}
+                {planReferenceDerivedField !== 'hours' && <span className="progress-lite-hours-unit">小时</span>}
               </div>
             </div>
             <PlanDateTimeField
               label="结束时间"
-              value={task.estimatedDate ?? ''}
-              onChange={(v) => onUpdateTask(task.id, { estimatedDate: v })}
-              isActive={true}
-              control={<ScheduleAnchorSwitch active={true} label="预计结束时间" onClick={() => {}} />}
+              value={planReferenceEndValue}
+              onChange={updatePlanReferenceEnd}
+              isActive={planReferenceDerivedField !== 'end'}
+              readOnly={planReferenceDerivedField === 'end'}
+              control={<ScheduleAnchorSwitch active={planReferenceDerivedField !== 'end'} label="切换预计结束时间" onClick={() => togglePlanReferenceScheduleField('end')} />}
               pickerId="plan-end"
               activePickerId={activeDatePickerId}
               onActivePickerChange={setActiveDatePickerId}
