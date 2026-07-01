@@ -91,6 +91,7 @@ import {
   type ReportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
+  type TextLearningContext,
   type TextAssistantSuggestion,
   type TokenScope,
   type OpenRouterFreeModel,
@@ -2156,10 +2157,13 @@ function PlanDateTimeField({
   afterInput?: ReactNode
 }) {
   const fieldRef = useRef<HTMLDivElement | null>(null)
+  const inputWrapRef = useRef<HTMLDivElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
   const formatValue = (rawValue: string) => includeTime ? formatPlanDateTime(rawValue) : rawValue.replace(/-/g, '/')
   const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
   const [localPickerOpen, setLocalPickerOpen] = useState(false)
+  const [popoverLeft, setPopoverLeft] = useState<number | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
   const [pickerView, setPickerView] = useState<'calendar' | 'month'>('calendar')
   const hourListRef = useRef<HTMLDivElement | null>(null)
@@ -2227,6 +2231,22 @@ function PlanDateTimeField({
   const selectedMonth = Number(calendarMonth.slice(5, 7))
   const yearOptions = Array.from({ length: 11 }, (_, index) => calendarYear - 5 + index)
 
+  const updatePopoverPosition = useCallback(() => {
+    const wrap = inputWrapRef.current
+    if (!wrap) {
+      return
+    }
+    const wrapRect = wrap.getBoundingClientRect()
+    const popoverWidth = popoverRef.current?.offsetWidth ?? Math.min(396, window.innerWidth - 48)
+    const viewportGutter = 24
+    const defaultLeft = wrapRect.width - popoverWidth
+    const minLeft = viewportGutter - wrapRect.left
+    const maxLeft = window.innerWidth - viewportGutter - wrapRect.left - popoverWidth
+    const boundedMaxLeft = Math.max(minLeft, maxLeft)
+    const nextLeft = Math.min(Math.max(defaultLeft, minLeft), boundedMaxLeft)
+    setPopoverLeft(nextLeft)
+  }, [])
+
   useEffect(() => {
     if (!isPickerOpen) {
       return
@@ -2238,16 +2258,19 @@ function PlanDateTimeField({
     }
     document.addEventListener('pointerdown', closeOnOutsidePointer)
     const frame = window.requestAnimationFrame(() => {
+      updatePopoverPosition()
       if (pickerView === 'calendar') {
         hourListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
         minuteListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'center' })
       }
     })
+    window.addEventListener('resize', updatePopoverPosition)
     return () => {
       document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('resize', updatePopoverPosition)
       window.cancelAnimationFrame(frame)
     }
-  }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear, setPickerOpen])
+  }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear, setPickerOpen, updatePopoverPosition])
 
   const shiftMonth = (offset: number) => {
     const current = localDateFromIsoDate(`${calendarMonth}-01`)
@@ -2310,7 +2333,7 @@ function PlanDateTimeField({
         <span>{label}</span>
         {control}
       </span>
-      <div className={`date-input-wrap${afterInput ? ' date-input-wrap-with-ref' : ''}`}>
+      <div ref={inputWrapRef} className={`date-input-wrap${afterInput ? ' date-input-wrap-with-ref' : ''}`}>
         <input
           type="text"
           inputMode="numeric"
@@ -2345,7 +2368,9 @@ function PlanDateTimeField({
         </button>
         {isPickerOpen && (
           <div
+            ref={popoverRef}
             className="date-time-popover"
+            style={popoverLeft === null ? undefined : { left: `${popoverLeft}px`, right: 'auto' }}
             role="dialog"
             aria-label={`${label}选择器`}
             onMouseDown={(event) => {
@@ -8253,6 +8278,9 @@ function TaskProgressModal({
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
+  const progressAiSuggestionAppliedRef = useRef<{ context: TextLearningContext; aiOutput: string } | null>(null)
+  const pendingAttachmentAiNameAppliedRef = useRef<Record<string, string>>({})
+  const existingAttachmentAiNameAppliedRef = useRef<Record<number, string>>({})
   const uploadedNames = pendingAttachments.map((attachment) => sanitizeAttachmentName(attachment.name, attachment.originalName))
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
@@ -8637,6 +8665,18 @@ function TaskProgressModal({
     const draftName = existingAttachmentDrafts[file.id] ?? file.name
     const nextName = sanitizeAttachmentName(draftName, file.name)
     setExistingAttachmentDrafts((current) => ({ ...current, [file.id]: nextName }))
+    const appliedName = existingAttachmentAiNameAppliedRef.current[file.id]?.trim() ?? ''
+    if (appliedName && nextName && nextName !== appliedName) {
+      void api.recordTextEditPair({
+        context: 'attachment_name',
+        aiOutput: appliedName,
+        userFinal: nextName,
+        designType: task.type,
+        taskId: task.id,
+        taskTitle: task.title,
+      })
+      delete existingAttachmentAiNameAppliedRef.current[file.id]
+    }
     if (nextName === file.name) {
       return
     }
@@ -8693,6 +8733,42 @@ function TaskProgressModal({
     })
   }
 
+  const recordAppliedTextLearning = (finalText: string) => {
+    const applied = progressAiSuggestionAppliedRef.current
+    const userFinal = finalText.trim()
+    const aiOutput = applied?.aiOutput.trim() ?? ''
+    if (!applied || !userFinal || !aiOutput || userFinal === aiOutput) {
+      return
+    }
+    void api.recordTextEditPair({
+      context: applied.context,
+      aiOutput,
+      userFinal,
+      designType: task.type,
+      taskId: task.id,
+      taskTitle: task.title,
+    })
+    progressAiSuggestionAppliedRef.current = null
+  }
+
+  const recordAppliedAttachmentNameLearning = () => {
+    pendingAttachments.forEach((attachment) => {
+      const aiOutput = pendingAttachmentAiNameAppliedRef.current[attachment.id]?.trim() ?? ''
+      const userFinal = sanitizeAttachmentName(attachment.name, attachment.originalName)
+      if (aiOutput && userFinal && userFinal !== aiOutput) {
+        void api.recordTextEditPair({
+          context: 'attachment_name',
+          aiOutput,
+          userFinal,
+          designType: task.type,
+          taskId: task.id,
+          taskTitle: task.title,
+        })
+      }
+      delete pendingAttachmentAiNameAppliedRef.current[attachment.id]
+    })
+  }
+
   // 验收态：工时汇总计算（复用现有工具函数）
   const acceptanceTimeEntries = task.timeEntries ?? []
   const acceptanceWaitingEntries = task.waitingEntries ?? []
@@ -8745,6 +8821,8 @@ function TaskProgressModal({
         setUploadErrors(uploadFailures)
         return
       }
+      recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
+      recordAppliedAttachmentNameLearning()
       const planScheduleChanges = buildPlanScheduleChanges()
       const hasPlanScheduleChanges = Object.keys(planScheduleChanges).length > 0
       const nextTimeEntries = !isWaitingMode
@@ -8842,6 +8920,8 @@ function TaskProgressModal({
         setUploadErrors(uploadFailures)
         return
       }
+      recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
+      recordAppliedAttachmentNameLearning()
       // 累计工时
       const nextTimeEntries = isConvertingEntryToAcceptance && nextEntry
         ? acceptanceTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
@@ -8948,15 +9028,8 @@ function TaskProgressModal({
   }
 
   const updatePlanReferenceStart = (value: string) => {
-    const previousStartDate = datePart(planReferenceStartValue)
-    const nextStartDate = datePart(value)
-    const dateChanged = Boolean(value && previousStartDate && nextStartDate && previousStartDate !== nextStartDate)
     writePlanReferenceStart(value)
     if (!value) {
-      return
-    }
-    if (dateChanged && planReferenceEndValue) {
-      writePlanReferenceEnd(withDatePart(planReferenceEndValue, nextStartDate))
       return
     }
     if (planReferenceDerivedField === 'hours' && planReferenceEndValue) {
@@ -8972,15 +9045,8 @@ function TaskProgressModal({
   }
 
   const updatePlanReferenceEnd = (value: string) => {
-    const previousEndDate = datePart(planReferenceEndValue)
-    const nextEndDate = datePart(value)
-    const dateChanged = Boolean(value && previousEndDate && nextEndDate && previousEndDate !== nextEndDate)
     writePlanReferenceEnd(value)
     if (!value) {
-      return
-    }
-    if (dateChanged && planReferenceStartValue) {
-      writePlanReferenceStart(withDatePart(planReferenceStartValue, nextEndDate))
       return
     }
     if (planReferenceDerivedField === 'hours' && planReferenceStartValue) {
@@ -9105,15 +9171,8 @@ function TaskProgressModal({
 
   const updateProgressStart = (value: string) => {
     setHasTouchedSchedule(true)
-    const previousStartDate = activeStartDate
-    const nextStartDate = datePart(value)
-    const dateChanged = Boolean(value && previousStartDate && nextStartDate && previousStartDate !== nextStartDate)
     writeProgressStart(value)
     if (!value) {
-      return
-    }
-    if (dateChanged && progressEndValue) {
-      writeProgressEnd(withDatePart(progressEndValue, nextStartDate))
       return
     }
     if (scheduleDerivedField === 'hours' && progressEndValue) {
@@ -9130,15 +9189,8 @@ function TaskProgressModal({
 
   const updateProgressEnd = (value: string) => {
     setHasTouchedSchedule(true)
-    const previousEndDate = activeEndDate
-    const nextEndDate = datePart(value)
-    const dateChanged = Boolean(value && previousEndDate && nextEndDate && previousEndDate !== nextEndDate)
     writeProgressEnd(value)
     if (!value) {
-      return
-    }
-    if (dateChanged && progressStartValue) {
-      writeProgressStart(withDatePart(progressStartValue, nextEndDate))
       return
     }
     if (scheduleDerivedField === 'hours' && progressStartValue) {
@@ -9640,6 +9692,10 @@ function TaskProgressModal({
                           type="button"
                           className="ghost-button compact-button"
                           onClick={() => {
+                            progressAiSuggestionAppliedRef.current = {
+                              context: isAcceptanceMode ? 'acceptance' : 'progress',
+                              aiOutput: progressAiSuggestion.optimizedText,
+                            }
                             setNote(progressAiSuggestion.optimizedText)
                             if (!isAcceptanceMode) {
                               updateActiveDraft((current) => ({ ...current, note: progressAiSuggestion.optimizedText }))
@@ -9785,6 +9841,9 @@ function TaskProgressModal({
                                   type="button"
                                   onClick={() => {
                                     const nextName = sanitizeAttachmentName(aiState.suggestion?.suggestedName ?? draftName, file.name)
+                                    if (nextName) {
+                                      existingAttachmentAiNameAppliedRef.current[file.id] = nextName
+                                    }
                                     setExistingAttachmentDrafts((current) => ({ ...current, [file.id]: nextName }))
                                     setExistingAttachmentAiState((current) => ({
                                       ...current,
@@ -9893,11 +9952,15 @@ function TaskProgressModal({
                             <button
                               type="button"
                               onClick={() => {
+                                const nextName = sanitizeAttachmentName(attachment.aiSuggestion?.suggestedName ?? attachment.name, attachment.originalName)
+                                if (nextName) {
+                                  pendingAttachmentAiNameAppliedRef.current[attachment.id] = nextName
+                                }
                                 setPendingAttachments((current) => current.map((item) =>
                                   item.id === attachment.id
                                     ? {
                                         ...item,
-                                        name: sanitizeAttachmentName(attachment.aiSuggestion?.suggestedName ?? item.name, item.originalName),
+                                        name: nextName || sanitizeAttachmentName(item.name, item.originalName),
                                         aiSuggestion: undefined,
                                       }
                                     : item,
@@ -14934,6 +14997,29 @@ function NewTaskModal({
     })
   }
 
+  const recordTaskAssistantLearning = (finalTitle: string, finalRequirement: string, finalType: string) => {
+    // 若用户采用了 AI 建议后又做了修改，记录差异供 AI 持续学习。
+    const appliedSuggestion = aiSuggestionAppliedRef.current
+    if (appliedSuggestion && appliedSuggestion !== finalRequirement) {
+      void api.recordTaskEditPair({ aiOutput: appliedSuggestion, userFinal: finalRequirement, designType: finalType })
+    }
+    const appliedTitle = aiTitleSuggestionAppliedRef.current
+    if (appliedTitle && appliedTitle !== finalTitle) {
+      void api.recordTaskTitleEditPair({ aiOutput: appliedTitle, userFinal: finalTitle, designType: finalType })
+    }
+    // 无论是否使用 AI，每次提交都记录最终选择的设计类型，供分类建议模型学习。
+    if (finalTitle || finalRequirement) {
+      void api.recordTaskTypeChoice({
+        requirement: finalRequirement,
+        title: finalTitle,
+        finalType,
+        aiSuggestedType: aiSuggestion?.suggestedType ?? undefined,
+      })
+    }
+    aiSuggestionAppliedRef.current = null
+    aiTitleSuggestionAppliedRef.current = null
+  }
+
   const handleSubmit = () => {
     const nextErrors: Record<string, string> = {}
     if (!type.trim()) {
@@ -14959,18 +15045,22 @@ function NewTaskModal({
       return
     }
     const estimated = Math.round((estimatedMinutes / 60) * 100) / 100
+    const finalTitle = title.trim()
+    const finalRequirement = requirement.trim()
+    const finalType = type.trim()
+    recordTaskAssistantLearning(finalTitle, finalRequirement, finalType)
     if (editingTask && onSave) {
       const nextRequester = requester.trim() || editingTask.requester || contact.trim() || '待确认'
       const nextContact = contact.trim() || editingTask.contact || nextRequester
       const nextReviewer = reviewer.trim() || editingTask.reviewer || nextRequester
       onSave({
-        title: title.trim() || editingTask.title,
+        title: finalTitle || editingTask.title,
         date: startDate,
         estimatedDate,
         settlementMonth: isSupplemental ? settlementMonth : '',
         isSupplemental,
-        type: type.trim() || editingTask.type,
-        requirement: requirement.trim(),
+        type: finalType || editingTask.type,
+        requirement: finalRequirement,
         requester: nextRequester,
         contact: nextContact,
         reviewer: nextReviewer,
@@ -14979,26 +15069,6 @@ function NewTaskModal({
         acceptanceNote: editingTask.acceptanceNote ?? '',
       })
       return
-    }
-    // 若用户采用了 AI 建议后又做了修改，记录差异供 AI 持续学习
-    const appliedSuggestion = aiSuggestionAppliedRef.current
-    const finalRequirement = requirement.trim()
-    if (appliedSuggestion && appliedSuggestion !== finalRequirement) {
-      void api.recordTaskEditPair({ aiOutput: appliedSuggestion, userFinal: finalRequirement, designType: type.trim() })
-    }
-    const appliedTitle = aiTitleSuggestionAppliedRef.current
-    const finalTitle = title.trim()
-    if (appliedTitle && appliedTitle !== finalTitle) {
-      void api.recordTaskTitleEditPair({ aiOutput: appliedTitle, userFinal: finalTitle, designType: type.trim() })
-    }
-    // 无论是否使用 AI，每次提交都记录最终选择的设计类型，供分类建议模型学习
-    if (finalTitle || finalRequirement) {
-      void api.recordTaskTypeChoice({
-        requirement: finalRequirement,
-        title: finalTitle,
-        finalType: type.trim(),
-        aiSuggestedType: aiSuggestion?.suggestedType ?? undefined,
-      })
     }
 
     const status: TaskStatus = '计划中'
@@ -15009,9 +15079,9 @@ function NewTaskModal({
       estimatedDate,
       settlementMonth: isSupplemental ? settlementMonth : '',
       isSupplemental,
-      type: type.trim(),
-      title: title.trim(),
-      requirement: requirement.trim(),
+      type: finalType,
+      title: finalTitle,
+      requirement: finalRequirement,
       requester: requester.trim(),
       contact: contact.trim(),
       reviewer: reviewer.trim() || requester.trim(),

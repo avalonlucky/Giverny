@@ -125,6 +125,7 @@ export type TaskAssistantSuggestion = {
 }
 
 export type TextAssistantMode = 'acceptance' | 'progress'
+export type TextLearningContext = TextAssistantMode | 'attachment_name'
 
 export type TextAssistantSuggestion = {
   optimizedText: string
@@ -636,6 +637,12 @@ export const api = {
     }).catch(() => null),
   recordTaskTypeChoice: (payload: { requirement: string; title: string; finalType: string; aiSuggestedType?: string }) =>
     fetch('/api/ai/task-type-choices', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null),
+  recordTextEditPair: (payload: { context: TextLearningContext; aiOutput: string; userFinal: string; designType?: string; taskId?: number; taskTitle?: string }) =>
+    fetch('/api/ai/text-edits', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

@@ -9683,7 +9683,7 @@ button.file-chip:focus-visible {
 .progress-schedule-two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0;
+  gap: 24px;
 }
 
 /* 覆盖 new-task-schedule-row 的 grid-column: 1/-1，让两栏真正并排 */
@@ -9693,7 +9693,7 @@ button.file-chip:focus-visible {
 
 .progress-schedule-two-col > .new-task-schedule-row:last-child {
   border-left: 1px solid var(--color-border-soft);
-  padding-left: 20px;
+  padding-left: 24px;
 }
 
 .progress-lite-schedule-row .field-label-row,
@@ -10406,6 +10406,11 @@ input::file-selector-button {
   border-radius: var(--radius-control);
   background: var(--color-surface-strong);
   box-shadow: var(--shadow-popover);
+}
+
+.task-modal.progress-lite-modal {
+  width: min(1040px, calc(100vw - 48px));
+  overflow: visible;
 }
 
 .date-time-popover-header {
@@ -15825,6 +15830,16 @@ textarea:focus-visible {
 
   .new-task-schedule-row {
     grid-template-columns: 1fr;
+  }
+
+  .progress-schedule-two-col {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .progress-schedule-two-col > .new-task-schedule-row:last-child {
+    border-left: 0;
+    padding-left: 0;
   }
 
   .insights-hero {

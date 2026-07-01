@@ -1182,8 +1182,17 @@ async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 
   }
 }
 
-async function callTextFallbackJson<T extends object>(env: Env, systemPrompt: string, payload: unknown, outputShape: string): Promise<T | null> {
-  const endpoint = await resolveAiEndpoint(env, 'textFallback')
+function describeAiCallError(error: unknown) {
+  return error instanceof Error ? error.message : '模型请求失败'
+}
+
+async function callTextFallbackJson<T extends object>(
+  env: Env,
+  systemPrompt: string,
+  payload: unknown,
+  outputShape: string,
+  maxOutputTokens = 1200,
+): Promise<T | null> {
   const prompt = `${systemPrompt}
 
 请只返回一个 JSON 对象，不要解释，不要使用 Markdown 代码块。
@@ -1191,28 +1200,58 @@ JSON 字段要求：${outputShape}
 
 输入数据：
 ${JSON.stringify(payload)}`
-  // 备用模型有 Key 就先用它；失败或无 Key 时回落到 Workers AI 兜底。
-  if (endpoint.apiKey) {
+  const errors: string[] = []
+  for (const route of ['textPrimary', 'textFallback'] as AiModelRouteKey[]) {
+    const endpoint = await resolveAiEndpoint(env, route)
+    if (!endpoint.apiKey) {
+      errors.push(`${route} 未配置 API Key`)
+      continue
+    }
     try {
-      const output = await callAiEndpointText(endpoint, prompt)
+      const output = await callAiEndpointText(endpoint, prompt, maxOutputTokens)
       const parsed = parseLooseJsonObject(output)
       if (Object.keys(parsed).length > 0) {
         return parsed as T
       }
-    } catch {
-      // 落到 Workers AI
+      errors.push(`${endpoint.model} 未返回可解析 JSON`)
+    } catch (error) {
+      errors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
     }
   }
   if (env.AI) {
     try {
-      const output = await callWorkersAiText(env, prompt, 512)
+      const output = await callWorkersAiText(env, prompt, maxOutputTokens)
       const parsed = parseLooseJsonObject(output)
       return Object.keys(parsed).length > 0 ? (parsed as T) : null
     } catch {
       return null
     }
   }
+  if (errors.length) {
+    console.warn(JSON.stringify({ event: 'ai_text_json_fallback_failed', errors: errors.slice(-4) }))
+  }
   return null
+}
+
+async function callMultimodalWithVisionFallback(env: Env, prompt: string, assets: MultimodalAsset[]) {
+  const errors: string[] = []
+  for (const route of ['visionPrimary', 'visionFallback'] as AiModelRouteKey[]) {
+    const endpoint = await resolveAiEndpoint(env, route)
+    if (!endpoint.apiKey) {
+      errors.push(`${route} 未配置 API Key`)
+      continue
+    }
+    try {
+      const output = await callAiEndpointMultimodal(endpoint, prompt, assets)
+      if (output.trim()) {
+        return output
+      }
+      errors.push(`${endpoint.model} 未返回内容`)
+    } catch (error) {
+      errors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
+    }
+  }
+  throw new Error(errors.length ? errors.slice(-2).join('；') : '视觉模型暂时不可用')
 }
 
 async function callAiEndpointVision(
@@ -1576,13 +1615,6 @@ ${source.extractedText || '无，需直接读取文件视觉内容'}
 }`
 }
 
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
-
-function isRetryableVisionError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error)
-  return /(high demand|temporar|429|500|502|503|504|overloaded|quota)/i.test(message)
-}
-
 async function createAttachmentAnalysisJob(env: Env, attachmentId: string, taskId: string, reset = false) {
   await env.DB.prepare(
     `INSERT INTO attachment_analyses (attachment_id, task_id, status, requested_at, updated_at)
@@ -1747,7 +1779,8 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
       return
     }
     const prompt = attachmentAnalysisPrompt(row, source)
-    let endpoint = await resolveAiEndpoint(env, 'visionPrimary')
+    let analysisProvider = 'vision-fallback-chain'
+    let analysisModel = 'visionPrimary/visionFallback'
 
     // 超长图：先尝试切片并行分析再合并（更准、更快、不截断）。切不了（zone 未开 Image Resizing）就回退整图。
     let payload: AnalysisPayload | null = null
@@ -1757,7 +1790,7 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
         const segmentOutputs = await Promise.all(segments.map(async (segment, index) => {
           const segmentPrompt = `${prompt}\n\n（这是同一张长图垂直切分后的第 ${index + 1}/${segments.length} 段，只分析本段可见内容；错别字与文案不符照常列出。）`
           try {
-            return await callAiEndpointMultimodal(endpoint, segmentPrompt, [segment])
+            return await callMultimodalWithVisionFallback(env, segmentPrompt, [segment])
           } catch {
             return ''
           }
@@ -1774,25 +1807,14 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
     if (!payload) {
       let output = ''
       try {
-        output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-      } catch (primaryError) {
-        if (isRetryableVisionError(primaryError)) {
-          await wait(1500)
-          try {
-            output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-          } catch {
-            output = ''
-          }
-        }
-        if (!output) {
-          endpoint = await resolveAiEndpoint(env, 'visionFallback')
-          try {
-            output = await callAiEndpointMultimodal(endpoint, prompt, source.assets)
-          } catch (fallbackError) {
-            const primaryMessage = primaryError instanceof Error ? primaryError.message : '主模型失败'
-            const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : '备用模型失败'
-            throw new Error(`主模型：${primaryMessage}；备用模型：${fallbackMessage}`, { cause: fallbackError })
-          }
+        output = await callMultimodalWithVisionFallback(env, prompt, source.assets)
+      } catch (visionError) {
+        if (source.extractedText.trim()) {
+          output = await callTextWithFallback(env, prompt, 1800)
+          analysisProvider = 'text-fallback-chain'
+          analysisModel = 'textPrimary/textFallback/workers-ai'
+        } else {
+          throw visionError
         }
       }
       payload = normalizeAnalysisPayload(parseLooseJsonObject(output))
@@ -1809,8 +1831,8 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
        WHERE attachment_id = ?`,
     ).bind(
       source.parserKind,
-      endpoint.provider,
-      endpoint.model,
+      analysisProvider,
+      analysisModel,
       payload.summary,
       payload.contentType,
       payload.extractedText,
@@ -1823,8 +1845,8 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string) {
       attachmentId,
     ).run()
     await audit(env, 'complete', 'attachment_analysis', attachmentId, {
-      provider: endpoint.provider,
-      model: endpoint.model,
+      provider: analysisProvider,
+      model: analysisModel,
       parserKind: source.parserKind,
       confidence: payload.confidence,
     })
@@ -4564,37 +4586,42 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
     const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
     const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
     const toolName = 'report_task_progress'
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: JSON.stringify(payload) },
-        ],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: toolName,
-              description: '返回任务整体完成度',
-              parameters: {
-                type: 'object',
-                properties: {
-                  progress: { type: 'integer', description: '整体完成度 0-100，必须是 10 的倍数' },
-                  reason: { type: 'string', description: '一句简短中文理由' },
+    let response: Response | null = null
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: JSON.stringify(payload) },
+          ],
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: toolName,
+                description: '返回任务整体完成度',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    progress: { type: 'integer', description: '整体完成度 0-100，必须是 10 的倍数' },
+                    reason: { type: 'string', description: '一句简短中文理由' },
+                  },
+                  required: ['progress', 'reason'],
                 },
-                required: ['progress', 'reason'],
               },
             },
-          },
-        ],
-        tool_choice: { type: 'function', function: { name: toolName } },
-      }),
-    })
-    if (response.ok) {
+          ],
+          tool_choice: { type: 'function', function: { name: toolName } },
+        }),
+      })
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'ai_progress_deepseek_failed', error: describeAiCallError(error) }))
+    }
+    if (response?.ok) {
       const data = (await response.json().catch(() => null)) as {
         choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>
       } | null
@@ -4637,16 +4664,17 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   // 图片附件：用视觉模型描述后作为文案文本
   let attachmentText = String(body.attachmentText ?? '').trim().slice(0, 8000)
   if (attachmentImages.length > 0 && !attachmentText) {
-    const visionEndpoint = await resolveAiEndpoint(env, 'visionPrimary')
-    if (visionEndpoint.apiKey) {
-      const assets = attachmentImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType }))
-      const visionPrompt = `你在辅助设计任务需求分析。请对这${assets.length > 1 ? `${assets.length}张` : '张'}图片做完整内容提取，重点要求：
+    const assets = attachmentImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType }))
+    const visionPrompt = `你在辅助设计任务需求分析。请对这${assets.length > 1 ? `${assets.length}张` : '张'}图片做完整内容提取，重点要求：
 1. 【完整名称】所有标题、产品名、品牌名、项目名、页面名必须一字不漏地完整抄录，绝对不能缩写或截断
 2. 【正文内容】记录页面各区块的文字内容、数据指标、功能模块名称
 3. 【视觉结构】描述布局、配色、设计风格等视觉特征
 每张图片单独描述，用"【图片N】"分隔。`
-      const desc = await callAiEndpointMultimodal(visionEndpoint, visionPrompt, assets)
+    try {
+      const desc = await callMultimodalWithVisionFallback(env, visionPrompt, assets)
       if (desc) attachmentText = `【图片内容识别】\n${desc}`.slice(0, 8000)
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'ai_task_attachment_vision_failed', error: describeAiCallError(error) }))
     }
   }
 
@@ -4697,6 +4725,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     // 甲方提供的文案附件内容：需求为空时直接据此分析；需求非空时与之结合
     attachmentName,
     attachmentText,
+    styleGuide: styleGuideBlock,
   }
 
   const runtimeSuggestion = await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
@@ -4741,16 +4770,18 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'suggest_task_requirement_and_design_type'
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
         {
           role: 'system',
           content:
@@ -4796,9 +4827,14 @@ async function suggestTaskWithAi(env: Env, request: Request) {
           },
         },
       ],
-      tool_choice: { type: 'function', function: { name: toolName } },
-    }),
-  })
+        tool_choice: { type: 'function', function: { name: toolName } },
+      }),
+    })
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'ai_task_assistant_deepseek_failed', error: describeAiCallError(error) }))
+    const fallback = await callFallback()
+    return fallback ?? fail(`AI 助手暂时不可用：${describeAiCallError(error)}`, 503)
+  }
 
   if (!response.ok) {
     const fallback = await callFallback()
@@ -4849,6 +4885,11 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const uploadedFileNames = Array.isArray(body.uploadedFileNames) ? body.uploadedFileNames.slice(0, 20).map(String) : []
   const activity = Array.isArray(body.activity) ? body.activity.slice(0, 12) : []
   const taskTitle = String(body.task?.title ?? '').trim()
+  const taskType = String(body.task?.type ?? '').trim()
+  const textStyleGuide = await getOrBuildTextStyleGuide(env, mode, taskType)
+  const textStyleGuideInjection = textStyleGuide
+    ? `\n\n【用户${mode === 'acceptance' ? '验收备注' : '进展记录'}写法偏好】以下来自用户采纳 AI 后的真实改写，请优先遵循：\n${textStyleGuide}`
+    : ''
 
   if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0) {
     return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
@@ -4861,6 +4902,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     relatedFiles: files,
     currentUploadedFileNames: uploadedFileNames,
     recentActivity: activity,
+    styleGuide: textStyleGuide,
   }
 
   const runtimeSuggestion = await callBamlRuntime<TextAssistantToolArgs>(env, 'optimize-text', aiPayload)
@@ -4881,7 +4923,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TextAssistantToolArgs>(
       env,
-      '你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。',
+      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${textStyleGuideInjection}`,
       aiPayload,
       'optimizedText:string, summary:string',
     )
@@ -4907,20 +4949,22 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'optimize_task_worklog_text'
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
         {
           role: 'system',
           content:
-            '你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：分点列出交付/补传了哪些文件、关键进展、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。',
+            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：分点列出交付/补传了哪些文件、关键进展、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
         },
         {
           role: 'user',
@@ -4950,9 +4994,14 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
           },
         },
       ],
-      tool_choice: { type: 'function', function: { name: toolName } },
-    }),
-  })
+        tool_choice: { type: 'function', function: { name: toolName } },
+      }),
+    })
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'ai_text_assistant_deepseek_failed', error: describeAiCallError(error) }))
+    const fallback = await callFallback()
+    return fallback ?? fail(`AI 助手暂时不可用：${describeAiCallError(error)}`, 503)
+  }
 
   if (!response.ok) {
     const fallback = await callFallback()
@@ -5017,12 +5066,15 @@ async function suggestAttachmentNameWithAi(env: Env, request: Request) {
   const recentFileNames = Array.isArray(body.recentFileNames)
     ? body.recentFileNames.map((item) => String(item).trim()).filter(Boolean).slice(-12)
     : []
+  const taskType = String(body.task?.type ?? '').trim()
+  const attachmentNameStyleGuide = await getOrBuildTextStyleGuide(env, 'attachment_name', taskType)
   const payload = {
     currentFileName: fileName,
     requiredExtension: extension,
     progressNote: String(body.note ?? '').trim(),
     task: body.task ?? {},
     recentFileNames,
+    styleGuide: attachmentNameStyleGuide,
   }
   const prompt = `你是 Giverny 的设计交付文件命名助手。请分析附件内容和业务上下文，为设计师给出一个可直接使用的中文文件名。
 
@@ -5033,7 +5085,8 @@ async function suggestAttachmentNameWithAi(env: Env, request: Request) {
 4. 文件名必须简洁、可检索，主体建议 8-20 个中文字符，最多不超过 28 个中文字符；不要把任务标题全文、聊天原文、时间句子或失败原因塞进文件名。
 5. 必须保留 requiredExtension；去掉 / \\ : * ? " < > | 等非法字符。
 6. 如果确实无法识别附件内容，请返回空 suggestedName，不要编造兜底文件名。
-7. 只返回 JSON，不要 Markdown，不要额外解释。
+7. 如果 styleGuide 不为空，优先遵循用户已经确认过的附件命名偏好。
+8. 只返回 JSON，不要 Markdown，不要额外解释。
 
 JSON 结构：
 {"suggestedName":"包含扩展名的文件名，无法识别则为空字符串","reason":"不超过36字的命名依据","confidence":"低|中|高"}
@@ -5102,7 +5155,7 @@ ${JSON.stringify(payload)}`
 
   const routes: AiModelRouteKey[] = ['visionPrimary', 'visionFallback']
   const attachmentNameTimeoutMs = 30_000
-  let lastError = ''
+  const modelErrors: string[] = []
   let configuredRouteCount = 0
   for (let index = 0; index < routes.length; index += 1) {
     const controller = new AbortController()
@@ -5118,7 +5171,7 @@ ${JSON.stringify(payload)}`
         : await callAiEndpointText(endpoint, prompt, 1024, controller.signal)
       const suggestion = normalizeSuggestion(output, index > 0)
       if (!suggestion) {
-        lastError = `${endpoint.model} 返回内容无法解析为短文件名`
+        modelErrors.push(`${endpoint.model} 返回内容无法解析`)
         console.warn(JSON.stringify({
           event: 'ai_attachment_name_unparseable',
           provider: endpoint.provider,
@@ -5138,17 +5191,64 @@ ${JSON.stringify(payload)}`
       })
       return ok(suggestion)
     } catch (error) {
-      lastError = controller.signal.aborted
+      modelErrors.push(controller.signal.aborted
         ? `${routes[index] === 'visionPrimary' ? '主视觉模型' : '备用视觉模型'}响应超时`
-        : error instanceof Error ? error.message : '模型请求失败'
+        : error instanceof Error ? error.message : '模型请求失败')
     } finally {
       clearTimeout(timeout)
     }
   }
-  if (configuredRouteCount === 0) {
-    return fail('视觉模型尚未配置可用的 API Key', 503)
+
+  const fallbackPrompt = `你是 Giverny 的设计交付文件命名助手。视觉识别模型当前没有给出可用结果，请只基于任务上下文、进展备注、原始文件名和同项目近期文件名，生成一个保守、可检索、可直接使用的中文文件名。
+
+命名规则：
+1. 文件名主体建议 8-20 个中文字符，最多不超过 28 个中文字符。
+2. 必须保留 requiredExtension。
+3. 不要返回“无法识别”“命名失败”“暂时不可用”等错误提示作为文件名。
+4. 如果任务上下文也不足以判断，请尽量从原始文件名提炼，不要照抄随机串或截图时间戳。
+5. 如果 styleGuide 不为空，优先遵循用户已经确认过的附件命名偏好。
+6. 只返回 JSON，不要 Markdown，不要额外解释。
+
+JSON 结构：
+{"suggestedName":"包含扩展名的文件名","reason":"不超过36字的命名依据","confidence":"低|中|高"}
+
+输入：
+${JSON.stringify(payload)}`
+
+  const textFallbackController = new AbortController()
+  const textFallbackTimeout = setTimeout(() => textFallbackController.abort('文字兜底模型响应超时'), 20_000)
+  try {
+    const output = await callTextWithFallback(env, fallbackPrompt, 512, textFallbackController.signal)
+    const suggestion = normalizeSuggestion(output, true)
+    if (suggestion) {
+      await audit(env, 'suggest', 'ai_attachment_name', String(body.task?.id ?? fileName), {
+        originalName: fileName,
+        suggestedName: suggestion.suggestedName,
+        provider: 'text-fallback-chain',
+        model: 'textPrimary/textFallback/workers-ai',
+        fallbackUsed: true,
+        usedImage: false,
+        visionAttempts: configuredRouteCount,
+      })
+      return ok({
+        ...suggestion,
+        reason: suggestion.reason || '视觉模型不可用，已按任务上下文整理',
+      })
+    }
+    modelErrors.push('文字兜底模型未返回可用短文件名')
+  } catch (error) {
+    modelErrors.push(textFallbackController.signal.aborted
+      ? '文字兜底模型响应超时'
+      : error instanceof Error ? error.message : '文字兜底模型请求失败')
+  } finally {
+    clearTimeout(textFallbackTimeout)
   }
-  return fail(lastError ? `AI 命名暂时不可用：${lastError}` : '视觉模型没有返回可用命名建议，请稍后重试或手动命名。', 503)
+
+  if (configuredRouteCount === 0 && modelErrors.length === 0) {
+    return fail('AI 模型尚未配置可用的 API Key，且 Workers AI 未启用', 503)
+  }
+  const detail = modelErrors.slice(-3).join('；')
+  return fail(detail ? `AI 命名暂时不可用：${detail}` : 'AI 模型没有返回可用命名建议，请稍后重试或手动命名。', 503)
 }
 
 async function suggestDailyKnowledgeWithAi(env: Env, request: Request) {
@@ -5200,12 +5300,7 @@ JSON 结构：
 输入：
 ${JSON.stringify(payload)}`
 
-  const callRoute = async (route: AiModelRouteKey) => {
-    const endpoint = await resolveAiEndpoint(env, route)
-    if (!endpoint.apiKey) {
-      return null
-    }
-    const output = await callAiEndpointText(endpoint, prompt, 1600)
+  const parseSuggestion = (output: string, source: string) => {
     const parsed = parseLooseJsonObject(output) as DailyKnowledgeToolArgs
     const title = String(parsed.title ?? '').trim()
     const category = String(parsed.category ?? '').trim()
@@ -5218,31 +5313,48 @@ ${JSON.stringify(payload)}`
     }
     return {
       category: category.slice(0, 12),
-      source: `AI · ${endpoint.model}`,
+      source,
       title: title.slice(0, 36),
       teaser: teaser.slice(0, 90),
       body: paragraphs,
     }
   }
 
-  try {
-    const suggestion = await callRoute('textPrimary')
-    if (suggestion) {
-      return ok(suggestion)
+  const errors: string[] = []
+  for (const route of ['textPrimary', 'textFallback'] as AiModelRouteKey[]) {
+    const endpoint = await resolveAiEndpoint(env, route)
+    if (!endpoint.apiKey) {
+      errors.push(`${route} 未配置 API Key`)
+      continue
     }
-  } catch {
-    // Primary failures fall through to the configured text backup.
+    try {
+      const output = await callAiEndpointText(endpoint, prompt, 1600)
+      const suggestion = parseSuggestion(output, `AI · ${endpoint.model}`)
+      if (suggestion) {
+        return ok(suggestion)
+      }
+      errors.push(`${endpoint.model} 未返回可用知识卡片`)
+    } catch (error) {
+      errors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
+    }
   }
 
-  try {
-    const fallback = await callRoute('textFallback')
-    if (fallback) {
-      return ok(fallback)
+  if (env.AI) {
+    try {
+      const output = await callWorkersAiText(env, prompt, 1600)
+      const suggestion = parseSuggestion(output, 'AI · Workers AI')
+      if (suggestion) {
+        return ok(suggestion)
+      }
+      errors.push('Workers AI 未返回可用知识卡片')
+    } catch (error) {
+      errors.push(`Workers AI: ${describeAiCallError(error)}`)
     }
-  } catch {
-    // The frontend has a curated fallback pool, so keep this endpoint concise.
   }
 
+  if (errors.length) {
+    console.warn(JSON.stringify({ event: 'ai_daily_knowledge_failed', errors: errors.slice(-4) }))
+  }
   return fail('AI 暂时没有生成可用内容', 503)
 }
 
@@ -5294,6 +5406,18 @@ async function ensureTaskLearningTables(env: Env) {
       requirement TEXT NOT NULL DEFAULT '',
       final_type TEXT NOT NULL,
       ai_suggested_type TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS ai_text_edits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      context TEXT NOT NULL DEFAULT 'progress',
+      ai_output TEXT NOT NULL,
+      user_final TEXT NOT NULL,
+      design_type TEXT NOT NULL DEFAULT '',
+      task_id INTEGER,
+      task_title TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     )`,
   ).run()
@@ -5353,6 +5477,42 @@ async function saveTaskTypeChoice(env: Env, request: Request) {
   return ok({ saved: true })
 }
 
+type TextLearningContext = 'progress' | 'acceptance' | 'attachment_name'
+
+function normalizeTextLearningContext(value: unknown): TextLearningContext {
+  if (value === 'acceptance' || value === 'attachment_name') {
+    return value
+  }
+  return 'progress'
+}
+
+async function saveTextEditPair(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    context?: string
+    aiOutput?: string
+    userFinal?: string
+    designType?: string
+    taskId?: number
+    taskTitle?: string
+  }
+  const context = normalizeTextLearningContext(body.context)
+  const aiOutput = String(body.aiOutput ?? '').trim().slice(0, 6000)
+  const userFinal = String(body.userFinal ?? '').trim().slice(0, 6000)
+  const designType = String(body.designType ?? '').trim().slice(0, 120)
+  const taskTitle = String(body.taskTitle ?? '').trim().slice(0, 200)
+  const taskId = Number(body.taskId)
+  if (!aiOutput || !userFinal || aiOutput === userFinal) {
+    return ok({ saved: false })
+  }
+  await ensureTaskLearningTables(env)
+  await env.DB.prepare(
+    'INSERT INTO ai_text_edits (context, ai_output, user_final, design_type, task_id, task_title, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  )
+    .bind(context, aiOutput, userFinal, designType, Number.isFinite(taskId) ? taskId : null, taskTitle, Date.now())
+    .run()
+  return ok({ saved: true })
+}
+
 async function getTypeChoiceExamples(env: Env, limit = 40): Promise<Array<{ title: string; requirement: string; final_type: string }>> {
   try {
     await ensureTaskLearningTables(env)
@@ -5399,6 +5559,75 @@ async function countEditsForType(
     .bind(designType)
     .first<{ cnt: number }>()
   return row?.cnt ?? 0
+}
+
+async function fetchNewTextEdits(
+  env: Env,
+  context: TextLearningContext,
+  designType: string | null,
+  afterId: number,
+  batchSize: number,
+): Promise<EditRow[]> {
+  const rows = designType !== null
+    ? await env.DB.prepare(
+        'SELECT id, ai_output, user_final, design_type FROM ai_text_edits WHERE context = ? AND design_type = ? AND id > ? ORDER BY id ASC LIMIT ?',
+      )
+        .bind(context, designType, afterId, batchSize)
+        .all<EditRow>()
+    : await env.DB.prepare(
+        'SELECT id, ai_output, user_final, design_type FROM ai_text_edits WHERE context = ? AND id > ? ORDER BY id ASC LIMIT ?',
+      )
+        .bind(context, afterId, batchSize)
+        .all<EditRow>()
+  return rows.results ?? []
+}
+
+async function countTextEditsForContextType(env: Env, context: TextLearningContext, designType: string): Promise<number> {
+  const row = await env.DB.prepare('SELECT COUNT(*) as cnt FROM ai_text_edits WHERE context = ? AND design_type = ?')
+    .bind(context, designType)
+    .first<{ cnt: number }>()
+  return row?.cnt ?? 0
+}
+
+function textContextLabel(context: TextLearningContext): string {
+  if (context === 'acceptance') return '验收备注'
+  if (context === 'attachment_name') return '附件命名'
+  return '进展记录'
+}
+
+async function mergeTextStyleSummary(
+  env: Env,
+  context: TextLearningContext,
+  designType: string | null,
+  existingSummary: string,
+  newSamples: EditRow[],
+): Promise<string> {
+  const typeLabel = designType && designType !== '__general__' ? `「${designType}」类` : '各类'
+  const label = textContextLabel(context)
+  const samplesText = newSamples
+    .map(
+      (e, i) =>
+        `---新样本${i + 1}${e.design_type && designType === '__general__' ? `（${e.design_type}）` : ''}\n[AI建议]\n${e.ai_output}\n[用户改为]\n${e.user_final}`,
+    )
+    .join('\n')
+  const prompt = existingSummary
+    ? `你是写作风格分析助手。请在以下「已有${label}写法指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（200 字以内）。若新样本与已有指导一致则强化，若有新规律则补充，若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
+
+已有${label}写法指导：
+${existingSummary}
+
+新增${typeLabel}${label}修改样本：
+${samplesText}`
+    : `你是写作风格分析助手。以下是一位设计师对 AI 生成的${typeLabel}${label}建议的修改记录（共 ${newSamples.length} 条）。分析用户的写法偏好，生成「${label}写法指导」（200 字以内）：倾向保留/删除什么、偏好分点还是短句、惯用表达、对事实边界和下一步的写法。只输出指导文字，不要编号和标题。
+
+样本：
+${samplesText}`
+  try {
+    const result = await callTextWithFallback(env, prompt, 450)
+    return result.trim()
+  } catch {
+    return existingSummary
+  }
 }
 
 async function mergeStyleSummary(
@@ -5530,6 +5759,77 @@ async function getOrBuildStyleGuide(env: Env, field: 'requirement' | 'title', de
   }
 }
 
+async function getOrBuildTextStyleGuide(env: Env, context: TextLearningContext, designType: string): Promise<string> {
+  const keyPrefix = `text:${context}`
+  const BATCH_SIZE = 30
+  const MIN_TOTAL = 3
+
+  try {
+    await ensureTaskLearningTables(env)
+
+    if (designType) {
+      const typeCount = await countTextEditsForContextType(env, context, designType)
+      if (typeCount >= MIN_TOTAL) {
+        const typeKey = `${keyPrefix}:${designType}`
+        const cached = await env.DB.prepare(
+          'SELECT summary, last_processed_id FROM task_style_summaries WHERE summary_key = ?',
+        )
+          .bind(typeKey)
+          .first<{ summary: string; last_processed_id: number }>()
+        const lastId = cached?.last_processed_id ?? 0
+        const newSamples = await fetchNewTextEdits(env, context, designType, lastId, BATCH_SIZE)
+        if (newSamples.length === 0) {
+          return cached?.summary ?? ''
+        }
+        const maxId = Math.max(...newSamples.map((r) => r.id))
+        const updated = await mergeTextStyleSummary(env, context, designType, cached?.summary ?? '', newSamples)
+        if (updated) {
+          await env.DB.prepare(
+            'INSERT OR REPLACE INTO task_style_summaries (summary_key, summary, last_processed_id, updated_at) VALUES (?, ?, ?, ?)',
+          )
+            .bind(typeKey, updated, maxId, Date.now())
+            .run()
+          return updated
+        }
+        return cached?.summary ?? ''
+      }
+    }
+
+    const generalKey = `${keyPrefix}:__general__`
+    const cachedGeneral = await env.DB.prepare(
+      'SELECT summary, last_processed_id FROM task_style_summaries WHERE summary_key = ?',
+    )
+      .bind(generalKey)
+      .first<{ summary: string; last_processed_id: number }>()
+    const generalTotalRow = await env.DB.prepare('SELECT COUNT(*) as cnt FROM ai_text_edits WHERE context = ?')
+      .bind(context)
+      .first<{ cnt: number }>()
+    const generalTotal = generalTotalRow?.cnt ?? 0
+    if (generalTotal < MIN_TOTAL) {
+      return ''
+    }
+
+    const lastGeneralId = cachedGeneral?.last_processed_id ?? 0
+    const newGeneralSamples = await fetchNewTextEdits(env, context, null, lastGeneralId, BATCH_SIZE)
+    if (newGeneralSamples.length === 0) {
+      return cachedGeneral?.summary ?? ''
+    }
+    const maxGeneralId = Math.max(...newGeneralSamples.map((r) => r.id))
+    const updatedGeneral = await mergeTextStyleSummary(env, context, '__general__', cachedGeneral?.summary ?? '', newGeneralSamples)
+    if (updatedGeneral) {
+      await env.DB.prepare(
+        'INSERT OR REPLACE INTO task_style_summaries (summary_key, summary, last_processed_id, updated_at) VALUES (?, ?, ?, ?)',
+      )
+        .bind(generalKey, updatedGeneral, maxGeneralId, Date.now())
+        .run()
+      return updatedGeneral
+    }
+    return cachedGeneral?.summary ?? ''
+  } catch {
+    return ''
+  }
+}
+
 // ─── 个人知识库 ───────────────────────────────────────────────────────────────
 
 type KnowledgeNoteRow = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
@@ -5625,11 +5925,6 @@ async function chatWithAi(env: Env, request: Request) {
   const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
   const textAttachments = attachments.filter((a) => a.type === 'text').slice(0, 3)
 
-  const endpoint = await resolveAiEndpoint(env, 'textPrimary')
-  if (!endpoint.apiKey) {
-    return fail('未配置 AI 模型，请先在设置页配置 API Key', 503)
-  }
-
   // 判断是否需要联网搜索（用户在问自身数据则不搜）
   const lastMsg = messages.at(-1)?.content ?? ''
   const DATA_KW = ['今天', '今日', '本月', '上月', '工时', '任务', '收入', '赚', '计时', '结算', '明细', '近期', '最近', '历史', '验收']
@@ -5671,8 +5966,12 @@ async function chatWithAi(env: Env, request: Request) {
     const taskKey = task.title + '|' + task.start_date
     if (seenTaskIds.has(taskKey)) return
     seenTaskIds.add(taskKey)
-    let entries: Array<{ date?: string; endDate?: string; start?: string; end?: string; isUncounted?: boolean }> = []
-    try { entries = JSON.parse(task.time_entries_json ?? '[]') } catch {}
+    let entries: Array<{ date?: string; endDate?: string; start?: string; end?: string; isUncounted?: boolean }>
+    try {
+      entries = JSON.parse(task.time_entries_json ?? '[]')
+    } catch {
+      entries = []
+    }
     let taskTodayMinutes = 0
     entries.forEach((e) => {
       if (e.isUncounted) return
@@ -5763,47 +6062,72 @@ ${webSearchResult ? `\n=== 网络搜索结果 ===\n${webSearchResult}` : ''}
 ${textAttachmentSection}
 `
 
-  // 对 Gemini 用普通请求（不支持 SSE）
+  const fallbackChatPrompt = `[系统提示]\n${systemPrompt}\n\n[用户]\n${messages.at(-1)?.content ?? ''}`
+
   // 有图片附件：调用视觉模型（非流式，返回 JSON）
   if (imageAttachments.length > 0) {
-    const visionEndpoint = await resolveAiEndpoint(env, 'visionPrimary')
-    if (!visionEndpoint.apiKey) {
-      return fail('未配置视觉模型（visionPrimary），请在设置页配置后重试', 503)
-    }
     const lastUserContent = messages.at(-1)?.content ?? ''
     const visionPrompt = `${systemPrompt}\n\n用户问题：${lastUserContent}`
     const assets: MultimodalAsset[] = imageAttachments.map((a) => ({ base64: a.data, mimeType: a.mimeType }))
     try {
-      const text = await callAiEndpointMultimodal(visionEndpoint, visionPrompt, assets)
+      const text = await callMultimodalWithVisionFallback(env, visionPrompt, assets)
       return ok({ content: text })
     } catch (e) {
-      return fail(e instanceof Error ? e.message : '视觉模型调用失败', 500)
+      try {
+        const imageNames = imageAttachments.map((item) => item.name).filter(Boolean).join('、') || '未命名图片'
+        const text = await callTextWithFallback(
+          env,
+          `${fallbackChatPrompt}\n\n用户还上传了图片附件：${imageNames}。当前视觉模型不可用，请基于已有文字上下文先回答，并明确说明无法直接读取图片细节。`,
+          1500,
+        )
+        return ok({ content: text })
+      } catch (fallbackError) {
+        const detail = describeAiCallError(fallbackError) || describeAiCallError(e)
+        return fail(`AI 暂时不可用：${detail}`, 503)
+      }
     }
   }
 
-  if (endpoint.provider === 'gemini') {
-    const allMessages = [{ role: 'user', content: `[系统提示]\n${systemPrompt}\n\n[用户]\n${messages.at(-1)?.content ?? ''}` }]
-    const text = await callAiEndpointText(endpoint, allMessages[0].content, 1500).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : '调用失败')
-    })
-    return ok({ content: text })
+  const endpoint = await resolveAiEndpoint(env, 'textPrimary')
+  if (endpoint.provider === 'gemini' || !endpoint.apiKey) {
+    try {
+      const text = await callTextWithFallback(env, fallbackChatPrompt, 1500)
+      return ok({ content: text })
+    } catch (error) {
+      return fail(`AI 暂时不可用：${describeAiCallError(error)}`, 503)
+    }
+  }
+
+  const fallbackToJsonChat = async (error: unknown) => {
+    console.warn(JSON.stringify({ event: 'ai_chat_stream_primary_failed', error: describeAiCallError(error) }))
+    try {
+      const text = await callTextWithFallback(env, fallbackChatPrompt, 1500)
+      return ok({ content: text })
+    } catch (fallbackError) {
+      return fail(`AI 暂时不可用：${describeAiCallError(fallbackError)}`, 503)
+    }
   }
 
   // OpenAI 兼容流式
-  const aiRes = await fetch(`${endpoint.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${endpoint.apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: endpoint.model,
-      stream: true,
-      max_tokens: 1500,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-    }),
-  })
+  let aiRes: Response
+  try {
+    aiRes = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${endpoint.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: endpoint.model,
+        stream: true,
+        max_tokens: 1500,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      }),
+    })
+  } catch (error) {
+    return fallbackToJsonChat(error)
+  }
 
   if (!aiRes.ok || !aiRes.body) {
     const err = (await aiRes.json().catch(() => null)) as { error?: { message?: string } } | null
-    return fail(err?.error?.message ?? `AI 调用失败：${aiRes.status}`, 500)
+    return fallbackToJsonChat(new Error(err?.error?.message ?? `AI 调用失败：${aiRes.status}`))
   }
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
@@ -6042,18 +6366,20 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'suggest_task_hour_estimate'
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      'content-type': 'application/json',
-      // 冷知识「换一条」需要每次新内容，跳过 AI Gateway 缓存（其他 AI 调用保留缓存以提速省钱）
-      'cf-aig-skip-cache': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.15,
-      messages: [
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        'content-type': 'application/json',
+        // 冷知识「换一条」需要每次新内容，跳过 AI Gateway 缓存（其他 AI 调用保留缓存以提速省钱）
+        'cf-aig-skip-cache': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.15,
+        messages: [
         {
           role: 'system',
           content:
@@ -6097,9 +6423,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
           },
         },
       ],
-      tool_choice: { type: 'function', function: { name: toolName } },
-    }),
-  })
+        tool_choice: { type: 'function', function: { name: toolName } },
+      }),
+    })
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'ai_hour_estimate_deepseek_failed', error: describeAiCallError(error) }))
+    const fallback = await callFallback()
+    return fallback ?? fail(`AI 工时建议暂时不可用：${describeAiCallError(error)}`, 503)
+  }
 
   if (!response.ok) {
     const fallback = await callFallback()
@@ -6264,6 +6595,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/task-edits' ||
       path === '/api/ai/task-title-edits' ||
       path === '/api/ai/task-type-choices' ||
+      path === '/api/ai/text-edits' ||
       path === '/api/knowledge' ||
       path.startsWith('/api/knowledge/') ||
       path === '/api/search' ||
@@ -6390,6 +6722,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/task-type-choices' && request.method === 'POST') {
     return saveTaskTypeChoice(env, request)
+  }
+  if (path === '/api/ai/text-edits' && request.method === 'POST') {
+    return saveTextEditPair(env, request)
   }
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)
