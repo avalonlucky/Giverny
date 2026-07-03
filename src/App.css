@@ -82,22 +82,20 @@
 /* 工具模式（默认）主色固定为 #3c6b61，不随季节漂移——季节只在「吉维尼模式」里生效。 */
 
 /* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
-   默认是冷静的工具模式；开启后背景变暖润亚麻、主色变湿润睡莲绿、文字变暖墨，
-   状态色饱和度再降、色相更自然，并叠一层极淡画布纹理 + logo 旁睡莲签名。
-   这是「可选模式」，给用户在想要氛围时主动打开。 */
+   默认是冷静的工具模式；开启后只做低饱和、高明度的季节偏色。
+   纸面仍保持干净，季节感来自主色和极浅水面底色，不让整站变脏。 */
 :root[data-giverny="on"] {
   --color-text: #28302c;
   --color-text-secondary: #5d6863;
   --color-text-muted: #939c96;
   /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
-     基底是近白，季节色按低比例渗入：底色干净可读，但能清楚看出春绿/夏青/秋金/冬蓝。
-     卡片(strong)最浅、水面(surface)中、页底(alt)最深，营造「卡片浮在水上」的层次。 */
-  --color-surface: color-mix(in srgb, var(--brand-primary) 11%, #fbfbf9);
-  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 6%, #fdfdfc);
-  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 17%, #f6f7f4);
-  --color-sidebar: color-mix(in srgb, var(--brand-primary) 14%, #f9faf7);
-  --color-border: color-mix(in srgb, var(--brand-primary) 20%, transparent);
-  --color-border-soft: color-mix(in srgb, var(--brand-primary) 11%, transparent);
+     基底是近白，季节色只按很低比例渗入：看得出季节，但仍像干净白纸。 */
+  --color-surface: color-mix(in srgb, var(--brand-primary) 5%, #fbfbf9);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 2.5%, #fdfdfc);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 8%, #f7f8f5);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 6%, #fbfbf8);
+  --color-border: color-mix(in srgb, var(--brand-primary) 13%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
   /* 主色随季节走（见下方花园四季块）。默认夏。 */
   --brand-primary: #3c6b61;
   --brand-primary-strong: #2f564e;
@@ -107,40 +105,50 @@
   --color-primary-strong: var(--brand-primary-strong);
   --color-primary-hover: var(--brand-primary-strong);
   /* 状态色融入花园：饱和度再降、色相偏自然 */
-  --color-status-planning: #8a8a78;  /* 橄榄灰 */
-  --color-status-active: #5a7e94;    /* 雾蓝 */
-  --color-status-pending: #b08e4e;   /* 麦金 */
-  --color-status-accepted: #4a7a64;  /* 睡莲叶绿 */
-  --row-fill-plan: #e3fdfd;
-  --row-fill-active: #e8edea;
-  --row-fill-pending: #f0ebe0;
+  --color-status-planning: #8b928c;
+  --color-status-active: #668699;
+  --color-status-pending: #ae9661;
+  --color-status-accepted: var(--brand-primary);
+  --row-fill-plan: color-mix(in srgb, var(--brand-primary) 7%, #f8f8f4);
+  --row-fill-active: color-mix(in srgb, var(--color-status-active) 8%, #f8f8f4);
+  --row-fill-pending: color-mix(in srgb, var(--color-status-pending) 10%, #f8f8f4);
 }
 
-/* 吉维尼模式下的四季睡莲绿：在「花园」里季节感才有意义，故幅度比工具模式明显些。
-   选择器更具体(0,3,0)，胜过上面的 :root[data-giverny=on]。 */
+/* 吉维尼模式四季：低饱和、高明度，避免脏绿、土黄和冷灰压住内容。 */
 :root[data-giverny="on"][data-season="spring"] {
-  --brand-primary: #6b8a6e;        /* 春 · 萌芽嫩绿：水里透出新绿与暖光 */
-  --brand-primary-strong: #557058;
-  --brand-glow: rgba(107, 138, 110, 0.12);
-  --brand-glow-soft: rgba(107, 138, 110, 0.06);
+  --brand-primary: #82a08b;        /* 春 · 淡芽绿 */
+  --brand-primary-strong: #617b69;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
 }
 :root[data-giverny="on"][data-season="summer"] {
-  --brand-primary: #6f8f88;        /* 夏 · 睡莲盛放：更淡的海沫青绿（饱和度降到春天档 S13）*/
-  --brand-primary-strong: #54716b;
-  --brand-glow: rgba(111, 143, 136, 0.12);
-  --brand-glow-soft: rgba(111, 143, 136, 0.06);
+  --brand-primary: #78a09a;        /* 夏 · 清水青 */
+  --brand-primary-strong: #5b7b76;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
 }
 :root[data-giverny="on"][data-season="autumn"] {
-  --brand-primary: #b3a096;        /* 秋 · 暮光暖陶：更淡的柔和陶土（去刺眼，S16 暖灰陶）*/
-  --brand-primary-strong: #826a5d;
-  --brand-glow: rgba(179, 160, 150, 0.12);
-  --brand-glow-soft: rgba(179, 160, 150, 0.06);
+  --brand-primary: #a96f56;        /* 秋 · 暖陶土：参考 Claude 官网的暖白 + 陶土橙棕 */
+  --brand-primary-strong: #75503f;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+  --color-text: #2f2923;
+  --color-text-secondary: #6c6258;
+  --color-text-muted: #9b9288;
+  --color-surface: color-mix(in srgb, var(--brand-primary) 4%, #fcfaf6);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 1.8%, #fffdf8);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 7%, #f8f4ed);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 5%, #faf6ef);
+  --color-border: color-mix(in srgb, var(--brand-primary) 12%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 6%, transparent);
+  --color-status-pending: #a98258;
+  --row-fill-pending: color-mix(in srgb, var(--brand-primary) 9%, #fbf8f2);
 }
 :root[data-giverny="on"][data-season="winter"] {
-  --brand-primary: #7a929d;        /* 冬 · 冷静水蓝：更淡更通透的雾霭蓝（S15）*/
-  --brand-primary-strong: #5e7580;
-  --brand-glow: rgba(122, 146, 157, 0.12);
-  --brand-glow-soft: rgba(122, 146, 157, 0.06);
+  --brand-primary: #8aa1ad;        /* 冬 · 雾蓝灰 */
+  --brand-primary-strong: #667b86;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
 }
 
 /* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
@@ -5316,6 +5324,40 @@ button.topbar-create-button:hover {
   line-height: 1;
 }
 
+.progress-lite-time-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.progress-lite-time-sync:hover,
+.progress-lite-time-sync:focus-visible {
+  background: var(--color-supplement-bg);
+  color: var(--color-primary-strong);
+}
+
+.progress-lite-time-sync:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.progress-lite-time-heading .progress-lite-time-sync span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
 .progress-lite-time-formula .progress-lite-schedule-row.is-uncounted {
   opacity: 0.42;
   pointer-events: none;
@@ -5695,6 +5737,43 @@ button.topbar-create-button:hover {
   background: var(--color-surface-alt);
   color: var(--color-primary);
   max-width: 220px;
+}
+
+.brief-file-chip.has-preview {
+  max-width: 286px;
+  align-items: flex-start;
+}
+
+.brief-file-preview-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.brief-file-preview-thumb:disabled {
+  cursor: default;
+}
+
+.brief-file-preview-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.brief-file-preview-thumb span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
 }
 
 .brief-file-meta {
@@ -9711,6 +9790,7 @@ button.file-chip:focus-visible {
 
 .progress-lite-schedule-row-plan {
   color: var(--color-text-muted);
+  opacity: 0.86;
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row-plan .date-field > .field-label-row,
@@ -9722,6 +9802,7 @@ button.file-chip:focus-visible {
 .progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap > button,
 .progress-lite-time-formula .progress-lite-schedule-row-plan .new-task-hours-input {
   color: var(--color-text-muted);
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row-plan .date-input-wrap input[type='text'][readonly],
@@ -9985,6 +10066,15 @@ button.file-chip:focus-visible {
   gap: 8px;
 }
 
+.new-task-modal .ai-suggestion-panel {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 16px 18px 18px;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
 .ai-suggestion-head {
   display: flex;
   align-items: center;
@@ -9993,6 +10083,11 @@ button.file-chip:focus-visible {
   color: #4c5a5f;
   font-size: 13px;
   font-weight: 800;
+}
+
+.new-task-modal .ai-suggestion-head {
+  justify-content: flex-start;
+  color: var(--color-text-secondary);
 }
 
 /* AI 建议的轻量关闭按钮（不采纳也能关掉） */
@@ -10032,6 +10127,38 @@ button.file-chip:focus-visible {
   padding: 4px 8px;
 }
 
+.new-task-modal .ai-suggestion-head em {
+  background: var(--brand-glow-soft);
+}
+
+.ai-suggestion-inline-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ai-suggestion-inline-actions .text-button {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.ai-suggestion-inline-actions .text-button:hover {
+  color: var(--color-primary-strong);
+}
+
+.new-task-modal .ai-suggestion-panel p,
+.new-task-modal .ai-suggestion-title-text,
+.new-task-modal .ai-suggestion-body,
+.new-task-modal .ai-suggestion-item,
+.new-task-modal .ai-suggestion-line {
+  color: var(--color-text);
+}
+
 .ai-suggestion-panel p {
   margin: 0;
   color: #243840;
@@ -10047,6 +10174,17 @@ button.file-chip:focus-visible {
   background: rgba(47, 111, 109, 0.07);
   border-radius: 6px;
   font-size: 13px;
+}
+
+.new-task-modal .ai-suggestion-title-row {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: 0;
+}
+
+.new-task-modal .ai-suggestion-title-label {
+  color: var(--color-text-secondary);
 }
 
 .ai-suggestion-title-label {
@@ -10409,7 +10547,7 @@ input::file-selector-button {
 }
 
 .task-modal.progress-lite-modal {
-  width: min(1040px, calc(100vw - 48px));
+  width: min(1180px, calc(100vw - 40px));
   overflow: visible;
 }
 
@@ -13059,7 +13197,7 @@ textarea:focus-visible {
   width: 38px;
   height: 22px;
   border-radius: 999px;
-  background: #cdd3ce;
+  background: var(--color-border-strong);
   flex: 0 0 auto;
   transition: background 0.3s ease;
 }
@@ -13071,8 +13209,8 @@ textarea:focus-visible {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: var(--color-surface-strong);
+  box-shadow: none;
   transition: transform 0.3s ease;
 }
 
@@ -19418,7 +19556,7 @@ button.topbar-create-button kbd {
   gap: 10px;
 }
 
-.chat-history-item:hover { background: rgba(0,0,0,0.04); }
+.chat-history-item:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 
 .chat-history-item-title {
   flex: 1;
@@ -19450,4 +19588,102 @@ button.topbar-create-button kbd {
   transition: opacity 0.15s;
 }
 
-.chat-history-del:hover { opacity: 1; color: #c0392b; }
+.chat-history-del:hover { opacity: 1; color: var(--color-status-danger); }
+
+/* ---------- UI audit cleanup: insight surfaces and Alice assistant ---------- */
+
+.insights-history-row,
+.attachment-analysis-stats > div,
+.attachment-analysis-row,
+.attachment-analysis-columns section,
+.insights-chain-row,
+.insights-risk-row,
+.insights-score-card,
+.knowledge-item,
+.alice-input-card,
+.alice-scope-popup,
+.chat-history-panel {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.insights-history-row,
+.attachment-analysis-stats > div,
+.attachment-analysis-row,
+.insights-chain-row,
+.insights-risk-row {
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+.insights-history-row dl div,
+.attachment-analysis-columns section,
+.insights-score-card,
+.knowledge-item {
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface-strong));
+}
+
+.insights-score-card {
+  border: 1px solid var(--color-border);
+}
+
+.insights-coverage-chip {
+  border-radius: 0;
+}
+
+.knowledge-save-btn,
+.knowledge-cancel-btn,
+.chat-knowledge-toggle,
+.chat-attachment-chip,
+.alice-suggested-btn,
+.alice-send-btn,
+.alice-tool-btn,
+.alice-scope-badge {
+  border-radius: 0;
+}
+
+.knowledge-item-ai-tip {
+  border-color: color-mix(in srgb, var(--color-status-danger) 25%, var(--color-border));
+  background: color-mix(in srgb, var(--color-status-danger) 4%, var(--color-surface));
+}
+
+.knowledge-item-delete:hover {
+  color: var(--color-status-danger);
+}
+
+.chat-knowledge-toggle.on,
+.knowledge-save-btn,
+.alice-send-btn {
+  color: var(--color-surface-strong);
+}
+
+.alice-welcome-avatar {
+  box-shadow: none;
+}
+
+.alice-suggested-btn:hover,
+.alice-tool-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+
+.alice-input-card {
+  background: transparent;
+}
+
+.alice-input-card:focus-within {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  box-shadow: none;
+}
+
+.alice-scope-badge {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.alice-toggle {
+  background: var(--color-border);
+}
+
+.alice-toggle::after {
+  background: var(--color-surface-strong);
+  box-shadow: none;
+}

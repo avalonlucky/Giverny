@@ -922,6 +922,49 @@ async function extractAttachmentText(file: File): Promise<string> {
   return ''
 }
 
+async function createTextPreviewFile(fileName: string, text: string) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 600
+  canvas.height = 420
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return undefined
+  }
+  context.fillStyle = '#fbfbf7'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = '#2f3a37'
+  context.font = '600 28px -apple-system, "PingFang SC", "Segoe UI", sans-serif'
+  context.fillText(splitFileName(fileName).base.slice(0, 18), 38, 58)
+  context.fillStyle = '#8c9895'
+  context.font = '500 18px -apple-system, "PingFang SC", "Segoe UI", sans-serif'
+  context.fillText(splitFileName(fileName).extension.replace('.', '').toUpperCase() || 'TEXT', 38, 90)
+  context.strokeStyle = '#e3e7e2'
+  context.beginPath()
+  context.moveTo(38, 118)
+  context.lineTo(562, 118)
+  context.stroke()
+
+  context.fillStyle = '#46524f'
+  context.font = '22px -apple-system, "PingFang SC", "Segoe UI", sans-serif'
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  const lines: string[] = []
+  let cursor = normalized
+  while (cursor && lines.length < 8) {
+    let end = Math.min(cursor.length, 22)
+    while (end < cursor.length && context.measureText(cursor.slice(0, end)).width < 500) {
+      end += 1
+    }
+    lines.push(cursor.slice(0, end).trim())
+    cursor = cursor.slice(end).trim()
+  }
+  lines.forEach((line, index) => context.fillText(line, 38, 158 + index * 34))
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), 'image/png'))
+  if (!blob) {
+    return undefined
+  }
+  return new File([blob], `${splitFileName(fileName).base || 'attachment'}-preview.png`, { type: 'image/png' })
+}
+
 async function createPdfPreviewFile(file: File) {
   const data = await file.arrayBuffer()
   const pdfjs = await import('pdfjs-dist')
@@ -2730,6 +2773,32 @@ function renderTextAssistantBody(text: string) {
     }
     return <span className="ai-suggestion-line" key={index}>{trimmed}</span>
   })
+}
+
+function taskAssistantRequirementWithoutOutputFiles(text: string) {
+  const lines = text.split('\n')
+  const result: string[] = []
+  let skippingOutputSection = false
+
+  lines.forEach((line) => {
+    const trimmed = line.trim()
+    const isNumberedSection = /^\d+[、.．]/.test(trimmed)
+    const isPlainOutputSection = /^(?:【)?\s*(输出文件|交付文件|文件格式|源文件)(?:】)?\s*[：:]/.test(trimmed)
+    const isOutputSection = /输出文件|交付文件|文件格式|源文件/.test(trimmed)
+
+    if ((isNumberedSection && isOutputSection) || isPlainOutputSection) {
+      skippingOutputSection = true
+      return
+    }
+    if (skippingOutputSection && isNumberedSection) {
+      skippingOutputSection = false
+    }
+    if (!skippingOutputSection) {
+      result.push(line)
+    }
+  })
+
+  return result.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 const readDraftCache = <T,>(key: string, fallback: T): T => {
@@ -6405,6 +6474,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               onCopyShareLink={handleCopyShareLink}
               onRotateReportToken={handleRotateReportToken}
               onLockReport={handleLockMonthlyReport}
+              onNotify={notify}
             />
           ) : (
             adminOnlyPanel
@@ -9032,15 +9102,15 @@ function TaskProgressModal({
     if (!value) {
       return
     }
-    if (planReferenceDerivedField === 'hours' && planReferenceEndValue) {
+    if (planReferenceDerivedField === 'end') {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(value, planReferenceMinutes))
+      return
+    }
+    if (planReferenceEndValue) {
       const nextMinutes = exactDurationMinutesBetween(value, planReferenceEndValue)
       if (nextMinutes > 0) {
         setPlanReferenceMinutes(nextMinutes)
       }
-      return
-    }
-    if (planReferenceDerivedField === 'end') {
-      writePlanReferenceEnd(addMinutesToPlanDateTime(value, planReferenceMinutes))
     }
   }
 
@@ -9049,15 +9119,15 @@ function TaskProgressModal({
     if (!value) {
       return
     }
-    if (planReferenceDerivedField === 'hours' && planReferenceStartValue) {
+    if (planReferenceDerivedField === 'start') {
+      writePlanReferenceStart(addMinutesToPlanDateTime(value, -planReferenceMinutes))
+      return
+    }
+    if (planReferenceStartValue) {
       const nextMinutes = exactDurationMinutesBetween(planReferenceStartValue, value)
       if (nextMinutes > 0) {
         setPlanReferenceMinutes(nextMinutes)
       }
-      return
-    }
-    if (planReferenceDerivedField === 'start') {
-      writePlanReferenceStart(addMinutesToPlanDateTime(value, -planReferenceMinutes))
     }
   }
 
@@ -9068,15 +9138,15 @@ function TaskProgressModal({
       writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -nextMinutes))
       return
     }
-    if (planReferenceDerivedField === 'start' && planReferenceStartValue) {
-      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, nextMinutes))
-      return
-    }
     if (planReferenceDerivedField === 'end' && planReferenceStartValue) {
       writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, nextMinutes))
       return
     }
-    if (planReferenceDerivedField === 'end' && planReferenceEndValue) {
+    if (planReferenceStartValue) {
+      writePlanReferenceEnd(addMinutesToPlanDateTime(planReferenceStartValue, nextMinutes))
+      return
+    }
+    if (planReferenceEndValue) {
       writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -nextMinutes))
     }
   }
@@ -9248,6 +9318,26 @@ function TaskProgressModal({
     setTimeEntryError('')
   }
 
+  const syncPlanReferenceToProgress = () => {
+    const referenceMinutes = exactDurationMinutesBetween(planReferenceStartValue, planReferenceEndValue)
+    if (!planReferenceStartValue || !planReferenceEndValue || referenceMinutes <= 0) {
+      setTimeEntryError('预计结束时间需晚于预计开始时间，才能同步到实际工时')
+      return
+    }
+    setHasTouchedSchedule(true)
+    setScheduleDerivedField(planReferenceDerivedField)
+    setSegmentMinutes(referenceMinutes)
+    updateActiveDraft((current) => ({
+      ...current,
+      date: datePart(planReferenceStartValue),
+      start: planReferenceStartValue.slice(11, 16),
+      endDate: datePart(planReferenceEndValue),
+      end: planReferenceEndValue.slice(11, 16),
+    }))
+    setActiveDatePickerId(null)
+    setTimeEntryError('')
+  }
+
   const sortSegmentsByTime = (segs: TimeEntry[]) =>
     [...segs].sort((a, b) => {
       const ta = `${a.date}T${a.start}`
@@ -9311,6 +9401,18 @@ function TaskProgressModal({
           <small>{timeCounts ? '三项同时只激活两项，第三项自动推算（灰色）' : isAcceptanceMode ? '本次验收不计入工时' : '本次不计工时，仅记录进展'}</small>
         </div>
         <div className="progress-lite-time-heading-actions">
+          {isAcceptanceMode && !isWaitingMode && (
+            <button
+              type="button"
+              className="progress-lite-time-sync"
+              onClick={syncPlanReferenceToProgress}
+              disabled={!planReferenceStartValue || !planReferenceEndValue || planReferenceMinutes <= 0}
+              title="把右侧预计时间与工时同步到左侧实际"
+            >
+              <ArrowRightLeft size={13} />
+              <span>同步预计</span>
+            </button>
+          )}
           {isAcceptanceMode && (
             <button
               type="button"
@@ -9404,8 +9506,8 @@ function TaskProgressModal({
               label="开始时间"
               value={planReferenceStartValue}
               onChange={updatePlanReferenceStart}
-              isActive={planReferenceDerivedField !== 'start'}
-              readOnly={planReferenceDerivedField === 'start'}
+              isActive
+              readOnly={false}
               control={<ScheduleAnchorSwitch active={planReferenceDerivedField !== 'start'} label="切换预计开始时间" onClick={() => togglePlanReferenceScheduleField('start')} />}
               pickerId="plan-start"
               activePickerId={activeDatePickerId}
@@ -9417,30 +9519,24 @@ function TaskProgressModal({
                 本段工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
-                {planReferenceDerivedField === 'hours' ? (
-                  <output className="new-task-hours-input new-task-hours-output" aria-label="预计工时">
-                    {formatDuration(planReferenceMinutes)}
-                  </output>
-                ) : (
-                  <input
-                    className="new-task-hours-input"
-                    type="number"
-                    min="0.5"
-                    step="0.5"
-                    value={formatHoursInputValue(planReferenceMinutes)}
-                    onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
-                    aria-label="预计工时"
-                  />
-                )}
-                {planReferenceDerivedField !== 'hours' && <span className="progress-lite-hours-unit">小时</span>}
+                <input
+                  className="new-task-hours-input"
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={formatHoursInputValue(planReferenceMinutes)}
+                  onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
+                  aria-label="预计工时"
+                />
+                <span className="progress-lite-hours-unit">小时</span>
               </div>
             </div>
             <PlanDateTimeField
               label="结束时间"
               value={planReferenceEndValue}
               onChange={updatePlanReferenceEnd}
-              isActive={planReferenceDerivedField !== 'end'}
-              readOnly={planReferenceDerivedField === 'end'}
+              isActive
+              readOnly={false}
               control={<ScheduleAnchorSwitch active={planReferenceDerivedField !== 'end'} label="切换预计结束时间" onClick={() => togglePlanReferenceScheduleField('end')} />}
               pickerId="plan-end"
               activePickerId={activeDatePickerId}
@@ -12302,6 +12398,7 @@ function ReportsView({
   onCopyShareLink,
   onRotateReportToken,
   onLockReport,
+  onNotify,
 }: {
   stats: {
     totalHours: number
@@ -12325,6 +12422,7 @@ function ReportsView({
   onCopyShareLink: (token: string) => void
   onRotateReportToken: (report: ReportRecord) => void
   onLockReport: () => void
+  onNotify: (message: string, tone?: ToastTone) => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
   const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail'>('min')
@@ -12559,7 +12657,7 @@ function ReportsView({
     URL.revokeObjectURL(url)
     } catch (error) {
       console.error('User 表导出失败', error)
-      window.alert(error instanceof Error ? `User 表导出失败：${error.message}` : 'User 表导出失败，请重试')
+      onNotify(error instanceof Error ? `User 表导出失败：${error.message}` : 'User 表导出失败，请重试', 'error')
     }
   }
 
@@ -14895,18 +14993,53 @@ function NewTaskModal({
   const aiSuggestionAppliedRef = useRef<string | null>(null)
   const aiTitleSuggestionAppliedRef = useRef<string | null>(null)
   // 甲方文案附件：仅用于 AI 需求分析（前端就地抽取文字或图片 base64），不随任务持久化
-  type BriefItem = { id: string; name: string; text: string; chars: number; isImage?: boolean; base64?: string; mimeType?: string }
+  type BriefItem = {
+    id: string
+    name: string
+    text: string
+    chars: number
+    isImage?: boolean
+    base64?: string
+    mimeType?: string
+    previewUrl?: string
+    previewLabel?: string
+  }
   const [briefFiles, setBriefFiles] = useState<BriefItem[]>([])
   const [briefError, setBriefError] = useState('')
   const [isBriefLoading, setIsBriefLoading] = useState(false)
   const [briefLightboxSrc, setBriefLightboxSrc] = useState<string | null>(null)
   const briefInputRef = useRef<HTMLInputElement | null>(null)
+  const briefFilesRef = useRef<BriefItem[]>([])
   const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
   const [hourSuggestionError, setHourSuggestionError] = useState('')
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
+
+  const revokeBriefPreview = (item: BriefItem) => {
+    if (item.previewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(item.previewUrl)
+    }
+  }
+
+  const removeBriefFile = (id: string) => {
+    setBriefFiles((prev) => {
+      const removed = prev.find((item) => item.id === id)
+      if (removed) {
+        revokeBriefPreview(removed)
+      }
+      return prev.filter((item) => item.id !== id)
+    })
+  }
+
+  useEffect(() => {
+    briefFilesRef.current = briefFiles
+  }, [briefFiles])
+
+  useEffect(() => () => {
+    briefFilesRef.current.forEach(revokeBriefPreview)
+  }, [])
 
   useEffect(() => {
     if (isEditing) {
@@ -15127,7 +15260,16 @@ function NewTaskModal({
         } else {
           const text = await extractAttachmentText(file)
           if (text.trim()) {
-            added.push({ id: crypto.randomUUID(), name: file.name, text, chars: text.length })
+            const previewFile = await createOptionalPreviewFile(file) ?? await createTextPreviewFile(file.name, text)
+            const previewUrl = previewFile ? URL.createObjectURL(previewFile) : undefined
+            added.push({
+              id: crypto.randomUUID(),
+              name: file.name,
+              text,
+              chars: text.length,
+              previewUrl,
+              previewLabel: splitFileName(file.name).extension.replace('.', '').toUpperCase() || 'FILE',
+            })
           } else {
             setBriefError('部分文件没能读到文字（支持 Word .docx、PPT .pptx、PDF、txt；旧版 .doc/.ppt 请另存为新格式）')
           }
@@ -15176,11 +15318,16 @@ function NewTaskModal({
     if (!aiSuggestion) {
       return
     }
-    aiSuggestionAppliedRef.current = aiSuggestion.optimizedRequirement
-    setRequirement(aiSuggestion.optimizedRequirement)
-    if (aiSuggestion.categoryExists) {
-      setType(aiSuggestion.suggestedType)
+    const nextRequirement = taskAssistantRequirementWithoutOutputFiles(aiSuggestion.optimizedRequirement)
+    aiSuggestionAppliedRef.current = nextRequirement
+    setRequirement(nextRequirement)
+  }
+
+  const applyAiCategory = () => {
+    if (!aiSuggestion?.categoryExists) {
+      return
     }
+    setType(aiSuggestion.suggestedType)
   }
 
   const addSuggestedCategoryAndApply = async () => {
@@ -15202,12 +15349,6 @@ function NewTaskModal({
     }
     await onDesignTypeGroupsChange(nextGroups)
     setType(`${parent} / ${child}`)
-    aiSuggestionAppliedRef.current = aiSuggestion.optimizedRequirement
-    setRequirement(aiSuggestion.optimizedRequirement)
-    if (aiSuggestion.suggestedTitle) {
-      aiTitleSuggestionAppliedRef.current = aiSuggestion.suggestedTitle
-      setTitle(aiSuggestion.suggestedTitle)
-    }
     setAiSuggestion({ ...aiSuggestion, categoryExists: true, missingCategory: undefined })
   }
 
@@ -15336,16 +15477,31 @@ function NewTaskModal({
                 f.isImage && f.base64 ? (
                   <div key={f.id} className="brief-img-chip">
                     <img src={`data:${f.mimeType};base64,${f.base64}`} className="brief-img-thumb" alt={f.name} onClick={() => setBriefLightboxSrc(`data:${f.mimeType};base64,${f.base64}`)} style={{ cursor: 'zoom-in' }} />
-                    <button type="button" className="brief-img-remove" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
+                    <button type="button" className="brief-img-remove" aria-label="移除" onClick={() => removeBriefFile(f.id)}>
                       <X size={10} />
                     </button>
                   </div>
                 ) : (
-                  <div key={f.id} className="brief-file-chip">
-                    <button type="button" className="brief-file-remove" aria-label="移除" onClick={() => setBriefFiles((prev) => prev.filter((x) => x.id !== f.id))}>
+                  <div key={f.id} className={`brief-file-chip ${f.previewUrl ? 'has-preview' : ''}`}>
+                    <button type="button" className="brief-file-remove" aria-label="移除" onClick={() => removeBriefFile(f.id)}>
                       <X size={10} />
                     </button>
-                    <FileText size={14} />
+                    <button
+                      type="button"
+                      className="brief-file-preview-thumb"
+                      aria-label={`预览 ${f.name}`}
+                      onClick={() => f.previewUrl && setBriefLightboxSrc(f.previewUrl)}
+                      disabled={!f.previewUrl}
+                    >
+                      {f.previewUrl ? (
+                        <img src={f.previewUrl} alt={f.name} />
+                      ) : (
+                        <>
+                          <FileText size={18} />
+                          <span>{f.previewLabel || 'FILE'}</span>
+                        </>
+                      )}
+                    </button>
                     <div className="brief-file-meta">
                       <strong>{f.name}</strong>
                       <small>约 {f.chars} 字</small>
@@ -15390,6 +15546,27 @@ function NewTaskModal({
               <div className="ai-suggestion-head">
                 <span>{isAiLoading ? 'AI 正在整理需求' : 'AI 建议'}</span>
                 {aiSuggestion && <em>{aiSuggestion.suggestedType}</em>}
+                {aiSuggestion && (
+                  <div className="ai-suggestion-inline-actions">
+                    <button type="button" className="text-button" onClick={applyAiSuggestion}>
+                      采用文案
+                    </button>
+                    {aiSuggestion.categoryExists ? (
+                      <button type="button" className="text-button" onClick={applyAiCategory}>
+                        采用分类
+                      </button>
+                    ) : (
+                      <button type="button" className="text-button" onClick={() => void addSuggestedCategoryAndApply()}>
+                        新增并采用分类
+                      </button>
+                    )}
+                    {aiSuggestion.suggestedTitle && (
+                      <button type="button" className="text-button" onClick={applyAiTitle}>
+                        采用任务名称
+                      </button>
+                    )}
+                  </div>
+                )}
                 {!isAiLoading && (aiSuggestion || aiError) && (
                   <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setAiSuggestion(null); setAiError('') }}>
                     <X size={14} />
@@ -15402,15 +15579,12 @@ function NewTaskModal({
                 <>
                   {aiSuggestion.suggestedTitle && (
                     <div className="ai-suggestion-title-row">
-                      <span className="ai-suggestion-title-label">建议名称</span>
+                      <span className="ai-suggestion-title-label">建议任务名称</span>
                       <span className="ai-suggestion-title-text">{aiSuggestion.suggestedTitle}</span>
-                      <button type="button" className="ghost-button compact-button" onClick={applyAiTitle}>
-                        采用
-                      </button>
                     </div>
                   )}
                   <div className="ai-suggestion-body">
-                    {aiSuggestion.optimizedRequirement.split('\n').map((line, index) => {
+                    {taskAssistantRequirementWithoutOutputFiles(aiSuggestion.optimizedRequirement).split('\n').map((line, index) => {
                       const trimmed = line.trim()
                       if (!trimmed) {
                         return null
@@ -15427,16 +15601,6 @@ function NewTaskModal({
                     })}
                   </div>
                   {aiSuggestion.reason && <small>{aiSuggestion.reason}</small>}
-                  <div className="ai-suggestion-actions">
-                    <button type="button" className="ghost-button compact-button" onClick={applyAiSuggestion}>
-                      采用文案{aiSuggestion.categoryExists ? '和分类' : ''}
-                    </button>
-                    {!aiSuggestion.categoryExists && (
-                      <button type="button" className="primary-button compact-button" onClick={() => void addSuggestedCategoryAndApply()}>
-                        新增分类并采用
-                      </button>
-                    )}
-                  </div>
                 </>
               )}
             </div>

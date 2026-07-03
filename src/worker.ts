@@ -1428,6 +1428,100 @@ const toAttachmentAnalysis = (row: DbAttachmentAnalysis): AttachmentAnalysis => 
   completedAt: formatBeijing(row.completed_at),
 })
 
+type AcceptanceAttachmentAiContext = {
+  id: string
+  name: string
+  type: string
+  mimeType: string
+  tag: string
+  uploadedAt: string
+  analysisStatus: string
+  analysisSummary: string
+  extractedText: string
+  findings: string[]
+  qualityIssues: string[]
+  requirementMatches: string[]
+  risks: string[]
+  suggestions: string[]
+}
+
+type AcceptanceAttachmentAiRow = {
+  id: string
+  file_name: string
+  file_type: string | null
+  mime_type: string | null
+  file_tag: string | null
+  uploaded_at: string
+  analysis_status: string | null
+  summary: string | null
+  extracted_text: string | null
+  findings_json: string | null
+  quality_issues_json: string | null
+  requirement_matches_json: string | null
+  risks_json: string | null
+  suggestions_json: string | null
+}
+
+const trimAiContextText = (value: string | null | undefined, limit = 1200) => {
+  const text = String(value ?? '').trim()
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
+}
+
+async function getAcceptanceAttachmentAiContexts(env: Env, taskId: unknown): Promise<AcceptanceAttachmentAiContext[]> {
+  const taskIdText = typeof taskId === 'number' || typeof taskId === 'string' ? String(taskId).trim() : ''
+  if (!taskIdText) {
+    return []
+  }
+  const rows = await env.DB.prepare(
+    `SELECT
+       attachments.id,
+       attachments.file_name,
+       attachments.file_type,
+       attachments.mime_type,
+       attachments.file_tag,
+       attachments.uploaded_at,
+       attachment_analyses.status AS analysis_status,
+       attachment_analyses.summary,
+       attachment_analyses.extracted_text,
+       attachment_analyses.findings_json,
+       attachment_analyses.quality_issues_json,
+       attachment_analyses.requirement_matches_json,
+       attachment_analyses.risks_json,
+       attachment_analyses.suggestions_json
+     FROM attachments
+     LEFT JOIN attachment_analyses ON attachment_analyses.attachment_id = attachments.id
+     WHERE attachments.task_id = ?
+       AND attachments.deleted_at IS NULL
+       AND (
+         attachments.attachment_scope = 'acceptance'
+         OR attachments.is_final = 1
+         OR attachments.file_tag = '验收文件'
+         OR attachments.file_tag = '验收附件'
+       )
+     ORDER BY attachments.uploaded_at DESC
+     LIMIT 24`,
+  )
+    .bind(taskIdText)
+    .all<AcceptanceAttachmentAiRow>()
+
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    name: row.file_name,
+    type: row.file_type || '',
+    mimeType: row.mime_type || '',
+    tag: row.file_tag || '',
+    uploadedAt: formatBeijing(row.uploaded_at),
+    analysisStatus: row.analysis_status || 'missing',
+    analysisSummary: trimAiContextText(row.summary),
+    extractedText: trimAiContextText(row.extracted_text, 1600),
+    findings: analysisJsonArray(row.findings_json).slice(0, 8),
+    qualityIssues: analysisJsonArray(row.quality_issues_json).slice(0, 6),
+    requirementMatches: analysisJsonArray(row.requirement_matches_json).slice(0, 8),
+    risks: analysisJsonArray(row.risks_json).slice(0, 6),
+    suggestions: analysisJsonArray(row.suggestions_json).slice(0, 6),
+  }))
+}
+
 type AnalysisPayload = {
   summary: string
   contentType: string
@@ -3023,15 +3117,33 @@ type HourEstimateSample = {
   deliveryCycleHours: number
 }
 
-function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTypeGroup[]) {
-  const parent = String(args.suggestedParentType ?? '').trim()
-  const child = String(args.suggestedChildType ?? '').trim()
+const taskAssistantCategoryRules = `\n\n【分类规则】\n- availableDesignTypeGroups 是当前已配置分类，不是封闭选项。\n- 已有大类合适但子类缺失时，复用该大类并输出新的子类。例如「视频剪辑」「短视频剪辑」「直播切片」若没有对应子类，可建议「传播类 / 视频剪辑」或更贴切的新子类。\n- 如果大类也不合适，可以输出新的大类。\n- 不要为了让 categoryExists=true 把任务硬套进「海报」「单页 / 折页」「官网 banner」「邀请函长图」等不准确分类。`
+
+const videoTaskPattern = /视频剪辑|剪视频|短视频|直播切片|切片剪辑|后期剪辑|视频后期|字幕包装|片头片尾|视频包装|视频号|抖音|快手|小红书视频/
+const videoCategoryPattern = /视频|剪辑|切片|后期/
+
+function hasVideoCategory(groups: DesignTypeGroup[]) {
+  return groups.some((group) => videoCategoryPattern.test(group.name) || group.items.some((item) => videoCategoryPattern.test(item)))
+}
+
+function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTypeGroup[], context = '') {
+  let parent = String(args.suggestedParentType ?? '').trim()
+  let child = String(args.suggestedChildType ?? '').trim()
   const fallbackParent = groups[0]?.name ?? '常用类型'
   const fallbackChild = groups[0]?.items[0] ?? defaultDesignTypes[0]
+  const shouldSuggestVideoCategory =
+    videoTaskPattern.test(context) && !hasVideoCategory(groups) && !videoCategoryPattern.test(`${parent} ${child}`)
+
+  if (shouldSuggestVideoCategory) {
+    parent = groups.find((group) => group.name.includes('传播'))?.name ?? '视频类'
+    child = '视频剪辑'
+  }
+
   const suggestedParentType = parent || fallbackParent
   const suggestedChildType = child || fallbackChild
   const matchedGroup = groups.find((group) => group.name === suggestedParentType)
   const categoryExists = Boolean(matchedGroup?.items.includes(suggestedChildType))
+  const baseReason = String(args.reason ?? '').trim()
   return {
     suggestedTitle: String(args.suggestedTitle ?? '').trim(),
     optimizedRequirement: String(args.optimizedRequirement ?? '').trim(),
@@ -3039,7 +3151,9 @@ function toTaskAssistantSuggestion(args: TaskAssistantToolArgs, groups: DesignTy
     suggestedChildType,
     suggestedType: `${suggestedParentType} / ${suggestedChildType}`,
     categoryExists,
-    reason: String(args.reason ?? '').trim(),
+    reason: shouldSuggestVideoCategory
+      ? `${baseReason ? `${baseReason}；` : ''}检测到视频剪辑类任务且当前分类缺少对应子类，建议新增并采用。`
+      : baseReason,
     missingCategory: categoryExists ? undefined : { parent: suggestedParentType, child: suggestedChildType },
   }
 }
@@ -4727,10 +4841,11 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     attachmentText,
     styleGuide: styleGuideBlock,
   }
+  const taskAssistantContext = [title, requirement, attachmentName, attachmentText].filter(Boolean).join('\n')
 
   const runtimeSuggestion = await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
   if (runtimeSuggestion) {
-    const suggestion = toTaskAssistantSuggestion(runtimeSuggestion, designTypeGroups)
+    const suggestion = toTaskAssistantSuggestion(runtimeSuggestion, designTypeGroups, taskAssistantContext)
     if (suggestion.optimizedRequirement) {
       await audit(env, 'suggest', 'ai_task_assistant', title || 'untitled', {
         title,
@@ -4745,11 +4860,11 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TaskAssistantToolArgs>(
       env,
-      `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。输入可能带 attachmentText（甲方提供的文案附件，已抽取为纯文本或图片识别内容）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。图片识别内容以「图片内容识别」开头，请充分理解图片整体含义，用图片中的完整准确信息补全用户的简写或不完整描述。不要编造用户和附件都没有提供的事实。${styleGuideInjection}`,
+      `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并判断最合适的大类和子类；已有分类能准确覆盖时复用，没有精确匹配时输出新大类或新子类，供前端新增并采用。输入可能带 attachmentText（甲方提供的文案附件，已抽取为纯文本或图片识别内容）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。图片识别内容以「图片内容识别」开头，请充分理解图片整体含义，用图片中的完整准确信息补全用户的简写或不完整描述。不要编造用户和附件都没有提供的事实。${taskAssistantCategoryRules}${styleGuideInjection}`,
       aiPayload,
       'suggestedTitle:string, optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
     )
-    const suggestion = toTaskAssistantSuggestion(fallbackParsed ?? {}, designTypeGroups)
+    const suggestion = toTaskAssistantSuggestion(fallbackParsed ?? {}, designTypeGroups, taskAssistantContext)
     if (!suggestion.optimizedRequirement) {
       return null
     }
@@ -4785,7 +4900,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴切的大类和子类。\n\n【附件参考规则】attachmentText 可能来自 Word/PDF 文案（纯文本），也可能来自图片识别（以「图片内容识别」开头）。以用户写的 rawRequirement 为绝对主导，附件是帮你更深理解用户意图的背景材料：\n- rawRequirement 非空时：以它定义任务范围和设计目的；附件帮助你补全、纠正、丰富用户描述里不完整的地方。\n- rawRequirement 为空时：从附件中提炼简洁任务单，不照抄大段文案。\n\n【图片理解与意图识别】当 attachmentText 来自图片识别时，你的核心任务是：充分理解图片的整体内容（产品功能、信息结构、视觉风格、核心主题），然后结合图片内容重新理解用户 rawRequirement 的真实意图——用户的描述往往是口语化、简写或不完整的，图片才是最准确的信息源。\n具体要做的事：\n1. 先完整理解图片：这是什么产品/项目，核心价值是什么，内容结构怎么组织，视觉风格如何\n2. 用图片内容校准用户描述：用户写的简称、模糊表达、不完整的名字，用图片中对应的准确内容补全（如用户写”融合防勒索与零信任”，图片完整标题是”融合防勒索与零信任的一体化办公终端安全软件—星点御河”，则用完整名称）\n3. 识别用户意图的延伸信息：图片中有但用户未提及、却对设计任务有帮助的信息（如产品定位、目标受众、核心卖点），可以用一句话补入设计背景\n4. 图片视觉风格可参考写入设计要求，但只写”参考附件样式”而非自行规定具体颜色\n\n【设计要求的写法】只写甲方明确指定的约束（如甲方说了”要用科技蓝””横版A4”才写）；无明确视觉指定时，设计要求写”参考附件样式，具体视觉方向对接时确认”，不要自行规定主色调或风格。\n\n禁止：逐条照抄附件里的产品清单/功能列表（一句话带过并注”详见甲方附件”）；凭空编造交付物、尺寸、品牌规范；写客套话。\n允许：修正语病；归并信息；用图片中的完整名称替换用户简写；用图片理解到的产品背景补充设计背景。\n\n输出严格使用三段固定模板，段标题一字不改：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[甲方明确指定的约束；无明确要求则写”参考附件样式，具体视觉方向对接时确认”]\n3、输出文件：[交付物清单]\n\n方括号只是提示，最终不要保留。用户和附件都没有提供的信息写”未明确，可在对接时确认”。${styleGuideInjection}`,
+            `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并判断最合适的大类和子类；已有分类能准确覆盖时复用，没有精确匹配时输出新大类或新子类，供前端新增并采用。\n\n【附件参考规则】attachmentText 可能来自 Word/PDF 文案（纯文本），也可能来自图片识别（以「图片内容识别」开头）。以用户写的 rawRequirement 为绝对主导，附件是帮你更深理解用户意图的背景材料：\n- rawRequirement 非空时：以它定义任务范围和设计目的；附件帮助你补全、纠正、丰富用户描述里不完整的地方。\n- rawRequirement 为空时：从附件中提炼简洁任务单，不照抄大段文案。\n\n【图片理解与意图识别】当 attachmentText 来自图片识别时，你的核心任务是：充分理解图片的整体内容（产品功能、信息结构、视觉风格、核心主题），然后结合图片内容重新理解用户 rawRequirement 的真实意图——用户的描述往往是口语化、简写或不完整的，图片才是最准确的信息源。\n具体要做的事：\n1. 先完整理解图片：这是什么产品/项目，核心价值是什么，内容结构怎么组织，视觉风格如何\n2. 用图片内容校准用户描述：用户写的简称、模糊表达、不完整的名字，用图片中对应的准确内容补全（如用户写”融合防勒索与零信任”，图片完整标题是”融合防勒索与零信任的一体化办公终端安全软件—星点御河”，则用完整名称）\n3. 识别用户意图的延伸信息：图片中有但用户未提及、却对设计任务有帮助的信息（如产品定位、目标受众、核心卖点），可以用一句话补入设计背景\n4. 图片视觉风格可参考写入设计要求，但只写”参考附件样式”而非自行规定具体颜色\n\n【设计要求的写法】只写甲方明确指定的约束（如甲方说了”要用科技蓝””横版A4”才写）；无明确视觉指定时，设计要求写”参考附件样式，具体视觉方向对接时确认”，不要自行规定主色调或风格。${taskAssistantCategoryRules}\n\n禁止：逐条照抄附件里的产品清单/功能列表（一句话带过并注”详见甲方附件”）；凭空编造交付物、尺寸、品牌规范；写客套话。\n允许：修正语病；归并信息；用图片中的完整名称替换用户简写；用图片理解到的产品背景补充设计背景。\n\n输出严格使用三段固定模板，段标题一字不改：\n1、设计背景：[项目用途/场景/对接背景]\n2、设计要求：[甲方明确指定的约束；无明确要求则写”参考附件样式，具体视觉方向对接时确认”]\n3、输出文件：[交付物清单]\n\n方括号只是提示，最终不要保留。用户和附件都没有提供的信息写”未明确，可在对接时确认”。${styleGuideInjection}`,
         },
         {
           role: 'user',
@@ -4811,11 +4926,11 @@ async function suggestTaskWithAi(env: Env, request: Request) {
                 },
                 suggestedParentType: {
                   type: 'string',
-                  description: '推荐的大类名称，优先从 availableDesignTypeGroups.name 中选择。',
+                  description: '推荐的大类名称。已有 availableDesignTypeGroups.name 能准确覆盖时优先选择；没有合适大类时可以输出新的大类名称。',
                 },
                 suggestedChildType: {
                   type: 'string',
-                  description: '推荐的子类名称，优先从对应大类 items 中选择。',
+                  description: '推荐的子类名称。已有对应大类 items 能准确覆盖时优先选择；没有精确匹配时必须输出新的子类名称，不要硬套到不相关分类。',
                 },
                 reason: {
                   type: 'string',
@@ -4855,7 +4970,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     parsed = parseToolArguments(message.content)
   }
 
-  const suggestion = toTaskAssistantSuggestion(parsed, designTypeGroups)
+  const suggestion = toTaskAssistantSuggestion(parsed, designTypeGroups, taskAssistantContext)
   if (!suggestion.optimizedRequirement) {
     const fallback = await callFallback()
     return fallback ?? fail('AI 助手没有返回有效建议，请稍后重试。', 502)
@@ -4886,12 +5001,19 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const activity = Array.isArray(body.activity) ? body.activity.slice(0, 12) : []
   const taskTitle = String(body.task?.title ?? '').trim()
   const taskType = String(body.task?.type ?? '').trim()
+  const taskRequirement = String(body.task?.requirement ?? '').trim()
+  const acceptanceAttachmentContexts = mode === 'acceptance'
+    ? await getAcceptanceAttachmentAiContexts(env, body.task?.id)
+    : []
   const textStyleGuide = await getOrBuildTextStyleGuide(env, mode, taskType)
   const textStyleGuideInjection = textStyleGuide
     ? `\n\n【用户${mode === 'acceptance' ? '验收备注' : '进展记录'}写法偏好】以下来自用户采纳 AI 后的真实改写，请优先遵循：\n${textStyleGuide}`
     : ''
+  const acceptanceModeRules = mode === 'acceptance'
+    ? `\n\n【验收备注专用规则】这次不是单纯润色用户备注，必须同时分析三类信息：\n1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。\n2. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。\n3. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。\n\n写法要求：\n- 如果用户备注很短，但附件分析足够明确，可以基于任务需求 + 附件内容生成完整验收备注。\n- 如果是海报、长图、PPT、品牌物料等复杂任务，要结合附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在任务需求、用户备注或附件分析里明确出现“麦拉风/Mylafon”等风格时才可以写。\n- 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。\n- 不要凭空写客户已确认、已通过、无问题、符合规范、已上线等事实；除非输入明确提供。\n- 输出仍必须使用「1、」「2、」「3、」分点，每点一行，一行一件事。`
+    : ''
 
-  if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0) {
+  if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0 && acceptanceAttachmentContexts.length === 0) {
     return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
   }
 
@@ -4902,6 +5024,14 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     relatedFiles: files,
     currentUploadedFileNames: uploadedFileNames,
     recentActivity: activity,
+    acceptanceContext: mode === 'acceptance'
+      ? {
+          taskRequirement,
+          rawAcceptanceNote: text,
+          acceptanceAttachments: acceptanceAttachmentContexts,
+          instruction: '请同时参考任务需求、验收附件分析结果和用户原始验收备注。附件分析内容优先于文件名；文件名只作兜底。',
+        }
+      : undefined,
     styleGuide: textStyleGuide,
   }
 
@@ -4910,8 +5040,9 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
       mode,
       taskTitle,
-      fileCount: files.length,
+      fileCount: files.length + acceptanceAttachmentContexts.length,
       uploadedFileCount: uploadedFileNames.length,
+      acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
       provider: 'baml-runtime',
     })
     return ok({
@@ -4923,7 +5054,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TextAssistantToolArgs>(
       env,
-      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${textStyleGuideInjection}`,
+      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${acceptanceModeRules}${textStyleGuideInjection}`,
       aiPayload,
       'optimizedText:string, summary:string',
     )
@@ -4934,8 +5065,9 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
       mode,
       taskTitle,
-      fileCount: files.length,
+      fileCount: files.length + acceptanceAttachmentContexts.length,
       uploadedFileCount: uploadedFileNames.length,
+      acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
       provider: 'text-fallback',
     })
     return ok({ optimizedText, summary: String(fallbackParsed?.summary ?? '').trim() })
@@ -4964,7 +5096,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：分点列出交付/补传了哪些文件、关键进展、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
+            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：必须结合任务初始需求、验收附件分析结果、用户原始验收备注三者共同润色；分点列出交付/补传了哪些文件、附件体现出的关键完成内容、任务需求对应情况、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
         },
         {
           role: 'user',
@@ -5031,8 +5163,9 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
     mode,
     taskTitle,
-    fileCount: files.length,
+    fileCount: files.length + acceptanceAttachmentContexts.length,
     uploadedFileCount: uploadedFileNames.length,
+    acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
     provider: 'deepseek-direct',
   })
   return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })

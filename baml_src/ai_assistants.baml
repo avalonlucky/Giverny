@@ -23,13 +23,13 @@ client<llm> DeepSeekDefault {
 
 class TaskAssistantOutput {
   optimizedRequirement string @description("优化后的中文任务需求。必须严格使用三段：1、设计背景；2、设计要求；3、输出文件。")
-  suggestedParentType string @description("推荐的大类名称，优先从已有设计类型大类中选择。")
-  suggestedChildType string @description("推荐的子类名称，优先从对应大类 items 中选择。")
+  suggestedParentType string @description("推荐的大类名称。已有大类能准确覆盖时优先选择；没有合适大类时可以输出新的大类名称。")
+  suggestedChildType string @description("推荐的子类名称。已有子类能准确覆盖时优先选择；没有精确匹配时必须输出新的子类名称，不要硬套到不相关分类。")
   reason string @description("一句话说明为什么推荐该类型。")
 }
 
 class TextAssistantOutput {
-  optimizedText string @description("可直接写入进展记录或验收备注的中文文本，必须用「1、」「2、」「3、」中文序号分点排列，每点一行。")
+  optimizedText string @description("可直接写入进展记录或验收备注的中文文本，必须用「1、」「2、」「3、」中文序号分点排列，每点一行。验收备注必须综合任务需求、验收附件分析和用户原始备注。")
   summary string @description("一句话说明本次优化依据。")
 }
 
@@ -49,7 +49,7 @@ class HourEstimateOutput {
 function SuggestTaskAssistant(payload_json: string) -> TaskAssistantOutput {
   client DeepSeekDefault
   prompt #"
-    你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并从已有设计类型中选择最贴近的大类和子类。
+    你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并判断最合适的大类和子类；已有分类能准确覆盖时复用，没有精确匹配时输出新大类或新子类，供前端新增并采用。
 
     输入可能带 attachmentText（甲方以 Word/PDF 等提供的文案，已抽取为纯文本）。附件只是「低权重参考」，绝不是需求本身：
     - rawRequirement 非空时：以它为绝对主导定义任务范围；附件只用来补一两句背景。设计要求控制在 2-3 句：只写整体风格/调性 + 最多 2-3 个最关键约束。凡是附件里成体系的明细（产品清单/各模块/卖点/副标题/口令/每条文案等）一律不要逐条罗列或照抄，而是一句话带过并注明「详见甲方文案附件」，设计时再查附件即可。
@@ -60,6 +60,12 @@ function SuggestTaskAssistant(payload_json: string) -> TaskAssistantOutput {
     - 不是只排版，而是把口语化表达改成专业任务单语言。
     - 把模糊描述整理成可执行要求。
     - 把散乱信息归并到对应模块。
+
+    【分类规则】
+    - availableDesignTypeGroups 是当前已配置分类，不是封闭选项。
+    - 如果已有大类合适但子类缺失，复用该大类并输出新的子类。例如「视频剪辑」「短视频剪辑」「直播切片」若没有对应子类，可建议「传播类 / 视频剪辑」或更贴切的新子类。
+    - 如果大类也不合适，可以输出新的大类。
+    - 不要为了让 categoryExists=true 把任务硬套进「海报」「单页 / 折页」「官网 banner」「邀请函长图」等不准确分类。
 
     允许：修正语病；归并重复信息；把用户已经表达的需求整理成明确动作；基于原文把“用途/场景/必须包含内容/输出清单”补全到对应模块。
     禁止：凭空编造用户没提过的交付物、尺寸、品牌规范、交付承诺或验收标准；丢失用户提到的背景、约束、文件名、版本号、数量；写客套话或解释你做了什么。
@@ -91,7 +97,17 @@ function OptimizeTaskText(payload_json: string) -> TextAssistantOutput {
     - 【结构化】必须把内容拆成分点，用「1、」「2、」「3、」中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。
 
     progress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。
-    acceptance 模式：分点列出交付/补传了哪些文件、关键进展、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。
+
+    acceptance 模式不是单纯润色用户备注，必须综合三类信息：
+    1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。
+    2. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。
+    3. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。
+
+    acceptance 模式写法：
+    - 如果用户备注很短，但附件分析足够明确，可以基于任务需求 + 附件内容生成完整验收备注。
+    - 如果是海报、长图、PPT、品牌物料等复杂任务，要结合附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在任务需求、用户备注或附件分析里明确出现“麦拉风/Mylafon”等风格时才可以写。
+    - 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。
+    - 分点列出交付/补传了哪些文件、附件体现出的关键完成内容、任务需求对应情况、结算/补录说明。不要改变验收状态，不要凭空说客户已确认、已通过、无问题、符合规范、已上线等事实。
 
     只返回优化后的文本（分点序号格式）和一句简短摘要。
 
