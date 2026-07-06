@@ -502,6 +502,56 @@ button {
   min-width: 0;
 }
 
+.task-calendar-titlebar {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-calendar-titlebar .month-picker {
+  z-index: var(--z-popover);
+}
+
+.task-calendar-titlebar .month-trigger {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.task-calendar-titlebar .month-trigger:hover,
+.task-calendar-titlebar .month-trigger.active {
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.task-calendar-titlebar .month-trigger svg {
+  color: var(--color-text-secondary);
+}
+
+.calendar-mode-select {
+  min-height: 34px;
+  padding: 0 24px 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-mode-select:hover,
+.calendar-mode-select:focus {
+  color: var(--color-text);
+  outline: 0;
+}
+
 .topbar-summary {
   margin: 7px 0 0;
   color: var(--color-text-secondary);
@@ -12622,65 +12672,6 @@ textarea:focus-visible {
   background: var(--color-surface-strong);
 }
 
-.google-calendar-toolbar {
-  min-height: 64px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.google-calendar-nav {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.google-calendar-nav h2 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 1.1;
-}
-
-.google-calendar-nav p {
-  margin: 3px 0 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.google-calendar-mode-tabs {
-  display: inline-flex;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-alt);
-}
-
-.google-calendar-mode-tabs button {
-  min-width: 44px;
-  height: 34px;
-  padding: 0 12px;
-  border: 0;
-  border-left: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.google-calendar-mode-tabs button:first-child {
-  border-left: 0;
-}
-
-.google-calendar-mode-tabs button.active {
-  background: var(--color-primary);
-  color: var(--color-surface-strong);
-}
-
 .google-month-view {
   background: var(--color-surface-strong);
 }
@@ -12764,8 +12755,8 @@ textarea:focus-visible {
   min-height: 22px;
   padding: 3px 8px;
   border: 0;
-  border-left: 3px solid var(--event-color, var(--color-primary));
-  background: color-mix(in srgb, var(--event-color, var(--color-primary)) 18%, var(--color-surface-strong));
+  border-left: 3px solid var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-strong));
   color: var(--color-text);
   font-size: 12px;
   font-weight: 700;
@@ -12908,8 +12899,8 @@ textarea:focus-visible {
   min-height: 30px;
   padding: 5px 8px;
   border: 0;
-  border-left: 3px solid var(--event-color, var(--color-primary));
-  background: color-mix(in srgb, var(--event-color, var(--color-primary)) 24%, var(--color-surface-strong));
+  border-left: 3px solid var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-strong));
   color: var(--color-text);
   text-align: left;
   overflow: hidden;

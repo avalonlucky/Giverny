@@ -12,7 +12,6 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardCheck,
@@ -1486,16 +1485,6 @@ const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验�
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
 const taskFeedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
-
-const statusDotColors: Record<TaskStatus, string> = {
-  计划中: 'var(--color-status-planning)',
-  进行中: 'var(--color-status-active)',
-  挂起: 'var(--color-status-hold)',
-  待验收: 'var(--color-status-pending)',
-  已验收: 'var(--color-status-accepted)',
-  终止: 'var(--color-status-stopped)',
-  不计费: 'var(--color-status-disabled)',
-}
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 
@@ -4418,6 +4407,7 @@ function ChatPanel({
 function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
   const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
+  const [calendarDisplayMode, setCalendarDisplayMode] = useState<CalendarDisplayMode>('月')
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
@@ -4544,6 +4534,7 @@ function App() {
   const importedHours = currentMonth.value === importedHoursMonth ? importedMonthlyHours : 0
   const selectedTaskSource = activeView === '任务' ? taskPageSourceTasks : activeMonthTasks
   const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
+  const isTaskCalendarView = activeView === '任务' && taskViewMode === '日历'
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
 
   const notify = (
@@ -6590,7 +6581,23 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
       <section className="workspace">
         <header className="topbar">
           <div className="topbar-heading">
-            <h1>{viewTitle}</h1>
+            {isTaskCalendarView ? (
+              <div className="task-calendar-titlebar">
+                <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} minimal />
+                <select
+                  className="calendar-mode-select"
+                  value={calendarDisplayMode}
+                  aria-label="选择日历显示方式"
+                  onChange={(event) => setCalendarDisplayMode(event.target.value as CalendarDisplayMode)}
+                >
+                  <option value="日">日</option>
+                  <option value="周">周</option>
+                  <option value="月">月</option>
+                </select>
+              </div>
+            ) : (
+              <h1>{viewTitle}</h1>
+            )}
             {activeView === '工作台' && (
               <p className="topbar-summary">
                 本月 {activeMonthTasks.length} 条任务 · {stats.pending} 个待验收
@@ -6598,7 +6605,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             )}
           </div>
           <div className="topbar-actions">
-            <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} iconOnly />
+            {!isTaskCalendarView && <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} iconOnly />}
             {canSeeFull && (
               <button
                 type="button"
@@ -6921,8 +6928,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <TasksView
             viewMode={taskViewMode}
             onViewModeChange={setTaskViewMode}
+            calendarMode={calendarDisplayMode}
             monthValue={currentMonth.value}
-            taskMonthValues={taskMonthValues}
             onMonthChange={setMonthValue}
             activeMonthTasks={activeMonthTasks}
             selectedTask={selectedTask}
@@ -8314,8 +8321,8 @@ function DashboardTaskSidebar({
 function TasksView({
   viewMode,
   onViewModeChange,
+  calendarMode,
   monthValue,
-  taskMonthValues,
   onMonthChange,
   activeMonthTasks,
   selectedTask,
@@ -8355,8 +8362,8 @@ function TasksView({
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
+  calendarMode: CalendarDisplayMode
   monthValue: string
-  taskMonthValues: Set<string>
   onMonthChange: (month: string) => void
   activeMonthTasks: Task[]
   selectedTask: Task | undefined
@@ -8480,12 +8487,18 @@ function TasksView({
               <p>按日期查看已完成与待完成任务，点击日期查看当天安排</p>
             </div>
             <div className="panel-tools calendar-toolbar-actions">
-              <MonthPicker value={monthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} />
               {viewTabs}
             </div>
           </div>
         </section>
-        <CalendarView key={monthValue} monthValue={monthValue} tasks={tasks} onOpenTask={onOpenTask} onMonthChange={onMonthChange} />
+        <CalendarView
+          key={monthValue}
+          monthValue={monthValue}
+          mode={calendarMode}
+          tasks={tasks}
+          onOpenTask={onOpenTask}
+          onMonthChange={onMonthChange}
+        />
       </section>
     )
   }
@@ -11194,16 +11207,6 @@ function startOfCalendarWeek(value: string) {
   return isoDateFromLocalDate(date)
 }
 
-function calendarDateLabel(value: string) {
-  const date = localDateFromIsoDate(value)
-  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`
-}
-
-function calendarWeekLabel(startValue: string) {
-  const endValue = addIsoDays(startValue, 6)
-  return `${calendarDateLabel(startValue)} - ${calendarDateLabel(endValue)}`
-}
-
 function calendarTaskStartsAt(task: Task) {
   if (!task.date.includes('T')) {
     return null
@@ -11223,16 +11226,17 @@ function calendarTaskDurationMinutes(task: Task) {
 
 function CalendarView({
   monthValue,
+  mode,
   tasks,
   onOpenTask,
   onMonthChange,
 }: {
   monthValue: string
+  mode: CalendarDisplayMode
   tasks: Task[]
   onOpenTask: (taskId: number) => void
   onMonthChange: (value: string) => void
 }) {
-  const [mode, setMode] = useState<CalendarDisplayMode>('月')
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = isoDate()
     return today.startsWith(monthValue) ? today : `${monthValue}-01`
@@ -11251,11 +11255,6 @@ function CalendarView({
   const weekStart = startOfCalendarWeek(selectedDate)
   const weekDays = Array.from({ length: 7 }, (_, index) => addIsoDays(weekStart, index))
   const monthDays = calendarDaysForMonth(monthValue)
-  const title = mode === '日'
-    ? `${Number(selectedDate.slice(0, 4))} 年 ${Number(selectedDate.slice(5, 7))} 月 ${Number(selectedDate.slice(8, 10))} 日`
-    : mode === '周'
-      ? calendarWeekLabel(weekStart)
-      : monthLabelOf(monthValue)
 
   const setCalendarDate = (value: string) => {
     setSelectedDate(value)
@@ -11264,23 +11263,11 @@ function CalendarView({
     }
   }
 
-  const shiftPeriod = (direction: -1 | 1) => {
-    const nextDate = mode === '日'
-      ? addIsoDays(selectedDate, direction)
-      : mode === '周'
-        ? addIsoDays(selectedDate, direction * 7)
-        : `${shiftMonthValue(monthValue, direction)}-01`
-    setCalendarDate(nextDate)
-  }
-
-  const goToday = () => setCalendarDate(today)
-
   const renderMonthTask = (task: Task) => (
     <button
       type="button"
       className="calendar-event-pill"
       key={task.id}
-      style={{ '--event-color': statusDotColors[task.status] } as CSSProperties}
       onClick={(event) => {
         event.stopPropagation()
         onOpenTask(task.id)
@@ -11296,7 +11283,6 @@ function CalendarView({
       type="button"
       className="calendar-allday-chip"
       key={task.id}
-      style={{ '--event-color': statusDotColors[task.status] } as CSSProperties}
       onClick={() => onOpenTask(task.id)}
       title={`${task.title} · ${task.type}`}
     >
@@ -11320,7 +11306,6 @@ function CalendarView({
         className={`calendar-timed-event ${isOutside ? 'outside-hours' : ''}`}
         key={task.id}
         style={{
-          '--event-color': statusDotColors[task.status],
           '--event-top': `${top}px`,
           '--event-height': `${height}px`,
         } as CSSProperties}
@@ -11385,29 +11370,6 @@ function CalendarView({
 
   return (
     <section className="panel google-calendar-panel">
-      <header className="google-calendar-toolbar">
-        <div className="google-calendar-nav">
-          <button type="button" className="ghost-button compact-button" onClick={goToday}>今天</button>
-          <button type="button" className="icon-button" aria-label="上一段" title="上一段" onClick={() => shiftPeriod(-1)}>
-            <ChevronLeft size={17} />
-          </button>
-          <button type="button" className="icon-button" aria-label="下一段" title="下一段" onClick={() => shiftPeriod(1)}>
-            <ChevronRight size={17} />
-          </button>
-          <div>
-            <h2>{title}</h2>
-            <p>{mode === '月' ? '月视图' : mode === '周' ? '周视图 · 按天查看计划' : '日视图 · 按时间查看计划'}</p>
-          </div>
-        </div>
-        <div className="google-calendar-mode-tabs" aria-label="日历显示方式">
-          {(['日', '周', '月'] as CalendarDisplayMode[]).map((item) => (
-            <button type="button" className={mode === item ? 'active' : ''} key={item} onClick={() => setMode(item)}>
-              {item}
-            </button>
-          ))}
-        </div>
-      </header>
-
       {mode === '月' ? (
         <div className="google-month-view">
           <div className="google-month-weekdays">
