@@ -8485,7 +8485,7 @@ function TasksView({
             </div>
           </div>
         </section>
-        <CalendarView key={monthValue} monthValue={monthValue} tasks={activeMonthTasks} onOpenTask={onOpenTask} onMonthChange={onMonthChange} />
+        <CalendarView key={monthValue} monthValue={monthValue} tasks={tasks} onOpenTask={onOpenTask} onMonthChange={onMonthChange} />
       </section>
     )
   }
@@ -11176,6 +11176,51 @@ function TaskDetailModal({
 }
 
 
+type CalendarDisplayMode = '日' | '周' | '月'
+
+const calendarHours = Array.from({ length: 17 }, (_, index) => index + 7)
+const calendarHourHeight = 54
+
+function addIsoDays(value: string, amount: number) {
+  const date = localDateFromIsoDate(value)
+  date.setDate(date.getDate() + amount)
+  return isoDateFromLocalDate(date)
+}
+
+function startOfCalendarWeek(value: string) {
+  const date = localDateFromIsoDate(value)
+  const offset = (date.getDay() + 6) % 7
+  date.setDate(date.getDate() - offset)
+  return isoDateFromLocalDate(date)
+}
+
+function calendarDateLabel(value: string) {
+  const date = localDateFromIsoDate(value)
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`
+}
+
+function calendarWeekLabel(startValue: string) {
+  const endValue = addIsoDays(startValue, 6)
+  return `${calendarDateLabel(startValue)} - ${calendarDateLabel(endValue)}`
+}
+
+function calendarTaskStartsAt(task: Task) {
+  if (!task.date.includes('T')) {
+    return null
+  }
+  const hour = Number(task.date.slice(11, 13))
+  const minute = Number(task.date.slice(14, 16))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return null
+  }
+  return hour * 60 + minute
+}
+
+function calendarTaskDurationMinutes(task: Task) {
+  const hours = task.actualHours > 0 ? task.actualHours : task.estimatedHours
+  return Math.max(30, Math.round((Number.isFinite(hours) && hours > 0 ? hours : 1) * 60))
+}
+
 function CalendarView({
   monthValue,
   tasks,
@@ -11187,155 +11232,208 @@ function CalendarView({
   onOpenTask: (taskId: number) => void
   onMonthChange: (value: string) => void
 }) {
+  const [mode, setMode] = useState<CalendarDisplayMode>('月')
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = isoDate()
     return today.startsWith(monthValue) ? today : `${monthValue}-01`
   })
-
-  const [year, month] = monthValue.split('-').map(Number)
-  const daysInMonth = new Date(year, month, 0).getDate()
-  const leadingBlanks = (new Date(year, month - 1, 1).getDay() + 6) % 7
   const today = isoDate()
-
+  const visibleTasks = useMemo(() => tasks.filter((task) => !task.voidedAt), [tasks])
   const tasksByDate = useMemo(() => {
     const map = new Map<string, Task[]>()
-    tasks.forEach((task) => {
+    visibleTasks.forEach((task) => {
       const key = datePart(task.date)
-      map.set(key, [...(map.get(key) ?? []), task])
+      map.set(key, [...(map.get(key) ?? []), task].sort((a, b) => a.date.localeCompare(b.date)))
     })
     return map
-  }, [tasks])
+  }, [visibleTasks])
 
-  const dayTasks = tasksByDate.get(selectedDate) ?? []
-  const doneTasks = dayTasks.filter((task) => task.status === '已验收' || task.status === '不计费')
-  const ongoingTasks = dayTasks.filter((task) => task.status === '进行中' || task.status === '待验收')
-  const plannedTasks = dayTasks.filter((task) => task.status === '计划中')
-  const upcomingTasks = tasks
-    .filter((task) => datePart(task.date) > selectedDate && (task.status === '计划中' || task.status === '进行中'))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, 6)
+  const weekStart = startOfCalendarWeek(selectedDate)
+  const weekDays = Array.from({ length: 7 }, (_, index) => addIsoDays(weekStart, index))
+  const monthDays = calendarDaysForMonth(monthValue)
+  const title = mode === '日'
+    ? `${Number(selectedDate.slice(0, 4))} 年 ${Number(selectedDate.slice(5, 7))} 月 ${Number(selectedDate.slice(8, 10))} 日`
+    : mode === '周'
+      ? calendarWeekLabel(weekStart)
+      : monthLabelOf(monthValue)
 
-  const renderTaskRows = (list: Task[]) =>
-    list.map((task) => (
-      <button className="calendar-task-row" key={task.id} onClick={() => onOpenTask(task.id)}>
-        <i style={{ background: statusDotColors[task.status] }} />
-        <div>
-          <strong>{task.title}</strong>
-          <small>
-            {task.type} · {task.actualHours > 0 ? `${task.actualHours.toFixed(1)}h` : `预估 ${task.estimatedHours.toFixed(1)}h`}
-          </small>
-        </div>
-        <StatusBadge status={task.status} />
+  const setCalendarDate = (value: string) => {
+    setSelectedDate(value)
+    if (monthPart(value) !== monthValue) {
+      onMonthChange(monthPart(value))
+    }
+  }
+
+  const shiftPeriod = (direction: -1 | 1) => {
+    const nextDate = mode === '日'
+      ? addIsoDays(selectedDate, direction)
+      : mode === '周'
+        ? addIsoDays(selectedDate, direction * 7)
+        : `${shiftMonthValue(monthValue, direction)}-01`
+    setCalendarDate(nextDate)
+  }
+
+  const goToday = () => setCalendarDate(today)
+
+  const renderMonthTask = (task: Task) => (
+    <button
+      type="button"
+      className="calendar-event-pill"
+      key={task.id}
+      style={{ '--event-color': statusDotColors[task.status] } as CSSProperties}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpenTask(task.id)
+      }}
+      title={`${task.title} · ${task.type}`}
+    >
+      {task.title}
+    </button>
+  )
+
+  const renderAllDayTask = (task: Task) => (
+    <button
+      type="button"
+      className="calendar-allday-chip"
+      key={task.id}
+      style={{ '--event-color': statusDotColors[task.status] } as CSSProperties}
+      onClick={() => onOpenTask(task.id)}
+      title={`${task.title} · ${task.type}`}
+    >
+      {task.title}
+    </button>
+  )
+
+  const renderTimedTask = (task: Task) => {
+    const startsAt = calendarTaskStartsAt(task)
+    if (startsAt === null) {
+      return null
+    }
+    const firstMinute = calendarHours[0] * 60
+    const lastMinute = (calendarHours.at(-1) ?? 23) * 60
+    const top = Math.max(0, ((startsAt - firstMinute) / 60) * calendarHourHeight)
+    const height = Math.max(30, Math.min(180, (calendarTaskDurationMinutes(task) / 60) * calendarHourHeight))
+    const isOutside = startsAt < firstMinute || startsAt > lastMinute + 59
+    return (
+      <button
+        type="button"
+        className={`calendar-timed-event ${isOutside ? 'outside-hours' : ''}`}
+        key={task.id}
+        style={{
+          '--event-color': statusDotColors[task.status],
+          '--event-top': `${top}px`,
+          '--event-height': `${height}px`,
+        } as CSSProperties}
+        onClick={() => onOpenTask(task.id)}
+        title={`${formatMonthDayTime(task.date)} · ${task.title}`}
+      >
+        <strong>{task.title}</strong>
+        <span>{task.type}</span>
       </button>
-    ))
+    )
+  }
+
+  const renderScheduleGrid = (days: string[]) => (
+    <div className="calendar-schedule">
+      <div className="calendar-schedule-header" style={{ '--day-count': days.length } as CSSProperties}>
+        <div className="calendar-timezone">GMT+08</div>
+        {days.map((day) => {
+          const date = localDateFromIsoDate(day)
+          return (
+            <button
+              type="button"
+              className={`calendar-schedule-day ${day === today ? 'today' : ''} ${day === selectedDate ? 'selected' : ''}`}
+              key={day}
+              onClick={() => setCalendarDate(day)}
+            >
+              <span>{weekdayLabels[(date.getDay() + 6) % 7]}</span>
+              <strong>{date.getDate()}</strong>
+            </button>
+          )
+        })}
+      </div>
+      <div className="calendar-allday-row" style={{ '--day-count': days.length } as CSSProperties}>
+        <div className="calendar-time-label">计划</div>
+        {days.map((day) => {
+          const dayTasks = tasksByDate.get(day) ?? []
+          return (
+            <div className="calendar-allday-cell" key={day}>
+              {dayTasks.slice(0, 4).map(renderAllDayTask)}
+              {dayTasks.length > 4 && <span className="calendar-overflow">+{dayTasks.length - 4} 项</span>}
+            </div>
+          )
+        })}
+      </div>
+      <div className="calendar-time-grid" style={{ '--day-count': days.length } as CSSProperties}>
+        <div className="calendar-time-axis">
+          {calendarHours.map((hour) => (
+            <span key={hour}>{hour < 12 ? `上午${hour}点` : hour === 12 ? '下午12点' : `下午${hour - 12}点`}</span>
+          ))}
+        </div>
+        {days.map((day) => {
+          const dayTasks = tasksByDate.get(day) ?? []
+          return (
+            <div className="calendar-time-column" key={day}>
+              {calendarHours.map((hour) => <span className="calendar-hour-line" key={hour} />)}
+              {dayTasks.map(renderTimedTask)}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 
   return (
-    <section className="calendar-layout">
-      <section className="panel calendar-panel">
-        <div className="calendar-month-toolbar">
-          <button type="button" className="icon-button" aria-label="上个月" title="上个月" onClick={() => onMonthChange(shiftMonthValue(monthValue, -1))}>
+    <section className="panel google-calendar-panel">
+      <header className="google-calendar-toolbar">
+        <div className="google-calendar-nav">
+          <button type="button" className="ghost-button compact-button" onClick={goToday}>今天</button>
+          <button type="button" className="icon-button" aria-label="上一段" title="上一段" onClick={() => shiftPeriod(-1)}>
             <ChevronLeft size={17} />
           </button>
-          <strong>{monthLabelOf(monthValue)}</strong>
-          <button type="button" className="icon-button" aria-label="下个月" title="下个月" onClick={() => onMonthChange(shiftMonthValue(monthValue, 1))}>
+          <button type="button" className="icon-button" aria-label="下一段" title="下一段" onClick={() => shiftPeriod(1)}>
             <ChevronRight size={17} />
           </button>
-        </div>
-        <div className="calendar-weekdays">
-          {weekdayLabels.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-        <div className="calendar-grid">
-          {Array.from({ length: leadingBlanks }).map((_, index) => (
-            <div className="calendar-cell blank" key={`blank-${index}`} />
-          ))}
-          {Array.from({ length: daysInMonth }).map((_, index) => {
-            const day = index + 1
-            const dateValue = `${monthValue}-${pad(day)}`
-            const cellTasks = tasksByDate.get(dateValue) ?? []
-            const cellClass = [
-              'calendar-cell',
-              selectedDate === dateValue ? 'selected' : '',
-              today === dateValue ? 'today' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-
-            return (
-              <button className={cellClass} key={dateValue} onClick={() => setSelectedDate(dateValue)}>
-                <span className="calendar-day-number">{day}</span>
-                <span className="calendar-dots">
-                  {cellTasks.slice(0, 4).map((task) => (
-                    <i key={task.id} style={{ background: statusDotColors[task.status] }} />
-                  ))}
-                </span>
-                {cellTasks.slice(0, 2).map((task) => (
-                  <span className="calendar-chip" key={task.id} style={{ '--chip-color': statusDotColors[task.status] } as CSSProperties}>
-                    {task.title}
-                  </span>
-                ))}
-                {cellTasks.length > 2 && <span className="calendar-more">+{cellTasks.length - 2} 项</span>}
-              </button>
-            )
-          })}
-        </div>
-        <div className="calendar-legend">
-          {(Object.keys(statusDotColors) as TaskStatus[]).map((status) => (
-            <span key={status}>
-              <i style={{ background: statusDotColors[status] }} />
-              {status}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      <aside className="panel calendar-day-panel">
-        <div className="panel-header compact">
           <div>
-            <h2>
-              {month} 月 {Number(selectedDate.slice(8, 10))} 日{today === selectedDate ? ' · 今天' : ''}
-            </h2>
-            <p>{dayTasks.length > 0 ? `共 ${dayTasks.length} 个任务` : '当天没有安排任务'}</p>
+            <h2>{title}</h2>
+            <p>{mode === '月' ? '月视图' : mode === '周' ? '周视图 · 按天查看计划' : '日视图 · 按时间查看计划'}</p>
           </div>
         </div>
-
-        {ongoingTasks.length > 0 && (
-          <div className="calendar-day-group">
-            <h3>进行中 / 待验收</h3>
-            {renderTaskRows(ongoingTasks)}
-          </div>
-        )}
-        {plannedTasks.length > 0 && (
-          <div className="calendar-day-group">
-            <h3>计划中</h3>
-            {renderTaskRows(plannedTasks)}
-          </div>
-        )}
-        {doneTasks.length > 0 && (
-          <div className="calendar-day-group">
-            <h3>已完成</h3>
-            {renderTaskRows(doneTasks)}
-          </div>
-        )}
-
-        <div className="calendar-day-group upcoming">
-          <h3>接下来待完成</h3>
-          {upcomingTasks.length === 0 && <p className="calendar-empty-hint">本月之后暂无待办任务。</p>}
-          {upcomingTasks.map((task) => (
-            <button className="calendar-task-row" key={task.id} onClick={() => onOpenTask(task.id)}>
-              <i style={{ background: statusDotColors[task.status] }} />
-              <div>
-                <strong>{task.title}</strong>
-                <small>
-                  {formatMonthDayTime(task.date)} · {task.type}
-                </small>
-              </div>
-              <StatusBadge status={task.status} />
+        <div className="google-calendar-mode-tabs" aria-label="日历显示方式">
+          {(['日', '周', '月'] as CalendarDisplayMode[]).map((item) => (
+            <button type="button" className={mode === item ? 'active' : ''} key={item} onClick={() => setMode(item)}>
+              {item}
             </button>
           ))}
         </div>
-      </aside>
+      </header>
+
+      {mode === '月' ? (
+        <div className="google-month-view">
+          <div className="google-month-weekdays">
+            {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="google-month-grid">
+            {monthDays.map((day) => {
+              const cellTasks = tasksByDate.get(day.value) ?? []
+              return (
+                <button
+                  type="button"
+                  className={`google-month-cell ${day.inMonth ? '' : 'outside'} ${day.value === today ? 'today' : ''} ${day.value === selectedDate ? 'selected' : ''}`}
+                  key={day.value}
+                  onClick={() => setCalendarDate(day.value)}
+                >
+                  <span className="google-month-day">{day.day}</span>
+                  <span className="google-month-events">
+                    {cellTasks.slice(0, 4).map(renderMonthTask)}
+                    {cellTasks.length > 4 && <span className="calendar-overflow">+{cellTasks.length - 4} 项</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : renderScheduleGrid(mode === '周' ? weekDays : [selectedDate])}
     </section>
   )
 }
