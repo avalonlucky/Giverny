@@ -3300,6 +3300,16 @@ button.topbar-create-button:hover {
   font-weight: 700;
 }
 
+/* 树分组下暂无条目时的占位说明：与树项同缩进，弱化为 muted 文字，不可点击 */
+.insight-tree-empty {
+  margin: 0;
+  min-height: 32px;
+  padding: 6px 0 0 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .insight-tree-item.active em {
   color: var(--color-primary);
 }
@@ -7529,11 +7539,10 @@ button.file-chip:focus-visible {
 
 .empty-state {
   margin-top: 8px;
-  padding: 22px;
-  border: 1px solid rgba(39, 54, 58, 0.06);
-  border-radius: 8px;
-  background: #f2f4ee;
-  color: #667174;
+  padding: 26px 24px;
+  border: 1px solid var(--color-border-soft);
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: grid;
   gap: 4px;
 }
@@ -7927,7 +7936,7 @@ button.file-chip:focus-visible {
 
 .file-inspector-empty {
   min-height: 320px;
-  color: #748083;
+  color: var(--color-text-secondary);
   display: grid;
   place-items: center;
   align-content: center;
@@ -12790,9 +12799,8 @@ textarea:focus-visible {
 .calendar-empty-hint {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 8px;
-  color: #7b8788;
-  background: rgba(242, 244, 238, 0.72);
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
   font-size: 13px;
 }
 
@@ -18954,7 +18962,6 @@ button.topbar-create-button kbd {
 
 .knowledge-input {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
   padding: 7px 10px;
   font-size: 13px;
   color: var(--color-text);
@@ -18970,7 +18977,6 @@ button.topbar-create-button kbd {
 
 .knowledge-textarea {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
   color: var(--color-text);
@@ -19000,8 +19006,7 @@ button.topbar-create-button kbd {
 
 .knowledge-save-btn {
   border: 0;
-  border-radius: 6px;
-  background: var(--color-primary);
+  background: var(--color-primary-strong);
   color: #fff;
   font-size: 13px;
   font-weight: 500;
@@ -19009,6 +19014,10 @@ button.topbar-create-button kbd {
   cursor: pointer;
   white-space: nowrap;
   flex: 0 0 auto;
+}
+
+.knowledge-save-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
 }
 
 .knowledge-save-btn:disabled {
@@ -19035,7 +19044,6 @@ button.topbar-create-button kbd {
 
 .knowledge-item {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
   padding: 10px 12px;
   background: var(--color-surface);
 }
@@ -19143,7 +19151,6 @@ button.topbar-create-button kbd {
 
 .knowledge-cancel-btn {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 13px;

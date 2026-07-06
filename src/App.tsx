@@ -3500,10 +3500,16 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
 
         {loading && <p className="knowledge-empty">加载中…</p>}
         {!loading && activeTab === 'user' && userNotes.length === 0 && (
-          <p className="knowledge-empty">还没有笔记。添加后，AI 工作助手对话时会自动参考这里的内容。</p>
+          <div className="empty-state">
+            <strong>还没有笔记</strong>
+            <p>写下定价逻辑、甲方话术、行业心得，AI 工作助手对话时会自动参考这里的内容。</p>
+          </div>
         )}
         {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
-          <p className="knowledge-empty">还没有收藏。在每日小知识里点击 ♥ 收藏感兴趣的内容。</p>
+          <div className="empty-state">
+            <strong>还没有收藏</strong>
+            <p>在工作台的每日小知识里点击 ♥，感兴趣的内容会收进这里。</p>
+          </div>
         )}
         {(activeTab === 'user' ? userNotes : aiTipNotes).map((n) => (
           <div key={n.id} className={`knowledge-item ${n.source === 'ai-tip' ? 'knowledge-item-ai-tip' : ''}`}>
@@ -3554,19 +3560,325 @@ function saveToChatHistory(msgs: ChatMessage[]) {
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '帮我分析本月收入', '我的效率怎么样？']
 
+type AssistantTaskDraft = {
+  kind: 'create-task'
+  title: string
+  requirement: string
+  type: string
+  startDate: string
+  estimatedDate: string
+  estimatedHours: number
+  requester: string
+  contact: string
+  reviewer: string
+  notes: string[]
+}
+
+type AssistantTaskSession = {
+  brief: string
+  askedFor: 'brief' | 'detail' | 'time'
+}
+
+type ChatPanelProps = {
+  currentMonthValue: string
+  designTypeGroups: DesignTypeGroup[]
+  onCreateTask: (task: Task) => Promise<Task | undefined> | Task | undefined
+  onClose: () => void
+}
+
+const assistantDefaultPerson = '黄媚'
+
+function assistantCurrentYear(currentMonthValue: string) {
+  const parsed = Number(currentMonthValue.slice(0, 4))
+  return Number.isFinite(parsed) && parsed > 2000 ? parsed : new Date().getFullYear()
+}
+
+function normalizeAssistantHour(rawHour: number, period?: string) {
+  if (!Number.isFinite(rawHour)) return 9
+  let hour = Math.max(0, Math.min(23, rawHour))
+  if (/下午|晚上|傍晚/.test(period ?? '') && hour < 12) hour += 12
+  if (/中午/.test(period ?? '') && hour < 11) hour += 12
+  return hour
+}
+
+function extractAssistantTime(text: string, labels: string[]) {
+  const labelPattern = labels.join('|')
+  const match = text.match(new RegExp(`(?:${labelPattern})\\s*(?:时间)?\\s*(上午|早上|下午|晚上|傍晚|中午)?\\s*(\\d{1,2})(?:[点:：](\\d{1,2})?)?\\s*(?:分)?`))
+  if (!match) return null
+  const rawHour = Number(match[2])
+  const rawMinute = match[3] === undefined || match[3] === '' ? 0 : Number(match[3])
+  const period = match[1]
+  const inferredHour = !period && rawHour >= 1 && rawHour <= 8 ? rawHour + 12 : normalizeAssistantHour(rawHour, period)
+  return {
+    hour: inferredHour,
+    minute: Number.isFinite(rawMinute) ? Math.max(0, Math.min(59, rawMinute)) : 0,
+    assumedAfternoon: !period && rawHour >= 1 && rawHour <= 8,
+  }
+}
+
+function buildAssistantTime(rawHour: number, rawMinute: number, period?: string) {
+  const inferredHour = !period && rawHour >= 1 && rawHour <= 8 ? rawHour + 12 : normalizeAssistantHour(rawHour, period)
+  return {
+    hour: inferredHour,
+    minute: Number.isFinite(rawMinute) ? Math.max(0, Math.min(59, rawMinute)) : 0,
+    assumedAfternoon: !period && rawHour >= 1 && rawHour <= 8,
+  }
+}
+
+function extractAssistantTimeRange(text: string) {
+  const match = text.match(/(上午|早上|下午|晚上|傍晚|中午)?\s*(\d{1,2})(?:[点:：](\d{1,2})?)?\s*(?:分)?\s*(?:到|至|[-—~])\s*(上午|早上|下午|晚上|傍晚|中午)?\s*(\d{1,2})(?:[点:：](\d{1,2})?)?\s*(?:分)?/)
+  if (!match) return { startTime: null, endTime: null }
+  const startPeriod = match[1]
+  const startRawHour = Number(match[2])
+  const startRawMinute = match[3] === undefined || match[3] === '' ? 0 : Number(match[3])
+  const endPeriod = match[4] ?? startPeriod
+  const endRawHour = Number(match[5])
+  const endRawMinute = match[6] === undefined || match[6] === '' ? 0 : Number(match[6])
+  return {
+    startTime: buildAssistantTime(startRawHour, startRawMinute, startPeriod),
+    endTime: buildAssistantTime(endRawHour, endRawMinute, endPeriod),
+  }
+}
+
+function extractAssistantDate(text: string, currentMonthValue: string) {
+  const slashMatch = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/)
+  if (slashMatch) {
+    return {
+      year: Number(slashMatch[1]),
+      month: Number(slashMatch[2]),
+      day: Number(slashMatch[3]),
+    }
+  }
+  const monthDayMatch = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)?/)
+  if (monthDayMatch) {
+    return {
+      year: assistantCurrentYear(currentMonthValue),
+      month: Number(monthDayMatch[1]),
+      day: Number(monthDayMatch[2]),
+    }
+  }
+  const [year, month] = currentMonthValue.split('-').map(Number)
+  const now = new Date()
+  return {
+    year: Number.isFinite(year) ? year : now.getFullYear(),
+    month: Number.isFinite(month) ? month : now.getMonth() + 1,
+    day: now.getDate(),
+  }
+}
+
+function assistantDateTimeValue(dateParts: { year: number; month: number; day: number }, time: { hour: number; minute: number }) {
+  return `${dateParts.year}-${pad(dateParts.month)}-${pad(dateParts.day)}T${pad(time.hour)}:${pad(time.minute)}`
+}
+
+function extractAssistantTitle(text: string) {
+  const quoted = text.match(/[“"'‘]([^“"'‘’]{2,60})[”"'’]/)
+  if (quoted?.[1]) return quoted[1].trim()
+
+  const actionMatch = text.match(/(?:增加|新增|新建|创建|记录)(?:一个|一条|一下)?(.{2,60}?)(?:的)?(?:工作|任务|项目)(?:。|，|,|$)/)
+  if (actionMatch?.[1]) {
+    return actionMatch[1].replace(/^(一下|一个|一条)/, '').trim()
+  }
+
+  const designMatch = text.match(/(?:做|设计|制作)(.{2,40}?)(?:。|，|,|$)/)
+  if (designMatch?.[1]) return designMatch[1].trim()
+  return '待确认设计任务'
+}
+
+function matchAssistantDesignType(text: string, title: string, designTypeGroups: DesignTypeGroup[]) {
+  const availableTypes = flattenDesignTypeGroups(normalizeDesignTypeGroups(designTypeGroups))
+  const fallbackType = availableTypes[0] ?? defaultDesignTypes[0] ?? '常用类型'
+  const source = `${text} ${title}`
+  const direct = availableTypes.find((type) => source.includes(type) || source.includes(type.split('/').at(-1)?.trim() ?? type))
+  if (direct) return { type: direct, matched: true }
+
+  const keywordRules: Array<{ keywords: string[]; candidates: string[] }> = [
+    { keywords: ['彩页', '单页', '折页', '宣传页'], candidates: ['单页', '折页', '彩页'] },
+    { keywords: ['邀请函', '长图'], candidates: ['邀请函', '长图'] },
+    { keywords: ['倒计时', '海报'], candidates: ['海报', '倒计时'] },
+    { keywords: ['视频', '剪辑'], candidates: ['视频', '剪辑'] },
+    { keywords: ['名片'], candidates: ['名片'] },
+    { keywords: ['PPT', 'ppt'], candidates: ['PPT', '演示'] },
+    { keywords: ['banner', '轮播'], candidates: ['banner', '轮播'] },
+  ]
+  for (const rule of keywordRules) {
+    if (!rule.keywords.some((keyword) => source.includes(keyword))) continue
+    const matchedType = availableTypes.find((type) => rule.candidates.some((candidate) => type.toLowerCase().includes(candidate.toLowerCase())))
+    if (matchedType) return { type: matchedType, matched: true }
+  }
+  return { type: fallbackType, matched: false }
+}
+
+function shouldUseTaskAgent(text: string) {
+  return /(?:帮我|请|麻烦|记录|新增|新建|创建|增加|加一条|加一个|我要|我想|想要|需要)/.test(text)
+    && /(?:任务|工作|项目|设计|制作|做|海报|长图|彩页|名片|视频|PPT|ppt|banner|轮播|邀请函)/.test(text)
+}
+
+function normalizeAssistantTaskBrief(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function isAssistantTaskHelpOnly(text: string) {
+  const compact = text.replace(/\s+/g, '')
+  return /(?:可以|能|能不能|能否|可不可以)?.*帮我.*(?:新建|创建|新增).*任务/.test(compact) && compact.length <= 18
+}
+
+function hasAssistantSpecificBrief(text: string) {
+  const compact = text.replace(/\s+/g, '')
+  if (compact.length >= 24) return true
+  return /(?:用于|活动|主题|文案|产品|客户|渠道|发布|尺寸|风格|包含|要求|背景|宣传|封面|详情|折页|单页|长图|直播|会议|方案|彩页|邀请函|banner|轮播|名片|视频|剪辑|PPT|ppt)/.test(text)
+}
+
+function hasAssistantTaskTimeRange(text: string) {
+  const range = extractAssistantTimeRange(text)
+  const startTime = range.startTime ?? extractAssistantTime(text, ['开始时间', '开始', '从'])
+  const endTime = range.endTime ?? extractAssistantTime(text, ['结束时间', '结束', '到', '至', '交付'])
+  return Boolean(startTime && endTime)
+}
+
+function mergeAssistantTaskSessionBrief(session: AssistantTaskSession, text: string) {
+  const cleanText = normalizeAssistantTaskBrief(text)
+  if (!session.brief) return cleanText
+  return normalizeAssistantTaskBrief(`${session.brief}。${cleanText}`)
+}
+
+function renderAssistantTaskIntro() {
+  return [
+    '可以，我能帮你把任务一步步整理成可创建的任务。',
+    '',
+    '你可以先简单描述一下：要做什么、给谁用、有什么内容或风格要求。',
+    '描述足够后，我会继续确认预计开始、交付时间和分类，最后整理成草稿给你确认。',
+  ].join('\n')
+}
+
+function renderAssistantTaskNeedDetail(brief: string) {
+  const prefix = brief ? `我先记下了：「${brief}」。` : '可以，我来帮你整理。'
+  return [
+    prefix,
+    '',
+    '现在描述还太泛了。你可以再补充一点：',
+    '- 这个设计用于什么场景或活动？',
+    '- 需要包含哪些核心信息？',
+    '- 有没有尺寸、风格、交付格式或参考方向？',
+  ].join('\n')
+}
+
+function renderAssistantTaskNeedTime(brief: string) {
+  return [
+    `这个需求已经比较清楚了：${brief}`,
+    '',
+    '还需要确认预计时间：你预计什么时候开始？什么时候交付？',
+    '可以直接说类似「6月7号开始时间 5点，结束时间 7点」。',
+  ].join('\n')
+}
+
+function buildAssistantTaskDraft(text: string, currentMonthValue: string, designTypeGroups: DesignTypeGroup[]): AssistantTaskDraft | null {
+  if (!shouldUseTaskAgent(text)) return null
+  if (isAssistantTaskHelpOnly(text) || !hasAssistantSpecificBrief(text) || !hasAssistantTaskTimeRange(text)) return null
+  const notes: string[] = []
+  const title = extractAssistantTitle(text)
+  const dateParts = extractAssistantDate(text, currentMonthValue)
+  const timeRange = extractAssistantTimeRange(text)
+  const startTime = timeRange.startTime ?? extractAssistantTime(text, ['开始时间', '开始', '从'])
+  const endTime = timeRange.endTime ?? extractAssistantTime(text, ['结束时间', '结束', '到', '至', '交付'])
+  if (!startTime || !endTime) return null
+  if (startTime?.assumedAfternoon || endTime?.assumedAfternoon) {
+    notes.push('未写上午/下午的 1-8 点已按下午/晚上理解。')
+  }
+
+  let startDate = assistantDateTimeValue(dateParts, startTime)
+  let estimatedDate = assistantDateTimeValue(dateParts, endTime)
+  if (exactDurationMinutesBetween(startDate, estimatedDate) <= 0) {
+    estimatedDate = addMinutesToPlanDateTime(estimatedDate, 1440)
+    notes.push('结束时间早于开始时间，已按跨天任务处理。')
+  }
+  startDate = snapPlanDateTime(startDate, 'nearest')
+  estimatedDate = snapPlanDateTime(estimatedDate, 'nearest')
+  const minutes = Math.max(30, exactDurationMinutesBetween(startDate, estimatedDate))
+  const matchedType = matchAssistantDesignType(text, title, designTypeGroups)
+  if (!matchedType.matched) {
+    notes.push(`没有明确识别到分类，暂按「${matchedType.type}」归类。`)
+  }
+
+  const requirement = text.replace(/\s+/g, ' ').trim()
+  return {
+    kind: 'create-task',
+    title,
+    requirement,
+    type: matchedType.type,
+    startDate,
+    estimatedDate,
+    estimatedHours: Math.round((minutes / 60) * 100) / 100,
+    requester: assistantDefaultPerson,
+    contact: assistantDefaultPerson,
+    reviewer: assistantDefaultPerson,
+    notes,
+  }
+}
+
+function assistantDraftToTask(draft: AssistantTaskDraft): Task {
+  return {
+    id: Date.now(),
+    date: draft.startDate,
+    estimatedDate: draft.estimatedDate,
+    settlementMonth: '',
+    isSupplemental: false,
+    type: draft.type,
+    title: draft.title,
+    requirement: draft.requirement,
+    requester: draft.requester,
+    contact: draft.contact,
+    reviewer: draft.reviewer,
+    stage: '计划中',
+    estimatedHours: draft.estimatedHours,
+    actualHours: 0,
+    status: '计划中',
+    progress: 0,
+    billable: true,
+    supplementalNote: '',
+    acceptanceNote: '',
+    files: [],
+  }
+}
+
+function renderAssistantTaskDraft(draft: AssistantTaskDraft) {
+  const notes = draft.notes.length > 0 ? `\n\n需要你确认：\n${draft.notes.map((note) => `- ${note}`).join('\n')}` : ''
+  return [
+    '我识别到你想新建一条任务，先帮你整理成草稿：',
+    '',
+    `任务名称：${draft.title}`,
+    `设计类型：${draft.type}`,
+    `需求人 / 对接人 / 验收人：${draft.requester} / ${draft.contact} / ${draft.reviewer}`,
+    `预计开始：${formatPlanDateTime(draft.startDate)}`,
+    `预计交付：${formatPlanDateTime(draft.estimatedDate)}`,
+    `预估工时：${formatDuration(Math.round(draft.estimatedHours * 60))}`,
+    `任务状态：计划中`,
+    '',
+    '回复「可以新建」我就写入任务；回复「取消」放弃这条草稿。' + notes,
+  ].join('\n')
+}
+
+function isAssistantTaskConfirm(text: string) {
+  return /^(可以新建|确认|执行|保存|创建|新建|可以|没问题|确定)$/i.test(text.trim())
+}
+
+function isAssistantTaskCancel(text: string) {
+  return /^(取消|放弃|不要|先不|不用了)$/i.test(text.trim())
+}
+
 function ChatPanel({
   currentMonthValue,
+  designTypeGroups,
+  onCreateTask,
   onClose,
-}: {
-  currentMonthValue: string
-  onClose: () => void
-}) {
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [useKnowledge, setUseKnowledge] = useState(true)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [pendingAgentDraft, setPendingAgentDraft] = useState<AssistantTaskDraft | null>(null)
+  const [pendingAgentSession, setPendingAgentSession] = useState<AssistantTaskSession | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showScopePopup, setShowScopePopup] = useState(false)
   const [historyList, setHistoryList] = useState<ConversationRecord[]>([])
@@ -3599,6 +3911,8 @@ function ChatPanel({
     setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
     setInput('')
     setAttachments([])
+    setPendingAgentDraft(null)
+    setPendingAgentSession(null)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -3610,6 +3924,8 @@ function ChatPanel({
 
   const loadConversation = (record: ConversationRecord) => {
     setMessages(record.messages)
+    setPendingAgentDraft(null)
+    setPendingAgentSession(null)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -3663,10 +3979,96 @@ function ChatPanel({
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
     const assistantId = crypto.randomUUID()
     const baseMessages = isWelcome ? [] : messages
-    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '' }])
     if (overrideText === undefined) setInput('')
     const sentAttachments = [...attachments]
     setAttachments([])
+
+    if (sentAttachments.length === 0 && pendingAgentDraft && isAssistantTaskCancel(text)) {
+      setPendingAgentDraft(null)
+      setPendingAgentSession(null)
+      setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '好，我先不创建。这条草稿已经放弃。' }])
+      return
+    }
+
+    if (sentAttachments.length === 0 && pendingAgentDraft && isAssistantTaskConfirm(text)) {
+      const draft = pendingAgentDraft
+      setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '正在创建任务…' }])
+      setLoading(true)
+      try {
+        const created = await onCreateTask(assistantDraftToTask(draft))
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? {
+          ...m,
+          content: created
+            ? `已新建任务「${created.title}」。它现在是「计划中」状态，切到「进行中」后就能开始记录进展。`
+            : '任务没有创建成功，你可以检查权限或稍后再试。',
+        } : m))
+        if (created) setPendingAgentDraft(null)
+        if (created) setPendingAgentSession(null)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '创建失败，请重试'
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `创建失败：${msg}` } : m))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    if (sentAttachments.length === 0) {
+      if (pendingAgentSession && isAssistantTaskCancel(text)) {
+        setPendingAgentSession(null)
+        setPendingAgentDraft(null)
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '好，我先不整理这条任务。需要时你再告诉我。' }])
+        return
+      }
+
+      if (pendingAgentSession) {
+        const mergedBrief = mergeAssistantTaskSessionBrief(pendingAgentSession, text)
+        if (!hasAssistantSpecificBrief(mergedBrief)) {
+          setPendingAgentSession({ brief: mergedBrief, askedFor: 'detail' })
+          setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskNeedDetail(mergedBrief) }])
+          return
+        }
+        const draft = buildAssistantTaskDraft(mergedBrief, currentMonthValue, designTypeGroups)
+        if (!draft) {
+          setPendingAgentSession({ brief: mergedBrief, askedFor: 'time' })
+          setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskNeedTime(mergedBrief) }])
+          return
+        }
+        setPendingAgentDraft(draft)
+        setPendingAgentSession(null)
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskDraft(draft) }])
+        return
+      }
+
+      if (isAssistantTaskHelpOnly(text)) {
+        setPendingAgentSession({ brief: '', askedFor: 'brief' })
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskIntro() }])
+        return
+      }
+
+      if (shouldUseTaskAgent(text) && !hasAssistantSpecificBrief(text)) {
+        const brief = normalizeAssistantTaskBrief(text)
+        setPendingAgentSession({ brief, askedFor: 'detail' })
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskNeedDetail(brief) }])
+        return
+      }
+
+      const draft = buildAssistantTaskDraft(text, currentMonthValue, designTypeGroups)
+      if (draft) {
+        setPendingAgentDraft(draft)
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskDraft(draft) }])
+        return
+      }
+
+      if (shouldUseTaskAgent(text)) {
+        const brief = normalizeAssistantTaskBrief(text)
+        setPendingAgentSession({ brief, askedFor: 'time' })
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskNeedTime(brief) }])
+        return
+      }
+    }
+
+    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '' }])
     setLoading(true)
     try {
       const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
@@ -6563,7 +6965,15 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
       {isChatOpen && isAdmin && (
         <>
           <div className="chat-backdrop" onDoubleClick={() => setIsChatOpen(false)} />
-          <ChatPanel currentMonthValue={currentMonth.value} onClose={() => setIsChatOpen(false)} />
+          <ChatPanel
+            currentMonthValue={currentMonth.value}
+            designTypeGroups={designTypeGroups}
+            onCreateTask={isAdmin ? handleCreateTask : async () => {
+              requireAdmin()
+              return undefined
+            }}
+            onClose={() => setIsChatOpen(false)}
+          />
         </>
       )}
       {isSemanticSearchOpen && (
@@ -7644,7 +8054,7 @@ function DashboardTaskSidebar({
                         return entry.isAcceptanceProgress && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
                       })
                       const entryNote = entry.isAcceptanceProgress ? (task.acceptanceNote?.trim() || entry.note || '已完成验收确认。') : (entry.note || '未填写具体内容')
-                      const hasAcceptanceFiles = entryFiles.some((f) => f.scope === 'acceptance')
+                      const hasAcceptanceFiles = entry.isAcceptanceProgress && entryFiles.some((f) => f.scope === 'acceptance')
                       return (
                         <article className="dashboard-side-time-item" key={entry.id}>
                           <span className="dot" />
@@ -8364,6 +8774,18 @@ function TaskProgressModal({
     }
     setTimeDraft(updater)
   }
+  const toggleAcceptanceMode = () => {
+    if (isAcceptanceMode) {
+      setTimeDraft((current) => ({
+        ...current,
+        note: note.trim() ? note : current.note,
+      }))
+    } else if (!note.trim() && timeDraft.note.trim()) {
+      setNote(timeDraft.note)
+    }
+    setIsAcceptanceMode((current) => !current)
+    setIsAcceptanceBaseExpanded(false)
+  }
   const activeStartDate = /^\d{4}-\d{2}-\d{2}$/.test(activeDraft.date || '') ? activeDraft.date : isoDate()
   const activeEndDate = /^\d{4}-\d{2}-\d{2}$/.test(activeDraft.endDate || '') ? activeDraft.endDate : activeStartDate
   const draftEntry = {
@@ -8460,7 +8882,8 @@ function TaskProgressModal({
   const buildDraftTimeEntry = (options?: { isAcceptanceProgress?: boolean }) => {
     const start = activeDraft.start.trim()
     const end = activeDraft.end.trim()
-    const noteText = (isAcceptanceMode ? note : activeDraft.note)?.trim() ?? ''
+    const rawNote = isAcceptanceMode ? note : (activeDraft.note || note)
+    const noteText = rawNote?.trim() ?? ''
     // 不计工时的普通进展：时间由用户自选（用于记录与排序），计 0 工时。未选时间则锚到当前时刻。
     if (isZeroTimeProgress) {
       if (!noteText && pendingAttachments.length === 0) {
@@ -8762,6 +9185,23 @@ function TaskProgressModal({
     }
   }
 
+  const demoteRollbackAcceptanceAttachments = async () => {
+    if (!isRollingBackAcceptanceEntry) {
+      return
+    }
+    const rollbackFiles = existingEntryAttachments.filter((file) => file.scope === 'acceptance')
+    if (rollbackFiles.length === 0) {
+      return
+    }
+    await Promise.all(rollbackFiles.map((file) => {
+      const nextTags = parseFileTags(file.tag).filter((tag) => tag !== '验收文件')
+      return onUpdateFile(file.id, {
+        scope: 'progress',
+        tag: serializeFileTags(nextTags),
+      })
+    }))
+  }
+
   const requestExistingAttachmentNameSuggestion = async (file: FileAsset) => {
     const aiState = existingAttachmentAiState[file.id]
     if (aiState?.loading) {
@@ -8885,6 +9325,7 @@ function TaskProgressModal({
         }
       }
       await saveDirtyExistingAttachmentNames()
+      await demoteRollbackAcceptanceAttachments()
       // 附件在添加时已后台预上传，这里只需等待收尾 + 必要时改名，通常瞬间完成。
       const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
       if (uploadFailures.length > 0) {
@@ -8934,7 +9375,7 @@ function TaskProgressModal({
         onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
       }
       // 单独标记为验收文件的附件：更新 scope/tag，并追加到 task.acceptanceFiles
-      const perAcceptanceAttachments = !isAcceptanceMode
+      const perAcceptanceAttachments = !isAcceptanceMode && !isRollingBackAcceptanceEntry
         ? pendingAttachments.filter((a) => a.isAcceptanceFile && a.uploadedFile)
         : []
       if (perAcceptanceAttachments.length > 0) {
@@ -9689,15 +10130,11 @@ function TaskProgressModal({
                 className={`progress-acceptance-toggle ${isAcceptanceMode ? 'active' : ''}`}
                 role="button"
                 tabIndex={0}
-                onClick={() => {
-                  setIsAcceptanceMode((current) => !current)
-                  setIsAcceptanceBaseExpanded(false)
-                }}
+                onClick={toggleAcceptanceMode}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
-                    setIsAcceptanceMode((current) => !current)
-                    setIsAcceptanceBaseExpanded(false)
+                    toggleAcceptanceMode()
                   }
                 }}
               >
@@ -10866,7 +11303,12 @@ function FilesView({
 
       <section className="file-library-layout">
         <aside className="file-project-list">
-          {monthGroups.length === 0 && <p className="calendar-empty-hint">当前还没有验收文件。</p>}
+          {monthGroups.length === 0 && (
+            <div className="empty-state">
+              <strong>还没有验收交付件</strong>
+              <p>任务提交验收时上传的交付文件会按项目自动归档到这里，AI 也会同步解析内容供搜索。</p>
+            </div>
+          )}
           {monthGroups.map((group) => {
             const isOpen = Boolean(fileQuery.trim()) || openMonths.has(group.month)
             return (
@@ -11832,6 +12274,9 @@ function InsightsView({
                 <span>{item.task.title}</span>
               </button>
             ))}
+            {projectDiagnosisRows.length === 0 && (
+              <p className="insight-tree-empty">本月暂无需要关注的异常任务</p>
+            )}
           </div>
           <div className="insight-tree-group">
             <button type="button" className="insight-tree-head">
@@ -11847,6 +12292,9 @@ function InsightsView({
                 <span>{item.name}</span>
               </button>
             ))}
+            {requesterProfileRows.length === 0 && (
+              <p className="insight-tree-empty">周期内出现记录需求人的任务后生成画像</p>
+            )}
           </div>
         </aside>
 
@@ -12456,7 +12904,8 @@ function ReportsView({
       }
   const billableTasks = selectedTasks.filter((task) => isTaskBillable(task) && task.actualHours > 0)
   const receiptDetailTasks = billableTasks
-  const plannedCount = selectedTasks.filter((task) => task.status === '计划中').length
+  // 只统计真正没进结算表的计划中任务：有实际工时的计划中任务会照常计费，不能在备注里说成未计费
+  const plannedCount = selectedTasks.filter((task) => task.status === '计划中' && isTaskBillable(task) && task.actualHours === 0).length
   const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
   // 不计时清单：① 整单不计费的任务；② 计费任务里「不计工时」的分段（如仅改名）。两者都要让甲方看到做了什么、为何不计时。
   const uncountedItems: Array<{ key: string; title: string; type: string; reason: string; formula: string }> = []

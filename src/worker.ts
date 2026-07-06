@@ -36,6 +36,7 @@ type Env = {
   UPLOADS: R2Bucket
   ASSETS: { fetch: (request: Request) => Promise<Response> }
   ADMIN_TOKEN?: string
+  LOCAL_DEV?: string
   DEEPSEEK_API_KEY?: string
   DEEPSEEK_BASE_URL?: string
   DEEPSEEK_MODEL?: string
@@ -1777,8 +1778,8 @@ async function markAnalysisFailure(env: Env, attachmentId: string, error: unknow
 // 若 zone 未开 Image Resizing（返回原图而非裁切结果），返回 null，让上层回退为整图单次分析。
 async function sliceLongImageViaCfImage(attachmentId: number | string, baseUrl: string): Promise<MultimodalAsset[] | null> {
   const srcUrl = `${baseUrl}/api/files/${attachmentId}/source`
-  let width = 0
-  let height = 0
+  let width: number
+  let height: number
   try {
     const meta = await fetch(srcUrl, { cf: { image: { format: 'json' } } } as RequestInit & { cf: unknown })
     if (!meta.ok || !(meta.headers.get('content-type') || '').includes('json')) {
@@ -2700,7 +2701,7 @@ async function testAiModelRoute(env: Env, request: Request) {
 }
 
 async function listAiModelsForRoute(env: Env, request: Request) {
-  let route: AiModelRouteKey | null = null
+  let route: AiModelRouteKey | null
   try {
     const url = new URL(request.url)
     route = parseAiRouteKey(url.searchParams.get('route'))
@@ -6955,7 +6956,10 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
 export default {
   async fetch(request: Request, env: Env, ctx: WorkerExecutionContext) {
     const url = new URL(request.url)
-    if (url.protocol === 'http:') {
+    // wrangler dev 会把请求 host 重写成路由域名，无法用 hostname 判断本地环境，
+    // 因此本地跳过强制 HTTPS 依赖 .dev.vars 里的 LOCAL_DEV 标记。
+    const isLocalDev = env.LOCAL_DEV === '1' || url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+    if (url.protocol === 'http:' && !isLocalDev) {
       url.protocol = 'https:'
       return Response.redirect(url.toString(), 301)
     }
