@@ -67,6 +67,7 @@ import {
   defaultHourlyRate,
   defaultPdfTitle,
   defaultServiceCompanyName,
+  designTypeColorPalette,
   importedHoursMonth,
   importedMonthlyHours,
   type DesignTypeGroup,
@@ -1733,6 +1734,15 @@ function isVisualReviewReady(file: FileAsset) {
   return Boolean(file.previewUrl) || isInlineImageFileType(type) || isInlineDocumentFileType(type) || isOfficeFileType(type)
 }
 
+const validDesignTypeColor = (value: unknown) => (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim().toLowerCase() : '')
+
+const designTypeColorForIndex = (index: number) => designTypeColorPalette[index % designTypeColorPalette.length] ?? '#e9f5ea'
+
+function nextUnusedDesignTypeColor(groups: DesignTypeGroup[]) {
+  const used = new Set(groups.map((group) => validDesignTypeColor(group.color)).filter(Boolean))
+  return designTypeColorPalette.find((color) => !used.has(color.toLowerCase())) ?? designTypeColorForIndex(groups.length)
+}
+
 const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
 
 function formatDuration(minutes: number) {
@@ -2117,13 +2127,34 @@ function calculateLaborWithholding(rows: AnnualIncomeRow[]) {
 
 const normalizeDesignTypeGroups = (groups: DesignTypeGroup[]) => {
   const normalized = groups
-    .map((group) => ({
+    .map((group, index) => ({
       name: group.name.trim(),
+      color: validDesignTypeColor(group.color) || designTypeColorForIndex(index),
       items: [...new Set(group.items.map((item) => item.trim()).filter(Boolean))],
     }))
     .filter((group) => group.name)
 
   return normalized.length > 0 ? normalized : defaultDesignTypeGroups
+}
+
+function designTypeGroupForTaskType(type: string, groups: DesignTypeGroup[]) {
+  const normalizedType = type.trim()
+  if (!normalizedType) {
+    return null
+  }
+  const explicitGroupName = normalizedType.includes(' / ') ? normalizedType.split(' / ')[0].trim() : ''
+  if (explicitGroupName) {
+    const matched = groups.find((group) => group.name === explicitGroupName)
+    if (matched) {
+      return matched
+    }
+  }
+  return groups.find((group) => group.items.includes(normalizedType)) ?? null
+}
+
+function designTypeColorForTask(type: string, groups: DesignTypeGroup[]) {
+  const group = designTypeGroupForTaskType(type, groups)
+  return validDesignTypeColor(group?.color) || designTypeColorForIndex(0)
 }
 
 function MonthPicker({
@@ -6963,6 +6994,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onCalendarFocusDateChange={setCalendarFocusDate}
             monthValue={currentMonth.value}
             onMonthChange={setMonthValue}
+            designTypeGroups={designTypeGroups}
             activeMonthTasks={activeMonthTasks}
             selectedTask={selectedTask}
             tasks={taskPageTasks}
@@ -8358,6 +8390,7 @@ function TasksView({
   onCalendarFocusDateChange,
   monthValue,
   onMonthChange,
+  designTypeGroups,
   activeMonthTasks,
   selectedTask,
   tasks,
@@ -8401,6 +8434,7 @@ function TasksView({
   onCalendarFocusDateChange: (value: string) => void
   monthValue: string
   onMonthChange: (month: string) => void
+  designTypeGroups: DesignTypeGroup[]
   activeMonthTasks: Task[]
   selectedTask: Task | undefined
   tasks: Task[]
@@ -8532,6 +8566,7 @@ function TasksView({
           monthValue={monthValue}
           mode={calendarMode}
           focusDate={calendarFocusDate}
+          designTypeGroups={designTypeGroups}
           tasks={tasks}
           onOpenTask={onOpenTask}
           onFocusDateChange={onCalendarFocusDateChange}
@@ -11266,6 +11301,7 @@ function CalendarView({
   monthValue,
   mode,
   focusDate,
+  designTypeGroups,
   tasks,
   onOpenTask,
   onFocusDateChange,
@@ -11274,6 +11310,7 @@ function CalendarView({
   monthValue: string
   mode: CalendarDisplayMode
   focusDate: string
+  designTypeGroups: DesignTypeGroup[]
   tasks: Task[]
   onOpenTask: (taskId: number) => void
   onFocusDateChange: (value: string) => void
@@ -11302,11 +11339,16 @@ function CalendarView({
     }
   }
 
+  const calendarTaskColorStyle = (task: Task) => ({
+    '--calendar-type-color': designTypeColorForTask(task.type, designTypeGroups),
+  }) as CSSProperties
+
   const renderMonthTask = (task: Task) => (
     <button
       type="button"
       className="calendar-event-pill"
       key={task.id}
+      style={calendarTaskColorStyle(task)}
       onClick={(event) => {
         event.stopPropagation()
         onOpenTask(task.id)
@@ -11322,6 +11364,7 @@ function CalendarView({
       type="button"
       className="calendar-allday-chip"
       key={task.id}
+      style={calendarTaskColorStyle(task)}
       onClick={() => onOpenTask(task.id)}
       title={`${task.title} · ${task.type}`}
     >
@@ -11345,6 +11388,7 @@ function CalendarView({
         className={`calendar-timed-event ${isOutside ? 'outside-hours' : ''}`}
         key={task.id}
         style={{
+          ...calendarTaskColorStyle(task),
           '--event-top': `${top}px`,
           '--event-height': `${height}px`,
         } as CSSProperties}
@@ -13982,8 +14026,16 @@ function SettingsView({
     if (!value || designTypeGroups.some((group) => group.name === value)) {
       return
     }
-    onDesignTypeGroupsChange([...designTypeGroups, { name: value, items: [] }])
+    onDesignTypeGroupsChange([...designTypeGroups, { name: value, color: nextUnusedDesignTypeColor(designTypeGroups), items: [] }])
     setNewGroupName('')
+  }
+
+  const updateDesignTypeGroupColor = (groupName: string, color: string) => {
+    const nextColor = validDesignTypeColor(color)
+    if (!nextColor) {
+      return
+    }
+    onDesignTypeGroupsChange(designTypeGroups.map((group) => (group.name === groupName ? { ...group, color: nextColor } : group)))
   }
 
   const performDeleteDesignTypeGroup = async (name: string) => {
@@ -14681,6 +14733,7 @@ function SettingsView({
                     onClick={() => setActiveDesignGroup(group.name)}
                   >
                     <GripVertical size={13} />
+                    <i className="design-type-tab-swatch" style={{ '--design-type-color': validDesignTypeColor(group.color) || designTypeColorForIndex(0) } as CSSProperties} />
                     <span>{group.name}</span>
                     <em>{group.items.length}</em>
                   </button>
@@ -14731,6 +14784,22 @@ function SettingsView({
                         }
                       }}
                     />
+                    <div className="design-type-color-editor" aria-label={`${activeGroup.name} 日历颜色`}>
+                      <span className="design-type-color-current" style={{ '--design-type-color': validDesignTypeColor(activeGroup.color) || designTypeColorForIndex(0) } as CSSProperties} />
+                      <div className="design-type-color-options">
+                        {designTypeColorPalette.map((color) => (
+                          <button
+                            type="button"
+                            key={color}
+                            className={validDesignTypeColor(activeGroup.color) === color.toLowerCase() ? 'active' : ''}
+                            aria-label={`设置 ${activeGroup.name} 颜色为 ${color}`}
+                            title={color}
+                            style={{ '--design-type-color': color } as CSSProperties}
+                            onClick={() => updateDesignTypeGroupColor(activeGroup.name, color)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                     <small>{activeGroup.items.length} 个子类</small>
                     <button
                       className="icon-button danger-icon"

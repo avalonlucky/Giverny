@@ -1,4 +1,4 @@
-import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, type DesignTypeGroup } from './config/appConfig'
+import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import JSZip from 'jszip'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
@@ -3069,19 +3069,24 @@ const normalizeDesignTypeItems = (values: unknown) => {
 
 const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
 
+const normalizeDesignTypeColor = (value: unknown) => (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim().toLowerCase() : '')
+
+const designTypeColorForIndex = (index: number) => designTypeColorPalette[index % designTypeColorPalette.length] ?? '#e9f5ea'
+
 const normalizeDesignTypeGroups = (values: unknown): DesignTypeGroup[] => {
   if (Array.isArray(values) && values.every((item) => typeof item === 'string')) {
-    return [{ name: '常用类型', items: normalizeDesignTypes(values) }]
+    return [{ name: '常用类型', color: designTypeColorForIndex(0), items: normalizeDesignTypes(values) }]
   }
 
   const groups = Array.isArray(values) ? values : []
   const normalized = groups
-    .map((group) => {
+    .map((group, index) => {
       const name = String((group as { name?: unknown }).name ?? '').trim()
       const items = normalizeDesignTypeItems((group as { items?: unknown }).items)
-      return name ? { name, items } : null
+      const color = normalizeDesignTypeColor((group as { color?: unknown }).color) || designTypeColorForIndex(index)
+      return name ? { name, color, items } : null
     })
-    .filter((group): group is DesignTypeGroup => Boolean(group))
+    .filter((group): group is { name: string; color: string; items: string[] } => Boolean(group))
 
   return normalized.length > 0 ? normalized : defaultDesignTypeGroups
 }
