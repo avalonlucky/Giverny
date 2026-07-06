@@ -12748,7 +12748,23 @@ textarea:focus-visible {
 
 .google-month-cell:hover,
 .google-month-cell.selected {
-  background: #e9f5ea;
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-strong));
+}
+
+.google-month-cell.official-holiday {
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-strong));
+}
+
+.google-month-cell.official-workday {
+  background: color-mix(in srgb, var(--color-admin-only) 4%, var(--color-surface-strong));
+}
+
+.google-month-date {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .google-month-day {
@@ -12760,6 +12776,35 @@ textarea:focus-visible {
   color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 700;
+}
+
+.google-month-lunar {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.google-month-cell.festival .google-month-lunar,
+.calendar-schedule-day.festival small {
+  color: var(--color-primary);
+}
+
+.google-month-lunar em,
+.calendar-schedule-day small em {
+  margin-left: 4px;
+  padding: 1px 3px;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  color: inherit;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.google-month-cell.official-workday .google-month-lunar,
+.calendar-schedule-day.official-workday small {
+  color: var(--color-admin-only);
 }
 
 .google-month-cell.today .google-month-day {
@@ -12779,8 +12824,8 @@ textarea:focus-visible {
   min-height: 22px;
   padding: 3px 8px;
   border: 0;
-  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 82%, var(--color-text));
-  background: var(--calendar-type-color, #e9f5ea);
+  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 58%, var(--color-primary-strong));
+  background: color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 34%, var(--color-surface-strong));
   color: var(--color-text);
   font-size: 12px;
   font-weight: 700;
@@ -12795,7 +12840,7 @@ textarea:focus-visible {
 .calendar-event-pill:hover,
 .calendar-allday-chip:hover,
 .calendar-timed-event:hover {
-  filter: saturate(1.05);
+  background: color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 42%, var(--color-surface-strong));
 }
 
 .calendar-overflow {
@@ -12861,6 +12906,13 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.calendar-schedule-day small {
+  min-height: 16px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .calendar-schedule-day.today strong {
   border-radius: var(--radius-pill);
   color: var(--color-surface-strong);
@@ -12869,6 +12921,14 @@ textarea:focus-visible {
 
 .calendar-schedule-day.selected:not(.today) strong {
   color: var(--color-primary);
+}
+
+.calendar-schedule-day.official-holiday {
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-strong));
+}
+
+.calendar-schedule-day.official-workday {
+  background: color-mix(in srgb, var(--color-admin-only) 4%, var(--color-surface-strong));
 }
 
 .calendar-allday-row {
@@ -12923,8 +12983,8 @@ textarea:focus-visible {
   min-height: 30px;
   padding: 5px 8px;
   border: 0;
-  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 82%, var(--color-text));
-  background: var(--calendar-type-color, #e9f5ea);
+  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 58%, var(--color-primary-strong));
+  background: color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 34%, var(--color-surface-strong));
   color: var(--color-text);
   text-align: left;
   overflow: hidden;
