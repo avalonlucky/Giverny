@@ -2141,12 +2141,23 @@ function taskCycleDays(task: DbTask) {
   return Math.max(1, Math.round((lifecycle.end - lifecycle.start) / 1440))
 }
 
-function entriesHours(entries: TimeEntry[], fallbackDate?: string | null) {
-  const minutes = entries.reduce((sum, entry) => {
-    const bounds = entryBounds(entry, fallbackDate)
-    return sum + (bounds ? Math.max(0, bounds.end - bounds.start) : 0)
+function waitingHoursForTask(task: DbTask) {
+  const workStarts = parseTimeEntries(task.time_entries_json)
+    .filter((entry) => !entry.isUncounted)
+    .flatMap((entry) => {
+      const bounds = entryBounds(entry, task.start_date)
+      return bounds && bounds.end > bounds.start ? [bounds.start] : []
+    })
+    .sort((a, b) => a - b)
+  const waitingMinutes = parseWaitingEntries(task.waiting_entries_json).reduce((sum, entry) => {
+    const start = entryMinuteStamp(entry.date || String(task.start_date || '').slice(0, 10), entry.start)
+    if (!Number.isFinite(start)) {
+      return sum
+    }
+    const nextStart = workStarts.find((stamp) => stamp > start)
+    return sum + (nextStart !== undefined && Number.isFinite(nextStart) ? Math.max(0, nextStart - start) : 0)
   }, 0)
-  return Math.round((minutes / 60) * 100) / 100
+  return Math.round((waitingMinutes / 60) * 100) / 100
 }
 
 function parseAnalysisItems(value: string | null) {
@@ -2185,7 +2196,7 @@ function aggregateInsightMetrics(source: DbTask[], dataSet: Pick<InsightDataSet,
     const actualHours = items.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0)
     const estimatedHours = items.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0)
     const cycleHours = items.reduce((sum, task) => sum + (taskLifecycleBounds(task)?.hours ?? 0), 0)
-    const explicitWaitingHours = items.reduce((sum, task) => sum + entriesHours(parseWaitingEntries(task.waiting_entries_json), task.start_date), 0)
+    const explicitWaitingHours = items.reduce((sum, task) => sum + waitingHoursForTask(task), 0)
     const opportunityWaitHours = explicitWaitingHours
     const revisionSignals = items.reduce(
       (sum, task) => sum + (dataSet.updatesByTask.get(task.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
@@ -2590,8 +2601,8 @@ async function diagnoseInsights(env: Env, request: Request) {
       feedbackTags: '验收时设计师可选原因标签：需求不清晰、沟通成本高、定价偏低、技术挑战大。',
       feedbackNote: '验收时设计师填写的主观体感评价，用于补充等待、沟通、返工等客观字段无法表达的背景。',
       cycleHours: '基于分段进展计时推导的真实执行生命周期小时，排除计划中阶段和系统补录/编辑流水时间；优先以验收进展作为结束点。',
-      opportunityWaitHours: '显式等待小时，等同于设计师手动记录的等待/非计费时间；不得用自然日周期减计费工时推断等待。',
-      explicitWaitingHours: '设计师手动记录的等待/非计费时间段，例如等待甲方意见、等待资料、等待确认；不进入结算工时。',
+      opportunityWaitHours: '显式等待小时，来自设计师记录的等待开始时间，并由同一任务下一段工作进展分段计时的开始时间自动截止；不得用自然日周期减计费工时推断等待。',
+      explicitWaitingHours: '设计师记录的等待开始，例如等待甲方意见、等待资料、等待确认；结束点由下一段工作进展分段计时自动生成，不进入结算工时。',
       waitingRatioPercent: '显式等待小时占（计费工时 + 显式等待小时）的百分比。没有等待记录时为 0，不能推断为长等待。',
     },
   }
@@ -5396,7 +5407,7 @@ async function suggestDailyKnowledgeWithAi(env: Env, request: Request) {
     ? [...new Set(body.taskThemes.map((item) => String(item).trim()).filter(Boolean))].slice(0, 12)
     : []
   const recentTitles = Array.isArray(body.recentTitles)
-    ? [...new Set(body.recentTitles.map((item) => String(item).trim()).filter(Boolean))].slice(-30)
+    ? [...new Set(body.recentTitles.map((item) => String(item).trim()).filter(Boolean))].slice(-80)
     : []
   const payload = {
     currentMonth,

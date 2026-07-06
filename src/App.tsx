@@ -541,7 +541,22 @@ const dailyKnowledgePool: DailyKnowledgeItem[] = [
 ]
 
 const dailyKnowledgeHistoryKey = 'giverny-daily-knowledge-history-v1'
+const dailyKnowledgeCurrentKey = 'giverny-daily-knowledge-current-v1'
+const dailyKnowledgeQueueKey = 'giverny-daily-knowledge-queue-v1'
 const dailyKnowledgeQueueSize = 10
+
+function isDailyKnowledgeItem(value: unknown): value is DailyKnowledgeItem {
+  const item = value as Partial<DailyKnowledgeItem> | null
+  return Boolean(
+    item
+    && typeof item.category === 'string'
+    && typeof item.source === 'string'
+    && typeof item.title === 'string'
+    && typeof item.teaser === 'string'
+    && Array.isArray(item.body)
+    && item.body.length > 0,
+  )
+}
 
 function readDailyKnowledgeHistory() {
   try {
@@ -554,20 +569,65 @@ function readDailyKnowledgeHistory() {
 
 function rememberDailyKnowledgeTitle(title: string) {
   const history = readDailyKnowledgeHistory().filter((item) => item !== title)
-  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title]))
+  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-80)))
+}
+
+function readStoredDailyKnowledgeItem() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeCurrentKey) ?? 'null') as unknown
+    return isDailyKnowledgeItem(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredDailyKnowledgeItem(item: DailyKnowledgeItem) {
+  try {
+    window.localStorage.setItem(dailyKnowledgeCurrentKey, JSON.stringify(item))
+  } catch {
+    // localStorage may be unavailable in private mode; losing the cache only affects variety after refresh.
+  }
+}
+
+function readStoredDailyKnowledgeQueue() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeQueueKey) ?? '[]') as unknown
+    return Array.isArray(parsed) ? parsed.filter(isDailyKnowledgeItem) : []
+  } catch {
+    return []
+  }
+}
+
+function writeStoredDailyKnowledgeQueue(items: DailyKnowledgeItem[]) {
+  try {
+    window.localStorage.setItem(dailyKnowledgeQueueKey, JSON.stringify(items.slice(0, dailyKnowledgeQueueSize)))
+  } catch {
+    // Best-effort cache only.
+  }
 }
 
 function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
-  const excluded = new Set(Array.isArray(excludedTitles) ? excludedTitles : [excludedTitles].filter(Boolean))
+  const excludedList = Array.isArray(excludedTitles) ? excludedTitles.filter(Boolean) : [excludedTitles].filter(Boolean)
+  const excluded = new Set(excludedList)
   const candidates = dailyKnowledgePool.filter((item) => !excluded.has(item.title))
-  const pool = candidates.length > 0 ? candidates : dailyKnowledgePool
+  if (candidates.length > 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  }
+  const history = readDailyKnowledgeHistory()
+  const currentTitle = excludedList[0] ?? ''
+  const leastRecent = dailyKnowledgePool
+    .filter((item) => item.title !== currentTitle)
+    .sort((left, right) => history.indexOf(left.title) - history.indexOf(right.title))
+  const pool = leastRecent.length > 0 ? leastRecent.slice(0, Math.max(1, Math.ceil(leastRecent.length / 3))) : dailyKnowledgePool
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
 function fallbackDailyKnowledgeBatch(count: number, excludedTitles: string[] = []) {
   const items: DailyKnowledgeItem[] = []
   const excluded = new Set(excludedTitles)
-  while (items.length < count && excluded.size < dailyKnowledgePool.length) {
+  let attempts = 0
+  while (items.length < count && attempts < dailyKnowledgePool.length * 3) {
+    attempts += 1
     const next = fallbackDailyKnowledge([...excluded])
     if (excluded.has(next.title)) {
       break
@@ -1776,6 +1836,49 @@ function normalizeClockInput(value: string) {
 
 function sumTimeEntries(entries: TimeEntry[]) {
   return entries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+}
+
+function timeEntryStartStamp(entry: Pick<TimeEntry, 'date' | 'start'>) {
+  return dateTimeMinuteStamp(entry.date || '', entry.start)
+}
+
+function nextWorkStartForWaiting(task: Task, waitingEntry: WaitingEntry) {
+  const waitingStart = timeEntryStartStamp(waitingEntry)
+  if (!Number.isFinite(waitingStart)) {
+    return Number.NaN
+  }
+  const nextStart = (task.timeEntries ?? [])
+    .filter((entry) => !entry.isUncounted && minutesForTimeEntry(entry) > 0)
+    .map(timeEntryStartStamp)
+    .filter((stamp) => Number.isFinite(stamp) && stamp > waitingStart)
+    .sort((a, b) => a - b)[0]
+  return nextStart ?? Number.NaN
+}
+
+function minutesForWaitingEntry(task: Task, entry: WaitingEntry) {
+  const waitingStart = timeEntryStartStamp(entry)
+  const nextStart = nextWorkStartForWaiting(task, entry)
+  if (!Number.isFinite(waitingStart) || !Number.isFinite(nextStart) || nextStart <= waitingStart) {
+    return 0
+  }
+  return nextStart - waitingStart
+}
+
+function sumWaitingEntries(task: Task) {
+  return (task.waitingEntries ?? []).reduce((sum, entry) => sum + minutesForWaitingEntry(task, entry), 0)
+}
+
+function formatWaitingEntryDateTimeRange(task: Task, entry: WaitingEntry) {
+  const startDate = entry.date || datePart(task.date)
+  const startLabel = `${formatMonthDay(startDate)} ${entry.start}`
+  const nextStart = nextWorkStartForWaiting(task, entry)
+  if (!Number.isFinite(nextStart)) {
+    return `${startLabel} 起 · 等待中`
+  }
+  const endValue = planDateTimeFromMinuteStamp(nextStart)
+  const endDate = datePart(endValue)
+  const endTime = endValue.slice(11, 16)
+  return startDate === endDate ? `${startLabel}-${endTime}` : `${startLabel} - ${formatMonthDay(endDate)} ${endTime}`
 }
 
 // 计费口径的唯一来源：与后端 is_billable 保持一致——状态不影响计费，
@@ -3415,21 +3518,37 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
   const [editId, setEditId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'user' | 'ai-tip'>('user')
 
-  const authHeaders = (): Record<string, string> => {
+  const authHeaders = useCallback((): Record<string, string> => {
     const h: Record<string, string> = { 'content-type': 'application/json' }
     if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
     return h
-  }
+  }, [auth])
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/knowledge', { headers: authHeaders() })
       if (res.ok) setNotes((await res.json()) as KnowledgeNote[])
     } finally { setLoading(false) }
-  }
+  }, [authHeaders])
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/knowledge', { headers: authHeaders() })
+        if (res.ok) {
+          const items = (await res.json()) as KnowledgeNote[]
+          if (!cancelled) setNotes(items)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [authHeaders])
 
   const reset = () => { setTitle(''); setContent(''); setTags(''); setEditId(null) }
 
@@ -3881,7 +4000,7 @@ function ChatPanel({
   const [pendingAgentSession, setPendingAgentSession] = useState<AssistantTaskSession | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showScopePopup, setShowScopePopup] = useState(false)
-  const [historyList, setHistoryList] = useState<ConversationRecord[]>([])
+  const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -3890,7 +4009,6 @@ function ChatPanel({
 
   const isWelcome = messages.length === 1 && messages[0].id === ALICE_WELCOME_ID
 
-  useEffect(() => { setHistoryList(loadChatHistory()) }, [])
   useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
   useEffect(() => { inputRef.current?.focus() }, [])
 
@@ -4335,10 +4453,16 @@ function App() {
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
-  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => fallbackDailyKnowledge(readDailyKnowledgeHistory()))
+  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => {
+    const stored = readStoredDailyKnowledgeItem()
+    return stored ?? fallbackDailyKnowledge(readDailyKnowledgeHistory())
+  })
   const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() => {
     const history = readDailyKnowledgeHistory()
-    return fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, history)
+    const storedQueue = mergeDailyKnowledgeQueue(readStoredDailyKnowledgeQueue(), [dailyKnowledge.title, ...history])
+    return storedQueue.length > 0
+      ? storedQueue
+      : fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, [dailyKnowledge.title, ...history])
   })
   const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
   const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
@@ -4396,6 +4520,8 @@ function App() {
   const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
   const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
   const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
+  const canToggleIncomeVisibility = canSeeFull || isClient
+  const toggleIncomeVisibility = () => setIncomeVisible((value) => !value)
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
   const taskMonthValues = useMemo(
     () => new Set(taskItems.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value))),
@@ -4442,10 +4568,13 @@ function App() {
 
   useEffect(() => {
     dailyKnowledgeRef.current = dailyKnowledge
+    writeStoredDailyKnowledgeItem(dailyKnowledge)
+    rememberDailyKnowledgeTitle(dailyKnowledge.title)
   }, [dailyKnowledge])
 
   useEffect(() => {
     dailyKnowledgeQueueRef.current = dailyKnowledgeQueue
+    writeStoredDailyKnowledgeQueue(dailyKnowledgeQueue)
   }, [dailyKnowledgeQueue])
 
   const seedDailyKnowledgeQueue = useCallback((baseQueue: DailyKnowledgeItem[] = dailyKnowledgeQueueRef.current) => {
@@ -4477,15 +4606,21 @@ function App() {
       ...dailyKnowledgeQueueRef.current.map((item) => item.title),
       ...extraTitles,
     ].filter(Boolean)
-    const suggestion: DailyKnowledgeSuggestion = await api.suggestDailyKnowledge({
-      currentMonth: currentMonth.value,
-      taskThemes,
-      recentTitles,
-    })
-    if (!suggestion.title || recentTitles.includes(suggestion.title)) {
-      return null
+    const attemptedTitles = new Set(recentTitles)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const suggestion: DailyKnowledgeSuggestion = await api.suggestDailyKnowledge({
+        currentMonth: currentMonth.value,
+        taskThemes,
+        recentTitles: [...attemptedTitles],
+      })
+      if (suggestion.title && !attemptedTitles.has(suggestion.title)) {
+        return suggestion
+      }
+      if (suggestion.title) {
+        attemptedTitles.add(suggestion.title)
+      }
     }
-    return suggestion
+    return null
   }, [activeMonthTasks, currentMonth.value])
 
   const prefetchDailyKnowledgeQueue = useCallback(async () => {
@@ -4535,13 +4670,22 @@ function App() {
     }
     setIsDailyKnowledgeLoading(true)
     try {
+      const excludedTitles = [
+        dailyKnowledgeRef.current.title,
+        ...readDailyKnowledgeHistory(),
+        ...dailyKnowledgeQueueRef.current.map((item) => item.title),
+      ]
       const fetchedItem = await fetchDailyKnowledgeItem()
-      const nextFallback = fetchedItem ?? fallbackDailyKnowledge(dailyKnowledgeRef.current.title)
+      const nextFallback = fetchedItem ?? fallbackDailyKnowledge(excludedTitles)
       dailyKnowledgeRef.current = nextFallback
       setDailyKnowledge(nextFallback)
       rememberDailyKnowledgeTitle(nextFallback.title)
     } catch {
-      const fallback = fallbackDailyKnowledge(dailyKnowledgeRef.current.title)
+      const fallback = fallbackDailyKnowledge([
+        dailyKnowledgeRef.current.title,
+        ...readDailyKnowledgeHistory(),
+        ...dailyKnowledgeQueueRef.current.map((item) => item.title),
+      ])
       dailyKnowledgeRef.current = fallback
       setDailyKnowledge(fallback)
       rememberDailyKnowledgeTitle(fallback.title)
@@ -4855,10 +4999,7 @@ function App() {
   const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
 
   const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
-  const taskContextInsights = useMemo(
-    () => buildTaskContextInsights(activeTaskItems, updateItems),
-    [activeTaskItems, updateItems],
-  )
+  const taskContextInsights = buildTaskContextInsights(activeTaskItems, updateItems)
 
   const stats = useMemo(() => {
     const totalHours = activeMonthTasks.reduce((sum, task) => sum + task.actualHours, importedHours)
@@ -4893,9 +5034,9 @@ function App() {
     return { items, total: Number(items.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
   }, [activeMonthTasks])
 
-  const today = isoDate()
-  const dueSoonDate = isoDate(3)
-  const dueTasks = useMemo(() => {
+  const [today] = useState(() => isoDate())
+  const [dueSoonDate] = useState(() => isoDate(3))
+  const dueTasks = (() => {
     const actionableTasks = activeMonthTasks.filter((task) => !['已验收', '终止', '不计费'].includes(task.status))
     const byEstimateAsc = (a: Task, b: Task) => datePart(a.estimatedDate || a.date).localeCompare(datePart(b.estimatedDate || b.date))
     const byNearestPlan = (a: Task, b: Task) => {
@@ -4912,7 +5053,7 @@ function App() {
     const soonHighlights = soon.filter((task) => task.id !== primary?.id).slice(0, 2)
     const reminderTasks = [primary, ...soonHighlights].filter((task): task is Task => Boolean(task))
     return { overdue, soon, primary, soonHighlights, reminderTasks }
-  }, [activeMonthTasks, dueSoonDate, today])
+  })()
 
   const annualData = useMemo(() => {
     const year = currentMonth.value.slice(0, 4)
@@ -5096,15 +5237,16 @@ function App() {
       await refreshState()
       notify('已撤回分段计时')
     }
+    const entryRangeLabel = isWaiting ? formatWaitingEntryDateTimeRange(task, entry as WaitingEntry) : formatEntryDateTimeRange(task, entry)
     setConfirmDialog({
-      title: `确定删除 ${formatEntryDateTimeRange(task, entry)} 这段记录吗？`,
+      title: `确定删除 ${entryRangeLabel} 这段记录吗？`,
       body: isWaiting
         ? '删除后，这段等待时长将不再进入洞察分析。'
         : '删除后，这段工时会从实际工时和结算金额中扣除。',
       confirmText: '确认删除',
       tone: 'danger',
       hideIcon: true,
-      details: [entry.note || (isWaiting ? '未填写等待说明' : '未填写进展内容'), isWaiting ? '不计结算' : `计时 ${formatDuration(minutesForTimeEntry(entry))}`],
+      details: [entry.note || (isWaiting ? '未填写等待说明' : '未填写进展内容'), isWaiting ? '不计结算，下一段工作进展开始时自动截止' : `计时 ${formatDuration(minutesForTimeEntry(entry))}`],
       onConfirm: async () => {
         // 附件归档与 task update 并行，减少串行等待
         const archivePromise = api.setEntryAttachmentsArchived(taskId, entry.id, true)
@@ -6093,6 +6235,7 @@ function App() {
       label: '全局',
       items: [
         { keys: '⌘ K / Ctrl K', action: '打开命令面板' },
+        { keys: '⌘ ⇧ M / Ctrl ⇧ M', action: '显示 / 隐藏金额' },
         { keys: '⌥ ⌥', action: '查看快捷键' },
         { keys: '⌥ A', action: '打开 / 关闭爱丽丝 AI 助手（管理员）' },
         { keys: 'N', action: '新建任务' },
@@ -6160,6 +6303,13 @@ function App() {
           setIsCommandPaletteOpen(false)
         } else {
           openCommandPalette()
+        }
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === 'm') {
+        if (canToggleIncomeVisibility && !isCommandPaletteOpen && !isShortcutHelpOpen && !hasBlockingModal && !isEditableShortcutTarget(event.target)) {
+          event.preventDefault()
+          toggleIncomeVisibility()
         }
         return
       }
@@ -6511,21 +6661,23 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <article className="dashboard-metric">
             <span>预计收入</span>
             <strong className="income-metric-value">
-              {canSeeFull || isClient
+              {canToggleIncomeVisibility
                 ? (incomeVisible ? `¥${formatYuan(stats.amount)}` : '¥ ****')
                 : '仅管理员'}
-              {(canSeeFull || isClient) && (
+              {canToggleIncomeVisibility && (
                 <button
                   type="button"
                   className="income-visibility-toggle"
                   aria-label={incomeVisible ? '隐藏收入' : '显示收入'}
-                  onClick={() => setIncomeVisible((v) => !v)}
+                  aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
+                  title={`${incomeVisible ? '隐藏收入' : '显示收入'}（⌘⇧M / Ctrl⇧M）`}
+                  onClick={toggleIncomeVisibility}
                 >
                   {incomeVisible ? <EyeOff size={13} /> : <Eye size={13} />}
                 </button>
               )}
             </strong>
-            <p>{canSeeFull || isClient ? `按 ¥${hourlyRate} / 小时` : '游客只读不可见'}</p>
+            <p>{canToggleIncomeVisibility ? `按 ¥${hourlyRate} / 小时` : '游客只读不可见'}</p>
           </article>
           <article className="dashboard-metric">
             <span>验收情况</span>
@@ -7815,7 +7967,7 @@ function DashboardTaskSidebar({
   const waitingEntries = task.waitingEntries ?? []
   const actualMinutes = sumTimeEntries(timeEntries)
   const billableHours = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
-  const waitingMinutes = sumTimeEntries(waitingEntries)
+  const waitingMinutes = sumWaitingEntries(task)
   const canAcceptTask = task.status === '待验收'
   const canRecordProgress = canRecordNewProgress(task)
   const demandPerson = task.requester || task.contact || '待确认'
@@ -8130,16 +8282,16 @@ function DashboardTaskSidebar({
                 <>
                   <div className="dashboard-side-waiting-list">
                     {shownWaitingEntries.map((entry) => {
-                      const minutes = minutesForTimeEntry(entry)
+                      const minutes = minutesForWaitingEntry(task, entry)
                       return (
                         <article className="dashboard-side-waiting-item" key={entry.id}>
                           <div className="dashboard-side-entry-actions">
                             <button type="button" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>编辑</button>
                             <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>
                           </div>
-                          <time>{formatEntryDateTimeRange(task, entry)}</time>
+                          <time>{formatWaitingEntryDateTimeRange(task, entry)}</time>
                           {renderEntryNote(`${task.id}:waiting:${entry.id}`, entry.note || entry.reason || '等待甲方确认')}
-                          <em>等待 {(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h · 不计结算</em>
+                          <em>{minutes > 0 ? `等待 ${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h` : '等待中'} · 不计结算</em>
                         </article>
                       )
                     })}
@@ -8884,6 +9036,19 @@ function TaskProgressModal({
     const end = activeDraft.end.trim()
     const rawNote = isAcceptanceMode ? note : (activeDraft.note || note)
     const noteText = rawNote?.trim() ?? ''
+    if (isWaitingMode) {
+      if (!start || !activeStartDate) {
+        return null
+      }
+      return {
+        id: editEntryId ?? stagedEntryIdRef.current,
+        date: activeStartDate,
+        endDate: activeStartDate,
+        start,
+        end: start,
+        note: noteText,
+      } as WaitingEntry
+    }
     // 不计工时的普通进展：时间由用户自选（用于记录与排序），计 0 工时。未选时间则锚到当前时刻。
     if (isZeroTimeProgress) {
       if (!noteText && pendingAttachments.length === 0) {
@@ -9292,13 +9457,13 @@ function TaskProgressModal({
       : acceptanceTimeEntries
   const acceptanceComputedMinutes = sumTimeEntries(acceptancePreviewTimeEntries)
   const acceptanceLockedHours = Math.round((acceptanceComputedMinutes / 60) * 100) / 100
-  const acceptanceWaitingMinutes = sumTimeEntries(acceptanceWaitingEntries)
+  const acceptanceWaitingMinutes = sumWaitingEntries(task)
   const acceptanceEstimatedAmount = roundCents(acceptanceLockedHours * hourlyRate)
   const canConfirmAcceptance = (acceptanceLockedHours > 0 || isAcceptanceRevisionMode || !countAcceptanceTime) && !isSaving && Boolean(onConfirmAcceptance) && !hasAnotherAcceptanceProgress && (!countAcceptanceTime || !draftConflict)
   const progressHeaderHint = isAcceptanceMode
     ? ''
     : isWaitingMode
-      ? '记录非工作的等待时间段，仅用于洞察分析，不计入结算工时'
+      ? '记录非工作的等待开始时间，仅用于洞察分析，不计入结算工时'
       : isEditingEntry
         ? '修改这段记录的内容和时间'
         : `${task.title} · 按时间段计时，工时自动累计并计入结算`
@@ -9521,6 +9686,18 @@ function TaskProgressModal({
   const planReferenceEndValue = planReferenceDraft.endDate && normalizeClockInput(planReferenceDraft.end)
     ? `${planReferenceDraft.endDate}T${normalizeClockInput(planReferenceDraft.end)}`
     : ''
+  const hasWaitingStart = isWaitingMode && Boolean(progressStartValue)
+  const waitingPreviewEntry = hasWaitingStart
+    ? {
+        id: editEntryId ?? stagedEntryIdRef.current,
+        date: datePart(progressStartValue),
+        endDate: datePart(progressStartValue),
+        start: progressStartValue.slice(11, 16),
+        end: progressStartValue.slice(11, 16),
+        note: note.trim(),
+      } as WaitingEntry
+    : null
+  const waitingPreviewMinutes = waitingPreviewEntry ? minutesForWaitingEntry(task, waitingPreviewEntry) : 0
 
   const writePlanReferenceStart = (value: string) => {
     setPlanReferenceDraft((current) => ({
@@ -9834,6 +10011,51 @@ function TaskProgressModal({
 
   const totalPendingMinutes = pendingExtraSegments.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
 
+  const waitingTimeFields = (
+    <section className="progress-lite-time-formula">
+      <div className="progress-lite-time-heading">
+        <div>
+          <span>等待开始时间</span>
+          <small>截止时间取同一任务下一段工作进展的开始时间</small>
+        </div>
+      </div>
+      <div className="progress-schedule-wrap">
+        <div className="new-task-schedule-row progress-lite-schedule-row">
+          <PlanDateTimeField
+            label="开始时间"
+            value={progressStartValue}
+            onChange={(value) => {
+              setHasTouchedSchedule(true)
+              writeProgressStart(value)
+              if (value) {
+                writeProgressEnd(value)
+              }
+              setTimeEntryError('')
+            }}
+            isActive
+            readOnly={false}
+            pickerId="waiting-start"
+            activePickerId={activeDatePickerId}
+            onActivePickerChange={setActiveDatePickerId}
+          />
+          <div className="field progress-lite-hours-field">
+            <span className="new-task-inline-label">自动截止</span>
+            <output className="new-task-hours-input new-task-hours-output" aria-label="等待截止规则">
+              {waitingPreviewEntry && waitingPreviewMinutes > 0 ? formatDuration(waitingPreviewMinutes) : '下一段工作进展'}
+            </output>
+          </div>
+        </div>
+      </div>
+      <p className={`progress-lite-duration ${hasWaitingStart ? '' : 'invalid'}`} role="status">
+        {hasWaitingStart
+          ? waitingPreviewMinutes > 0
+            ? `当前会按下一段工作进展自动计算为等待 ${formatDuration(waitingPreviewMinutes)}`
+            : '保存后显示为等待中；下一次记录工作进展分段计时时自动截止'
+          : '请选择等待开始时间'}
+      </p>
+    </section>
+  )
+
   const timeFields = (
     <section className="progress-lite-time-formula">
       <div className="progress-lite-time-heading">
@@ -10105,7 +10327,7 @@ function TaskProgressModal({
       <div className={`progress-lite-body ${isWaitingMode ? 'waiting-mode' : ''} ${isAcceptanceMode ? 'acceptance-mode' : ''}`}>
         {isWaitingMode ? (
           <>
-            {timeFields}
+            {waitingTimeFields}
             <section className="progress-lite-field">
               <label className="progress-lite-label" htmlFor="progress-lite-waiting-note">备注</label>
               <textarea
@@ -10631,12 +10853,15 @@ function TaskProgressModal({
                   {acceptanceWaitingEntries.length > 0 && (
                     <div className="progress-acceptance-waiting">
                       <h4>等待记录 · 不计入结算</h4>
-                      {acceptanceWaitingEntries.map((entry) => (
-                        <div className="progress-acceptance-waiting-row" key={entry.id}>
-                          <span>{formatEntryDateTimeRange(task, entry)}</span>
-                          <em>{(minutesForTimeEntry(entry) / 60).toFixed(1)}h</em>
-                        </div>
-                      ))}
+                      {acceptanceWaitingEntries.map((entry) => {
+                        const minutes = minutesForWaitingEntry(task, entry)
+                        return (
+                          <div className="progress-acceptance-waiting-row" key={entry.id}>
+                            <span>{formatWaitingEntryDateTimeRange(task, entry)}</span>
+                            <em>{minutes > 0 ? `${(minutes / 60).toFixed(1)}h` : '等待中'}</em>
+                          </div>
+                        )
+                      })}
                       <div className="progress-acceptance-waiting-total"><strong>累计等待</strong><em>{(acceptanceWaitingMinutes / 60).toFixed(1)}h</em></div>
                     </div>
                   )}
@@ -10699,7 +10924,7 @@ function TaskProgressModal({
             {isSaving ? '保存中…' : isAcceptanceRevisionMode ? '保存修改' : '确认验收通过'}
           </button>
         ) : (
-          <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (!hasDraftTimeEntry && !canSaveZeroTimeProgress && pendingExtraSegments.length === 0)} onClick={() => void saveProgress()}>
+          <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (isWaitingMode ? !hasWaitingStart : (!hasDraftTimeEntry && !canSaveZeroTimeProgress && pendingExtraSegments.length === 0))} onClick={() => void saveProgress()}>
             {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
           </button>
         )}
@@ -10739,7 +10964,7 @@ function TaskDetailModal({
 }) {
   const dueState = taskDueState(task, isoDate(), isoDate(3))
   const actualMinutes = sumTimeEntries(task.timeEntries ?? [])
-  const waitingMinutes = sumTimeEntries(task.waitingEntries ?? [])
+  const waitingMinutes = sumWaitingEntries(task)
   const actualHoursText = actualMinutes > 0 ? `${(actualMinutes / 60).toFixed(2)} h（共 ${(task.timeEntries ?? []).length} 段）` : `${task.actualHours.toFixed(2)} h`
   const actualH = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
   const estimatedH = task.estimatedHours
@@ -11224,12 +11449,12 @@ function FilesView({
     const target = acceptanceFiles.find((file) => file.id === focusFileId)
     if (target) {
       const project = projectRecords.find((record) => record.id === target.taskId)
-      if (project) {
-        setOpenMonths((current) => new Set(current).add(project.month))
-      }
-      setSelectedProjectId(target.taskId)
-      setSelectedFileId(focusFileId)
       requestAnimationFrame(() => {
+        if (project) {
+          setOpenMonths((current) => new Set(current).add(project.month))
+        }
+        setSelectedProjectId(target.taskId)
+        setSelectedFileId(focusFileId)
         document.querySelector(`[data-file-id="${focusFileId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       })
     }
@@ -11892,7 +12117,7 @@ function InsightsView({
     .map(([label, value], index) => ({ label, value, color: donutPalette[index % donutPalette.length] }))
   const typeDistribution = { items: typeDistributionItems, total: Number(typeDistributionItems.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
 
-  const waitingMinutes = periodTasks.reduce((sum, task) => sum + sumTimeEntries(task.waitingEntries ?? []), 0)
+  const waitingMinutes = periodTasks.reduce((sum, task) => sum + sumWaitingEntries(task), 0)
   const waitingHours = Number((waitingMinutes / 60).toFixed(1))
   const leadingType = typeDistribution.items[0]
   const selectedInsightKind = activeInsightKey.split(':')[0]
@@ -12161,7 +12386,7 @@ function InsightsView({
       c.updates += (task.timeEntries ?? []).length
       // 改稿轮次：只数显式勾选「本次为改稿轮次」的分段，避免把分阶段提交误判为改稿
       c.revisionMentions += (task.timeEntries ?? []).filter((entry) => entry.isRevision).length
-      c.waiting += sumTimeEntries(task.waitingEntries ?? []) / 60
+      c.waiting += sumWaitingEntries(task) / 60
       if (task.estimatedHours > 0 && task.actualHours > 0) {
         const dev = (task.actualHours - task.estimatedHours) / task.estimatedHours
         c.devSum += dev
@@ -15466,11 +15691,11 @@ function NewTaskModal({
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
 
-  const revokeBriefPreview = (item: BriefItem) => {
+  const revokeBriefPreview = useCallback((item: BriefItem) => {
     if (item.previewUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(item.previewUrl)
     }
-  }
+  }, [])
 
   const removeBriefFile = (id: string) => {
     setBriefFiles((prev) => {
@@ -15488,7 +15713,7 @@ function NewTaskModal({
 
   useEffect(() => () => {
     briefFilesRef.current.forEach(revokeBriefPreview)
-  }, [])
+  }, [revokeBriefPreview])
 
   useEffect(() => {
     if (isEditing) {
