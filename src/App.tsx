@@ -4532,7 +4532,6 @@ function App() {
       return next
     })
   }
-  const navigationChordRef = useRef<number | null>(null)
   const lastAltPressRef = useRef<number>(0)
   const dailyKnowledgeRequestedRef = useRef(false)
   const dailyKnowledgeRef = useRef(dailyKnowledge)
@@ -6154,14 +6153,23 @@ function App() {
   }
   const visibleNavItems = navItems.filter((item) => !('adminOnly' in item) || !item.adminOnly || isAdmin)
   const navShortcutHints: Partial<Record<AppView, string>> = {
-    工作台: 'G D',
-    任务: 'G T',
-    文件库: 'F',
-    洞察: 'G I',
-    结算: 'G S',
-    收入: 'G R',
-    知识库: '⌥K',
-    设置: ',',
+    工作台: '⌘⌥1',
+    任务: '⌘⌥2',
+    文件库: '⌘⌥3',
+    洞察: '⌘⌥4',
+    结算: '⌘⌥5',
+    收入: '⌘⌥6',
+    知识库: '⌘⇧⌥K',
+    设置: '⌘⇧⌥,',
+  }
+  const navAriaShortcutHints: Partial<Record<AppView, string>> = {
+    工作台: 'Meta+Alt+1 Control+Alt+1',
+    任务: 'Meta+Alt+2 Control+Alt+2',
+    文件库: 'Meta+Alt+3 Control+Alt+3',
+    洞察: 'Meta+Alt+4 Control+Alt+4',
+    结算: 'Meta+Alt+5 Control+Alt+5',
+    收入: 'Meta+Alt+6 Control+Alt+6',
+    知识库: 'Meta+Shift+Alt+K Control+Shift+Alt+K',
   }
   const openCommandPalette = (initialQuery = '') => {
     setCommandPaletteInitialQuery(initialQuery)
@@ -6175,7 +6183,7 @@ function App() {
         group: '快速导航',
         label: `前往${item.label}`,
         detail: item.label === activeView ? '当前页面' : undefined,
-        shortcut: item.label === '文件库' ? 'F / G F' : navShortcutHints[item.label as AppView],
+        shortcut: navShortcutHints[item.label as AppView],
         keywords: `页面 导航 ${item.label}`,
         run: () => navigateView(item.label as AppView),
       }
@@ -6184,7 +6192,7 @@ function App() {
       id: 'view-settings',
       group: '快速导航',
       label: '前往设置',
-      shortcut: ', / G O',
+      shortcut: '⌘⇧⌥,',
       keywords: '设置 配置 API 模型',
       run: () => navigateView('设置'),
     },
@@ -6294,14 +6302,14 @@ function App() {
     {
       label: '导航',
       items: [
-        { keys: 'G D', action: '工作台' },
-        { keys: 'G T', action: '任务' },
-        { keys: 'F / G F', action: '文件库' },
-        { keys: 'G I', action: '洞察' },
-        { keys: 'G S', action: '结算' },
-        { keys: 'G R', action: '收入' },
-        { keys: ', / G O', action: '设置' },
-        { keys: '⌥ K', action: '跳转到知识库（管理员）' },
+        { keys: '⌘ ⌥ 1', action: '工作台' },
+        { keys: '⌘ ⌥ 2', action: '任务' },
+        { keys: '⌘ ⌥ 3', action: '文件库' },
+        { keys: '⌘ ⌥ 4', action: '洞察' },
+        { keys: '⌘ ⌥ 5', action: '结算' },
+        { keys: '⌘ ⌥ 6', action: '收入' },
+        { keys: '⌘ ⇧ ⌥ ,', action: '设置' },
+        { keys: '⌘ ⇧ ⌥ K', action: '跳转到知识库（管理员）' },
       ],
     },
     {
@@ -6374,47 +6382,39 @@ function App() {
 if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
         return
       }
-      // ⌥A = 工作助手，⌥K = 知识库（Option 键，不与文字输入冲突）
+      if ((event.metaKey || event.ctrlKey) && event.altKey) {
+        const navigationShortcuts: Record<string, AppView> = {
+          Digit1: '工作台',
+          Digit2: '任务',
+          Digit3: '文件库',
+          Digit4: '洞察',
+          Digit5: '结算',
+          Digit6: '收入',
+        }
+        const nextView = !event.shiftKey ? navigationShortcuts[event.code] : undefined
+        if (nextView && visibleNavItems.some((item) => item.label === nextView)) {
+          event.preventDefault()
+          navigateView(nextView)
+          return
+        }
+        if (event.shiftKey && event.key === ',') {
+          event.preventDefault()
+          navigateView('设置')
+          return
+        }
+        if (event.shiftKey && event.code === 'KeyK' && isAdmin) {
+          event.preventDefault()
+          navigateView('知识库')
+          return
+        }
+      }
+      // ⌥A = 工作助手（Option 键，不与文字输入冲突）
       if (event.altKey && !event.metaKey && !event.shiftKey) {
         if (event.code === 'KeyA' && isAdmin) {
           event.preventDefault()
           setIsChatOpen((v) => !v)
           return
         }
-        if (event.code === 'KeyK' && isAdmin) {
-          event.preventDefault()
-          navigateView('知识库')
-          return
-        }
-      }
-      if (key === 'g' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault()
-        if (navigationChordRef.current) {
-          window.clearTimeout(navigationChordRef.current)
-        }
-        navigationChordRef.current = window.setTimeout(() => {
-          navigationChordRef.current = null
-        }, 1000)
-        return
-      }
-      if (navigationChordRef.current) {
-        window.clearTimeout(navigationChordRef.current)
-        navigationChordRef.current = null
-        const navigationShortcuts: Record<string, AppView> = {
-          d: '工作台',
-          t: '任务',
-          f: '文件库',
-          i: '洞察',
-          s: '结算',
-          r: '收入',
-          o: '设置',
-        }
-        const nextView = navigationShortcuts[key]
-        if (nextView && (nextView === '设置' || visibleNavItems.some((item) => item.label === nextView))) {
-          event.preventDefault()
-          navigateView(nextView)
-        }
-        return
       }
       if (key === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
@@ -6484,10 +6484,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
     window.addEventListener('keydown', handleGlobalShortcut)
     return () => {
       window.removeEventListener('keydown', handleGlobalShortcut)
-      if (navigationChordRef.current) {
-        window.clearTimeout(navigationChordRef.current)
-        navigationChordRef.current = null
-      }
     }
   })
   const adminOnlyPanel = (
@@ -6551,12 +6547,13 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
         <nav className="nav-list" aria-label="主导航">
           {visibleNavItems.map((item) => {
             const shortcut = navShortcutHints[item.label as AppView]
+            const ariaShortcut = navAriaShortcutHints[item.label as AppView]
             return (
               <div key={item.label}>
                 <button
                   className={`nav-item ${activeView === item.label ? 'active' : ''}`}
                   aria-label={`切换到${item.label}`}
-                  aria-keyshortcuts={item.label === '文件库' ? 'F' : undefined}
+                  aria-keyshortcuts={ariaShortcut}
                   title={shortcut ? `${item.label}（${shortcut}）` : item.label}
                   onClick={() => navigateView(item.label as AppView)}
                 >

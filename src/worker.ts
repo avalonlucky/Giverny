@@ -6178,14 +6178,15 @@ async function chatWithAi(env: Env, request: Request) {
   Shift+N  补录已完成任务
   ?        显示快捷键帮助面板
 【页面导航】
-  G D      前往工作台
-  G T      前往任务列表
-  F / G F  前往文件库
-  G I      前往洞察
-  G S      前往结算
-  G R      前往收入
-  Alt+K    前往知识库
-  ,        前往设置
+  Command+Option+1        前往工作台
+  Command+Option+2        前往任务列表
+  Command+Option+3        前往文件库
+  Command+Option+4        前往洞察
+  Command+Option+5        前往结算
+  Command+Option+6        前往收入
+  Command+Shift+Option+K  前往知识库
+  Command+Shift+Option+,  前往设置
+  Ctrl 可替代 Command。
 注意：在输入框和编辑区域内，单键快捷键自动停用。
 
 今天：${today}
