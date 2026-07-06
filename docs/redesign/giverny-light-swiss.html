@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Giverny · Light Swiss 视觉重构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     Giverny · Light Swiss · 单文件视觉重构
+     纯白 + 黑灰 + 零彩色，靠字重和层级区分语义
+     ============================================================ */
+  :root{
+    --bg:#FFFFFF;            /* 画布：纯白 */
+    --bg-2:#FAFAF8;          /* 卡片：微暖白，与画布拉开半档 */
+    --bg-3:#F3F2EC;          /* hover / 次背景 */
+    --bg-4:#E9E7E0;          /* 强调背景 / 选中态 */
+    --line:rgba(10,10,10,0.10);
+    --line-2:rgba(10,10,10,0.18);
+    --ink:#0A0A0A;           /* 主文字：近黑 */
+    --ink-2:#4A4A4A;
+    --ink-3:#7A7775;
+    --ink-4:#B5B2AE;
+    --acc:#0A0A0A;           /* 强调即黑色本身 */
+    --acc-2:#2A2A2A;
+    --acc-dim:rgba(10,10,10,0.06);
+    --acc-glow:rgba(10,10,10,0.08);
+    --warn:#5A3A1A;          /* 截止临近：深棕，不用亮琥珀 */
+    --warn-dim:rgba(90,58,26,0.07);
+    --info:#4A4A4A;
+    --info-dim:rgba(74,74,74,0.06);
+    --purple:#4A4A4A;
+    --purple-dim:rgba(74,74,74,0.06);
+    --danger:#7A2A2A;
+    --sans:'Inter','PingFang SC',-apple-system,sans-serif;
+    --serif:'Instrument Serif','Songti SC',serif;
+    --mono:'JetBrains Mono',monospace;
+    --r:10px; --r-sm:7px; --r-xs:5px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;font-feature-settings:'cv11','ss01'}
+  ::selection{background:#0A0A0A;color:#FFFFFF}
+
+  .shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+
+  /* ===== 侧栏（跨视图复用） ===== */
+  .side{background:var(--bg);border-right:1px solid var(--line);padding:18px 0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .brand{padding:0 20px 18px;display:flex;align-items:center;gap:11px}
+  .brand-g{width:30px;height:30px;border-radius:8px;background:#0A0A0A;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:18px;color:#FFFFFF;font-weight:600;font-style:italic;flex-shrink:0}
+  .brand-t .b{font-size:14.5px;font-weight:600;letter-spacing:-0.01em}
+  .brand-t .s{font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:0.12em;margin-top:2px;font-weight:500}
+  .side-quick{padding:4px 12px 14px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .side-search{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink-3);font-size:12px;cursor:pointer}
+  .side-search:hover{border-color:var(--line-2);background:var(--bg-3)}
+  .side-search .ico{width:13px;height:13px}
+  .side-search .kbd{margin-left:auto;font-family:var(--mono);font-size:10px;background:var(--bg);padding:2px 5px;border-radius:3px;color:var(--ink-4)}
+  .nav{padding:4px 10px;flex:1;overflow-y:auto}
+  .nav-l{font-family:var(--mono);font-size:9px;color:var(--ink-4);letter-spacing:0.18em;text-transform:uppercase;padding:14px 10px 5px;font-weight:500}
+  .nav-i{display:flex;align-items:center;gap:11px;padding:8px 10px;font-size:13px;color:var(--ink-2);font-weight:450;border-radius:var(--r-sm);cursor:pointer;margin-bottom:1px;position:relative}
+  .nav-i:hover{background:var(--bg-2);color:var(--ink)}
+  .nav-i .ico{width:16px;height:16px;opacity:0.8;flex-shrink:0}
+  .nav-i.on{background:var(--bg-3);color:var(--ink);font-weight:500}
+  .nav-i.on::before{content:'';position:absolute;left:-10px;top:50%;transform:translateY(-50%);width:3px;height:16px;background:var(--acc);border-radius:0 2px 2px 0}
+  .nav-i.on .ico{opacity:1;color:var(--acc)}
+  .nav-i .c{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);background:var(--bg-2);padding:1px 7px;border-radius:4px;font-weight:500}
+  .nav-i.on .c{color:var(--ink-2);background:var(--bg-4)}
+  .nav-i .badge-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--warn)}
+  .side-foot{margin:8px;padding:10px;border:1px solid var(--line);border-radius:var(--r-sm);display:flex;align-items:center;gap:10px;cursor:pointer}
+  .side-foot:hover{background:var(--bg-2)}
+  .av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#B8A07A,#8C7350);flex-shrink:0;position:relative}
+  .av::after{content:'';position:absolute;bottom:0;right:0;width:9px;height:9px;border-radius:50%;background:var(--acc);border:2px solid var(--bg)}
+  .sf{flex:1;min-width:0}
+  .sf .n{font-size:12.5px;font-weight:500}
+  .sf .r{font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+
+  /* ===== 主区 / 顶栏 ===== */
+  .main{padding:0;min-width:0;overflow-x:hidden}
+  .top{padding:22px 32px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-end;gap:20px}
+  .top .eb{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:0.08em;margin-bottom:8px;display:flex;gap:8px;align-items:center}
+  .top .eb b{color:var(--ink-2);font-weight:500}
+  .top .eb .live{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 8px var(--acc-glow);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .top h1{font-size:26px;font-weight:600;letter-spacing:-0.02em;line-height:1.15}
+  .top h1 em{font-family:var(--serif);font-style:italic;font-weight:400;color:var(--ink-2);font-size:23px}
+  .top-a{display:flex;gap:8px;align-items:center}
+  .btn{font-size:12.5px;font-weight:500;padding:9px 14px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink);cursor:pointer;border-radius:var(--r-sm);display:inline-flex;align-items:center;gap:7px;transition:all .15s}
+  .btn:hover{background:var(--bg-3);border-color:var(--ink-4)}
+  .btn .ico{width:14px;height:14px}
+  .btn-ghost{background:transparent;border-color:var(--line)}
+  .btn-acc{background:var(--acc);color:#FFFFFF;border-color:var(--acc);font-weight:600}
+  .btn-acc:hover{background:var(--acc-2);border-color:var(--acc-2);box-shadow:0 0 0 3px var(--acc-dim)}
+
+  /* 通用控件 */
+  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .card-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px;border-bottom:1px solid var(--line)}
+  .card-h h3{font-size:13px;font-weight:600;letter-spacing:-0.005em;display:flex;align-items:center;gap:8px}
+  .card-h h3 .ico{width:14px;height:14px;color:var(--ink-3)}
+  .card-h .m{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:0.04em;display:flex;align-items:center;gap:8px}
+  .card-h .m b{color:var(--acc);font-weight:600}
+  .card-h .more{color:var(--ink-3);cursor:pointer;padding:4px;border-radius:4px}
+  .card-h .more:hover{background:var(--bg-3);color:var(--ink)}
+  .badge{font-family:var(--mono);font-size:9px;font-weight:600;padding:3px 7px;border-radius:4px;letter-spacing:0.06em;text-transform:uppercase}
+  .badge.a{background:var(--acc-dim);color:var(--acc)}
+  .badge.p{background:rgba(10,10,10,0.05);color:var(--ink-2)}
+  .badge.w{background:var(--warn-dim);color:var(--warn)}
+  .badge.info{background:var(--info-dim);color:var(--info)}
+  .pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px}
+  .pill-up{color:var(--acc);background:var(--acc-dim)}
+  .pill-warn{color:var(--warn);background:var(--warn-dim)}
+
+  /* 视图切换：hidden / active */
+  .view{display:none}
+  .view.on{display:block}
+
+  /* ============================================================
+     视图 1：工作台
+     ============================================================ */
+  .dash-body{padding:22px 32px 64px;display:flex;flex-direction:column;gap:16px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .sc{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;position:relative;overflow:hidden;transition:border-color .15s}
+  .sc:hover{border-color:var(--line-2)}
+  .sc-k{font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px;font-weight:500;display:flex;align-items:center;gap:6px}
+  .sc-k .ico{width:12px;height:12px;opacity:0.7}
+  .sc-v{font-size:30px;font-weight:600;letter-spacing:-0.025em;line-height:1}
+  .sc-v small{font-size:14px;color:var(--ink-3);font-weight:400;margin-left:2px}
+  .sc-v .cur{font-size:18px;color:var(--ink-2);font-weight:500;margin-right:1px}
+  .sc-d{font-size:11px;color:var(--ink-3);margin-top:10px;display:flex;gap:6px;align-items:center}
+  .spark{position:absolute;right:14px;top:42px;width:60px;height:24px;opacity:0.85}
+
+  .grid-main{display:grid;grid-template-columns:1.6fr 1fr;gap:12px}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .tl{padding:8px 18px 14px}
+  .tl-r{display:grid;grid-template-columns:1px 60px 1fr auto;gap:14px;padding:12px 0;align-items:start;position:relative}
+  .tl-rail{width:1px;background:var(--line);position:relative}
+  .tl-node{width:9px;height:9px;border-radius:50%;background:var(--bg-2);border:2px solid var(--ink-3);position:absolute;left:-4px;top:14px;z-index:1}
+  .tl-r.now .tl-node{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 4px var(--acc-dim)}
+  .tl-r.done .tl-node{background:var(--acc);border-color:var(--acc);opacity:0.6}
+  .tl-t{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);padding-top:2px;line-height:1.5}
+  .tl-t b{display:block;color:var(--ink);font-weight:500;font-size:12px}
+  .tl-r.now .tl-t b{color:var(--acc)}
+  .tl-b .tt{font-size:13px;font-weight:500;margin-bottom:3px}
+  .tl-r.done .tl-b .tt{color:var(--ink-2);text-decoration:line-through;text-decoration-color:var(--ink-4)}
+  .tl-b .pp{font-size:11px;color:var(--ink-3);display:flex;gap:8px;align-items:center}
+  .tl-b .pp .cl{color:var(--info)}
+  .tl-d{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:var(--bg-3);padding:3px 8px;border-radius:5px;font-weight:500;align-self:center}
+  .tl-r.now .tl-d{color:#FFFFFF;background:var(--acc)}
+  .tl-add{display:flex;align-items:center;justify-content:center;gap:7px;padding:10px;margin:6px 8px 8px;border:1px dashed var(--line-2);border-radius:var(--r-sm);color:var(--ink-3);font-size:12px;cursor:pointer}
+  .tl-add:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-dim)}
+
+  .tk{padding:6px}
+  .tk-r{display:grid;grid-template-columns:auto 1fr auto;gap:12px;padding:10px 12px;border-radius:var(--r-sm);align-items:center;cursor:pointer}
+  .tk-r:hover{background:var(--bg-3)}
+  .tk-mid{min-width:0}
+  .tk-mid .tt{font-size:13px;font-weight:500;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tk-mid .pp{font-size:10.5px;color:var(--ink-3);font-family:var(--mono);display:flex;gap:10px;align-items:center}
+  .tk-mid .pp .due{color:var(--warn)}
+  .tk-mid .pp .due.now{color:var(--acc)}
+  .ring{width:34px;height:34px;position:relative;flex-shrink:0}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:9.5px;font-weight:600;color:var(--ink-2)}
+
+  .quick-card{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+  .quick-card .t{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:0.14em;text-transform:uppercase;font-weight:500;margin-bottom:10px;padding:0 4px}
+  .qg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .qbtn{display:flex;flex-direction:column;gap:6px;padding:12px;background:var(--bg-3);border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;transition:all .15s}
+  .qbtn:hover{border-color:var(--acc);background:var(--bg-4)}
+  .qbtn .ico{width:18px;height:18px;color:var(--ink-2)}
+  .qbtn:hover .ico{color:var(--acc)}
+  .qbtn .l{font-size:12px;font-weight:500}
+  .qbtn .d{font-size:10px;color:var(--ink-3);font-family:var(--mono)}
+
+  .grid-foot{display:grid;grid-template-columns:1.6fr 1fr;gap:12px}
+  .rhythm .chart{margin:12px 16px 8px;position:relative;height:150px}
+  .rhythm .chart svg{width:100%;height:100%;display:block}
+  .chart-foot{display:flex;justify-content:space-between;padding:0 16px 16px;font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:0.06em}
+  .chart-foot b{color:var(--ink)}
+  .inc-body{padding:14px 18px 18px}
+  .inc-big{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+  .inc-big .v{font-size:28px;font-weight:600;letter-spacing:-0.02em}
+  .inc-big .cur{font-size:15px;color:var(--ink-2)}
+  .inc-big .pill{margin-left:auto}
+  .inc-sub{font-size:11px;color:var(--ink-3);font-family:var(--mono);margin-bottom:16px}
+  .inc-bars{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:end;height:70px}
+  .inc-bar{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}
+  .inc-bar .bf{width:100%;max-width:22px;background:linear-gradient(to top,var(--acc-2),var(--acc));border-radius:3px 3px 0 0;opacity:0.5}
+  .inc-bar.cur .bf{opacity:1}
+  .inc-bar .bl{font-family:var(--mono);font-size:9px;color:var(--ink-4)}
+  .inc-bar.cur .bl{color:var(--acc)}
+  .inc-legend{display:flex;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3)}
+  .inc-legend b{color:var(--ink);font-family:var(--mono);font-weight:500}
+
+  /* ============================================================
+     视图 2：任务（看板）
+     ============================================================ */
+  .tasks-top{padding:22px 32px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:16px}
+  .tabs-row{display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:3px}
+  .seg-i{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;font-size:12px;color:var(--ink-3);font-weight:500;border-radius:5px;cursor:pointer}
+  .seg-i:hover{color:var(--ink)}
+  .seg-i.on{background:var(--bg-4);color:var(--ink)}
+  .seg-i .ico{width:13px;height:13px}
+  .seg-i .n{font-family:var(--mono);font-size:10px;color:var(--ink-4)}
+  .seg-i.on .n{color:var(--ink-3)}
+  .filters{display:flex;align-items:center;gap:8px}
+  .chip{font-size:11.5px;color:var(--ink-2);padding:6px 11px;border:1px solid var(--line);background:var(--bg-2);border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px;font-weight:450}
+  .chip:hover{background:var(--bg-3);border-color:var(--line-2)}
+  .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .chip .ico{width:12px;height:12px}
+
+  .board{padding:20px 32px 56px;display:grid;grid-template-columns:repeat(4,minmax(280px,1fr));gap:14px;align-items:start}
+  .col{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:200px}
+  .col-h{display:flex;align-items:center;justify-content:space-between;padding:13px 14px 12px;border-bottom:1px solid var(--line)}
+  .col-h .lt{display:flex;align-items:center;gap:8px}
+  .col-dot{width:8px;height:8px;border-radius:50%}
+  .col-dot.plan{background:var(--info)}
+  .col-dot.active{background:var(--acc)}
+  .col-dot.wait{background:var(--warn)}
+  .col-dot.done{background:var(--ink-4)}
+  .col-h .nm{font-size:12.5px;font-weight:600;letter-spacing:0.01em}
+  .col-h .ct{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);background:var(--bg-3);padding:1px 7px;border-radius:4px;font-weight:500}
+  .col-h .add{color:var(--ink-3);cursor:pointer;padding:2px;border-radius:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+  .col-h .add:hover{background:var(--bg-4);color:var(--ink)}
+  .col-body{padding:8px;display:flex;flex-direction:column;gap:8px}
+  .tcard{background:var(--bg-3);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;cursor:pointer;transition:all .15s;position:relative}
+  .tcard:hover{border-color:var(--line-2);background:var(--bg-4);transform:translateY(-1px)}
+  .tcard.urgent{border-left:3px solid var(--warn)}
+  .tcard.urgent.now{border-left:3px solid var(--acc)}
+  .tc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}
+  .tc-no{font-family:var(--mono);font-size:9.5px;color:var(--ink-4);letter-spacing:0.04em;font-weight:500}
+  .tc-type{font-family:var(--mono);font-size:9px;color:var(--info);background:var(--info-dim);padding:2px 6px;border-radius:3px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600}
+  .tc-type.illust{color:var(--purple);background:var(--purple-dim)}
+  .tc-type.vi{color:var(--acc);background:var(--acc-dim)}
+  .tc-title{font-size:13.5px;font-weight:500;line-height:1.35;margin-bottom:10px;letter-spacing:-0.005em}
+  .tc-progress{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .tc-bar{flex:1;height:4px;background:var(--bg-4);border-radius:2px;overflow:hidden}
+  .tc-bar i{display:block;height:100%;background:var(--acc);border-radius:2px}
+  .tc-bar.wait i{background:var(--warn)}
+  .tc-bar.plan i{background:var(--info)}
+  .tc-bar.done i{background:var(--ink-4)}
+  .tc-pct{font-family:var(--mono);font-size:10px;color:var(--ink-2);font-weight:600;min-width:30px;text-align:right}
+  .tc-foot{display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--line);font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+  .tc-client{display:flex;align-items:center;gap:6px}
+  .tc-avatar{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#B8A07A,#8C7350);flex-shrink:0;font-size:9px;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600}
+  .tc-avatar.b{background:linear-gradient(135deg,#525252,#5A8BD6)}
+  .tc-avatar.c{background:linear-gradient(135deg,#525252,#8B6FD6)}
+  .tc-meta{display:flex;gap:10px;align-items:center}
+  .tc-meta .due{color:var(--warn)}
+  .tc-meta .due.now{color:var(--acc);font-weight:600}
+  .tc-meta .ico{width:11px;height:11px;opacity:0.8}
+  .tcard-new{border:1px dashed var(--line-2);background:transparent;text-align:center;padding:14px;color:var(--ink-3);font-size:12px;cursor:pointer;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;gap:6px}
+  .tcard-new:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-dim)}
+
+  /* ============================================================
+     视图 3：结算单
+     ============================================================ */
+  .settle-body{padding:40px 32px 24px;max-width:980px;margin:0 auto}
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:24px;border-bottom:2px solid var(--ink);margin-bottom:0}
+  .doc-brand{font-family:var(--serif);font-size:24px;font-weight:500}
+  .doc-brand i{font-style:italic;font-weight:400;color:var(--ink-3)}
+  .doc-brand .sub{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:0.16em;text-transform:uppercase;margin-top:10px;font-weight:500}
+  .doc-no{text-align:right}
+  .doc-no .k{font-family:var(--mono);font-size:9.5px;color:var(--ink-4);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:6px}
+  .doc-no .v{font-family:var(--mono);font-size:13px;font-weight:500}
+  .doc-no .st{display:inline-block;margin-top:10px;font-family:var(--mono);font-size:9.5px;font-weight:600;padding:4px 9px;letter-spacing:0.1em;text-transform:uppercase;background:var(--warn);color:#2A1E08}
+  .parties{display:grid;grid-template-columns:1fr 1fr;padding:22px 0;border-bottom:1px solid var(--line)}
+  .party .lbl{font-family:var(--mono);font-size:9px;color:var(--ink-4);letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;font-weight:600}
+  .party .nm{font-family:var(--serif);font-size:18px;font-weight:500;margin-bottom:4px}
+  .party .ln{font-size:12px;color:var(--ink-3);line-height:1.6}
+  .party.r{text-align:right}
+  .period{text-align:center;padding:32px 0 24px}
+  .period .y{font-family:var(--mono);font-size:10.5px;color:var(--ink-4);letter-spacing:0.2em;margin-bottom:8px}
+  .period h2{font-family:var(--serif);font-size:36px;font-weight:400;letter-spacing:-0.02em;line-height:1}
+  .period h2 em{font-style:italic;color:var(--ink-3)}
+  .period .rng{font-size:11.5px;color:var(--ink-3);margin-top:10px;font-family:var(--mono)}
+  .ledger{border-top:2px solid var(--ink)}
+  .lg-h,.lg-r{display:grid;grid-template-columns:40px 1fr 80px 80px 100px;gap:16px;padding:13px 0;align-items:baseline;border-bottom:1px solid var(--line)}
+  .lg-h{font-family:var(--mono);font-size:9px;color:var(--ink-4);letter-spacing:0.12em;text-transform:uppercase;font-weight:600;border-bottom:1px solid var(--ink)}
+  .lg-no{font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+  .lg-desc .t{font-size:12.5px;font-weight:500;margin-bottom:2px}
+  .lg-desc .s{font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+  .lg-rate,.lg-qty,.lg-amt{font-family:var(--mono);font-size:12.5px;text-align:right;color:var(--ink-2)}
+  .lg-amt{font-weight:500;color:var(--ink)}
+  .lg-group{display:grid;grid-template-columns:40px 1fr 80px 80px 100px;gap:16px;padding:14px 0 6px;border-bottom:1px solid var(--line);align-items:baseline}
+  .lg-group .gk{font-family:var(--mono);font-size:9.5px;color:var(--ink);letter-spacing:0.12em;text-transform:uppercase;font-weight:600;grid-column:2}
+  .lg-group .gh{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);text-align:right}
+  .totals{margin-top:18px;margin-left:auto;width:320px}
+  .tl-row{display:grid;grid-template-columns:1fr auto;padding:8px 0;border-bottom:1px dotted var(--line);font-size:12.5px;align-items:baseline}
+  .tl-row .k{color:var(--ink-3)}
+  .tl-row .v{font-family:var(--mono);color:var(--ink-2)}
+  .tl-row.grand{border-top:2px solid var(--ink);border-bottom:0;margin-top:8px;padding-top:14px;padding-bottom:6px}
+  .tl-row.grand .k{font-family:var(--serif);font-size:17px;color:var(--ink);font-weight:500}
+  .tl-row.grand .v{font-family:var(--serif);font-size:28px;font-weight:500;letter-spacing:-0.01em;color:var(--acc)}
+  .foot-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:40px;margin-top:48px;padding-top:28px;border-top:1px solid var(--line)}
+  .foot-grid .k{font-family:var(--mono);font-size:9px;color:var(--ink-4);letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;font-weight:600}
+  .foot-grid p{font-size:12px;color:var(--ink-3);line-height:1.7}
+  .sign-line{margin-top:44px;border-bottom:1px solid var(--ink);padding-bottom:6px;font-size:10.5px;color:var(--ink-4);font-family:var(--mono)}
+  .float-bar{position:sticky;bottom:0;margin:32px -32px 0;padding:14px 32px;background:var(--bg);border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .fb-stat{font-size:12px;color:var(--ink-3)}
+  .fb-stat b{font-family:var(--serif);font-size:19px;color:var(--acc);font-weight:500;margin:0 4px}
+
+  /* ============================================================
+     视图 4：文件库
+     ============================================================ */
+  .files-body{padding:22px 32px 64px}
+  .files-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+  .fs-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .fcard{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:14px;cursor:pointer;transition:all .15s}
+  .fcard:hover{border-color:var(--line-2);background:var(--bg-3);transform:translateY(-1px)}
+  .fcard-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+  .fthumb{width:44px;height:44px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:600;color:var(--ink-2)}
+  .fthumb.psd{background:linear-gradient(135deg,#0A0A0A,#0A0A0A);color:var(--acc)}
+  .fthumb.pdf{background:linear-gradient(135deg,#3A3A3A,#3A3A3A);color:var(--danger)}
+  .fthumb.img{background:linear-gradient(135deg,#6A6A6A,#6A6A6A);color:var(--info)}
+  .fthumb.zip{background:linear-gradient(135deg,#1A1A1A,#1A1A1A);color:var(--warn)}
+  .fmore{color:var(--ink-4);padding:4px;cursor:pointer}
+  .fmore:hover{color:var(--ink)}
+  .fname{font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3}
+  .fmeta{font-family:var(--mono);font-size:10px;color:var(--ink-4);display:flex;gap:8px;align-items:center}
+  .fmeta .cl{color:var(--info)}
+  .ftag{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px;background:var(--bg-4);color:var(--ink-3);margin-top:10px;letter-spacing:0.05em;text-transform:uppercase}
+
+  /* ============================================================
+     视图 5：收入
+     ============================================================ */
+  .inc-page{padding:22px 32px 64px;display:flex;flex-direction:column;gap:16px}
+  .inc-hero{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:28px 32px;display:flex;justify-content:space-between;align-items:flex-end;gap:24px;position:relative;overflow:hidden}
+  .inc-hero::after{content:'';position:absolute;right:-40px;top:-40px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,var(--acc-dim) 0%,transparent 70%);pointer-events:none}
+  .inc-hero .l{position:relative;z-index:1}
+  .inc-hero .lbl{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px;font-weight:500}
+  .inc-hero .big{font-family:var(--serif);font-size:48px;font-weight:500;letter-spacing:-0.02em;line-height:1}
+  .inc-hero .big .cur{font-size:26px;color:var(--ink-2);margin-right:2px}
+  .inc-hero .sub{font-size:12px;color:var(--ink-3);margin-top:14px;display:flex;gap:10px;align-items:center}
+  .inc-hero .r{display:flex;flex-direction:column;gap:10px;align-items:flex-end;position:relative;z-index:1}
+  .inc-grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}
+  .trend-chart{margin:14px 18px 8px;height:200px}
+  .trend-chart svg{width:100%;height:100%}
+  .breakdown{padding:18px}
+  .bd-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+  .bd-row:last-child{border:0}
+  .bd-dot{width:8px;height:8px;border-radius:2px}
+  .bd-name{font-size:12.5px}
+  .bd-name small{display:block;font-size:10.5px;color:var(--ink-3);font-family:var(--mono);margin-top:2px}
+  .bd-val{font-family:var(--mono);font-size:12.5px;font-weight:500;text-align:right}
+  .bd-val small{display:block;font-size:10px;color:var(--ink-3);font-weight:400}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ============================================================ 侧栏 -->
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-g">G</div>
+      <div class="brand-t"><div class="b">Giverny</div><div class="s">WORKLOG</div></div>
+    </div>
+    <div class="side-quick">
+      <div class="side-search">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        检索任务、文件…
+        <span class="kbd">⌘K</span>
+      </div>
+    </div>
+    <div class="nav">
+      <div class="nav-l">主要</div>
+      <div class="nav-i on" data-view="dash"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>工作台</div>
+      <div class="nav-i" data-view="tasks"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>任务<span class="c">7</span></div>
+      <div class="nav-i" data-view="files"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>文件库</div>
+      <div class="nav-i" data-view="income"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 17l5-5 4 3 7-8"/><path d="M14 7h6v6"/></svg>收入</div>
+      <div class="nav-l">财务</div>
+      <div class="nav-i" data-view="settle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>结算<span class="c">2</span></div>
+      <div class="nav-l">系统</div>
+      <div class="nav-i"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M2 12h3M19 12h3"/></svg>设置</div>
+    </div>
+    <div class="side-foot">
+      <div class="av"></div>
+      <div class="sf"><div class="n">Alice 林</div><div class="r">季度合作 · 在线</div></div>
+    </div>
+  </aside>
+
+  <!-- ============================================================ 主区 -->
+  <main class="main">
+
+    <!-- =============== 视图 1：工作台 =============== -->
+    <section class="view on" id="view-dash">
+      <div class="top">
+        <div>
+          <div class="eb"><span class="live"></span>2026 / 07 / 06 · 周一 · 自动记录中</div>
+          <h1>早安，Alice <em>— 今天 3 项交付</em></h1>
+        </div>
+        <div class="top-a">
+          <button class="btn btn-ghost"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>日历视图</button>
+          <button class="btn btn-acc"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>记一笔工时</button>
+        </div>
+      </div>
+
+      <div class="dash-body">
+        <section class="stats">
+          <div class="sc">
+            <div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>本月工时</div>
+            <div class="sc-v">86<small>.5h</small></div>
+            <div class="sc-d"><span class="pill pill-up">↑ 12.3h</span><span>较上月</span></div>
+            <svg class="spark" viewBox="0 0 60 24" fill="none" preserveAspectRatio="none"><path d="M0 20 L10 16 L20 18 L30 11 L40 13 L50 6 L60 8" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </div>
+          <div class="sc">
+            <div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>在途任务</div>
+            <div class="sc-v">07</div>
+            <div class="sc-d"><span class="pill pill-warn">3 项本周到期</span></div>
+          </div>
+          <div class="sc">
+            <div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v16h16"/><path d="M7 14l3-3 3 2 4-5"/></svg>预计月收入</div>
+            <div class="sc-v"><span class="cur">¥</span>12,975</div>
+            <div class="sc-d"><span class="pill pill-up">↑ 8%</span><span>含 1 项待确认</span></div>
+            <svg class="spark" viewBox="0 0 60 24" fill="none" preserveAspectRatio="none"><path d="M0 18 L10 19 L20 14 L30 15 L40 9 L50 11 L60 5" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </div>
+          <div class="sc">
+            <div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>本周节奏</div>
+            <div class="sc-v">5<small>/7 天</small></div>
+            <div class="sc-d">平均 <b style="color:var(--ink-2);font-family:var(--mono);font-weight:500">4.3h</b> / 工作日</div>
+          </div>
+        </section>
+
+        <section class="grid-main">
+          <div class="card">
+            <div class="card-h">
+              <h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>今日聚焦</h3>
+              <div class="m">4 条 · <b>5h 30m</b> · <span style="color:var(--warn)">1 项即将截止</span></div>
+            </div>
+            <div class="tl">
+              <div class="tl-r done"><div class="tl-rail"><span class="tl-node"></span></div><div class="tl-t"><b>08:50</b>—09:15</div><div class="tl-b"><div class="tt">晨会 · 周计划同步</div><div class="pp"><span class="cl">内部</span></div></div><div class="tl-d">0h25</div></div>
+              <div class="tl-r now"><div class="tl-rail"><span class="tl-node"></span></div><div class="tl-t"><b>09:30</b>—10:45</div><div class="tl-b"><div class="tt">品牌手册 · 内页版式三稿</div><div class="pp"><span class="cl">云栖科技</span> · 提交评审</div></div><div class="tl-d">1h15</div></div>
+              <div class="tl-r"><div class="tl-rail"><span class="tl-node"></span></div><div class="tl-t"><b>11:00</b>—12:30</div><div class="tl-b"><div class="tt">小程序首页 Banner 切图</div><div class="pp"><span class="cl">鲸海文创</span> · @3x 导出</div></div><div class="tl-d">1h30</div></div>
+              <div class="tl-r"><div class="tl-rail"><span class="tl-node"></span></div><div class="tl-t"><b>14:00</b>—16:00</div><div class="tl-b"><div class="tt">包装设计 · 瓶贴插画</div><div class="pp"><span class="cl">璞茶</span> · 第二轮修改</div></div><div class="tl-d">2h00</div></div>
+              <div class="tl-r"><div class="tl-rail"><span class="tl-node"></span></div><div class="tl-t"><b>16:30</b>—17:15</div><div class="tl-b"><div class="tt">月度结算单整理</div><div class="pp"><span class="cl">内部</span> · 六月对账</div></div><div class="tl-d">0h45</div></div>
+            </div>
+            <div class="tl-add"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>添加时间段</div>
+          </div>
+
+          <div class="stack">
+            <div class="card">
+              <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>在途任务</h3><div class="more"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></div></div>
+              <div class="tk">
+                <div class="tk-r"><span class="badge a">进行</span><div class="tk-mid"><div class="tt">品牌手册 · 内页版式</div><div class="pp"><span>云栖科技</span><span class="due now">今 17:00</span></div></div><div class="ring"><svg width="34" height="34"><circle cx="17" cy="17" r="14" fill="none" stroke="rgba(10,10,10,0.10)" stroke-width="2.5"/><circle cx="17" cy="17" r="14" fill="none" stroke="#0A0A0A" stroke-width="2.5" stroke-dasharray="87.96" stroke-dashoffset="15.8" stroke-linecap="round"/></svg><div class="pct">82</div></div></div>
+                <div class="tk-r"><span class="badge a">进行</span><div class="tk-mid"><div class="tt">小程序首页 Banner</div><div class="pp"><span>鲸海文创</span><span class="due">明天</span></div></div><div class="ring"><svg width="34" height="34"><circle cx="17" cy="17" r="14" fill="none" stroke="rgba(10,10,10,0.10)" stroke-width="2.5"/><circle cx="17" cy="17" r="14" fill="none" stroke="#525252" stroke-dasharray="87.96" stroke-dashoffset="48.4" stroke-linecap="round"/></svg><div class="pct">45</div></div></div>
+                <div class="tk-r"><span class="badge p">计划</span><div class="tk-mid"><div class="tt">璞茶 · 瓶贴插画修改</div><div class="pp"><span>璞茶</span><span>07 / 09</span></div></div><div class="ring"><svg width="34" height="34"><circle cx="17" cy="17" r="14" fill="none" stroke="rgba(10,10,10,0.10)" stroke-width="2.5"/><circle cx="17" cy="17" r="14" fill="none" stroke="#525252" stroke-dasharray="87.96" stroke-dashoffset="61.6" stroke-linecap="round"/></svg><div class="pct">30</div></div></div>
+              </div>
+            </div>
+
+            <div class="quick-card">
+              <div class="t">快捷操作</div>
+              <div class="qg">
+                <div class="qbtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg><div class="l">记工时</div><div class="d">⌘ + N</div></div>
+                <div class="qbtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg><div class="l">导出结算</div><div class="d">六月</div></div>
+                <div class="qbtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16"/><path d="M14 14l2.5-2.5a2 2 0 0 1 2.8 0L20 12"/><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/></svg><div class="l">上传文件</div><div class="d">拖拽即可</div></div>
+                <div class="qbtn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg><div class="l">分享只读</div><div class="d">给甲方</div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid-foot">
+          <div class="card rhythm">
+            <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 4-5"/></svg>本周节奏</h3><div class="m">工时曲线 · 周累计 <b>27.9h</b> / 目标 35h</div></div>
+            <div class="chart">
+              <svg viewBox="0 0 700 150" preserveAspectRatio="none">
+                <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0A0A0A" stop-opacity="0.32"/><stop offset="100%" stop-color="#0A0A0A" stop-opacity="0"/></linearGradient></defs>
+                <line x1="0" y1="37" x2="700" y2="37" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <line x1="0" y1="80" x2="700" y2="80" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <line x1="0" y1="123" x2="700" y2="123" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <path d="M50,100 L150,58 L250,76 L350,32 L450,86 L550,125 L650,50 L650,150 L50,150 Z" fill="url(#g1)"/>
+                <path d="M50,100 L150,58 L250,76 L350,32 L450,86 L550,125 L650,50" fill="none" stroke="#0A0A0A" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+                <circle cx="50" cy="100" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="150" cy="58" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="250" cy="76" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="350" cy="32" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="450" cy="86" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="550" cy="125" r="3.5" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="650" cy="50" r="6" fill="#0A0A0A"/>
+                <circle cx="650" cy="50" r="11" fill="none" stroke="#0A0A0A" stroke-width="1" opacity="0.45"/>
+                <text x="650" y="36" fill="#0A0A0A" font-family="JetBrains Mono" font-size="12" font-weight="600" text-anchor="middle">5.3h</text>
+              </svg>
+            </div>
+            <div class="chart-foot"><span>MON · 3.2</span><span>TUE · 5.1</span><span>WED · 4.5</span><span>THU · 6.0</span><span>FRI · 3.8</span><span>SAT · —</span><b style="color:var(--acc)">TODAY · 5.3</b></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v16h16"/><path d="M7 14l3-3 3 2 4-5"/></svg>近 6 月收入</h3><div class="more"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m9 18 6-6-6-6"/></svg></div></div>
+            <div class="inc-body">
+              <div class="inc-big"><span class="cur">¥</span><span class="v">71,420</span><span class="pill pill-up">↑ 18%</span></div>
+              <div class="inc-sub">累计 · 月均 ¥11,903</div>
+              <div class="inc-bars">
+                <div class="inc-bar"><div class="bf" style="height:48%"></div><div class="bl">02</div></div>
+                <div class="inc-bar"><div class="bf" style="height:62%"></div><div class="bl">03</div></div>
+                <div class="inc-bar"><div class="bf" style="height:55%"></div><div class="bl">04</div></div>
+                <div class="inc-bar"><div class="bf" style="height:78%"></div><div class="bl">05</div></div>
+                <div class="inc-bar"><div class="bf" style="height:88%"></div><div class="bl">06</div></div>
+                <div class="inc-bar cur"><div class="bf" style="height:70%"></div><div class="bl">07</div></div>
+              </div>
+              <div class="inc-legend"><span>本月 <b>¥12,975</b></span><span>最高 <b>¥14,800</b></span></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- =============== 视图 2：任务 =============== -->
+    <section class="view" id="view-tasks">
+      <div class="tasks-top">
+        <div class="top" style="border:0;padding:0 0 0;margin:0">
+          <div>
+            <div class="eb">任务 · <b>7 个在途</b> · 3 项本周到期</div>
+            <h1>任务 <em>/ Tasks</em></h1>
+          </div>
+          <div class="top-a">
+            <button class="btn btn-ghost"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 6h18M6 12h12M10 18h4"/></svg>分组</button>
+            <button class="btn btn-acc"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>新建任务</button>
+          </div>
+        </div>
+        <div class="tabs-row">
+          <div class="seg">
+            <div class="seg-i on"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="6" height="9" rx="1"/><rect x="11" y="3" width="6" height="5" rx="1"/><rect x="11" y="10" width="6" height="11" rx="1"/><rect x="3" y="14" width="6" height="7" rx="1"/></svg>看板<span class="n">7</span></div>
+            <div class="seg-i"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>列表</div>
+            <div class="seg-i"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>日历</div>
+            <div class="seg-i"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 9v6M12 9v6M16 9v6"/></svg>归档<span class="n">23</span></div>
+          </div>
+          <div class="filters">
+            <div class="chip on">全部客户</div>
+            <div class="chip">云栖科技</div>
+            <div class="chip">鲸海文创</div>
+            <div class="chip">璞茶</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="col">
+          <div class="col-h"><div class="lt"><span class="col-dot plan"></span><span class="nm">计划中</span></div><div style="display:flex;gap:6px;align-items:center"><span class="ct">2</span><span class="add"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span></div></div>
+          <div class="col-body">
+            <div class="tcard"><div class="tc-top"><span class="tc-no">PROJ-PC-011</span><span class="tc-type illust">插画</span></div><div class="tc-title">璞茶 · 瓶贴插画第二轮修改</div><div class="tc-progress"><div class="tc-bar plan"><i style="width:30%"></i></div><span class="tc-pct">30%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar c">璞</span>璞茶</div><div class="tc-meta"><span>6.5h</span><span>07/09</span></div></div></div>
+            <div class="tcard"><div class="tc-top"><span class="tc-no">PROJ-JH-009</span><span class="tc-type">长图</span></div><div class="tc-title">详情页长图改版 · 首屏概念</div><div class="tc-progress"><div class="tc-bar plan"><i style="width:12%"></i></div><span class="tc-pct">12%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar b">鲸</span>鲸海文创</div><div class="tc-meta"><span>2.5h</span><span>07/14</span></div></div></div>
+            <div class="tcard-new"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建任务</div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="col-h"><div class="lt"><span class="col-dot active"></span><span class="nm">进行中</span></div><div style="display:flex;gap:6px;align-items:center"><span class="ct">3</span><span class="add"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span></div></div>
+          <div class="col-body">
+            <div class="tcard urgent now"><div class="tc-top"><span class="tc-no">PROJ-YS-024</span><span class="tc-type vi">VI</span></div><div class="tc-title">品牌手册 · 内页版式三稿</div><div class="tc-progress"><div class="tc-bar"><i style="width:82%"></i></div><span class="tc-pct">82%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar">云</span>云栖科技</div><div class="tc-meta"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>14.5h</span><span class="due now">今17:00</span></div></div></div>
+            <div class="tcard urgent"><div class="tc-top"><span class="tc-no">PROJ-JH-008</span><span class="tc-type">切图</span></div><div class="tc-title">小程序首页 Banner · @3x 切图</div><div class="tc-progress"><div class="tc-bar"><i style="width:45%"></i></div><span class="tc-pct">45%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar b">鲸</span>鲸海文创</div><div class="tc-meta"><span>4.0h</span><span class="due">明天</span></div></div></div>
+            <div class="tcard"><div class="tc-top"><span class="tc-no">PROJ-PC-010</span><span class="tc-type vi">VI</span></div><div class="tc-title">LOGO 组合规范整理 · 横版/竖版</div><div class="tc-progress"><div class="tc-bar"><i style="width:60%"></i></div><span class="tc-pct">60%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar c">璞</span>璞茶</div><div class="tc-meta"><span>3.5h</span><span>07/11</span></div></div></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="col-h"><div class="lt"><span class="col-dot wait"></span><span class="nm">待确认</span></div><div style="display:flex;gap:6px;align-items:center"><span class="ct">1</span><span class="add"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span></div></div>
+          <div class="col-body">
+            <div class="tcard"><div class="tc-top"><span class="tc-no">PROJ-YS-023</span><span class="tc-type vi">VI</span></div><div class="tc-title">周年庆主视觉 KV · 概念稿</div><div class="tc-progress"><div class="tc-bar wait"><i style="width:100%"></i></div><span class="tc-pct" style="color:var(--warn)">✓ 100%</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar">云</span>云栖科技</div><div class="tc-meta"><span>12.0h</span><span class="due">等待反馈</span></div></div></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="col-h"><div class="lt"><span class="col-dot done"></span><span class="nm">本周完成</span></div><div style="display:flex;gap:6px;align-items:center"><span class="ct">1</span><span class="add"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 18 6-6-6-6"/></svg></span></div></div>
+          <div class="col-body">
+            <div class="tcard" style="opacity:0.7"><div class="tc-top"><span class="tc-no">PROJ-JH-007</span><span class="tc-type">头图</span></div><div class="tc-title" style="text-decoration:line-through;text-decoration-color:var(--ink-4)">公众号头图 · 七月系列</div><div class="tc-progress"><div class="tc-bar done"><i style="width:100%"></i></div><span class="tc-pct" style="color:var(--ink-3)">✓</span></div><div class="tc-foot"><div class="tc-client"><span class="tc-avatar b">鲸</span>鲸海文创</div><div class="tc-meta"><span>8.0h</span><span>07/02 ✓</span></div></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== 视图 3：结算单 =============== -->
+    <section class="view" id="view-settle">
+      <div class="settle-body">
+        <div class="doc-head">
+          <div class="doc-brand">Giverny<i>.</i><div class="sub">Worklog Settlement · 工时结算单</div></div>
+          <div class="doc-no"><div class="k">单据编号</div><div class="v">SET-2026-07-001</div><div class="st">待确认</div></div>
+        </div>
+        <div class="parties">
+          <div class="party"><div class="lbl">受款方 / Designer</div><div class="nm">Alice 林</div><div class="ln">独立设计师 · 季度合作<br/>alice@giverny.design</div></div>
+          <div class="party r"><div class="lbl">付款方 / Client</div><div class="nm">云栖科技有限公司</div><div class="ln">陈牧 · 品牌部<br/>chenmu@yunqi.tech</div></div>
+        </div>
+        <div class="period"><div class="y">2026 · 六月</div><h2>工时 <em>结算单</em></h2><div class="rng">结算周期 06 / 01 — 06 / 30 · 共 30 天</div></div>
+
+        <div class="ledger">
+          <div class="lg-h"><span>#</span><span>任务明细</span><span style="text-align:right">单价</span><span style="text-align:right">工时</span><span style="text-align:right">金额</span></div>
+          <div class="lg-group"><span class="gk">品牌设计</span><span></span><span class="gh">¥85/h</span><span class="gh">26.0h</span><span class="gh">¥2,210</span></div>
+          <div class="lg-r"><span class="lg-no">01</span><div class="lg-desc"><div class="t">品牌手册 · 内页版式</div><div class="s">PROJ-YS-024 · 3 轮</div></div><span class="lg-rate">¥85.00</span><span class="lg-qty">14.5h</span><span class="lg-amt">¥1,232.50</span></div>
+          <div class="lg-r"><span class="lg-no">02</span><div class="lg-desc"><div class="t">周年庆主视觉 KV</div><div class="s">PROJ-YS-023 · 概念稿</div></div><span class="lg-rate">¥85.00</span><span class="lg-qty">11.5h</span><span class="lg-amt">¥977.50</span></div>
+          <div class="lg-group"><span class="gk">视觉设计</span><span></span><span class="gh">¥80/h</span><span class="gh">18.0h</span><span class="gh">¥1,440</span></div>
+          <div class="lg-r"><span class="lg-no">03</span><div class="lg-desc"><div class="t">小程序首页 Banner</div><div class="s">PROJ-YS-022</div></div><span class="lg-rate">¥80.00</span><span class="lg-qty">6.0h</span><span class="lg-amt">¥480.00</span></div>
+          <div class="lg-r"><span class="lg-no">04</span><div class="lg-desc"><div class="t">详情页长图设计</div><div class="s">PROJ-YS-021 · 2 版</div></div><span class="lg-rate">¥80.00</span><span class="lg-qty">12.0h</span><span class="lg-amt">¥960.00</span></div>
+          <div class="lg-group"><span class="gk">插画</span><span></span><span class="gh">¥95/h</span><span class="gh">8.0h</span><span class="gh">¥760</span></div>
+          <div class="lg-r"><span class="lg-no">05</span><div class="lg-desc"><div class="t">节日海报插画</div><div class="s">PROJ-YS-020 · 端午</div></div><span class="lg-rate">¥95.00</span><span class="lg-qty">8.0h</span><span class="lg-amt">¥760.00</span></div>
+        </div>
+
+        <div class="totals">
+          <div class="tl-row"><span class="k">小计 · 工时金额</span><span class="v">¥4,410.00</span></div>
+          <div class="tl-row"><span class="k">合计工时</span><span class="v">52.0 h</span></div>
+          <div class="tl-row"><span class="k">代扣个税（劳务）</span><span class="v">− ¥441.00</span></div>
+          <div class="tl-row grand"><span class="k">应付金额</span><span class="v">¥3,969.00</span></div>
+        </div>
+
+        <div class="foot-grid">
+          <div><div class="k">备注 / Notes</div><p>本结算单依据 Giverny 平台六月工时记录自动生成，含 5 项任务共 52.0 工时。所有交付文件已归档至文件库，甲方可在只读链接中查阅。如有异议请于 7 日内回复确认。</p></div>
+          <div><div class="k">确认 / Acceptance</div><div class="sign-line">设计师签字 / 日期</div><div class="sign-line" style="margin-top:24px">甲方确认 / 日期</div></div>
+        </div>
+
+        <div class="float-bar">
+          <div class="fb-stat">应付合计 <b>¥3,969.00</b> · 52.0 工时</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>导出 PDF</button>
+            <button class="btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>只读分享</button>
+            <button class="btn btn-acc"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>提交确认</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== 视图 4：文件库 =============== -->
+    <section class="view" id="view-files">
+      <div class="top">
+        <div>
+          <div class="eb">文件库 · <b>248 个文件</b> · 7.2 GB</div>
+          <h1>文件库 <em>/ Files</em></h1>
+        </div>
+        <div class="top-a">
+          <button class="btn btn-ghost"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>按客户</button>
+          <button class="btn btn-acc"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>上传文件</button>
+        </div>
+      </div>
+      <div class="files-body">
+        <div class="files-stats">
+          <div class="sc"><div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>总文件数</div><div class="sc-v">248</div><div class="sc-d">7.2 GB · 含 PSD/PDF/IMG</div></div>
+          <div class="sc"><div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>本周新增</div><div class="sc-v">12<small>个</small></div><div class="sc-d"><span class="pill pill-up">↑ 4</span> 较上周</div></div>
+          <div class="sc"><div class="sc-k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>已归档</div><div class="sc-v">186<small>个</small></div><div class="sc-d">75% 归档率</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>最近文件</h3><div class="m">按修改时间 · 共 8 项</div></div>
+          <div class="fs-grid" style="padding:14px">
+            <div class="fcard"><div class="fcard-top"><div class="fthumb psd">PSD</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">品牌手册_三稿.indd</div><div class="fmeta"><span class="cl">云栖</span><span>14.2 MB</span></div><div class="ftag">今天</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb img">IMG</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">Banner_首页_@3x.png</div><div class="fmeta"><span class="cl">鲸海</span><span>3.8 MB</span></div><div class="ftag">今天</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb psd">PSD</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">瓶贴插画_v2.psd</div><div class="fmeta"><span class="cl">璞茶</span><span>52.6 MB</span></div><div class="ftag">昨天</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb pdf">PDF</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">KV_概念稿_评审.pdf</div><div class="fmeta"><span class="cl">云栖</span><span>8.4 MB</span></div><div class="ftag" style="color:var(--warn)">07/02</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb zip">ZIP</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">七月头图_交付包.zip</div><div class="fmeta"><span class="cl">鲸海</span><span>28.1 MB</span></div><div class="ftag" style="color:var(--ink-3)">已归档</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb img">IMG</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">LOGO_组合规范.jpg</div><div class="fmeta"><span class="cl">璞茶</span><span>1.2 MB</span></div><div class="ftag" style="color:var(--ink-3)">06/28</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb pdf">PDF</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">六月结算单.pdf</div><div class="fmeta"><span class="cl">内部</span><span>0.8 MB</span></div><div class="ftag" style="color:var(--ink-3)">06/30</div></div>
+            <div class="fcard"><div class="fcard-top"><div class="fthumb psd">PSD</div><span class="fmore"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span></div><div class="fname">详情页_首屏_v1.psd</div><div class="fmeta"><span class="cl">鲸海</span><span>36.4 MB</span></div><div class="ftag" style="color:var(--ink-3)">06/25</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== 视图 5：收入 =============== -->
+    <section class="view" id="view-income">
+      <div class="top">
+        <div>
+          <div class="eb">收入 · <b>2026 累计</b> · 含待确认</div>
+          <h1>收入 <em>/ Income</em></h1>
+        </div>
+        <div class="top-a">
+          <button class="btn btn-ghost"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>按月</button>
+          <button class="btn btn-acc"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>导出报表</button>
+        </div>
+      </div>
+
+      <div class="inc-page">
+        <div class="inc-hero">
+          <div class="l">
+            <div class="lbl">2026 年累计收入</div>
+            <div class="big"><span class="cur">¥</span>71,420</div>
+            <div class="sub"><span class="pill pill-up">↑ 18% YoY</span><span>月均 ¥11,903 · 共 6 个月</span></div>
+          </div>
+          <div class="r">
+            <div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:0.1em">本月预计</div>
+            <div style="font-family:var(--serif);font-size:30px;font-weight:500;color:var(--acc);letter-spacing:-0.02em">¥12,975</div>
+            <div style="font-size:11px;color:var(--ink-3)">含 1 项待确认 · 6 个任务</div>
+          </div>
+        </div>
+
+        <div class="inc-grid2">
+          <div class="card">
+            <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-5 4 3 7-8"/><path d="M14 7h6v6"/></svg>收入趋势</h3><div class="m">近 6 月 · 单位 ¥</div></div>
+            <div class="trend-chart">
+              <svg viewBox="0 0 700 200" preserveAspectRatio="none">
+                <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0A0A0A" stop-opacity="0.3"/><stop offset="100%" stop-color="#0A0A0A" stop-opacity="0"/></linearGradient></defs>
+                <line x1="0" y1="50" x2="700" y2="50" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <line x1="0" y1="100" x2="700" y2="100" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <line x1="0" y1="150" x2="700" y2="150" stroke="rgba(10,10,10,0.10)" stroke-width="1" stroke-dasharray="3 5"/>
+                <text x="6" y="46" fill="#B5B2AE" font-family="JetBrains Mono" font-size="10">15k</text>
+                <text x="6" y="96" fill="#B5B2AE" font-family="JetBrains Mono" font-size="10">10k</text>
+                <text x="6" y="146" fill="#B5B2AE" font-family="JetBrains Mono" font-size="10">5k</text>
+                <path d="M70,120 L180,90 L290,105 L400,55 L510,35 L620,70 L620,200 L70,200 Z" fill="url(#g2)"/>
+                <path d="M70,120 L180,90 L290,105 L400,55 L510,35 L620,70" fill="none" stroke="#0A0A0A" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+                <circle cx="70" cy="120" r="4" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="180" cy="90" r="4" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="290" cy="105" r="4" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="400" cy="55" r="4" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="510" cy="35" r="4" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="2"/>
+                <circle cx="620" cy="70" r="7" fill="#0A0A0A"/>
+                <circle cx="620" cy="70" r="12" fill="none" stroke="#0A0A0A" stroke-width="1.5" opacity="0.4"/>
+                <text x="70" y="142" fill="#7A7775" font-family="JetBrains Mono" font-size="10" text-anchor="middle">9.4k</text>
+                <text x="180" y="112" fill="#7A7775" font-family="JetBrains Mono" font-size="10" text-anchor="middle">11.2k</text>
+                <text x="290" y="127" fill="#7A7775" font-family="JetBrains Mono" font-size="10" text-anchor="middle">10.5k</text>
+                <text x="400" y="77" fill="#7A7775" font-family="JetBrains Mono" font-size="10" text-anchor="middle">13.8k</text>
+                <text x="510" y="57" fill="#7A7775" font-family="JetBrains Mono" font-size="10" text-anchor="middle">14.8k</text>
+                <text x="620" y="92" fill="#0A0A0A" font-family="JetBrains Mono" font-size="11" font-weight="600" text-anchor="middle">13.0k</text>
+              </svg>
+            </div>
+            <div class="chart-foot"><span>02 月</span><span>03 月</span><span>04 月</span><span>05 月</span><span>06 月</span><b style="color:var(--acc)">07 月</b></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>客户构成</h3><div class="m">2026 累计</div></div>
+            <div class="breakdown">
+              <div class="bd-row"><span class="bd-dot" style="background:var(--acc)"></span><div class="bd-name">云栖科技<small>YUNQI · 38 项任务</small></div><div class="bd-val">¥32,180<small>45.1%</small></div></div>
+              <div class="bd-row"><span class="bd-dot" style="background:var(--info)"></span><div class="bd-name">鲸海文创<small>JINGHAI · 29 项任务</small></div><div class="bd-val">¥21,560<small>30.2%</small></div></div>
+              <div class="bd-row"><span class="bd-dot" style="background:var(--purple)"></span><div class="bd-name">璞茶<small>PUCHA · 14 项任务</small></div><div class="bd-val">¥12,940<small>18.1%</small></div></div>
+              <div class="bd-row"><span class="bd-dot" style="background:var(--warn)"></span><div class="bd-name">其他<small>5 位客户 · 9 项</small></div><div class="bd-val">¥4,740<small>6.6%</small></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // 侧栏视图切换
+  document.querySelectorAll('.nav-i[data-view]').forEach(item => {
+    item.addEventListener('click', () => {
+      const v = item.dataset.view;
+      document.querySelectorAll('.nav-i').forEach(n => n.classList.remove('on'));
+      item.classList.add('on');
+      document.querySelectorAll('.view').forEach(s => s.classList.remove('on'));
+      document.getElementById('view-' + v).classList.add('on');
+      window.scrollTo(0, 0);
+    });
+  });
+</script>
+</body>
+</html>
