@@ -505,7 +505,7 @@ button {
 .task-calendar-titlebar {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
 }
 
 .task-calendar-titlebar .month-picker {
@@ -548,6 +548,30 @@ button {
 
 .calendar-mode-select:hover,
 .calendar-mode-select:focus {
+  color: var(--color-text);
+  outline: 0;
+}
+
+.calendar-period-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.calendar-period-nav button {
+  width: 28px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.calendar-period-nav button:hover,
+.calendar-period-nav button:focus-visible {
   color: var(--color-text);
   outline: 0;
 }
@@ -12724,7 +12748,7 @@ textarea:focus-visible {
 
 .google-month-cell:hover,
 .google-month-cell.selected {
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-strong));
+  background: #e9f5ea;
 }
 
 .google-month-day {
@@ -12756,7 +12780,7 @@ textarea:focus-visible {
   padding: 3px 8px;
   border: 0;
   border-left: 3px solid var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-strong));
+  background: #e9f5ea;
   color: var(--color-text);
   font-size: 12px;
   font-weight: 700;
@@ -12900,7 +12924,7 @@ textarea:focus-visible {
   padding: 5px 8px;
   border: 0;
   border-left: 3px solid var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-strong));
+  background: #e9f5ea;
   color: var(--color-text);
   text-align: left;
   overflow: hidden;

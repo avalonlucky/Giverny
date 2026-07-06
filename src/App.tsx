@@ -12,6 +12,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardCheck,
@@ -4408,6 +4409,7 @@ function App() {
   const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
   const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
   const [calendarDisplayMode, setCalendarDisplayMode] = useState<CalendarDisplayMode>('月')
+  const [calendarFocusDate, setCalendarFocusDate] = useState(() => isoDate())
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
@@ -4535,6 +4537,7 @@ function App() {
   const selectedTaskSource = activeView === '任务' ? taskPageSourceTasks : activeMonthTasks
   const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
   const isTaskCalendarView = activeView === '任务' && taskViewMode === '日历'
+  const effectiveCalendarFocusDate = calendarFocusDate.startsWith(currentMonth.value) ? calendarFocusDate : `${currentMonth.value}-01`
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
 
   const notify = (
@@ -5272,6 +5275,25 @@ function App() {
         })
       },
     })
+  }
+
+  const handleTaskCalendarMonthChange = (value: string) => {
+    setMonthValue(value)
+    setCalendarFocusDate((current) => (current.startsWith(value) ? current : `${value}-01`))
+  }
+
+  const shiftTaskCalendarPeriod = (direction: -1 | 1) => {
+    if (calendarDisplayMode === '月') {
+      const nextMonth = shiftMonthValue(currentMonth.value, direction)
+      setMonthValue(nextMonth)
+      setCalendarFocusDate(`${nextMonth}-01`)
+      return
+    }
+    const nextDate = addIsoDays(effectiveCalendarFocusDate, direction * (calendarDisplayMode === '周' ? 7 : 1))
+    setCalendarFocusDate(nextDate)
+    if (monthPart(nextDate) !== currentMonth.value) {
+      setMonthValue(monthPart(nextDate))
+    }
   }
 
   const handleDeleteAcceptanceProgress = (taskId: number, entryId?: string) => {
@@ -6583,7 +6605,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <div className="topbar-heading">
             {isTaskCalendarView ? (
               <div className="task-calendar-titlebar">
-                <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} minimal />
+                <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={handleTaskCalendarMonthChange} minimal />
                 <select
                   className="calendar-mode-select"
                   value={calendarDisplayMode}
@@ -6594,6 +6616,14 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                   <option value="周">周</option>
                   <option value="月">月</option>
                 </select>
+                <div className="calendar-period-nav" aria-label="切换日历周期">
+                  <button type="button" aria-label="上一周期" title="上一周期" onClick={() => shiftTaskCalendarPeriod(-1)}>
+                    <ChevronLeft size={24} />
+                  </button>
+                  <button type="button" aria-label="下一周期" title="下一周期" onClick={() => shiftTaskCalendarPeriod(1)}>
+                    <ChevronRight size={24} />
+                  </button>
+                </div>
               </div>
             ) : (
               <h1>{viewTitle}</h1>
@@ -6929,6 +6959,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             viewMode={taskViewMode}
             onViewModeChange={setTaskViewMode}
             calendarMode={calendarDisplayMode}
+            calendarFocusDate={effectiveCalendarFocusDate}
+            onCalendarFocusDateChange={setCalendarFocusDate}
             monthValue={currentMonth.value}
             onMonthChange={setMonthValue}
             activeMonthTasks={activeMonthTasks}
@@ -8322,6 +8354,8 @@ function TasksView({
   viewMode,
   onViewModeChange,
   calendarMode,
+  calendarFocusDate,
+  onCalendarFocusDateChange,
   monthValue,
   onMonthChange,
   activeMonthTasks,
@@ -8363,6 +8397,8 @@ function TasksView({
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
   calendarMode: CalendarDisplayMode
+  calendarFocusDate: string
+  onCalendarFocusDateChange: (value: string) => void
   monthValue: string
   onMonthChange: (month: string) => void
   activeMonthTasks: Task[]
@@ -8495,8 +8531,10 @@ function TasksView({
           key={monthValue}
           monthValue={monthValue}
           mode={calendarMode}
+          focusDate={calendarFocusDate}
           tasks={tasks}
           onOpenTask={onOpenTask}
+          onFocusDateChange={onCalendarFocusDateChange}
           onMonthChange={onMonthChange}
         />
       </section>
@@ -11227,20 +11265,21 @@ function calendarTaskDurationMinutes(task: Task) {
 function CalendarView({
   monthValue,
   mode,
+  focusDate,
   tasks,
   onOpenTask,
+  onFocusDateChange,
   onMonthChange,
 }: {
   monthValue: string
   mode: CalendarDisplayMode
+  focusDate: string
   tasks: Task[]
   onOpenTask: (taskId: number) => void
+  onFocusDateChange: (value: string) => void
   onMonthChange: (value: string) => void
 }) {
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const today = isoDate()
-    return today.startsWith(monthValue) ? today : `${monthValue}-01`
-  })
+  const selectedDate = focusDate || `${monthValue}-01`
   const today = isoDate()
   const visibleTasks = useMemo(() => tasks.filter((task) => !task.voidedAt), [tasks])
   const tasksByDate = useMemo(() => {
@@ -11257,7 +11296,7 @@ function CalendarView({
   const monthDays = calendarDaysForMonth(monthValue)
 
   const setCalendarDate = (value: string) => {
-    setSelectedDate(value)
+    onFocusDateChange(value)
     if (monthPart(value) !== monthValue) {
       onMonthChange(monthPart(value))
     }
