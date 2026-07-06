@@ -12791,6 +12791,11 @@ textarea:focus-visible {
   color: var(--color-primary);
 }
 
+.google-month-cell.festival .google-month-lunar,
+.calendar-schedule-day.festival small {
+  color: var(--color-text-muted);
+}
+
 .google-month-lunar em,
 .calendar-schedule-day small em {
   margin-left: 4px;
@@ -12819,14 +12824,14 @@ textarea:focus-visible {
 }
 
 .calendar-event-pill,
-.calendar-allday-chip {
+.calendar-allday-chip,
+.calendar-holiday-pill,
+.calendar-workday-pill {
   width: 100%;
   min-height: 22px;
   padding: 3px 8px;
   border: 0;
-  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 58%, var(--color-primary-strong));
-  background: color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 34%, var(--color-surface-strong));
-  color: var(--color-text);
+  display: block;
   font-size: 12px;
   font-weight: 700;
   line-height: 1.35;
@@ -12834,7 +12839,34 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.calendar-event-pill,
+.calendar-allday-chip {
+  border-left: 3px solid color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 58%, var(--color-primary-strong));
+  background: color-mix(in srgb, var(--calendar-type-color, var(--color-primary)) 34%, var(--color-surface-strong));
+  color: var(--color-text);
   cursor: pointer;
+}
+
+.calendar-holiday-pill {
+  background: var(--color-primary);
+  color: var(--color-surface-strong);
+}
+
+.calendar-holiday-pill em {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--color-surface-strong) 46%, transparent);
+  color: inherit;
+  font-style: normal;
+  font-size: 10px;
+}
+
+.calendar-workday-pill {
+  border-left: 3px solid var(--color-admin-only);
+  background: color-mix(in srgb, var(--color-admin-only) 13%, var(--color-surface-strong));
+  color: var(--color-admin-only);
 }
 
 .calendar-event-pill:hover,

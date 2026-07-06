@@ -1606,18 +1606,15 @@ function calendarDayMeta(value: string) {
   const lunarMonth = lunarMonthNumbers[lunar.month.replace('闰', '')]
   const lunarFestival = lunarMonth ? lunarFestivalLabels[`${lunarMonth}-${lunar.day}`] : undefined
   const festival = solarFestival ?? lunarFestival ?? (isChineseNewYearEve(value) ? '除夕' : undefined)
-  const officialLabel = official?.kind === 'workday'
-    ? '补班'
-    : official?.name === '国庆节' && !festival
-      ? '黄金周'
-      : official?.kind === 'holiday'
-        ? '休'
-        : undefined
+  const holidayLabel = festival
+    ?? (official?.kind === 'holiday' ? (official.name === '国庆节' ? '黄金周' : official.name) : undefined)
+  const officialLabel = official?.kind === 'workday' ? '补班' : official?.kind === 'holiday' ? '休' : undefined
   const lunarLabel = lunar.day === 1 ? lunar.month : lunarDayLabels[lunar.day - 1] ?? ''
   return {
-    label: festival ?? officialLabel ?? lunarLabel,
+    label: lunarLabel,
+    holidayLabel,
     officialLabel,
-    isFestival: Boolean(festival),
+    isFestival: Boolean(holidayLabel),
     officialKind: official?.kind,
   }
 }
@@ -11521,6 +11518,25 @@ function CalendarView({
     )
   }
 
+  const renderHolidayPill = (dayMeta: ReturnType<typeof calendarDayMeta>, key: string) => {
+    if (dayMeta.holidayLabel) {
+      return (
+        <span className="calendar-holiday-pill" key={key}>
+          {dayMeta.holidayLabel}
+          {dayMeta.officialLabel === '休' && <em>休</em>}
+        </span>
+      )
+    }
+    if (dayMeta.officialLabel === '补班') {
+      return (
+        <span className="calendar-workday-pill" key={key}>
+          补班
+        </span>
+      )
+    }
+    return null
+  }
+
   const renderScheduleGrid = (days: string[]) => (
     <div className="calendar-schedule">
       <div className="calendar-schedule-header" style={{ '--day-count': days.length } as CSSProperties}>
@@ -11537,10 +11553,7 @@ function CalendarView({
             >
               <span>{weekdayLabels[(date.getDay() + 6) % 7]}</span>
               <strong>{date.getDate()}</strong>
-              <small>
-                {dayMeta.label}
-                {dayMeta.officialLabel && dayMeta.officialLabel !== dayMeta.label && <em>{dayMeta.officialLabel}</em>}
-              </small>
+              <small>{dayMeta.label}</small>
             </button>
           )
         })}
@@ -11549,10 +11562,12 @@ function CalendarView({
         <div className="calendar-time-label">计划</div>
         {days.map((day) => {
           const dayTasks = tasksByDate.get(day) ?? []
+          const dayMeta = calendarDayMeta(day)
           return (
             <div className="calendar-allday-cell" key={day}>
-              {dayTasks.slice(0, 4).map(renderAllDayTask)}
-              {dayTasks.length > 4 && <span className="calendar-overflow">+{dayTasks.length - 4} 项</span>}
+              {renderHolidayPill(dayMeta, `${day}-holiday`)}
+              {dayTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map(renderAllDayTask)}
+              {dayTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{dayTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
             </div>
           )
         })}
@@ -11598,12 +11613,12 @@ function CalendarView({
                     <span className="google-month-day">{day.day}</span>
                     <span className="google-month-lunar">
                       {dayMeta.label}
-                      {dayMeta.officialLabel && dayMeta.officialLabel !== dayMeta.label && <em>{dayMeta.officialLabel}</em>}
                     </span>
                   </span>
                   <span className="google-month-events">
-                    {cellTasks.slice(0, 4).map(renderMonthTask)}
-                    {cellTasks.length > 4 && <span className="calendar-overflow">+{cellTasks.length - 4} 项</span>}
+                    {renderHolidayPill(dayMeta, `${day.value}-holiday`)}
+                    {cellTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map(renderMonthTask)}
+                    {cellTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{cellTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
                   </span>
                 </button>
               )
