@@ -9699,9 +9699,12 @@ function TaskProgressModal({
     : shouldIncludeAcceptanceDraftEntry
       ? [...acceptanceTimeEntries, { id: 'acceptance-preview-entry', date: activeStartDate, endDate: activeEndDate, start: activeDraft.start.trim(), end: activeDraft.end.trim(), note: note.trim(), isAcceptanceProgress: true }]
       : acceptanceTimeEntries
+  const acceptanceWaitingPreviewTask = acceptancePreviewTimeEntries === acceptanceTimeEntries
+    ? task
+    : { ...task, timeEntries: acceptancePreviewTimeEntries }
   const acceptanceComputedMinutes = sumTimeEntries(acceptancePreviewTimeEntries)
   const acceptanceLockedHours = Math.round((acceptanceComputedMinutes / 60) * 100) / 100
-  const acceptanceWaitingMinutes = sumWaitingEntries(task)
+  const acceptanceWaitingMinutes = sumWaitingEntries(acceptanceWaitingPreviewTask)
   const acceptanceEstimatedAmount = roundCents(acceptanceLockedHours * hourlyRate)
   const canConfirmAcceptance = (acceptanceLockedHours > 0 || isAcceptanceRevisionMode || !countAcceptanceTime) && !isSaving && Boolean(onConfirmAcceptance) && !hasAnotherAcceptanceProgress && (!countAcceptanceTime || !draftConflict)
   const progressHeaderHint = isAcceptanceMode
@@ -11113,10 +11116,10 @@ function TaskProgressModal({
                     <div className="progress-acceptance-waiting">
                       <h4>等待记录 · 不计入结算</h4>
                       {acceptanceWaitingEntries.map((entry) => {
-                        const minutes = minutesForWaitingEntry(task, entry)
+                        const minutes = minutesForWaitingEntry(acceptanceWaitingPreviewTask, entry)
                         return (
                           <div className="progress-acceptance-waiting-row" key={entry.id}>
-                            <span>{formatWaitingEntryDateTimeRange(task, entry)}</span>
+                            <span>{formatWaitingEntryDateTimeRange(acceptanceWaitingPreviewTask, entry)}</span>
                             <em>{minutes > 0 ? `${(minutes / 60).toFixed(1)}h` : '等待中'}</em>
                           </div>
                         )
