@@ -19972,17 +19972,18 @@ button.topbar-create-button kbd {
 }
 
 .alice-model-popup {
-  position: static;
-  width: auto;
-  max-height: 230px;
+  position: absolute;
+  right: 76px;
+  bottom: 76px;
+  width: min(360px, calc(100vw - 96px));
+  max-height: min(56vh, 520px);
   overflow-y: auto;
-  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface-strong));
+  background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
-  border-radius: 18px;
-  box-shadow: none;
-  margin: 0 12px 8px;
-  padding: 10px;
-  z-index: 1;
+  border-radius: 22px;
+  box-shadow: var(--shadow-float);
+  padding: 12px;
+  z-index: 12;
   animation: modal-in 0.12s ease both;
 }
 
@@ -20005,11 +20006,11 @@ button.topbar-create-button kbd {
   background: transparent;
   color: var(--color-text);
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 24px 1fr;
   gap: 10px;
   align-items: center;
-  padding: 10px 9px;
-  border-radius: 12px;
+  padding: 11px 10px;
+  border-radius: 14px;
   text-align: left;
   cursor: pointer;
   font: inherit;
@@ -20017,7 +20018,7 @@ button.topbar-create-button kbd {
 
 .alice-model-row:hover,
 .alice-model-row.active {
-  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface-strong));
 }
 
 .alice-model-row span {

@@ -5025,6 +5025,54 @@ function ChatPanel({
             </label>
           </div>
         )}
+        {showModelPopup && (
+          <div className="alice-model-popup">
+            <div className="alice-model-popup-section">
+              <div className="alice-model-popup-title">模型</div>
+              {modelOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedModelChoice(option.value)
+                    setShowModelPopup(false)
+                  }}
+                >
+                  <Bot size={15} />
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>{option.meta}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="alice-model-popup-section">
+              <div className="alice-model-popup-title">更多免费模型</div>
+              {isLoadingOpenRouterModels && <p className="alice-model-empty">正在读取 OpenRouter 免费模型…</p>}
+              {!isLoadingOpenRouterModels && openRouterModels.length === 0 && (
+                <p className="alice-model-empty">暂无可用缓存，可先在设置里扫描 OpenRouter 免费模型。</p>
+              )}
+              {openRouterModels.map((model) => (
+                <button
+                  key={model.id}
+                  type="button"
+                  className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedModelChoice(`openrouter:${model.id}` as ChatModelChoice)
+                    setShowModelPopup(false)
+                  }}
+                >
+                  <Sparkles size={15} />
+                  <span>
+                    <strong>{model.id}</strong>
+                    <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -5047,54 +5095,6 @@ function ChatPanel({
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
           />
-          {showModelPopup && (
-            <div className="alice-model-popup">
-              <div className="alice-model-popup-section">
-                <div className="alice-model-popup-title">模型</div>
-                {modelOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedModelChoice(option.value)
-                      setShowModelPopup(false)
-                    }}
-                  >
-                    <Bot size={15} />
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.meta}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div className="alice-model-popup-section">
-                <div className="alice-model-popup-title">更多免费模型</div>
-                {isLoadingOpenRouterModels && <p className="alice-model-empty">正在读取 OpenRouter 免费模型…</p>}
-                {!isLoadingOpenRouterModels && openRouterModels.length === 0 && (
-                  <p className="alice-model-empty">暂无可用缓存，可先在设置里扫描 OpenRouter 免费模型。</p>
-                )}
-                {openRouterModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedModelChoice(`openrouter:${model.id}` as ChatModelChoice)
-                      setShowModelPopup(false)
-                    }}
-                  >
-                    <Sparkles size={15} />
-                    <span>
-                      <strong>{model.id}</strong>
-                      <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           <div className="alice-input-toolbar">
             <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件（图片、txt、md…）" aria-label="添加附件">
               <Paperclip size={15} />
@@ -5113,6 +5113,7 @@ function ChatPanel({
                 </span>
               )}
             </button>
+            <div style={{ flex: 1 }} />
             <button
               type="button"
               className={`alice-tool-btn alice-model-btn ${selectedModelChoice !== 'auto' ? 'active' : ''}`}
@@ -5123,7 +5124,6 @@ function ChatPanel({
               <Bot size={15} />
               <span className="alice-model-label">{chatModelChoiceLabel(selectedModelChoice, aiModelConfig)}</span>
             </button>
-            <div style={{ flex: 1 }} />
             <button
               type="button"
               className="alice-send-btn"
