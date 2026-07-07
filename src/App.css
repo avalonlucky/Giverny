@@ -2449,6 +2449,27 @@ button.topbar-create-button:hover {
   color: #b45309;
 }
 
+.progress-entry-tag.client-feedback {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary-strong);
+}
+
+.progress-entry-tag.feedback-version {
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+}
+
+.dashboard-side-entry-meta {
+  margin: 4px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-side-feedback-item .dot {
+  background: var(--color-primary);
+}
+
 .dashboard-side-time-item p,
 .dashboard-side-waiting-item p {
   margin: 6px 0 0;
@@ -5311,6 +5332,63 @@ button.topbar-create-button:hover {
   gap: 10px;
 }
 
+.progress-feedback-meta {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: end;
+  gap: 18px;
+}
+
+.progress-feedback-meta label,
+.progress-feedback-source {
+  display: grid;
+  gap: 8px;
+}
+
+.progress-feedback-meta label > span,
+.progress-feedback-source > span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.progress-feedback-meta input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  outline: none;
+}
+
+.progress-feedback-source > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.progress-feedback-source button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.progress-feedback-source button.active {
+  background: var(--color-primary);
+  color: var(--color-surface-strong);
+}
+
 .progress-lite-label-row {
   display: flex;
   align-items: center;
@@ -6199,11 +6277,20 @@ button.topbar-create-button:hover {
   place-items: center;
 }
 
-.attachment-hover-thumb img {
+.attachment-hover-thumb img,
+.attachment-hover-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.attachment-hover-thumb .office-preview {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  transform: scale(0.22);
+  transform-origin: top left;
 }
 
 .attachment-hover-thumb .file-thumbnail-canvas,
@@ -6252,10 +6339,17 @@ button.topbar-create-button:hover {
   min-height: 220px;
 }
 
-.attachment-hover-preview-media img {
+.attachment-hover-preview-media img,
+.attachment-hover-preview-media video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.attachment-hover-preview-media .office-preview {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .attachment-hover-preview-media strong {
@@ -7906,7 +8000,9 @@ button.file-chip:focus-visible {
   aspect-ratio: auto;
 }
 
-.file-thumb-preview img {
+.file-thumb-preview img,
+.file-thumb-preview video,
+.file-thumbnail-video {
   width: 100%;
   height: auto;
   display: block;
@@ -12207,14 +12303,14 @@ input::file-selector-button {
   position: fixed;
   inset: 0;
   margin: auto;
-  width: min(680px, 94vw);
-  height: min(80vh, 720px);
+  width: min(960px, 94vw);
+  height: min(86vh, 820px);
   display: flex;
   flex-direction: column;
   background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
-  border-radius: 16px;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+  border-radius: 0;
+  box-shadow: none;
   z-index: var(--z-overlay-effect);
   overflow: hidden;
   animation: modal-in 0.18s ease both;
@@ -12224,7 +12320,7 @@ input::file-selector-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 18px 22px;
   border-bottom: 1px solid var(--color-border);
   flex: 0 0 auto;
 }
@@ -12232,10 +12328,19 @@ input::file-selector-button {
 .chat-panel-title {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--color-text);
+}
+
+.chat-panel-title small {
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .chat-panel-header-actions {
@@ -12268,18 +12373,18 @@ input::file-selector-button {
 .chat-panel-messages {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 30px min(72px, 6vw);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 22px;
 }
 
 .chat-bubble {
-  max-width: 86%;
-  padding: 9px 13px;
-  border-radius: 10px;
-  font-size: 13.5px;
-  line-height: 1.55;
+  max-width: min(720px, 78%);
+  padding: 15px 20px;
+  border-radius: 22px;
+  font-size: 15.5px;
+  line-height: 1.78;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -12287,16 +12392,96 @@ input::file-selector-button {
 .chat-bubble.user {
   align-self: flex-end;
   background: var(--color-primary);
-  color: #fff;
-  border-bottom-right-radius: 3px;
+  color: var(--color-surface-strong);
+  border-top-right-radius: 8px;
 }
 
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: var(--color-surface);
+  max-width: min(780px, 86%);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text);
+  border: 0;
+}
+
+.chat-bubble strong {
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.chat-bubble.user strong {
+  color: var(--color-surface-strong);
+}
+
+.chat-agent-timeline {
+  margin: 0 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.chat-agent-timeline summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.chat-agent-timeline summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-agent-timeline summary svg {
+  transition: transform 0.16s ease;
+}
+
+.chat-agent-timeline[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.chat-agent-timeline summary small {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chat-agent-timeline ol {
+  list-style: none;
+  margin: 12px 0 0 6px;
+  padding: 0 0 0 18px;
+  border-left: 1px solid var(--color-border);
+}
+
+.chat-agent-timeline li {
+  position: relative;
+  margin: 0 0 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+}
+
+.chat-agent-timeline li::before {
+  content: '';
+  position: absolute;
+  left: -23px;
+  top: 0.7em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
-  border-bottom-left-radius: 3px;
+}
+
+.chat-final-answer {
+  color: var(--color-text);
+}
+
+.chat-agent-trace-line {
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 @keyframes chat-blink {
@@ -19589,17 +19774,6 @@ button.topbar-create-button kbd {
 
 .chat-attach-btn:hover { color: var(--color-text); }
 
-/* ─── Alice avatar ───────────────────────────────────────────────────────── */
-
-.alice-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex: 0 0 auto;
-  display: block;
-}
-
 /* ─── Alice welcome screen ───────────────────────────────────────────────── */
 
 .alice-welcome {
@@ -19613,14 +19787,12 @@ button.topbar-create-button kbd {
   gap: 12px;
 }
 
-.alice-welcome-avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  object-fit: cover;
-  display: block;
-  margin-bottom: 8px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+.alice-welcome-kicker {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .alice-welcome-title {
@@ -19660,14 +19832,14 @@ button.topbar-create-button kbd {
 .alice-suggested-btn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
-  background: rgba(60,107,97,0.05);
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }
 
 /* ─── Alice input card ───────────────────────────────────────────────────── */
 
 .alice-input-wrap {
   flex: 0 0 auto;
-  padding: 10px 14px 14px;
+  padding: 14px 28px 24px;
   position: relative;
 }
 
@@ -19675,16 +19847,16 @@ button.topbar-create-button kbd {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background: var(--color-surface);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border-radius: 28px;
+  background: var(--color-surface-strong);
+  box-shadow: none;
   overflow: hidden;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .alice-input-card:focus-within {
-  border-color: rgba(60,107,97,0.45);
-  box-shadow: 0 2px 12px rgba(60,107,97,0.1);
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  box-shadow: none;
 }
 
 .alice-textarea {
@@ -19697,15 +19869,15 @@ button.topbar-create-button kbd {
   -webkit-appearance: none;
   background: transparent;
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--color-text);
   resize: none;
   line-height: 1.55;
-  min-height: 44px;
-  max-height: 120px;
+  min-height: 78px;
+  max-height: 180px;
   overflow-y: auto;
   outline: none;
-  padding: 12px 14px 4px;
+  padding: 18px 20px 8px;
 }
 
 .alice-textarea::placeholder {
@@ -19723,8 +19895,8 @@ button.topbar-create-button kbd {
 .alice-input-toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 8px 8px;
+  gap: 6px;
+  padding: 6px 14px 14px;
   border: none;
   border-top: none !important;
   background: transparent;
@@ -19735,8 +19907,8 @@ button.topbar-create-button kbd {
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
-  padding: 5px 6px;
-  border-radius: 7px;
+  padding: 6px 8px;
+  border-radius: 999px;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -19748,7 +19920,7 @@ button.topbar-create-button kbd {
 
 .alice-tool-btn:hover {
   color: var(--color-text);
-  background: rgba(0,0,0,0.05);
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }
 
 .alice-tool-btn.active {
@@ -19759,36 +19931,36 @@ button.topbar-create-button kbd {
   font-size: 11px;
   font-weight: 600;
   color: var(--color-primary);
-  background: rgba(60,107,97,0.1);
-  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  border-radius: 999px;
   padding: 1px 6px;
   line-height: 1.4;
 }
 
 .alice-send-btn {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 50%;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-surface-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, transform 0.15s;
   flex: 0 0 auto;
 }
 
 .alice-send-btn:disabled { opacity: 0.32; cursor: not-allowed; }
-.alice-send-btn:not(:disabled):hover { opacity: 0.82; }
+.alice-send-btn:not(:disabled):hover { opacity: 0.86; transform: translateY(-1px); }
 
 /* ─── Alice scope popup ──────────────────────────────────────────────────── */
 
 .alice-scope-popup {
   position: absolute;
   bottom: calc(100% - 6px);
-  left: 14px;
+  left: 28px;
   background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
   border-radius: 12px;
@@ -19797,6 +19969,91 @@ button.topbar-create-button kbd {
   min-width: 200px;
   z-index: 10;
   animation: modal-in 0.12s ease both;
+}
+
+.alice-model-popup {
+  position: static;
+  width: auto;
+  max-height: 230px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface-strong));
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  box-shadow: none;
+  margin: 0 12px 8px;
+  padding: 10px;
+  z-index: 1;
+  animation: modal-in 0.12s ease both;
+}
+
+.alice-model-popup-section + .alice-model-popup-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.alice-model-popup-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.alice-model-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 9px;
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.alice-model-row:hover,
+.alice-model-row.active {
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
+.alice-model-row span {
+  min-width: 0;
+}
+
+.alice-model-row strong,
+.alice-model-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alice-model-row strong {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.alice-model-row small,
+.alice-model-empty {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.alice-model-empty {
+  margin: 8px;
+  line-height: 1.6;
+}
+
+.alice-model-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .alice-scope-popup-title {
@@ -19942,7 +20199,6 @@ button.topbar-create-button kbd {
 .insights-risk-row,
 .insights-score-card,
 .knowledge-item,
-.alice-input-card,
 .alice-scope-popup,
 .chat-history-panel {
   border-radius: 0;
@@ -19976,11 +20232,7 @@ button.topbar-create-button kbd {
 .knowledge-save-btn,
 .knowledge-cancel-btn,
 .chat-knowledge-toggle,
-.chat-attachment-chip,
-.alice-suggested-btn,
-.alice-send-btn,
-.alice-tool-btn,
-.alice-scope-badge {
+.chat-attachment-chip {
   border-radius: 0;
 }
 
@@ -19999,17 +20251,13 @@ button.topbar-create-button kbd {
   color: var(--color-surface-strong);
 }
 
-.alice-welcome-avatar {
-  box-shadow: none;
-}
-
 .alice-suggested-btn:hover,
 .alice-tool-btn:hover {
   background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }
 
 .alice-input-card {
-  background: transparent;
+  background: var(--color-surface-strong);
 }
 
 .alice-input-card:focus-within {

@@ -4,6 +4,7 @@ import {
   AlarmClock,
   AlertTriangle,
   Archive,
+  ArrowUp,
   ArrowRightLeft,
   Palette,
   Briefcase,
@@ -31,7 +32,6 @@ import {
   GripVertical,
   HelpCircle,
   KeyRound,
-  Send,
   LayoutDashboard,
   List,
   ListChecks,
@@ -1218,24 +1218,24 @@ async function createOfficePreviewFile(file: File, fileType: 'DOCX' | 'PPTX' | '
 }
 
 async function createOptionalPreviewFile(file: File) {
-  const lower = file.name.toLowerCase()
+  const inferred = fileTypeForFile(file)
   try {
-    if (lower.endsWith('.psd')) {
+    if (inferred.kind === 'psd') {
       return await createPsdPreviewFile(file)
     }
-    if (lower.endsWith('.pdf') || file.type === 'application/pdf') {
+    if (inferred.kind === 'pdf') {
       return await createPdfPreviewFile(file)
     }
-    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|ogv)$/i.test(lower)) {
+    if (inferred.kind === 'video') {
       return await createVideoPreviewFile(file)
     }
-    if (lower.endsWith('.docx')) {
+    if (inferred.type === 'DOCX') {
       return await createOfficePreviewFile(file, 'DOCX')
     }
-    if (lower.endsWith('.pptx')) {
+    if (inferred.type === 'PPTX') {
       return await createOfficePreviewFile(file, 'PPTX')
     }
-    if (lower.endsWith('.xlsx')) {
+    if (inferred.type === 'XLSX') {
       return await createOfficePreviewFile(file, 'XLSX')
     }
   } catch (error) {
@@ -1317,9 +1317,100 @@ function appendQueryParam(url: string | undefined, key: string, value: string) {
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
 }
 
-const inlineImageFileTypes = new Set(['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'])
+const inlineImageFileTypes = new Set(['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG', 'BMP'])
 const inlineDocumentFileTypes = new Set(['PDF', 'AI'])
 const officeFileTypes = new Set(['DOCX', 'XLSX', 'PPTX', 'DOC', 'XLS', 'PPT'])
+const videoFileTypes = new Set(['MP4', 'MOV', 'WEBM', 'M4V', 'OGV'])
+const trustedFileExtensions = new Set([
+  ...inlineImageFileTypes,
+  ...inlineDocumentFileTypes,
+  ...officeFileTypes,
+  ...videoFileTypes,
+  'PSD',
+  'TXT',
+  'MD',
+  'CSV',
+  'JSON',
+  'ZIP',
+  'RAR',
+  '7Z',
+])
+
+type InferredFileKind = 'image' | 'pdf' | 'ai' | 'psd' | 'office' | 'video' | 'text' | 'archive' | 'unknown'
+type FileTypeInput = { name?: string; type?: string; mimeType?: string }
+
+function extensionFromTrustedName(name: string | undefined) {
+  const extension = splitFileName(name ?? '').extension.replace('.', '').trim().toUpperCase()
+  if (!extension) {
+    return ''
+  }
+  const normalized = extension === 'JPEG' ? 'JPG' : extension
+  return trustedFileExtensions.has(normalized) ? normalized : ''
+}
+
+function typeFromMime(mimeType: string | undefined) {
+  const mime = String(mimeType ?? '').toLowerCase()
+  if (!mime) return ''
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPG'
+  if (mime === 'image/png') return 'PNG'
+  if (mime === 'image/webp') return 'WEBP'
+  if (mime === 'image/gif') return 'GIF'
+  if (mime === 'image/svg+xml') return 'SVG'
+  if (mime === 'image/bmp') return 'BMP'
+  if (mime === 'application/pdf') return 'PDF'
+  if (mime.startsWith('video/')) {
+    if (mime.includes('quicktime')) return 'MOV'
+    if (mime.includes('webm')) return 'WEBM'
+    if (mime.includes('ogg')) return 'OGV'
+    return 'MP4'
+  }
+  if (mime.includes('wordprocessingml.document')) return 'DOCX'
+  if (mime.includes('presentationml.presentation')) return 'PPTX'
+  if (mime.includes('spreadsheetml.sheet')) return 'XLSX'
+  if (mime === 'application/msword') return 'DOC'
+  if (mime === 'application/vnd.ms-powerpoint') return 'PPT'
+  if (mime === 'application/vnd.ms-excel') return 'XLS'
+  if (mime.startsWith('text/')) return mime.includes('csv') ? 'CSV' : 'TXT'
+  if (mime.includes('zip')) return 'ZIP'
+  return ''
+}
+
+function kindForFileType(fileType: string): InferredFileKind {
+  const type = fileType.toUpperCase()
+  if (isInlineImageFileType(type)) return 'image'
+  if (type === 'PDF') return 'pdf'
+  if (type === 'AI') return 'ai'
+  if (type === 'PSD') return 'psd'
+  if (isOfficeFileType(type)) return 'office'
+  if (videoFileTypes.has(type)) return 'video'
+  if (['TXT', 'MD', 'CSV', 'JSON'].includes(type)) return 'text'
+  if (['ZIP', 'RAR', '7Z'].includes(type)) return 'archive'
+  return 'unknown'
+}
+
+function inferFileType(input: FileTypeInput) {
+  const mimeType = input.mimeType || (input.type?.includes('/') ? input.type : '')
+  const fromMime = typeFromMime(mimeType)
+  const rawType = input.type && !input.type.includes('/') ? input.type.trim().toUpperCase() : ''
+  const normalizedRawType = rawType === 'JPEG' ? 'JPG' : rawType
+  const fromExistingType = trustedFileExtensions.has(normalizedRawType) ? normalizedRawType : ''
+  const fromName = extensionFromTrustedName(input.name)
+  const type = fromMime || fromExistingType || fromName || 'FILE'
+  return {
+    type,
+    kind: kindForFileType(type),
+    mimeType: mimeType || '',
+    extension: fromName,
+  }
+}
+
+function fileTypeForAsset(file: FileAsset | undefined) {
+  return inferFileType({ name: file?.name, type: file?.type, mimeType: file?.mimeType })
+}
+
+function fileTypeForFile(file: File) {
+  return inferFileType({ name: file.name, mimeType: file.type })
+}
 
 function isInlineImageFileType(fileType: string) {
   return inlineImageFileTypes.has(fileType.toUpperCase())
@@ -1337,8 +1428,16 @@ function fileDocumentPreviewSource(file: FileAsset | undefined) {
   if (!file) {
     return undefined
   }
-  const fileType = file.type.toUpperCase()
+  const fileType = fileTypeForAsset(file).type
   return authedPreviewUrl(fileType === 'AI' ? appendQueryParam(file.sourceUrl, 'as', 'pdf') : file.sourceUrl)
+}
+
+function fileThumbnailSource(file: FileAsset | undefined) {
+  if (!file) {
+    return undefined
+  }
+  const kind = fileTypeForAsset(file).kind
+  return ['pdf', 'ai', 'psd', 'office', 'video'].includes(kind) ? fileDocumentPreviewSource(file) : undefined
 }
 
 function parseFileTags(tag: string | undefined) {
@@ -1702,13 +1801,40 @@ function hasAcceptanceProgress(task: Pick<Task, 'timeEntries'>) {
   return (task.timeEntries ?? []).some((entry) => entry.isAcceptanceProgress)
 }
 
+function acceptanceProgressEndDateTime(task: Pick<Task, 'date' | 'timeEntries'>) {
+  const acceptanceEntries = (task.timeEntries ?? [])
+    .filter((entry) => entry.isAcceptanceProgress)
+    .map((entry) => {
+      const endDate = entry.endDate || entry.date || datePart(task.date)
+      const end = normalizeClockInput(entry.end)
+      const stamp = dateTimeMinuteStamp(endDate, end || '')
+      return Number.isFinite(stamp) ? { stamp, value: planDateTimeFromMinuteStamp(stamp) } : null
+    })
+    .filter((item): item is { stamp: number; value: string } => Boolean(item))
+    .sort((a, b) => b.stamp - a.stamp)
+  return acceptanceEntries[0]?.value ?? ''
+}
+
+function normalizeTaskClosure(task: Task): Task {
+  if (!hasAcceptanceProgress(task)) {
+    return task
+  }
+  return {
+    ...task,
+    status: '已验收',
+    stage: task.stage && task.stage !== '待验收' && task.stage !== '进行中' ? task.stage : '已验收',
+    progress: 100,
+    actualDeliveryDate: task.actualDeliveryDate || acceptanceProgressEndDateTime(task),
+  }
+}
+
 function canRecordNewProgress(task: Pick<Task, 'status' | 'timeEntries'>) {
   return isTaskStarted(task) && task.status !== '已验收' && !hasAcceptanceProgress(task)
 }
 
-function taskDisplayProgress(task: Pick<Task, 'status' | 'progress'>) {
+function taskDisplayProgress(task: Pick<Task, 'status' | 'progress' | 'timeEntries'>) {
   // 已验收即任务闭环，整体进度恒为 100%（兜底历史数据中状态已验收但 progress 未到 100 的情况）
-  if (task.status === '已验收') {
+  if (task.status === '已验收' || hasAcceptanceProgress(task)) {
     return 100
   }
   return isTaskStarted(task) ? snapProgress(task.progress) : 0
@@ -1882,7 +2008,7 @@ function formatInsightRange(range: { start: Date; end: Date }) {
 }
 
 function isVisualReviewReady(file: FileAsset) {
-  const type = file.type.toUpperCase()
+  const type = fileTypeForAsset(file).type
   return Boolean(file.previewUrl) || isInlineImageFileType(type) || isInlineDocumentFileType(type) || isOfficeFileType(type)
 }
 
@@ -2199,7 +2325,9 @@ function fillTimeDraftFromDuration(draft: TimeEntryDraft, minutes: number) {
   }
 }
 
-type ProgressRecordMode = 'progress' | 'waiting'
+type ProgressRecordMode = 'progress' | 'waiting' | 'feedback'
+
+const clientFeedbackSources = ['甲方', '需求人', '验收人', '其他'] as const
 
 type ProgressModalTarget = {
   taskId: number
@@ -2991,11 +3119,6 @@ function describeActivity(item: ActivityItem): string {
   return '其他操作'
 }
 
-function fileTypeFromName(name: string) {
-  const extension = name.split('.').pop()?.trim().toUpperCase() ?? ''
-  return extension === 'JPEG' ? 'JPG' : extension
-}
-
 function taskAssistantFiles(task: Task, files: FileAsset[], uploadedFiles: Array<FileAsset | string> = []) {
   const taskFileNames = new Set([...(task.files ?? []), ...(task.acceptanceFiles ?? [])].map((name) => name.trim()).filter(Boolean))
   const uploadedNames = uploadedFiles
@@ -3146,18 +3269,34 @@ function AttachmentHoverThumbnail({
   onOpen?: () => void
 }) {
   const [hoverPreview, setHoverPreview] = useState<{ style: CSSProperties; fieldPlacement: boolean } | null>(null)
-  const extension = (type || fileTypeFromName(name) || 'FILE').toUpperCase()
-  const pdfSourceUrl = !previewUrl && extension === 'PDF' ? sourceUrl : ''
+  const inferred = inferFileType({ name, type })
+  const extension = inferred.type
+  const pdfSourceUrl = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
+  const psdSourceUrl = !previewUrl && inferred.kind === 'psd' ? sourceUrl : ''
+  const officeSourceUrl = !previewUrl && inferred.kind === 'office' ? sourceUrl : ''
+  const videoSourceUrl = !previewUrl && inferred.kind === 'video' ? sourceUrl : ''
   const media = previewUrl
     ? <img src={previewUrl} alt="" loading="lazy" />
     : pdfSourceUrl
       ? <PdfThumbnail sourceUrl={pdfSourceUrl} label={name} />
-      : <span className="attachment-hover-thumb-ext">{extension}</span>
+      : psdSourceUrl
+        ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
+        : officeSourceUrl
+          ? <OfficePreview fileType={extension} sourceUrl={officeSourceUrl} compact />
+          : videoSourceUrl
+            ? <video src={videoSourceUrl} muted playsInline preload="metadata" />
+            : <span className="attachment-hover-thumb-ext">{extension}</span>
   const hoverMedia = previewUrl
     ? <img src={previewUrl} alt="" />
     : pdfSourceUrl
       ? <PdfThumbnail sourceUrl={pdfSourceUrl} label={name} />
-      : <strong>{extension}</strong>
+      : psdSourceUrl
+        ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
+        : officeSourceUrl
+          ? <OfficePreview fileType={extension} sourceUrl={officeSourceUrl} compact />
+          : videoSourceUrl
+            ? <video src={videoSourceUrl} muted playsInline preload="metadata" />
+            : <strong>{extension}</strong>
   const showPreview = (element: HTMLElement) => {
     const rect = element.getBoundingClientRect()
     const attachmentField = element.closest('.progress-attachment-field')?.getBoundingClientRect()
@@ -3217,8 +3356,10 @@ function PendingAttachmentThumbnail({
   attachment: PendingProgressAttachment
   onOpen: () => void
 }) {
-  const isImage = attachment.file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(attachment.name)
-  const imagePreviewUrl = useMemo(() => isImage ? URL.createObjectURL(attachment.file) : undefined, [attachment.file, isImage])
+  const inferred = fileTypeForFile(attachment.file)
+  const isImage = inferred.kind === 'image'
+  const canUseSourceFallback = ['image', 'pdf', 'ai', 'psd', 'office', 'video'].includes(inferred.kind)
+  const sourcePreviewUrl = useMemo(() => canUseSourceFallback ? URL.createObjectURL(attachment.file) : undefined, [attachment.file, canUseSourceFallback])
   const [generatedPreviewUrl, setGeneratedPreviewUrl] = useState('')
 
   useEffect(() => {
@@ -3245,16 +3386,17 @@ function PendingAttachmentThumbnail({
   }, [attachment.file, isImage])
 
   useEffect(() => () => {
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl)
+    if (sourcePreviewUrl) {
+      URL.revokeObjectURL(sourcePreviewUrl)
     }
-  }, [imagePreviewUrl])
+  }, [sourcePreviewUrl])
 
   return (
     <AttachmentHoverThumbnail
       name={attachment.name}
-      type={splitFileName(attachment.name).extension.replace('.', '')}
-      previewUrl={imagePreviewUrl || (isImage ? '' : generatedPreviewUrl)}
+      type={inferred.type}
+      previewUrl={isImage ? sourcePreviewUrl : generatedPreviewUrl}
+      sourceUrl={sourcePreviewUrl}
       onOpen={onOpen}
     />
   )
@@ -3643,14 +3785,16 @@ function SemanticSearchModal({
                     <span className="semantic-search-files-label">文件库</span>
                     <div className="semantic-search-files-row">
                       {libraryFiles.map((file) => {
-                        const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                        const fileType = fileTypeForAsset(file).type
                         const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                        const documentSourceUrl = fileThumbnailSource(file)
                         return (
                           <AttachmentHoverThumbnail
                             key={file.id}
                             name={file.name}
                             type={fileType}
                             previewUrl={previewUrl}
+                            sourceUrl={documentSourceUrl}
                             compact
                             onOpen={() => onJumpToFile(file)}
                           />
@@ -3832,8 +3976,10 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
 type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number }
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'workers-ai' | `openrouter:${string}`
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
+const CHAT_MODEL_CHOICE_KEY = 'alice_chat_model_choice'
 
 function loadChatHistory(): ConversationRecord[] {
   try { return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) ?? '[]') as ConversationRecord[] }
@@ -3851,6 +3997,91 @@ function saveToChatHistory(msgs: ChatMessage[]) {
 
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '帮我分析本月收入', '我的效率怎么样？']
+
+function readChatModelChoice(): ChatModelChoice {
+  try {
+    const raw = window.localStorage.getItem(CHAT_MODEL_CHOICE_KEY) ?? ''
+    if (raw === 'auto' || raw === 'workers-ai' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
+      return raw as ChatModelChoice
+    }
+  } catch {
+    // ignore
+  }
+  return 'auto'
+}
+
+function chatRouteLabel(route: AiModelRouteKey) {
+  if (route === 'textPrimary') return '文字主模型'
+  if (route === 'textFallback') return '文字备用'
+  if (route === 'visionPrimary') return '识图主模型'
+  return '识图备用'
+}
+
+function chatModelChoiceLabel(choice: ChatModelChoice, aiModelConfig: AiModelConfig | null) {
+  if (choice === 'auto') return '自动'
+  if (choice === 'workers-ai') return 'Workers AI'
+  if (choice.startsWith('openrouter:')) return choice.replace(/^openrouter:/, '').replace(/:free$/, '').split('/').pop() || 'OpenRouter'
+  const route = choice.replace(/^route:/, '') as AiModelRouteKey
+  const model = aiModelConfig?.[route]?.model || aiRouteDefaults[route]?.model || chatRouteLabel(route)
+  return model
+}
+
+function renderRichChatLine(line: string) {
+  const parts = line.split(/(\*\*[^*]+\*\*)/g)
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>
+    }
+    return <Fragment key={index}>{part}</Fragment>
+  })
+}
+
+function renderPlainChatLines(lines: string[]) {
+  return (
+    <>
+      {lines.map((line, index) => (
+        <Fragment key={`${index}-${line}`}>
+          {index > 0 && <br />}
+          {renderRichChatLine(line)}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+function renderChatContent(content: string) {
+  const lines = content.split('\n')
+  if (lines[0] === '我按这个过程处理：') {
+    const dividerIndex = lines.findIndex((line, index) => index > 0 && line.trim() === '')
+    const traceLines = lines
+      .slice(1, dividerIndex > 0 ? dividerIndex : lines.length)
+      .map((line) => line.replace(/^- /, '').trim())
+      .filter(Boolean)
+    const answerLines = dividerIndex > 0 ? lines.slice(dividerIndex + 1) : []
+    return (
+      <>
+        <details className="chat-agent-timeline">
+          <summary>
+            <span>运行完成</span>
+            <small>{traceLines.length} 步</small>
+            <ChevronDown size={13} />
+          </summary>
+          <ol>
+            {traceLines.map((line, index) => (
+              <li key={`${index}-${line}`}>{renderRichChatLine(line)}</li>
+            ))}
+          </ol>
+        </details>
+        {answerLines.length > 0 && (
+          <div className="chat-final-answer">{renderPlainChatLines(answerLines)}</div>
+        )}
+      </>
+    )
+  }
+  return (
+    <>{renderPlainChatLines(lines)}</>
+  )
+}
 
 type AssistantTaskDraft = {
   kind: 'create-task'
@@ -3871,10 +4102,26 @@ type AssistantTaskSession = {
   askedFor: 'brief' | 'detail' | 'time'
 }
 
+type AssistantAgentActionPlan = {
+  action: 'record-feedback' | 'unknown'
+  taskId?: number
+  taskTitle?: string
+  note?: string
+  feedbackVersion?: string
+  feedbackSource?: string
+  dateTime?: string
+  confidence?: number
+  question?: string
+}
+
 type ChatPanelProps = {
   currentMonthValue: string
   designTypeGroups: DesignTypeGroup[]
+  tasks: Task[]
+  selectedTaskId?: number
+  aiModelConfig: AiModelConfig | null
   onCreateTask: (task: Task) => Promise<Task | undefined> | Task | undefined
+  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => Promise<boolean>
   onClose: () => void
 }
 
@@ -4001,6 +4248,7 @@ function matchAssistantDesignType(text: string, title: string, designTypeGroups:
 }
 
 function shouldUseTaskAgent(text: string) {
+  if (/(?:反馈|修改意见|改稿意见|意见|批注|返修|B\d{2,3}|b\d{2,3})/.test(text)) return false
   return /(?:帮我|请|麻烦|记录|新增|新建|创建|增加|加一条|加一个|我要|我想|想要|需要)/.test(text)
     && /(?:任务|工作|项目|设计|制作|做|海报|长图|彩页|名片|视频|PPT|ppt|banner|轮播|邀请函)/.test(text)
 }
@@ -4157,10 +4405,153 @@ function isAssistantTaskCancel(text: string) {
   return /^(取消|放弃|不要|先不|不用了)$/i.test(text.trim())
 }
 
+function shouldUseAgentAction(text: string) {
+  return /(?:帮我|请|麻烦|记录|新增|新建|创建|增加|加一条|补一条|写入|登记|把|给|这个任务|当前任务)/.test(text)
+    && /(?:反馈|修改意见|改稿意见|意见|批注|返修|B\d{2,3}|b\d{2,3})/.test(text)
+}
+
+function isAgentActionConfirm(text: string) {
+  return /^(确认执行|执行|确认|保存|写入|记录|可以|没问题|确定)$/i.test(text.trim())
+}
+
+function isAgentActionCancel(text: string) {
+  return /^(取消|放弃|不要|先不|不用了)$/i.test(text.trim())
+}
+
+function compactAgentTask(task: Task) {
+  return {
+    id: task.id,
+    title: task.title,
+    type: task.type,
+    status: task.status,
+    progress: task.progress,
+    date: task.date,
+    estimatedDate: task.estimatedDate,
+  }
+}
+
+function findAgentTargetTask(plan: AssistantAgentActionPlan, tasks: Task[], selectedTaskId?: number) {
+  if (plan.taskId) {
+    const exact = tasks.find((task) => task.id === plan.taskId)
+    if (exact) return exact
+  }
+  const title = (plan.taskTitle ?? '').trim()
+  if (title) {
+    const exactTitle = tasks.find((task) => task.title === title)
+    if (exactTitle) return exactTitle
+    const fuzzy = tasks.find((task) => task.title.includes(title) || title.includes(task.title))
+    if (fuzzy) return fuzzy
+  }
+  if (selectedTaskId) {
+    return tasks.find((task) => task.id === selectedTaskId)
+  }
+  return undefined
+}
+
+function buildLocalAgentActionPlan(text: string, currentMonthValue: string, tasks: Task[], selectedTaskId?: number): AssistantAgentActionPlan | null {
+  if (!shouldUseAgentAction(text)) return null
+  const selectedTask = selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined
+  const matchedTask = selectedTask ?? tasks.find((task) => text.includes(task.title))
+  if (!matchedTask) {
+    return {
+      action: 'unknown',
+      question: '我还不知道要记录到哪一个任务。请先选中任务，或在这句话里带上任务名称。',
+      confidence: 0.3,
+    }
+  }
+  const version = text.match(/\b([Bb]\d{2,3})\b/)?.[1]?.toUpperCase()
+  const dateParts = extractAssistantDate(text, currentMonthValue)
+  const time = extractAssistantTime(text, ['反馈时间', '时间', '在', '于']) ?? {
+    hour: new Date().getHours(),
+    minute: new Date().getMinutes(),
+    assumedAfternoon: false,
+  }
+  const cleanedNote = text
+    .replace(/^(帮我|请|麻烦)?\s*(把|给)?\s*(这个任务|当前任务)?\s*(记录|新增|新建|创建|增加|加一条|补一条|写入|登记)?\s*(一条)?\s*/g, '')
+    .replace(/^(甲方)?(反馈|修改意见|改稿意见|意见)[:：]?\s*/g, '')
+    .trim()
+  return {
+    action: 'record-feedback',
+    taskId: matchedTask.id,
+    taskTitle: matchedTask.title,
+    note: cleanedNote || text,
+    feedbackVersion: version,
+    feedbackSource: /客户/.test(text) ? '客户' : '甲方',
+    dateTime: assistantDateTimeValue(dateParts, time),
+    confidence: 0.72,
+  }
+}
+
+function renderAssistantAgentPlan(plan: AssistantAgentActionPlan, task?: Task) {
+  if (plan.action === 'unknown') {
+    return plan.question || '这句话我还不能可靠地转换成操作。你可以说“给当前任务记录一条 B02 修改意见：……”。'
+  }
+  const targetTitle = task?.title ?? plan.taskTitle ?? '未匹配任务'
+  const note = (plan.note ?? '').trim()
+  const timeText = plan.dateTime ? formatPlanDateTime(plan.dateTime) : '现在'
+  return [
+    '我可以替你执行这条记录，先确认一下：',
+    '',
+    `操作：记录甲方反馈 / 修改意见`,
+    `任务：${targetTitle}`,
+    `时间：${timeText}`,
+    `版本：${plan.feedbackVersion || '未填写'}`,
+    `来源：${plan.feedbackSource || '甲方'}`,
+    `内容：${note || '未填写'}`,
+    '',
+    '回复「确认执行」我就写入任务进展；回复「取消」放弃。',
+  ].join('\n')
+}
+
+function renderAgentWorkingStatus(step = '正在理解你的问题…') {
+  return [
+    step,
+    '',
+    'Agent 正在准备可验证的执行步骤。',
+  ].join('\n')
+}
+
+function formatAgentTraceContent(content: string, trace?: string[]) {
+  if (!trace || trace.length === 0) {
+    return content
+  }
+  return [
+    '我按这个过程处理：',
+    ...trace.map((item) => `- ${item}`),
+    '',
+    content,
+  ].join('\n')
+}
+
+function agentPlanToFeedbackEntry(plan: AssistantAgentActionPlan): TimeEntry {
+  const dateTime = plan.dateTime && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(plan.dateTime)
+    ? plan.dateTime
+    : isoDateTime()
+  const date = datePart(dateTime)
+  const time = dateTime.slice(11, 16)
+  return {
+    id: crypto.randomUUID(),
+    date,
+    endDate: date,
+    start: time,
+    end: time,
+    note: (plan.note ?? '').trim(),
+    isClientFeedback: true,
+    isUncounted: true,
+    isRevision: true,
+    feedbackVersion: (plan.feedbackVersion ?? '').trim(),
+    feedbackSource: (plan.feedbackSource ?? '甲方').trim(),
+  }
+}
+
 function ChatPanel({
   currentMonthValue,
   designTypeGroups,
+  tasks,
+  selectedTaskId,
+  aiModelConfig,
   onCreateTask,
+  onUpdateTask,
   onClose,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
@@ -4171,8 +4562,13 @@ function ChatPanel({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [pendingAgentDraft, setPendingAgentDraft] = useState<AssistantTaskDraft | null>(null)
   const [pendingAgentSession, setPendingAgentSession] = useState<AssistantTaskSession | null>(null)
+  const [pendingAgentAction, setPendingAgentAction] = useState<AssistantAgentActionPlan | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showScopePopup, setShowScopePopup] = useState(false)
+  const [showModelPopup, setShowModelPopup] = useState(false)
+  const [selectedModelChoice, setSelectedModelChoice] = useState<ChatModelChoice>(() => readChatModelChoice())
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterFreeModel[]>([])
+  const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false)
   const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
@@ -4196,6 +4592,25 @@ function ChatPanel({
     return () => document.removeEventListener('mousedown', handler)
   }, [showScopePopup])
 
+  useEffect(() => {
+    if (!showModelPopup) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.alice-model-popup') && !(e.target as HTMLElement).closest('.alice-model-btn')) {
+        setShowModelPopup(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showModelPopup])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_MODEL_CHOICE_KEY, selectedModelChoice)
+    } catch {
+      // ignore
+    }
+  }, [selectedModelChoice])
+
   const newConversation = () => {
     if (!isWelcome) saveToChatHistory(messages)
     setHistoryList(loadChatHistory())
@@ -4204,6 +4619,8 @@ function ChatPanel({
     setAttachments([])
     setPendingAgentDraft(null)
     setPendingAgentSession(null)
+    setPendingAgentAction(null)
+    setShowModelPopup(false)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -4217,6 +4634,7 @@ function ChatPanel({
     setMessages(record.messages)
     setPendingAgentDraft(null)
     setPendingAgentSession(null)
+    setPendingAgentAction(null)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -4263,6 +4681,18 @@ function ChatPanel({
     setAttachments((prev) => [...prev, ...added].slice(0, 4))
   }
 
+  const openModelPicker = () => {
+    setShowModelPopup((value) => !value)
+    if (openRouterModels.length > 0 || isLoadingOpenRouterModels) return
+    setIsLoadingOpenRouterModels(true)
+    api.getOpenRouterFreeModels()
+      .then((result) => {
+        setOpenRouterModels((result.models ?? []).filter((model) => model.status === 'ok').slice(0, 12))
+      })
+      .catch(() => setOpenRouterModels([]))
+      .finally(() => setIsLoadingOpenRouterModels(false))
+  }
+
   const send = async (overrideText?: string) => {
     const text = (overrideText !== undefined ? overrideText : input).trim()
     if ((!text && attachments.length === 0) || loading) return
@@ -4273,6 +4703,45 @@ function ChatPanel({
     if (overrideText === undefined) setInput('')
     const sentAttachments = [...attachments]
     setAttachments([])
+
+    if (sentAttachments.length === 0 && pendingAgentAction && isAgentActionCancel(text)) {
+      setPendingAgentAction(null)
+      setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '好，这次操作已经取消，我不会写入任务。' }])
+      return
+    }
+
+    if (sentAttachments.length === 0 && pendingAgentAction && isAgentActionConfirm(text)) {
+      const plan = pendingAgentAction
+      const targetTask = findAgentTargetTask(plan, tasks, selectedTaskId)
+      if (!targetTask || plan.action !== 'record-feedback') {
+        setPendingAgentAction(null)
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '这条操作缺少明确任务，我先不写入。请选中任务后再说一次。' }])
+        return
+      }
+      const entry = agentPlanToFeedbackEntry(plan)
+      const nextEntries = sortTimeEntriesDesc([...(targetTask.timeEntries ?? []), entry])
+      setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '正在写入任务进展…' }])
+      setLoading(true)
+      try {
+        const saved = await onUpdateTask(targetTask.id, {
+          timeEntries: nextEntries,
+          allowAcceptedTimeEdit: true,
+        })
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? {
+          ...m,
+          content: saved
+            ? `已写入「${targetTask.title}」的甲方反馈${entry.feedbackVersion ? `（${entry.feedbackVersion}）` : ''}，这条记录会出现在进展与反馈时间线里。`
+            : '没有写入成功，可能是权限或后端保存失败。',
+        } : m))
+        if (saved) setPendingAgentAction(null)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '写入失败，请重试'
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `写入失败：${msg}` } : m))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
 
     if (sentAttachments.length === 0 && pendingAgentDraft && isAssistantTaskCancel(text)) {
       setPendingAgentDraft(null)
@@ -4357,11 +4826,61 @@ function ChatPanel({
         setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAssistantTaskNeedTime(brief) }])
         return
       }
+
+      if (shouldUseAgentAction(text)) {
+        setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '我先把这句话转换成可执行操作…' }])
+        setLoading(true)
+        try {
+          const selectedTask = selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined
+          const res = await fetch('/api/ai/agent-plan', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+              text,
+              month: currentMonthValue,
+              selectedTask: selectedTask ? compactAgentTask(selectedTask) : null,
+              tasks: tasks.slice(0, 30).map(compactAgentTask),
+            }),
+          })
+          let plan: AssistantAgentActionPlan | null = null
+          if (res.ok) {
+            const data = (await res.json().catch(() => null)) as { plan?: AssistantAgentActionPlan } | null
+            plan = data?.plan ?? null
+          }
+          if (!plan || plan.action === 'unknown') {
+            plan = buildLocalAgentActionPlan(text, currentMonthValue, tasks, selectedTaskId) ?? plan
+          }
+          const targetTask = plan ? findAgentTargetTask(plan, tasks, selectedTaskId) : undefined
+          if (!plan || plan.action === 'unknown' || !targetTask) {
+            const message = renderAssistantAgentPlan(plan ?? { action: 'unknown' })
+            setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: message } : m))
+            return
+          }
+          const normalizedPlan = { ...plan, taskId: targetTask.id, taskTitle: targetTask.title }
+          setPendingAgentAction(normalizedPlan)
+          setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: renderAssistantAgentPlan(normalizedPlan, targetTask) } : m))
+        } catch (e) {
+          const localPlan = buildLocalAgentActionPlan(text, currentMonthValue, tasks, selectedTaskId)
+          const targetTask = localPlan ? findAgentTargetTask(localPlan, tasks, selectedTaskId) : undefined
+          if (localPlan && localPlan.action !== 'unknown' && targetTask) {
+            const normalizedPlan = { ...localPlan, taskId: targetTask.id, taskTitle: targetTask.title }
+            setPendingAgentAction(normalizedPlan)
+            setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: renderAssistantAgentPlan(normalizedPlan, targetTask) } : m))
+          } else {
+            const msg = e instanceof Error ? e.message : '暂时无法生成操作计划'
+            setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `我还没法可靠执行这句话：${msg}` } : m))
+          }
+        } finally {
+          setLoading(false)
+        }
+        return
+      }
     }
 
-    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '' }])
+    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAgentWorkingStatus() }])
     setLoading(true)
     try {
+      const minimumVisibleDelay = new Promise((resolve) => setTimeout(resolve, 650))
       const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
@@ -4371,19 +4890,22 @@ function ChatPanel({
           month: currentMonthValue,
           useKnowledge,
           useWebSearch,
+          modelChoice: selectedModelChoice,
           attachments: sentAttachments.map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
         }),
       })
+      await minimumVisibleDelay
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null
         throw new Error(err?.error ?? `请求失败：${res.status}`)
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as { content?: string }
-        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: data.content ?? '（无回复）' } : m))
+        const data = (await res.json()) as { content?: string; trace?: string[] }
+        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace) } : m))
         return
       }
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: '' } : m))
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buf = ''
@@ -4413,14 +4935,21 @@ function ChatPanel({
   }
 
   const scopeActive = useKnowledge || useWebSearch
+  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; disabled?: boolean }> = [
+    { value: 'auto', label: '自动', meta: '由 Agent 按任务选择当前可用路线' },
+    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: `${chatRouteLabel('textPrimary')} · ${aiModelConfig?.textPrimary.provider || 'DeepSeek'}` },
+    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || '文字备用', meta: `${chatRouteLabel('textFallback')} · ${aiModelConfig?.textFallback.provider || 'Kimi'}` },
+    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: `${chatRouteLabel('visionPrimary')} · 可处理图片问题` },
+    { value: 'workers-ai', label: 'Workers AI', meta: 'Cloudflare 边缘兜底模型' },
+  ]
 
   return (
     <div className="chat-panel" role="dialog" aria-label="爱丽丝">
       {/* header */}
       <div className="chat-panel-header">
         <div className="chat-panel-title">
-          <img className="alice-avatar" src="/alice-avatar.jpg" alt="爱丽丝" />
           <span>爱丽丝</span>
+          <small>Giverny Agent</small>
         </div>
         <div className="chat-panel-header-actions">
           <button type="button" className="chat-panel-icon-btn" onClick={newConversation} title="新建对话" aria-label="新建对话">
@@ -4439,7 +4968,7 @@ function ChatPanel({
       <div className="chat-panel-messages">
         {isWelcome ? (
           <div className="alice-welcome">
-            <img className="alice-welcome-avatar" src="/alice-avatar.jpg" alt="爱丽丝" />
+            <div className="alice-welcome-kicker">Giverny Agent</div>
             <h2 className="alice-welcome-title">嗨，来和爱丽丝聊一聊</h2>
             <p className="alice-welcome-sub">查工作数据、分析收入，或者聊聊设计行业问题</p>
             <div className="alice-suggested">
@@ -4454,7 +4983,7 @@ function ChatPanel({
           <>
             {messages.map((msg) => (
               <div key={msg.id} className={`chat-bubble ${msg.role}`}>
-                {msg.content || (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
+                {msg.content ? renderChatContent(msg.content) : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
               </div>
             ))}
             <div ref={bottomRef} />
@@ -4518,6 +5047,54 @@ function ChatPanel({
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
           />
+          {showModelPopup && (
+            <div className="alice-model-popup">
+              <div className="alice-model-popup-section">
+                <div className="alice-model-popup-title">模型</div>
+                {modelOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedModelChoice(option.value)
+                      setShowModelPopup(false)
+                    }}
+                  >
+                    <Bot size={15} />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.meta}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="alice-model-popup-section">
+                <div className="alice-model-popup-title">更多免费模型</div>
+                {isLoadingOpenRouterModels && <p className="alice-model-empty">正在读取 OpenRouter 免费模型…</p>}
+                {!isLoadingOpenRouterModels && openRouterModels.length === 0 && (
+                  <p className="alice-model-empty">暂无可用缓存，可先在设置里扫描 OpenRouter 免费模型。</p>
+                )}
+                {openRouterModels.map((model) => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedModelChoice(`openrouter:${model.id}` as ChatModelChoice)
+                      setShowModelPopup(false)
+                    }}
+                  >
+                    <Sparkles size={15} />
+                    <span>
+                      <strong>{model.id}</strong>
+                      <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="alice-input-toolbar">
             <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件（图片、txt、md…）" aria-label="添加附件">
               <Paperclip size={15} />
@@ -4536,6 +5113,16 @@ function ChatPanel({
                 </span>
               )}
             </button>
+            <button
+              type="button"
+              className={`alice-tool-btn alice-model-btn ${selectedModelChoice !== 'auto' ? 'active' : ''}`}
+              onClick={openModelPicker}
+              title="选择模型"
+              aria-label="选择模型"
+            >
+              <Bot size={15} />
+              <span className="alice-model-label">{chatModelChoiceLabel(selectedModelChoice, aiModelConfig)}</span>
+            </button>
             <div style={{ flex: 1 }} />
             <button
               type="button"
@@ -4544,7 +5131,7 @@ function ChatPanel({
               disabled={(!input.trim() && attachments.length === 0) || loading}
               aria-label="发送"
             >
-              <Send size={14} />
+              <ArrowUp size={17} />
             </button>
           </div>
         </div>
@@ -4596,6 +5183,7 @@ function App() {
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
   // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
   const [bootCache] = useState(() => readStateCache())
+  const bootTasks = useMemo(() => bootCache?.tasks.map(normalizeTaskClosure) ?? [], [bootCache])
   const [role, setRole] = useState<AuthRole>(bootCache?.role ?? 'guest')
   const [accessTokens, setAccessTokens] = useState<AccessToken[]>(bootCache?.accessTokens ?? [])
   const [newTokenId, setNewTokenId] = useState('')
@@ -4603,8 +5191,8 @@ function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isLoaded, setIsLoaded] = useState(Boolean(bootCache))
   const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
-  const [taskItems, setTaskItems] = useState<Task[]>(bootCache?.tasks ?? [])
-  const taskItemsRef = useRef<Task[]>(bootCache?.tasks ?? [])
+  const [taskItems, setTaskItems] = useState<Task[]>(bootTasks)
+  const taskItemsRef = useRef<Task[]>(bootTasks)
   const [updateItems, setUpdateItems] = useState<TaskUpdate[]>(bootCache?.updates ?? [])
   const [fileItems, setFileItems] = useState<FileAsset[]>(bootCache?.files ?? [])
   const [attachmentAnalyses, setAttachmentAnalyses] = useState<AttachmentAnalysis[]>(bootCache?.attachmentAnalyses ?? [])
@@ -4938,8 +5526,10 @@ function App() {
 
   const refreshState = async () => {
     const state = await api.getState()
-    writeStateCache(state)
-    setTaskItems(state.tasks)
+    const normalizedTasks = state.tasks.map(normalizeTaskClosure)
+    const normalizedState = { ...state, tasks: normalizedTasks }
+    writeStateCache(normalizedState)
+    setTaskItems(normalizedTasks)
     setUpdateItems(state.updates)
     setFileItems(state.files)
     setAttachmentAnalyses(state.attachmentAnalyses ?? [])
@@ -4961,8 +5551,8 @@ function App() {
     setDesignTypeGroups(normalizeDesignTypeGroups(state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }]))
     setAiModelConfig(state.settings.aiModel ?? null)
     setSelectedTaskId((currentId) => {
-      const activeTasks = state.tasks.filter((task) => !task.voidedAt)
-      return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? state.tasks[0]?.id ?? 0
+      const activeTasks = normalizedTasks.filter((task) => !task.voidedAt)
+      return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? normalizedTasks[0]?.id ?? 0
     })
     setBackendStatus('已接入 D1/R2')
     setIsLoaded(true)
@@ -5008,14 +5598,13 @@ function App() {
     if (role !== 'admin') {
       return
     }
-    const canBackfill = (name: string, type: string) =>
-      type === 'PDF' || /\.(pdf|mp4|mov|webm|m4v|ogv|psd|ai|docx|pptx|xlsx)$/i.test(name)
+    const canBackfill = (file: FileAsset) => ['pdf', 'ai', 'psd', 'office', 'video'].includes(fileTypeForAsset(file).kind)
     const targets = fileItems.filter(
       (file) =>
         !file.deletedAt &&
         !file.previewUrl &&
         file.sourceUrl &&
-        canBackfill(file.name, file.type) &&
+        canBackfill(file) &&
         !previewBackfillRef.current.has(file.id),
     )
     if (targets.length === 0) {
@@ -5038,7 +5627,7 @@ function App() {
             continue
           }
           const blob = await response.blob()
-          const sourceFile = new File([blob], file.name, { type: blob.type || '' })
+          const sourceFile = new File([blob], file.name, { type: blob.type || file.mimeType || '' })
           const preview = await createOptionalPreviewFile(sourceFile)
           if (!preview) {
             continue
@@ -5664,9 +6253,8 @@ function App() {
   ) => {
     try {
       validateUploadFile(file)
-      const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
       const uploadFile = await compressProgressImageFile(file)
-      const uploadExtension = uploadFile.name.split('.').pop()?.toUpperCase() || extension
+      const uploadExtension = fileTypeForFile(uploadFile).type
       const preview = await createOptionalPreviewFile(uploadFile)
       await api.uploadFile({
         taskId,
@@ -5690,7 +6278,7 @@ function App() {
   }
 
   const handleAcceptanceFileUpload = async (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => {
-    const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+    const extension = fileTypeForFile(file).type
     const preview = await createOptionalPreviewFile(file)
     const savedFile = await api.uploadFile(
       {
@@ -5804,8 +6392,8 @@ function App() {
     updatingTaskIdsRef.current.add(taskId)
     let savedSuccessfully = false
     try {
-      const savedTask = await api.updateTask(taskId, normalizedChanges)
-      setTaskItems((currentTasks) => currentTasks.map((task) => (task.id === taskId ? { ...task, ...savedTask } : task)))
+      const savedTask = normalizeTaskClosure(await api.updateTask(taskId, normalizedChanges))
+      setTaskItems((currentTasks) => currentTasks.map((task) => (task.id === taskId ? normalizeTaskClosure({ ...task, ...savedTask }) : task)))
       setBackendStatus('已接入 D1/R2')
       if (detailTaskId === taskId) {
         void loadTaskActivity(taskId)
@@ -7332,10 +7920,14 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <ChatPanel
             currentMonthValue={currentMonth.value}
             designTypeGroups={designTypeGroups}
+            tasks={taskItems}
+            selectedTaskId={selectedTask?.id}
+            aiModelConfig={aiModelConfig}
             onCreateTask={isAdmin ? handleCreateTask : async () => {
               requireAdmin()
               return undefined
             }}
+            onUpdateTask={handleUpdateTask}
             onClose={() => setIsChatOpen(false)}
           />
         </>
@@ -8147,6 +8739,7 @@ function DashboardTaskSidebar({
     taskId: 0,
     pane: 'progress' as ProgressRecordMode,
     expandedProgress: false,
+    expandedFeedback: false,
     expandedWaiting: false,
   })
 
@@ -8187,12 +8780,13 @@ function DashboardTaskSidebar({
   const displayedProgress = task.status === '计划中' ? 0 : snappedProgress
   const scopedProgressUiState = progressUiState.taskId === task.id
     ? progressUiState
-    : { taskId: task.id, pane: 'progress' as ProgressRecordMode, expandedProgress: false, expandedWaiting: false }
+    : { taskId: task.id, pane: 'progress' as ProgressRecordMode, expandedProgress: false, expandedFeedback: false, expandedWaiting: false }
   const progressPane = scopedProgressUiState.pane
   const expandedProgressEntries = scopedProgressUiState.expandedProgress
+  const expandedFeedbackEntries = scopedProgressUiState.expandedFeedback
   const expandedWaitingEntries = scopedProgressUiState.expandedWaiting
   const setProgressPane = (pane: ProgressRecordMode) => {
-    setProgressUiState({ taskId: task.id, pane, expandedProgress: false, expandedWaiting: false })
+    setProgressUiState({ taskId: task.id, pane, expandedProgress: false, expandedFeedback: false, expandedWaiting: false })
   }
   const toggleProgressEntries = () => {
     setProgressUiState((current) => {
@@ -8204,6 +8798,12 @@ function DashboardTaskSidebar({
     setProgressUiState((current) => {
       const scoped = current.taskId === task.id ? current : scopedProgressUiState
       return { ...scoped, expandedWaiting: !scoped.expandedWaiting }
+    })
+  }
+  const toggleFeedbackEntries = () => {
+    setProgressUiState((current) => {
+      const scoped = current.taskId === task.id ? current : scopedProgressUiState
+      return { ...scoped, expandedFeedback: !scoped.expandedFeedback }
     })
   }
   const toggleEntryNote = (noteKey: string) => {
@@ -8224,6 +8824,7 @@ function DashboardTaskSidebar({
     )
   }
   const sortedTimeEntries = sortTimeEntriesDesc(timeEntries)
+  const sortedFeedbackEntries = sortedTimeEntries.filter((entry) => entry.isClientFeedback)
   const sortedWaitingEntries = sortTimeEntriesDesc(waitingEntries)
   const hasAcceptanceProgressEntry = sortedTimeEntries.some((entry) => entry.isAcceptanceProgress)
   const shouldShowAcceptanceSummary = task.status === '已验收' && !hasAcceptanceProgressEntry && Boolean(task.acceptanceNote?.trim() || (task.acceptanceFiles?.length ?? 0) > 0)
@@ -8247,6 +8848,7 @@ function DashboardTaskSidebar({
     return groups
   })()
   const shownGroups = expandedProgressEntries ? groupedTimeEntries : groupedTimeEntries.slice(0, 5)
+  const shownFeedbackEntries = expandedFeedbackEntries ? sortedFeedbackEntries : sortedFeedbackEntries.slice(0, 5)
   const shownWaitingEntries = expandedWaitingEntries ? sortedWaitingEntries : sortedWaitingEntries.slice(0, 5)
   return (
     <aside className="dashboard-task-sidebar">
@@ -8350,6 +8952,9 @@ function DashboardTaskSidebar({
             <button type="button" className={progressPane === 'progress' ? 'active' : ''} onClick={() => setProgressPane('progress')} role="tab" aria-selected={progressPane === 'progress'}>
               工作进展分段计时
             </button>
+            <button type="button" className={progressPane === 'feedback' ? 'active' : ''} onClick={() => setProgressPane('feedback')} role="tab" aria-selected={progressPane === 'feedback'}>
+              甲方反馈 / 修改意见
+            </button>
             <button type="button" className={progressPane === 'waiting' ? 'active' : ''} onClick={() => setProgressPane('waiting')} role="tab" aria-selected={progressPane === 'waiting'}>
               等待记录不计结算
             </button>
@@ -8363,8 +8968,12 @@ function DashboardTaskSidebar({
                   <Plus size={15} />
                   记录进展
                 </button>
+                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : task.status === '计划中' ? '改为进行中后可记录反馈' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'feedback')}>
+                  <Plus size={15} />
+                  记录反馈
+                </button>
               </div>
-              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.length} 段 · {billableHours.toFixed(1)}h</p>
+              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.filter((entry) => !entry.isClientFeedback).length} 段 · {billableHours.toFixed(1)}h；反馈 {sortedFeedbackEntries.length} 条</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
                 <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
               ) : (
@@ -8386,14 +8995,16 @@ function DashboardTaskSidebar({
                         {acceptanceSummaryFiles.length > 0 && (
                           <div className="dashboard-side-entry-files" aria-label="验收附件">
                             {acceptanceSummaryFiles.map((file) => {
-                              const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                              const fileType = fileTypeForAsset(file).type
                               const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                              const documentSourceUrl = fileThumbnailSource(file)
                               return (
                                 <AttachmentHoverThumbnail
                                   key={file.id}
                                   name={file.name}
                                   type={fileType}
                                   previewUrl={previewUrl}
+                                  sourceUrl={documentSourceUrl}
                                   compact
                                   onOpen={() => onPreviewFile(file)}
                                 />
@@ -8444,21 +9055,30 @@ function DashboardTaskSidebar({
                               </span>
                             ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
+                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">甲方反馈</span>}
+                            {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
                             {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
+                          {entry.isClientFeedback && (
+                            <p className="dashboard-side-entry-meta">
+                              {entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}
+                            </p>
+                          )}
                           <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                               {entryFiles.map((file) => {
-                                const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                                const fileType = fileTypeForAsset(file).type
                                 const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                                const documentSourceUrl = fileThumbnailSource(file)
                                 return (
                                   <AttachmentHoverThumbnail
                                     key={file.id}
                                     name={file.name}
                                     type={fileType}
                                     previewUrl={previewUrl}
+                                    sourceUrl={documentSourceUrl}
                                     compact
                                     onOpen={() => onPreviewFile(file)}
                                   />
@@ -8473,6 +9093,70 @@ function DashboardTaskSidebar({
                   {groupedTimeEntries.length > 5 && (
                     <button type="button" className="dashboard-side-expand" onClick={toggleProgressEntries}>
                       {expandedProgressEntries ? '收起记录' : `展开 ${groupedTimeEntries.length - 5} 条`}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          ) : progressPane === 'feedback' ? (
+            <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-feedback" role="tabpanel">
+              <div className="dashboard-side-subsection-title">
+                <span>甲方反馈 · 修改意见</span>
+                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
+                  <Plus size={15} />
+                  记录反馈
+                </button>
+              </div>
+              <p className="dashboard-side-subsection-meta">用于追溯 B01 / B02 等每轮修改意见，默认不计工时。</p>
+              {sortedFeedbackEntries.length === 0 ? (
+                <p className="dashboard-side-muted">暂无甲方反馈；收到批注、聊天截图或版本意见时可单独记录。</p>
+              ) : (
+                <>
+                  <div className="dashboard-side-timeline">
+                    {shownFeedbackEntries.map((entry) => {
+                      const entryFiles = files.filter((file) => file.taskId === task.id && !file.deletedAt && file.entryId === entry.id)
+                      return (
+                        <article className="dashboard-side-time-item dashboard-side-feedback-item" key={entry.id}>
+                          <span className="dot" />
+                          <div className="dashboard-side-entry-actions">
+                            <button type="button" onClick={() => onOpenProgress(task.id, 'feedback', entry.id)}>编辑</button>
+                            <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'feedback', entry.id)}>删除</button>
+                          </div>
+                          <div className="dashboard-side-entry-time-row">
+                            <time>{formatEntryDateTimeRange(task, entry)}</time>
+                            <span className="progress-entry-tag client-feedback">甲方反馈</span>
+                            {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
+                          </div>
+                          {renderEntryNote(`${task.id}:feedback:${entry.id}`, entry.note || '未填写修改意见')}
+                          <p className="dashboard-side-entry-meta">{entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>
+                          <em className="progress-time-pill is-uncounted">不计工时</em>
+                          {entryFiles.length > 0 && (
+                            <div className="dashboard-side-entry-files" aria-label="反馈附件">
+                              {entryFiles.map((file) => {
+                                const fileType = fileTypeForAsset(file).type
+                                const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                                const documentSourceUrl = fileThumbnailSource(file)
+                                return (
+                                  <AttachmentHoverThumbnail
+                                    key={file.id}
+                                    name={file.name}
+                                    type={fileType}
+                                    previewUrl={previewUrl}
+                                    sourceUrl={documentSourceUrl}
+                                    compact
+                                    onOpen={() => onPreviewFile(file)}
+                                  />
+                                )
+                              })}
+                            </div>
+                          )}
+                        </article>
+                      )
+                    })}
+                  </div>
+                  {sortedFeedbackEntries.length > 5 && (
+                    <button type="button" className="dashboard-side-expand" onClick={toggleFeedbackEntries}>
+                      {expandedFeedbackEntries ? '收起记录' : `展开 ${sortedFeedbackEntries.length - 5} 条`}
                     </button>
                   )}
                 </>
@@ -9005,6 +9689,7 @@ function TaskProgressModal({
   const [replacementAttachmentId, setReplacementAttachmentId] = useState('')
   const [replacementExistingFileId, setReplacementExistingFileId] = useState<number | null>(null)
   const isWaitingMode = mode === 'waiting'
+  const isFeedbackMode = mode === 'feedback'
   const editingEntry = (isWaitingMode ? task.waitingEntries ?? [] : task.timeEntries ?? []).find((entry) => entry.id === editEntryId)
   const initialAcceptanceFlag = initialAcceptanceMode || Boolean(editingEntry?.isAcceptanceProgress)
   const existingEntryAttachments = files.filter((file) => {
@@ -9125,12 +9810,25 @@ function TaskProgressModal({
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
   const [countAcceptanceTime, setCountAcceptanceTime] = useState(true)
-  // 普通进展是否计入工时：默认计入；关闭后本次进展计 0 工时（仅记录进展/反馈，不进结算）。
+  // 普通进展是否计入工时：默认计入；编辑已有分段时以保存的 isUncounted 为准。
   // 适用于「对方只给了点修改反馈，想留个进展记录但不算工时」等场景。
-  const [countProgressTime, setCountProgressTime] = useState(!editingEntry || minutesForTimeEntry(editingEntry) > 0)
+  const [countProgressTime, setCountProgressTime] = useState(() => {
+    if (isFeedbackMode) {
+      return false
+    }
+    if (!editingEntry) {
+      return true
+    }
+    if (editingEntry.isUncounted) {
+      return false
+    }
+    return minutesForTimeEntry(editingEntry) > 0
+  })
   // 本次进展是否为「改稿轮次」：显式开关，开 = 计入需求人画像的改稿轮次；
   // 关 = 只是把任务分阶段提交，不算改稿。仅用于画像/AI 分析，不影响计时与结算。
-  const [isRevisionRound, setIsRevisionRound] = useState(Boolean(editingEntry?.isRevision))
+  const [isRevisionRound, setIsRevisionRound] = useState(isFeedbackMode ? editingEntry?.isRevision !== false : Boolean(editingEntry?.isRevision))
+  const [feedbackVersion, setFeedbackVersion] = useState(editingEntry?.feedbackVersion ?? '')
+  const [feedbackSource, setFeedbackSource] = useState(editingEntry?.feedbackSource ?? '甲方')
   const [isAcceptanceBaseExpanded, setIsAcceptanceBaseExpanded] = useState(false)
   const acceptanceBaseRef = useRef<HTMLElement | null>(null)
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialProgressDraft.feedbackRating ?? '')
@@ -9186,7 +9884,7 @@ function TaskProgressModal({
   const isEditingAcceptanceEntry = Boolean(isEditingEntry && editingEntry?.isAcceptanceProgress)
   const isRollingBackAcceptanceEntry = isEditingAcceptanceEntry && !isAcceptanceMode && task.status === '已验收'
   const hasAnotherAcceptanceProgress = !isWaitingMode && (task.timeEntries ?? []).some((entry) => entry.isAcceptanceProgress && entry.id !== editEntryId)
-  const canToggleAcceptanceMode = Boolean(onConfirmAcceptance) && !isWaitingMode && !hasAnotherAcceptanceProgress && (task.status !== '已验收' || isEditingAcceptanceEntry)
+  const canToggleAcceptanceMode = Boolean(onConfirmAcceptance) && !isWaitingMode && !isFeedbackMode && !hasAnotherAcceptanceProgress && (task.status !== '已验收' || isEditingAcceptanceEntry)
   const isConvertingEntryToAcceptance = isAcceptanceMode && isEditingEntry && !editingEntry?.isAcceptanceProgress && task.status !== '已验收'
   const showAcceptanceTaskReference = () => {
     setIsAcceptanceBaseExpanded(true)
@@ -9194,9 +9892,10 @@ function TaskProgressModal({
       acceptanceBaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
   }
-  const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
+  const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isFeedbackMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
   // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
-  const timeCounts = isWaitingMode ? true : isAcceptanceMode ? countAcceptanceTime : countProgressTime
+  const timeCounts = isWaitingMode ? true : isFeedbackMode ? false : isAcceptanceMode ? countAcceptanceTime : countProgressTime
+  const progressUncountedActive = !countProgressTime
   // 只有「验收且不计工时」才锁定时间输入；普通进展即便不计工时，时间仍可自选
   const lockSchedule = isAcceptanceMode && !countAcceptanceTime
   // 不计工时的普通进展：没有有效时间段也能保存，只要有备注或附件（计 0 工时，仅作进展记录）
@@ -9284,6 +9983,27 @@ function TaskProgressModal({
         note: noteText,
       } as WaitingEntry
     }
+    if (isFeedbackMode) {
+      if (!noteText && pendingAttachments.length === 0) {
+        return null
+      }
+      const hasPicked = Boolean(start && activeStartDate)
+      const nowDate = isoDate()
+      const nowTime = isoDateTime().slice(11, 16) || '00:00'
+      return {
+        id: editEntryId ?? stagedEntryIdRef.current,
+        date: hasPicked ? activeStartDate : nowDate,
+        endDate: hasPicked ? activeStartDate : nowDate,
+        start: hasPicked ? start : nowTime,
+        end: hasPicked ? start : nowTime,
+        note: noteText,
+        isClientFeedback: true,
+        isUncounted: true,
+        isRevision: isRevisionRound,
+        feedbackVersion: feedbackVersion.trim(),
+        feedbackSource: feedbackSource.trim() || '甲方',
+      } as TimeEntry
+    }
     // 不计工时的普通进展：时间由用户自选（用于记录与排序），计 0 工时。未选时间则锚到当前时刻。
     if (isZeroTimeProgress) {
       if (!noteText && pendingAttachments.length === 0) {
@@ -9330,7 +10050,7 @@ function TaskProgressModal({
     const uploadFile = acceptance
       ? renamedFile(attachment.file, attachment.name)
       : await compressProgressImageFile(renamedFile(attachment.file, attachment.name))
-    const extension = uploadFile.name.split('.').pop()?.toUpperCase() || 'FILE'
+    const extension = fileTypeForFile(uploadFile).type
     const preview = await createOptionalPreviewFile(uploadFile)
     return api.uploadFile(
       {
@@ -9649,11 +10369,11 @@ function TaskProgressModal({
       [file.id]: { loading: true },
     }))
     try {
-      const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+      const fileType = fileTypeForAsset(file).type
       const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
       const suggestion = await api.suggestAttachmentName({
         fileName: sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name),
-        mimeType: file.type,
+        mimeType: file.mimeType || file.type,
         imageBase64: await imageUrlBase64(previewUrl),
         note,
         recentFileNames: files.filter((item) => item.taskId === task.id && item.id !== file.id).map((item) => item.name).slice(-12),
@@ -9739,6 +10459,8 @@ function TaskProgressModal({
     ? ''
     : isWaitingMode
       ? '记录非工作的等待开始时间，仅用于洞察分析，不计入结算工时'
+      : isFeedbackMode
+        ? '记录甲方给出的版本反馈、批注意见或聊天截图，默认不计工时但进入生命周期'
       : isEditingEntry
         ? '修改这段记录的内容和时间'
         : `${task.title} · 按时间段计时，工时自动累计并计入结算`
@@ -9830,7 +10552,11 @@ function TaskProgressModal({
       const body = note.trim() || nextEntry?.note?.trim() || ''
       if (body || finalizedUploadedNames.length > 0) {
         await onCreateTaskUpdate(task.id, {
-          title: isRollingBackAcceptanceEntry ? '验收进展已撤回' : isEditingEntry ? (isWaitingMode ? '等待记录已修改' : '进展记录已修改') : (isWaitingMode ? '等待记录' : '进展更新'),
+          title: isRollingBackAcceptanceEntry
+            ? '验收进展已撤回'
+            : isEditingEntry
+              ? (isWaitingMode ? '等待记录已修改' : isFeedbackMode ? '反馈记录已修改' : '进展记录已修改')
+              : (isWaitingMode ? '等待记录' : isFeedbackMode ? '甲方反馈' : '进展更新'),
           body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
           hours: 0,
           visible: false,
@@ -10331,6 +11057,45 @@ function TaskProgressModal({
     </section>
   )
 
+  const feedbackTimeFields = (
+    <section className="progress-lite-time-formula progress-feedback-time-formula">
+      <div className="progress-lite-time-heading">
+        <div>
+          <span>反馈时间</span>
+          <small>只用于生命周期追溯，不计入结算工时</small>
+        </div>
+      </div>
+      <div className="progress-schedule-wrap">
+        <div className="new-task-schedule-row progress-lite-schedule-row">
+          <PlanDateTimeField
+            label="反馈时间"
+            value={progressStartValue}
+            onChange={(value) => {
+              setHasTouchedSchedule(true)
+              writeProgressStart(value)
+              if (value) {
+                writeProgressEnd(value)
+              }
+              setTimeEntryError('')
+            }}
+            isActive
+            readOnly={false}
+            pickerId="feedback-time"
+            activePickerId={activeDatePickerId}
+            onActivePickerChange={setActiveDatePickerId}
+          />
+          <div className="field progress-lite-hours-field">
+            <span className="new-task-inline-label">计时口径</span>
+            <output className="new-task-hours-input new-task-hours-output" aria-label="反馈计时口径">
+              0 min
+            </output>
+          </div>
+        </div>
+      </div>
+      <p className="progress-lite-duration" role="status">保存后显示为一条「甲方反馈」节点，可附截图 / 批注文件追溯。</p>
+    </section>
+  )
+
   const timeFields = (
     <section className="progress-lite-time-formula">
       <div className="progress-lite-time-heading">
@@ -10367,14 +11132,14 @@ function TaskProgressModal({
           {!isAcceptanceMode && !isWaitingMode && (
             <button
               type="button"
-              className={`switch-control progress-lite-time-toggle ${countProgressTime ? 'active' : ''}`}
-              aria-pressed={countProgressTime}
-              aria-label={countProgressTime ? '本次计入工时，点击关闭则计 0 工时' : '本次不计工时，点击开启则计入'}
-              title={countProgressTime ? '本次计入工时，点击关闭则计 0 工时' : '本次不计工时，点击开启则计入'}
+              className={`switch-control progress-lite-time-toggle ${progressUncountedActive ? 'active' : ''}`}
+              aria-pressed={progressUncountedActive}
+              aria-label={progressUncountedActive ? '本次不计工时，点击关闭则计入' : '本次计入工时，点击开启则计 0 工时'}
+              title={progressUncountedActive ? '本次不计工时，点击关闭则计入' : '本次计入工时，点击开启则计 0 工时'}
               onClick={() => setCountProgressTime((value) => !value)}
             >
               <i />
-              <span>{countProgressTime ? '计入工时' : '不计工时'}</span>
+              <span>{progressUncountedActive ? '不计工时' : '计入工时'}</span>
             </button>
           )}
           <button
@@ -10592,14 +11357,14 @@ function TaskProgressModal({
     <ModalShell className="task-action-modal task-progress-modal progress-lite-modal" labelledBy="task-progress-title" onClose={onClose}>
       <header className="progress-lite-header">
         <div>
-          <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : isAcceptanceRevisionMode ? '编辑验收进展' : isAcceptanceMode ? '记录验收进展' : '记录进展'}</h2>
+          <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : isFeedbackMode ? (isEditingEntry ? '编辑反馈' : '记录反馈') : isAcceptanceRevisionMode ? '编辑验收进展' : isAcceptanceMode ? '记录验收进展' : '记录进展'}</h2>
           {progressHeaderHint && <small>{progressHeaderHint}</small>}
         </div>
         <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
           <X size={18} />
         </button>
       </header>
-      <div className={`progress-lite-body ${isWaitingMode ? 'waiting-mode' : ''} ${isAcceptanceMode ? 'acceptance-mode' : ''}`}>
+      <div className={`progress-lite-body ${isWaitingMode ? 'waiting-mode' : ''} ${isFeedbackMode ? 'feedback-mode' : ''} ${isAcceptanceMode ? 'acceptance-mode' : ''}`}>
         {isWaitingMode ? (
           <>
             {waitingTimeFields}
@@ -10672,9 +11437,40 @@ function TaskProgressModal({
               </section>
             )}
             {isAcceptanceMode && timeFields}
+            {isFeedbackMode && (
+              <>
+                <section className="progress-lite-field progress-feedback-meta">
+                  <label>
+                    <span>反馈版本</span>
+                    <input
+                      value={feedbackVersion}
+                      onChange={(event) => setFeedbackVersion(event.target.value)}
+                      placeholder="例如：B01 / B02 / B03"
+                    />
+                  </label>
+                  <div className="progress-feedback-source" role="group" aria-label="反馈来源">
+                    <span>反馈来源</span>
+                    <div>
+                      {clientFeedbackSources.map((source) => (
+                        <button
+                          type="button"
+                          key={source}
+                          className={feedbackSource === source ? 'active' : ''}
+                          aria-pressed={feedbackSource === source}
+                          onClick={() => setFeedbackSource(source)}
+                        >
+                          {source}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+                {feedbackTimeFields}
+              </>
+            )}
             <section className="progress-lite-field">
               <div className="progress-lite-label-row">
-                <label htmlFor="progress-lite-note">{isAcceptanceMode ? '验收备注' : '进展内容'}</label>
+                <label htmlFor="progress-lite-note">{isAcceptanceMode ? '验收备注' : isFeedbackMode ? '修改意见' : '进展内容'}</label>
                 <span className="progress-lite-label-actions">
                   {isAcceptanceMode && (
                     <button
@@ -10689,8 +11485,8 @@ function TaskProgressModal({
                   <button
                     type="button"
                     className="icon-button ai-assist-button"
-                    aria-label={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
-                    title={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
+                    aria-label={isAcceptanceMode ? 'AI 优化验收备注' : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
+                    title={isAcceptanceMode ? 'AI 优化验收备注' : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
                     onClick={() => void requestProgressAiSuggestion()}
                     disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
                   >
@@ -10709,7 +11505,7 @@ function TaskProgressModal({
                     updateActiveDraft((current) => ({ ...current, note: value }))
                   }
                 }}
-                placeholder={isAcceptanceMode ? '例如：终稿已按甲方反馈调整完成，PNG / PDF / 源文件已同步，确认进入验收。' : '例如：按甲方反馈调整封面配色，导出终稿'}
+                placeholder={isAcceptanceMode ? '例如：终稿已按甲方反馈调整完成，PNG / PDF / 源文件已同步，确认进入验收。' : isFeedbackMode ? '例如：B01 反馈：标题需要更突出，主视觉换成更正式的蓝色，补充数据安全痛点。' : '例如：按甲方反馈调整封面配色，导出终稿'}
               />
               {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
                 <div className="ai-suggestion-panel task-text-ai-panel">
@@ -10721,7 +11517,7 @@ function TaskProgressModal({
                       </button>
                     )}
                   </div>
-                  {isProgressAiLoading && <p>{isAcceptanceMode ? '正在结合任务需求、已上传文件和当前备注优化文案...' : '正在结合当前输入、任务附件和最近进展优化文案...'}</p>}
+                  {isProgressAiLoading && <p>{isAcceptanceMode ? '正在结合任务需求、已上传文件和当前备注优化文案...' : isFeedbackMode ? '正在结合任务需求和附件整理修改意见...' : '正在结合当前输入、任务附件和最近进展优化文案...'}</p>}
                   {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
                   {progressAiSuggestion && (
                     <>
@@ -10752,7 +11548,7 @@ function TaskProgressModal({
                 </div>
               )}
             </section>
-            {!isAcceptanceMode && (
+            {!isAcceptanceMode && !isFeedbackMode && (
               <div
                 className={`progress-acceptance-toggle progress-revision-toggle ${isRevisionRound ? 'active' : ''}`}
                 role="button"
@@ -10770,7 +11566,25 @@ function TaskProgressModal({
                 <em>{isRevisionRound ? '计入需求人画像（不影响计时与结算）' : '仅分阶段提交，不算改稿'}</em>
               </div>
             )}
-            {!isAcceptanceMode && timeFields}
+            {isFeedbackMode && (
+              <div
+                className={`progress-acceptance-toggle progress-revision-toggle ${isRevisionRound ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setIsRevisionRound((current) => !current)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setIsRevisionRound((current) => !current)
+                  }
+                }}
+              >
+                <span className={`switch-control ${isRevisionRound ? 'active' : ''}`}><i /></span>
+                <span className="progress-acceptance-toggle-label">计入改稿轮次</span>
+                <em>{isRevisionRound ? '这条反馈会进入需求人画像 / 改稿统计' : '仅作为反馈记录，不计入改稿轮次'}</em>
+              </div>
+            )}
+            {!isAcceptanceMode && !isFeedbackMode && timeFields}
             <section
               className={`progress-lite-field progress-attachment-field ${isDraggingFiles ? 'is-dragover' : ''}`}
               onPaste={(event) => {
@@ -10834,9 +11648,9 @@ function TaskProgressModal({
                   <small>已有附件</small>
                   <div className="progress-attachment-list progress-existing-attachment-list" aria-label="已有附件列表">
                     {existingEntryAttachments.map((file) => {
-                      const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                      const fileType = fileTypeForAsset(file).type
                       const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                      const documentSourceUrl = fileType === 'PDF' ? authedPreviewUrl(file.sourceUrl) : undefined
+                      const documentSourceUrl = fileThumbnailSource(file)
                       const draftName = existingAttachmentDrafts[file.id] ?? file.name
                       const aiState = existingAttachmentAiState[file.id] ?? {}
                       const isAcceptanceFile = isExistingAttachmentAcceptanceFile(file)
@@ -10873,7 +11687,7 @@ function TaskProgressModal({
                               />
                             </div>
                             <small title={file.name}>完整名称：{file.name}</small>
-                            {!isAcceptanceMode && (
+                            {!isAcceptanceMode && !isFeedbackMode && (
                               <button
                                 type="button"
                                 className={`attachment-acceptance-toggle ${isAcceptanceFile ? 'active' : ''}`}
@@ -11028,7 +11842,7 @@ function TaskProgressModal({
                             </button>
                           </div>
                         )}
-                        {!isAcceptanceMode && (
+                        {!isAcceptanceMode && !isFeedbackMode && (
                           <button
                             type="button"
                             className={`attachment-acceptance-toggle ${attachment.isAcceptanceFile ? 'active' : ''}`}
@@ -11227,7 +12041,7 @@ function TaskProgressModal({
           </button>
         ) : (
           <button data-modal-save="true" className="primary-button" disabled={isSaving || Boolean(draftConflict) || (isWaitingMode ? !hasWaitingStart : (!hasDraftTimeEntry && !canSaveZeroTimeProgress && pendingExtraSegments.length === 0))} onClick={() => void saveProgress()}>
-            {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : '记录进展'}
+            {isSaving ? '保存中…' : isEditingEntry ? '保存修改' : isWaitingMode ? '记录等待' : isFeedbackMode ? '记录反馈' : '记录进展'}
           </button>
         )}
       </footer>
@@ -11411,7 +12225,7 @@ function TaskDetailModal({
 
         <section className="task-detail-log">
           <div className="section-heading">
-            <h3>进展分段计时</h3>
+            <h3>进展与反馈时间线</h3>
             <Clock3 size={15} />
           </div>
           {detailTimeEntries.length === 0 && <p className="calendar-empty-hint">暂无分段计时。</p>}
@@ -11433,23 +12247,28 @@ function TaskDetailModal({
                   <article className="timeline-item" key={entry.id}>
                     <span className="dot" />
                     <div className="task-detail-entry-time">
-                      <time>{formatEntryDateTimeRange(task, entry)}</time>
-                      {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
-                      {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
-                      <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
-                    </div>
-                    {entry.note && <p>{entry.note}</p>}
+	                      <time>{formatEntryDateTimeRange(task, entry)}</time>
+	                      {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
+	                      {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">甲方反馈</span>}
+	                      {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
+	                      {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
+	                      <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
+	                    </div>
+	                    {entry.note && <p>{entry.note}</p>}
+	                    {entry.isClientFeedback && <p className="dashboard-side-entry-meta">{entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>}
                     {entryFiles.length > 0 && (
                       <div className="dashboard-side-entry-files" aria-label="本段进展附件">
                         {entryFiles.map((file) => {
-                          const fileType = (file.type || fileTypeFromName(file.name) || 'FILE').toUpperCase()
+                          const fileType = fileTypeForAsset(file).type
                           const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+                          const documentSourceUrl = fileThumbnailSource(file)
                           return (
                             <AttachmentHoverThumbnail
                               key={file.id}
                               name={file.name}
                               type={fileType}
                               previewUrl={previewUrl}
+                              sourceUrl={documentSourceUrl}
                               compact
                               onOpen={() => onPreviewFile(file)}
                             />
@@ -12085,7 +12904,7 @@ function FilesView({
           )}
           <div className="grouped-file-grid">
             {selectedFiles.map((file) => {
-              const fileType = file.type.toUpperCase()
+              const fileType = fileTypeForAsset(file).type
               return (
                 <article
                   className={`file-thumb-card ${selectedFile?.id === file.id ? 'selected' : ''}`}
@@ -12207,7 +13026,7 @@ function FileInspector({
 
   if (!file) return null
 
-  const fileType = file.type.toUpperCase()
+  const fileType = fileTypeForAsset(file).type
   const sourceUrl = authedPreviewUrl(file.sourceUrl)
   const saveMetadata = async (nextTags = tags) => {
     setIsSaving(true)
@@ -12360,7 +13179,7 @@ function FileInspector({
 }
 
 function FileThumbnailPreview({ file, inspector = false }: { file: FileAsset; inspector?: boolean }) {
-  const fileType = file.type.toUpperCase()
+  const fileType = fileTypeForAsset(file).type
   const previewUrl = authedPreviewUrl(file.previewUrl)
   const sourceUrl = fileDocumentPreviewSource(file)
 
@@ -12382,6 +13201,10 @@ function FileThumbnailPreview({ file, inspector = false }: { file: FileAsset; in
         <OfficePreview fileType={fileType} sourceUrl={sourceUrl} compact />
       </div>
     )
+  }
+
+  if (videoFileTypes.has(fileType) && sourceUrl) {
+    return <video className="file-thumbnail-video" src={sourceUrl} muted playsInline preload="metadata" />
   }
 
   return (
@@ -15820,13 +16643,13 @@ function DailyKnowledgeModal({
 }
 
 function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
-  const fileType = file.type.toUpperCase()
+  const fileType = fileTypeForAsset(file).type
   const sourceUrl = fileDocumentPreviewSource(file)
   const previewUrl = authedPreviewUrl(file.previewUrl ?? file.sourceUrl)
   const isImage = isInlineImageFileType(fileType)
   const isRasterPreview = Boolean(file.previewUrl) && ['PSD', 'AI'].includes(fileType)
   const isPdfLike = isInlineDocumentFileType(fileType)
-  const isVideo = ['MP4', 'WEBM', 'MOV'].includes(fileType)
+  const isVideo = videoFileTypes.has(fileType)
   const isOffice = isOfficeFileType(fileType)
 
   return (

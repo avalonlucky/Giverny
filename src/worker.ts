@@ -47,6 +47,8 @@ type Env = {
   KIMI_BASE_URL?: string
   KIMI_MODEL?: string
   OPENROUTER_API_KEY?: string
+  OPENAI_API_KEY?: string
+  ANTHROPIC_API_KEY?: string
   AI_PROVIDER?: string
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
@@ -88,6 +90,8 @@ type VectorizeBinding = {
 type WorkerExecutionContext = {
   waitUntil: (promise: Promise<unknown>) => void
 }
+
+const roundCents = (value: number) => Math.round(value * 100) / 100
 
 // 管理员账号：该邮箱 + 平台密码拥有最高权限（含口令管理）
 const ADMIN_EMAIL = 'bh141425@gmail.com'
@@ -496,6 +500,12 @@ function providerEnvironmentKey(env: Env, provider: AiModelProvider) {
   }
   if (provider === 'openrouter') {
     return env.OPENROUTER_API_KEY || ''
+  }
+  if (provider === 'openai') {
+    return env.OPENAI_API_KEY || ''
+  }
+  if (provider === 'anthropic') {
+    return env.ANTHROPIC_API_KEY || ''
   }
   return ''
 }
@@ -1183,6 +1193,76 @@ async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 
   }
 }
 
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'workers-ai' | `openrouter:${string}`
+type ChatModelTarget =
+  | { kind: 'endpoint'; endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>; label: string; note?: string }
+  | { kind: 'workers-ai'; label: string; note?: string }
+
+function normalizeChatModelChoice(value: unknown): ChatModelChoice {
+  const raw = String(value ?? 'auto').trim()
+  if (raw === 'auto' || raw === 'workers-ai' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
+  if (raw === 'route:textPrimary' || raw === 'route:textFallback' || raw === 'route:visionPrimary' || raw === 'route:visionFallback') {
+    return raw as ChatModelChoice
+  }
+  return 'auto'
+}
+
+async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promise<ChatModelTarget> {
+  if (choice === 'workers-ai') {
+    return { kind: 'workers-ai', label: env.WORKERS_AI_MODEL || WORKERS_AI_DEFAULT_MODEL }
+  }
+  if (choice.startsWith('openrouter:')) {
+    const model = choice.replace(/^openrouter:/, '').trim()
+    const apiKey = env.OPENROUTER_API_KEY || ''
+    return {
+      kind: 'endpoint',
+      label: `OpenRouter / ${model}`,
+      endpoint: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model,
+        apiKey,
+        keySource: apiKey ? 'environment' : 'missing',
+      },
+      note: apiKey ? undefined : 'OpenRouter API Key 未配置，已回落到默认模型链路。',
+    }
+  }
+  const route = choice === 'auto' ? 'textPrimary' : choice.replace(/^route:/, '') as AiModelRouteKey
+  const endpoint = await resolveAiEndpoint(env, route)
+  return {
+    kind: 'endpoint',
+    endpoint,
+    label: `${route} / ${endpoint.model}`,
+    note: !endpoint.apiKey ? `${route} 未配置 API Key，已回落到默认模型链路。` : undefined,
+  }
+}
+
+async function callTextWithSelectedModel(
+  env: Env,
+  prompt: string,
+  choice: ChatModelChoice,
+  maxOutputTokens = 1200,
+): Promise<{ text: string; modelLabel: string; fallbackUsed: boolean; notes: string[] }> {
+  const notes: string[] = []
+  const target = await resolveChatModelTarget(env, choice)
+  if (target.note) notes.push(target.note)
+  try {
+    if (target.kind === 'workers-ai') {
+      const text = await callWorkersAiText(env, prompt, maxOutputTokens)
+      if (text) return { text, modelLabel: target.label, fallbackUsed: false, notes }
+      throw new Error('Workers AI 未返回内容')
+    }
+    if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
+    const text = await callAiEndpointText(target.endpoint, prompt, maxOutputTokens)
+    if (text) return { text, modelLabel: target.label, fallbackUsed: false, notes }
+    throw new Error('模型未返回内容')
+  } catch (error) {
+    notes.push(`${target.label} 调用失败：${describeAiCallError(error)}；已回落到默认模型链路。`)
+    const text = await callTextWithFallback(env, prompt, maxOutputTokens)
+    return { text, modelLabel: '默认模型链路', fallbackUsed: true, notes }
+  }
+}
+
 function describeAiCallError(error: unknown) {
   return error instanceof Error ? error.message : '模型请求失败'
 }
@@ -1253,6 +1333,223 @@ async function callMultimodalWithVisionFallback(env: Env, prompt: string, assets
     }
   }
   throw new Error(errors.length ? errors.slice(-2).join('；') : '视觉模型暂时不可用')
+}
+
+function normalizeMonthValue(year: number, month: number) {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return ''
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function addMonthValue(monthValue: string, offset: number) {
+  const match = monthValue.match(/^(\d{4})-(\d{2})$/)
+  const date = match ? new Date(Number(match[1]), Number(match[2]) - 1 + offset, 1) : new Date()
+  return normalizeMonthValue(date.getFullYear(), date.getMonth() + 1)
+}
+
+function extractRequestedMonths(text: string, currentMonthValue: string) {
+  const current = /^\d{4}-\d{2}$/.test(currentMonthValue) ? currentMonthValue : nowIso().slice(0, 7)
+  const currentYear = Number(current.slice(0, 4))
+  const months = new Set<string>()
+  const explicitYearMonth = text.matchAll(/(\d{4})\s*年\s*(\d{1,2})\s*月/g)
+  for (const match of explicitYearMonth) {
+    const value = normalizeMonthValue(Number(match[1]), Number(match[2]))
+    if (value) months.add(value)
+  }
+  const shortMonth = text.matchAll(/(?<!\d)(\d{1,2})\s*月(?:份)?/g)
+  for (const match of shortMonth) {
+    const value = normalizeMonthValue(currentYear, Number(match[1]))
+    if (value) months.add(value)
+  }
+  if (/本月|这个月|当前月/.test(text)) months.add(current)
+  if (/上月|上个月/.test(text)) months.add(addMonthValue(current, -1))
+  if (/下月|下个月/.test(text)) months.add(addMonthValue(current, 1))
+  return [...months].slice(0, 12)
+}
+
+function isBillableDbTask(task: Pick<DbTask, 'is_billable' | 'status'>) {
+  return task.is_billable !== 0 && task.status !== '不计费' && task.status !== '终止'
+}
+
+type MonthFinanceStats = {
+  month: string
+  billableHours: number
+  totalHours: number
+  amount: number
+  taskCount: number
+  billableTaskCount: number
+  taskLines: string[]
+}
+
+async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: number) {
+  const stats: MonthFinanceStats[] = []
+  for (const month of months) {
+    const rows = await env.DB.prepare(
+      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC',
+    )
+      .bind(month)
+      .all<DbTask>()
+    const tasks = rows.results ?? []
+    const billableTasks = tasks.filter(isBillableDbTask)
+    const billableHours = roundCents(billableTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
+    const totalHours = roundCents(tasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
+    const amount = roundCents(billableTasks.reduce((sum, task) => sum + roundCents((Number(task.actual_hours) || 0) * hourlyRate), 0))
+    const taskLines = billableTasks
+      .filter((task) => Number(task.actual_hours) > 0)
+      .map((task) => {
+        const hours = roundCents(Number(task.actual_hours) || 0)
+        const taskAmount = roundCents(hours * hourlyRate)
+        return `  - ${task.title || '未命名'}：${hours}h × ¥${hourlyRate}/h = ¥${taskAmount}`
+      })
+    stats.push({
+      month,
+      billableHours,
+      totalHours,
+      amount,
+      taskCount: tasks.length,
+      billableTaskCount: billableTasks.length,
+      taskLines,
+    })
+  }
+  return stats
+}
+
+function isFinanceQuestion(text: string) {
+  return /(?:金额|收入|多少钱|多少[钱元]|结算|工资|费用|合计|加起来|总共|统计)/.test(text)
+}
+
+function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number) {
+  const mergedHours = roundCents(stats.reduce((sum, row) => sum + row.billableHours, 0))
+  const mergedAmount = roundCents(stats.reduce((sum, row) => sum + row.amount, 0))
+  const lines = stats.map((item) => {
+    return `- ${item.month}：¥${item.amount}（计费工时 ${item.billableHours}h，按 ¥${hourlyRate}/小时）`
+  })
+  return [
+    stats.length > 1
+      ? `算出来了：${stats.map((item) => item.month).join(' + ')} 合计 ¥${mergedAmount}，计费工时 ${mergedHours}h。`
+      : `算出来了：${stats[0]?.month ?? ''} 是 ¥${mergedAmount}，计费工时 ${mergedHours}h。`,
+    '',
+    ...lines,
+  ].join('\n')
+}
+
+type ChatAgentToolName = 'query_month_finance' | 'query_recent_tasks' | 'none'
+type ChatAgentPlanResponse = {
+  intent?: 'finance' | 'worklog' | 'knowledge' | 'general' | 'unknown'
+  tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
+  confidence?: number
+  question?: string
+}
+
+type ChatAgentToolResult = {
+  name: ChatAgentToolName
+  args: Record<string, unknown>
+  result: unknown
+}
+
+async function planChatAgentTurn(
+  env: Env,
+  payload: {
+    question: string
+    currentMonth: string
+    today: string
+    requestedMonthCandidates: string[]
+    hasAttachments: boolean
+    useKnowledge: boolean
+    useWebSearch: boolean
+  },
+): Promise<ChatAgentPlanResponse | null> {
+  const systemPrompt = `你是 Giverny 的聊天智能体规划器。你的任务是先理解用户问题，再决定是否调用工具；不要直接回答用户。
+可用工具：
+1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
+2. query_recent_tasks：查询近期任务摘要。参数：limit:number。
+3. none：不需要工具，交给普通聊天模型回答。
+
+规划规则：
+- 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
+- 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
+- 用户问任务概览、最近做了什么、效率如何，可调用 query_recent_tasks。
+- 图片或附件问题优先交给后续多模态流程，工具可返回 none。
+- 只输出 JSON，不要回答正文。`
+  return callTextFallbackJson<ChatAgentPlanResponse>(
+    env,
+    systemPrompt,
+    payload,
+    'intent:"finance"|"worklog"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"query_recent_tasks"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    900,
+  )
+}
+
+async function executeChatAgentTools(
+  env: Env,
+  plan: ChatAgentPlanResponse | null,
+  fallbackMonths: string[],
+  hourlyRate: number,
+): Promise<{ results: ChatAgentToolResult[]; trace: string[] }> {
+  const results: ChatAgentToolResult[] = []
+  const trace: string[] = []
+  const plannedTools = Array.isArray(plan?.tools) ? plan.tools : []
+  let usedFinanceFallback = false
+
+  for (const tool of plannedTools) {
+    const name = tool.name === 'query_month_finance' || tool.name === 'query_recent_tasks' ? tool.name : 'none'
+    if (name === 'none') continue
+    if (name === 'query_month_finance') {
+      const rawMonths = Array.isArray(tool.args?.months) ? tool.args?.months : fallbackMonths
+      const months = rawMonths.map((item) => String(item)).filter((item) => /^\d{4}-\d{2}$/.test(item)).slice(0, 12)
+      const finalMonths = months.length ? months : fallbackMonths
+      if (!finalMonths.length) continue
+      const stats = await computeMonthFinanceStats(env, finalMonths, hourlyRate)
+      results.push({ name, args: { months: finalMonths }, result: { hourlyRate, stats } })
+      trace.push(`工具执行：query_month_finance(${finalMonths.join('、')})，从 D1 读取任务、工时和计费状态。`)
+      continue
+    }
+    if (name === 'query_recent_tasks') {
+      const limit = Math.min(Math.max(Number(tool.args?.limit ?? 12), 1), 30)
+      const rows = await env.DB.prepare(
+        'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT ?',
+      )
+        .bind(limit)
+        .all<DbTask>()
+      results.push({ name, args: { limit }, result: rows.results ?? [] })
+      trace.push(`工具执行：query_recent_tasks(${limit})，读取近期任务摘要。`)
+    }
+  }
+
+  if (results.length === 0 && fallbackMonths.length > 0) {
+    usedFinanceFallback = true
+    const stats = await computeMonthFinanceStats(env, fallbackMonths, hourlyRate)
+    results.push({ name: 'query_month_finance', args: { months: fallbackMonths }, result: { hourlyRate, stats } })
+    trace.push(`工具补救：规划器未给出可执行金额工具参数，使用月份候选 ${fallbackMonths.join('、')} 计算。`)
+  }
+
+  if (usedFinanceFallback || results.length > 0) {
+    trace.unshift(`模型规划：${plan?.intent || 'unknown'}，${plannedTools.map((tool) => tool.name).filter(Boolean).join('、') || '未显式选择工具'}`)
+  }
+  return { results, trace }
+}
+
+async function composeChatAgentAnswer(
+  env: Env,
+  args: {
+    question: string
+    toolResults: ChatAgentToolResult[]
+    modelChoice: ChatModelChoice
+  },
+): Promise<{ content: string; modelLabel: string; fallbackUsed: boolean; notes: string[] }> {
+  const prompt = `你是 Giverny 的工作智能体。请基于工具结果回答用户问题。
+要求：
+- 如果工具结果里有金额、工时、月份，必须严格使用工具结果数字，不要重算或改写为其他数值。
+- 先给结论，再给分月/分项说明。
+- 语气自然、简洁，不要说“根据数据无法计算”。
+- 可以使用 Markdown 加粗突出关键金额或关键结论。
+
+用户问题：
+${args.question}
+
+工具结果 JSON：
+${JSON.stringify(args.toolResults)}`
+  const answer = await callTextWithSelectedModel(env, prompt, args.modelChoice, 1400)
+  return { content: answer.text, modelLabel: answer.modelLabel, fallbackUsed: answer.fallbackUsed, notes: answer.notes }
 }
 
 async function callAiEndpointVision(
@@ -1508,7 +1805,7 @@ async function getAcceptanceAttachmentAiContexts(env: Env, taskId: unknown): Pro
   return (rows.results ?? []).map((row) => ({
     id: row.id,
     name: row.file_name,
-    type: row.file_type || '',
+    type: inferAttachmentFileType(row.file_name, row.mime_type, row.file_type),
     mimeType: row.mime_type || '',
     tag: row.file_tag || '',
     uploadedAt: formatBeijing(row.uploaded_at),
@@ -1609,7 +1906,7 @@ async function r2ObjectBytes(env: Env, key: string) {
 }
 
 async function buildAnalysisSource(env: Env, row: DbAttachment & { requirement: string | null }) {
-  const extension = (row.file_name.split('.').pop() || row.file_type || '').toLowerCase()
+  const extension = inferAttachmentFileType(row.file_name, row.mime_type, row.file_type).toLowerCase()
   const mimeType = row.mime_type || ''
   const originalSize = Number(row.file_size) || 0
 
@@ -2901,39 +3198,6 @@ function formatBeijing(value: string | null) {
   return `${beijing.getUTCFullYear()}-${pad2(beijing.getUTCMonth() + 1)}-${pad2(beijing.getUTCDate())} ${pad2(beijing.getUTCHours())}:${pad2(beijing.getUTCMinutes())}`
 }
 
-const toTask = (row: DbTask, files: string[] = []): Task => ({
-  id: Number(row.id),
-  date: row.start_date ?? '',
-  estimatedDate: row.estimated_delivery_date ?? '',
-  actualDeliveryDate: row.actual_delivery_date ?? '',
-  settlementMonth: row.settlement_month || '',
-  isSupplemental: Boolean(row.is_supplemental),
-  type: row.design_type ?? '',
-  title: row.title,
-  requirement: row.requirement ?? '',
-  requester: row.requester ?? '',
-  contact: row.contact_person ?? '',
-  reviewer: row.reviewer ?? '',
-  stage: row.stage ?? row.status,
-  estimatedHours: Number(row.estimated_hours) || 0,
-  actualHours: Number(row.actual_hours) || 0,
-  status: row.status,
-  progress: Number(row.progress) || 0,
-  billable: Number(row.is_billable) !== 0,
-  suspendReason: row.suspend_reason ?? '',
-  terminateReason: row.terminate_reason ?? '',
-  supplementalNote: row.supplemental_note ?? '',
-  acceptanceNote: row.acceptance_note ?? '',
-  feedbackRating: normalizeFeedbackRating(row.feedback_rating),
-  feedbackTags: parseFeedbackTags(row.feedback_tags_json),
-  feedbackNote: row.feedback_note ?? '',
-  timeEntries: parseTimeEntries(row.time_entries_json),
-  waitingEntries: parseWaitingEntries(row.waiting_entries_json),
-  voidedAt: row.voided_at ?? '',
-  voidReason: row.void_reason ?? '',
-  files,
-})
-
 const parseTimeEntries = (value: string | null): TimeEntry[] => {
   if (!value) {
     return []
@@ -2952,6 +3216,9 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
             isAcceptanceProgress: Boolean((entry as TimeEntry).isAcceptanceProgress),
             isRevision: Boolean((entry as TimeEntry).isRevision),
             isUncounted: Boolean((entry as TimeEntry).isUncounted),
+            isClientFeedback: Boolean((entry as TimeEntry).isClientFeedback),
+            ...((entry as TimeEntry).feedbackVersion ? { feedbackVersion: String((entry as TimeEntry).feedbackVersion) } : {}),
+            ...((entry as TimeEntry).feedbackSource ? { feedbackSource: String((entry as TimeEntry).feedbackSource) } : {}),
             ...((entry as TimeEntry).groupId ? { groupId: String((entry as TimeEntry).groupId) } : {}),
             reason: String((entry as WaitingEntry).reason ?? '') as WaitingReason,
           }))
@@ -2963,6 +3230,101 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
 }
 
 const parseWaitingEntries = (value: string | null): WaitingEntry[] => parseTimeEntries(value)
+
+function acceptanceProgressEndDateTime(entries: TimeEntry[], fallbackDate: string | null | undefined) {
+  const acceptanceEntries = entries.filter((entry) => entry.isAcceptanceProgress)
+  if (acceptanceEntries.length === 0) {
+    return ''
+  }
+  const latest = acceptanceEntries
+    .map((entry) => {
+      const endDate = entry.endDate || entry.date || String(fallbackDate || '').slice(0, 10)
+      const end = entry.end
+      const stamp = Date.parse(`${endDate}T${end || '00:00'}:00+08:00`)
+      return { value: endDate && end ? `${endDate}T${end}` : '', stamp }
+    })
+    .filter((item) => item.value && Number.isFinite(item.stamp))
+    .sort((a, b) => b.stamp - a.stamp)[0]
+  return latest?.value ?? ''
+}
+
+function normalizeTaskClosure<T extends { status: TaskStatus; stage?: string; progress?: number; actualDeliveryDate?: string; timeEntries: TimeEntry[]; date?: string | null }>(task: T): T {
+  if (!task.timeEntries.some((entry) => entry.isAcceptanceProgress)) {
+    return task
+  }
+  return {
+    ...task,
+    status: '已验收',
+    stage: task.stage && task.stage !== '待验收' && task.stage !== '进行中' ? task.stage : '已验收',
+    progress: 100,
+    actualDeliveryDate: task.actualDeliveryDate || acceptanceProgressEndDateTime(task.timeEntries, task.date),
+  }
+}
+
+type TaskUpdateDraft = {
+  title: string
+  requirement: string
+  type: string
+  date: string
+  estimatedDate: string
+  settlementMonth: string
+  isSupplemental: boolean
+  estimatedHours: number
+  actualHours: number
+  requester: string
+  contact: string
+  reviewer: string
+  stage: string
+  status: TaskStatus
+  progress: number
+  suspendReason: string
+  terminateReason: string
+  supplementalNote: string
+  acceptanceNote: string
+  feedbackRating: TaskFeedbackRating | ''
+  feedbackTags: TaskFeedbackTag[]
+  feedbackNote: string
+  timeEntries: TimeEntry[]
+  waitingEntries: WaitingEntry[]
+  actualDeliveryDate: string
+}
+
+const toTask = (row: DbTask, files: string[] = []): Task => {
+  const timeEntries = parseTimeEntries(row.time_entries_json)
+  const normalized = normalizeTaskClosure({
+    id: Number(row.id),
+    date: row.start_date ?? '',
+    estimatedDate: row.estimated_delivery_date ?? '',
+    actualDeliveryDate: row.actual_delivery_date ?? '',
+    settlementMonth: row.settlement_month || '',
+    isSupplemental: Boolean(row.is_supplemental),
+    type: row.design_type ?? '',
+    title: row.title,
+    requirement: row.requirement ?? '',
+    requester: row.requester ?? '',
+    contact: row.contact_person ?? '',
+    reviewer: row.reviewer ?? '',
+    stage: row.stage ?? row.status,
+    estimatedHours: Number(row.estimated_hours) || 0,
+    actualHours: Number(row.actual_hours) || 0,
+    status: row.status,
+    progress: Number(row.progress) || 0,
+    billable: Number(row.is_billable) !== 0,
+    suspendReason: row.suspend_reason ?? '',
+    terminateReason: row.terminate_reason ?? '',
+    supplementalNote: row.supplemental_note ?? '',
+    acceptanceNote: row.acceptance_note ?? '',
+    feedbackRating: normalizeFeedbackRating(row.feedback_rating),
+    feedbackTags: parseFeedbackTags(row.feedback_tags_json),
+    feedbackNote: row.feedback_note ?? '',
+    timeEntries,
+    waitingEntries: parseWaitingEntries(row.waiting_entries_json),
+    voidedAt: row.voided_at ?? '',
+    voidReason: row.void_reason ?? '',
+    files,
+  })
+  return normalized
+}
 
 const feedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
 const feedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
@@ -2995,6 +3357,80 @@ const toUpdate = (row: DbUpdate, files: string[] = []): TaskUpdate => ({
   files,
 })
 
+const trustedAttachmentExtensions = new Set([
+  'PNG',
+  'JPG',
+  'JPEG',
+  'WEBP',
+  'GIF',
+  'SVG',
+  'BMP',
+  'PDF',
+  'AI',
+  'PSD',
+  'DOCX',
+  'XLSX',
+  'PPTX',
+  'DOC',
+  'XLS',
+  'PPT',
+  'MP4',
+  'MOV',
+  'WEBM',
+  'M4V',
+  'OGV',
+  'TXT',
+  'MD',
+  'CSV',
+  'JSON',
+  'ZIP',
+  'RAR',
+  '7Z',
+])
+
+function trustedExtensionFromName(name: string | null | undefined) {
+  const raw = String(name ?? '').split('.').pop()?.trim().toUpperCase() ?? ''
+  if (!raw || raw === String(name ?? '').toUpperCase()) {
+    return ''
+  }
+  const normalized = raw === 'JPEG' ? 'JPG' : raw
+  return trustedAttachmentExtensions.has(normalized) ? normalized : ''
+}
+
+function attachmentTypeFromMime(mimeType: string | null | undefined) {
+  const mime = String(mimeType ?? '').toLowerCase()
+  if (!mime) return ''
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPG'
+  if (mime === 'image/png') return 'PNG'
+  if (mime === 'image/webp') return 'WEBP'
+  if (mime === 'image/gif') return 'GIF'
+  if (mime === 'image/svg+xml') return 'SVG'
+  if (mime === 'image/bmp') return 'BMP'
+  if (mime === 'application/pdf') return 'PDF'
+  if (mime.startsWith('video/')) {
+    if (mime.includes('quicktime')) return 'MOV'
+    if (mime.includes('webm')) return 'WEBM'
+    if (mime.includes('ogg')) return 'OGV'
+    return 'MP4'
+  }
+  if (mime.includes('wordprocessingml.document')) return 'DOCX'
+  if (mime.includes('presentationml.presentation')) return 'PPTX'
+  if (mime.includes('spreadsheetml.sheet')) return 'XLSX'
+  if (mime === 'application/msword') return 'DOC'
+  if (mime === 'application/vnd.ms-powerpoint') return 'PPT'
+  if (mime === 'application/vnd.ms-excel') return 'XLS'
+  if (mime.startsWith('text/')) return mime.includes('csv') ? 'CSV' : 'TXT'
+  if (mime.includes('zip')) return 'ZIP'
+  return ''
+}
+
+function inferAttachmentFileType(name: string | null | undefined, mimeType: string | null | undefined, currentType?: string | null) {
+  const fromMime = attachmentTypeFromMime(mimeType)
+  const rawType = String(currentType ?? '').trim().toUpperCase()
+  const fromCurrent = trustedAttachmentExtensions.has(rawType === 'JPEG' ? 'JPG' : rawType) ? (rawType === 'JPEG' ? 'JPG' : rawType) : ''
+  return fromMime || fromCurrent || trustedExtensionFromName(name) || 'FILE'
+}
+
 const toFile = (row: DbAttachment): FileAsset => ({
   id: Number(row.id),
   taskId: Number(row.task_id),
@@ -3002,7 +3438,8 @@ const toFile = (row: DbAttachment): FileAsset => ({
   scope: row.attachment_scope === 'acceptance' ? 'acceptance' : 'progress',
   name: row.file_name,
   task: row.task_title ?? '未关联任务',
-  type: row.file_type ?? 'FILE',
+  type: inferAttachmentFileType(row.file_name, row.mime_type, row.file_type),
+  mimeType: row.mime_type ?? '',
   size: row.display_size ?? `${row.file_size ?? 0} B`,
   uploadedAt: formatBeijing(row.uploaded_at),
   final: Boolean(row.is_final),
@@ -3847,7 +4284,7 @@ async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerEx
     }
   }
 
-  const next = {
+  const next = normalizeTaskClosure<TaskUpdateDraft>({
     title: changes.title ?? current.title,
     requirement: changes.requirement ?? current.requirement ?? '',
     type: changes.type ?? current.design_type ?? '',
@@ -3878,8 +4315,8 @@ async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerEx
       ? String(changes.actualDeliveryDate ?? '')
       : changes.status === '已验收' && current.status !== '已验收'
         ? nowIso()
-        : current.actual_delivery_date,
-  }
+        : current.actual_delivery_date ?? '',
+  })
 
   await env.DB.prepare(
     `UPDATE tasks SET
@@ -4116,7 +4553,7 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   const taskId = String(form.get('taskId') ?? '')
   const entryId = String(form.get('entryId') ?? '').trim()
   const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
-  const type = String(form.get('type') || file.name.split('.').pop()?.toUpperCase() || 'FILE')
+  const type = inferAttachmentFileType(file.name, file.type || null, String(form.get('type') ?? ''))
   const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(taskId).first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
@@ -4128,7 +4565,7 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   if (preview instanceof File && preview.size > 0) {
     previewKey = `previews/${taskId}/${id}/${sanitizeFileName(preview.name)}`
     await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
-  } else if (file.type.startsWith('image/')) {
+  } else if (type === 'PNG' || type === 'JPG' || type === 'WEBP' || type === 'GIF' || type === 'SVG' || type === 'BMP') {
     previewKey = r2Key
   }
 
@@ -4230,7 +4667,8 @@ async function insertAttachment(
     scope: payload.scope,
     name: payload.fileName,
     task: task.title,
-    type: payload.fileType,
+    type: inferAttachmentFileType(payload.fileName, payload.mimeType, payload.fileType),
+    mimeType: payload.mimeType ?? '',
     size: payload.displaySize,
     uploadedAt: formatBeijing(uploadedAt),
     final: payload.final,
@@ -4306,7 +4744,7 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
     entryId,
     scope,
     fileName,
-    fileType: String(form.get('type') ?? fileName.split('.').pop()?.toUpperCase() ?? 'FILE'),
+    fileType: inferAttachmentFileType(fileName, String(form.get('contentType') ?? '') || null, String(form.get('type') ?? '')),
     mimeType: String(form.get('contentType') ?? '') || null,
     r2Key: key,
     previewKey,
@@ -6062,6 +6500,7 @@ async function chatWithAi(env: Env, request: Request) {
     month?: string
     useKnowledge?: boolean
     useWebSearch?: boolean
+    modelChoice?: string
     attachments?: Array<{ type: 'image' | 'text'; name: string; data: string; mimeType: string }>
   }
   const messages = Array.isArray(body.messages)
@@ -6070,6 +6509,7 @@ async function chatWithAi(env: Env, request: Request) {
   const month = String(body.month ?? '').trim().slice(0, 7)
   const useKnowledge = body.useKnowledge !== false
   const useWebSearch = body.useWebSearch !== false
+  const modelChoice = normalizeChatModelChoice(body.modelChoice)
   const today = nowIso().slice(0, 10)
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
@@ -6095,6 +6535,7 @@ async function chatWithAi(env: Env, request: Request) {
     useKnowledge ? listKnowledgeNotes(env) : Promise.resolve([] as KnowledgeNoteRow[]),
     needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
   ])
+  const requestedMonths = extractRequestedMonths(lastMsg, month)
 
   // 将 "HH:MM" 时间字符串 + 日期字符串转换为分钟戳（与前端 dateTimeMinuteStamp 一致）
   function timeStrToMinutes(date: string, time: string): number {
@@ -6163,8 +6604,42 @@ async function chatWithAi(env: Env, request: Request) {
     ? `\n=== 用户上传的文档 ===\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
     : ''
 
+  if (imageAttachments.length === 0 && textAttachments.length === 0) {
+    const plan = await planChatAgentTurn(env, {
+      question: lastMsg,
+      currentMonth: month,
+      today,
+      requestedMonthCandidates: requestedMonths,
+      hasAttachments: false,
+      useKnowledge,
+      useWebSearch: Boolean(needsWebSearch),
+    })
+    const { results: toolResults, trace } = await executeChatAgentTools(
+      env,
+      plan,
+      requestedMonths.length > 0 && isFinanceQuestion(lastMsg) ? requestedMonths : [],
+      hourlyRate,
+    )
+    if (toolResults.length > 0) {
+      const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
+      const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
+      const financeStats = statsResult?.stats ?? []
+      const finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
+      return ok({
+        content: finalContent,
+        trace: [
+          `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
+          ...trace,
+          `生成答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''} 组织最终回答。`,
+          ...answer.notes,
+        ],
+      })
+    }
+  }
+
   const systemPrompt = `你是 Giverny 工作数据助手，帮助这位独立设计师分析任务、工时、收入，也能回答设计行业问题。
 若数据中有相关信息则优先引用；若没有且开启了联网搜索，则参考搜索结果；都没有则诚实说明。
+如果问题涉及月份金额、收入、结算、工时合计，必须优先引用“确定性月份金额统计”，不能声称历史月份无法计算。
 回答简洁自然，像了解对方工作节奏的助理。
 
 === Giverny 键盘快捷键（准确信息，回答快捷键问题时必须以此为准）===
@@ -6239,86 +6714,97 @@ ${textAttachmentSection}
     }
   }
 
-  const endpoint = await resolveAiEndpoint(env, 'textPrimary')
-  if (endpoint.provider === 'gemini' || !endpoint.apiKey) {
-    try {
-      const text = await callTextWithFallback(env, fallbackChatPrompt, 1500)
-      return ok({ content: text })
-    } catch (error) {
-      return fail(`AI 暂时不可用：${describeAiCallError(error)}`, 503)
-    }
-  }
-
-  const fallbackToJsonChat = async (error: unknown) => {
-    console.warn(JSON.stringify({ event: 'ai_chat_stream_primary_failed', error: describeAiCallError(error) }))
-    try {
-      const text = await callTextWithFallback(env, fallbackChatPrompt, 1500)
-      return ok({ content: text })
-    } catch (fallbackError) {
-      return fail(`AI 暂时不可用：${describeAiCallError(fallbackError)}`, 503)
-    }
-  }
-
-  // OpenAI 兼容流式
-  let aiRes: Response
   try {
-    aiRes = await fetch(`${endpoint.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${endpoint.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: endpoint.model,
-        stream: true,
-        max_tokens: 1500,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      }),
+    const answer = await callTextWithSelectedModel(env, fallbackChatPrompt, modelChoice, 1500)
+    return ok({
+      content: answer.text,
+      trace: [
+        '理解问题：未触发结构化工具，进入普通对话流程。',
+        `生成答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
+        ...answer.notes,
+      ],
     })
   } catch (error) {
-    return fallbackToJsonChat(error)
+    return fail(`AI 暂时不可用：${describeAiCallError(error)}`, 503)
   }
+}
 
-  if (!aiRes.ok || !aiRes.body) {
-    const err = (await aiRes.json().catch(() => null)) as { error?: { message?: string } } | null
-    return fallbackToJsonChat(new Error(err?.error?.message ?? `AI 调用失败：${aiRes.status}`))
+type AgentPlanResponse = {
+  action?: 'record-feedback' | 'unknown'
+  taskId?: number
+  taskTitle?: string
+  note?: string
+  feedbackVersion?: string
+  feedbackSource?: string
+  dateTime?: string
+  confidence?: number
+  question?: string
+}
+
+async function planAgentAction(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    text?: string
+    month?: string
+    selectedTask?: unknown
+    tasks?: unknown[]
   }
+  const text = String(body.text ?? '').trim()
+  if (!text) {
+    return fail('缺少操作描述', 400)
+  }
+  const now = nowIso()
+  const systemPrompt = `你是 Giverny 的工作执行智能体规划器。你的任务是把用户自然语言转换成“待确认操作计划”，不要直接执行。
+目前只允许输出两类 action：
+1. record-feedback：记录甲方反馈 / 修改意见 / 返修意见 / B01、B02 等版本意见。它会写入指定任务的进展与反馈时间线，不计工时。
+2. unknown：无法可靠判断或缺少任务时。
 
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-  const writer = writable.getWriter()
-  const encoder = new TextEncoder()
-  const decoder = new TextDecoder()
+任务匹配规则：
+- 如果用户说“当前任务/这个任务”，优先使用 selectedTask。
+- 如果用户提到任务名称，匹配 tasks 中最接近的标题，并返回 taskId。
+- 没有明确任务且没有 selectedTask 时，返回 unknown，并用 question 询问任务。
 
-  void (async () => {
-    const reader = aiRes.body!.getReader()
-    let buf = ''
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('data:')) continue
-          const data = trimmed.slice(5).trim()
-          if (data === '[DONE]') {
-            await writer.write(encoder.encode('data:[DONE]\n\n'))
-            return
-          }
-          try {
-            const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
-            const content = chunk.choices?.[0]?.delta?.content
-            if (content) await writer.write(encoder.encode(`data:${JSON.stringify({ t: content })}\n\n`))
-          } catch { /* skip malformed */ }
-        }
-      }
-    } finally {
-      await writer.close().catch(() => {})
-    }
-  })()
-
-  return new Response(readable, {
-    headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' },
-  })
+字段规则：
+- note 是要记录的反馈正文，去掉“帮我记录/给当前任务/甲方反馈”等指令外壳，但保留实际修改意见。
+- feedbackVersion 只提取 B01/B02/B03 等版本号，没有就空字符串。
+- feedbackSource 默认为“甲方”，用户说客户则填“客户”。
+- dateTime 使用本地时间格式 YYYY-MM-DDTHH:mm；用户没说时间就用当前时间 ${now.slice(0, 16)}。
+- confidence 0 到 1；低于 0.55 时应返回 unknown。
+- 只返回 JSON 对象。`
+  const parsed = await callTextFallbackJson<AgentPlanResponse>(
+    env,
+    systemPrompt,
+    {
+      text,
+      month: String(body.month ?? '').slice(0, 7),
+      now: now.slice(0, 16),
+      selectedTask: body.selectedTask ?? null,
+      tasks: Array.isArray(body.tasks) ? body.tasks.slice(0, 30) : [],
+    },
+    'action:"record-feedback"|"unknown", taskId?:number, taskTitle?:string, note?:string, feedbackVersion?:string, feedbackSource?:string, dateTime?:string(YYYY-MM-DDTHH:mm), confidence?:number, question?:string',
+    900,
+  )
+  if (!parsed) {
+    return ok({ plan: { action: 'unknown', question: '暂时无法生成可靠的操作计划。', confidence: 0 } })
+  }
+  const action = parsed.action === 'record-feedback' ? 'record-feedback' : 'unknown'
+  const confidence = Number(parsed.confidence ?? 0)
+  const plan: AgentPlanResponse = {
+    ...parsed,
+    action: confidence > 0 && confidence < 0.55 ? 'unknown' : action,
+    taskId: Number.isFinite(Number(parsed.taskId)) ? Number(parsed.taskId) : undefined,
+    taskTitle: String(parsed.taskTitle ?? '').trim(),
+    note: String(parsed.note ?? '').trim(),
+    feedbackVersion: String(parsed.feedbackVersion ?? '').trim().toUpperCase(),
+    feedbackSource: String(parsed.feedbackSource ?? '甲方').trim() || '甲方',
+    dateTime: String(parsed.dateTime ?? now.slice(0, 16)).slice(0, 16),
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    question: String(parsed.question ?? '').trim(),
+  }
+  if (plan.action === 'record-feedback' && (!plan.note || (!plan.taskId && !plan.taskTitle))) {
+    plan.action = 'unknown'
+    plan.question = !plan.note ? '要记录的反馈内容还不够明确。' : '我还不知道要记录到哪一个任务。'
+  }
+  return ok({ plan })
 }
 
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
@@ -6742,6 +7228,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/models' ||
       path === '/api/ai/openrouter/free-models' ||
       path === '/api/ai/openrouter/free-models/scan' ||
+      path === '/api/ai/agent-plan' ||
       path === '/api/ai/chat' ||
       path === '/api/ai/task-edits' ||
       path === '/api/ai/task-title-edits' ||
@@ -6891,6 +7378,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/daily-knowledge' && request.method === 'POST') {
     return suggestDailyKnowledgeWithAi(env, request)
+  }
+  if (path === '/api/ai/agent-plan' && request.method === 'POST') {
+    return planAgentAction(env, request)
   }
   if (path === '/api/ai/chat' && request.method === 'POST') {
     return chatWithAi(env, request)

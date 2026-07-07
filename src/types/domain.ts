@@ -59,6 +59,10 @@ export type TimeEntry = {
   isRevision?: boolean
   /** 本段是否「不计工时」：时间仍可自选（用于记录与排序），但计 0 工时、不进结算。 */
   isUncounted?: boolean
+  /** 本段是否为甲方反馈 / 修改意见节点：用于记录 B01/B02 等版本反馈，不计工时但进入任务生命周期。 */
+  isClientFeedback?: boolean
+  feedbackVersion?: string
+  feedbackSource?: string
   /** 同一次「记录进展」提交的多段工时共享同一 groupId，用于右侧面板合并展示。 */
   groupId?: string
 }
@@ -77,6 +81,7 @@ export type FileAsset = {
   name: string
   task: string
   type: string
+  mimeType?: string
   size: string
   uploadedAt: string
   final: boolean
