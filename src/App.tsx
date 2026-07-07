@@ -16402,20 +16402,22 @@ function NewTaskModal({
     }
   }
 
-  const loadBriefFiles = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return
+  const loadBriefFiles = async (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
+    const files = Array.from(fileList ?? [])
+    if (files.length === 0) return
     setBriefError('')
     setIsBriefLoading(true)
     const added: BriefItem[] = []
     try {
-      for (const file of Array.from(fileList).slice(0, 6)) {
+      for (const file of files.slice(0, 6)) {
+        const displayName = source === 'paste' ? pastedImageName(file) : file.name
         if (file.type.startsWith('image/')) {
           const base64 = await new Promise<string>((resolve) => {
             const reader = new FileReader()
             reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '')
             reader.readAsDataURL(file)
           })
-          added.push({ id: crypto.randomUUID(), name: file.name, text: '', chars: 0, isImage: true, base64, mimeType: file.type || 'image/jpeg' })
+          added.push({ id: crypto.randomUUID(), name: displayName, text: '', chars: 0, isImage: true, base64, mimeType: file.type || 'image/jpeg' })
         } else {
           const text = await extractAttachmentText(file)
           if (text.trim()) {
@@ -16423,7 +16425,7 @@ function NewTaskModal({
             const previewUrl = previewFile ? URL.createObjectURL(previewFile) : undefined
             added.push({
               id: crypto.randomUUID(),
-              name: file.name,
+              name: displayName,
               text,
               chars: text.length,
               previewUrl,
@@ -16441,6 +16443,18 @@ function NewTaskModal({
       setIsBriefLoading(false)
       if (briefInputRef.current) briefInputRef.current.value = ''
     }
+  }
+
+  const handleBriefPaste = (event: React.ClipboardEvent) => {
+    const pastedImages = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+    if (pastedImages.length === 0) {
+      return
+    }
+    event.preventDefault()
+    void loadBriefFiles(pastedImages, 'paste')
   }
 
   const requestAiSuggestion = async () => {
@@ -16589,7 +16603,7 @@ function NewTaskModal({
           </div>
         </header>
 
-        <div className="form-grid new-task-form">
+        <div className="form-grid new-task-form" onPaste={handleBriefPaste}>
           <div className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
             <span>设计类型</span>
             <NewTaskDesignTypeSelector groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
@@ -16683,7 +16697,7 @@ function NewTaskModal({
                   }}
                 >
                   <Plus size={briefFiles.length > 0 ? 16 : 14} />
-                  {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传或拖拽甲方文案到这里')}
+                  {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传、拖拽或 Command+V 粘贴甲方文案到这里')}
                   {briefFiles.length > 0 && isBriefLoading && <small>读取中…</small>}
                   {briefFiles.length === 0 && <small>支持 Word .docx / PPT .pptx / PDF / txt / 图片，最多 6 个</small>}
                 </button>
