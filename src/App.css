@@ -12855,6 +12855,23 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
+.calendar-event-pill.span-middle,
+.calendar-allday-chip.span-middle {
+  border-left-color: transparent;
+}
+
+.calendar-event-pill:not(.span-start),
+.calendar-allday-chip:not(.span-start) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.calendar-event-pill:not(.span-end),
+.calendar-allday-chip:not(.span-end) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .calendar-holiday-pill {
   background: var(--color-primary);
   color: var(--color-surface-strong);

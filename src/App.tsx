@@ -11490,6 +11490,25 @@ function calendarTaskDurationMinutes(task: Task) {
   return Math.max(30, Math.round((Number.isFinite(hours) && hours > 0 ? hours : 1) * 60))
 }
 
+function calendarTaskRange(task: Task) {
+  const start = datePart(task.date || task.settlementMonth || isoDate())
+  const lifecycleEnd = datePart(taskLifecycleDate(task) || '')
+  const plannedEnd = datePart(task.estimatedDate || '')
+  const rawEnd = task.status === '已验收'
+    ? lifecycleEnd || plannedEnd || start
+    : plannedEnd || lifecycleEnd || start
+  const end = rawEnd >= start ? rawEnd : start
+  return { start, end }
+}
+
+function compareCalendarTasks(a: Task, b: Task) {
+  const rangeCompare = calendarTaskRange(a).start.localeCompare(calendarTaskRange(b).start)
+  if (rangeCompare !== 0) {
+    return rangeCompare
+  }
+  return a.title.localeCompare(b.title)
+}
+
 function CalendarView({
   monthValue,
   mode,
@@ -11512,14 +11531,17 @@ function CalendarView({
   const selectedDate = focusDate || `${monthValue}-01`
   const today = isoDate()
   const visibleTasks = useMemo(() => tasks.filter((task) => !task.voidedAt), [tasks])
+  const taskRanges = useMemo(() => new Map(visibleTasks.map((task) => [task.id, calendarTaskRange(task)])), [visibleTasks])
   const tasksByDate = useMemo(() => {
     const map = new Map<string, Task[]>()
     visibleTasks.forEach((task) => {
-      const key = datePart(task.date)
-      map.set(key, [...(map.get(key) ?? []), task].sort((a, b) => a.date.localeCompare(b.date)))
+      const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
+      dateRangeValues(range.start, range.end).forEach((key) => {
+        map.set(key, [...(map.get(key) ?? []), task].sort(compareCalendarTasks))
+      })
     })
     return map
-  }, [visibleTasks])
+  }, [taskRanges, visibleTasks])
 
   const weekStart = startOfCalendarWeek(selectedDate)
   const weekDays = Array.from({ length: 7 }, (_, index) => addIsoDays(weekStart, index))
@@ -11536,34 +11558,48 @@ function CalendarView({
     '--calendar-type-color': designTypeColorForTask(task.type, designTypeGroups),
   }) as CSSProperties
 
-  const renderMonthTask = (task: Task) => (
+  const rangeSegmentClass = (task: Task, day: string) => {
+    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
+    const isStart = day === range.start
+    const isEnd = day === range.end
+    return `${isStart ? 'span-start' : 'span-middle'} ${isEnd ? 'span-end' : ''}`
+  }
+
+  const renderMonthTask = (task: Task, day: string) => {
+    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
+    const showTitle = day === range.start || addIsoDays(day, -1) < range.start
+    return (
     <button
       type="button"
-      className="calendar-event-pill"
+      className={`calendar-event-pill ${rangeSegmentClass(task, day)}`}
       key={task.id}
       style={calendarTaskColorStyle(task)}
       onClick={(event) => {
         event.stopPropagation()
         onOpenTask(task.id)
       }}
-      title={`${task.title} · ${task.type}`}
+      title={`${task.title} · ${formatMonthDay(range.start)} - ${formatMonthDay(range.end)}`}
     >
-      {task.title}
+      {showTitle ? task.title : '\u00A0'}
     </button>
-  )
+    )
+  }
 
-  const renderAllDayTask = (task: Task) => (
+  const renderAllDayTask = (task: Task, day: string) => {
+    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
+    return (
     <button
       type="button"
-      className="calendar-allday-chip"
+      className={`calendar-allday-chip ${rangeSegmentClass(task, day)}`}
       key={task.id}
       style={calendarTaskColorStyle(task)}
       onClick={() => onOpenTask(task.id)}
-      title={`${task.title} · ${task.type}`}
+      title={`${task.title} · ${formatMonthDay(range.start)} - ${formatMonthDay(range.end)}`}
     >
       {task.title}
     </button>
-  )
+    )
+  }
 
   const renderTimedTask = (task: Task) => {
     const startsAt = calendarTaskStartsAt(task)
@@ -11642,7 +11678,7 @@ function CalendarView({
           return (
             <div className="calendar-allday-cell" key={day}>
               {renderHolidayPill(dayMeta, `${day}-holiday`)}
-              {dayTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map(renderAllDayTask)}
+              {dayTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map((task) => renderAllDayTask(task, day))}
               {dayTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{dayTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
             </div>
           )
@@ -11655,7 +11691,7 @@ function CalendarView({
           ))}
         </div>
         {days.map((day) => {
-          const dayTasks = tasksByDate.get(day) ?? []
+          const dayTasks = (tasksByDate.get(day) ?? []).filter((task) => datePart(task.date) === day)
           return (
             <div className="calendar-time-column" key={day}>
               {calendarHours.map((hour) => <span className="calendar-hour-line" key={hour} />)}
@@ -11693,7 +11729,7 @@ function CalendarView({
                   </span>
                   <span className="google-month-events">
                     {renderHolidayPill(dayMeta, `${day.value}-holiday`)}
-                    {cellTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map(renderMonthTask)}
+                    {cellTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map((task) => renderMonthTask(task, day.value))}
                     {cellTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{cellTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
                   </span>
                 </button>
