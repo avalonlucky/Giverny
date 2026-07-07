@@ -1328,6 +1328,14 @@ function serializeFileTags(tags: string[]) {
   return Array.from(new Set(tags.map((item) => item.trim()).filter(Boolean))).join('、')
 }
 
+function isAcceptanceFileAsset(file: FileAsset, acceptanceFileNames?: Set<string>) {
+  const fileTags = parseFileTags(file.tag)
+  return file.scope === 'acceptance'
+    || fileTags.includes('验收文件')
+    || fileTags.includes('验收附件')
+    || Boolean(acceptanceFileNames?.has(file.name.trim()))
+}
+
 function nowStamp() {
   const now = new Date()
   return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
@@ -8391,10 +8399,10 @@ function DashboardTaskSidebar({
                         if (groupEntryIds.has(file.entryId ?? '')) {
                           return true
                         }
-                        return entry.isAcceptanceProgress && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
+                        return entry.isAcceptanceProgress && isAcceptanceFileAsset(file, acceptanceFileNames) && (!file.entryId || acceptanceFileNames.has(file.name.trim()))
                       })
                       const entryNote = entry.isAcceptanceProgress ? (task.acceptanceNote?.trim() || entry.note || '已完成验收确认。') : (entry.note || '未填写具体内容')
-                      const hasAcceptanceFiles = entry.isAcceptanceProgress && entryFiles.some((f) => f.scope === 'acceptance')
+                      const hasAcceptanceFiles = entryFiles.some((file) => isAcceptanceFileAsset(file, acceptanceFileNames))
                       return (
                         <article className="dashboard-side-time-item" key={entry.id}>
                           <span className="dot" />
@@ -9555,11 +9563,8 @@ function TaskProgressModal({
   }
 
   const isExistingAttachmentAcceptanceFile = (file: FileAsset) => {
-    const fileTags = parseFileTags(file.tag)
-    return file.scope === 'acceptance'
-      || fileTags.includes('验收文件')
-      || fileTags.includes('验收附件')
-      || (task.acceptanceFiles ?? []).includes(file.name)
+    const acceptanceFileNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
+    return isAcceptanceFileAsset(file, acceptanceFileNames)
   }
 
   const toggleExistingAttachmentAcceptanceFile = async (file: FileAsset) => {
@@ -11386,14 +11391,16 @@ function TaskDetailModal({
                   if (file.entryId === entry.id) {
                     return true
                   }
-                  return Boolean(entry.isAcceptanceProgress) && file.scope === 'acceptance' && (!file.entryId || acceptanceFileNames.has(file.name))
+                  return Boolean(entry.isAcceptanceProgress) && isAcceptanceFileAsset(file, acceptanceFileNames) && (!file.entryId || acceptanceFileNames.has(file.name.trim()))
                 })
+                const hasAcceptanceFiles = entryFiles.some((file) => isAcceptanceFileAsset(file, acceptanceFileNames))
                 return (
                   <article className="timeline-item" key={entry.id}>
                     <span className="dot" />
                     <div className="task-detail-entry-time">
                       <time>{formatEntryDateTimeRange(task, entry)}</time>
                       {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
+                      {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
                       <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
                     </div>
                     {entry.note && <p>{entry.note}</p>}
