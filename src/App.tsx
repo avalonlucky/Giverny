@@ -651,6 +651,24 @@ function mergeDailyKnowledgeQueue(items: DailyKnowledgeItem[], excludedTitles: s
   })
 }
 
+function prepareDailyKnowledgeSession() {
+  const history = readDailyKnowledgeHistory()
+  const storedCurrent = readStoredDailyKnowledgeItem()
+  const storedQueue = mergeDailyKnowledgeQueue(readStoredDailyKnowledgeQueue(), [storedCurrent?.title ?? '', ...history])
+  const [queuedCurrent, ...remainingQueue] = storedQueue
+  if (queuedCurrent) {
+    return {
+      current: queuedCurrent,
+      queue: remainingQueue,
+    }
+  }
+  const current = fallbackDailyKnowledge([storedCurrent?.title ?? '', ...history])
+  return {
+    current,
+    queue: fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, [current.title, storedCurrent?.title ?? '', ...history]),
+  }
+}
+
 function viewFromPath(pathname: string): AppView {
   if (pathname === '/updates') {
     return '任务'
@@ -4604,17 +4622,9 @@ function App() {
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
-  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(() => {
-    const stored = readStoredDailyKnowledgeItem()
-    return stored ?? fallbackDailyKnowledge(readDailyKnowledgeHistory())
-  })
-  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(() => {
-    const history = readDailyKnowledgeHistory()
-    const storedQueue = mergeDailyKnowledgeQueue(readStoredDailyKnowledgeQueue(), [dailyKnowledge.title, ...history])
-    return storedQueue.length > 0
-      ? storedQueue
-      : fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, [dailyKnowledge.title, ...history])
-  })
+  const [dailyKnowledgeSession] = useState(() => prepareDailyKnowledgeSession())
+  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(dailyKnowledgeSession.current)
+  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(dailyKnowledgeSession.queue)
   const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
   const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
   const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
