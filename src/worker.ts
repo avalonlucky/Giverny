@@ -46,6 +46,9 @@ type Env = {
   KIMI_API_KEY?: string
   KIMI_BASE_URL?: string
   KIMI_MODEL?: string
+  DOUBAO_API_KEY?: string
+  DOUBAO_BASE_URL?: string
+  DOUBAO_MODEL?: string
   OPENROUTER_API_KEY?: string
   OPENAI_API_KEY?: string
   ANTHROPIC_API_KEY?: string
@@ -99,8 +102,10 @@ const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
 const ADMIN_RESET_SETTING = 'adminPasswordReset'
 const AI_MODEL_SETTING = 'aiModelConfig'
 const PASSWORD_ITERATIONS = 100000
+const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
+const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
 
-type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 type AiModelMode = 'deepseek-direct' | 'baml-runtime'
 
@@ -438,6 +443,7 @@ function normalizeAiProvider(value: unknown): AiModelProvider {
   return value === 'deepseek' ||
     value === 'gemini' ||
     value === 'kimi' ||
+    value === 'doubao' ||
     value === 'openai' ||
     value === 'openrouter' ||
     value === 'anthropic' ||
@@ -497,6 +503,9 @@ function providerEnvironmentKey(env: Env, provider: AiModelProvider) {
   }
   if (provider === 'deepseek') {
     return env.DEEPSEEK_API_KEY || ''
+  }
+  if (provider === 'doubao') {
+    return env.DOUBAO_API_KEY || ''
   }
   if (provider === 'openrouter') {
     return env.OPENROUTER_API_KEY || ''
@@ -1193,14 +1202,14 @@ async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 
   }
 }
 
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'workers-ai' | `openrouter:${string}`
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
 type ChatModelTarget =
   | { kind: 'endpoint'; endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>; label: string; note?: string }
   | { kind: 'workers-ai'; label: string; note?: string }
 
 function normalizeChatModelChoice(value: unknown): ChatModelChoice {
   const raw = String(value ?? 'auto').trim()
-  if (raw === 'auto' || raw === 'workers-ai' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
+  if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
   if (raw === 'route:textPrimary' || raw === 'route:textFallback' || raw === 'route:visionPrimary' || raw === 'route:visionFallback') {
     return raw as ChatModelChoice
   }
@@ -1210,6 +1219,21 @@ function normalizeChatModelChoice(value: unknown): ChatModelChoice {
 async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promise<ChatModelTarget> {
   if (choice === 'workers-ai') {
     return { kind: 'workers-ai', label: env.WORKERS_AI_MODEL || WORKERS_AI_DEFAULT_MODEL }
+  }
+  if (choice === 'doubao-seed-2-1-pro') {
+    const apiKey = env.DOUBAO_API_KEY || ''
+    return {
+      kind: 'endpoint',
+      label: '豆包 Seed 2.1 Pro',
+      endpoint: {
+        provider: 'doubao',
+        baseUrl: (env.DOUBAO_BASE_URL || DOUBAO_BASE_URL).replace(/\/$/, ''),
+        model: env.DOUBAO_MODEL || DOUBAO_SEED_PRO_MODEL,
+        apiKey,
+        keySource: apiKey ? 'environment' : 'missing',
+      },
+      note: apiKey ? undefined : '豆包 API Key 未配置，已回落到默认模型链路。',
+    }
   }
   if (choice.startsWith('openrouter:')) {
     const model = choice.replace(/^openrouter:/, '').trim()
@@ -3038,6 +3062,9 @@ async function listAiModelsForRoute(env: Env, request: Request) {
         .map((item) => (item.name || '').replace(/^models\//, ''))
         .filter(Boolean)
       return ok({ provider: endpoint.provider, models: Array.from(new Set(models)).sort() })
+    }
+    if (endpoint.provider === 'doubao') {
+      return ok({ provider: endpoint.provider, models: [env.DOUBAO_MODEL || DOUBAO_SEED_PRO_MODEL] })
     }
     // OpenAI 兼容（DeepSeek / Kimi / OpenAI / OpenRouter / 自定义网关）：GET /models
     const response = await fetch(`${baseUrl}/models`, {

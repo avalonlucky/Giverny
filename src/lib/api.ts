@@ -48,7 +48,7 @@ export type AccessToken = {
   lastUsedAt: string
 }
 
-export type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+export type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 export type AiModelMode = 'deepseek-direct' | 'baml-runtime'
 
