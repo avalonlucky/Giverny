@@ -5998,7 +5998,7 @@ function App() {
     })
   }
 
-  const handleUpdateFile = async (fileId: number, changes: { name?: string; tag?: string }) => {
+  const handleUpdateFile = async (fileId: number, changes: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) => {
     try {
       const updatedFile = await api.updateFile(fileId, changes)
       setFileItems((currentFiles) => currentFiles.map((file) => (file.id === fileId ? { ...file, ...updatedFile } : file)))
@@ -9070,6 +9070,7 @@ function TaskProgressModal({
     suggestion?: AttachmentNameSuggestion
   }>>({})
   const [uploadingExistingFileId, setUploadingExistingFileId] = useState<number | null>(null)
+  const [updatingExistingAcceptanceFileId, setUpdatingExistingAcceptanceFileId] = useState<number | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [previewAttachment, setPreviewAttachment] = useState<PendingProgressAttachment | null>(null)
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
@@ -9550,6 +9551,46 @@ function TaskProgressModal({
       if (draftName && sanitizeAttachmentName(draftName, file.name) !== file.name) {
         await saveExistingAttachmentName(file)
       }
+    }
+  }
+
+  const isExistingAttachmentAcceptanceFile = (file: FileAsset) => {
+    const fileTags = parseFileTags(file.tag)
+    return file.scope === 'acceptance'
+      || fileTags.includes('验收文件')
+      || fileTags.includes('验收附件')
+      || (task.acceptanceFiles ?? []).includes(file.name)
+  }
+
+  const toggleExistingAttachmentAcceptanceFile = async (file: FileAsset) => {
+    if (updatingExistingAcceptanceFileId === file.id) {
+      return
+    }
+    setUpdatingExistingAcceptanceFileId(file.id)
+    try {
+      await saveExistingAttachmentName(file)
+      const finalName = sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name) || file.name
+      const currentTags = parseFileTags(file.tag).filter((tag) => tag !== '验收文件' && tag !== '验收附件')
+      const isMarked = isExistingAttachmentAcceptanceFile(file)
+      if (isMarked) {
+        await onUpdateFile(file.id, {
+          scope: 'progress',
+          tag: serializeFileTags(currentTags),
+        })
+        onUpdateTask(task.id, {
+          acceptanceFiles: (task.acceptanceFiles ?? []).filter((name) => name !== file.name && name !== finalName),
+        })
+        return
+      }
+      await onUpdateFile(file.id, {
+        scope: 'acceptance',
+        tag: serializeFileTags([...currentTags, '验收文件']),
+      })
+      onUpdateTask(task.id, {
+        acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), finalName])),
+      })
+    } finally {
+      setUpdatingExistingAcceptanceFileId(null)
     }
   }
 
@@ -10755,6 +10796,8 @@ function TaskProgressModal({
                       const documentSourceUrl = fileType === 'PDF' ? authedPreviewUrl(file.sourceUrl) : undefined
                       const draftName = existingAttachmentDrafts[file.id] ?? file.name
                       const aiState = existingAttachmentAiState[file.id] ?? {}
+                      const isAcceptanceFile = isExistingAttachmentAcceptanceFile(file)
+                      const isAcceptanceFileUpdating = updatingExistingAcceptanceFileId === file.id
                       return (
                         <article className="progress-attachment-draft progress-existing-attachment" key={file.id}>
                           <AttachmentHoverThumbnail
@@ -10787,6 +10830,19 @@ function TaskProgressModal({
                               />
                             </div>
                             <small title={file.name}>完整名称：{file.name}</small>
+                            {!isAcceptanceMode && (
+                              <button
+                                type="button"
+                                className={`attachment-acceptance-toggle ${isAcceptanceFile ? 'active' : ''}`}
+                                aria-label={isAcceptanceFile ? '取消标记为验收文件' : '标记为验收文件'}
+                                title={isAcceptanceFile ? '取消标记为验收文件' : '标记为验收文件'}
+                                disabled={isAcceptanceFileUpdating}
+                                onClick={() => void toggleExistingAttachmentAcceptanceFile(file)}
+                              >
+                                <Star size={12} fill={isAcceptanceFile ? 'currentColor' : 'none'} />
+                                {isAcceptanceFile ? '验收文件' : '标为验收文件'}
+                              </button>
+                            )}
                             {aiState.loading && <small>视觉模型正在识别文件内容并整理名称...</small>}
                             {aiState.error && <small className="attachment-ai-error">{aiState.error}</small>}
                             {aiState.suggestion && (

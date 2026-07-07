@@ -6129,6 +6129,12 @@ button.topbar-create-button:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
+
+.attachment-acceptance-toggle:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .attachment-acceptance-toggle.active {
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
