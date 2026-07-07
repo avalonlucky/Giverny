@@ -892,6 +892,12 @@ function formatHoursInputValue(minutes: number) {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(1)
 }
 
+function formatExactHoursInputValue(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(Number.isFinite(minutes) ? minutes : 0))
+  const hours = safeMinutes / 60
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
 function exactDurationMinutesBetween(startValue: string, endValue: string) {
   const startTime = new Date(startValue).getTime()
   const endTime = new Date(endValue).getTime()
@@ -10019,7 +10025,7 @@ function TaskProgressModal({
   }
 
   const updatePlanReferenceMinutes = (value: number) => {
-    const nextMinutes = snapDurationMinutes(value)
+    const nextMinutes = Math.max(1, Math.round(Number.isFinite(value) ? value : 0))
     setPlanReferenceMinutes(nextMinutes)
     if (planReferenceDerivedField === 'start' && planReferenceEndValue) {
       writePlanReferenceStart(addMinutesToPlanDateTime(planReferenceEndValue, -nextMinutes))
@@ -10448,15 +10454,15 @@ function TaskProgressModal({
             <div className="field progress-lite-hours-field">
               <span className="new-task-inline-label">
                 <ScheduleAnchorSwitch active={planReferenceDerivedField !== 'hours'} label="切换预计工时" onClick={() => togglePlanReferenceScheduleField('hours')} />
-                本段工时
+                预计工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
                 <input
                   className="new-task-hours-input"
                   type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={formatHoursInputValue(planReferenceMinutes)}
+                  min="0.01"
+                  step="0.01"
+                  value={formatExactHoursInputValue(planReferenceMinutes)}
                   onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
                   aria-label="预计工时"
                 />
