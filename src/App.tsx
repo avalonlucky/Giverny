@@ -11509,6 +11509,14 @@ function compareCalendarTasks(a: Task, b: Task) {
   return a.title.localeCompare(b.title)
 }
 
+function chunkCalendarWeeks(days: ReturnType<typeof calendarDaysForMonth>) {
+  const weeks: typeof days[] = []
+  for (let index = 0; index < days.length; index += 7) {
+    weeks.push(days.slice(index, index + 7))
+  }
+  return weeks
+}
+
 function CalendarView({
   monthValue,
   mode,
@@ -11546,6 +11554,7 @@ function CalendarView({
   const weekStart = startOfCalendarWeek(selectedDate)
   const weekDays = Array.from({ length: 7 }, (_, index) => addIsoDays(weekStart, index))
   const monthDays = calendarDaysForMonth(monthValue)
+  const monthWeeks = useMemo(() => chunkCalendarWeeks(monthDays), [monthDays])
 
   const setCalendarDate = (value: string) => {
     onFocusDateChange(value)
@@ -11565,24 +11574,44 @@ function CalendarView({
     return `${isStart ? 'span-start' : 'span-middle'} ${isEnd ? 'span-end' : ''}`
   }
 
-  const renderMonthTask = (task: Task, day: string) => {
-    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
-    const showTitle = day === range.start || addIsoDays(day, -1) < range.start
-    return (
-    <button
-      type="button"
-      className={`calendar-event-pill ${rangeSegmentClass(task, day)}`}
-      key={task.id}
-      style={calendarTaskColorStyle(task)}
-      onClick={(event) => {
-        event.stopPropagation()
-        onOpenTask(task.id)
-      }}
-      title={`${task.title} · ${formatMonthDay(range.start)} - ${formatMonthDay(range.end)}`}
-    >
-      {showTitle ? task.title : '\u00A0'}
-    </button>
-    )
+  const monthSegmentsForWeek = (week: typeof monthDays) => {
+    const weekStartValue = week[0]?.value ?? selectedDate
+    const weekEndValue = week[week.length - 1]?.value ?? selectedDate
+    const slots: boolean[][] = []
+    return visibleTasks
+      .map((task) => {
+        const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
+        const segmentStart = range.start > weekStartValue ? range.start : weekStartValue
+        const segmentEnd = range.end < weekEndValue ? range.end : weekEndValue
+        if (segmentEnd < weekStartValue || segmentStart > weekEndValue || segmentStart > segmentEnd) {
+          return null
+        }
+        const startIndex = week.findIndex((day) => day.value === segmentStart)
+        const endIndex = week.findIndex((day) => day.value === segmentEnd)
+        if (startIndex < 0 || endIndex < 0) {
+          return null
+        }
+        return { task, range, segmentStart, segmentEnd, startIndex, endIndex }
+      })
+      .filter((segment): segment is NonNullable<typeof segment> => !!segment)
+      .sort((a, b) => compareCalendarTasks(a.task, b.task))
+      .map((segment) => {
+        let slot = slots.findIndex((items) => {
+          for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
+            if (items[index]) return false
+          }
+          return true
+        })
+        if (slot < 0) {
+          slot = slots.length
+          slots.push([])
+        }
+        for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
+          slots[slot][index] = true
+        }
+        return { ...segment, slot }
+      })
+      .filter((segment) => segment.slot < 4)
   }
 
   const renderAllDayTask = (task: Task, day: string) => {
@@ -11711,30 +11740,59 @@ function CalendarView({
             {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label) => <span key={label}>{label}</span>)}
           </div>
           <div className="google-month-grid">
-            {monthDays.map((day) => {
-              const cellTasks = tasksByDate.get(day.value) ?? []
-              const dayMeta = calendarDayMeta(day.value)
-              return (
-                <button
-                  type="button"
-                  className={`google-month-cell ${day.inMonth ? '' : 'outside'} ${day.value === today ? 'today' : ''} ${day.value === selectedDate ? 'selected' : ''} ${dayMeta.isFestival ? 'festival' : ''} ${dayMeta.officialKind ? `official-${dayMeta.officialKind}` : ''}`}
-                  key={day.value}
-                  onClick={() => setCalendarDate(day.value)}
-                >
-                  <span className="google-month-date">
-                    <span className="google-month-day">{day.day}</span>
-                    <span className="google-month-lunar">
-                      {dayMeta.label}
-                    </span>
-                  </span>
-                  <span className="google-month-events">
-                    {renderHolidayPill(dayMeta, `${day.value}-holiday`)}
-                    {cellTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map((task) => renderMonthTask(task, day.value))}
-                    {cellTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{cellTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
-                  </span>
-                </button>
-              )
-            })}
+            {monthWeeks.map((week) => (
+              <div className="google-month-week" key={week[0]?.value}>
+                <div className="google-month-week-cells">
+                  {week.map((day) => {
+                    const dayMeta = calendarDayMeta(day.value)
+                    return (
+                      <button
+                        type="button"
+                        className={`google-month-cell ${day.inMonth ? '' : 'outside'} ${day.value === today ? 'today' : ''} ${day.value === selectedDate ? 'selected' : ''} ${dayMeta.isFestival ? 'festival' : ''} ${dayMeta.officialKind ? `official-${dayMeta.officialKind}` : ''}`}
+                        key={day.value}
+                        onClick={() => setCalendarDate(day.value)}
+                      >
+                        <span className="google-month-date">
+                          <span className="google-month-day">{day.day}</span>
+                          <span className="google-month-lunar">
+                            {dayMeta.label}
+                          </span>
+                        </span>
+                        <span className="google-month-events">
+                          {renderHolidayPill(dayMeta, `${day.value}-holiday`)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="google-month-week-events" aria-hidden={false}>
+                  {monthSegmentsForWeek(week).map((segment) => {
+                    const isRangeStart = segment.segmentStart === segment.range.start
+                    const isRangeEnd = segment.segmentEnd === segment.range.end
+                    return (
+                      <button
+                        type="button"
+                        className={`calendar-event-pill month-span ${isRangeStart ? 'span-start' : 'span-middle'} ${isRangeEnd ? 'span-end' : ''}`}
+                        key={`${segment.task.id}-${segment.segmentStart}`}
+                        style={{
+                          ...calendarTaskColorStyle(segment.task),
+                          '--span-column': segment.startIndex + 1,
+                          '--span-days': segment.endIndex - segment.startIndex + 1,
+                          '--span-slot': segment.slot,
+                        } as CSSProperties}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onOpenTask(segment.task.id)
+                        }}
+                        title={`${segment.task.title} · ${formatMonthDay(segment.range.start)} - ${formatMonthDay(segment.range.end)}`}
+                      >
+                        {segment.task.title}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       ) : renderScheduleGrid(mode === '周' ? weekDays : [selectedDate])}
