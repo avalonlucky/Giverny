@@ -5337,6 +5337,24 @@ button.topbar-create-button:hover {
   background: var(--color-supplement-bg);
 }
 
+.progress-lite-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-reference-button {
+  min-height: 28px;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progress-reference-button:hover {
+  color: var(--color-primary-strong);
+}
+
 .task-progress-note.progress-lite-note {
   min-height: 96px;
   padding: 18px;

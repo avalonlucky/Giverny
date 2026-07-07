@@ -9126,6 +9126,7 @@ function TaskProgressModal({
   // 关 = 只是把任务分阶段提交，不算改稿。仅用于画像/AI 分析，不影响计时与结算。
   const [isRevisionRound, setIsRevisionRound] = useState(Boolean(editingEntry?.isRevision))
   const [isAcceptanceBaseExpanded, setIsAcceptanceBaseExpanded] = useState(false)
+  const acceptanceBaseRef = useRef<HTMLElement | null>(null)
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialProgressDraft.feedbackRating ?? '')
   const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialProgressDraft.feedbackTags ?? [])
   const [feedbackNote, setFeedbackNote] = useState(initialProgressDraft.feedbackNote ?? '')
@@ -9181,6 +9182,12 @@ function TaskProgressModal({
   const hasAnotherAcceptanceProgress = !isWaitingMode && (task.timeEntries ?? []).some((entry) => entry.isAcceptanceProgress && entry.id !== editEntryId)
   const canToggleAcceptanceMode = Boolean(onConfirmAcceptance) && !isWaitingMode && !hasAnotherAcceptanceProgress && (task.status !== '已验收' || isEditingAcceptanceEntry)
   const isConvertingEntryToAcceptance = isAcceptanceMode && isEditingEntry && !editingEntry?.isAcceptanceProgress && task.status !== '已验收'
+  const showAcceptanceTaskReference = () => {
+    setIsAcceptanceBaseExpanded(true)
+    window.requestAnimationFrame(() => {
+      acceptanceBaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
   const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
   // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
   const timeCounts = isWaitingMode ? true : isAcceptanceMode ? countAcceptanceTime : countProgressTime
@@ -10632,7 +10639,7 @@ function TaskProgressModal({
               </div>
             )}
             {isAcceptanceMode && (
-              <section className="progress-acceptance-base">
+              <section className="progress-acceptance-base" ref={acceptanceBaseRef}>
                 <button
                   type="button"
                   className="progress-acceptance-base-toggle"
@@ -10662,16 +10669,28 @@ function TaskProgressModal({
             <section className="progress-lite-field">
               <div className="progress-lite-label-row">
                 <label htmlFor="progress-lite-note">{isAcceptanceMode ? '验收备注' : '进展内容'}</label>
-                <button
-                  type="button"
-                  className="icon-button ai-assist-button"
-                  aria-label={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
-                  title={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
-                  onClick={() => void requestProgressAiSuggestion()}
-                  disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
-                >
-                  <Sparkles size={16} />
-                </button>
+                <span className="progress-lite-label-actions">
+                  {isAcceptanceMode && (
+                    <button
+                      type="button"
+                      className="text-button progress-reference-button"
+                      onClick={showAcceptanceTaskReference}
+                      title="查看任务详情，用于参考填写验收备注"
+                    >
+                      参考任务详情
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button ai-assist-button"
+                    aria-label={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
+                    title={isAcceptanceMode ? 'AI 优化验收备注' : 'AI 优化进展内容'}
+                    onClick={() => void requestProgressAiSuggestion()}
+                    disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
+                  >
+                    <Sparkles size={16} />
+                  </button>
+                </span>
               </div>
               <textarea
                 id="progress-lite-note"
