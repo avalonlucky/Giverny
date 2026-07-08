@@ -872,6 +872,44 @@ async function searchTasks(env: Env, query: string): Promise<Response> {
   return ok({ results })
 }
 
+async function semanticTaskIds(env: Env, query: string, limit: number, month = '') {
+  if (!env.VECTORIZE || !env.AI || !query.trim()) {
+    return []
+  }
+  try {
+    const [vector] = await embedTexts(env, [query])
+    if (!vector) return []
+    const res = await env.VECTORIZE.query(vector, { topK: Math.max(limit, 20), returnMetadata: 'all' })
+    return (res.matches ?? [])
+      .filter((match) => match.score >= 0.4)
+      .map((match) => ({
+        id: String(match.metadata?.taskId ?? match.id.replace('task-', '')),
+        score: Math.round(match.score * 100) / 100,
+        month: String(match.metadata?.month ?? ''),
+      }))
+      .filter((item) => /^\d+$/.test(item.id))
+      .filter((item) => !month || item.month === month)
+      .slice(0, limit)
+  } catch {
+    return []
+  }
+}
+
+async function tasksByIds(env: Env, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => /^\d+$/.test(id)))).slice(0, 100)
+  if (uniqueIds.length === 0) {
+    return []
+  }
+  const placeholders = uniqueIds.map(() => '?').join(',')
+  const rows = await env.DB.prepare(
+    `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+     FROM tasks
+     WHERE deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`,
+  ).bind(...uniqueIds).all<DbTask>()
+  const byId = new Map((rows.results ?? []).map((task) => [String(task.id), task]))
+  return uniqueIds.map((id) => byId.get(id)).filter((task): task is DbTask => Boolean(task))
+}
+
 // ===== 结算回单服务端 PDF（Cloudflare Browser Rendering 无头浏览器，输出清晰矢量 PDF）=====
 function escapeHtml(value: string): string {
   return String(value ?? '')
@@ -2567,7 +2605,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const today = nowIso().slice(0, 10)
   const monthWhere = month ? '(settlement_month = ? OR start_date LIKE ?)' : ''
   const monthBindings = month ? [month, `${month}%`] : []
-  const rows = query && !statusIntent
+  const keywordRows = query && !statusIntent
     ? month
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
@@ -2585,7 +2623,9 @@ async function agentSearchTasksTool(env: Env, request: Request) {
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(like, like, like, limit).all<DbTask>()
-    : month
+    : { results: [] as DbTask[], success: true }
+  const scopeRows = statusIntent || !query
+    ? month
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
@@ -2596,10 +2636,20 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       : await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL
+          WHERE deleted_at IS NULL AND voided_at IS NULL
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(limit).all<DbTask>()
+    : { results: [] as DbTask[], success: true }
+  const semanticMatches = query && !statusIntent ? await semanticTaskIds(env, query, limit, month) : []
+  const semanticRows = semanticMatches.length ? await tasksByIds(env, semanticMatches.map((item) => item.id)) : []
+  const semanticScoreById = new Map(semanticMatches.map((item) => [item.id, item.score]))
+  const mergedById = new Map<string, DbTask>()
+  semanticRows.forEach((task) => mergedById.set(String(task.id), task))
+  ;(keywordRows.results ?? []).forEach((task) => mergedById.set(String(task.id), task))
+  const rows = statusIntent || !query
+    ? scopeRows
+    : { results: Array.from(mergedById.values()).slice(0, limit), success: true }
   const allResults = rows.results ?? []
   const isClosed = (task: DbTask) => task.status === '已验收' || task.status === '终止' || task.status === '不计费'
   const isOverdue = (task: DbTask) => !isClosed(task) && Boolean(task.estimated_delivery_date) && String(task.estimated_delivery_date).slice(0, 10) < today
@@ -2624,6 +2674,8 @@ async function agentSearchTasksTool(env: Env, request: Request) {
     unfinishedCount: allResults.filter((task) => !isClosed(task)).length,
     overdueCount: allResults.filter(isOverdue).length,
     statusIntent,
+    searchMode: statusIntent ? 'structured-status' : query ? 'semantic-vector+keyword' : 'recent',
+    semanticEnabled: Boolean(env.VECTORIZE && env.AI),
     results: filteredResults.map((task) => ({
       id: Number(task.id),
       title: task.title,
@@ -2638,6 +2690,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       settlementMonth: task.settlement_month ?? '',
       billable: isBillableDbTask(task),
       overdue: isOverdue(task),
+      semanticScore: semanticScoreById.get(String(task.id)) ?? null,
     })),
     generatedAt: nowIso(),
   })
