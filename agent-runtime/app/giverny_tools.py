@@ -6,7 +6,6 @@ import os
 from typing import Any
 
 import httpx
-from agents import function_tool
 
 from .schemas import TraceEvent
 
@@ -73,7 +72,6 @@ async def _get_json(endpoint: str, params: dict[str, Any] | None = None) -> dict
     return data
 
 
-@function_tool
 async def query_month_finance(
     question: str,
     current_month: str | None = None,
@@ -87,7 +85,6 @@ async def query_month_finance(
     return json.dumps(data, ensure_ascii=False)
 
 
-@function_tool
 async def search_tasks(query: str, month: str | None = None, limit: int = 8) -> str:
     """Search Giverny tasks by title, requirement, people, or month."""
     params = {"query": query, "month": month, "limit": limit}
@@ -97,7 +94,6 @@ async def search_tasks(query: str, month: str | None = None, limit: int = 8) -> 
     return json.dumps(data, ensure_ascii=False)
 
 
-@function_tool
 async def get_task_detail(task_id: int | None = None, title: str | None = None) -> str:
     """Get a task detail by task id or approximate title."""
     params = {"taskId": task_id, "title": title}
@@ -107,10 +103,94 @@ async def get_task_detail(task_id: int | None = None, title: str | None = None) 
     return json.dumps(data, ensure_ascii=False)
 
 
-@function_tool
 async def get_giverny_context() -> str:
     """Get Giverny workspace context and current platform summary."""
     append_trace("tool", "读取工作台上下文", "获取当前平台概览。")
     data = await _get_json("context")
     append_trace("result", "工作台上下文已返回", payload=data)
     return json.dumps(data, ensure_ascii=False)
+
+
+TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "query_month_finance",
+            "description": "Query Giverny monthly finance data, billable hours, and income statistics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Original user question."},
+                    "current_month": {"type": "string", "description": "Current month in YYYY-MM format."},
+                    "months": {
+                        "type": "string",
+                        "description": "Optional comma-separated settlement months, for example 2026-06,2026-07.",
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_tasks",
+            "description": "Search Giverny tasks by title, requirement, people, or month.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search keyword or natural-language query."},
+                    "month": {"type": "string", "description": "Optional settlement month in YYYY-MM format."},
+                    "limit": {"type": "integer", "description": "Maximum number of tasks to return."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_task_detail",
+            "description": "Get one task detail by task id or approximate title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "integer", "description": "Task ID."},
+                    "title": {"type": "string", "description": "Approximate task title."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_giverny_context",
+            "description": "Get Giverny workspace context and current platform summary.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+
+async def dispatch_tool(name: str, arguments: dict[str, Any]) -> str:
+    if name == "query_month_finance":
+        return await query_month_finance(
+            question=str(arguments.get("question") or ""),
+            current_month=arguments.get("current_month"),
+            months=arguments.get("months"),
+        )
+    if name == "search_tasks":
+        raw_limit = arguments.get("limit", 8)
+        limit = raw_limit if isinstance(raw_limit, int) else 8
+        return await search_tasks(
+            query=str(arguments.get("query") or ""),
+            month=arguments.get("month"),
+            limit=limit,
+        )
+    if name == "get_task_detail":
+        raw_task_id = arguments.get("task_id")
+        task_id = raw_task_id if isinstance(raw_task_id, int) else None
+        return await get_task_detail(task_id=task_id, title=arguments.get("title"))
+    if name == "get_giverny_context":
+        return await get_giverny_context()
+    raise ValueError(f"Unknown tool: {name}")

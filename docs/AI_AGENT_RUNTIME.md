@@ -21,7 +21,7 @@
 React UI / Cloudflare Worker
         │
         ▼
-agent-runtime/  (OpenAI Agents SDK)
+agent-runtime/  (DeepSeek/OpenAI-compatible Tool Calls)
         │
         ├── query_month_finance
         ├── search_tasks
@@ -35,7 +35,7 @@ Giverny Worker Tool API
 D1 / R2 / app data
 ```
 
-选择 OpenAI Agents SDK 的原因：
+选择自建 Runtime 的原因：
 
 - 代码可控：提示词、工具、模型和安全边界都在仓库里版本化。
 - 易测试：可以为每个工具、每类问题写自动化测试。
@@ -45,22 +45,22 @@ D1 / R2 / app data
 
 ## 当前已落地
 
-- `agent-runtime/app/main.py`：FastAPI 服务，提供 `/health` 和 `/v1/chat`。
+- `agent-runtime/app/main.py`：FastAPI 服务，提供 `/health` 和 `/v1/chat`，默认用 DeepSeek OpenAI-compatible Tool Calls。
 - `agent-runtime/app/giverny_tools.py`：封装 Giverny Worker 工具接口。
 - `agent-runtime/app/schemas.py`：定义请求、回答和 trace 数据结构。
 - `agent-runtime/.env.example`：本地环境变量模板。
 - `agent-runtime/README.md`：本地启动和测试说明。
 - `src/worker.ts`：`/api/ai/chat` 已预留 Agent Runtime 主链路。
 
-当前 Worker 已预留接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 OpenAI Agents Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime；如果仍不可用，则直接回退到原有本地逻辑。
+当前 Worker 已预留接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 Agent Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime；如果仍不可用，则直接回退到原有本地逻辑。
 
-这意味着代码层面的主链路已经接上，但正式站要真正使用它，还需要在 Cloudflare Worker 配置 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
+这意味着代码层面的主链路已经接上；正式站默认使用 `DEEPSEEK_API_KEY`、`AGENT_TOOL_TOKEN` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
 
 ## 下一步
 
-1. 本地配置 `OPENAI_API_KEY` 和 `GIVERNY_AGENT_TOOL_TOKEN`，启动 `agent-runtime/`，用 `/v1/chat` 验证收入、工时、任务检索、任务详情等问题。
+1. 本地配置 `DEEPSEEK_API_KEY` 和 `GIVERNY_AGENT_TOOL_TOKEN`，启动 `agent-runtime/`，用 `/v1/chat` 验证收入、工时、任务检索、任务详情等问题。
 2. 通过 Cloudflare Containers 部署 `agent-runtime/`。
-3. 在 Cloudflare Worker 配置 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN` 和 `AGENT_RUNTIME_KEY`，部署正式站供验收。
+3. 在 Cloudflare Worker 配置 `DEEPSEEK_API_KEY`、`AGENT_TOOL_TOKEN` 和 `AGENT_RUNTIME_KEY`，部署正式站供验收。
 4. 改造爱丽丝工作助手 UI：
    - 用户消息保持圆角填充。
    - AI 正文无卡片背景。

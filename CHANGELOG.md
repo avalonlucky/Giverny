@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-08 · v0.28.7（Agent Runtime 默认使用 DeepSeek）
+
+- Agent Runtime：移除对 `OPENAI_API_KEY` 的强依赖，容器默认使用 DeepSeek OpenAI-compatible Tool Calls
+- 工作助手：Runtime 采用自有 Tool Calling Loop，由模型选择 `month-finance`、`search-tasks`、`task-detail`、`context` 等只读工具，再由 Runtime 执行并总结
+- 配置：容器启动时注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，并保留 OpenAI provider 作为可选切换项
+- 文档：更新 Runtime 本地启动、Cloudflare Containers 部署和 provider 配置说明
+
 ## 2026-07-08 · v0.28.6（Agent Runtime 部署到 Cloudflare Containers）
 
 - Agent Runtime：将 `agent-runtime/` 接入 Cloudflare Containers，通过 `AGENT_RUNTIME_CONTAINER` 绑定由主站 Worker 内部调用

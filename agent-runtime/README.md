@@ -2,7 +2,7 @@
 
 This is the code-owned agent runtime for Giverny. It is separate from the existing BAML `ai-runtime/` and replaces the retired Dify verification workflow.
 
-The runtime uses the OpenAI Agents SDK to combine:
+The runtime uses a code-owned OpenAI-compatible tool-calling loop. DeepSeek is the default provider, and OpenAI can still be selected by configuration.
 
 - an LLM
 - Giverny tool calls
@@ -22,8 +22,10 @@ cp .env.example .env
 Fill `.env`:
 
 ```bash
-OPENAI_API_KEY=...
-OPENAI_AGENT_MODEL=gpt-4.1-mini
+AGENT_MODEL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 GIVERNY_API_BASE_URL=https://mayeai.com
 GIVERNY_AGENT_TOOL_TOKEN=...
 AGENT_RUNTIME_KEY=optional-local-runtime-key
@@ -73,8 +75,10 @@ In production, this runtime is deployed as a Cloudflare Container behind the mai
 Cloudflare Container deployment requires:
 
 ```bash
-npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put DEEPSEEK_API_KEY
 npx wrangler secret put AGENT_TOOL_TOKEN
 npx wrangler secret put AGENT_RUNTIME_KEY
 npx wrangler deploy
 ```
+
+To switch the runtime to OpenAI later, set `AGENT_MODEL_PROVIDER=openai`, then provide `OPENAI_API_KEY` and `OPENAI_AGENT_MODEL`.

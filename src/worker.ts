@@ -61,7 +61,9 @@ type Env = {
   AGENT_RUNTIME_KEY?: string
   AGENT_TOOL_TOKEN?: string
   AGENT_RUNTIME_CONTAINER?: ContainerNamespace
+  AGENT_MODEL_PROVIDER?: string
   OPENAI_AGENT_MODEL?: string
+  OPENAI_BASE_URL?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
@@ -1681,7 +1683,12 @@ async function callOpenAiAgentRuntime(
       startOptions: {
         enableInternet: true,
         envVars: {
+          AGENT_MODEL_PROVIDER: String(env.AGENT_MODEL_PROVIDER || 'deepseek'),
+          DEEPSEEK_API_KEY: String(env.DEEPSEEK_API_KEY || ''),
+          DEEPSEEK_BASE_URL: String(env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'),
+          DEEPSEEK_MODEL: String(env.DEEPSEEK_MODEL || 'deepseek-v4-flash'),
           OPENAI_API_KEY: String(env.OPENAI_API_KEY || ''),
+          OPENAI_BASE_URL: String(env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
           OPENAI_AGENT_MODEL: String(env.OPENAI_AGENT_MODEL || 'gpt-4.1-mini'),
           GIVERNY_API_BASE_URL: 'https://mayeai.com',
           GIVERNY_AGENT_TOOL_TOKEN: String(env.AGENT_TOOL_TOKEN || ''),
