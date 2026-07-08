@@ -56,10 +56,9 @@ type Env = {
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
   AI_SETTINGS_SECRET?: string
+  AGENT_RUNTIME_URL?: string
+  AGENT_RUNTIME_KEY?: string
   AGENT_TOOL_TOKEN?: string
-  DIFY_TOOL_TOKEN?: string
-  DIFY_API_KEY?: string
-  DIFY_BASE_URL?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
@@ -1603,91 +1602,65 @@ ${JSON.stringify(args.toolResults)}`
   return { content: answer.text, modelLabel: answer.modelLabel, fallbackUsed: answer.fallbackUsed, notes: answer.notes }
 }
 
-type DifyChatMessageResponse = {
-  answer?: string
-  text?: string
-  data?: { outputs?: { answer?: string; text?: string } }
-  message?: string
+type OpenAiAgentRuntimeTraceItem = {
+  id?: string
+  type?: string
+  label?: string
+  detail?: string
+  timestamp?: string
 }
 
-function normalizeDifyBaseUrl(env: Env) {
-  return (env.DIFY_BASE_URL || 'https://api.dify.ai/v1').replace(/\/+$/, '')
+type OpenAiAgentRuntimeResult = {
+  answer: string
+  conversationId?: string
+  model?: string
+  trace?: OpenAiAgentRuntimeTraceItem[]
 }
 
-function stringifyDifyInputValue(value: unknown) {
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return JSON.stringify(value)
+function normalizeAgentRuntimeBaseUrl(env: Env) {
+  return String(env.AGENT_RUNTIME_URL || '').trim().replace(/\/+$/, '')
 }
 
-async function callDifyChatApp(
+function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
+  if (!Array.isArray(trace) || trace.length === 0) return []
+  return trace
+    .map((item) => {
+      const label = String(item.label || item.type || 'Agent 步骤').trim()
+      const detail = String(item.detail || '').trim()
+      return detail ? `${label}：${detail}` : label
+    })
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+async function callOpenAiAgentRuntime(
   env: Env,
-  args: {
-    query: string
-    inputs?: Record<string, unknown>
-    user?: string
-  },
-): Promise<string | null> {
-  const apiKey = env.DIFY_API_KEY
-  if (!apiKey) return null
-  const cleanQuery = String(args.query ?? '').trim()
+  args: { query: string; currentMonth?: string; conversationId?: string },
+): Promise<OpenAiAgentRuntimeResult | null> {
+  const baseUrl = normalizeAgentRuntimeBaseUrl(env)
+  if (!baseUrl) return null
+  const cleanQuery = String(args.query || '').trim()
   if (!cleanQuery) return null
-  const inputs = Object.fromEntries(
-    Object.entries(args.inputs ?? {}).map(([key, value]) => [key, stringifyDifyInputValue(value).slice(0, 20000)]),
-  )
-  const res = await fetch(`${normalizeDifyBaseUrl(env)}/chat-messages`, {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  const runtimeKey = String(env.AGENT_RUNTIME_KEY || '').trim()
+  if (runtimeKey) headers['x-agent-runtime-key'] = runtimeKey
+  const res = await fetch(`${baseUrl}/v1/chat`, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
-      inputs,
-      query: cleanQuery,
-      response_mode: 'blocking',
-      conversation_id: '',
-      user: args.user || 'giverny-admin',
+      message: cleanQuery,
+      currentMonth: args.currentMonth || undefined,
+      conversationId: args.conversationId || undefined,
+      debug: false,
     }),
   })
-  const raw = await res.text()
-  let data: DifyChatMessageResponse
-  try {
-    data = raw ? JSON.parse(raw) as DifyChatMessageResponse : {}
-  } catch {
-    data = { answer: raw }
-  }
   if (!res.ok) {
-    const message = data.message || raw || `Dify 请求失败：HTTP ${res.status}`
-    throw new Error(message)
+    const raw = await res.text().catch(() => '')
+    throw new Error(`OpenAI Agent Runtime 请求失败：HTTP ${res.status} ${raw.slice(0, 200)}`)
   }
-  return String(data.answer || data.text || data.data?.outputs?.answer || data.data?.outputs?.text || '').trim() || null
-}
-
-async function composeChatAgentAnswerWithDify(
-  env: Env,
-  args: {
-    question: string
-    toolResults: ChatAgentToolResult[]
-    currentMonth: string
-    today: string
-  },
-): Promise<string | null> {
-  const prompt = `用户问题：${args.question}
-
-工具返回数据：
-${JSON.stringify(args.toolResults)}
-
-请只根据工具返回数据回答，不要编造接口里没有的数据。金额、工时、月份必须严格使用工具返回的数字。先给结论，再给必要的分月说明。
-如果你需要输出思考内容，只能放在完整的 <think>...</think> 标签内；最终答案必须写在 </think> 之后，不要把思考草稿混入最终答案。`
-  return callDifyChatApp(env, {
-    query: prompt,
-    inputs: {
-      currentMonth: args.currentMonth,
-      today: args.today,
-      toolResults: args.toolResults,
-      answerStyle: 'concise_work_assistant',
-    },
-  })
+  const payload = (await res.json().catch(() => null)) as OpenAiAgentRuntimeResult | null
+  if (!payload || !String(payload.answer || '').trim()) return null
+  return payload
 }
 
 const agentToolCorsHeaders = {
@@ -1701,7 +1674,7 @@ const agentOk = (data: unknown, status = 200) => Response.json(data, { status, h
 const agentFail = (message: string, status = 400) => agentOk({ error: message }, status)
 
 function getAgentToolToken(env: Env) {
-  return env.DIFY_TOOL_TOKEN || env.AGENT_TOOL_TOKEN || ''
+  return env.AGENT_TOOL_TOKEN || ''
 }
 
 async function verifyAgentToolRequest(env: Env, request: Request) {
@@ -1873,7 +1846,7 @@ function agentOpenApiSpec(request: Request) {
         BearerAuth: {
           type: 'http',
           scheme: 'bearer',
-          description: 'Use the DIFY_TOOL_TOKEN or AGENT_TOOL_TOKEN value as a Bearer token.',
+          description: 'Use the AGENT_TOOL_TOKEN value as a Bearer token.',
         },
       },
       schemas: {
@@ -1993,85 +1966,6 @@ function agentOpenApiSpec(request: Request) {
             },
             generatedAt: { type: 'string', format: 'date-time' },
           },
-        },
-      },
-    },
-  }
-}
-
-function agentDifyOpenApiSpec(request: Request) {
-  const origin = new URL(request.url).origin
-  const stringParam = (name: string, description: string, required = false) => ({
-    name,
-    in: 'query' as const,
-    required,
-    description,
-    schema: { type: 'string' },
-  })
-  const integerParam = (name: string, description: string, required = false) => ({
-    name,
-    in: 'query' as const,
-    required,
-    description,
-    schema: { type: 'integer' },
-  })
-  const okResponse = { description: 'OK' }
-
-  return {
-    openapi: '3.0.0',
-    info: {
-      title: 'Giverny Agent Tools',
-      version: '1.0.0',
-      description:
-        'Dify-compatible read-only tools for Giverny. Configure Authorization Bearer token in Dify tool authentication.',
-    },
-    servers: [{ url: origin }],
-    paths: {
-      '/api/agent/tools/month-finance': {
-        get: {
-          operationId: 'query_month_finance',
-          summary: 'Query monthly finance totals',
-          description:
-            'Return billable hours, income amount, hourly rate and task-level details for one or more settlement months.',
-          parameters: [
-            stringParam('question', 'Original user question. Use this when months is empty.'),
-            stringParam('months', 'Settlement months separated by comma, for example 2026-06,2026-07.'),
-            stringParam('currentMonth', 'Current month in YYYY-MM format, for example 2026-07.'),
-          ],
-          responses: { '200': okResponse },
-        },
-      },
-      '/api/agent/tools/search-tasks': {
-        get: {
-          operationId: 'search_tasks',
-          summary: 'Search tasks',
-          description: 'Search Giverny tasks by title, requirement or design type.',
-          parameters: [
-            stringParam('query', 'Search keyword.', true),
-            stringParam('month', 'Optional settlement month in YYYY-MM format.'),
-            integerParam('limit', 'Maximum number of tasks to return.'),
-          ],
-          responses: { '200': okResponse },
-        },
-      },
-      '/api/agent/tools/task-detail': {
-        get: {
-          operationId: 'get_task_detail',
-          summary: 'Get task detail',
-          description: 'Return one task with progress updates, attachments and attachment analysis summaries.',
-          parameters: [
-            integerParam('taskId', 'Task ID.'),
-            stringParam('title', 'Task title.'),
-          ],
-          responses: { '200': okResponse },
-        },
-      },
-      '/api/agent/tools/context': {
-        get: {
-          operationId: 'get_giverny_context',
-          summary: 'Get Giverny agent context',
-          description: 'Return stable identity, capabilities and safety constraints for Alice.',
-          responses: { '200': okResponse },
         },
       },
     },
@@ -2243,11 +2137,8 @@ async function handleAgentToolApi(request: Request, env: Env) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: agentToolCorsHeaders })
   }
-  if (
-    (url.pathname === '/api/agent/openapi.json' || url.pathname === '/api/agent/dify-openapi.json') &&
-    request.method === 'GET'
-  ) {
-    return agentOk(agentDifyOpenApiSpec(request))
+  if (url.pathname === '/api/agent/openapi.json' && request.method === 'GET') {
+    return agentOk(agentOpenApiSpec(request))
   }
   if (url.pathname === '/api/agent/openapi-full.json' && request.method === 'GET') {
     return agentOk(agentOpenApiSpec(request))
@@ -7219,6 +7110,7 @@ async function chatWithAi(env: Env, request: Request) {
     useKnowledge?: boolean
     useWebSearch?: boolean
     modelChoice?: string
+    agentRuntimeConversationId?: string
     attachments?: Array<{ type: 'image' | 'text'; name: string; data: string; mimeType: string }>
   }
   const messages = Array.isArray(body.messages)
@@ -7254,6 +7146,43 @@ async function chatWithAi(env: Env, request: Request) {
     needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
   ])
   const requestedMonths = extractRequestedMonths(lastMsg, month)
+
+  // ===== Agent Runtime 优先 =====
+  // 纯文本问题优先交给项目自有 OpenAI Agents Runtime；未配置或失败时回退到站内本地助手逻辑。
+  // 触发联网搜索或带图片时仍走本地链路。
+  if (imageAttachments.length === 0 && !webSearchResult) {
+    const knowledgeSection = useKnowledge && knowledgeNotes.length
+      ? `\n\n[参考资料：用户的个人知识库笔记，仅在与问题相关时引用]\n${knowledgeNotes
+          .map((n) => `【${n.title || '笔记'}】\n${n.content}`)
+          .join('\n\n')
+          .slice(0, 6000)}`
+      : ''
+    const textAttachmentQuerySection = textAttachments.length
+      ? `\n\n[用户上传的文档]\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
+      : ''
+    const agentQuery = `${lastMsg}${textAttachmentQuerySection}${knowledgeSection}`
+
+    try {
+      const runtimeResult = await callOpenAiAgentRuntime(env, {
+        query: agentQuery,
+        currentMonth: month,
+        conversationId: String(body.agentRuntimeConversationId ?? '').trim(),
+      })
+      if (runtimeResult?.answer) {
+        return ok({
+          content: runtimeResult.answer,
+          agentRuntimeConversationId: runtimeResult.conversationId,
+          trace: [
+            `理解问题：OpenAI Agents Runtime 分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
+            ...formatAgentRuntimeTrace(runtimeResult.trace),
+            `生成答复：使用 ${runtimeResult.model || 'OpenAI Agents SDK'} 组织最终回答。`,
+          ],
+        })
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'openai_agent_runtime_failed', error: describeAiCallError(error) }))
+    }
+  }
 
   // 将 "HH:MM" 时间字符串 + 日期字符串转换为分钟戳（与前端 dateTimeMinuteStamp 一致）
   function timeStrToMinutes(date: string, time: string): number {
@@ -7339,26 +7268,6 @@ async function chatWithAi(env: Env, request: Request) {
       hourlyRate,
     )
     if (toolResults.length > 0) {
-      try {
-        const difyContent = await composeChatAgentAnswerWithDify(env, {
-          question: lastMsg,
-          toolResults,
-          currentMonth: month,
-          today,
-        })
-        if (difyContent) {
-          return ok({
-            content: difyContent,
-            trace: [
-              `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
-              ...trace,
-              '生成答复：调用 Dify 工作智能体，并将 D1 工具结果作为事实依据。',
-            ],
-          })
-        }
-      } catch (error) {
-        console.warn(JSON.stringify({ event: 'dify_chat_tool_answer_failed', error: describeAiCallError(error) }))
-      }
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
@@ -7450,32 +7359,6 @@ ${textAttachmentSection}
         return fail(`AI 暂时不可用：${detail}`, 503)
       }
     }
-  }
-
-  try {
-    const difyContent = await callDifyChatApp(env, {
-      query: messages.at(-1)?.content ?? '',
-      inputs: {
-        currentMonth: month,
-        today,
-        hourlyRate,
-        useKnowledge,
-        useWebSearch: Boolean(needsWebSearch),
-        givernyContext: systemPrompt.slice(0, 16000),
-        textAttachments: textAttachments.map((item) => ({ name: item.name, text: item.data.slice(0, 3000) })),
-      },
-    })
-    if (difyContent) {
-      return ok({
-        content: difyContent,
-        trace: [
-          '理解问题：未触发结构化工具，进入 Dify 工作智能体流程。',
-          '生成答复：调用 Dify App，并附带当前工作台上下文。',
-        ],
-      })
-    }
-  } catch (error) {
-    console.warn(JSON.stringify({ event: 'dify_chat_general_failed', error: describeAiCallError(error) }))
   }
 
   try {

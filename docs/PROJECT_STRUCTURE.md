@@ -15,7 +15,16 @@
 │   ├── README.md
 │   ├── package.json
 │   └── package-lock.json
+├── agent-runtime/
+│   ├── app/
+│   │   ├── giverny_tools.py
+│   │   ├── main.py
+│   │   └── schemas.py
+│   ├── Dockerfile
+│   ├── README.md
+│   └── requirements.txt
 ├── docs/
+│   ├── AI_AGENT_RUNTIME.md
 │   ├── AI_MODEL_ROUTING.md
 │   ├── OPERATION_POLICIES.md
 │   ├── PROJECT_STRUCTURE.md
@@ -73,6 +82,8 @@
 - BAML AI function contracts: `baml_src/ai_assistants.baml`
 - Generated BAML TypeScript client: `src/baml_client/baml_client/`
 - Independent BAML Node runtime: `ai-runtime/`
+- OpenAI Agents SDK runtime scaffold: `agent-runtime/`
+- Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - Domain types: `src/types/domain.ts`
 - App version and defaults: `src/config/appConfig.ts`
@@ -91,6 +102,8 @@
 - `binding = "ASSETS"` in `wrangler.toml` must remain, or SPA routes such as `/share/:token` can fail.
 - BAML is used as the AI prompt/schema contract and code-generation layer.
 - The production Cloudflare Worker does not import BAML directly. It can call the independent `ai-runtime/` Node service first, then fall back to DeepSeek direct if the runtime is unavailable.
+- `agent-runtime/` is the code-owned long-term agent scaffold. It uses OpenAI Agents SDK tools to call Giverny Worker data endpoints and returns a final answer plus a compact trace for the assistant UI.
+- `agent-runtime/` is not wired into production yet; keep it behind a Worker proxy before exposing it to the frontend.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 
 ## Auth Notes

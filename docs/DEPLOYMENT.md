@@ -52,6 +52,8 @@ env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u htt
 
 桌面沙箱下不要直接使用用户级 `~/.npm` 缓存或 `~/.wrangler/logs`：这些目录可能因旧权限或沙箱写入限制导致 `EPERM`。正式部署统一把临时 npm 缓存和 Wrangler 日志都指向 `/private/tmp`，无需修改系统权限。
 
+如果直连 Cloudflare API 在 DNS 或网络层面超时，而默认代理可以访问 `https://api.cloudflare.com/client/v4/`，可以保留代理环境变量重试部署，但仍要保留上面的 `npm_config_cache=/private/tmp/giverny-npm-cache` 和 `WRANGLER_LOG_PATH=/private/tmp/giverny-wrangler.log`，便于排查。
+
 ## 数据安全
 
 正式站已经进入试运营，不要在正式 D1/R2 上做清表测试或无意义测试上传。涉及数据结构、结算口径、文件删除、权限等高风险改动时，先在本地或临时隔离环境验证清楚，再部署正式站。

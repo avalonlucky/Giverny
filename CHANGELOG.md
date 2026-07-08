@@ -1,13 +1,13 @@
 # Changelog
 
-## 2026-07-08 · v0.28.4（Dify 工具接口打底）
+## 2026-07-08 · v0.28.4（自建 Agent Runtime 打底）
 
-- Dify 工具：将默认 `/api/agent/openapi.json` 切换为极简 Dify 兼容 schema，完整 OpenAPI 保留在 `/api/agent/openapi-full.json`，绕开 Dify Swagger 导入器对 `$ref` / `components` 的兼容问题
-- Agent 中台：Worker 新增 Dify 可导入的 OpenAPI 描述 `/api/agent/openapi.json`，为爱丽丝接入外部 Agent 编排做准备
-- 只读工具：新增 `month-finance`、`search-tasks`、`task-detail`、`context` 四个 Dify 工具接口，支持查询收入、任务列表、任务详情和爱丽丝能力边界
-- 工作助手：站内 `/api/ai/chat` 已接入 Dify App，优先把确定性工具结果交给 Dify 组织回答；Dify 异常时自动回落到原有模型链路
+- Agent 中台：移除 Dify 验证链路，长期方向改为自建 OpenAI Agents SDK Runtime，站内 `/api/ai/chat` 优先调用 `AGENT_RUNTIME_URL`
+- 只读工具：保留 `month-finance`、`search-tasks`、`task-detail`、`context` 四个 Agent 工具接口，支持查询收入、任务列表、任务详情和爱丽丝能力边界
+- OpenAPI：`/api/agent/openapi.json` 直接返回正式工具 schema，`/api/agent/dify-openapi.json` 退役，避免继续依赖外部编排平台的兼容 schema
+- 工作助手：Agent Runtime 未配置或调用失败时，自动回落到站内原有本地助手逻辑，不再回退到 Dify
 - 工作助手：模型输出 `<think>...</think>` 思考内容时，前端会自动折叠为「思考过程」，最终答案保持清爽可读
-- 安全：Dify 工具接口使用独立 `DIFY_TOOL_TOKEN` / `AGENT_TOOL_TOKEN` Bearer 鉴权，和网站登录口令隔离；本轮不开放任何写入型操作
+- 安全：Agent 工具接口使用独立 `AGENT_TOOL_TOKEN` Bearer 鉴权，和网站登录口令隔离；本轮不开放任何写入型操作
 - 数据口径：月份金额工具复用 D1 确定性统计口径，返回总金额、计费工时、时薪和结构化任务明细，避免模型自由估算
 
 ## 2026-07-07 · v0.28.3（工作助手接入豆包 Seed 2.1 Pro）

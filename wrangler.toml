@@ -4,8 +4,8 @@ compatibility_date = "2026-06-10"
 compatibility_flags = ["nodejs_compat"]
 account_id = "ccd312f47f0dca574199fa6e33758c6d"
 
-# Dify Cloud 的服务端请求会被自定义域名上的部分安全层拦截；workers.dev 作为 Agent 工具直连入口，
-# 仅用于 token 保护的 /api/agent/* 调用，正式页面仍以 mayeai.com 为主入口。
+# workers.dev 保留为 Agent Runtime 调试入口；/api/agent/* 工具接口仍使用 AGENT_TOOL_TOKEN 保护，
+# 正式页面仍以 mayeai.com 为主入口。
 # preview_urls 开启后，每次 `wrangler versions upload` 会生成独立的版本预览链接，
 # 用于在不影响生产流量的情况下预览升级分支。
 workers_dev = true
