@@ -4122,19 +4122,22 @@ function renderChatThinkingBlock(lines: string[]) {
 
 function renderChatContent(content: string) {
   const lines = content.split('\n')
-  if (lines[0] === '我按这个过程处理：') {
+  const liveTraceMatch = lines[0]?.match(/^我正在这样处理：(\d+)$/)
+  const isLiveAgentTrace = Boolean(liveTraceMatch)
+  if (lines[0] === '我按这个过程处理：' || isLiveAgentTrace) {
     const dividerIndex = lines.findIndex((line, index) => index > 0 && line.trim() === '')
     const traceLines = lines
       .slice(1, dividerIndex > 0 ? dividerIndex : lines.length)
       .map((line) => line.replace(/^- /, '').trim())
       .filter(Boolean)
     const { thinkingLines, answerLines } = splitChatThinkingLines(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
+    const liveTotalSteps = liveTraceMatch ? Number(liveTraceMatch[1]) : traceLines.length
     return (
       <>
-        <details className="chat-agent-timeline">
+        <details className="chat-agent-timeline" open={isLiveAgentTrace}>
           <summary>
-            <span>运行完成</span>
-            <small>{traceLines.length} 步</small>
+            <span>{isLiveAgentTrace ? '正在运行' : '运行完成'}</span>
+            <small>{isLiveAgentTrace ? `${traceLines.length} / ${liveTotalSteps} 步` : `${traceLines.length} 步`}</small>
             <ChevronDown size={13} />
           </summary>
           <ol>
@@ -4165,14 +4168,6 @@ type ChatPanelProps = {
   onClose: () => void
 }
 
-function renderAgentWorkingStatus(step = '正在理解你的问题…') {
-  return [
-    step,
-    '',
-    'Agent 正在准备可验证的执行步骤。',
-  ].join('\n')
-}
-
 function formatAgentTraceContent(content: string, trace?: string[]) {
   if (!trace || trace.length === 0) {
     return content
@@ -4182,6 +4177,42 @@ function formatAgentTraceContent(content: string, trace?: string[]) {
     ...trace.map((item) => `- ${item}`),
     '',
     content,
+  ].join('\n')
+}
+
+const AGENT_LIVE_TRACE_STEPS = [
+  '理解问题：识别你的目标、月份和要核对的工作口径。',
+  '判断路径：确认是否需要读取 Giverny 的任务、工时、收入或验收数据。',
+  '选择工具：准备调用任务搜索、语义召回或结构化统计工具。',
+  '读取数据：等待 Worker 与 Agent Runtime 返回可核对的任务结果。',
+  '核对口径：检查月份范围、未完成、逾期、状态和任务数量是否一致。',
+  '生成答复：整理结论、任务明细和下一步建议。',
+]
+
+function buildAgentLiveTraceSteps(text: string, hasAttachments: boolean, useWebSearch: boolean) {
+  const firstStep = hasAttachments
+    ? '理解问题：识别你的目标、附件内容和要核对的工作口径。'
+    : AGENT_LIVE_TRACE_STEPS[0]
+  const toolStep = useWebSearch
+    ? '选择工具：准备调用站内任务工具，必要时补充联网搜索。'
+    : AGENT_LIVE_TRACE_STEPS[2]
+  const answerStep = text.length > 0
+    ? AGENT_LIVE_TRACE_STEPS[5]
+    : '生成答复：整理附件分析结论和下一步建议。'
+  return [
+    firstStep,
+    AGENT_LIVE_TRACE_STEPS[1],
+    toolStep,
+    AGENT_LIVE_TRACE_STEPS[3],
+    AGENT_LIVE_TRACE_STEPS[4],
+    answerStep,
+  ]
+}
+
+function formatAgentLiveTraceContent(trace: string[], totalSteps: number) {
+  return [
+    `我正在这样处理：${totalSteps}`,
+    ...trace.map((item) => `- ${item}`),
   ].join('\n')
 }
 
@@ -4330,11 +4361,36 @@ function ChatPanel({
     if (overrideText === undefined) setInput('')
     const sentAttachments = [...attachments]
     setAttachments([])
+    const liveTraceSteps = buildAgentLiveTraceSteps(text, sentAttachments.length > 0, useWebSearch)
+    let liveTraceStepCount = 1
+    let liveTraceTimer: number | undefined
+    const stopLiveTrace = () => {
+      if (liveTraceTimer !== undefined) {
+        window.clearInterval(liveTraceTimer)
+        liveTraceTimer = undefined
+      }
+    }
+    const updateLiveTrace = (count: number) => {
+      setMessages((prev) => prev.map((m) => (
+        m.id === assistantId
+          ? { ...m, content: formatAgentLiveTraceContent(liveTraceSteps.slice(0, count), liveTraceSteps.length) }
+          : m
+      )))
+    }
 
-    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: renderAgentWorkingStatus() }])
+    setMessages([...baseMessages, userMsg, {
+      id: assistantId,
+      role: 'assistant',
+      content: formatAgentLiveTraceContent(liveTraceSteps.slice(0, liveTraceStepCount), liveTraceSteps.length),
+    }])
     setLoading(true)
     try {
       const minimumVisibleDelay = new Promise((resolve) => setTimeout(resolve, 650))
+      liveTraceTimer = window.setInterval(() => {
+        liveTraceStepCount = Math.min(liveTraceStepCount + 1, liveTraceSteps.length)
+        updateLiveTrace(liveTraceStepCount)
+        if (liveTraceStepCount >= liveTraceSteps.length) stopLiveTrace()
+      }, 520)
       const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
@@ -4356,9 +4412,11 @@ function ChatPanel({
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
         const data = (await res.json()) as { content?: string; trace?: string[] }
+        stopLiveTrace()
         setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace) } : m))
         return
       }
+      stopLiveTrace()
       setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: '' } : m))
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
@@ -4381,9 +4439,11 @@ function ChatPanel({
         }
       }
     } catch (e) {
+      stopLiveTrace()
       const msg = e instanceof Error ? e.message : '请求失败，请重试'
       setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `⚠️ ${msg}` } : m))
     } finally {
+      stopLiveTrace()
       setLoading(false)
     }
   }
