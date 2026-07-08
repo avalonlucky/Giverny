@@ -12396,6 +12396,11 @@ input::file-selector-button {
   border-top-right-radius: 8px;
 }
 
+.chat-bubble.user,
+.chat-bubble.user * {
+  color: var(--color-surface-strong);
+}
+
 .chat-bubble.assistant {
   align-self: flex-start;
   max-width: min(780px, 86%);

@@ -100,10 +100,10 @@ async def query_month_finance(
     return json.dumps(data, ensure_ascii=False)
 
 
-async def search_tasks(query: str, month: str | None = None, limit: int = 8) -> str:
-    """Search Giverny tasks by title, requirement, people, or month."""
+async def search_tasks(query: str, month: str | None = None, limit: int = 30) -> str:
+    """Search Giverny tasks by title, requirement, status intent, people, or month."""
     params = {"query": query, "month": month, "limit": limit}
-    append_trace("tool", "搜索任务", "按任务名称、需求、人员或月份检索。", params)
+    append_trace("tool", "搜索任务", "按月份、状态意图、任务名称、需求或人员检索。", params)
     data = await _get_json("search-tasks", params)
     append_trace("result", "任务搜索已返回", payload=data)
     return json.dumps(data, ensure_ascii=False)
@@ -157,13 +157,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search Giverny tasks by title, requirement, people, or month.",
+            "description": "Search Giverny tasks by title, requirement, status intent, people, or month. For questions like unfinished/overdue tasks in a month, pass the month and the original user query; the Worker will first load the month scope and then filter by status.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search keyword or natural-language query."},
                     "month": {"type": "string", "description": "Optional settlement month in YYYY-MM format."},
-                    "limit": {"type": "integer", "description": "Maximum number of tasks to return."},
+                    "limit": {"type": "integer", "description": "Maximum number of tasks to return. Use 30 or more for month-level status questions."},
                 },
                 "required": ["query"],
             },

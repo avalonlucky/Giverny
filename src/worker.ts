@@ -2559,18 +2559,24 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   const query = String(body.query ?? '').trim().slice(0, 120)
   const month = String(body.month ?? '').trim().slice(0, 7)
-  const limit = Math.min(Math.max(Number(body.limit ?? 12) || 12, 1), 30)
+  const limit = Math.min(Math.max(Number(body.limit ?? 30) || 30, 1), 100)
   const like = `%${query}%`
-  const rows = query
+  const statusIntent = /(?:未完成|没完成|没做完|没做|未做完|逾期|过期|延期|还(?:有|没)|待验收|进行中|计划中|挂起)/.test(query)
+  const unfinishedIntent = /(?:未完成|没完成|没做完|没做|未做完|还(?:有|没)|逾期|过期|延期)/.test(query)
+  const overdueIntent = /(?:逾期|过期|延期)/.test(query)
+  const today = nowIso().slice(0, 10)
+  const monthWhere = month ? '(settlement_month = ? OR start_date LIKE ?)' : ''
+  const monthBindings = month ? [month, `${month}%`] : []
+  const rows = query && !statusIntent
     ? month
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL AND settlement_month = ?
+           WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(month, like, like, like, limit).all<DbTask>()
+        ).bind(...monthBindings, like, like, like, limit).all<DbTask>()
       : await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
@@ -2583,10 +2589,10 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL AND settlement_month = ?
+           WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(month, limit).all<DbTask>()
+        ).bind(...monthBindings, limit).all<DbTask>()
       : await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
            FROM tasks
@@ -2594,12 +2600,31 @@ async function agentSearchTasksTool(env: Env, request: Request) {
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(limit).all<DbTask>()
+  const allResults = rows.results ?? []
+  const isClosed = (task: DbTask) => task.status === '已验收' || task.status === '终止' || task.status === '不计费'
+  const isOverdue = (task: DbTask) => !isClosed(task) && Boolean(task.estimated_delivery_date) && String(task.estimated_delivery_date).slice(0, 10) < today
+  const filteredResults = statusIntent
+    ? allResults.filter((task) => {
+        if (overdueIntent) return isOverdue(task)
+        if (unfinishedIntent) return !isClosed(task)
+        if (/待验收/.test(query)) return task.status === '待验收'
+        if (/进行中/.test(query)) return task.status === '进行中'
+        if (/计划中/.test(query)) return task.status === '计划中'
+        if (/挂起/.test(query)) return task.status === '挂起'
+        return true
+      })
+    : allResults
 
   return agentOk({
     tool: 'search_tasks',
     query,
     month,
-    results: (rows.results ?? []).map((task) => ({
+    count: filteredResults.length,
+    totalInScope: allResults.length,
+    unfinishedCount: allResults.filter((task) => !isClosed(task)).length,
+    overdueCount: allResults.filter(isOverdue).length,
+    statusIntent,
+    results: filteredResults.map((task) => ({
       id: Number(task.id),
       title: task.title,
       requirement: task.requirement ?? '',
@@ -2612,6 +2637,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       actualDeliveryDate: task.actual_delivery_date ?? '',
       settlementMonth: task.settlement_month ?? '',
       billable: isBillableDbTask(task),
+      overdue: isOverdue(task),
     })),
     generatedAt: nowIso(),
   })
