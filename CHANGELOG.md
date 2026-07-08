@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-08 · v0.28.4（自建 Agent Runtime 打底）
+## 2026-07-08 · v0.28.5（自建 Agent Runtime 打底）
 
 - Agent 中台：移除 Dify 验证链路，长期方向改为自建 OpenAI Agents SDK Runtime，站内 `/api/ai/chat` 优先调用 `AGENT_RUNTIME_URL`
 - 只读工具：保留 `month-finance`、`search-tasks`、`task-detail`、`context` 四个 Agent 工具接口，支持查询收入、任务列表、任务详情和爱丽丝能力边界
