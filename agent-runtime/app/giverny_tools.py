@@ -72,6 +72,21 @@ async def _get_json(endpoint: str, params: dict[str, Any] | None = None) -> dict
     return data
 
 
+async def _post_json(endpoint: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    base_url = os.getenv("GIVERNY_API_BASE_URL", "https://mayeai.com").rstrip("/")
+    url = f"{base_url}/api/agent/tools/{endpoint}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers={**_headers(), "content-type": "application/json"}, json=payload or {})
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Giverny tool {endpoint} failed with HTTP {response.status_code}: {response.text[:300]}",
+        )
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Giverny tool {endpoint} returned a non-object payload.")
+    return data
+
+
 async def query_month_finance(
     question: str,
     current_month: str | None = None,
@@ -108,6 +123,13 @@ async def get_giverny_context() -> str:
     append_trace("tool", "读取工作台上下文", "获取当前平台概览。")
     data = await _get_json("context")
     append_trace("result", "工作台上下文已返回", payload=data)
+    return json.dumps(data, ensure_ascii=False)
+
+
+async def write_tool(endpoint: str, label: str, payload: dict[str, Any]) -> str:
+    append_trace("tool", label, payload=payload)
+    data = await _post_json(endpoint, payload)
+    append_trace("result", f"{label}已返回", payload=data)
     return json.dumps(data, ensure_ascii=False)
 
 
@@ -169,6 +191,141 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task_preview",
+            "description": "Preview a new task draft. Call this before creating a task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "requirement": {"type": "string"},
+                    "type": {"type": "string"},
+                    "startDate": {"type": "string", "description": "YYYY-MM-DDTHH:mm"},
+                    "estimatedDate": {"type": "string", "description": "YYYY-MM-DDTHH:mm"},
+                    "settlementMonth": {"type": "string", "description": "YYYY-MM"},
+                    "estimatedHours": {"type": "number"},
+                    "requester": {"type": "string"},
+                    "contact": {"type": "string"},
+                    "reviewer": {"type": "string"},
+                    "billable": {"type": "boolean"},
+                    "isSupplemental": {"type": "boolean"},
+                    "currentMonth": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task",
+            "description": "Create a task after the user explicitly confirms a create_task_preview.",
+            "parameters": {"type": "object", "properties": {"confirmationToken": {"type": "string"}}, "required": ["confirmationToken"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_feedback_preview",
+            "description": "Preview recording client feedback or revision notes on a task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "taskId": {"type": "integer"},
+                    "taskTitle": {"type": "string"},
+                    "note": {"type": "string"},
+                    "feedbackVersion": {"type": "string"},
+                    "feedbackSource": {"type": "string"},
+                    "dateTime": {"type": "string", "description": "YYYY-MM-DDTHH:mm"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_feedback",
+            "description": "Record client feedback after explicit user confirmation.",
+            "parameters": {"type": "object", "properties": {"confirmationToken": {"type": "string"}}, "required": ["confirmationToken"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task_status_preview",
+            "description": "Preview changing a task status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "taskId": {"type": "integer"},
+                    "taskTitle": {"type": "string"},
+                    "status": {"type": "string", "enum": ["计划中", "进行中", "挂起", "待验收", "已验收", "终止", "不计费"]},
+                    "progress": {"type": "integer"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task_status",
+            "description": "Update task status after explicit user confirmation.",
+            "parameters": {"type": "object", "properties": {"confirmationToken": {"type": "string"}}, "required": ["confirmationToken"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task_fields_preview",
+            "description": "Preview editing safe task fields such as title, requirement, type, schedule, people, billable, notes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "taskId": {"type": "integer"},
+                    "taskTitle": {"type": "string"},
+                    "fields": {"type": "object", "additionalProperties": True},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task_fields",
+            "description": "Update task fields after explicit user confirmation.",
+            "parameters": {"type": "object", "properties": {"confirmationToken": {"type": "string"}}, "required": ["confirmationToken"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_progress_preview",
+            "description": "Preview appending a progress/time entry to a task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "taskId": {"type": "integer"},
+                    "taskTitle": {"type": "string"},
+                    "note": {"type": "string"},
+                    "startDateTime": {"type": "string", "description": "YYYY-MM-DDTHH:mm"},
+                    "endDateTime": {"type": "string", "description": "YYYY-MM-DDTHH:mm"},
+                    "isUncounted": {"type": "boolean"},
+                    "isRevision": {"type": "boolean"},
+                    "isAcceptanceProgress": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_progress",
+            "description": "Append progress after explicit user confirmation.",
+            "parameters": {"type": "object", "properties": {"confirmationToken": {"type": "string"}}, "required": ["confirmationToken"]},
+        },
+    },
 ]
 
 
@@ -193,4 +350,19 @@ async def dispatch_tool(name: str, arguments: dict[str, Any]) -> str:
         return await get_task_detail(task_id=task_id, title=arguments.get("title"))
     if name == "get_giverny_context":
         return await get_giverny_context()
+    write_tool_map = {
+        "create_task_preview": ("create-task-preview", "预览新建任务"),
+        "create_task": ("create-task", "创建任务"),
+        "record_feedback_preview": ("record-feedback-preview", "预览记录反馈"),
+        "record_feedback": ("record-feedback", "记录反馈"),
+        "update_task_status_preview": ("update-task-status-preview", "预览修改状态"),
+        "update_task_status": ("update-task-status", "修改状态"),
+        "update_task_fields_preview": ("update-task-fields-preview", "预览修改字段"),
+        "update_task_fields": ("update-task-fields", "修改字段"),
+        "append_progress_preview": ("append-progress-preview", "预览追加进展"),
+        "append_progress": ("append-progress", "追加进展"),
+    }
+    if name in write_tool_map:
+        endpoint, label = write_tool_map[name]
+        return await write_tool(endpoint, label, arguments)
     raise ValueError(f"Unknown tool: {name}")

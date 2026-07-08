@@ -1724,6 +1724,7 @@ const agentToolCorsHeaders = {
 
 const agentOk = (data: unknown, status = 200) => Response.json(data, { status, headers: agentToolCorsHeaders })
 const agentFail = (message: string, status = 400) => agentOk({ error: message }, status)
+const agentTaskStatuses: TaskStatus[] = ['计划中', '进行中', '挂起', '待验收', '已验收', '终止', '不计费']
 
 function getAgentToolToken(env: Env) {
   return env.AGENT_TOOL_TOKEN || ''
@@ -1746,6 +1747,468 @@ async function parseAgentToolBody(request: Request): Promise<Record<string, unkn
     return Object.fromEntries(params.entries())
   }
   return (await request.json().catch(() => ({}))) as Record<string, unknown>
+}
+
+function agentString(value: unknown, max = 1000) {
+  return String(value ?? '').trim().slice(0, max)
+}
+
+function agentNumber(value: unknown, fallback = 0) {
+  const next = Number(value)
+  return Number.isFinite(next) ? next : fallback
+}
+
+function agentBool(value: unknown, fallback = false) {
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return fallback
+}
+
+function agentDateTime(value: unknown, fallback = nowIso().slice(0, 16)) {
+  const raw = agentString(value, 32)
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) ? raw.slice(0, 16) : fallback
+}
+
+function agentDatePart(value: string) {
+  return value.slice(0, 10)
+}
+
+function agentTimePart(value: string) {
+  return value.slice(11, 16) || '00:00'
+}
+
+function agentEntryMinutes(entry: TimeEntry) {
+  if (entry.isUncounted || entry.isClientFeedback) return 0
+  const startDate = agentString(entry.date || nowIso().slice(0, 10), 10)
+  const endDate = agentString(entry.endDate || startDate, 10)
+  const start = Date.parse(`${startDate}T${entry.start || '00:00'}:00+08:00`)
+  const end = Date.parse(`${endDate}T${entry.end || entry.start || '00:00'}:00+08:00`)
+  return Number.isFinite(start) && Number.isFinite(end) && end > start ? Math.round((end - start) / 60000) : 0
+}
+
+function agentEntryHours(entries: TimeEntry[]) {
+  return Math.round((entries.reduce((sum, entry) => sum + agentEntryMinutes(entry), 0) / 60) * 100) / 100
+}
+
+function agentCanonicalize(value: unknown): string {
+  if (value === null || value === undefined) return 'null'
+  if (Array.isArray(value)) return `[${value.map(agentCanonicalize).join(',')}]`
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${agentCanonicalize(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function agentBase64Url(bytes: Uint8Array) {
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function agentBase64UrlToString(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return new TextDecoder().decode(bytes)
+}
+
+async function agentSigningKey(env: Env) {
+  const secret = env.AGENT_RUNTIME_KEY || env.AGENT_TOOL_TOKEN || env.ADMIN_TOKEN || 'giverny-agent-local'
+  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+}
+
+async function createAgentConfirmationToken(env: Env, action: string, draft: Record<string, unknown>) {
+  const payload = {
+    action,
+    draft,
+    exp: Date.now() + 10 * 60 * 1000,
+  }
+  const payloadText = agentCanonicalize(payload)
+  const payloadPart = agentBase64Url(encoder.encode(payloadText))
+  const key = await agentSigningKey(env)
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(payloadPart)))
+  return `${payloadPart}.${agentBase64Url(signature)}`
+}
+
+async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAction: string) {
+  const raw = agentString(token, 5000)
+  const [payloadPart, signaturePart] = raw.split('.')
+  if (!payloadPart || !signaturePart) {
+    throw new Error('缺少有效 confirmationToken，请先调用对应 preview 工具。')
+  }
+  const key = await agentSigningKey(env)
+  const expectedSignature = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(payloadPart)))
+  if (agentBase64Url(expectedSignature) !== signaturePart) {
+    throw new Error('confirmationToken 校验失败，请重新生成预览。')
+  }
+  const payload = JSON.parse(agentBase64UrlToString(payloadPart)) as { action?: string; draft?: Record<string, unknown>; exp?: number }
+  if (payload.action !== expectedAction) {
+    throw new Error(`confirmationToken 动作不匹配：需要 ${expectedAction}`)
+  }
+  if (!payload.exp || payload.exp < Date.now()) {
+    throw new Error('confirmationToken 已过期，请重新生成预览。')
+  }
+  return payload.draft ?? {}
+}
+
+async function agentTaskByRef(env: Env, body: Record<string, unknown>) {
+  const taskId = agentNumber(body.taskId, 0)
+  const title = agentString(body.taskTitle ?? body.title, 160)
+  const task = taskId > 0
+    ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
+    : title
+      ? await env.DB.prepare('SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ? ORDER BY start_date DESC, created_at DESC LIMIT 1').bind(`%${title}%`).first<DbTask>()
+      : null
+  if (!task) throw new Error('没有匹配到明确任务，请提供 taskId 或更完整的任务标题。')
+  return task
+}
+
+async function agentPreview(env: Env, action: string, draft: Record<string, unknown>, missing: string[] = [], warnings: string[] = []) {
+  return agentOk({
+    tool: action,
+    mode: 'preview',
+    ready: missing.length === 0,
+    draft,
+    missing,
+    warnings,
+    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, action.replace(/_preview$/, ''), draft) : '',
+    instruction: missing.length === 0
+      ? '请把预览内容展示给用户；只有用户明确确认后，才调用对应 execute 工具并传入 confirmationToken。'
+      : '请向用户追问缺失字段，不要调用 execute 工具。',
+    generatedAt: nowIso(),
+  })
+}
+
+async function agentCreateTaskPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const currentMonth = agentString(body.currentMonth, 7) || monthPart(nowIso())
+  const draft = {
+    title: agentString(body.title, 120),
+    requirement: agentString(body.requirement, 3000),
+    type: agentString(body.type ?? body.designType, 120) || defaultDesignTypes[0],
+    date: agentDateTime(body.startDate ?? body.date),
+    estimatedDate: agentDateTime(body.estimatedDate ?? body.dueDate, nowIso().slice(0, 16)),
+    settlementMonth: agentString(body.settlementMonth, 7) || currentMonth,
+    estimatedHours: Math.max(0.5, agentNumber(body.estimatedHours, 1)),
+    requester: agentString(body.requester, 80),
+    contact: agentString(body.contact, 80) || agentString(body.requester, 80),
+    reviewer: agentString(body.reviewer, 80) || agentString(body.contact, 80) || agentString(body.requester, 80),
+    billable: agentBool(body.billable, true),
+    isSupplemental: agentBool(body.isSupplemental, false),
+  }
+  const missing = [
+    !draft.title && 'title',
+    !draft.requirement && 'requirement',
+    !draft.date && 'startDate',
+    !draft.estimatedDate && 'estimatedDate',
+  ].filter(Boolean) as string[]
+  return agentPreview(env, 'create_task_preview', draft, missing)
+}
+
+async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'create_task')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const id = toId(Date.now())
+  const hourlyRate = await getHourlyRate(env)
+  const billable = agentBool(draft.billable, true)
+  const status: TaskStatus = billable ? '计划中' : '不计费'
+  const startDate = agentDateTime(draft.date)
+  const estimatedDate = agentDateTime(draft.estimatedDate, startDate)
+  await env.DB.prepare(
+    `INSERT INTO tasks (
+      id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
+      estimated_hours, actual_hours, hourly_rate, requester, contact_person, reviewer, stage, status, progress,
+      suspend_reason, terminate_reason, supplemental_note, acceptance_note, feedback_rating, feedback_tags_json, feedback_note, time_entries_json, waiting_entries_json, is_billable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    id,
+    agentString(draft.title, 120),
+    agentString(draft.requirement, 3000),
+    agentString(draft.type, 120) || defaultDesignTypes[0],
+    startDate,
+    estimatedDate,
+    null,
+    agentString(draft.settlementMonth, 7) || monthPart(startDate),
+    agentBool(draft.isSupplemental, false) ? 1 : 0,
+    Math.max(0.5, agentNumber(draft.estimatedHours, 1)),
+    0,
+    hourlyRate,
+    agentString(draft.requester, 80),
+    agentString(draft.contact, 80),
+    agentString(draft.reviewer, 80),
+    status,
+    status,
+    0,
+    '',
+    '',
+    '',
+    '',
+    '',
+    JSON.stringify([]),
+    '',
+    JSON.stringify([]),
+    JSON.stringify([]),
+    billable ? 1 : 0,
+  ).run()
+  await env.DB.prepare(
+    `INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_to_client)
+     VALUES (?, ?, ?, ?, ?, 0, 1)`,
+  ).bind(`${id}-created`, id, startDate, `项目名称：${agentString(draft.type, 120) || '未分类项目'}`, `任务名称：${agentString(draft.title, 120)}`).run()
+  await audit(env, 'agent_create', 'task', id, draft)
+  ctx?.waitUntil(indexTaskSearch(env, id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<DbTask>()
+  return agentOk({ tool: 'create_task', mode: 'execute', ok: true, task: saved ? toTask(saved) : { id } })
+}
+
+async function agentRecordFeedbackPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const dateTime = agentDateTime(body.dateTime)
+    const draft = {
+      taskId: Number(task.id),
+      taskTitle: task.title,
+      note: agentString(body.note ?? body.feedback, 2000),
+      feedbackVersion: agentString(body.feedbackVersion, 30).toUpperCase(),
+      feedbackSource: agentString(body.feedbackSource, 80) || '甲方',
+      dateTime,
+    }
+    const missing = [!draft.note && 'note'].filter(Boolean) as string[]
+    return agentPreview(env, 'record_feedback_preview', draft, missing)
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法生成反馈预览', 400)
+  }
+}
+
+async function agentRecordFeedbackTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'record_feedback')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再写入反馈', 409)
+  const entries = parseTimeEntries(task.time_entries_json)
+  const dateTime = agentDateTime(draft.dateTime)
+  const entry: TimeEntry = {
+    id: crypto.randomUUID(),
+    date: agentDatePart(dateTime),
+    endDate: agentDatePart(dateTime),
+    start: agentTimePart(dateTime),
+    end: agentTimePart(dateTime),
+    note: agentString(draft.note, 2000),
+    isClientFeedback: true,
+    isRevision: true,
+    isUncounted: true,
+    feedbackVersion: agentString(draft.feedbackVersion, 30).toUpperCase(),
+    feedbackSource: agentString(draft.feedbackSource, 80) || '甲方',
+  }
+  const nextEntries = [...entries, entry]
+  await env.DB.prepare('UPDATE tasks SET time_entries_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(JSON.stringify(nextEntries), task.id)
+    .run()
+  await audit(env, 'agent_record_feedback', 'task', task.id, entry)
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'record_feedback', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
+}
+
+async function agentUpdateTaskStatusPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const status = agentString(body.status ?? body.newStatus, 20) as TaskStatus
+    const draft = {
+      taskId: Number(task.id),
+      taskTitle: task.title,
+      fromStatus: task.status,
+      status,
+      progress: status === '已验收' ? 100 : status === '待验收' ? Math.max(Number(task.progress) || 0, 90) : Math.min(Math.max(agentNumber(body.progress, Number(task.progress) || 0), 0), 100),
+      reason: agentString(body.reason, 500),
+    }
+    const missing = [!agentTaskStatuses.includes(status) && 'status'].filter(Boolean) as string[]
+    const warnings = task.status === '已验收' && status !== '已验收' ? ['已验收任务回退状态属于敏感操作，本工具不会回退验收锁定。'] : []
+    return agentPreview(env, 'update_task_status_preview', draft, missing, warnings)
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法生成状态修改预览', 400)
+  }
+}
+
+async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_status')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再修改状态', 409)
+  const status = agentString(draft.status, 20) as TaskStatus
+  if (!agentTaskStatuses.includes(status)) return agentFail('状态不合法', 400)
+  if (task.status === '已验收' && status !== '已验收') return agentFail('已验收任务状态已锁定，不能通过 Agent 回退', 409)
+  const progress = status === '已验收' ? 100 : Math.min(Math.max(agentNumber(draft.progress, Number(task.progress) || 0), 0), 100)
+  const actualDeliveryDate = status === '已验收' && task.status !== '已验收' ? nowIso() : task.actual_delivery_date ?? ''
+  await env.DB.prepare('UPDATE tasks SET status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(status, status, progress, actualDeliveryDate, task.id)
+    .run()
+  await audit(env, 'agent_update_status', 'task', task.id, draft)
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'update_task_status', mode: 'execute', ok: true, task: saved ? toTask(saved) : null })
+}
+
+function agentAllowedFieldChanges(fields: Record<string, unknown>) {
+  const allowed = new Set(['title', 'requirement', 'type', 'date', 'estimatedDate', 'settlementMonth', 'estimatedHours', 'requester', 'contact', 'reviewer', 'billable', 'isSupplemental', 'supplementalNote', 'acceptanceNote'])
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => allowed.has(key)))
+}
+
+async function agentUpdateTaskFieldsPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const rawFields = typeof body.fields === 'object' && body.fields ? body.fields as Record<string, unknown> : body
+    const fields = agentAllowedFieldChanges(rawFields)
+    const draft = {
+      taskId: Number(task.id),
+      taskTitle: task.title,
+      fields,
+      before: {
+        title: task.title,
+        requirement: task.requirement ?? '',
+        type: task.design_type ?? '',
+        date: task.start_date ?? '',
+        estimatedDate: task.estimated_delivery_date ?? '',
+        settlementMonth: task.settlement_month ?? '',
+        estimatedHours: Number(task.estimated_hours) || 0,
+        billable: Number(task.is_billable) !== 0,
+      },
+    }
+    const missing = Object.keys(fields).length === 0 ? ['fields'] : []
+    return agentPreview(env, 'update_task_fields_preview', draft, missing)
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法生成字段修改预览', 400)
+  }
+}
+
+async function agentUpdateTaskFieldsTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_fields')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再修改任务字段', 409)
+  const fields = agentAllowedFieldChanges((draft.fields as Record<string, unknown>) ?? {})
+  const next = {
+    title: Object.hasOwn(fields, 'title') ? agentString(fields.title, 120) : task.title,
+    requirement: Object.hasOwn(fields, 'requirement') ? agentString(fields.requirement, 3000) : task.requirement ?? '',
+    type: Object.hasOwn(fields, 'type') ? agentString(fields.type, 120) : task.design_type ?? '',
+    date: Object.hasOwn(fields, 'date') ? agentDateTime(fields.date, task.start_date ?? nowIso().slice(0, 16)) : task.start_date ?? '',
+    estimatedDate: Object.hasOwn(fields, 'estimatedDate') ? agentDateTime(fields.estimatedDate, task.estimated_delivery_date ?? task.start_date ?? nowIso().slice(0, 16)) : task.estimated_delivery_date ?? '',
+    settlementMonth: Object.hasOwn(fields, 'settlementMonth') ? agentString(fields.settlementMonth, 7) : task.settlement_month ?? '',
+    estimatedHours: Object.hasOwn(fields, 'estimatedHours') ? Math.max(0, agentNumber(fields.estimatedHours, Number(task.estimated_hours) || 0)) : Number(task.estimated_hours) || 0,
+    requester: Object.hasOwn(fields, 'requester') ? agentString(fields.requester, 80) : task.requester ?? '',
+    contact: Object.hasOwn(fields, 'contact') ? agentString(fields.contact, 80) : task.contact_person ?? '',
+    reviewer: Object.hasOwn(fields, 'reviewer') ? agentString(fields.reviewer, 80) : task.reviewer ?? '',
+    isSupplemental: Object.hasOwn(fields, 'isSupplemental') ? agentBool(fields.isSupplemental) : Boolean(task.is_supplemental),
+    billable: Object.hasOwn(fields, 'billable') ? agentBool(fields.billable, true) : Number(task.is_billable) !== 0,
+    supplementalNote: Object.hasOwn(fields, 'supplementalNote') ? agentString(fields.supplementalNote, 1000) : task.supplemental_note ?? '',
+    acceptanceNote: Object.hasOwn(fields, 'acceptanceNote') ? agentString(fields.acceptanceNote, 1000) : task.acceptance_note ?? '',
+  }
+  await env.DB.prepare(
+    `UPDATE tasks SET title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, settlement_month = ?, estimated_hours = ?, requester = ?, contact_person = ?, reviewer = ?, is_supplemental = ?, is_billable = ?, supplemental_note = ?, acceptance_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+  ).bind(next.title, next.requirement, next.type, next.date, next.estimatedDate, next.settlementMonth || monthPart(next.date), next.estimatedHours, next.requester, next.contact, next.reviewer, next.isSupplemental ? 1 : 0, next.billable ? 1 : 0, next.supplementalNote, next.acceptanceNote, task.id).run()
+  await audit(env, 'agent_update_fields', 'task', task.id, fields)
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'update_task_fields', mode: 'execute', ok: true, task: saved ? toTask(saved) : null })
+}
+
+async function agentAppendProgressPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const startDateTime = agentDateTime(body.startDateTime ?? body.start)
+    const endDateTime = agentDateTime(body.endDateTime ?? body.end, startDateTime)
+    const draft = {
+      taskId: Number(task.id),
+      taskTitle: task.title,
+      note: agentString(body.note, 2000),
+      startDateTime,
+      endDateTime,
+      isUncounted: agentBool(body.isUncounted, false),
+      isRevision: agentBool(body.isRevision, false),
+      isAcceptanceProgress: agentBool(body.isAcceptanceProgress, false),
+    }
+    const missing = [!draft.note && 'note'].filter(Boolean) as string[]
+    return agentPreview(env, 'append_progress_preview', draft, missing)
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法生成进展预览', 400)
+  }
+}
+
+async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_progress')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再写入进展', 409)
+  if (task.status === '已验收' && !agentBool(draft.isAcceptanceProgress, false)) return agentFail('已验收任务的工时已锁定，不能再追加普通进展', 409)
+  const startDateTime = agentDateTime(draft.startDateTime)
+  const endDateTime = agentDateTime(draft.endDateTime, startDateTime)
+  const entry: TimeEntry = {
+    id: crypto.randomUUID(),
+    date: agentDatePart(startDateTime),
+    endDate: agentDatePart(endDateTime),
+    start: agentTimePart(startDateTime),
+    end: agentTimePart(endDateTime),
+    note: agentString(draft.note, 2000),
+    isUncounted: agentBool(draft.isUncounted, false),
+    isRevision: agentBool(draft.isRevision, false),
+    isAcceptanceProgress: agentBool(draft.isAcceptanceProgress, false),
+  }
+  const entries = [...parseTimeEntries(task.time_entries_json), entry]
+  const actualHours = agentEntryHours(entries)
+  const nextStatus: TaskStatus = entry.isAcceptanceProgress ? '已验收' : task.status === '计划中' ? '进行中' : task.status
+  const nextProgress = entry.isAcceptanceProgress ? 100 : Math.max(Number(task.progress) || 0, nextStatus === '进行中' ? 10 : Number(task.progress) || 0)
+  const actualDeliveryDate = entry.isAcceptanceProgress ? endDateTime : task.actual_delivery_date ?? ''
+  await env.DB.prepare('UPDATE tasks SET time_entries_json = ?, actual_hours = ?, status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(JSON.stringify(entries), actualHours, nextStatus, nextStatus, nextProgress, actualDeliveryDate, task.id)
+    .run()
+  await audit(env, 'agent_append_progress', 'task', task.id, entry)
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'append_progress', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
 }
 
 function normalizedAgentMonths(value: unknown, question: string, currentMonth: string) {
@@ -1778,18 +2241,49 @@ function agentOpenApiSpec(request: Request) {
       },
     },
   })
+  const writeToolPath = (operationId: string, summary: string) => ({
+    post: {
+      operationId,
+      tags: ['Write Tools'],
+      summary,
+      description: 'Two-step write tool. Preview endpoints return a signed confirmationToken; execute endpoints require that token after explicit user confirmation.',
+      security: [{ BearerAuth: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { type: 'object', additionalProperties: true },
+          },
+        },
+      },
+      responses: {
+        '200': {
+          description: 'Tool response',
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: true },
+            },
+          },
+        },
+        '400': errorResponse,
+        '401': errorResponse,
+        '409': errorResponse,
+      },
+    },
+  })
   return {
     openapi: '3.0.3',
     info: {
       title: 'Giverny Agent Tools',
       version: '1.0.0',
-      description: 'Read-only tools for the Giverny worklog agent. All tool calls require a Bearer token.',
+      description: 'Read and confirmed-write tools for the Giverny worklog agent. All tool calls require a Bearer token.',
     },
     servers: [{ url: origin }],
     tags: [
       { name: 'Finance', description: 'Income and billable hour statistics.' },
       { name: 'Tasks', description: 'Task search and task detail lookup.' },
       { name: 'Context', description: 'Stable assistant context and capability notes.' },
+      { name: 'Write Tools', description: 'Preview/execute tools for confirmed writes.' },
     ],
     paths: {
       '/api/agent/tools/month-finance': {
@@ -1892,6 +2386,16 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
+      '/api/agent/tools/create-task-preview': writeToolPath('create_task_preview', 'Preview a new task'),
+      '/api/agent/tools/create-task': writeToolPath('create_task', 'Create a task after confirmation'),
+      '/api/agent/tools/record-feedback-preview': writeToolPath('record_feedback_preview', 'Preview recording client feedback'),
+      '/api/agent/tools/record-feedback': writeToolPath('record_feedback', 'Record client feedback after confirmation'),
+      '/api/agent/tools/update-task-status-preview': writeToolPath('update_task_status_preview', 'Preview changing task status'),
+      '/api/agent/tools/update-task-status': writeToolPath('update_task_status', 'Update task status after confirmation'),
+      '/api/agent/tools/update-task-fields-preview': writeToolPath('update_task_fields_preview', 'Preview editing task fields'),
+      '/api/agent/tools/update-task-fields': writeToolPath('update_task_fields', 'Update task fields after confirmation'),
+      '/api/agent/tools/append-progress-preview': writeToolPath('append_progress_preview', 'Preview appending task progress'),
+      '/api/agent/tools/append-progress': writeToolPath('append_progress', 'Append task progress after confirmation'),
     },
     components: {
       securitySchemes: {
@@ -2172,19 +2676,21 @@ async function agentContextTool(env: Env, request: Request) {
       '查询任务、任务详情、进展、验收附件和交付件分析',
       '统计收入、计费工时、结算月份和任务明细',
       '整理需求、甲方反馈、进展记录、验收备注和月报',
+      '在用户确认后创建任务、记录反馈、修改状态、修改任务字段和追加进展',
       '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
       '闲聊、解释概念、头脑风暴、写作润色和效率规划',
     ],
     constraints: [
       '涉及金额、工时、状态和验收时优先调用工具，不凭空编造。',
-      '当前工具均为只读；创建、修改、删除、验收、结算、部署等写入动作必须先生成计划并等待用户确认。',
+      '写入动作必须先调用 preview 工具生成草稿和 confirmationToken，并等待用户明确确认后再调用 execute 工具。',
+      '删除、作废、结算锁定、部署等高风险动作不开放给 Agent 工具。',
       '不要自称 DeepSeek、Gemini、GPT 或其他底层模型。',
     ],
     generatedAt: nowIso(),
   })
 }
 
-async function handleAgentToolApi(request: Request, env: Env) {
+async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecutionContext) {
   const url = new URL(request.url)
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: agentToolCorsHeaders })
@@ -2206,6 +2712,36 @@ async function handleAgentToolApi(request: Request, env: Env) {
   }
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/create-task-preview' && request.method === 'POST') {
+    return agentCreateTaskPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/create-task' && request.method === 'POST') {
+    return agentCreateTaskTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/record-feedback-preview' && request.method === 'POST') {
+    return agentRecordFeedbackPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/record-feedback' && request.method === 'POST') {
+    return agentRecordFeedbackTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/update-task-status-preview' && request.method === 'POST') {
+    return agentUpdateTaskStatusPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/update-task-status' && request.method === 'POST') {
+    return agentUpdateTaskStatusTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/update-task-fields-preview' && request.method === 'POST') {
+    return agentUpdateTaskFieldsPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/update-task-fields' && request.method === 'POST') {
+    return agentUpdateTaskFieldsTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/append-progress-preview' && request.method === 'POST') {
+    return agentAppendProgressPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/append-progress' && request.method === 'POST') {
+    return agentAppendProgressTool(env, request, ctx)
   }
   return agentFail('Agent tool not found', 404)
 }
@@ -7212,7 +7748,8 @@ async function chatWithAi(env: Env, request: Request) {
     const textAttachmentQuerySection = textAttachments.length
       ? `\n\n[用户上传的文档]\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
       : ''
-    const agentQuery = `${lastMsg}${textAttachmentQuerySection}${knowledgeSection}`
+    const recentConversation = messages.slice(-6).map((message) => `${message.role === 'assistant' ? '爱丽丝' : '用户'}：${message.content}`).join('\n')
+    const agentQuery = `[最近对话]\n${recentConversation}\n\n[当前用户输入]\n${lastMsg}${textAttachmentQuerySection}${knowledgeSection}`
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
@@ -7967,7 +8504,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return ok({ ok: true, storage: 'D1/R2', checkedAt: nowIso() })
   }
   if (path.startsWith('/api/agent/')) {
-    return handleAgentToolApi(request, env)
+    return handleAgentToolApi(request, env, ctx)
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)

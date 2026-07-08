@@ -26,7 +26,12 @@ agent-runtime/  (DeepSeek/OpenAI-compatible Tool Calls)
         ├── query_month_finance
         ├── search_tasks
         ├── get_task_detail
-        └── get_giverny_context
+        ├── get_giverny_context
+        ├── create_task_preview / create_task
+        ├── record_feedback_preview / record_feedback
+        ├── update_task_status_preview / update_task_status
+        ├── update_task_fields_preview / update_task_fields
+        └── append_progress_preview / append_progress
         │
         ▼
 Giverny Worker Tool API
@@ -51,26 +56,24 @@ D1 / R2 / app data
 - `agent-runtime/.env.example`：本地环境变量模板。
 - `agent-runtime/README.md`：本地启动和测试说明。
 - `src/worker.ts`：`/api/ai/chat` 已预留 Agent Runtime 主链路。
+- `/api/agent/tools/*`：提供只读工具与写入工具。写入工具统一采用 preview/execute 两段式协议，execute 必须携带 preview 生成的 `confirmationToken`。
 
-当前 Worker 已预留接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 Agent Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime；如果仍不可用，则直接回退到原有本地逻辑。
+当前 Worker 已接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 Agent Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime。涉及工作数据或写入意图时，Runtime 不可用会显式报错，避免旧模板伪装成智能体。
 
 这意味着代码层面的主链路已经接上；正式站默认使用 `DEEPSEEK_API_KEY`、`AGENT_TOOL_TOKEN` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
 
 ## 下一步
 
-1. 本地配置 `DEEPSEEK_API_KEY` 和 `GIVERNY_AGENT_TOOL_TOKEN`，启动 `agent-runtime/`，用 `/v1/chat` 验证收入、工时、任务检索、任务详情等问题。
-2. 通过 Cloudflare Containers 部署 `agent-runtime/`。
-3. 在 Cloudflare Worker 配置 `DEEPSEEK_API_KEY`、`AGENT_TOOL_TOKEN` 和 `AGENT_RUNTIME_KEY`，部署正式站供验收。
-4. 改造爱丽丝工作助手 UI：
-   - 用户消息保持圆角填充。
-   - AI 正文无卡片背景。
-   - trace 默认折叠，只展示“运行完成 N 步 / N 秒”。
-   - 展开后展示工具调用时间线。
-5. 用户确认满意后，再完成 GitHub commit、tag 和 Release。
+1. 为写入工具补充更细的端到端测试：创建任务、记录反馈、修改状态、修改字段、追加进展。
+2. 将确认体验从纯文本升级为站内确认卡片，明确展示草稿 diff、风险提示和“确认执行”按钮。
+3. 扩展更多低风险工具，例如等待记录、验收附件标记、结算草稿预览。
+4. 用户确认满意后，再完成 GitHub commit、tag 和 Release。
 
 ## 安全边界
 
 - 不把任何模型密钥或工具 token 写入代码。
 - `agent-runtime/.env` 必须保持未跟踪。
 - 前端不可直接调用 `agent-runtime/`；生产环境应由 Cloudflare Worker 代理，并用 `AGENT_RUNTIME_KEY` 保护 runtime。
+- 写入工具必须先 preview，再 execute；execute 的 `confirmationToken` 由 Worker 使用服务端密钥签名，默认 10 分钟有效。
+- Agent 不开放删除、作废、结算锁定、部署等高风险操作。
 - 如果密钥曾出现在截图、聊天记录或公开页面，应先轮换再上线。
