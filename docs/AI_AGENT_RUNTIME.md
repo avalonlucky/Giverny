@@ -52,15 +52,15 @@ D1 / R2 / app data
 - `agent-runtime/README.md`：本地启动和测试说明。
 - `src/worker.ts`：`/api/ai/chat` 已预留 Agent Runtime 主链路。
 
-当前 Worker 已预留接入路径：纯文本工作助手请求会优先调用 `AGENT_RUNTIME_URL` 指向的 OpenAI Agents Runtime；如果未配置或调用失败，则直接回退到原有本地逻辑。
+当前 Worker 已预留接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 OpenAI Agents Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime；如果仍不可用，则直接回退到原有本地逻辑。
 
-这意味着代码层面的主链路已经接上，但正式站要真正使用它，还需要先托管 runtime，并在 Cloudflare Worker 配置 `AGENT_RUNTIME_URL` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
+这意味着代码层面的主链路已经接上，但正式站要真正使用它，还需要在 Cloudflare Worker 配置 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
 
 ## 下一步
 
 1. 本地配置 `OPENAI_API_KEY` 和 `GIVERNY_AGENT_TOOL_TOKEN`，启动 `agent-runtime/`，用 `/v1/chat` 验证收入、工时、任务检索、任务详情等问题。
-2. 把 `agent-runtime/` 托管到长期可访问的运行环境。
-3. 在 Cloudflare Worker 配置 `AGENT_RUNTIME_URL` 和 `AGENT_RUNTIME_KEY`，部署正式站供验收。
+2. 通过 Cloudflare Containers 部署 `agent-runtime/`。
+3. 在 Cloudflare Worker 配置 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN` 和 `AGENT_RUNTIME_KEY`，部署正式站供验收。
 4. 改造爱丽丝工作助手 UI：
    - 用户消息保持圆角填充。
    - AI 正文无卡片背景。

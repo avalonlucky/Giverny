@@ -1,4 +1,5 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
+import { Container } from '@cloudflare/containers'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import JSZip from 'jszip'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
@@ -59,6 +60,8 @@ type Env = {
   AGENT_RUNTIME_URL?: string
   AGENT_RUNTIME_KEY?: string
   AGENT_TOOL_TOKEN?: string
+  AGENT_RUNTIME_CONTAINER?: ContainerNamespace
+  OPENAI_AGENT_MODEL?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
@@ -93,8 +96,25 @@ type VectorizeBinding = {
   deleteByIds: (ids: string[]) => Promise<unknown>
 }
 
+type ContainerStub = {
+  fetch: (request: Request) => Promise<Response>
+  startAndWaitForPorts: (args: {
+    startOptions?: { envVars?: Record<string, string>; enableInternet?: boolean }
+    ports?: number | number[]
+    cancellationOptions?: { portReadyTimeoutMS?: number; waitInterval?: number }
+  }) => Promise<void>
+}
+type ContainerNamespace = {
+  getByName: (name: string) => ContainerStub
+}
+
 type WorkerExecutionContext = {
   waitUntil: (promise: Promise<unknown>) => void
+}
+
+export class AgentRuntimeContainer extends Container<Env> {
+  defaultPort = 8789
+  sleepAfter = '10m'
 }
 
 const roundCents = (value: number) => Math.round(value * 100) / 100
@@ -1637,14 +1657,12 @@ async function callOpenAiAgentRuntime(
   env: Env,
   args: { query: string; currentMonth?: string; conversationId?: string },
 ): Promise<OpenAiAgentRuntimeResult | null> {
-  const baseUrl = normalizeAgentRuntimeBaseUrl(env)
-  if (!baseUrl) return null
   const cleanQuery = String(args.query || '').trim()
   if (!cleanQuery) return null
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const runtimeKey = String(env.AGENT_RUNTIME_KEY || '').trim()
   if (runtimeKey) headers['x-agent-runtime-key'] = runtimeKey
-  const res = await fetch(`${baseUrl}/v1/chat`, {
+  const requestInit = {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -1653,7 +1671,30 @@ async function callOpenAiAgentRuntime(
       conversationId: args.conversationId || undefined,
       debug: false,
     }),
-  })
+  }
+  const container = env.AGENT_RUNTIME_CONTAINER?.getByName('primary')
+  const baseUrl = normalizeAgentRuntimeBaseUrl(env)
+  if (!container && !baseUrl) return null
+  if (container) {
+    await container.startAndWaitForPorts({
+      ports: 8789,
+      startOptions: {
+        enableInternet: true,
+        envVars: {
+          OPENAI_API_KEY: String(env.OPENAI_API_KEY || ''),
+          OPENAI_AGENT_MODEL: String(env.OPENAI_AGENT_MODEL || 'gpt-4.1-mini'),
+          GIVERNY_API_BASE_URL: 'https://mayeai.com',
+          GIVERNY_AGENT_TOOL_TOKEN: String(env.AGENT_TOOL_TOKEN || ''),
+          AGENT_RUNTIME_KEY: runtimeKey,
+          AGENT_RUNTIME_CORS_ORIGINS: 'https://mayeai.com',
+        },
+      },
+      cancellationOptions: { portReadyTimeoutMS: 30000, waitInterval: 500 },
+    })
+  }
+  const res = container
+    ? await container.fetch(new Request('https://agent-runtime.internal/v1/chat', requestInit))
+    : await fetch(`${baseUrl}/v1/chat`, requestInit)
   if (!res.ok) {
     const raw = await res.text().catch(() => '')
     throw new Error(`OpenAI Agent Runtime 请求失败：HTTP ${res.status} ${raw.slice(0, 200)}`)

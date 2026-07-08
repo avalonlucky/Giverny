@@ -103,7 +103,7 @@
 - BAML is used as the AI prompt/schema contract and code-generation layer.
 - The production Cloudflare Worker does not import BAML directly. It can call the independent `ai-runtime/` Node service first, then fall back to DeepSeek direct if the runtime is unavailable.
 - `agent-runtime/` is the code-owned long-term agent scaffold. It uses OpenAI Agents SDK tools to call Giverny Worker data endpoints and returns a final answer plus a compact trace for the assistant UI.
-- `agent-runtime/` is not wired into production yet; keep it behind a Worker proxy before exposing it to the frontend.
+- `agent-runtime/` is wired through the `AGENT_RUNTIME_CONTAINER` Cloudflare Containers binding; keep frontend traffic behind the main Worker proxy.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 
 ## Auth Notes

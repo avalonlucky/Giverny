@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-08 · v0.28.6（Agent Runtime 部署到 Cloudflare Containers）
+
+- Agent Runtime：将 `agent-runtime/` 接入 Cloudflare Containers，通过 `AGENT_RUNTIME_CONTAINER` 绑定由主站 Worker 内部调用
+- 工作助手：`/api/ai/chat` 优先调用容器 Runtime，再回退 `AGENT_RUNTIME_URL`，最后回退站内本地助手逻辑
+- 安全：容器启动时由 Worker 注入 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN`、`AGENT_RUNTIME_KEY`，前端不直接接触 Runtime
+- 部署：新增容器 Docker 构建上下文忽略规则，并更新 Runtime 部署说明
+
 ## 2026-07-08 · v0.28.5（自建 Agent Runtime 打底）
 
 - Agent 中台：移除 Dify 验证链路，长期方向改为自建 OpenAI Agents SDK Runtime，站内 `/api/ai/chat` 优先调用 `AGENT_RUNTIME_URL`

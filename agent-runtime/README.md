@@ -68,4 +68,13 @@ AGENT_RUNTIME_KEY=the-same-runtime-key
 
 `AI_RUNTIME_URL` is still reserved for the BAML runtime and should not be reused for this service.
 
-When `AGENT_RUNTIME_URL` is configured, `/api/ai/chat` tries this runtime first. If the runtime is not configured or fails, the Worker falls back to the existing local assistant logic.
+In production, this runtime is deployed as a Cloudflare Container behind the main Worker. `/api/ai/chat` tries the `AGENT_RUNTIME_CONTAINER` binding first, then falls back to `AGENT_RUNTIME_URL` if configured, and finally falls back to the existing local assistant logic.
+
+Cloudflare Container deployment requires:
+
+```bash
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put AGENT_TOOL_TOKEN
+npx wrangler secret put AGENT_RUNTIME_KEY
+npx wrangler deploy
+```

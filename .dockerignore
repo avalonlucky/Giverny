@@ -1,0 +1,10 @@
+node_modules
+dist
+.wrangler
+.git
+.DS_Store
+*.log
+agent-runtime/.env
+agent-runtime/.venv
+**/__pycache__
+**/.pytest_cache

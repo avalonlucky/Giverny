@@ -49,6 +49,19 @@ max_batch_size = 3
 max_batch_timeout = 10
 max_retries = 3
 
+[[containers]]
+class_name = "AgentRuntimeContainer"
+image = "./agent-runtime/Dockerfile"
+max_instances = 1
+
+[[durable_objects.bindings]]
+name = "AGENT_RUNTIME_CONTAINER"
+class_name = "AgentRuntimeContainer"
+
+[[migrations]]
+tag = "v1-agent-runtime-container"
+new_sqlite_classes = [ "AgentRuntimeContainer" ]
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
