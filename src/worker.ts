@@ -1489,6 +1489,10 @@ function isFinanceQuestion(text: string) {
   return /(?:金额|收入|多少钱|多少[钱元]|结算|工资|费用|合计|加起来|总共|统计)/.test(text)
 }
 
+function isWorkDataQuestion(text: string) {
+  return /(?:任务|工作|项目|进展|进度|完成|未完成|没完成|验收|附件|收入|金额|多少钱|工时|计时|结算|明细|统计|查询|查看|查一下|列出|有哪些|哪几个|新增|新建|创建|记录|写入|修改|反馈|改稿|确认执行|可以新建)/.test(text)
+}
+
 function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number) {
   const mergedHours = roundCents(stats.reduce((sum, row) => sum + row.billableHours, 0))
   const mergedAmount = roundCents(stats.reduce((sum, row) => sum + row.amount, 0))
@@ -1655,7 +1659,7 @@ function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
     .slice(0, 8)
 }
 
-async function callOpenAiAgentRuntime(
+async function callAgentRuntime(
   env: Env,
   args: { query: string; currentMonth?: string; conversationId?: string },
 ): Promise<OpenAiAgentRuntimeResult | null> {
@@ -1704,7 +1708,7 @@ async function callOpenAiAgentRuntime(
     : await fetch(`${baseUrl}/v1/chat`, requestInit)
   if (!res.ok) {
     const raw = await res.text().catch(() => '')
-    throw new Error(`OpenAI Agent Runtime 请求失败：HTTP ${res.status} ${raw.slice(0, 200)}`)
+    throw new Error(`Agent Runtime 请求失败：HTTP ${res.status} ${raw.slice(0, 200)}`)
   }
   const payload = (await res.json().catch(() => null)) as OpenAiAgentRuntimeResult | null
   if (!payload || !String(payload.answer || '').trim()) return null
@@ -7196,7 +7200,7 @@ async function chatWithAi(env: Env, request: Request) {
   const requestedMonths = extractRequestedMonths(lastMsg, month)
 
   // ===== Agent Runtime 优先 =====
-  // 纯文本问题优先交给项目自有 OpenAI Agents Runtime；未配置或失败时回退到站内本地助手逻辑。
+  // 工作数据问题必须进入项目自有 Runtime；失败时显式报错，避免旧本地逻辑伪装成智能体。
   // 触发联网搜索或带图片时仍走本地链路。
   if (imageAttachments.length === 0 && !webSearchResult) {
     const knowledgeSection = useKnowledge && knowledgeNotes.length
@@ -7209,9 +7213,10 @@ async function chatWithAi(env: Env, request: Request) {
       ? `\n\n[用户上传的文档]\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
       : ''
     const agentQuery = `${lastMsg}${textAttachmentQuerySection}${knowledgeSection}`
+    const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
-      const runtimeResult = await callOpenAiAgentRuntime(env, {
+      const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         currentMonth: month,
         conversationId: String(body.agentRuntimeConversationId ?? '').trim(),
@@ -7221,14 +7226,20 @@ async function chatWithAi(env: Env, request: Request) {
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,
           trace: [
-            `理解问题：OpenAI Agents Runtime 分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
+            `理解问题：Agent Runtime 分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
             ...formatAgentRuntimeTrace(runtimeResult.trace),
-            `生成答复：使用 ${runtimeResult.model || 'OpenAI Agents SDK'} 组织最终回答。`,
+            `生成答复：使用 ${runtimeResult.model || 'Agent Runtime'} 组织最终回答。`,
           ],
         })
       }
+      if (requiresRuntime) {
+        return fail('Agent Runtime 没有返回有效答案；已停止旧本地兜底，避免用模板冒充智能体。', 503)
+      }
     } catch (error) {
-      console.warn(JSON.stringify({ event: 'openai_agent_runtime_failed', error: describeAiCallError(error) }))
+      console.warn(JSON.stringify({ event: 'agent_runtime_failed', error: describeAiCallError(error) }))
+      if (requiresRuntime) {
+        return fail(`Agent Runtime 暂时不可用：${describeAiCallError(error)}`, 503)
+      }
     }
   }
 

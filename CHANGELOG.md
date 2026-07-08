@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-08 · v0.28.8（爱丽丝统一交给 Agent 判断）
+
+- 工作助手：移除前端“新建任务 / 记录反馈”的关键词拦截逻辑，所有聊天输入统一进入 `/api/ai/chat`，由 Agent Runtime 判断意图
+- Agent Runtime：工作数据、写入意图、反馈记录、确认执行等请求必须走 Runtime；Runtime 失败时显式报错，不再静默回落到本地模板
+- 写入边界：Runtime 系统提示明确当前只开放只读工具，遇到新建、修改、记录反馈等写入请求时不再假装执行，而是说明能力边界和下一步信息
+
 ## 2026-07-08 · v0.28.7（Agent Runtime 默认使用 DeepSeek）
 
 - Agent Runtime：移除对 `OPENAI_API_KEY` 的强依赖，容器默认使用 DeepSeek OpenAI-compatible Tool Calls
