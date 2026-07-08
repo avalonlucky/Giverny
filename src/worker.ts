@@ -56,6 +56,10 @@ type Env = {
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
   AI_SETTINGS_SECRET?: string
+  AGENT_TOOL_TOKEN?: string
+  DIFY_TOOL_TOKEN?: string
+  DIFY_API_KEY?: string
+  DIFY_BASE_URL?: string
   RESEND_API_KEY?: string
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
@@ -1402,6 +1406,15 @@ type MonthFinanceStats = {
   taskCount: number
   billableTaskCount: number
   taskLines: string[]
+  tasks: Array<{
+    title: string
+    type: string
+    status: string
+    startDate: string
+    hours: number
+    amount: number
+    billable: boolean
+  }>
 }
 
 async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: number) {
@@ -1424,6 +1437,19 @@ async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: 
         const taskAmount = roundCents(hours * hourlyRate)
         return `  - ${task.title || '未命名'}：${hours}h × ¥${hourlyRate}/h = ¥${taskAmount}`
       })
+    const taskDetails = tasks.map((task) => {
+      const hours = roundCents(Number(task.actual_hours) || 0)
+      const billable = isBillableDbTask(task)
+      return {
+        title: task.title || '未命名',
+        type: task.design_type || '未分类',
+        status: task.status || '',
+        startDate: task.start_date || '',
+        hours,
+        amount: billable ? roundCents(hours * hourlyRate) : 0,
+        billable,
+      }
+    })
     stats.push({
       month,
       billableHours,
@@ -1432,6 +1458,7 @@ async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: 
       taskCount: tasks.length,
       billableTaskCount: billableTasks.length,
       taskLines,
+      tasks: taskDetails,
     })
   }
   return stats
@@ -1574,6 +1601,670 @@ ${args.question}
 ${JSON.stringify(args.toolResults)}`
   const answer = await callTextWithSelectedModel(env, prompt, args.modelChoice, 1400)
   return { content: answer.text, modelLabel: answer.modelLabel, fallbackUsed: answer.fallbackUsed, notes: answer.notes }
+}
+
+type DifyChatMessageResponse = {
+  answer?: string
+  text?: string
+  data?: { outputs?: { answer?: string; text?: string } }
+  message?: string
+}
+
+function normalizeDifyBaseUrl(env: Env) {
+  return (env.DIFY_BASE_URL || 'https://api.dify.ai/v1').replace(/\/+$/, '')
+}
+
+function stringifyDifyInputValue(value: unknown) {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
+}
+
+async function callDifyChatApp(
+  env: Env,
+  args: {
+    query: string
+    inputs?: Record<string, unknown>
+    user?: string
+  },
+): Promise<string | null> {
+  const apiKey = env.DIFY_API_KEY
+  if (!apiKey) return null
+  const cleanQuery = String(args.query ?? '').trim()
+  if (!cleanQuery) return null
+  const inputs = Object.fromEntries(
+    Object.entries(args.inputs ?? {}).map(([key, value]) => [key, stringifyDifyInputValue(value).slice(0, 20000)]),
+  )
+  const res = await fetch(`${normalizeDifyBaseUrl(env)}/chat-messages`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      inputs,
+      query: cleanQuery,
+      response_mode: 'blocking',
+      conversation_id: '',
+      user: args.user || 'giverny-admin',
+    }),
+  })
+  const raw = await res.text()
+  let data: DifyChatMessageResponse
+  try {
+    data = raw ? JSON.parse(raw) as DifyChatMessageResponse : {}
+  } catch {
+    data = { answer: raw }
+  }
+  if (!res.ok) {
+    const message = data.message || raw || `Dify 请求失败：HTTP ${res.status}`
+    throw new Error(message)
+  }
+  return String(data.answer || data.text || data.data?.outputs?.answer || data.data?.outputs?.text || '').trim() || null
+}
+
+async function composeChatAgentAnswerWithDify(
+  env: Env,
+  args: {
+    question: string
+    toolResults: ChatAgentToolResult[]
+    currentMonth: string
+    today: string
+  },
+): Promise<string | null> {
+  const prompt = `用户问题：${args.question}
+
+工具返回数据：
+${JSON.stringify(args.toolResults)}
+
+请只根据工具返回数据回答，不要编造接口里没有的数据。金额、工时、月份必须严格使用工具返回的数字。先给结论，再给必要的分月说明。
+如果你需要输出思考内容，只能放在完整的 <think>...</think> 标签内；最终答案必须写在 </think> 之后，不要把思考草稿混入最终答案。`
+  return callDifyChatApp(env, {
+    query: prompt,
+    inputs: {
+      currentMonth: args.currentMonth,
+      today: args.today,
+      toolResults: args.toolResults,
+      answerStyle: 'concise_work_assistant',
+    },
+  })
+}
+
+const agentToolCorsHeaders = {
+  ...jsonHeaders,
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type, x-agent-token',
+}
+
+const agentOk = (data: unknown, status = 200) => Response.json(data, { status, headers: agentToolCorsHeaders })
+const agentFail = (message: string, status = 400) => agentOk({ error: message }, status)
+
+function getAgentToolToken(env: Env) {
+  return env.DIFY_TOOL_TOKEN || env.AGENT_TOOL_TOKEN || ''
+}
+
+async function verifyAgentToolRequest(env: Env, request: Request) {
+  const expected = getAgentToolToken(env)
+  if (!expected) {
+    return false
+  }
+  const authorization = request.headers.get('authorization') || ''
+  const bearer = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
+  const token = bearer || request.headers.get('x-agent-token') || ''
+  return token === expected
+}
+
+async function parseAgentToolBody(request: Request): Promise<Record<string, unknown>> {
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    const params = new URL(request.url).searchParams
+    return Object.fromEntries(params.entries())
+  }
+  return (await request.json().catch(() => ({}))) as Record<string, unknown>
+}
+
+function normalizedAgentMonths(value: unknown, question: string, currentMonth: string) {
+  const fromList = Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter((item) => /^\d{4}-\d{2}$/.test(item))
+    : typeof value === 'string'
+      ? value.split(/[,\s，、]+/).map((item) => item.trim()).filter((item) => /^\d{4}-\d{2}$/.test(item))
+    : []
+  if (fromList.length) {
+    return Array.from(new Set(fromList)).slice(0, 12)
+  }
+  return extractRequestedMonths(question, currentMonth || nowIso().slice(0, 7))
+}
+
+function agentOpenApiSpec(request: Request) {
+  const origin = new URL(request.url).origin
+  const errorResponse = {
+    description: 'Error response',
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/ErrorResponse' },
+      },
+    },
+  }
+  const jsonResponse = (description: string, schemaRef: string) => ({
+    description,
+    content: {
+      'application/json': {
+        schema: { $ref: schemaRef },
+      },
+    },
+  })
+  return {
+    openapi: '3.0.3',
+    info: {
+      title: 'Giverny Agent Tools',
+      version: '1.0.0',
+      description: 'Read-only tools for the Giverny worklog agent. All tool calls require a Bearer token.',
+    },
+    servers: [{ url: origin }],
+    tags: [
+      { name: 'Finance', description: 'Income and billable hour statistics.' },
+      { name: 'Tasks', description: 'Task search and task detail lookup.' },
+      { name: 'Context', description: 'Stable assistant context and capability notes.' },
+    ],
+    paths: {
+      '/api/agent/tools/month-finance': {
+        get: {
+          operationId: 'query_month_finance',
+          tags: ['Finance'],
+          summary: 'Query monthly finance totals',
+          description: 'Return billable hours, income amount and task-level details for one or more settlement months.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            {
+              name: 'months',
+              in: 'query',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Settlement months separated by comma, for example 2026-06,2026-07.',
+            },
+            {
+              name: 'question',
+              in: 'query',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Original user question, used to extract months when months is empty.',
+            },
+            {
+              name: 'currentMonth',
+              in: 'query',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Current month in YYYY-MM format, for example 2026-07.',
+            },
+          ],
+          responses: {
+            '200': jsonResponse('Monthly finance statistics', '#/components/schemas/MonthFinanceResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+          },
+        },
+      },
+      '/api/agent/tools/search-tasks': {
+        get: {
+          operationId: 'search_tasks',
+          tags: ['Tasks'],
+          summary: 'Search tasks',
+          description: 'Search active Giverny tasks by title, requirement or design type.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'query', in: 'query', required: true, schema: { type: 'string' } },
+            {
+              name: 'month',
+              in: 'query',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Optional settlement month in YYYY-MM format.',
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer' },
+              description: 'Maximum number of tasks to return.',
+            },
+          ],
+          responses: {
+            '200': jsonResponse('Task search results', '#/components/schemas/SearchTasksResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+          },
+        },
+      },
+      '/api/agent/tools/task-detail': {
+        get: {
+          operationId: 'get_task_detail',
+          tags: ['Tasks'],
+          summary: 'Get task detail',
+          description: 'Return one task with progress updates, attachments and attachment analysis summaries.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'taskId', in: 'query', required: false, schema: { type: 'integer' } },
+            { name: 'title', in: 'query', required: false, schema: { type: 'string' } },
+          ],
+          responses: {
+            '200': jsonResponse('Task detail', '#/components/schemas/TaskDetailResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+            '404': errorResponse,
+          },
+        },
+      },
+      '/api/agent/tools/context': {
+        get: {
+          operationId: 'get_giverny_context',
+          tags: ['Context'],
+          summary: 'Get Giverny agent context',
+          description: 'Return stable identity, capabilities and safety constraints for Alice.',
+          security: [{ BearerAuth: [] }],
+          responses: {
+            '200': jsonResponse('Agent context', '#/components/schemas/AgentContextResponse'),
+            '401': errorResponse,
+          },
+        },
+      },
+    },
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description: 'Use the DIFY_TOOL_TOKEN or AGENT_TOOL_TOKEN value as a Bearer token.',
+        },
+      },
+      schemas: {
+        ErrorResponse: {
+          type: 'object',
+          required: ['error'],
+          properties: {
+            error: { type: 'string' },
+          },
+        },
+        MonthFinanceTask: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            id: { type: 'integer' },
+            title: { type: 'string' },
+            billableHours: { type: 'number' },
+            amount: { type: 'number' },
+            status: { type: 'string' },
+            designType: { type: 'string' },
+          },
+        },
+        MonthFinanceStat: {
+          type: 'object',
+          additionalProperties: true,
+          required: ['month', 'billableHours', 'amount', 'taskCount', 'tasks'],
+          properties: {
+            month: { type: 'string', example: '2026-07' },
+            billableHours: { type: 'number' },
+            amount: { type: 'number' },
+            taskCount: { type: 'integer' },
+            tasks: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MonthFinanceTask' },
+            },
+          },
+        },
+        MonthFinanceResponse: {
+          type: 'object',
+          required: ['tool', 'hourlyRate', 'months', 'totalBillableHours', 'totalAmount', 'stats', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['query_month_finance'] },
+            hourlyRate: { type: 'number' },
+            months: {
+              type: 'array',
+              items: { type: 'string', example: '2026-07' },
+            },
+            totalBillableHours: { type: 'number' },
+            totalAmount: { type: 'number' },
+            stats: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MonthFinanceStat' },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        SearchTasksResponse: {
+          type: 'object',
+          required: ['tool', 'query', 'count', 'results', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['search_tasks'] },
+            query: { type: 'string' },
+            count: { type: 'integer' },
+            results: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  id: { type: 'integer' },
+                  title: { type: 'string' },
+                  requirement: { type: 'string' },
+                  status: { type: 'string' },
+                  designType: { type: 'string' },
+                  month: { type: 'string' },
+                },
+              },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        TaskDetailResponse: {
+          type: 'object',
+          required: ['tool', 'task', 'updates', 'files', 'attachmentAnalyses', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['get_task_detail'] },
+            task: { type: 'object', additionalProperties: true },
+            updates: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+            files: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+            attachmentAnalyses: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        AgentContextResponse: {
+          type: 'object',
+          required: ['tool', 'name', 'identity', 'capabilities', 'constraints', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['get_giverny_context'] },
+            name: { type: 'string' },
+            identity: { type: 'string' },
+            capabilities: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            constraints: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+  }
+}
+
+function agentDifyOpenApiSpec(request: Request) {
+  const origin = new URL(request.url).origin
+  const stringParam = (name: string, description: string, required = false) => ({
+    name,
+    in: 'query' as const,
+    required,
+    description,
+    schema: { type: 'string' },
+  })
+  const integerParam = (name: string, description: string, required = false) => ({
+    name,
+    in: 'query' as const,
+    required,
+    description,
+    schema: { type: 'integer' },
+  })
+  const okResponse = { description: 'OK' }
+
+  return {
+    openapi: '3.0.0',
+    info: {
+      title: 'Giverny Agent Tools',
+      version: '1.0.0',
+      description:
+        'Dify-compatible read-only tools for Giverny. Configure Authorization Bearer token in Dify tool authentication.',
+    },
+    servers: [{ url: origin }],
+    paths: {
+      '/api/agent/tools/month-finance': {
+        get: {
+          operationId: 'query_month_finance',
+          summary: 'Query monthly finance totals',
+          description:
+            'Return billable hours, income amount, hourly rate and task-level details for one or more settlement months.',
+          parameters: [
+            stringParam('question', 'Original user question. Use this when months is empty.'),
+            stringParam('months', 'Settlement months separated by comma, for example 2026-06,2026-07.'),
+            stringParam('currentMonth', 'Current month in YYYY-MM format, for example 2026-07.'),
+          ],
+          responses: { '200': okResponse },
+        },
+      },
+      '/api/agent/tools/search-tasks': {
+        get: {
+          operationId: 'search_tasks',
+          summary: 'Search tasks',
+          description: 'Search Giverny tasks by title, requirement or design type.',
+          parameters: [
+            stringParam('query', 'Search keyword.', true),
+            stringParam('month', 'Optional settlement month in YYYY-MM format.'),
+            integerParam('limit', 'Maximum number of tasks to return.'),
+          ],
+          responses: { '200': okResponse },
+        },
+      },
+      '/api/agent/tools/task-detail': {
+        get: {
+          operationId: 'get_task_detail',
+          summary: 'Get task detail',
+          description: 'Return one task with progress updates, attachments and attachment analysis summaries.',
+          parameters: [
+            integerParam('taskId', 'Task ID.'),
+            stringParam('title', 'Task title.'),
+          ],
+          responses: { '200': okResponse },
+        },
+      },
+      '/api/agent/tools/context': {
+        get: {
+          operationId: 'get_giverny_context',
+          summary: 'Get Giverny agent context',
+          description: 'Return stable identity, capabilities and safety constraints for Alice.',
+          responses: { '200': okResponse },
+        },
+      },
+    },
+  }
+}
+
+async function agentMonthFinanceTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const question = String(body.question ?? '').trim()
+  const currentMonth = String(body.currentMonth ?? '').trim().slice(0, 7)
+  const months = normalizedAgentMonths(body.months, question, currentMonth)
+  if (!months.length) {
+    return agentFail('months 不能为空，格式为 YYYY-MM；也可以在 question 中包含月份。', 400)
+  }
+  const hourlyRate = await getHourlyRate(env)
+  const stats = await computeMonthFinanceStats(env, months, hourlyRate)
+  return agentOk({
+    tool: 'query_month_finance',
+    hourlyRate,
+    months,
+    totalBillableHours: roundCents(stats.reduce((sum, row) => sum + row.billableHours, 0)),
+    totalAmount: roundCents(stats.reduce((sum, row) => sum + row.amount, 0)),
+    stats,
+    generatedAt: nowIso(),
+  })
+}
+
+async function agentSearchTasksTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const query = String(body.query ?? '').trim().slice(0, 120)
+  const month = String(body.month ?? '').trim().slice(0, 7)
+  const limit = Math.min(Math.max(Number(body.limit ?? 12) || 12, 1), 30)
+  const like = `%${query}%`
+  const rows = query
+    ? month
+      ? await env.DB.prepare(
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+           FROM tasks
+           WHERE deleted_at IS NULL AND voided_at IS NULL AND settlement_month = ?
+             AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
+           ORDER BY start_date DESC, created_at DESC
+           LIMIT ?`,
+        ).bind(month, like, like, like, limit).all<DbTask>()
+      : await env.DB.prepare(
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+           FROM tasks
+           WHERE deleted_at IS NULL AND voided_at IS NULL
+             AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
+           ORDER BY start_date DESC, created_at DESC
+           LIMIT ?`,
+        ).bind(like, like, like, limit).all<DbTask>()
+    : month
+      ? await env.DB.prepare(
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+           FROM tasks
+           WHERE deleted_at IS NULL AND voided_at IS NULL AND settlement_month = ?
+           ORDER BY start_date DESC, created_at DESC
+           LIMIT ?`,
+        ).bind(month, limit).all<DbTask>()
+      : await env.DB.prepare(
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+           FROM tasks
+           WHERE deleted_at IS NULL AND voided_at IS NULL
+           ORDER BY start_date DESC, created_at DESC
+           LIMIT ?`,
+        ).bind(limit).all<DbTask>()
+
+  return agentOk({
+    tool: 'search_tasks',
+    query,
+    month,
+    results: (rows.results ?? []).map((task) => ({
+      id: Number(task.id),
+      title: task.title,
+      requirement: task.requirement ?? '',
+      type: task.design_type ?? '',
+      status: task.status,
+      progress: Number(task.progress) || 0,
+      actualHours: Number(task.actual_hours) || 0,
+      startDate: task.start_date ?? '',
+      estimatedDate: task.estimated_delivery_date ?? '',
+      actualDeliveryDate: task.actual_delivery_date ?? '',
+      settlementMonth: task.settlement_month ?? '',
+      billable: isBillableDbTask(task),
+    })),
+    generatedAt: nowIso(),
+  })
+}
+
+async function agentTaskDetailTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const taskId = Number(body.taskId)
+  const title = String(body.title ?? '').trim().slice(0, 160)
+  const task = Number.isFinite(taskId) && taskId > 0
+    ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
+    : title
+      ? await env.DB.prepare('SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ? ORDER BY start_date DESC, created_at DESC LIMIT 1').bind(`%${title}%`).first<DbTask>()
+      : null
+  if (!task) {
+    return agentFail('任务不存在或已作废', 404)
+  }
+  const [updateRows, fileRows, analysisRows] = await Promise.all([
+    env.DB.prepare('SELECT * FROM task_updates WHERE task_id = ? ORDER BY update_date ASC, created_at ASC').bind(task.id).all<DbUpdate>(),
+    env.DB.prepare('SELECT attachments.*, tasks.title AS task_title FROM attachments LEFT JOIN tasks ON tasks.id = attachments.task_id WHERE attachments.task_id = ? AND attachments.deleted_at IS NULL ORDER BY uploaded_at ASC').bind(task.id).all<DbAttachment>(),
+    env.DB.prepare(
+      `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
+       FROM attachment_analyses
+       INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
+       WHERE attachment_analyses.task_id = ? AND attachments.deleted_at IS NULL
+       ORDER BY attachment_analyses.requested_at ASC`,
+    ).bind(task.id).all<DbAttachmentAnalysis>(),
+  ])
+  return agentOk({
+    tool: 'get_task_detail',
+    task: toTask(task),
+    updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
+    files: (fileRows.results ?? []).map(toFile).map((file) => ({
+      id: file.id,
+      entryId: file.entryId,
+      scope: file.scope,
+      name: file.name,
+      type: file.type,
+      mimeType: file.mimeType,
+      size: file.size,
+      uploadedAt: file.uploadedAt,
+      final: file.final,
+      visible: file.visible,
+      tag: file.tag,
+    })),
+    attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
+    generatedAt: nowIso(),
+  })
+}
+
+async function agentContextTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  return agentOk({
+    name: '爱丽丝',
+    identity: 'Giverny 设计兼职平台的工作智能体，也是用户的长期工作助手。',
+    capabilities: [
+      '查询任务、任务详情、进展、验收附件和交付件分析',
+      '统计收入、计费工时、结算月份和任务明细',
+      '整理需求、甲方反馈、进展记录、验收备注和月报',
+      '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
+      '闲聊、解释概念、头脑风暴、写作润色和效率规划',
+    ],
+    constraints: [
+      '涉及金额、工时、状态和验收时优先调用工具，不凭空编造。',
+      '当前工具均为只读；创建、修改、删除、验收、结算、部署等写入动作必须先生成计划并等待用户确认。',
+      '不要自称 DeepSeek、Gemini、GPT 或其他底层模型。',
+    ],
+    generatedAt: nowIso(),
+  })
+}
+
+async function handleAgentToolApi(request: Request, env: Env) {
+  const url = new URL(request.url)
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: agentToolCorsHeaders })
+  }
+  if (
+    (url.pathname === '/api/agent/openapi.json' || url.pathname === '/api/agent/dify-openapi.json') &&
+    request.method === 'GET'
+  ) {
+    return agentOk(agentDifyOpenApiSpec(request))
+  }
+  if (url.pathname === '/api/agent/openapi-full.json' && request.method === 'GET') {
+    return agentOk(agentOpenApiSpec(request))
+  }
+  if (url.pathname === '/api/agent/tools/month-finance' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentMonthFinanceTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/search-tasks' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentSearchTasksTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/task-detail' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentTaskDetailTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentContextTool(env, request)
+  }
+  return agentFail('Agent tool not found', 404)
 }
 
 async function callAiEndpointVision(
@@ -6648,6 +7339,26 @@ async function chatWithAi(env: Env, request: Request) {
       hourlyRate,
     )
     if (toolResults.length > 0) {
+      try {
+        const difyContent = await composeChatAgentAnswerWithDify(env, {
+          question: lastMsg,
+          toolResults,
+          currentMonth: month,
+          today,
+        })
+        if (difyContent) {
+          return ok({
+            content: difyContent,
+            trace: [
+              `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
+              ...trace,
+              '生成答复：调用 Dify 工作智能体，并将 D1 工具结果作为事实依据。',
+            ],
+          })
+        }
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'dify_chat_tool_answer_failed', error: describeAiCallError(error) }))
+      }
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
@@ -6739,6 +7450,32 @@ ${textAttachmentSection}
         return fail(`AI 暂时不可用：${detail}`, 503)
       }
     }
+  }
+
+  try {
+    const difyContent = await callDifyChatApp(env, {
+      query: messages.at(-1)?.content ?? '',
+      inputs: {
+        currentMonth: month,
+        today,
+        hourlyRate,
+        useKnowledge,
+        useWebSearch: Boolean(needsWebSearch),
+        givernyContext: systemPrompt.slice(0, 16000),
+        textAttachments: textAttachments.map((item) => ({ name: item.name, text: item.data.slice(0, 3000) })),
+      },
+    })
+    if (difyContent) {
+      return ok({
+        content: difyContent,
+        trace: [
+          '理解问题：未触发结构化工具，进入 Dify 工作智能体流程。',
+          '生成答复：调用 Dify App，并附带当前工作台上下文。',
+        ],
+      })
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'dify_chat_general_failed', error: describeAiCallError(error) }))
   }
 
   try {
@@ -7220,6 +7957,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   // 公开接口：健康检查、登录、甲方分享页、文件预览（预览内部自行校验权限）
   const isPublic =
     path === '/api/health' ||
+    path.startsWith('/api/agent/') ||
     path === '/api/auth/login' ||
     path === '/api/auth/password-reset/request' ||
     path === '/api/auth/password-reset/confirm' ||
@@ -7285,6 +8023,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
 
   if (path === '/api/health') {
     return ok({ ok: true, storage: 'D1/R2', checkedAt: nowIso() })
+  }
+  if (path.startsWith('/api/agent/')) {
+    return handleAgentToolApi(request, env)
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)

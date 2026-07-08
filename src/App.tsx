@@ -4050,6 +4050,76 @@ function renderPlainChatLines(lines: string[]) {
   )
 }
 
+function trimEmptyChatLines(lines: string[]) {
+  const next = [...lines]
+  while (next.length > 0 && next[0].trim() === '') next.shift()
+  while (next.length > 0 && next[next.length - 1].trim() === '') next.pop()
+  return next
+}
+
+function splitChatThinkingLines(lines: string[]) {
+  const thinkingLines: string[] = []
+  const answerLines: string[] = []
+  let isInsideThinking = false
+  let hasThinkingBlock = false
+
+  lines.forEach((line) => {
+    let rest = line
+
+    if (rest === '') {
+      ;(isInsideThinking ? thinkingLines : answerLines).push(rest)
+      return
+    }
+
+    while (rest.length > 0) {
+      if (isInsideThinking) {
+        const closeIndex = rest.search(/<\/think>/i)
+        if (closeIndex < 0) {
+          thinkingLines.push(rest)
+          rest = ''
+          continue
+        }
+        const closeMatch = rest.slice(closeIndex).match(/^<\/think>/i)
+        thinkingLines.push(rest.slice(0, closeIndex))
+        rest = rest.slice(closeIndex + (closeMatch?.[0].length ?? '</think>'.length))
+        isInsideThinking = false
+        continue
+      }
+
+      const openIndex = rest.search(/<think>/i)
+      if (openIndex < 0) {
+        answerLines.push(rest)
+        rest = ''
+        continue
+      }
+      const openMatch = rest.slice(openIndex).match(/^<think>/i)
+      if (openIndex > 0) answerLines.push(rest.slice(0, openIndex))
+      rest = rest.slice(openIndex + (openMatch?.[0].length ?? '<think>'.length))
+      isInsideThinking = true
+      hasThinkingBlock = true
+    }
+  })
+
+  return {
+    thinkingLines: trimEmptyChatLines(thinkingLines),
+    answerLines: trimEmptyChatLines(hasThinkingBlock ? answerLines : lines),
+  }
+}
+
+function renderChatThinkingBlock(lines: string[]) {
+  if (lines.length === 0) return null
+  return (
+    <details className="chat-agent-timeline chat-agent-thoughts">
+      <summary>
+        <span>思考过程</span>
+        <small>{lines.length} 行</small>
+        <ChevronDown size={13} />
+      </summary>
+      <div className="chat-thought-body">{renderPlainChatLines(lines)}</div>
+    </details>
+  )
+}
+
 function renderChatContent(content: string) {
   const lines = content.split('\n')
   if (lines[0] === '我按这个过程处理：') {
@@ -4058,7 +4128,7 @@ function renderChatContent(content: string) {
       .slice(1, dividerIndex > 0 ? dividerIndex : lines.length)
       .map((line) => line.replace(/^- /, '').trim())
       .filter(Boolean)
-    const answerLines = dividerIndex > 0 ? lines.slice(dividerIndex + 1) : []
+    const { thinkingLines, answerLines } = splitChatThinkingLines(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
     return (
       <>
         <details className="chat-agent-timeline">
@@ -4073,14 +4143,19 @@ function renderChatContent(content: string) {
             ))}
           </ol>
         </details>
+        {renderChatThinkingBlock(thinkingLines)}
         {answerLines.length > 0 && (
           <div className="chat-final-answer">{renderPlainChatLines(answerLines)}</div>
         )}
       </>
     )
   }
+  const { thinkingLines, answerLines } = splitChatThinkingLines(lines)
   return (
-    <>{renderPlainChatLines(lines)}</>
+    <>
+      {renderChatThinkingBlock(thinkingLines)}
+      {answerLines.length > 0 && <div className="chat-final-answer">{renderPlainChatLines(answerLines)}</div>}
+    </>
   )
 }
 

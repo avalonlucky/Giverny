@@ -12475,6 +12475,18 @@ input::file-selector-button {
   border: 1px solid var(--color-border);
 }
 
+.chat-agent-thoughts {
+  margin-top: -4px;
+}
+
+.chat-thought-body {
+  margin: 10px 0 0 6px;
+  padding: 0 0 0 18px;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
 .chat-final-answer {
   color: var(--color-text);
 }
