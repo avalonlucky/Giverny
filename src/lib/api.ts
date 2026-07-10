@@ -199,7 +199,6 @@ const legacyTokenStorageKey = 'designer-worklog-admin-token'
 
 export type StoredAuth = {
   email: string
-  key: string
   /** 登录时拿到的角色，用于在重新加载时检测「管理员凭证已失效被降级」 */
   role?: AuthRole
 }
@@ -212,8 +211,12 @@ export function getStoredAuth(): StoredAuth | null {
     if (!raw) {
       return null
     }
-    const parsed = JSON.parse(raw) as StoredAuth
-    return parsed.key ? { email: parsed.email ?? '', key: parsed.key, role: parsed.role } : null
+    const parsed = JSON.parse(raw) as StoredAuth & { key?: unknown }
+    const sanitized = parsed.email || parsed.role ? { email: parsed.email ?? '', role: parsed.role } : null
+    if (sanitized) {
+      window.localStorage.setItem(authStorageKey, JSON.stringify(sanitized))
+    }
+    return sanitized
   } catch {
     return null
   }
@@ -228,17 +231,9 @@ export function clearStoredAuth() {
   window.localStorage.removeItem(legacyTokenStorageKey)
 }
 
-/** 给 <img> 等无法携带 header 的请求附加登录凭证 */
+/** 文件请求与普通 API 统一使用同源 HttpOnly 会话 Cookie。 */
 export function authedPreviewUrl(url: string | undefined) {
-  if (!url) {
-    return undefined
-  }
-  const auth = getStoredAuth()
-  if (!auth || url.includes('auth=') || url.includes('token=')) {
-    return url
-  }
-  const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}auth=${encodeURIComponent(auth.key)}&email=${encodeURIComponent(auth.email)}`
+  return url
 }
 
 export class ApiError extends Error {
@@ -255,11 +250,6 @@ function xhrJson<T>(method: string, url: string, body: XMLHttpRequestBodyInit, o
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open(method, url)
-    const auth = getStoredAuth()
-    if (auth) {
-      xhr.setRequestHeader('x-auth-key', auth.key)
-      xhr.setRequestHeader('x-auth-email', auth.email)
-    }
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress?.(event.loaded, event.total)
@@ -289,13 +279,7 @@ function xhrJson<T>(method: string, url: string, body: XMLHttpRequestBodyInit, o
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, withAuth = true): Promise<T> {
   const headers = new Headers(init?.headers)
-  if (withAuth) {
-    const auth = getStoredAuth()
-    if (auth) {
-      headers.set('x-auth-key', auth.key)
-      headers.set('x-auth-email', auth.email)
-    }
-  }
+  void withAuth
   const response = await fetch(input, { ...init, headers })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null
@@ -315,6 +299,7 @@ export const api = {
       },
       false,
     ),
+  logout: () => requestJson<{ ok: true }>('/api/auth/logout', { method: 'POST' }, false),
   changeAdminPassword: (payload: { currentPassword: string; newPassword: string }) =>
     requestJson<{ ok: true }>('/api/auth/password', {
       method: 'POST',
@@ -348,13 +333,7 @@ export const api = {
     ),
   reindexSearch: () => requestJson<{ ok: boolean; indexed: number; total: number }>('/api/search/reindex', { method: 'POST' }),
   exportReportPdf: async (month: string): Promise<Blob> => {
-    const headers = new Headers()
-    const auth = getStoredAuth()
-    if (auth) {
-      headers.set('x-auth-key', auth.key)
-      headers.set('x-auth-email', auth.email)
-    }
-    const response = await fetch(`/api/reports/${month}/pdf`, { headers })
+    const response = await fetch(`/api/reports/${month}/pdf`)
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null
       throw new ApiError(body?.error ?? `PDF 导出失败：${response.status}`, response.status)

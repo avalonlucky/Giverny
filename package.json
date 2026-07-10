@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.13",
+  "version": "0.28.15",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
@@ -40,5 +40,9 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
+  },
+  "overrides": {
+    "echarts": "^6.1.0",
+    "uuid": "^11.1.1"
   }
 }

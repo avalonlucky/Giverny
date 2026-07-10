@@ -141,6 +141,23 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   last_used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  email TEXT,
+  role TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_confirmation_uses (
+  jti TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
   action TEXT NOT NULL,
@@ -181,3 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_insights_history_trigger ON insights_history(trig
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_month ON monthly_reports(month);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_principal ON auth_sessions(principal_id);
+CREATE INDEX IF NOT EXISTS idx_agent_confirmation_uses_expiry ON agent_confirmation_uses(expires_at);

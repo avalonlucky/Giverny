@@ -3401,6 +3401,74 @@ function PendingAttachmentThumbnail({
   )
 }
 
+function PendingAttachmentPreview({
+  attachment,
+  onClose,
+}: {
+  attachment: PendingProgressAttachment
+  onClose: () => void
+}) {
+  const sourceUrl = useMemo(() => URL.createObjectURL(attachment.file), [attachment.file])
+  const fileType = fileTypeForFile(attachment.file).type
+  const isImage = isInlineImageFileType(fileType)
+  const isPdf = fileType === 'PDF'
+  const isVideo = videoFileTypes.has(fileType)
+  const isOffice = isOfficeFileType(fileType)
+
+  useEffect(() => () => URL.revokeObjectURL(sourceUrl), [sourceUrl])
+
+  return createPortal(
+    <ModalShell
+      className="file-preview-modal pending-attachment-preview-modal"
+      labelledBy="pending-attachment-preview-title"
+      onClose={onClose}
+      closeOnEscape
+    >
+      <header className="modal-header">
+        <div>
+          <p className="eyebrow">进展附件预览</p>
+          <h2 id="pending-attachment-preview-title">{attachment.name}</h2>
+        </div>
+        <div className="modal-header-actions">
+          {(isPdf || isImage || isVideo) && (
+            <a
+              className="icon-button"
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="在新窗口打开"
+              title="在新窗口打开"
+            >
+              <ExternalLink size={17} />
+            </a>
+          )}
+          <button className="icon-button modal-close-button" type="button" aria-label="关闭" title="关闭" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+      </header>
+      <div className="file-preview-body">
+        {isImage ? (
+          <img src={sourceUrl} alt={attachment.name} />
+        ) : isPdf ? (
+          <iframe className="file-preview-frame" src={sourceUrl} title={attachment.name} />
+        ) : isVideo ? (
+          <video className="file-preview-video" src={sourceUrl} controls preload="metadata" />
+        ) : isOffice ? (
+          <OfficePreview fileType={fileType} sourceUrl={sourceUrl} />
+        ) : (
+          <div className="file-preview-placeholder">
+            <FileArchive size={42} />
+            <strong>{fileType}</strong>
+            <span>该格式暂不支持站内完整预览，保存进展后仍可从文件记录打开源文件。</span>
+          </div>
+        )}
+      </div>
+    </ModalShell>,
+    document.body,
+  )
+}
+
 function snapProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value / 20) * 20))
 }
@@ -3819,7 +3887,7 @@ function SemanticSearchModal({
 
 type KnowledgeNote = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
 
-function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }) {
+function KnowledgeView() {
   const [notes, setNotes] = useState<KnowledgeNote[]>([])
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
@@ -3830,10 +3898,8 @@ function KnowledgeView({ auth }: { auth: { key: string; email: string } | null }
   const [activeTab, setActiveTab] = useState<'user' | 'ai-tip'>('user')
 
   const authHeaders = useCallback((): Record<string, string> => {
-    const h: Record<string, string> = { 'content-type': 'application/json' }
-    if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
-    return h
-  }, [auth])
+    return { 'content-type': 'application/json' }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -4298,10 +4364,7 @@ function ChatPanel({
   }
 
   const authHeaders = (): Record<string, string> => {
-    const auth = getStoredAuth()
-    const h: Record<string, string> = { 'content-type': 'application/json' }
-    if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
-    return h
+    return { 'content-type': 'application/json' }
   }
 
   const handleFiles = async (files: FileList | null) => {
@@ -5238,7 +5301,7 @@ function App() {
               <small>{taskDisplayProgress(task)}%</small>
             </div>
           </div>
-          <div className="task-row-actions" aria-label="任务快捷操作">
+          {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
             <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
               <Pencil size={15} />
             </button>
@@ -5255,7 +5318,7 @@ function App() {
             >
               <ClipboardCheck size={15} />
             </button>
-          </div>
+          </div>}
         </div>
       </article>
     )
@@ -6122,7 +6185,7 @@ function App() {
   const handleUnlock = async (email: string, key: string, turnstileToken?: string) => {
     try {
       const result = await api.login(email, key, turnstileToken)
-      const credentials = { email, key, role: result.role }
+      const credentials = { email, role: result.role }
       setStoredAuth(credentials)
       setAuthError('')
       setBackendStatus('连接中')
@@ -6140,6 +6203,7 @@ function App() {
   }
 
   const handleSignOut = () => {
+    void api.logout().catch(() => {})
     clearStoredAuth()
     clearDraftCache(STATE_CACHE_KEY)
     setAuth(null)
@@ -6154,14 +6218,6 @@ function App() {
   const handleChangeAdminPassword = async (currentPassword: string, newPassword: string) => {
     try {
       await api.changeAdminPassword({ currentPassword, newPassword })
-      setAuth((current) => {
-        if (!current) {
-          return current
-        }
-        const next = { ...current, key: newPassword }
-        setStoredAuth(next)
-        return next
-      })
       notify('管理员密码已更新')
     } catch (error) {
       notify(error instanceof Error ? `密码更新失败：${error.message}` : '密码更新失败')
@@ -7069,9 +7125,11 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                     onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
                     onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
                     onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
+                    canWrite={canWrite}
+                    canDelete={isAdmin}
                   />
                 )}
-                {dashboardCreateMenu && (
+                {canWrite && dashboardCreateMenu && (
                   <CreateTaskContextMenu
                     menu={dashboardCreateMenu}
                     onCreate={openNewTaskFromDashboardMenu}
@@ -7166,6 +7224,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
             onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
+            canWrite={canWrite}
+            canDelete={isAdmin}
           />
         </section>
           </div>
@@ -7215,6 +7275,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             rowThemeOn={rowThemeOn}
             onToggleRowTheme={toggleRowTheme}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
+            canWrite={canWrite}
+            canDelete={isAdmin}
           />
         )}
 
@@ -7231,6 +7293,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onDownloadFile={handleDownloadFile}
             onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onRetryAnalysis={handleRetryAttachmentAnalysis}
+            canWrite={canWrite}
+            canDelete={isAdmin}
           />
         )}
 
@@ -7292,7 +7356,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
         )}
 
         {activeView === '知识库' && isAdmin && (
-          <KnowledgeView auth={auth} />
+          <KnowledgeView />
         )}
 
         {activeView === '设置' && (
@@ -7347,7 +7411,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           onClose={() => setIsDailyKnowledgeOpen(false)}
           onFavorite={isAdmin ? async (item) => {
             const h: Record<string, string> = { 'content-type': 'application/json' }
-            if (auth) { h['x-auth-key'] = auth.key; h['x-auth-email'] = auth.email }
             const body = {
               title: item.title,
               content: item.body.join('\n\n'),
@@ -7988,6 +8051,8 @@ function TaskContextMenu({
   onVoidTask,
   onRestoreTask,
   onDeleteTask,
+  canWrite,
+  canDelete,
 }: {
   menu: { x: number; y: number; task: Task }
   onClose: () => void
@@ -7999,6 +8064,8 @@ function TaskContextMenu({
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
+  canWrite: boolean
+  canDelete: boolean
 }) {
   const run = (action: () => void) => {
     action()
@@ -8017,7 +8084,7 @@ function TaskContextMenu({
         <Eye size={15} />
         查看任务详情
       </button>
-      {!isVoided && (
+      {!isVoided && canWrite && (
         <>
           <button type="button" onClick={() => run(() => onOpenEditTask(menu.task.id))}>
             <Pencil size={15} />
@@ -8033,7 +8100,7 @@ function TaskContextMenu({
           </button>
         </>
       )}
-      {!isVoided && !hasAcceptanceClosure && (
+      {!isVoided && canWrite && !hasAcceptanceClosure && (
         <div className="context-submenu">
           <button type="button" className="context-menu-parent" aria-haspopup="menu" disabled={!canRecordProgress} title={canRecordProgress ? '快速改进度' : '计划中进度保持为 0'}>
             <BarChart3 size={15} />
@@ -8054,14 +8121,14 @@ function TaskContextMenu({
           </div>
         </div>
       )}
-      {isVoided && (
+      {isVoided && canDelete && (
         <button type="button" onClick={() => run(() => onRestoreTask(menu.task.id))}>
           <RotateCcw size={15} />
           恢复任务
         </button>
       )}
-      <div className="context-menu-separator" />
-      {isVoided ? (
+      {canDelete && <div className="context-menu-separator" />}
+      {canDelete && (isVoided ? (
         <button type="button" className="danger" onClick={() => run(() => onDeleteTask(menu.task.id))}>
           <Trash2 size={15} />
           永久删除
@@ -8071,7 +8138,7 @@ function TaskContextMenu({
           <Trash2 size={15} />
           作废任务
         </button>
-      )}
+      ))}
     </div>
   )
 }
@@ -8085,6 +8152,8 @@ function FileContextMenu({
   onFocusName,
   onFocusTag,
   onDelete,
+  canWrite,
+  canDelete,
 }: {
   menu: { x: number; y: number; file: FileAsset }
   onClose: () => void
@@ -8094,6 +8163,8 @@ function FileContextMenu({
   onFocusName: (file: FileAsset) => void
   onFocusTag: (file: FileAsset) => void
   onDelete: (fileId: number) => void
+  canWrite: boolean
+  canDelete: boolean
 }) {
   const run = (action: () => void) => {
     action()
@@ -8110,23 +8181,23 @@ function FileContextMenu({
         <ExternalLink size={15} />
         打开原文件
       </button>
-      <button type="button" onClick={() => run(() => onFocusName(menu.file))}>
+      {canWrite && <button type="button" onClick={() => run(() => onFocusName(menu.file))}>
         <Pencil size={15} />
         重命名
-      </button>
-      <button type="button" onClick={() => run(() => onFocusTag(menu.file))}>
+      </button>}
+      {canWrite && <button type="button" onClick={() => run(() => onFocusTag(menu.file))}>
         <Tag size={15} />
         添加标签
-      </button>
+      </button>}
       <button type="button" onClick={() => run(() => onDownload(menu.file))}>
         <Download size={15} />
         下载源文件
       </button>
-      <div className="context-menu-separator" />
-      <button type="button" className="danger" onClick={() => run(() => onDelete(menu.file.id))}>
+      {canDelete && <div className="context-menu-separator" />}
+      {canDelete && <button type="button" className="danger" onClick={() => run(() => onDelete(menu.file.id))}>
         <Trash2 size={15} />
         删除
-      </button>
+      </button>}
     </div>
   )
 }
@@ -8142,6 +8213,8 @@ function DashboardTaskSidebar({
   onOpenEdit,
   onOpenAcceptance,
   onAutoEstimateProgress,
+  canWrite,
+  canDelete,
 }: {
   task: Task | undefined
   files: FileAsset[]
@@ -8153,6 +8226,8 @@ function DashboardTaskSidebar({
   onOpenEdit: (taskId: number) => void
   onOpenAcceptance: (taskId: number) => void
   onAutoEstimateProgress?: (task: Task) => void
+  canWrite: boolean
+  canDelete: boolean
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
   const [expandedEntryNotes, setExpandedEntryNotes] = useState<Record<string, boolean>>({})
@@ -8322,7 +8397,7 @@ function DashboardTaskSidebar({
               </dd>
             </div>
           </dl>
-          <div className="dashboard-side-info-actions">
+          {canWrite && <div className="dashboard-side-info-actions">
             {canAcceptTask && (
               <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
                 去验收
@@ -8332,7 +8407,7 @@ function DashboardTaskSidebar({
               <Pencil size={15} />
               编辑信息
             </button>
-          </div>
+          </div>}
         </section>
       ) : (
         <section className="dashboard-side-section dashboard-side-progress-section" role="tabpanel">
@@ -8352,8 +8427,8 @@ function DashboardTaskSidebar({
                   key={value}
                   aria-label={`设置进度为 ${value}%`}
                   aria-pressed={displayedProgress === value}
-                  disabled={!canRecordProgress}
-                  title={canRecordProgress ? `设置进度为 ${value}%` : task.status === '计划中' ? '任务仍在计划中，进度保持为 0' : '任务已进入验收闭环，需先编辑或删除验收进展'}
+                  disabled={!canWrite || !canRecordProgress}
+                  title={!canWrite ? '当前为只读访问' : canRecordProgress ? `设置进度为 ${value}%` : task.status === '计划中' ? '任务仍在计划中，进度保持为 0' : '任务已进入验收闭环，需先编辑或删除验收进展'}
                   onClick={() => onUpdateTask(task.id, { progress: value })}
                 >
                   {value}%
@@ -8385,10 +8460,10 @@ function DashboardTaskSidebar({
             <div className="dashboard-side-subsection dashboard-side-record-pane" role="tabpanel">
               <div className="dashboard-side-subsection-title">
                 <span>分段计时</span>
-                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
+                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
                   <Plus size={15} />
                   记录进展
-                </button>
+                </button>}
               </div>
               <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.filter((entry) => !entry.isClientFeedback).length} 段 · {billableHours.toFixed(1)}h</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
@@ -8399,10 +8474,10 @@ function DashboardTaskSidebar({
                     {shouldShowAcceptanceSummary && (
                       <article className="dashboard-side-time-item dashboard-side-acceptance-item">
                         <span className="dot" />
-                        <div className="dashboard-side-entry-actions">
-                          <button type="button" onClick={() => onOpenProgress(task.id, 'progress', undefined, true)}>编辑</button>
-                          <button type="button" className="danger" onClick={() => onDeleteAcceptanceProgress(task.id)}>删除</button>
-                        </div>
+                        {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
+                          {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'progress', undefined, true)}>编辑</button>}
+                          {canDelete && <button type="button" className="danger" onClick={() => onDeleteAcceptanceProgress(task.id)}>删除</button>}
+                        </div>}
                         <div className="dashboard-side-entry-time-row">
                           <time>{task.actualDeliveryDate ? formatPlanDateTime(task.actualDeliveryDate) : formatPlanDateTime(isoDateTime())}</time>
                           <span className="progress-entry-tag acceptance">验收进展</span>
@@ -8450,9 +8525,9 @@ function DashboardTaskSidebar({
                       return (
                         <article className="dashboard-side-time-item" key={entry.id}>
                           <span className="dot" />
-                          <div className="dashboard-side-entry-actions">
-                            <button type="button" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>编辑</button>
-                            <button
+                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
+                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>编辑</button>}
+                            {canDelete && <button
                               type="button"
                               className="danger"
                               onClick={() => entry.isAcceptanceProgress
@@ -8460,15 +8535,15 @@ function DashboardTaskSidebar({
                                 : onDeleteEntry(task.id, 'progress', entry.id)}
                             >
                               删除
-                            </button>
-                          </div>
+                            </button>}
+                          </div>}
                           <div className="dashboard-side-entry-time-row">
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
                             {isGrouped && siblings.map((sib) => (
                               <span key={sib.id} className="progress-group-inline-sib">
                                 <span className="progress-group-inline-sep">·</span>
                                 <span className="progress-group-inline-time">{sib.start}–{sib.end}</span>
-                                <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={10} /></button>
+                                {canWrite && <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={10} /></button>}
                               </span>
                             ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
@@ -8519,10 +8594,10 @@ function DashboardTaskSidebar({
             <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-feedback" role="tabpanel">
               <div className="dashboard-side-subsection-title">
                 <span>修改建议</span>
-                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
+                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
                   <Plus size={15} />
                   记录反馈
-                </button>
+                </button>}
               </div>
               <p className="dashboard-side-subsection-meta">用于追溯 B01 / B02 等每轮修改意见，默认不计工时。</p>
               {sortedFeedbackEntries.length === 0 ? (
@@ -8535,10 +8610,10 @@ function DashboardTaskSidebar({
                       return (
                         <article className="dashboard-side-time-item dashboard-side-feedback-item" key={entry.id}>
                           <span className="dot" />
-                          <div className="dashboard-side-entry-actions">
-                            <button type="button" onClick={() => onOpenProgress(task.id, 'feedback', entry.id)}>编辑</button>
-                            <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'feedback', entry.id)}>删除</button>
-                          </div>
+                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
+                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'feedback', entry.id)}>编辑</button>}
+                            {canDelete && <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'feedback', entry.id)}>删除</button>}
+                          </div>}
                           <div className="dashboard-side-entry-time-row">
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
                             <span className="progress-entry-tag client-feedback">甲方反馈</span>
@@ -8583,10 +8658,10 @@ function DashboardTaskSidebar({
             <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-waiting" role="tabpanel">
               <div className="dashboard-side-subsection-title">
                 <span>等待记录</span>
-                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录等待' : '改为进行中后可记录等待'} onClick={() => onOpenProgress(task.id, 'waiting')}>
+                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录等待' : '改为进行中后可记录等待'} onClick={() => onOpenProgress(task.id, 'waiting')}>
                   <Plus size={15} />
                   记录等待
-                </button>
+                </button>}
               </div>
               {waitingMinutes > 0 && <p className="dashboard-side-subsection-meta">等待合计 {(waitingMinutes / 60).toFixed(1)}h · 仅进入洞察分析</p>}
               {waitingEntries.length === 0 ? (
@@ -8598,10 +8673,10 @@ function DashboardTaskSidebar({
                       const minutes = minutesForWaitingEntry(task, entry)
                       return (
                         <article className="dashboard-side-waiting-item" key={entry.id}>
-                          <div className="dashboard-side-entry-actions">
-                            <button type="button" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>编辑</button>
-                            <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>
-                          </div>
+                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
+                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>编辑</button>}
+                            {canDelete && <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>}
+                          </div>}
                           <time>{formatWaitingEntryDateTimeRange(task, entry)}</time>
                           {renderEntryNote(`${task.id}:waiting:${entry.id}`, entry.note || entry.reason || '等待甲方确认')}
                           <em>{minutes > 0 ? `等待 ${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h` : '等待中'} · 不计结算</em>
@@ -8667,6 +8742,8 @@ function TasksView({
   rowThemeOn,
   onToggleRowTheme,
   onAutoEstimateProgress,
+  canWrite,
+  canDelete,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -8708,6 +8785,8 @@ function TasksView({
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
   onAutoEstimateProgress?: (task: Task) => void
+  canWrite: boolean
+  canDelete: boolean
   rowThemeOn: boolean
   onToggleRowTheme: () => void
 }) {
@@ -8758,7 +8837,7 @@ function TasksView({
   }
 
   const openCreateMenu = (event: React.MouseEvent) => {
-    if (!isTaskListBlankContextTarget(event.target)) {
+    if (!canWrite || !isTaskListBlankContextTarget(event.target)) {
       return
     }
     event.preventDefault()
@@ -8953,7 +9032,7 @@ return (
                     <small>{taskDisplayProgress(task)}%</small>
                   </div>
                 </div>
-                <div className="task-row-actions" aria-label="任务快捷操作">
+                {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
                   <span className="task-row-due">{dueDateLabel}</span>
                   <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}>
                     <Pencil size={15} />
@@ -8971,7 +9050,7 @@ return (
                   >
                     <ClipboardCheck size={15} />
                   </button>
-                </div>
+                </div>}
               </div>
             </article>
             )
@@ -8980,7 +9059,7 @@ return (
             <div className="empty-state">
               <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
               <p>{activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}</p>
-              {activeMonthTasks.length === 0 && (
+              {canWrite && activeMonthTasks.length === 0 && (
                 <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
                   <Plus size={15} />
                   新建任务
@@ -9006,9 +9085,11 @@ return (
               onVoidTask={onVoidTask}
               onRestoreTask={onRestoreTask}
               onDeleteTask={onDeleteTask}
+              canWrite={canWrite}
+              canDelete={canDelete}
             />
           )}
-          {createMenu && (
+          {canWrite && createMenu && (
             <CreateTaskContextMenu
               menu={createMenu}
               onCreate={createTaskFromMenu}
@@ -9036,6 +9117,8 @@ return (
             }
           }}
           onAutoEstimateProgress={onAutoEstimateProgress}
+          canWrite={canWrite}
+          canDelete={canDelete}
         />
       </section>
       {progressTarget && (
@@ -9185,7 +9268,6 @@ function TaskProgressModal({
     stagedEntryIdCache.set(progressDraftKey, stagedEntryIdRef.current)
   }
   // 进行中的预上传 Promise（按附件 id 索引），保存时若仍在传则等待其完成。
-  const uploadPromisesRef = useRef<Map<string, Promise<FileAsset>>>(new Map())
   const [existingAttachmentDrafts, setExistingAttachmentDrafts] = useState<Record<number, string>>({})
   const [existingAttachmentAiState, setExistingAttachmentAiState] = useState<Record<number, {
     loading?: boolean
@@ -9483,35 +9565,6 @@ function TaskProgressModal({
     )
   }
 
-  // 文件一加入即后台预上传；保存时若已传完则秒过，无需再等。
-  const startEagerUpload = (attachment: PendingProgressAttachment) => {
-    setPendingAttachments((current) => current.map((item) =>
-      item.id === attachment.id ? { ...item, uploadStatus: 'uploading', uploadProgress: 0, uploadError: undefined } : item,
-    ))
-    const promise = stageUploadAttachment(attachment, (ratio) => {
-      setPendingAttachments((current) => current.map((item) =>
-        item.id === attachment.id ? { ...item, uploadProgress: ratio } : item,
-      ))
-    })
-      .then((saved) => {
-        setPendingAttachments((current) => current.map((item) =>
-          item.id === attachment.id ? { ...item, uploadStatus: 'done', uploadProgress: 1, uploadedFile: saved, uploadError: undefined } : item,
-        ))
-        return saved
-      })
-      .catch((error) => {
-        setPendingAttachments((current) => current.map((item) =>
-          item.id === attachment.id
-            ? { ...item, uploadStatus: 'error', uploadError: error instanceof Error ? error.message : '上传失败' }
-            : item,
-        ))
-        throw error
-      })
-    uploadPromisesRef.current.set(attachment.id, promise)
-    // 吞掉未捕获 rejection 噪声；真正的错误已写入 attachment.uploadError，保存时再处理。
-    promise.catch(() => {})
-  }
-
   // 移除某个待上传附件：若已传到后台则顺手删除，避免产生孤儿文件。
   const discardStagedFile = (fileId?: number) => {
     if (typeof fileId === 'number') {
@@ -9519,20 +9572,32 @@ function TaskProgressModal({
     }
   }
 
-  // 保存时定稿：等待在传的预上传完成，必要时改名（不重传），返回已上传的文件名。
+  // 保存时才上传，避免用户关闭弹窗后在 R2/D1 留下未关联的暂存文件。
   const finalizeStagedAttachments = async (): Promise<{ names: string[]; failures: string[] }> => {
     const names: string[] = []
     const failures: string[] = []
     for (const attachment of pendingAttachments) {
       let saved = attachment.uploadedFile
       if (!saved) {
-        const pending = uploadPromisesRef.current.get(attachment.id)
-        if (pending) {
-          try {
-            saved = await pending
-          } catch {
-            saved = undefined
-          }
+        setPendingAttachments((current) => current.map((item) =>
+          item.id === attachment.id ? { ...item, uploadStatus: 'uploading', uploadProgress: 0, uploadError: undefined } : item,
+        ))
+        try {
+          saved = await stageUploadAttachment(attachment, (ratio) => {
+            setPendingAttachments((current) => current.map((item) =>
+              item.id === attachment.id ? { ...item, uploadProgress: ratio } : item,
+            ))
+          })
+          attachment.uploadedFile = saved
+          setPendingAttachments((current) => current.map((item) =>
+            item.id === attachment.id ? { ...item, uploadStatus: 'done', uploadProgress: 1, uploadedFile: saved, uploadError: undefined } : item,
+          ))
+        } catch (error) {
+          setPendingAttachments((current) => current.map((item) =>
+            item.id === attachment.id
+              ? { ...item, uploadStatus: 'error', uploadError: error instanceof Error ? error.message : '上传失败' }
+              : item,
+          ))
         }
       }
       const finalName = sanitizeAttachmentName(attachment.name, attachment.originalName)
@@ -9569,8 +9634,6 @@ function TaskProgressModal({
           file,
           name: displayName,
           originalName: file.name,
-          uploadStatus: 'uploading',
-          uploadProgress: 0,
         })
       } catch (error) {
         nextErrors.push(error instanceof Error ? error.message : `${file.name}：文件无法添加`)
@@ -9579,7 +9642,6 @@ function TaskProgressModal({
     if (nextAttachments.length > 0) {
       setPendingAttachments((current) => [...current, ...nextAttachments])
       nextAttachments.forEach((attachment) => {
-        startEagerUpload(attachment)
         if (looksLikeUntidyFileName(attachment.name)) {
           window.setTimeout(() => void requestAttachmentNameSuggestion(attachment.id, attachment), 0)
         }
@@ -9602,19 +9664,15 @@ function TaskProgressModal({
       validateUploadFile(file)
       const previous = pendingAttachments.find((item) => item.id === replacementAttachmentId)
       discardStagedFile(previous?.uploadedFile?.id)
-      uploadPromisesRef.current.delete(replacementAttachmentId)
       const replaced: PendingProgressAttachment = {
         id: replacementAttachmentId,
         file,
         name: file.name,
         originalName: file.name,
-        uploadStatus: 'uploading',
-        uploadProgress: 0,
       }
       setPendingAttachments((current) => current.map((attachment) =>
         attachment.id === replacementAttachmentId ? replaced : attachment,
       ))
-      startEagerUpload(replaced)
       setUploadErrors([])
     } catch (error) {
       setUploadErrors([error instanceof Error ? error.message : `${file.name}：文件无法替换`])
@@ -9901,7 +9959,7 @@ function TaskProgressModal({
       }
       await saveDirtyExistingAttachmentNames()
       await demoteRollbackAcceptanceAttachments()
-      // 附件在添加时已后台预上传，这里只需等待收尾 + 必要时改名，通常瞬间完成。
+      // 附件在保存时上传，避免取消表单留下孤儿文件。
       const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
       if (uploadFailures.length > 0) {
         setUploadErrors(uploadFailures)
@@ -10003,8 +10061,7 @@ function TaskProgressModal({
         }
       }
       await saveDirtyExistingAttachmentNames()
-      // 验收附件已在添加时后台预上传（scope=acceptance，自动带「验收文件」标签）。
-      // 这里只需等待收尾 + 必要时改名，保存因此基本秒回，不再卡 30 秒。
+      // 验收附件在保存时上传（scope=acceptance，自动带「验收文件」标签）。
       const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
       if (uploadFailures.length > 0) {
         setUploadErrors(uploadFailures)
@@ -11297,7 +11354,6 @@ function TaskProgressModal({
                             className="danger"
                             onClick={() => {
                               discardStagedFile(attachment.uploadedFile?.id)
-                              uploadPromisesRef.current.delete(attachment.id)
                               setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))
                             }}
                           >
@@ -11458,18 +11514,7 @@ function TaskProgressModal({
           </button>
         )}
       </footer>
-      {previewAttachment && (
-        <div className="progress-attachment-preview-overlay" role="dialog" aria-label="附件预览" onClick={() => setPreviewAttachment(null)}>
-          {previewAttachment.file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(previewAttachment.name)
-            ? <img src={URL.createObjectURL(previewAttachment.file)} alt={previewAttachment.name} />
-            : (
-              <div className="progress-attachment-preview-file">
-                <strong>{splitFileName(previewAttachment.name).extension.replace('.', '').toUpperCase() || 'FILE'}</strong>
-                <span>{previewAttachment.name}</span>
-              </div>
-            )}
-        </div>
-      )}
+      {previewAttachment && <PendingAttachmentPreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />}
     </ModalShell>
   )
 }
@@ -12069,6 +12114,8 @@ function FilesView({
   onDownloadFile,
   onUpdateFile,
   onRetryAnalysis,
+  canWrite,
+  canDelete,
 }: {
   files: FileAsset[]
   tasks: Task[]
@@ -12081,6 +12128,8 @@ function FilesView({
   onDownloadFile: (file: FileAsset) => void
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
   onRetryAnalysis: (attachmentId: number) => Promise<void>
+  canWrite: boolean
+  canDelete: boolean
 }) {
   // 仅展示「已验收」任务的验收文件——未验收任务（进行中/待验收）即便预上传了验收稿也不显示，
   // 避免「还没验收却出现验收文件」。任务回到待验收（撤回验收）时也会自动隐藏。
@@ -12369,6 +12418,8 @@ function FilesView({
               setSelectedFileId(0)
               setFocusFileField(null)
             }}
+            canWrite={canWrite}
+            canDelete={canDelete}
           />
         )}
       </section>
@@ -12382,6 +12433,8 @@ function FilesView({
           onFocusName={(file) => focusInspectorField(file, 'name')}
           onFocusTag={(file) => focusInspectorField(file, 'tag')}
           onDelete={onDeleteFile}
+          canWrite={canWrite}
+          canDelete={canDelete}
         />
       )}
     </section>
@@ -12399,6 +12452,8 @@ function FileInspector({
   focusField,
   onFocusHandled,
   onClose,
+  canWrite,
+  canDelete,
 }: {
   file: FileAsset | undefined
   analysis?: AttachmentAnalysis
@@ -12410,6 +12465,8 @@ function FileInspector({
   focusField?: 'name' | 'tag' | null
   onFocusHandled?: () => void
   onClose: () => void
+  canWrite: boolean
+  canDelete: boolean
 }) {
   const nameInputRef = useRef<HTMLInputElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
@@ -12479,10 +12536,10 @@ function FileInspector({
             关闭 <X size={16} />
           </button>
         </header>
-        <label className="inspector-field file-inspector-name">
+        {canWrite ? <label className="inspector-field file-inspector-name">
           <span>文件名</span>
           <input ref={nameInputRef} value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={() => void saveMetadata()} />
-        </label>
+        </label> : <div className="inspector-field file-inspector-name"><span>文件名</span><strong>{file.name}</strong></div>}
         <p className="file-inspector-subtitle">{file.task} · {file.type}</p>
         <button className="file-inspector-preview" type="button" onClick={() => onPreview(file)}>
           <span className={`file-format-badge type-${fileType.toLowerCase()}`}>{fileType}</span>
@@ -12507,7 +12564,7 @@ function FileInspector({
             <dd><span className="file-meta-chip">验收文件</span></dd>
           </div>
         </dl>
-      <label className="inspector-field">
+      {canWrite && <label className="inspector-field">
         <span>标签</span>
         <input
           ref={tagInputRef}
@@ -12521,15 +12578,15 @@ function FileInspector({
           }}
           placeholder={isSaving ? '保存中…' : '输入标签后按回车'}
         />
-      </label>
+      </label>}
       <div className="inspector-tags">
         {tags.length === 0 && <em>暂无标签</em>}
         {tags.map((tag) => (
           <span key={tag}>
             {tag}
-            <button type="button" aria-label={`移除标签 ${tag}`} onClick={() => void removeTag(tag)}>
+            {canWrite && <button type="button" aria-label={`移除标签 ${tag}`} onClick={() => void removeTag(tag)}>
               <Trash2 size={12} />
-            </button>
+            </button>}
           </span>
         ))}
       </div>
@@ -12541,7 +12598,7 @@ function FileInspector({
               {!analysis ? '等待分析' : analysis.status === 'completed' ? '已完成' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : '需要重试'}
             </strong>
           </div>
-          <button
+          {canDelete && <button
             type="button"
             className="ghost-button compact-button"
             disabled={isRetrying || analysis?.status === 'processing'}
@@ -12552,7 +12609,7 @@ function FileInspector({
           >
             <RotateCcw size={13} />
             {isRetrying ? '提交中' : '重新分析'}
-          </button>
+          </button>}
         </div>
         {analysis?.status === 'completed' ? (
           <>
@@ -12582,9 +12639,9 @@ function FileInspector({
         <button className="ghost-button" type="button" onClick={() => sourceUrl && window.open(sourceUrl, '_blank', 'noreferrer')}>
           打开原文件
         </button>
-        <button className="ghost-button danger-text-button" type="button" onClick={() => onDelete(file.id)}>
+        {canDelete && <button className="ghost-button danger-text-button" type="button" onClick={() => onDelete(file.id)}>
           删除
-        </button>
+        </button>}
       </div>
       </aside>
     </>

@@ -125,6 +125,8 @@ const roundCents = (value: number) => Math.round(value * 100) / 100
 const ADMIN_EMAIL = 'bh141425@gmail.com'
 const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
 const ADMIN_RESET_SETTING = 'adminPasswordReset'
+const AUTH_SESSION_COOKIE = 'giverny_session'
+const AUTH_SESSION_TTL_SECONDS = 24 * 60 * 60
 const AI_MODEL_SETTING = 'aiModelConfig'
 const PASSWORD_ITERATIONS = 100000
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
@@ -190,6 +192,13 @@ type PublicAiModelConfig = {
 // guest        对客访客（口令/匿名）——只看进展和对客可见交付件，只读
 type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
 type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
+
+type AuthPrincipal = {
+  role: AuthRole
+  email: string
+  principalId: string
+  expiresAt?: string
+}
 
 function scopeToRole(scope: string | null | undefined): AuthRole {
   return scope === 'collaborator' || scope === 'viewer' || scope === 'client' ? scope : 'guest'
@@ -400,6 +409,84 @@ async function hashSecret(secret: string, salt = crypto.getRandomValues(new Uint
     256,
   )
   return `pbkdf2-sha256$${iterations}$${bytesToBase64(salt)}$${bytesToBase64(new Uint8Array(bits))}`
+}
+
+async function hashSessionToken(token: string) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token)))
+  return bytesToBase64(digest)
+}
+
+function requestCookie(request: Request, name: string) {
+  const cookie = request.headers.get('cookie') ?? ''
+  for (const part of cookie.split(';')) {
+    const separator = part.indexOf('=')
+    if (separator < 0) continue
+    if (part.slice(0, separator).trim() === name) {
+      return decodeURIComponent(part.slice(separator + 1).trim())
+    }
+  }
+  return ''
+}
+
+function authSessionCookie(token: string, maxAge = AUTH_SESSION_TTL_SECONDS) {
+  return `${AUTH_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, maxAge)}`
+}
+
+let authSessionsTableEnsured = false
+async function ensureAuthSessionsTable(env: Env) {
+  if (authSessionsTableEnsured) return
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      email TEXT,
+      role TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_auth_sessions_principal ON auth_sessions(principal_id)').run()
+  authSessionsTableEnsured = true
+}
+
+async function createAuthSession(env: Env, principal: AuthPrincipal) {
+  await ensureAuthSessionsTable(env)
+  const token = agentBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+  const tokenHash = await hashSessionToken(token)
+  const ttlExpiry = new Date(Date.now() + AUTH_SESSION_TTL_SECONDS * 1000)
+  const principalExpiry = principal.expiresAt ? new Date(principal.expiresAt) : null
+  const expiresAt = principalExpiry && Number.isFinite(principalExpiry.getTime()) && principalExpiry < ttlExpiry ? principalExpiry : ttlExpiry
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').bind(nowIso()).run()
+  await env.DB.prepare(
+    'INSERT INTO auth_sessions (id, token_hash, email, role, principal_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(crypto.randomUUID(), tokenHash, principal.email, principal.role, principal.principalId, expiresAt.toISOString()).run()
+  return { token, maxAge: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) }
+}
+
+async function resolveSessionRole(env: Env, request: Request): Promise<AuthRole | null> {
+  const token = requestCookie(request, AUTH_SESSION_COOKIE)
+  if (!token) return null
+  await ensureAuthSessionsTable(env)
+  const tokenHash = await hashSessionToken(token)
+  const row = await env.DB.prepare('SELECT role FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
+    .bind(tokenHash, nowIso())
+    .first<{ role: string }>()
+  return row && ['admin', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role) ? row.role as AuthRole : null
+}
+
+async function deleteRequestSession(env: Env, request: Request) {
+  const token = requestCookie(request, AUTH_SESSION_COOKIE)
+  if (!token) return
+  await ensureAuthSessionsTable(env)
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').bind(await hashSessionToken(token)).run()
+}
+
+async function revokePrincipalSessions(env: Env, principalId: string) {
+  await ensureAuthSessionsTable(env)
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE principal_id = ?').bind(principalId).run()
 }
 
 function getSecretHashIterations(storedHash: string | null | undefined) {
@@ -902,7 +989,7 @@ async function tasksByIds(env: Env, ids: string[]) {
   }
   const placeholders = uniqueIds.map(() => '?').join(',')
   const rows = await env.DB.prepare(
-    `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+    `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
      FROM tasks
      WHERE deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`,
   ).bind(...uniqueIds).all<DbTask>()
@@ -1853,12 +1940,42 @@ function agentBase64UrlToString(value: string) {
 }
 
 async function agentSigningKey(env: Env) {
-  const secret = env.AGENT_RUNTIME_KEY || env.AGENT_TOOL_TOKEN || env.ADMIN_TOKEN || 'giverny-agent-local'
+  const secret = env.AGENT_RUNTIME_KEY || env.AGENT_TOOL_TOKEN || env.ADMIN_TOKEN || (env.LOCAL_DEV === '1' ? 'giverny-agent-local' : '')
+  if (!secret) {
+    throw new Error('Agent confirmation signing secret is not configured')
+  }
   return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+}
+
+let agentConfirmationUsesTableEnsured = false
+async function ensureAgentConfirmationUsesTable(env: Env) {
+  if (agentConfirmationUsesTableEnsured) return
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_confirmation_uses (
+      jti TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_confirmation_uses_expires_at ON agent_confirmation_uses(expires_at)').run()
+  agentConfirmationUsesTableEnsured = true
+}
+
+async function consumeAgentConfirmationToken(env: Env, jti: string, action: string, expiresAt: number) {
+  await ensureAgentConfirmationUsesTable(env)
+  await env.DB.prepare('DELETE FROM agent_confirmation_uses WHERE expires_at <= ?').bind(nowIso()).run()
+  const result = await env.DB.prepare(
+    'INSERT OR IGNORE INTO agent_confirmation_uses (jti, action, expires_at) VALUES (?, ?, ?)',
+  ).bind(jti, action, new Date(expiresAt).toISOString()).run()
+  if (Number(result.meta?.changes ?? 0) !== 1) {
+    throw new Error('confirmationToken 已使用，请重新生成预览并确认。')
+  }
 }
 
 async function createAgentConfirmationToken(env: Env, action: string, draft: Record<string, unknown>) {
   const payload = {
+    jti: crypto.randomUUID(),
     action,
     draft,
     exp: Date.now() + 10 * 60 * 1000,
@@ -1881,13 +1998,17 @@ async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAc
   if (agentBase64Url(expectedSignature) !== signaturePart) {
     throw new Error('confirmationToken 校验失败，请重新生成预览。')
   }
-  const payload = JSON.parse(agentBase64UrlToString(payloadPart)) as { action?: string; draft?: Record<string, unknown>; exp?: number }
+  const payload = JSON.parse(agentBase64UrlToString(payloadPart)) as { jti?: string; action?: string; draft?: Record<string, unknown>; exp?: number }
   if (payload.action !== expectedAction) {
     throw new Error(`confirmationToken 动作不匹配：需要 ${expectedAction}`)
   }
   if (!payload.exp || payload.exp < Date.now()) {
     throw new Error('confirmationToken 已过期，请重新生成预览。')
   }
+  if (!payload.jti) {
+    throw new Error('confirmationToken 版本已失效，请重新生成预览。')
+  }
+  await consumeAgentConfirmationToken(env, payload.jti, expectedAction, payload.exp)
   return payload.draft ?? {}
 }
 
@@ -2608,7 +2729,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const keywordRows = query && !statusIntent
     ? month
       ? await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
@@ -2616,7 +2737,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
            LIMIT ?`,
         ).bind(...monthBindings, like, like, like, limit).all<DbTask>()
       : await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
@@ -2627,14 +2748,14 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const scopeRows = statusIntent || !query
     ? month
       ? await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(...monthBindings, limit).all<DbTask>()
       : await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
            FROM tasks
           WHERE deleted_at IS NULL AND voided_at IS NULL
            ORDER BY start_date DESC, created_at DESC
@@ -2651,16 +2772,19 @@ async function agentSearchTasksTool(env: Env, request: Request) {
     ? scopeRows
     : { results: Array.from(mergedById.values()).slice(0, limit), success: true }
   const allResults = rows.results ?? []
-  const isClosed = (task: DbTask) => task.status === '已验收' || task.status === '终止' || task.status === '不计费'
+  const effectiveStatus = (task: DbTask): TaskStatus => parseTimeEntries(task.time_entries_json).some((entry) => entry.isAcceptanceProgress)
+    ? '已验收'
+    : task.status
+  const isClosed = (task: DbTask) => ['已验收', '终止', '不计费'].includes(effectiveStatus(task))
   const isOverdue = (task: DbTask) => !isClosed(task) && Boolean(task.estimated_delivery_date) && String(task.estimated_delivery_date).slice(0, 10) < today
   const filteredResults = statusIntent
     ? allResults.filter((task) => {
         if (overdueIntent) return isOverdue(task)
         if (unfinishedIntent) return !isClosed(task)
-        if (/待验收/.test(query)) return task.status === '待验收'
-        if (/进行中/.test(query)) return task.status === '进行中'
-        if (/计划中/.test(query)) return task.status === '计划中'
-        if (/挂起/.test(query)) return task.status === '挂起'
+        if (/待验收/.test(query)) return effectiveStatus(task) === '待验收'
+        if (/进行中/.test(query)) return effectiveStatus(task) === '进行中'
+        if (/计划中/.test(query)) return effectiveStatus(task) === '计划中'
+        if (/挂起/.test(query)) return effectiveStatus(task) === '挂起'
         return true
       })
     : allResults
@@ -2681,12 +2805,12 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       title: task.title,
       requirement: task.requirement ?? '',
       type: task.design_type ?? '',
-      status: task.status,
-      progress: Number(task.progress) || 0,
+      status: effectiveStatus(task),
+      progress: effectiveStatus(task) === '已验收' ? 100 : Number(task.progress) || 0,
       actualHours: Number(task.actual_hours) || 0,
       startDate: task.start_date ?? '',
       estimatedDate: task.estimated_delivery_date ?? '',
-      actualDeliveryDate: task.actual_delivery_date ?? '',
+      actualDeliveryDate: task.actual_delivery_date || acceptanceProgressEndDateTime(parseTimeEntries(task.time_entries_json), task.start_date),
       settlementMonth: task.settlement_month ?? '',
       billable: isBillableDbTask(task),
       overdue: isOverdue(task),
@@ -5042,15 +5166,17 @@ async function ensureAccessTokenScope(env: Env) {
   accessTokenScopeEnsured = true
 }
 
-/** 校验登录凭证：管理员邮箱 + 平台密码 → admin；有效的访问口令 → 该口令的分级角色 */
-async function resolveRole(env: Env, key: string, email: string): Promise<AuthRole | null> {
+/** 校验一次性登录凭证；成功后只把服务端会话写入 HttpOnly Cookie。 */
+async function resolvePrincipal(env: Env, key: string, email: string): Promise<AuthPrincipal | null> {
   const normalizedEmail = email.trim().toLowerCase()
   const trimmedKey = key.trim()
   if (!trimmedKey) {
     return null
   }
   if (normalizedEmail === ADMIN_EMAIL) {
-    return (await verifyAdminPassword(env, trimmedKey)) ? 'admin' : null
+    return (await verifyAdminPassword(env, trimmedKey))
+      ? { role: 'admin', email: ADMIN_EMAIL, principalId: 'admin' }
+      : null
   }
 
   await ensureAccessTokenScope(env)
@@ -5062,7 +5188,26 @@ async function resolveRole(env: Env, key: string, email: string): Promise<AuthRo
     return null
   }
   await env.DB.prepare('UPDATE access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?').bind(row.id).run()
-  return scopeToRole(row.scope)
+  return {
+    role: scopeToRole(row.scope),
+    email: normalizedEmail,
+    principalId: row.id,
+    expiresAt: row.expires_at ?? undefined,
+  }
+}
+
+async function resolveRole(env: Env, key: string, email: string): Promise<AuthRole | null> {
+  return (await resolvePrincipal(env, key, email))?.role ?? null
+}
+
+async function resolveRequestRole(env: Env, request: Request): Promise<AuthRole | null> {
+  const sessionRole = await resolveSessionRole(env, request)
+  if (sessionRole) return sessionRole
+  return resolveRole(
+    env,
+    request.headers.get('x-auth-key') ?? '',
+    request.headers.get('x-auth-email') ?? '',
+  )
 }
 
 // ===== 登录防爆破（撞库/暴力破解）限流 =====
@@ -5151,15 +5296,27 @@ async function login(env: Env, request: Request) {
     await audit(env, 'login_captcha_failed', 'auth', ip, { email: body.email ?? '' })
     return fail('人机验证未通过，请刷新验证后重试', 403)
   }
-  const role = await resolveRole(env, body.key ?? '', body.email ?? '')
-  if (!role) {
+  const principal = await resolvePrincipal(env, body.key ?? '', body.email ?? '')
+  if (!principal) {
     const locked = await registerLoginFailure(env, ip)
     await audit(env, 'login_failed', 'auth', ip, { email: body.email ?? '', locked })
     return fail(locked ? '失败次数过多，已临时锁定 10 分钟，请稍后再试' : '账号或密码不正确', locked ? 429 : 401)
   }
   await clearLoginFailures(env, ip)
-  await audit(env, 'login', 'auth', role, { email: body.email ?? '' })
-  return ok({ role })
+  const session = await createAuthSession(env, principal)
+  await audit(env, 'login', 'auth', principal.role, { email: body.email ?? '', session: true })
+  return Response.json(
+    { role: principal.role },
+    { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
+  )
+}
+
+async function logout(env: Env, request: Request) {
+  await deleteRequestSession(env, request)
+  return Response.json(
+    { ok: true },
+    { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie('', 0) } },
+  )
 }
 
 async function changeAdminPassword(env: Env, request: Request) {
@@ -5173,9 +5330,14 @@ async function changeAdminPassword(env: Env, request: Request) {
     return fail('当前密码不正确', 401)
   }
   await setAdminPassword(env, newPassword)
+  await revokePrincipalSessions(env, 'admin')
+  const session = await createAuthSession(env, { role: 'admin', email: ADMIN_EMAIL, principalId: 'admin' })
   await deleteSettingValue(env, ADMIN_RESET_SETTING)
   await audit(env, 'update', 'setting', ADMIN_PASSWORD_SETTING, { method: 'change_password' })
-  return ok({ ok: true })
+  return Response.json(
+    { ok: true },
+    { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
+  )
 }
 
 async function sendPasswordResetEmail(env: Env, request: Request, email: string, token: string) {
@@ -5241,6 +5403,7 @@ async function confirmPasswordReset(env: Env, request: Request) {
     return fail('重置链接已失效，请重新申请。', 400)
   }
   await setAdminPassword(env, newPassword)
+  await revokePrincipalSessions(env, 'admin')
   await deleteSettingValue(env, ADMIN_RESET_SETTING)
   await audit(env, 'confirm', 'password_reset', ADMIN_EMAIL, null)
   return ok({ ok: true })
@@ -5280,12 +5443,16 @@ async function updateAccessToken(env: Env, id: string, request: Request) {
     return fail('口令不存在', 404)
   }
   await env.DB.prepare('UPDATE access_tokens SET disabled = ? WHERE id = ?').bind(body.disabled ? 1 : 0, id).run()
+  if (body.disabled) {
+    await revokePrincipalSessions(env, id)
+  }
   await audit(env, body.disabled ? 'disable' : 'enable', 'access_token', id, null)
   const saved = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ?').bind(id).first<DbAccessToken>()
   return ok(saved ? toAccessToken(saved) : toAccessToken(row))
 }
 
 async function deleteAccessToken(env: Env, id: string) {
+  await revokePrincipalSessions(env, id)
   await env.DB.prepare('DELETE FROM access_tokens WHERE id = ?').bind(id).run()
   await audit(env, 'delete', 'access_token', id, null)
   return ok({ ok: true })
@@ -5293,11 +5460,22 @@ async function deleteAccessToken(env: Env, id: string) {
 
 async function purgeExpiredProgressAttachments(env: Env, limit = 50) {
   const rows = await env.DB.prepare(
-    `SELECT id, task_id, file_name, r2_key, preview_r2_key
+    `SELECT attachments.id, attachments.task_id, attachments.file_name, attachments.r2_key, attachments.preview_r2_key
      FROM attachments
-     WHERE attachment_scope = 'progress'
-       AND datetime(uploaded_at) < datetime('now', '-2 months')
-     ORDER BY uploaded_at ASC
+     INNER JOIN tasks ON tasks.id = attachments.task_id
+     WHERE attachments.attachment_scope = 'progress'
+       AND attachments.entry_id IS NOT NULL
+       AND attachments.entry_id != ''
+       AND datetime(attachments.uploaded_at) < datetime('now', '-1 day')
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(COALESCE(tasks.time_entries_json, '[]'))
+         WHERE CAST(json_extract(json_each.value, '$.id') AS TEXT) = attachments.entry_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(COALESCE(tasks.waiting_entries_json, '[]'))
+         WHERE CAST(json_extract(json_each.value, '$.id') AS TEXT) = attachments.entry_id
+       )
+     ORDER BY attachments.uploaded_at ASC
      LIMIT ?`,
   ).bind(limit).all<{
     id: string
@@ -5308,10 +5486,10 @@ async function purgeExpiredProgressAttachments(env: Env, limit = 50) {
   }>()
 
   for (const row of rows.results ?? []) {
-    await audit(env, 'expire', 'attachment', row.id, {
+    await audit(env, 'delete_orphan', 'attachment', row.id, {
       taskId: Number(row.task_id),
       fileName: row.file_name,
-      retention: '2 months',
+      retention: 'unlinked for 24 hours',
     })
     await env.DB.batch([
       env.DB.prepare('DELETE FROM attachment_analyses WHERE attachment_id = ?').bind(row.id),
@@ -5372,6 +5550,19 @@ async function getState(env: Env, role: AuthRole) {
        FROM attachments
        LEFT JOIN tasks ON tasks.id = attachments.task_id
        WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${attachVoided} ${attachClientVisible}
+         AND (
+           attachments.attachment_scope != 'progress'
+           OR attachments.entry_id IS NULL
+           OR attachments.entry_id = ''
+           OR EXISTS (
+             SELECT 1 FROM json_each(COALESCE(tasks.time_entries_json, '[]'))
+             WHERE CAST(json_extract(json_each.value, '$.id') AS TEXT) = attachments.entry_id
+           )
+           OR EXISTS (
+             SELECT 1 FROM json_each(COALESCE(tasks.waiting_entries_json, '[]'))
+             WHERE CAST(json_extract(json_each.value, '$.id') AS TEXT) = attachments.entry_id
+           )
+         )
        ORDER BY uploaded_at DESC`,
     ).all<DbAttachment>(),
     seeAnalyses
@@ -6092,12 +6283,11 @@ async function getFilePreview(env: Env, id: string, request: Request) {
     return fail('没有预览图', 404)
   }
 
-  // 权限：登录凭证（header 或 auth/email 参数）可看全部；甲方分享 token 只能看「甲方可见」文件
+  // 登录用户可看全部；匿名访客可看对客可见文件，分享链接继续按 token 校验。
   if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
     const url = new URL(request.url)
-    const headerRole = await resolveRole(env, request.headers.get('x-auth-key') ?? '', request.headers.get('x-auth-email') ?? '')
-    const queryRole = headerRole ?? (await resolveRole(env, url.searchParams.get('auth') ?? '', url.searchParams.get('email') ?? ''))
-    if (!queryRole) {
+    const requestRole = await resolveRequestRole(env, request)
+    if (!requestRole && !row.visible_to_client) {
       const shareToken = url.searchParams.get('token') ?? ''
       const canRead = await canReadSharedFile(env, id, shareToken)
       if (!canRead) {
@@ -6131,9 +6321,8 @@ async function getFileSource(env: Env, id: string, request: Request) {
   }
 
   if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
-    const headerRole = await resolveRole(env, request.headers.get('x-auth-key') ?? '', request.headers.get('x-auth-email') ?? '')
-    const queryRole = headerRole ?? (await resolveRole(env, url.searchParams.get('auth') ?? '', url.searchParams.get('email') ?? ''))
-    if (!queryRole) {
+    const requestRole = await resolveRequestRole(env, request)
+    if (!requestRole && !row.visible_to_client) {
       const shareToken = url.searchParams.get('token') ?? ''
       const canRead = await canReadSharedFile(env, id, shareToken)
       if (!canRead) {
@@ -8517,6 +8706,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     path === '/api/health' ||
     path.startsWith('/api/agent/') ||
     path === '/api/auth/login' ||
+    path === '/api/auth/logout' ||
     path === '/api/auth/password-reset/request' ||
     path === '/api/auth/password-reset/confirm' ||
     (isGet && path.startsWith('/api/shared/')) ||
@@ -8526,11 +8716,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   let role: AuthRole = 'guest'
   const authEnabled = Boolean(env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING)))
   if (authEnabled && !isPublic) {
-    const resolved = await resolveRole(
-      env,
-      request.headers.get('x-auth-key') ?? '',
-      request.headers.get('x-auth-email') ?? '',
-    )
+    const resolved = await resolveRequestRole(env, request)
     if (resolved) {
       role = resolved
     } else if (!isGet) {
@@ -8587,6 +8773,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)
+  }
+  if (path === '/api/auth/logout' && request.method === 'POST') {
+    return logout(env, request)
   }
   if (path === '/api/auth/password-reset/request' && request.method === 'POST') {
     return requestPasswordReset(env, request)
@@ -8800,6 +8989,16 @@ export default {
     const withSecurityHeaders = (response: Response) => {
       const headers = new Headers(response.headers)
       headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains; preload')
+      headers.set('x-content-type-options', 'nosniff')
+      headers.set('referrer-policy', 'same-origin')
+      headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()')
+      headers.set(
+        'content-security-policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com; frame-src 'self' blob: https://challenges.cloudflare.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
+      )
+      if (url.pathname.startsWith('/api/') && !headers.has('cache-control')) {
+        headers.set('cache-control', 'no-store')
+      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
     }
 
