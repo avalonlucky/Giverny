@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.27",
+  "version": "0.28.28",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
@@ -13,10 +13,13 @@
     "deploy:worker": "npm run build && npx wrangler deploy"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.59",
     "@boundaryml/baml": "^0.222.0",
     "@cloudflare/containers": "^0.3.7",
     "@cloudflare/puppeteer": "^1.1.0",
     "ag-psd": "^30.1.1",
+    "agents": "^0.17.3",
+    "ai": "^6.0.223",
     "docx-preview": "^0.3.7",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
@@ -25,7 +28,8 @@
     "pdfjs-dist": "4.10.38",
     "pptx-preview": "^1.0.7",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

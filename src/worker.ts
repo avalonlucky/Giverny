@@ -1,8 +1,12 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
 import { Container } from '@cloudflare/containers'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
+import { getAgentByName } from 'agents'
 import JSZip from 'jszip'
+import { AliceAgent } from './aliceAgent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
+
+export { AliceAgent }
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -61,6 +65,7 @@ type Env = {
   AGENT_RUNTIME_KEY?: string
   AGENT_TOOL_TOKEN?: string
   AGENT_RUNTIME_CONTAINER?: ContainerNamespace
+  ALICE_AGENT?: unknown
   AGENT_MODEL_PROVIDER?: string
   OPENAI_AGENT_MODEL?: string
   OPENAI_BASE_URL?: string
@@ -1878,10 +1883,32 @@ function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
 
 async function callAgentRuntime(
   env: Env,
-  args: { query: string; currentMonth?: string; conversationId?: string },
+  args: {
+    query: string
+    context?: string
+    legacyQuery?: string
+    currentMonth?: string
+    conversationId?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  },
 ): Promise<OpenAiAgentRuntimeResult | null> {
   const cleanQuery = String(args.query || '').trim()
   if (!cleanQuery) return null
+  const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
+  if (env.ALICE_AGENT) {
+    try {
+      const agent = await getAgentByName(env.ALICE_AGENT as never, conversationId) as unknown as AliceAgent
+      const result = await agent.chat({
+        message: cleanQuery,
+        currentMonth: args.currentMonth,
+        history: args.history,
+        context: args.context,
+      })
+      return { ...result, conversationId }
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'cloudflare_alice_agent_failed', error: describeAiCallError(error) }))
+    }
+  }
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const runtimeKey = String(env.AGENT_RUNTIME_KEY || '').trim()
   if (runtimeKey) headers['x-agent-runtime-key'] = runtimeKey
@@ -1889,9 +1916,9 @@ async function callAgentRuntime(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      message: cleanQuery,
+      message: String(args.legacyQuery || cleanQuery).trim(),
       currentMonth: args.currentMonth || undefined,
-      conversationId: args.conversationId || undefined,
+      conversationId,
       debug: false,
     }),
   }
@@ -8664,14 +8691,22 @@ async function chatWithAi(env: Env, request: Request) {
       ? `\n\n[用户上传的文档]\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
       : ''
     const recentConversation = messages.slice(-6).map((message) => `${message.role === 'assistant' ? '爱丽丝' : '用户'}：${message.content}`).join('\n')
-    const agentQuery = `[最近对话]\n${recentConversation}\n\n[当前用户输入]\n${lastMsg}${textAttachmentQuerySection}${knowledgeSection}`
+    const agentContext = `${textAttachmentQuerySection}${knowledgeSection}`.trim()
+    const agentQuery = lastMsg
+    const legacyAgentQuery = `[最近对话]\n${recentConversation}\n\n[当前用户输入]\n${agentQuery}${agentContext ? `\n\n${agentContext}` : ''}`
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
+        context: agentContext,
+        legacyQuery: legacyAgentQuery,
         currentMonth: month,
         conversationId: String(body.agentRuntimeConversationId ?? '').trim(),
+        history: messages.slice(-13, -1).map((message) => ({
+          role: message.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          content: message.content,
+        })),
       })
       if (runtimeResult?.answer) {
         return ok({

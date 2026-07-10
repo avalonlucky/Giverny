@@ -1,6 +1,6 @@
 # Giverny Agent Runtime
 
-This is the code-owned agent runtime for Giverny. It is separate from the existing BAML `ai-runtime/` and replaces the retired Dify verification workflow.
+This is the legacy Python fallback runtime for Giverny. The primary assistant runtime now lives in `src/aliceAgent.ts` and uses Cloudflare Agents SDK with Durable Objects. This service remains temporarily available during production migration and should not receive new features.
 
 The runtime uses a code-owned OpenAI-compatible tool-calling loop. DeepSeek is the default provider, and OpenAI can still be selected by configuration.
 

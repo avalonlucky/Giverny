@@ -58,9 +58,17 @@ max_instances = 1
 name = "AGENT_RUNTIME_CONTAINER"
 class_name = "AgentRuntimeContainer"
 
+[[durable_objects.bindings]]
+name = "ALICE_AGENT"
+class_name = "AliceAgent"
+
 [[migrations]]
 tag = "v1-agent-runtime-container"
 new_sqlite_classes = [ "AgentRuntimeContainer" ]
+
+[[migrations]]
+tag = "v2-cloudflare-alice-agent"
+new_sqlite_classes = [ "AliceAgent" ]
 
 [assets]
 directory = "./dist"

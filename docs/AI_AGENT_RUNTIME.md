@@ -15,13 +15,17 @@
 
 ## 正式方向
 
-长期方案改为项目自有的 `agent-runtime/`：
+正式主链路已经迁移到 Cloudflare Agents SDK：
 
 ```text
-React UI / Cloudflare Worker
+React UI / Cloudflare Worker `/api/ai/chat`
         │
         ▼
-agent-runtime/  (DeepSeek/OpenAI-compatible Tool Calls)
+AliceAgent Durable Object
+        ├── Agent SQLite 会话历史
+        ├── DeepSeek / OpenAI-compatible AI SDK
+        ├── 类型化工具调用与执行轨迹
+        └── 持久待确认写入状态
         │
         ├── query_month_finance
         ├── search_tasks
@@ -40,40 +44,41 @@ Giverny Worker Tool API
 D1 / R2 / app data
 ```
 
-选择自建 Runtime 的原因：
+选择 Cloudflare 原生 Runtime 的原因：
 
 - 代码可控：提示词、工具、模型和安全边界都在仓库里版本化。
-- 易测试：可以为每个工具、每类问题写自动化测试。
-- 能扩展：后续可以加入多 Agent、文件理解、浏览器操作、知识库检索、长期记忆。
+- 会话持久：每个对话映射到独立 Durable Object，历史和待确认动作可跨请求恢复。
+- 部署收敛：Agent 与业务 Worker 使用同一套 TypeScript / Wrangler 发布链，不再要求 Python 容器参与主请求。
+- 易测试：可以为每个工具、确认策略和每类问题写自动化测试。
+- 能扩展：后续可以加入 Workflows、文件理解、浏览器操作、知识库检索和长期记忆。
 - 可替换：运行时可以逐步接入 OpenAI、DeepSeek、Gemini、豆包或本地模型，而不是被外部节点 UI 绑定。
 - 可观测：返回 `trace`，前端可以折叠展示“理解问题 → 调用工具 → 汇总结果”，避免把原始思考直接暴露在正文里。
 
 ## 当前已落地
 
-- `agent-runtime/app/main.py`：FastAPI 服务，提供 `/health` 和 `/v1/chat`，默认用 DeepSeek OpenAI-compatible Tool Calls。
-- `agent-runtime/app/giverny_tools.py`：封装 Giverny Worker 工具接口。
-- `agent-runtime/app/schemas.py`：定义请求、回答和 trace 数据结构。
-- `agent-runtime/.env.example`：本地环境变量模板。
-- `agent-runtime/README.md`：本地启动和测试说明。
-- `src/worker.ts`：`/api/ai/chat` 已预留 Agent Runtime 主链路。
+- `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、类型化 Tool Calling、确认状态和执行轨迹。
+- `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
+- `src/App.tsx`：新对话、当前对话和历史对话均保存对应 Agent 会话 ID；旧历史首次继续时自动导入上下文。
 - `/api/agent/tools/*`：提供只读工具与写入工具。写入工具统一采用 preview/execute 两段式协议，execute 必须携带 preview 生成的 `confirmationToken`。
+- `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
-当前 Worker 已接入路径：纯文本工作助手请求会优先调用 Cloudflare Container 里的 Agent Runtime；如果容器不可用，则尝试 `AGENT_RUNTIME_URL` 指向的外部 Runtime。涉及工作数据或写入意图时，Runtime 不可用会显式报错，避免旧模板伪装成智能体。
+当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
 
-这意味着代码层面的主链路已经接上；正式站默认使用 `DEEPSEEK_API_KEY`、`AGENT_TOOL_TOKEN` 与 `AGENT_RUNTIME_KEY`。`AI_RUNTIME_URL` 仍保留给 BAML runtime，不要复用到这个服务。
+正式站主链路使用 `DEEPSEEK_API_KEY` 与 `AGENT_TOOL_TOKEN`。`AGENT_RUNTIME_KEY` 仅服务旧 Container 回退；`AI_RUNTIME_URL` 仍保留给 BAML runtime。
 
 ## 下一步
 
-1. 为写入工具补充更细的端到端测试：创建任务、记录反馈、修改状态、修改字段、追加进展。
-2. 将确认体验从纯文本升级为站内确认卡片，明确展示草稿 diff、风险提示和“确认执行”按钮。
-3. 扩展更多低风险工具，例如等待记录、验收附件标记、结算草稿预览。
-4. 正式站关键路径回归通过后，直接完成 GitHub commit、tag 和 Release；只有用户明确要求暂停时才等待。
+1. 将确认体验从纯文本升级为站内确认卡片，明确展示草稿 diff、风险提示和“确认执行”按钮。
+2. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
+3. 建立覆盖真实月份查询、同名任务消歧、多轮追问和五类写入的固定评测集。
+4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
 
 ## 安全边界
 
 - 不把任何模型密钥或工具 token 写入代码。
 - `agent-runtime/.env` 必须保持未跟踪。
-- 前端不可直接调用 `agent-runtime/`；生产环境应由 Cloudflare Worker 代理，并用 `AGENT_RUNTIME_KEY` 保护 runtime。
+- 前端不可绕过 `/api/ai/chat` 直接调用 Agent 或业务工具。
 - 写入工具必须先 preview，再 execute；execute 的 `confirmationToken` 由 Worker 使用服务端密钥签名，默认 10 分钟有效。
+- 模型只拥有 preview 工具；confirmation token 保存在 Agent SQLite 中，不进入模型输出和前端响应。
 - Agent 不开放删除、作废、结算锁定、部署等高风险操作。
 - 如果密钥曾出现在截图、聊天记录或公开页面，应先轮换再上线。

@@ -57,6 +57,7 @@
 │   │   └── domain.ts
 │   ├── App.css
 │   ├── App.tsx
+│   ├── aliceAgent.ts
 │   ├── SharedReport.tsx
 │   ├── index.css
 │   ├── main.tsx
@@ -82,7 +83,8 @@
 - BAML AI function contracts: `baml_src/ai_assistants.baml`
 - Generated BAML TypeScript client: `src/baml_client/baml_client/`
 - Independent BAML Node runtime: `ai-runtime/`
-- DeepSeek/OpenAI-compatible Agent runtime scaffold: `agent-runtime/`
+- Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
+- Legacy Python Agent runtime fallback: `agent-runtime/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - Domain types: `src/types/domain.ts`
@@ -102,8 +104,8 @@
 - `binding = "ASSETS"` in `wrangler.toml` must remain, or SPA routes such as `/share/:token` can fail.
 - BAML is used as the AI prompt/schema contract and code-generation layer.
 - The production Cloudflare Worker does not import BAML directly. It can call the independent `ai-runtime/` Node service first, then fall back to DeepSeek direct if the runtime is unavailable.
-- `agent-runtime/` is the code-owned long-term agent scaffold. It uses OpenAI-compatible tool calls, defaults to DeepSeek, calls Giverny Worker data endpoints, and returns a final answer plus a compact trace for the assistant UI.
-- `agent-runtime/` is wired through the `AGENT_RUNTIME_CONTAINER` Cloudflare Containers binding; keep frontend traffic behind the main Worker proxy.
+- `src/aliceAgent.ts` is the primary Agent Runtime. Each conversation uses a named `AliceAgent` Durable Object with SQLite history, typed tool calls, pending confirmation state, and a compact trace.
+- `agent-runtime/` and `AGENT_RUNTIME_CONTAINER` remain temporarily as a legacy fallback while the Cloudflare-native path is validated in production.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 
 ## Auth Notes

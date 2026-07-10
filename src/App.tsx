@@ -4129,7 +4129,7 @@ function KnowledgeView() {
 
 type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
-type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number }
+type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
@@ -4140,11 +4140,11 @@ function loadChatHistory(): ConversationRecord[] {
   catch { return [] }
 }
 
-function saveToChatHistory(msgs: ChatMessage[]) {
+function saveToChatHistory(msgs: ChatMessage[], agentConversationId?: string) {
   const userMsgs = msgs.filter((m) => m.role === 'user')
   if (userMsgs.length === 0) return
   const title = userMsgs[0].content.slice(0, 30) + (userMsgs[0].content.length > 30 ? '…' : '')
-  const record: ConversationRecord = { id: crypto.randomUUID(), title, messages: msgs, savedAt: Date.now() }
+  const record: ConversationRecord = { id: crypto.randomUUID(), title, messages: msgs, savedAt: Date.now(), agentConversationId }
   const prev = loadChatHistory().slice(0, 19)
   localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([record, ...prev]))
 }
@@ -4376,6 +4376,7 @@ function ChatPanel({
   onClose,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+  const [agentConversationId, setAgentConversationId] = useState<string | undefined>()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [useKnowledge, setUseKnowledge] = useState(true)
@@ -4430,9 +4431,10 @@ function ChatPanel({
   }, [selectedModelChoice])
 
   const newConversation = () => {
-    if (!isWelcome) saveToChatHistory(messages)
+    if (!isWelcome) saveToChatHistory(messages, agentConversationId)
     setHistoryList(loadChatHistory())
     setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+    setAgentConversationId(undefined)
     setInput('')
     setAttachments([])
     setShowModelPopup(false)
@@ -4447,6 +4449,7 @@ function ChatPanel({
 
   const loadConversation = (record: ConversationRecord) => {
     setMessages(record.messages)
+    setAgentConversationId(record.agentConversationId)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -4553,6 +4556,7 @@ function ChatPanel({
           useWebSearch,
           modelChoice: selectedModelChoice,
           attachments: sentAttachments.map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
+          agentRuntimeConversationId: agentConversationId,
         }),
       })
       await minimumVisibleDelay
@@ -4562,7 +4566,8 @@ function ChatPanel({
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as { content?: string; trace?: string[] }
+        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string }
+        if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         stopLiveTrace()
         setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace) } : m))
         return
