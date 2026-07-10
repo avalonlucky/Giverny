@@ -21,7 +21,8 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 4. 如果 BAML Runtime 未配置或请求失败，Worker 会回退 DeepSeek 直连，继续通过 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` 保证线上可用。
 5. 文字和识图模型已拆成主 / 备用两组：文字主路默认 DeepSeek，文字备用默认 Kimi K2.6；识图主路默认 Gemini 3 Flash，识图备用默认 Kimi K2.6。
 6. 附件上传后会在 D1 创建分析任务；Worker 从 R2 读取源文件，图片和 PDF 直接送入视觉模型，PPTX / DOCX / XLSX 先提取文字和内嵌图片，再把结构化结果写回 `attachment_analyses`。
-7. 上传请求会立即尝试后台分析；每 5 分钟运行的 Cron 会继续处理待处理、失败未满 3 次以及长时间卡住的任务。
+7. 上传请求会立即进入 Cloudflare Queue；暂时性失败由队列最多重试 3 次，每 5 分钟运行的 Cron 继续处理遗漏、失败未满 3 次以及长时间卡住的任务。明确不支持的文件不会无意义重试。
+8. 前端只轮询仍处于待处理 / 处理中状态的分析，结果完成或失败后自动更新，不需要重新打开页面。
 
 ## 为什么现在仍然要引入 BAML
 
@@ -80,7 +81,7 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 | 新建任务需求优化 | `SuggestTaskAssistant` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 进展 / 验收文案优化 | `OptimizeTaskText` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
 | 工时建议 | `SuggestHourEstimate` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
-| 交付件识图 | Worker 附件分析任务 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；结果写入 D1 并供洞察页读取 |
+| 交付件识图 | Worker 附件分析任务 | 识图主模型 Gemini 3 Flash，失败后回退 Kimi K2.6；PDF 回退时使用首页预览图，结果写入 D1 并供洞察页读取 |
 | 异常侦查 | Worker 洞察诊断 | 文字主模型 DeepSeek，失败回退 Kimi K2.6；对比当前、上期、历史基线与历史洞察，结构化结果写入 D1 |
 | 事件洞察 | Worker Cron | 先用 D1 规则判断异常，命中后再调用文字模型生成专项建议，并写入 `insights_history` |
 
@@ -92,16 +93,24 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - 主观反馈来自验收时的「顺利 / 一般 / 有问题」与原因标签，用于捕捉客观工时看不出的沟通成本、定价压力、需求不清或技术挑战。
 - 等待占比来自任务从接受 / 预计开始到实际验收的总周期，并扣除可结算实际工时；手动「等待记录」会作为明确等待小时进入数据快照，但不参与结算。
 - 每次诊断保存到 `insight_diagnoses`，包含数据指纹与结构化异常键。同一数据会直接复用已保存结果；新诊断会拿历史建议做去重，仅在问题未解决时继续提示。
-- 每条可追踪建议会写入 `insights_history`，字段包括 `insight_type`、`finding`、`recommendation`、`data_snapshot` 和 `status`。后台事件触发器也写入同一张表。
+- 每条可追踪建议会写入 `insights_history`，字段包括 `insight_type`、`finding`、`recommendation`、`data_snapshot` 和 `status`。后台事件触发器也写入同一张表；相同 `trigger_key` 持续更新最新记录，异常消失后自动标记为已解决，历史接口只返回每个触发项的最新状态。
 - 当前事件触发器包括：同类任务修改信号偏高、同类任务等待占比偏高、月工时下降超过 20%、需求人综合时薪连续低于均值、设计类型超过 3 个月空缺、需求人主观问题标签集中。触发器先由 D1 数据规则判定，只有命中异常时才调用模型。
 
 ## 附件解析边界
 
 - PNG / JPG / WEBP / GIF：读取 R2 源文件并直接进行视觉分析。
-- PDF：18MB 以内使用 Gemini 原生 PDF 理解。当前 Kimi 备用路由只接受图片，因此 PDF 主模型失败且没有图片预览时会保留失败状态并等待重试。
+- PDF：18MB 以内优先使用 Gemini 原生 PDF 理解；同时携带已有首页预览，主模型失败后由 Kimi 读取预览图。超过 18MB 时直接分析首页预览；没有可用预览时明确标记为暂不支持。
 - PPTX / DOCX / XLSX：35MB 以内在 Worker 中解压，提取 XML 文字和最多 6 张内嵌图片。当前能理解内容和素材，但不等同于完整渲染每一页 / 每一张幻灯片的最终版式。
 - PSD / AI：有上传预览图时分析预览图；没有预览图时标记为暂不支持，提示补充 PNG / JPG 预览后重试。
 - ZIP / RAR / 7Z、旧版 PPT / DOC / XLS 等格式当前不自动解包，不会生成没有依据的分析结论。
+
+## 分析可靠性
+
+- 文字主 / 备用模型各有 30 秒超时；交付件深度分析的视觉主 / 备用模型各有 90 秒超时，在保留复杂文件处理时间的同时避免单个供应商无限占用后台任务。
+- 视觉模型请求优先使用 JSON 输出模式；字段缺失时只对原结果做一次结构修复，不补写不存在的事实。
+- 队列消费者根据分析结果决定确认或重试，不再把已捕获的模型错误误当成成功消息。
+- `provider` 和 `model` 保存实际成功的路由；置信度结合直接视觉来源、证据量、需求匹配和是否降级重新校准。
+- 长图切片必须全部成功才合并；任一切片失败则回退整图，避免不完整切片产生看似完整的结论。
 
 ## 密钥与安全
 

@@ -539,6 +539,8 @@ export const api = {
     requestJson<{ ok: true; attachmentId: number }>(`/api/files/${fileId}/analysis/retry`, {
       method: 'POST',
     }),
+  getAttachmentAnalysisStatuses: (fileIds: number[]) =>
+    requestJson<AttachmentAnalysis[]>(`/api/insights/attachment-analyses/status?ids=${encodeURIComponent(fileIds.join(','))}`),
   backfillAttachmentAnalyses: () =>
     requestJson<{ ok: true; created: number }>('/api/insights/attachment-analyses/backfill', {
       method: 'POST',

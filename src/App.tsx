@@ -5255,6 +5255,42 @@ function App() {
     })
   }, [auth])
 
+  const analysisPollingRef = useRef({ signature: '', attempts: 0, inFlight: false })
+  useEffect(() => {
+    const activeAnalyses = attachmentAnalyses.filter((analysis) => analysis.status === 'pending' || analysis.status === 'processing')
+    if (!isLoaded || activeAnalyses.length === 0) {
+      analysisPollingRef.current = { signature: '', attempts: 0, inFlight: false }
+      return undefined
+    }
+    const signature = activeAnalyses
+      .map((analysis) => `${analysis.attachmentId}:${analysis.requestedAt}`)
+      .sort()
+      .join('|')
+    if (analysisPollingRef.current.signature !== signature) {
+      analysisPollingRef.current = { signature, attempts: 0, inFlight: false }
+    }
+    if (analysisPollingRef.current.attempts >= 60) {
+      return undefined
+    }
+    const timer = window.setTimeout(() => {
+      if (analysisPollingRef.current.inFlight) {
+        return
+      }
+      analysisPollingRef.current.inFlight = true
+      analysisPollingRef.current.attempts += 1
+      void api.getAttachmentAnalysisStatuses(activeAnalyses.map((analysis) => analysis.attachmentId))
+        .then((updatedAnalyses) => {
+          const updatedById = new Map(updatedAnalyses.map((analysis) => [analysis.attachmentId, analysis]))
+          setAttachmentAnalyses((current) => current.map((analysis) => updatedById.get(analysis.attachmentId) ?? analysis))
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          analysisPollingRef.current.inFlight = false
+        })
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [attachmentAnalyses, isLoaded])
+
   useEffect(() => {
     if (!isLoaded || role !== 'admin' || dailyKnowledgeRequestedRef.current) {
       return
