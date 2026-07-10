@@ -1,0 +1,9 @@
+name = "giverny-editorial-preview"
+compatibility_date = "2026-07-10"
+account_id = "ccd312f47f0dca574199fa6e33758c6d"
+workers_dev = true
+preview_urls = true
+
+[assets]
+directory = "./public"
+not_found_handling = "single-page-application"
