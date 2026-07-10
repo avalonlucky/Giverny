@@ -132,6 +132,18 @@ export type TextAssistantSuggestion = {
   summary: string
 }
 
+export type TextAssistantProgressHistoryItem = {
+  sequence: number
+  date: string
+  endDate: string
+  start: string
+  end: string
+  note: string
+  kind: 'progress' | 'revision' | 'client_feedback'
+  counted: boolean
+  attachments: string[]
+}
+
 export type TextAssistantPayload = {
   mode: TextAssistantMode
   text: string
@@ -139,6 +151,7 @@ export type TextAssistantPayload = {
   files: Array<Pick<FileAsset, 'name' | 'type' | 'tag' | 'final' | 'visible' | 'uploadedAt'>>
   activity?: Array<{ createdAt: string; summary: string }>
   uploadedFileNames?: string[]
+  progressHistory?: TextAssistantProgressHistoryItem[]
 }
 
 export type AttachmentNamePayload = {

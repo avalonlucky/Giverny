@@ -3167,6 +3167,40 @@ function taskAssistantActivity(activity: ActivityItem[]) {
   }))
 }
 
+function taskAssistantProgressHistory(task: Task, files: FileAsset[]) {
+  const attachmentsByEntry = new Map<string, string[]>()
+  files.forEach((file) => {
+    if (file.taskId !== task.id || file.deletedAt || !file.entryId) {
+      return
+    }
+    const names = attachmentsByEntry.get(file.entryId) ?? []
+    if (!names.includes(file.name)) {
+      names.push(file.name)
+    }
+    attachmentsByEntry.set(file.entryId, names)
+  })
+
+  return (task.timeEntries ?? [])
+    .filter((entry) => !entry.isAcceptanceProgress)
+    .sort((left, right) => {
+      const leftKey = `${left.date ?? ''}T${left.start || '00:00'}`
+      const rightKey = `${right.date ?? ''}T${right.start || '00:00'}`
+      return leftKey.localeCompare(rightKey)
+    })
+    .map((entry, index) => ({
+      sequence: index + 1,
+      date: entry.date ?? '',
+      endDate: entry.endDate ?? entry.date ?? '',
+      start: entry.start,
+      end: entry.end,
+      note: entry.note?.trim() ?? '',
+      kind: entry.isClientFeedback ? 'client_feedback' as const : entry.isRevision ? 'revision' as const : 'progress' as const,
+      counted: !entry.isUncounted,
+      attachments: attachmentsByEntry.get(entry.id) ?? [],
+    }))
+    .filter((entry) => entry.note || entry.attachments.length > 0)
+}
+
 function renderTextAssistantBody(text: string) {
   return text.split('\n').map((line, index) => {
     const trimmed = line.trim()
@@ -9542,6 +9576,7 @@ function TaskProgressModal({
   const pendingAttachmentAiNameAppliedRef = useRef<Record<string, string>>({})
   const existingAttachmentAiNameAppliedRef = useRef<Record<number, string>>({})
   const uploadedNames = pendingAttachments.map((attachment) => sanitizeAttachmentName(attachment.name, attachment.originalName))
+  const projectProgressHistory = taskAssistantProgressHistory(task, files)
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
   const timeDirty = JSON.stringify(draftTimeEntries) !== savedTimeSignature
   const savedWaitingSignature = JSON.stringify(task.waitingEntries ?? [])
@@ -10328,6 +10363,7 @@ function TaskProgressModal({
         files: taskAssistantFiles(task, files, uploadedNames),
         activity: taskAssistantActivity(activity),
         uploadedFileNames: uploadedNames,
+        progressHistory: isAcceptanceMode ? projectProgressHistory : undefined,
       })
       setProgressAiSuggestion(suggestion)
     } catch (error) {
@@ -11160,10 +11196,10 @@ function TaskProgressModal({
                   <button
                     type="button"
                     className="icon-button ai-assist-button"
-                    aria-label={isAcceptanceMode ? 'AI 优化验收备注' : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
-                    title={isAcceptanceMode ? 'AI 优化验收备注' : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
+                    aria-label={isAcceptanceMode ? 'AI 汇总项目验收备注' : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
+                    title={isAcceptanceMode ? `AI 汇总项目验收备注（参考 ${projectProgressHistory.length} 段历史进展）` : isFeedbackMode ? 'AI 整理修改意见' : 'AI 优化进展内容'}
                     onClick={() => void requestProgressAiSuggestion()}
-                    disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0)}
+                    disabled={isProgressAiLoading || (!note.trim() && uploadedNames.length === 0 && taskAssistantFiles(task, files).length === 0 && (!isAcceptanceMode || projectProgressHistory.length === 0))}
                   >
                     <Sparkles size={16} />
                   </button>
@@ -11180,19 +11216,19 @@ function TaskProgressModal({
                     updateActiveDraft((current) => ({ ...current, note: value }))
                   }
                 }}
-                placeholder={isAcceptanceMode ? '例如：终稿已按甲方反馈调整完成，PNG / PDF / 源文件已同步，确认进入验收。' : isFeedbackMode ? '例如：B01 反馈：标题需要更突出，主视觉换成更正式的蓝色，补充数据安全痛点。' : '例如：按甲方反馈调整封面配色，导出终稿'}
+                placeholder={isAcceptanceMode ? '可补充本次收尾重点；AI 会结合全部历史进展，汇总项目更新、修改与最终交付。' : isFeedbackMode ? '例如：B01 反馈：标题需要更突出，主视觉换成更正式的蓝色，补充数据安全痛点。' : '例如：按甲方反馈调整封面配色，导出终稿'}
               />
               {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
                 <div className="ai-suggestion-panel task-text-ai-panel">
                   <div className="ai-suggestion-head">
-                    <span>{isProgressAiLoading ? (isAcceptanceMode ? 'AI 正在整理验收备注' : 'AI 正在整理进展') : 'AI 建议'}</span>
+                    <span>{isProgressAiLoading ? (isAcceptanceMode ? 'AI 正在整理验收备注' : 'AI 正在整理进展') : isAcceptanceMode ? 'AI 项目总结' : 'AI 建议'}</span>
                     {!isProgressAiLoading && (progressAiSuggestion || progressAiError) && (
                       <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setProgressAiSuggestion(null); setProgressAiError('') }}>
                         <X size={14} />
                       </button>
                     )}
                   </div>
-                  {isProgressAiLoading && <p>{isAcceptanceMode ? '正在结合任务需求、已上传文件和当前备注优化文案...' : isFeedbackMode ? '正在结合任务需求和附件整理修改意见...' : '正在结合当前输入、任务附件和最近进展优化文案...'}</p>}
+                  {isProgressAiLoading && <p>{isAcceptanceMode ? `正在汇总任务需求、${projectProgressHistory.length} 段历史进展、验收文件和当前备注...` : isFeedbackMode ? '正在结合任务需求和附件整理修改意见...' : '正在结合当前输入、任务附件和最近进展优化文案...'}</p>}
                   {progressAiError && <p className="ai-suggestion-error">{progressAiError}</p>}
                   {progressAiSuggestion && (
                     <>

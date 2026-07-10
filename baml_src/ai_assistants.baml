@@ -29,7 +29,7 @@ class TaskAssistantOutput {
 }
 
 class TextAssistantOutput {
-  optimizedText string @description("可直接写入进展记录或验收备注的中文文本，必须用「1、」「2、」「3、」中文序号分点排列，每点一行。验收备注必须综合任务需求、验收附件分析和用户原始备注。")
+  optimizedText string @description("可直接写入进展记录或验收备注的中文文本，必须用「1、」「2、」「3、」中文序号分点排列，每点一行。验收备注必须综合任务需求、全部历史分段进展、验收附件分析和用户原始备注。")
   summary string @description("一句话说明本次优化依据。")
 }
 
@@ -93,21 +93,25 @@ function OptimizeTaskText(payload_json: string) -> TextAssistantOutput {
     - 保留事实。
     - 不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺。
     - 如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达。
-    - 语言要专业、简洁、像内部工作记录。
+    - 语言要专业、简洁；progress 模式像内部工作记录，acceptance 模式写成甲方可直接阅读的项目交付总结。
     - 【结构化】必须把内容拆成分点，用「1、」「2、」「3、」中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。
 
     progress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。
 
-    acceptance 模式不是单纯润色用户备注，必须综合三类信息：
+    acceptance 模式不是单纯润色用户备注，必须综合四类信息：
     1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。
-    2. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。
-    3. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。
+    2. acceptanceContext.projectProgressHistory：从项目开始到验收前的全部分段进展，已按时间排序；包括普通进展、改稿轮次、甲方反馈、不计时进展及对应附件。
+    3. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。
+    4. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。
 
     acceptance 模式写法：
-    - 如果用户备注很短，但附件分析足够明确，可以基于任务需求 + 附件内容生成完整验收备注。
-    - 如果是海报、长图、PPT、品牌物料等复杂任务，要结合附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在任务需求、用户备注或附件分析里明确出现“麦拉风/Mylafon”等风格时才可以写。
+    - 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新、改稿和甲方反馈响应。
+    - 至少明确说明项目最终完成了什么，以及从开始到验收一共更新和修改了哪些关键内容。
+    - 推荐按“完成与交付概况 → 主要更新和修改 → 反馈响应 / 版本迭代 → 最终文件”的顺序组织；结算、补录或等待情况只在输入明确且确有必要时写。
+    - 如果用户备注很短或为空，但历史进展足够明确，也必须基于任务需求 + 全部历史进展生成完整验收备注。
+    - 如果是海报、长图、PPT、品牌物料等复杂任务，要结合历史进展和附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在输入明确出现具体风格时才可以写。
     - 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。
-    - 分点列出交付/补传了哪些文件、附件体现出的关键完成内容、任务需求对应情况、结算/补录说明。不要改变验收状态，不要凭空说客户已确认、已通过、无问题、符合规范、已上线等事实。
+    - 不要出现“系统记录”“isUncounted”等内部字段，不要改变验收状态，不要凭空说客户已确认、已通过、无问题、符合规范、已上线等事实。
 
     只返回优化后的文本（分点序号格式）和一句简短摘要。
 

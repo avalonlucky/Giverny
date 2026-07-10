@@ -6561,22 +6561,43 @@ async function callBamlRuntime<T>(env: Env, endpoint: 'suggest-task' | 'optimize
     return null
   }
 
-  const response = await fetch(`${runtimeUrl}/v1/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(env.AI_RUNTIME_KEY ? { 'x-ai-runtime-key': env.AI_RUNTIME_KEY } : {}),
-    },
-    body: JSON.stringify({
-      input,
-      model: {
-        provider: config.provider,
-        baseUrl: config.baseUrl,
-        model: config.model,
-        apiKey,
-      },
-    }),
-  })
+  let response: Response
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    response = await Promise.race([
+      fetch(`${runtimeUrl}/v1/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(env.AI_RUNTIME_KEY ? { 'x-ai-runtime-key': env.AI_RUNTIME_KEY } : {}),
+        },
+        body: JSON.stringify({
+          input,
+          model: {
+            provider: config.provider,
+            baseUrl: config.baseUrl,
+            model: config.model,
+            apiKey,
+          },
+        }),
+        signal: controller.signal,
+      }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          controller.abort()
+          reject(new Error('BAML Runtime 请求超时'))
+        }, 30_000)
+      }),
+    ])
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'baml_runtime_unavailable', endpoint, error: describeAiCallError(error) }))
+    return null
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
+  }
 
   if (!response.ok) {
     return null
@@ -6913,6 +6934,21 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     files?: Array<Record<string, unknown>>
     activity?: Array<{ createdAt?: string; summary?: string }>
     uploadedFileNames?: string[]
+    progressHistory?: Array<{
+      sequence?: number
+      date?: string
+      endDate?: string
+      start?: string
+      end?: string
+      note?: string
+      kind?: string
+      counted?: boolean
+      attachments?: string[]
+      isAcceptanceProgress?: boolean
+      isRevision?: boolean
+      isClientFeedback?: boolean
+      isUncounted?: boolean
+    }>
   }
   const mode = body.mode === 'acceptance' ? 'acceptance' : 'progress'
   const text = String(body.text ?? '').trim()
@@ -6922,6 +6958,39 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const taskTitle = String(body.task?.title ?? '').trim()
   const taskType = String(body.task?.type ?? '').trim()
   const taskRequirement = String(body.task?.requirement ?? '').trim()
+  const taskTimeEntries = Array.isArray(body.task?.timeEntries)
+    ? body.task.timeEntries as Array<Record<string, unknown>>
+    : []
+  const rawProgressHistory = Array.isArray(body.progressHistory) && body.progressHistory.length > 0
+    ? body.progressHistory
+    : taskTimeEntries
+  const projectProgressHistory = mode === 'acceptance'
+    ? rawProgressHistory
+        .filter((item) => !item?.isAcceptanceProgress)
+        .slice(0, 200)
+        .map((item) => {
+          const kind = item.kind === 'client_feedback' || item.isClientFeedback
+            ? 'client_feedback'
+            : item.kind === 'revision' || item.isRevision
+              ? 'revision'
+              : 'progress'
+          return {
+            date: String(item.date ?? '').slice(0, 10),
+            endDate: String(item.endDate ?? item.date ?? '').slice(0, 10),
+            start: String(item.start ?? '').slice(0, 5),
+            end: String(item.end ?? '').slice(0, 5),
+            note: String(item.note ?? '').trim().slice(0, 4000),
+            kind,
+            counted: typeof item.counted === 'boolean' ? item.counted : !item.isUncounted,
+            attachments: Array.isArray(item.attachments)
+              ? item.attachments.slice(0, 20).map((name) => String(name).trim().slice(0, 300)).filter(Boolean)
+              : [],
+          }
+        })
+        .filter((item) => item.note || item.attachments.length > 0)
+        .sort((left, right) => `${left.date}T${left.start}`.localeCompare(`${right.date}T${right.start}`))
+        .map((item, index) => ({ sequence: index + 1, ...item }))
+    : []
   const acceptanceAttachmentContexts = mode === 'acceptance'
     ? await getAcceptanceAttachmentAiContexts(env, body.task?.id)
     : []
@@ -6930,10 +6999,10 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     ? `\n\n【用户${mode === 'acceptance' ? '验收备注' : '进展记录'}写法偏好】以下来自用户采纳 AI 后的真实改写，请优先遵循：\n${textStyleGuide}`
     : ''
   const acceptanceModeRules = mode === 'acceptance'
-    ? `\n\n【验收备注专用规则】这次不是单纯润色用户备注，必须同时分析三类信息：\n1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。\n2. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。\n3. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。\n\n写法要求：\n- 如果用户备注很短，但附件分析足够明确，可以基于任务需求 + 附件内容生成完整验收备注。\n- 如果是海报、长图、PPT、品牌物料等复杂任务，要结合附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在任务需求、用户备注或附件分析里明确出现“麦拉风/Mylafon”等风格时才可以写。\n- 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。\n- 不要凭空写客户已确认、已通过、无问题、符合规范、已上线等事实；除非输入明确提供。\n- 输出仍必须使用「1、」「2、」「3、」分点，每点一行，一行一件事。`
+    ? `\n\n【验收备注专用规则】这次不是单纯润色用户备注，而是生成面向甲方的项目收尾说明。必须同时分析四类信息：\n1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。\n2. acceptanceContext.projectProgressHistory：从项目开始到验收前的全部分段进展，已按时间排序；包括普通进展、改稿轮次、甲方反馈、不计时进展和对应附件。\n3. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。\n4. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。\n\n写法要求：\n- 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新、修改、改稿和甲方反馈响应。\n- 至少明确说明项目最终完成了什么，以及从开始到验收一共更新和修改了哪些关键内容。\n- 语言面向甲方，写成清楚的项目交付总结，不出现“系统记录”“isUncounted”等内部字段，也不要夸大。\n- 推荐按“完成与交付概况 → 主要更新和修改 → 反馈响应 / 版本迭代 → 最终文件”的顺序组织；结算、补录或等待情况只在输入明确且确有必要时写。\n- 如果用户备注很短或为空，但历史进展足够明确，也必须根据任务需求 + 全部历史进展生成完整验收备注。\n- 如果是海报、长图、PPT、品牌物料等复杂任务，要结合历史进展和附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有输入明确出现具体风格时才可以写。\n- 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。\n- 不要凭空写客户已确认、已通过、无问题、符合规范、已上线等事实；除非输入明确提供。\n- 输出必须使用「1、」「2、」「3、」连续分点，每点一行，一行一件事。`
     : ''
 
-  if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0 && acceptanceAttachmentContexts.length === 0) {
+  if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0 && acceptanceAttachmentContexts.length === 0 && projectProgressHistory.length === 0) {
     return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
   }
 
@@ -6948,8 +7017,9 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       ? {
           taskRequirement,
           rawAcceptanceNote: text,
+          projectProgressHistory,
           acceptanceAttachments: acceptanceAttachmentContexts,
-          instruction: '请同时参考任务需求、验收附件分析结果和用户原始验收备注。附件分析内容优先于文件名；文件名只作兜底。',
+          instruction: '请逐条阅读全部项目进展，合并同类修改但不要遗漏重要更新；同时参考任务需求、验收附件分析和用户原始备注，生成面向甲方的完整项目交付总结。',
         }
       : undefined,
     styleGuide: textStyleGuide,
@@ -6963,6 +7033,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       fileCount: files.length + acceptanceAttachmentContexts.length,
       uploadedFileCount: uploadedFileNames.length,
       acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
+      projectProgressHistoryCount: projectProgressHistory.length,
       provider: 'baml-runtime',
     })
     return ok({
@@ -6988,6 +7059,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       fileCount: files.length + acceptanceAttachmentContexts.length,
       uploadedFileCount: uploadedFileNames.length,
       acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
+      projectProgressHistoryCount: projectProgressHistory.length,
       provider: 'text-fallback',
     })
     return ok({ optimizedText, summary: String(fallbackParsed?.summary ?? '').trim() })
@@ -7016,7 +7088,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁、像内部工作记录。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：必须结合任务初始需求、验收附件分析结果、用户原始验收备注三者共同润色；分点列出交付/补传了哪些文件、附件体现出的关键完成内容、任务需求对应情况、结算/补录说明。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
+            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：像内部工作记录，分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：写成面向甲方的项目交付总结，必须结合任务初始需求、全部历史分段进展、验收附件分析结果和用户原始验收备注；明确项目完成内容、全过程重要更新与修改、版本迭代及最终文件。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
         },
         {
           role: 'user',
@@ -7086,6 +7158,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     fileCount: files.length + acceptanceAttachmentContexts.length,
     uploadedFileCount: uploadedFileNames.length,
     acceptanceAttachmentAnalysisCount: acceptanceAttachmentContexts.filter((item) => item.analysisStatus === 'completed').length,
+    projectProgressHistoryCount: projectProgressHistory.length,
     provider: 'deepseek-direct',
   })
   return ok({ optimizedText, summary: String(parsed.summary ?? '').trim() })
