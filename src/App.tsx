@@ -5329,12 +5329,14 @@ function App() {
               {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
               <StatusBadge status={task.status} />
             </div>
-            <div className="progress-cell">
-              <div className="mini-meter">
-                <span style={{ width: `${taskDisplayProgress(task)}%` }} />
+            {task.status !== '已验收' && (
+              <div className="progress-cell">
+                <div className="mini-meter">
+                  <span style={{ width: `${taskDisplayProgress(task)}%` }} />
+                </div>
+                <small>{taskDisplayProgress(task)}%</small>
               </div>
-              <small>{taskDisplayProgress(task)}%</small>
-            </div>
+            )}
           </div>
           {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
             <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
@@ -7099,16 +7101,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                   <p>按月份汇总工作内容、工时与验收</p>
                   <button
                     type="button"
-                    className={`row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
-                    aria-pressed={rowThemeOn}
-                    title={rowThemeOn ? '关闭状态配色主题，行颜色还原中性' : '开启状态配色主题，行颜色随状态联动'}
-                    onClick={toggleRowTheme}
-                  >
-                    <Palette size={14} />
-                    {rowThemeOn ? '关闭主题' : '开启主题'}
-                  </button>
-                  <button
-                    type="button"
                     className="detail-pane-toggle"
                     aria-pressed={!isTaskDetailCollapsed}
                     title={isTaskDetailCollapsed ? '显示任务详情' : '收起任务详情'}
@@ -7348,7 +7340,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
-            onToggleRowTheme={toggleRowTheme}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
             canWrite={canWrite}
             canDelete={isAdmin}
@@ -7448,6 +7439,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               role={role}
               accessTokens={accessTokens}
               newTokenId={newTokenId}
+              rowThemeOn={rowThemeOn}
               onRateChange={handleRateChange}
               onPdfTitleChange={handlePdfTitleChange}
               onServiceCompanyNameChange={handleServiceCompanyNameChange}
@@ -7461,6 +7453,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               onToggleToken={handleToggleAccessToken}
               onDeleteToken={handleDeleteAccessToken}
               onCopyToken={handleCopyAccessToken}
+              onToggleRowTheme={toggleRowTheme}
             />
           ) : (
             <section className="panel read-only-settings-panel">
@@ -7960,7 +7953,13 @@ function Fireworks() {
 }
 
 // 设置页 · 吉维尼模式：默认关闭，用户手动开启。开启后主题随季节自动流转，也可手动指定季节。
-function GivernyModeSettings() {
+function GivernyModeSettings({
+  rowThemeOn,
+  onToggleRowTheme,
+}: {
+  rowThemeOn: boolean
+  onToggleRowTheme: () => void
+}) {
   const [on, setOn] = useState<boolean>(() =>
     typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
@@ -8050,6 +8049,22 @@ function GivernyModeSettings() {
               <p className="giverny-season-hint">默认跟随当前真实季节；也可手动锁定某一季。</p>
             </div>
           )}
+          <div className="panel-header compact appearance-setting-row">
+            <div>
+              <h2>任务状态配色</h2>
+              <p>开启后，任务行使用低饱和底色区分计划中、进行中和待验收；关闭后统一为中性纸面。</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={rowThemeOn}
+              className={`giverny-toggle ${rowThemeOn ? 'on' : ''}`}
+              onClick={onToggleRowTheme}
+            >
+              <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
+              <span className="giverny-toggle-label">{rowThemeOn ? '已开启' : '已关闭'}</span>
+            </button>
+          </div>
         </section>
       </div>
     </details>
@@ -8898,7 +8913,6 @@ function TasksView({
   onCreateTaskUpdate,
   onCreateTask,
   rowThemeOn,
-  onToggleRowTheme,
   onAutoEstimateProgress,
   canWrite,
   canDelete,
@@ -8950,7 +8964,6 @@ function TasksView({
   detailCollapsed: boolean
   onToggleDetail: () => void
   rowThemeOn: boolean
-  onToggleRowTheme: () => void
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -9124,15 +9137,6 @@ return (
             <div className="management-list-toolbar-end">
               <button
                 type="button"
-                className={`row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
-                aria-pressed={rowThemeOn}
-                title={rowThemeOn ? '关闭状态配色主题，行颜色还原中性' : '开启状态配色主题，行颜色随状态联动'}
-                onClick={onToggleRowTheme}
-              >
-                {rowThemeOn ? '关闭主题' : '开启主题'}
-              </button>
-              <button
-                type="button"
                 className="detail-pane-toggle"
                 aria-pressed={!detailCollapsed}
                 title={detailCollapsed ? '显示任务详情' : '收起任务详情'}
@@ -9141,7 +9145,6 @@ return (
                 {detailCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
                 {detailCollapsed ? '显示详情' : '收起详情'}
               </button>
-              <small>悬停显示快捷操作，右键可打开完整菜单</small>
             </div>
           </div>
           <div className="table-head">
@@ -9201,7 +9204,9 @@ return (
                     <span>交付</span>
                     <strong>{formatTaskRowDateTime(task.estimatedDate || task.date)}</strong>
                   </span>
-                  <span className={`schedule-countdown ${scheduleSignal.tone}`}>{scheduleSignal.label}</span>
+                  {task.status !== '已验收' && (
+                    <span className={`schedule-countdown ${scheduleSignal.tone}`}>{scheduleSignal.label}</span>
+                  )}
                   <TaskContextInsightBadge insight={contextInsight} />
                 </div>
               </div>
@@ -9218,12 +9223,14 @@ return (
                     {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
                     <StatusBadge status={task.status} />
                   </div>
-                  <div className="progress-cell">
-                    <div className="mini-meter">
-                      <span style={{ width: `${taskDisplayProgress(task)}%` }} />
+                  {task.status !== '已验收' && (
+                    <div className="progress-cell">
+                      <div className="mini-meter">
+                        <span style={{ width: `${taskDisplayProgress(task)}%` }} />
+                      </div>
+                      <small>{taskDisplayProgress(task)}%</small>
                     </div>
-                    <small>{taskDisplayProgress(task)}%</small>
-                  </div>
+                  )}
                 </div>
                 {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
                   <span className="task-row-due">{dueDateLabel}</span>
@@ -12484,10 +12491,12 @@ function FilesView({
     <section className="view-stack">
       <section className="file-library-header">
         <p>按项目归档 · 点进项目查看验收交付件，AI 已自动解析</p>
-        <label className="file-search-line file-library-search">
-          <Search size={15} />
-          <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="搜索文件、项目、标签、关联任务" />
-        </label>
+        <TaskSearchBox
+          value={fileQuery}
+          onChange={setFileQuery}
+          placeholder="搜索文件、项目、标签、关联任务"
+          className="file-library-search"
+        />
       </section>
 
       <section className="file-library-layout">
@@ -14726,6 +14735,7 @@ function SettingsView({
   role,
   accessTokens,
   newTokenId,
+  rowThemeOn,
   onRateChange,
   onPdfTitleChange,
   onServiceCompanyNameChange,
@@ -14739,6 +14749,7 @@ function SettingsView({
   onToggleToken,
   onDeleteToken,
   onCopyToken,
+  onToggleRowTheme,
 }: {
   hourlyRate: number
   pdfTitle: string
@@ -14749,6 +14760,7 @@ function SettingsView({
   role: AuthRole
   accessTokens: AccessToken[]
   newTokenId: string
+  rowThemeOn: boolean
   onRateChange: (rate: number) => void
   onPdfTitleChange: (title: string) => void
   onServiceCompanyNameChange: (name: string) => void
@@ -14770,6 +14782,7 @@ function SettingsView({
   onToggleToken: (tokenId: string, disabled: boolean) => void
   onDeleteToken: (tokenId: string) => void
   onCopyToken: (token: string) => void
+  onToggleRowTheme: () => void
 }) {
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenExpiry, setTokenExpiry] = useState('permanent')
@@ -15219,7 +15232,9 @@ function SettingsView({
           系统
         </button>
       </div>
-      {settingsTab === 'appearance' && <GivernyModeSettings />}
+      {settingsTab === 'appearance' && (
+        <GivernyModeSettings rowThemeOn={rowThemeOn} onToggleRowTheme={onToggleRowTheme} />
+      )}
       {settingsTab === 'settlement' && (
         <div className="settings-group-body settings-tab-body">
           <section className="panel settings-settlement-panel">

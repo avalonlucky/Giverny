@@ -65,7 +65,7 @@
 /* 文字三档 —— 对应「主 / 次 / 弱」三层信息 */
 --color-text:           #17282f;   /* 主信息 */
 --color-text-secondary: #5f6d70;   /* 次信息 */
---color-text-muted:     #8a9496;   /* 弱信息 / 占位 */
+--color-text-muted:     #66716d;   /* 弱信息 / 占位，小字号仍保持可读 */
 
 /* 品牌与状态 */
 --color-primary:        #2f6f6d;   /* 进度条 / 强调 */

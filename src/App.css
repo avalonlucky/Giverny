@@ -3,7 +3,7 @@
      深度靠色调，分隔靠留白，浮起靠反白。绿色全站只有一支 sage。 */
   --color-text: #1f2a27;
   --color-text-secondary: #586460;
-  --color-text-muted: #949c96;
+  --color-text-muted: #66716d;
   --color-surface: #fbfbf8;
   --color-surface-strong: #fbfbf8;
   --color-surface-alt: #f4f4ee;
@@ -47,7 +47,7 @@
   --color-editorial-surface-alt: #f4f4ee;
   --color-editorial-text: #1f2a27;
   --color-editorial-text-secondary: #586460;
-  --color-editorial-text-muted: #949c96;
+  --color-editorial-text-muted: #66716d;
   --color-editorial-primary: #3c6b61;
   --color-editorial-primary-hover: #2f564e;
   --color-editorial-menu: #20302c;
@@ -87,7 +87,7 @@
 :root[data-giverny="on"] {
   --color-text: #28302c;
   --color-text-secondary: #5d6863;
-  --color-text-muted: #939c96;
+  --color-text-muted: #66716d;
   /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
      基底是近白，季节色只按很低比例渗入：看得出季节，但仍像干净白纸。 */
   --color-surface: color-mix(in srgb, var(--brand-primary) 5%, #fbfbf9);
@@ -134,7 +134,7 @@
   --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
   --color-text: #2f2923;
   --color-text-secondary: #6c6258;
-  --color-text-muted: #9b9288;
+  --color-text-muted: #756b61;
   --color-surface: color-mix(in srgb, var(--brand-primary) 4%, #fcfaf6);
   --color-surface-strong: color-mix(in srgb, var(--brand-primary) 1.8%, #fffdf8);
   --color-surface-alt: color-mix(in srgb, var(--brand-primary) 7%, #f8f4ed);
@@ -1731,23 +1731,28 @@ button.topbar-create-button:hover {
 .panel-header p,
 .detail-title p {
   margin: 4px 0 0;
-  color: #748083;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
 .search-box {
   width: min(360px, 100%);
   min-width: 300px;
-  height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  color: #899294;
-  background: var(--color-surface-strong);
+  height: 38px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  color: var(--color-text-muted);
+  background: transparent;
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+.search-box:focus-within {
+  border-bottom-color: var(--color-primary);
 }
 
 .search-box input {
@@ -1760,7 +1765,7 @@ button.topbar-create-button:hover {
 }
 
 .search-box input::placeholder {
-  color: #899294;
+  color: var(--color-text-muted);
 }
 
 .task-search-box {
@@ -1810,7 +1815,7 @@ button.topbar-create-button:hover {
 .task-search-inline {
   width: min(300px, 34vw);
   min-width: 240px;
-  height: 34px;
+  height: 38px;
   margin-left: auto;
 }
 
@@ -2044,36 +2049,6 @@ button.topbar-create-button:hover {
   line-height: 1.4;
 }
 
-/* 状态配色主题开关 */
-.row-theme-toggle {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
-}
-
-.row-theme-toggle:hover {
-  color: var(--color-text);
-  border-color: var(--color-text-muted);
-}
-
-.row-theme-toggle.on {
-  color: var(--color-primary);
-  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
-}
-
 /* 关闭主题：任务行还原中性绿（不随状态联动） */
 .no-row-theme .task-row {
   background: var(--color-surface-alt);
@@ -2094,21 +2069,15 @@ button.topbar-create-button:hover {
 .dashboard-task-search {
   width: min(580px, 100%);
   min-width: 0;
-  height: 48px;
-  margin-top: 18px;
-  padding: 0 3px;
-  border: 0;
-  border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 16px;
+  height: 38px;
+  margin-top: 16px;
+  padding: 0 0 8px;
+  font-size: 13px;
   font-weight: 400;
 }
 
 .dashboard-task-search:focus-within {
-  border-bottom-color: var(--color-border);
-  background: transparent;
+  border-bottom-color: var(--color-primary);
 }
 
 .dashboard-task-search input:focus,
@@ -3413,7 +3382,7 @@ button.topbar-create-button:hover {
 }
 
 .progress-cell small {
-  color: #768285;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -13954,6 +13923,12 @@ textarea:focus-visible {
   padding: 0;
 }
 
+.giverny-settings-panel > .appearance-setting-row {
+  margin: 20px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
 .giverny-season-pref {
   padding: 16px 0 0;
 }
@@ -17156,7 +17131,7 @@ textarea:focus-visible {
 
 .file-library-header p {
   margin: -18px 0 8px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -17643,7 +17618,7 @@ textarea:focus-visible {
   color: var(--color-text);
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .file-library-search input::placeholder {
