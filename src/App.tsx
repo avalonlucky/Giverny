@@ -34,7 +34,6 @@ import {
   KeyRound,
   LayoutDashboard,
   List,
-  ListChecks,
   LoaderCircle,
   Lock,
   LogOut,
@@ -3418,11 +3417,6 @@ type ConfirmDialogState = {
   onConfirm: () => void | Promise<void>
 }
 
-type StatusReasonTarget = {
-  task: Task
-  status: Extract<TaskStatus, '挂起' | '终止'>
-} | null
-
 type ToastTone = 'success' | 'error' | 'info'
 
 type ToastState = {
@@ -4743,7 +4737,6 @@ function App() {
   const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
   const [voidTaskTarget, setVoidTaskTarget] = useState<Task | null>(null)
   const [isVoidTaskBusy, setIsVoidTaskBusy] = useState(false)
-  const [statusReasonTarget, setStatusReasonTarget] = useState<StatusReasonTarget>(null)
   const [showVoidedTasks, setShowVoidedTasks] = useState(false)
   const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -5946,44 +5939,6 @@ function App() {
     setVoidTaskTarget(task)
   }
 
-  const handleRequestTaskStatus = (taskId: number, status: TaskStatus) => {
-    const task = taskItems.find((item) => item.id === taskId)
-    if (!task || task.voidedAt) {
-      return
-    }
-    if (status === '挂起' || status === '终止') {
-      setStatusReasonTarget({ task, status })
-      return
-    }
-    // 「已验收」不允许通过改状态实现，必须走右侧「记录进展」里的验收闭环（保证工时汇总、进度 100% 等一并完成）
-    if (status === '已验收') {
-      notify('「已验收」请在右侧「记录进展」里通过验收完成')
-      return
-    }
-    const changes: Partial<Task> = status === '计划中'
-      ? { status, progress: 0 }
-      : status === '待验收'
-        ? { status, progress: snapProgress(Math.max(task.progress, 80)) }
-        : { status }
-    void handleUpdateTask(taskId, changes)
-  }
-
-  const confirmStatusReason = async (reason: string) => {
-    if (!statusReasonTarget) {
-      return
-    }
-    const trimmedReason = reason.trim()
-    if (!trimmedReason) {
-      return
-    }
-    const changes: Partial<Task> =
-      statusReasonTarget.status === '挂起'
-        ? { status: '挂起', suspendReason: trimmedReason, progress: snapProgress(statusReasonTarget.task.progress) }
-        : { status: '终止', terminateReason: trimmedReason, progress: snapProgress(statusReasonTarget.task.progress) }
-    await handleUpdateTask(statusReasonTarget.task.id, changes)
-    setStatusReasonTarget(null)
-  }
-
   const confirmVoidTask = async (reason: string) => {
     if (!voidTaskTarget || isVoidTaskBusy) {
       return
@@ -6504,16 +6459,6 @@ function App() {
             disabled: !isAdmin || selectedTask.status !== '待验收',
             run: () => handleOpenTaskAcceptance(selectedTask.id),
           },
-          {
-            id: 'selected-task-status',
-            group: '修改状态',
-            label: '修改任务状态',
-            detail: `${selectedTask.title} · 当前${selectedTask.status}`,
-            shortcut: 'S',
-            keywords: '状态 计划中 进行中 待验收',
-            disabled: !isAdmin || selectedTask.status === '已验收',
-            run: () => handleOpenTaskEdit(selectedTask.id),
-          },
         ]
       : []),
     ...taskItems
@@ -6567,7 +6512,6 @@ function App() {
         { keys: 'E', action: '编辑选中任务' },
         { keys: 'P', action: '记录选中任务进展' },
         { keys: 'A', action: '验收选中任务' },
-        { keys: 'S', action: '修改选中任务状态' },
       ],
     },
     {
@@ -6586,7 +6530,6 @@ function App() {
       || previewFile
       || confirmDialog
       || voidTaskTarget
-      || statusReasonTarget
       || isLoginModalOpen,
   )
 
@@ -7122,7 +7065,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                     onOpenEditTask={handleOpenTaskEdit}
                     onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
                     onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
-                    onRequestStatus={canWrite ? handleRequestTaskStatus : readOnlyUpdateTask}
                     onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
                     onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
                     onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
@@ -7253,7 +7195,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onShowVoidedChange={setShowVoidedTasks}
             onSelectTask={setSelectedTaskId}
             onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-            onRequestStatus={canWrite ? handleRequestTaskStatus : readOnlyUpdateTask}
             onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
             onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
             onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
@@ -7539,13 +7480,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           isBusy={isVoidTaskBusy}
           onClose={() => setVoidTaskTarget(null)}
           onConfirm={(reason) => void confirmVoidTask(reason)}
-        />
-      )}
-      {statusReasonTarget && (
-        <StatusReasonModal
-          target={statusReasonTarget}
-          onClose={() => setStatusReasonTarget(null)}
-          onConfirm={(reason) => void confirmStatusReason(reason)}
         />
       )}
       {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
@@ -8050,7 +7984,6 @@ function TaskContextMenu({
   onOpenEditTask,
   onOpenAcceptance,
   onOpenProgress,
-  onRequestStatus,
   onUpdateTask,
   onVoidTask,
   onRestoreTask,
@@ -8062,7 +7995,6 @@ function TaskContextMenu({
   onOpenEditTask: (taskId: number) => void
   onOpenAcceptance: (task: Task) => void
   onOpenProgress: (task: Task) => void
-  onRequestStatus: (taskId: number, status: TaskStatus) => void
   onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
@@ -8119,24 +8051,6 @@ function TaskContextMenu({
               </button>
               )
             })}
-          </div>
-        </div>
-      )}
-      {!isVoided && (
-        <div className="context-submenu">
-          <button type="button" className="context-menu-parent" aria-haspopup="menu">
-            <ListChecks size={15} />
-            改任务状态
-            <span>{menu.task.status}</span>
-            <ChevronRight size={14} />
-          </button>
-          <div className="context-submenu-panel" role="menu">
-            {(['计划中', '进行中', '待验收'] as TaskStatus[]).map((status) => (
-              <button type="button" key={status} onClick={() => run(() => onRequestStatus(menu.task.id, status))}>
-                {status === '计划中' ? <ListChecks size={15} /> : status === '进行中' ? <Clock3 size={15} /> : <CheckCircle2 size={15} />}
-                {status}
-              </button>
-            ))}
           </div>
         </div>
       )}
@@ -8457,30 +8371,26 @@ function DashboardTaskSidebar({
 
           <div className="dashboard-side-record-tabs" role="tablist" aria-label="进展记录类型">
             <button type="button" className={progressPane === 'progress' ? 'active' : ''} onClick={() => setProgressPane('progress')} role="tab" aria-selected={progressPane === 'progress'}>
-              工作进展分段计时
+              分段计时
             </button>
             <button type="button" className={progressPane === 'feedback' ? 'active' : ''} onClick={() => setProgressPane('feedback')} role="tab" aria-selected={progressPane === 'feedback'}>
-              甲方反馈 / 修改意见
+              修改建议
             </button>
             <button type="button" className={progressPane === 'waiting' ? 'active' : ''} onClick={() => setProgressPane('waiting')} role="tab" aria-selected={progressPane === 'waiting'}>
-              等待记录不计结算
+              等待记录
             </button>
           </div>
 
           {progressPane === 'progress' ? (
             <div className="dashboard-side-subsection dashboard-side-record-pane" role="tabpanel">
               <div className="dashboard-side-subsection-title">
-                <span>进展 · 分段计时</span>
+                <span>分段计时</span>
                 <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
                   <Plus size={15} />
                   记录进展
                 </button>
-                <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : task.status === '计划中' ? '改为进行中后可记录反馈' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'feedback')}>
-                  <Plus size={15} />
-                  记录反馈
-                </button>
               </div>
-              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.filter((entry) => !entry.isClientFeedback).length} 段 · {billableHours.toFixed(1)}h；反馈 {sortedFeedbackEntries.length} 条</p>
+              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.filter((entry) => !entry.isClientFeedback).length} 段 · {billableHours.toFixed(1)}h</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
                 <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
               ) : (
@@ -8608,7 +8518,7 @@ function DashboardTaskSidebar({
           ) : progressPane === 'feedback' ? (
             <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-feedback" role="tabpanel">
               <div className="dashboard-side-subsection-title">
-                <span>甲方反馈 · 修改意见</span>
+                <span>修改建议</span>
                 <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
                   <Plus size={15} />
                   记录反馈
@@ -8672,7 +8582,7 @@ function DashboardTaskSidebar({
           ) : (
             <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-waiting" role="tabpanel">
               <div className="dashboard-side-subsection-title">
-                <span>等待记录 · 不计结算</span>
+                <span>等待记录</span>
                 <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录等待' : '改为进行中后可记录等待'} onClick={() => onOpenProgress(task.id, 'waiting')}>
                   <Plus size={15} />
                   记录等待
@@ -8737,7 +8647,6 @@ function TasksView({
   onShowVoidedChange,
   onSelectTask,
   onUpdateTask,
-  onRequestStatus,
   onVoidTask,
   onRestoreTask,
   onDeleteTask,
@@ -8781,7 +8690,6 @@ function TasksView({
   onShowVoidedChange: (value: boolean) => void
   onSelectTask: (id: number) => void
   onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
-  onRequestStatus: (taskId: number, status: TaskStatus) => void
   onVoidTask: (taskId: number) => void
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
@@ -9094,7 +9002,6 @@ return (
               onOpenEditTask={onOpenEditTask}
               onOpenAcceptance={openAcceptance}
               onOpenProgress={openProgress}
-              onRequestStatus={onRequestStatus}
               onUpdateTask={onUpdateTask}
               onVoidTask={onVoidTask}
               onRestoreTask={onRestoreTask}
@@ -9402,7 +9309,6 @@ function TaskProgressModal({
   const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isFeedbackMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
   // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
   const timeCounts = isWaitingMode ? true : isFeedbackMode ? false : isAcceptanceMode ? countAcceptanceTime : countProgressTime
-  const progressUncountedActive = !countProgressTime
   // 只有「验收且不计工时」才锁定时间输入；普通进展即便不计工时，时间仍可自选
   const lockSchedule = isAcceptanceMode && !countAcceptanceTime
   // 不计工时的普通进展：没有有效时间段也能保存，只要有备注或附件（计 0 工时，仅作进展记录）
@@ -10639,14 +10545,14 @@ function TaskProgressModal({
           {!isAcceptanceMode && !isWaitingMode && (
             <button
               type="button"
-              className={`switch-control progress-lite-time-toggle ${progressUncountedActive ? 'active' : ''}`}
-              aria-pressed={progressUncountedActive}
-              aria-label={progressUncountedActive ? '本次不计工时，点击关闭则计入' : '本次计入工时，点击开启则计 0 工时'}
-              title={progressUncountedActive ? '本次不计工时，点击关闭则计入' : '本次计入工时，点击开启则计 0 工时'}
+              className={`switch-control progress-lite-time-toggle ${countProgressTime ? 'active' : ''}`}
+              aria-pressed={countProgressTime}
+              aria-label={countProgressTime ? '本次计入工时，点击关闭则本次不计入' : '本次不计入工时，点击开启则计入'}
+              title={countProgressTime ? '本次计入工时，点击关闭则本次不计入' : '本次不计入工时，点击开启则计入'}
               onClick={() => setCountProgressTime((value) => !value)}
             >
               <i />
-              <span>{progressUncountedActive ? '不计工时' : '计入工时'}</span>
+              <span>{countProgressTime ? '计入工时' : '不计工时'}</span>
             </button>
           )}
           <button
@@ -15855,63 +15761,6 @@ function VoidTaskModal({
         </button>
         <button className="danger-button solid-danger-button" disabled={isBusy} onClick={submit}>
           {isBusy ? '处理中…' : '确认作废'}
-        </button>
-      </div>
-    </ModalShell>
-  )
-}
-
-function StatusReasonModal({
-  target,
-  onClose,
-  onConfirm,
-}: {
-  target: NonNullable<StatusReasonTarget>
-  onClose: () => void
-  onConfirm: (reason: string) => void
-}) {
-  const initialReason = target.status === '挂起' ? target.task.suspendReason ?? '' : target.task.terminateReason ?? ''
-  const [reason, setReason] = useState(initialReason)
-  const isSuspend = target.status === '挂起'
-  const submit = () => {
-    const trimmedReason = reason.trim()
-    if (!trimmedReason) {
-      return
-    }
-    onConfirm(trimmedReason)
-  }
-
-  return (
-    <ModalShell className="delete-confirm-modal status-reason-modal danger-confirm" labelledBy="status-reason-title" onClose={onClose}>
-      <div className="delete-confirm-icon">
-        {isSuspend ? <Archive size={24} /> : <AlertTriangle size={24} />}
-      </div>
-      <div className="delete-confirm-copy">
-        <p className="eyebrow">{target.status}</p>
-        <h2 id="status-reason-title">
-          {isSuspend ? '填写挂起原因' : '填写终止原因'}
-        </h2>
-        <p>{isSuspend ? '挂起任务会暂时从计费统计中排除，请记录等待什么条件恢复。' : '终止任务会从后续计费中排除，请记录取消或停止的原因。'}</p>
-      </div>
-      <label className="void-reason-field">
-        <span>{isSuspend ? '挂起原因' : '终止原因'}</span>
-        <textarea
-          value={reason}
-          autoFocus
-          onChange={(event) => setReason(event.target.value)}
-          placeholder={isSuspend ? '例如：等待甲方补充资料或确认方向。' : '例如：需求取消，本次不再继续制作。'}
-        />
-      </label>
-      <div className="delete-confirm-meta">
-        <span>{target.task.title}</span>
-        <StatusBadge status={target.status} />
-      </div>
-      <div className="delete-confirm-actions">
-        <button className="ghost-button" onClick={onClose}>
-          取消
-        </button>
-        <button className="danger-button solid-danger-button" disabled={!reason.trim()} onClick={submit}>
-          确认{target.status}
         </button>
       </div>
     </ModalShell>
