@@ -1078,6 +1078,20 @@ async function createPdfPreviewFile(file: File) {
   return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
 }
 
+const PDF_PREVIEW_TIMEOUT_MS = 8000
+
+async function withPreviewTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId = 0
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
 // 把视频首帧渲染成 PNG 预览图（MP4 / MOV / WebM 等）
 async function createVideoPreviewFile(file: File) {
   const url = URL.createObjectURL(file)
@@ -3295,6 +3309,7 @@ function AttachmentHoverThumbnail({
   type,
   previewUrl,
   sourceUrl,
+  sourceFile,
   compact = false,
   onOpen,
 }: {
@@ -3302,40 +3317,69 @@ function AttachmentHoverThumbnail({
   type?: string
   previewUrl?: string
   sourceUrl?: string
+  sourceFile?: File
   compact?: boolean
   onOpen?: () => void
 }) {
   const [hoverPreview, setHoverPreview] = useState<{ style: CSSProperties; fieldPlacement: boolean } | null>(null)
-  const [generatedPdfPreview, setGeneratedPdfPreview] = useState<{ source: string; url: string } | null>(null)
+  const [generatedPdfPreview, setGeneratedPdfPreview] = useState<{
+    source: string
+    status: 'ready' | 'failed'
+    url?: string
+  } | null>(null)
   const inferred = inferFileType({ name, type })
   const extension = inferred.type
   const pdfSourceUrl = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
+  const pdfSourceFile = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceFile : undefined
+  const pdfSourceKey = pdfSourceFile
+    ? `file:${pdfSourceFile.name}:${pdfSourceFile.size}:${pdfSourceFile.lastModified}`
+    : pdfSourceUrl
   const psdSourceUrl = !previewUrl && inferred.kind === 'psd' ? sourceUrl : ''
   const officeSourceUrl = !previewUrl && inferred.kind === 'office' ? sourceUrl : ''
   const videoSourceUrl = !previewUrl && inferred.kind === 'video' ? sourceUrl : ''
-  const effectivePreviewUrl = previewUrl || (generatedPdfPreview?.source === pdfSourceUrl ? generatedPdfPreview?.url ?? '' : '')
+  const currentPdfPreview = generatedPdfPreview?.source === pdfSourceKey ? generatedPdfPreview : null
+  const effectivePreviewUrl = previewUrl || (currentPdfPreview?.status === 'ready' ? currentPdfPreview.url ?? '' : '')
+  const pdfPreviewFailed = currentPdfPreview?.status === 'failed'
 
   useEffect(() => {
-    if (!pdfSourceUrl || previewUrl) {
+    if ((!pdfSourceUrl && !pdfSourceFile) || previewUrl || !pdfSourceKey) {
       return
     }
     let cancelled = false
     let objectUrl = ''
     const generatePreview = async () => {
       try {
-        const response = await fetch(pdfSourceUrl)
-        if (!response.ok) {
-          throw new Error('PDF 读取失败')
+        let source = pdfSourceFile
+        if (!source) {
+          const remoteSourceUrl = pdfSourceUrl
+          if (!remoteSourceUrl) {
+            throw new Error('PDF 来源不可用')
+          }
+          const controller = new AbortController()
+          const response = await withPreviewTimeout(
+            fetch(remoteSourceUrl, { credentials: 'same-origin', signal: controller.signal }),
+            PDF_PREVIEW_TIMEOUT_MS,
+            'PDF 读取超时',
+          ).catch((error) => {
+            controller.abort()
+            throw error
+          })
+          if (!response.ok) {
+            throw new Error('PDF 读取失败')
+          }
+          source = new File([await response.blob()], name, { type: 'application/pdf' })
         }
-        const source = new File([await response.blob()], name, { type: 'application/pdf' })
-        const generated = await createPdfPreviewFile(source)
+        const generated = await withPreviewTimeout(createPdfPreviewFile(source), PDF_PREVIEW_TIMEOUT_MS, 'PDF 首页渲染超时')
         if (cancelled) {
           return
         }
         objectUrl = URL.createObjectURL(generated)
-        setGeneratedPdfPreview({ source: pdfSourceUrl, url: objectUrl })
+        setGeneratedPdfPreview({ source: pdfSourceKey, status: 'ready', url: objectUrl })
       } catch (error) {
         console.warn('PDF shared thumbnail generation failed', name, error)
+        if (!cancelled) {
+          setGeneratedPdfPreview({ source: pdfSourceKey, status: 'failed' })
+        }
       }
     }
     void generatePreview()
@@ -3345,7 +3389,7 @@ function AttachmentHoverThumbnail({
         URL.revokeObjectURL(objectUrl)
       }
     }
-  }, [name, pdfSourceUrl, previewUrl])
+  }, [name, pdfSourceFile, pdfSourceKey, pdfSourceUrl, previewUrl])
 
   const media = effectivePreviewUrl
     ? <img src={effectivePreviewUrl} alt="" loading="lazy" />
@@ -3361,7 +3405,7 @@ function AttachmentHoverThumbnail({
   const hoverMedia = effectivePreviewUrl
     ? <img src={effectivePreviewUrl} alt="" />
     : pdfSourceUrl
-      ? <><FileText size={42} /><strong>PDF</strong><span>正在生成首页预览</span></>
+      ? <><FileText size={42} /><strong>PDF</strong><span>{pdfPreviewFailed ? '首页预览暂不可用，点击缩略图查看完整 PDF' : '正在生成首页预览'}</span></>
       : psdSourceUrl
         ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
         : officeSourceUrl
@@ -3445,6 +3489,7 @@ function PendingAttachmentThumbnail({
       type={inferred.type}
       previewUrl={isImage ? sourcePreviewUrl : undefined}
       sourceUrl={sourcePreviewUrl}
+      sourceFile={attachment.file}
       onOpen={onOpen}
     />
   )
@@ -12960,32 +13005,36 @@ function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
     const renderFirstPage = async () => {
       try {
-        const response = await fetch(sourceUrl)
-        if (!response.ok) {
-          throw new Error('PDF 读取失败')
-        }
-        const data = await response.arrayBuffer()
-        const pdfjs = await import('pdfjs-dist')
-        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-        const document = await pdfjs.getDocument({ data }).promise
-        const page = await document.getPage(1)
-        const baseViewport = page.getViewport({ scale: 1 })
-        const targetWidth = 720
-        const viewport = page.getViewport({ scale: targetWidth / baseViewport.width })
-        const canvas = canvasRef.current
-        if (!canvas || cancelled) {
-          return
-        }
-        const context = canvas.getContext('2d')
-        if (!context) {
-          throw new Error('Canvas 不可用')
-        }
-        canvas.width = Math.ceil(viewport.width)
-        canvas.height = Math.ceil(viewport.height)
-        await page.render({ canvasContext: context, viewport }).promise
+        await withPreviewTimeout((async () => {
+          const response = await fetch(sourceUrl, { credentials: 'same-origin', signal: controller.signal })
+          if (!response.ok) {
+            throw new Error('PDF 读取失败')
+          }
+          const data = await response.arrayBuffer()
+          const pdfjs = await import('pdfjs-dist')
+          pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+          const document = await pdfjs.getDocument({ data }).promise
+          const page = await document.getPage(1)
+          const baseViewport = page.getViewport({ scale: 1 })
+          const targetWidth = 720
+          const viewport = page.getViewport({ scale: targetWidth / baseViewport.width })
+          const canvas = canvasRef.current
+          if (!canvas || cancelled) {
+            return
+          }
+          const context = canvas.getContext('2d')
+          if (!context) {
+            throw new Error('Canvas 不可用')
+          }
+          canvas.width = Math.ceil(viewport.width)
+          canvas.height = Math.ceil(viewport.height)
+          await page.render({ canvasContext: context, viewport }).promise
+        })(), PDF_PREVIEW_TIMEOUT_MS, 'PDF 首页渲染超时')
       } catch (error) {
+        controller.abort()
         console.warn('PDF thumbnail generation failed', error)
         if (!cancelled) {
           setFailed(true)
@@ -12995,6 +13044,7 @@ function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }
     void renderFirstPage()
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [sourceUrl])
 
