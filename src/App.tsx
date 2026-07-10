@@ -7,6 +7,8 @@ import {
   ArrowUp,
   ArrowRightLeft,
   Palette,
+  PanelRightClose,
+  PanelRightOpen,
   Briefcase,
   ShieldCheck,
   BarChart3,
@@ -2125,7 +2127,9 @@ function nextWorkStartForWaiting(task: Task, waitingEntry: WaitingEntry) {
     return Number.NaN
   }
   const nextStart = (task.timeEntries ?? [])
-    .filter((entry) => !entry.isUncounted && minutesForTimeEntry(entry) > 0)
+    // “不计工时”只影响结算，不影响任务生命周期；只要后续重新记录了工作进展，等待就应截止。
+    // 甲方反馈是外部意见节点，不代表设计工作已经恢复，因此不作为等待结束时间。
+    .filter((entry) => !entry.isClientFeedback)
     .map(timeEntryStartStamp)
     .filter((stamp) => Number.isFinite(stamp) && stamp > waitingStart)
     .sort((a, b) => a - b)[0]
@@ -4776,6 +4780,7 @@ function App() {
   const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
   const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState(0)
+  const [isTaskDetailCollapsed, setIsTaskDetailCollapsed] = useState(() => window.localStorage.getItem('giverny-task-detail-collapsed') === '1')
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
@@ -4867,8 +4872,6 @@ function App() {
     [currentMonth.value, taskItems, updateItems],
   )
   const importedHours = currentMonth.value === importedHoursMonth ? importedMonthlyHours : 0
-  const selectedTaskSource = activeView === '任务' ? taskPageSourceTasks : activeMonthTasks
-  const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
   const isTaskCalendarView = activeView === '任务' && taskViewMode === '日历'
   const effectiveCalendarFocusDate = calendarFocusDate.startsWith(currentMonth.value) ? calendarFocusDate : `${currentMonth.value}-01`
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
@@ -5129,6 +5132,16 @@ function App() {
     setIsLoaded(true)
   }
 
+  const retryRefreshState = async () => {
+    setBackendStatus('连接中')
+    try {
+      await refreshState()
+    } catch (error) {
+      setBackendStatus('后端异常')
+      notify(error instanceof Error ? `重新同步失败：${error.message}` : '重新同步失败，请稍后再试')
+    }
+  }
+
   useEffect(() => {
     // Initial and credential-change state hydration is the intended effect here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -5234,6 +5247,24 @@ function App() {
 
   const visibleTasks = filterTasks(activeMonthTasks, dashboardTaskFilter)
   const taskPageTasks = filterTasks(taskPageSourceTasks)
+  const selectedTaskSource = activeView === '任务' ? taskPageTasks : visibleTasks
+  const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
+  const selectedTaskSourceSignature = selectedTaskSource.map((task) => task.id).join(',')
+
+  useEffect(() => {
+    // Filters and month changes should keep the detail pane aligned with a row the user can actually see.
+    const visibleIds = selectedTaskSourceSignature ? selectedTaskSourceSignature.split(',').map(Number) : []
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedTaskId((currentId) => visibleIds.includes(currentId) ? currentId : visibleIds[0] ?? 0)
+  }, [selectedTaskSourceSignature])
+
+  const toggleTaskDetail = () => {
+    setIsTaskDetailCollapsed((current) => {
+      const next = !current
+      window.localStorage.setItem('giverny-task-detail-collapsed', next ? '1' : '0')
+      return next
+    })
+  }
 
   // 工作台只在「全部」筛选下折叠已验收：未完成任务进首屏（兜底分页），已验收收进可展开分区。
   // 选了具体状态（含「已验收」）时直接全量展示该状态，不再折叠。
@@ -5256,6 +5287,7 @@ function App() {
         data-due={dueState || undefined}
         key={task.id}
         role="button"
+        aria-pressed={selectedTask?.id === task.id}
         tabIndex={0}
         onClick={() => setSelectedTaskId(task.id)}
         onKeyDown={(event) => {
@@ -6956,6 +6988,22 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </div>
         </header>
 
+        {backendStatus !== '已接入 D1/R2' && (
+          <div className={`backend-notice ${backendStatus === '后端异常' ? 'error' : 'pending'}`} role={backendStatus === '后端异常' ? 'alert' : 'status'}>
+            {backendStatus === '后端异常' ? <AlertTriangle size={16} /> : <LoaderCircle size={16} />}
+            <div>
+              <strong>{backendStatus === '后端异常' ? '最新数据同步失败' : '正在同步最新数据'}</strong>
+              <span>{backendStatus === '后端异常' ? '当前页面可能显示上次成功加载的内容。' : '你可以先浏览页面，完成后会自动更新。'}</span>
+            </div>
+            {backendStatus === '后端异常' && (
+              <button type="button" className="text-button" onClick={() => void retryRefreshState()}>
+                <RotateCcw size={14} />
+                重新同步
+              </button>
+            )}
+          </div>
+        )}
+
         {activeView === '工作台' && (
           <div className="dashboard-context-surface" onContextMenu={openDashboardCreateMenu}>
         <section className="dashboard-metrics" aria-label="本月统计">
@@ -6971,10 +7019,10 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </article>
           <article className="dashboard-metric">
             <span>预计收入</span>
-            <strong className="income-metric-value">
+            <strong className={`income-metric-value ${canToggleIncomeVisibility ? '' : 'permission-placeholder'}`}>
               {canToggleIncomeVisibility
                 ? (incomeVisible ? `¥${formatYuan(stats.amount)}` : '¥ ****')
-                : '仅管理员'}
+                : <><Lock size={15} /><span>管理员可见</span></>}
               {canToggleIncomeVisibility && (
                 <button
                   type="button"
@@ -6988,7 +7036,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                 </button>
               )}
             </strong>
-            <p>{canToggleIncomeVisibility ? `按 ¥${hourlyRate} / 小时` : '游客只读不可见'}</p>
+            <p>{canToggleIncomeVisibility ? `按 ¥${hourlyRate} / 小时` : '登录管理员后查看'}</p>
           </article>
           <article className="dashboard-metric">
             <span>验收情况</span>
@@ -7039,7 +7087,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </button>
         )}
 
-        <section className="content-grid dashboard-content-grid">
+        <section className={`content-grid dashboard-content-grid ${isTaskDetailCollapsed ? 'detail-collapsed' : ''}`}>
           <div className="main-column">
             <section className="panel task-panel dashboard-task-panel">
               <div className="dashboard-task-header">
@@ -7056,30 +7104,54 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                     <Palette size={14} />
                     {rowThemeOn ? '关闭主题' : '开启主题'}
                   </button>
+                  <button
+                    type="button"
+                    className="detail-pane-toggle"
+                    aria-pressed={!isTaskDetailCollapsed}
+                    title={isTaskDetailCollapsed ? '显示任务详情' : '收起任务详情'}
+                    onClick={toggleTaskDetail}
+                  >
+                    {isTaskDetailCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
+                    {isTaskDetailCollapsed ? '显示详情' : '收起详情'}
+                  </button>
                 </div>
-                <label className="search-box dashboard-task-search">
-                  <Search size={20} />
-                  <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="搜索本月任务、需求、需求人（/）" />
-                </label>
+                <TaskSearchBox
+                  value={taskQuery}
+                  onChange={setTaskQuery}
+                  placeholder="搜索本月任务、需求、需求人（/）"
+                  className="dashboard-task-search"
+                />
               </div>
 
               <div className="segment-tabs">
                 {dashboardTaskFilters.map((filter) => (
-                  <button className={dashboardTaskFilter === filter ? 'active' : ''} key={filter} onClick={() => setTaskFilter(filter)}>
+                  <button className={dashboardTaskFilter === filter ? 'active' : ''} aria-pressed={dashboardTaskFilter === filter} key={filter} onClick={() => setTaskFilter(filter)}>
                     {filter}
                   </button>
                 ))}
               </div>
 
+              <ActiveTaskFilters
+                query={taskQuery}
+                filter={dashboardTaskFilter}
+                onClearQuery={() => setTaskQuery('')}
+                onClearFilter={() => setTaskFilter('全部')}
+              />
+
               <div className={`task-list ${rowThemeOn ? '' : 'no-row-theme'}`} onContextMenu={openDashboardCreateMenu}>
                 {visibleTasks.length === 0 && (
-                  <div className="empty-state">
+                  <div className="empty-state" role="status">
                     <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
                     <p>{activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}</p>
-                    {activeMonthTasks.length === 0 && (
+                    {activeMonthTasks.length === 0 ? (
                       <button className="ghost-button compact-button empty-state-action" onClick={() => openCreateTask(false)}>
                         <Plus size={15} />
                         新建任务
+                      </button>
+                    ) : (
+                      <button className="ghost-button compact-button empty-state-action" onClick={() => { setTaskQuery(''); setTaskFilter('全部') }}>
+                        <RotateCcw size={15} />
+                        清除筛选
                       </button>
                     )}
                   </div>
@@ -7213,7 +7285,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               </div>
             </details>
           </div>
-          <DashboardTaskSidebar
+          {!isTaskDetailCollapsed && <DashboardTaskSidebar
             task={selectedTask}
             files={fileItems}
             onPreviewFile={setPreviewFile}
@@ -7226,7 +7298,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
             canWrite={canWrite}
             canDelete={isAdmin}
-          />
+          />}
         </section>
           </div>
         )}
@@ -7277,6 +7349,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
             canWrite={canWrite}
             canDelete={isAdmin}
+            detailCollapsed={isTaskDetailCollapsed}
+            onToggleDetail={toggleTaskDetail}
           />
         )}
 
@@ -7772,6 +7846,79 @@ function StatCard({
 
 function StatusBadge({ status }: { status: TaskStatus }) {
   return <span className={`status-badge status-${status}`}>{status}</span>
+}
+
+function TaskSearchBox({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  className?: string
+}) {
+  return (
+    <label className={`search-box task-search-box ${className}`.trim()}>
+      <Search size={18} />
+      <input aria-label={placeholder} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      {value && (
+        <button
+          type="button"
+          className="search-clear-button"
+          aria-label="清除搜索内容"
+          title="清除搜索"
+          onClick={(event) => {
+            event.preventDefault()
+            onChange('')
+          }}
+        >
+          <X size={14} />
+        </button>
+      )}
+    </label>
+  )
+}
+
+function ActiveTaskFilters({
+  query,
+  filter,
+  onClearQuery,
+  onClearFilter,
+}: {
+  query: string
+  filter: TaskFilter
+  onClearQuery: () => void
+  onClearFilter: () => void
+}) {
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery && filter === '全部') {
+    return null
+  }
+
+  return (
+    <div className="task-active-filters" aria-live="polite">
+      <span>当前筛选</span>
+      {normalizedQuery && (
+        <button type="button" title="清除搜索关键词" onClick={onClearQuery}>
+          “{normalizedQuery}”
+          <X size={12} />
+        </button>
+      )}
+      {filter !== '全部' && (
+        <button type="button" title="清除状态筛选" onClick={onClearFilter}>
+          {filter}
+          <X size={12} />
+        </button>
+      )}
+      {normalizedQuery && filter !== '全部' && (
+        <button type="button" className="task-filter-reset" onClick={() => { onClearQuery(); onClearFilter() }}>
+          清除全部
+        </button>
+      )}
+    </div>
+  )
 }
 
 function StatusDotLabel({ status }: { status: TaskStatus }) {
@@ -8752,6 +8899,8 @@ function TasksView({
   onAutoEstimateProgress,
   canWrite,
   canDelete,
+  detailCollapsed,
+  onToggleDetail,
 }: {
   viewMode: TaskViewMode
   onViewModeChange: (mode: TaskViewMode) => void
@@ -8795,6 +8944,8 @@ function TasksView({
   onAutoEstimateProgress?: (task: Task) => void
   canWrite: boolean
   canDelete: boolean
+  detailCollapsed: boolean
+  onToggleDetail: () => void
   rowThemeOn: boolean
   onToggleRowTheme: () => void
 }) {
@@ -8803,11 +8954,11 @@ function TasksView({
   const [progressTarget, setProgressTarget] = useState<{ task: Task; mode?: ProgressRecordMode; editEntryId?: string; initialAcceptanceMode?: boolean } | null>(null)
   const viewTabs = (
     <div className="view-mode-tabs" aria-label="任务视图切换">
-      <button className={viewMode === '列表' ? 'active' : ''} onClick={() => onViewModeChange('列表')}>
+      <button className={viewMode === '列表' ? 'active' : ''} aria-pressed={viewMode === '列表'} title="切换到列表视图" onClick={() => onViewModeChange('列表')}>
         <List size={15} />
         列表视图
       </button>
-      <button className={viewMode === '日历' ? 'active' : ''} onClick={() => onViewModeChange('日历')}>
+      <button className={viewMode === '日历' ? 'active' : ''} aria-pressed={viewMode === '日历'} title="切换到日历视图" onClick={() => onViewModeChange('日历')}>
         <CalendarDays size={15} />
         日历视图
       </button>
@@ -8877,9 +9028,12 @@ function TasksView({
   const selectTaskAndReveal = (taskId: number) => {
     onSelectTask(taskId)
     if (window.matchMedia('(max-width: 680px)').matches) {
-      window.requestAnimationFrame(() => {
+      if (detailCollapsed) {
+        onToggleDetail()
+      }
+      window.setTimeout(() => {
         document.querySelector('.management-grid .dashboard-task-sidebar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      })
+      }, detailCollapsed ? 80 : 0)
     }
   }
 
@@ -8920,16 +9074,18 @@ return (
             <h2>任务管理</h2>
             <p>集中维护任务字段、验收状态、工时与交付文件</p>
           </div>
-          <label className="search-box task-search-inline">
-            <Search size={16} />
-            <input value={taskQuery} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索任务、需求、需求人" />
-          </label>
+          <TaskSearchBox
+            value={taskQuery}
+            onChange={onQueryChange}
+            placeholder="搜索任务、需求、需求人"
+            className="task-search-inline"
+          />
           {viewTabs}
         </div>
         <div className="task-toolbar-row">
           <div className="segment-tabs">
             {taskFilters.map((filter) => (
-              <button className={taskFilter === filter ? 'active' : ''} key={filter} onClick={() => onFilterChange(filter)}>
+              <button className={taskFilter === filter ? 'active' : ''} aria-pressed={taskFilter === filter} key={filter} onClick={() => onFilterChange(filter)}>
                 {filter === '全部' ? '全部任务' : filter}
               </button>
             ))}
@@ -8950,9 +9106,15 @@ return (
             {showVoidedTasks ? '隐藏作废' : `显示作废${voidedTaskCount ? ` ${voidedTaskCount}` : ''}`}
           </button>
         </div>
+        <ActiveTaskFilters
+          query={taskQuery}
+          filter={taskFilter}
+          onClearQuery={() => onQueryChange('')}
+          onClearFilter={() => onFilterChange('全部')}
+        />
       </section>
 
-      <section className="management-grid">
+      <section className={`management-grid ${detailCollapsed ? 'detail-collapsed' : ''}`}>
         <div className={`panel task-management-list ${rowThemeOn ? '' : 'no-row-theme'}`}>
           <div className="management-list-toolbar">
             <span>共 {tasks.length} 条</span>
@@ -8965,6 +9127,16 @@ return (
                 onClick={onToggleRowTheme}
               >
                 {rowThemeOn ? '关闭主题' : '开启主题'}
+              </button>
+              <button
+                type="button"
+                className="detail-pane-toggle"
+                aria-pressed={!detailCollapsed}
+                title={detailCollapsed ? '显示任务详情' : '收起任务详情'}
+                onClick={onToggleDetail}
+              >
+                {detailCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
+                {detailCollapsed ? '显示详情' : '收起详情'}
               </button>
               <small>悬停显示快捷操作，右键可打开完整菜单</small>
             </div>
@@ -8989,6 +9161,7 @@ return (
               data-due={dueState || undefined}
               key={task.id}
               role="button"
+              aria-pressed={selectedTask?.id === task.id}
               tabIndex={0}
               onClick={() => {
                 selectTaskAndReveal(task.id)
@@ -9073,15 +9246,20 @@ return (
             )
           })}
           {tasks.length === 0 && (
-            <div className="empty-state">
+            <div className="empty-state" role="status">
               <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
               <p>{activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}</p>
-              {canWrite && activeMonthTasks.length === 0 && (
+              {canWrite && activeMonthTasks.length === 0 ? (
                 <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
                   <Plus size={15} />
                   新建任务
                 </button>
-              )}
+              ) : activeMonthTasks.length > 0 ? (
+                <button className="ghost-button compact-button empty-state-action" onClick={() => { onQueryChange(''); onFilterChange('全部') }}>
+                  <RotateCcw size={15} />
+                  清除筛选
+                </button>
+              ) : null}
             </div>
           )}
           <div className="task-schedule-legend" aria-label="排期状态说明">
@@ -9113,7 +9291,7 @@ return (
             />
           )}
         </div>
-        <DashboardTaskSidebar
+        {!detailCollapsed && <DashboardTaskSidebar
           task={selectedTask}
           files={files}
           onPreviewFile={onPreviewFile}
@@ -9136,7 +9314,7 @@ return (
           onAutoEstimateProgress={onAutoEstimateProgress}
           canWrite={canWrite}
           canDelete={canDelete}
-        />
+        />}
       </section>
       {progressTarget && (
         <TaskProgressModal
