@@ -5247,12 +5247,24 @@ function App() {
 
   const visibleTasks = filterTasks(activeMonthTasks, dashboardTaskFilter)
   const taskPageTasks = filterTasks(taskPageSourceTasks)
-  const selectedTaskSource = activeView === '任务' ? taskPageTasks : visibleTasks
+  // 工作台只在「全部」筛选下折叠已验收：未完成任务进首屏（兜底分页），已验收收进可展开分区。
+  // 选了具体状态（含「已验收」）时直接全量展示该状态，不再折叠。
+  const DASHBOARD_PAGE_SIZE = 15
+  const isAllDashboardFilter = dashboardTaskFilter === '全部'
+  const dashboardPendingTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status !== '已验收') : visibleTasks
+  const dashboardAcceptedTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status === '已验收') : []
+  const dashboardPendingVisible = dashboardPendingShowAll ? dashboardPendingTasks : dashboardPendingTasks.slice(0, DASHBOARD_PAGE_SIZE)
+  const dashboardAcceptedVisible = dashboardAcceptedShowAll ? dashboardAcceptedTasks : dashboardAcceptedTasks.slice(0, DASHBOARD_PAGE_SIZE)
+  const dashboardSelectableTasks = [
+    ...dashboardPendingVisible,
+    ...(dashboardAcceptedOpen ? dashboardAcceptedVisible : []),
+  ]
+  const selectedTaskSource = activeView === '任务' ? taskPageTasks : dashboardSelectableTasks
   const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
   const selectedTaskSourceSignature = selectedTaskSource.map((task) => task.id).join(',')
 
   useEffect(() => {
-    // Filters and month changes should keep the detail pane aligned with a row the user can actually see.
+    // Filters, pagination and collapsed groups should keep the detail pane aligned with a rendered row.
     const visibleIds = selectedTaskSourceSignature ? selectedTaskSourceSignature.split(',').map(Number) : []
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedTaskId((currentId) => visibleIds.includes(currentId) ? currentId : visibleIds[0] ?? 0)
@@ -5265,15 +5277,6 @@ function App() {
       return next
     })
   }
-
-  // 工作台只在「全部」筛选下折叠已验收：未完成任务进首屏（兜底分页），已验收收进可展开分区。
-  // 选了具体状态（含「已验收」）时直接全量展示该状态，不再折叠。
-  const DASHBOARD_PAGE_SIZE = 15
-  const isAllDashboardFilter = dashboardTaskFilter === '全部'
-  const dashboardPendingTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status !== '已验收') : visibleTasks
-  const dashboardAcceptedTasks = isAllDashboardFilter ? visibleTasks.filter((task) => task.status === '已验收') : []
-  const dashboardPendingVisible = dashboardPendingShowAll ? dashboardPendingTasks : dashboardPendingTasks.slice(0, DASHBOARD_PAGE_SIZE)
-  const dashboardAcceptedVisible = dashboardAcceptedShowAll ? dashboardAcceptedTasks : dashboardAcceptedTasks.slice(0, DASHBOARD_PAGE_SIZE)
 
   const renderDashboardTaskRow = (task: Task) => {
     const dueState = taskDueState(task, today, dueSoonDate)

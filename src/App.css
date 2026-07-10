@@ -17077,8 +17077,15 @@ textarea:focus-visible {
   }
 
   .daily-knowledge-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
     align-items: flex-start;
     padding-block: 12px;
+  }
+
+  .daily-knowledge-category {
+    justify-self: start;
   }
 
   .daily-knowledge-copy {
@@ -17324,8 +17331,9 @@ textarea:focus-visible {
 }
 
 .file-thumb-preview {
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 4 / 3;
   min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 0;
   outline: 2px solid transparent;
@@ -17335,7 +17343,7 @@ textarea:focus-visible {
 
 .file-thumb-preview.visual-preview {
   min-height: 0;
-  aspect-ratio: auto;
+  aspect-ratio: 4 / 3;
   height: auto;
 }
 
@@ -17697,7 +17705,7 @@ textarea:focus-visible {
 
 .file-thumbnail-canvas {
   width: 100%;
-  height: auto;
+  height: 100%;
   background: var(--color-surface-strong);
   display: block;
   object-fit: contain;
@@ -17851,6 +17859,17 @@ textarea:focus-visible {
 @media (max-width: 900px) {
   .grouped-file-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 180px));
+  }
+
+  .file-project-note {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    line-height: 1.65;
+  }
+
+  .file-project-note strong {
+    white-space: normal;
   }
 }
 
