@@ -3306,16 +3306,51 @@ function AttachmentHoverThumbnail({
   onOpen?: () => void
 }) {
   const [hoverPreview, setHoverPreview] = useState<{ style: CSSProperties; fieldPlacement: boolean } | null>(null)
+  const [generatedPdfPreview, setGeneratedPdfPreview] = useState<{ source: string; url: string } | null>(null)
   const inferred = inferFileType({ name, type })
   const extension = inferred.type
   const pdfSourceUrl = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
   const psdSourceUrl = !previewUrl && inferred.kind === 'psd' ? sourceUrl : ''
   const officeSourceUrl = !previewUrl && inferred.kind === 'office' ? sourceUrl : ''
   const videoSourceUrl = !previewUrl && inferred.kind === 'video' ? sourceUrl : ''
-  const media = previewUrl
-    ? <img src={previewUrl} alt="" loading="lazy" />
+  const effectivePreviewUrl = previewUrl || (generatedPdfPreview?.source === pdfSourceUrl ? generatedPdfPreview?.url ?? '' : '')
+
+  useEffect(() => {
+    if (!pdfSourceUrl || previewUrl) {
+      return
+    }
+    let cancelled = false
+    let objectUrl = ''
+    const generatePreview = async () => {
+      try {
+        const response = await fetch(pdfSourceUrl)
+        if (!response.ok) {
+          throw new Error('PDF 读取失败')
+        }
+        const source = new File([await response.blob()], name, { type: 'application/pdf' })
+        const generated = await createPdfPreviewFile(source)
+        if (cancelled) {
+          return
+        }
+        objectUrl = URL.createObjectURL(generated)
+        setGeneratedPdfPreview({ source: pdfSourceUrl, url: objectUrl })
+      } catch (error) {
+        console.warn('PDF shared thumbnail generation failed', name, error)
+      }
+    }
+    void generatePreview()
+    return () => {
+      cancelled = true
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [name, pdfSourceUrl, previewUrl])
+
+  const media = effectivePreviewUrl
+    ? <img src={effectivePreviewUrl} alt="" loading="lazy" />
     : pdfSourceUrl
-      ? <PdfThumbnail sourceUrl={pdfSourceUrl} label={name} />
+      ? <span className="attachment-hover-thumb-ext">PDF</span>
       : psdSourceUrl
         ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
         : officeSourceUrl
@@ -3323,10 +3358,10 @@ function AttachmentHoverThumbnail({
           : videoSourceUrl
             ? <video src={videoSourceUrl} muted playsInline preload="metadata" />
             : <span className="attachment-hover-thumb-ext">{extension}</span>
-  const hoverMedia = previewUrl
-    ? <img src={previewUrl} alt="" />
+  const hoverMedia = effectivePreviewUrl
+    ? <img src={effectivePreviewUrl} alt="" />
     : pdfSourceUrl
-      ? <PdfThumbnail sourceUrl={pdfSourceUrl} label={name} />
+      ? <><FileText size={42} /><strong>PDF</strong><span>正在生成首页预览</span></>
       : psdSourceUrl
         ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
         : officeSourceUrl
@@ -3397,30 +3432,6 @@ function PendingAttachmentThumbnail({
   const isImage = inferred.kind === 'image'
   const canUseSourceFallback = ['image', 'pdf', 'ai', 'psd', 'office', 'video'].includes(inferred.kind)
   const sourcePreviewUrl = useMemo(() => canUseSourceFallback ? URL.createObjectURL(attachment.file) : undefined, [attachment.file, canUseSourceFallback])
-  const [generatedPreviewUrl, setGeneratedPreviewUrl] = useState('')
-
-  useEffect(() => {
-    if (isImage) {
-      return
-    }
-    let objectUrl = ''
-    let cancelled = false
-    const generatePreview = async () => {
-      const preview = await createOptionalPreviewFile(attachment.file)
-      if (!preview || cancelled) {
-        return
-      }
-      objectUrl = URL.createObjectURL(preview)
-      setGeneratedPreviewUrl(objectUrl)
-    }
-    void generatePreview()
-    return () => {
-      cancelled = true
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
-      }
-    }
-  }, [attachment.file, isImage])
 
   useEffect(() => () => {
     if (sourcePreviewUrl) {
@@ -3432,7 +3443,7 @@ function PendingAttachmentThumbnail({
     <AttachmentHoverThumbnail
       name={attachment.name}
       type={inferred.type}
-      previewUrl={isImage ? sourcePreviewUrl : generatedPreviewUrl}
+      previewUrl={isImage ? sourcePreviewUrl : undefined}
       sourceUrl={sourcePreviewUrl}
       onOpen={onOpen}
     />
@@ -12978,7 +12989,7 @@ function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }
       <div className="file-thumb-placeholder">
         <FileText size={42} />
         <strong>PDF</strong>
-        <span>缩略图生成失败</span>
+        <span>PDF 可正常打开，暂无首页预览</span>
       </div>
     )
   }

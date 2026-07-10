@@ -6572,6 +6572,17 @@ button.topbar-create-button:hover {
   letter-spacing: 0.04em;
 }
 
+.attachment-hover-preview-media > svg,
+.attachment-hover-preview-media > span {
+  color: var(--color-surface-strong);
+}
+
+.attachment-hover-preview-media > span {
+  padding: 0 18px;
+  font-size: 12px;
+  text-align: center;
+}
+
 .attachment-hover-preview-name {
   padding: 0 4px;
   color: var(--color-text-muted);
