@@ -8349,6 +8349,14 @@ function DashboardTaskSidebar({
   return (
     <aside className="dashboard-task-sidebar">
       <header className="dashboard-task-sidebar-header">
+        <button
+          type="button"
+          className="dashboard-side-mobile-back"
+          onClick={() => document.querySelector('.task-management-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          <ChevronLeft size={15} />
+          返回任务列表
+        </button>
         <h2>{task.title}</h2>
         <p className="dashboard-task-sidebar-meta">
           <span>{formatMonthDayDash(task.date)}</span>
@@ -8866,6 +8874,15 @@ function TasksView({
     setProgressTarget({ task, mode, editEntryId, initialAcceptanceMode })
   }
 
+  const selectTaskAndReveal = (taskId: number) => {
+    onSelectTask(taskId)
+    if (window.matchMedia('(max-width: 680px)').matches) {
+      window.requestAnimationFrame(() => {
+        document.querySelector('.management-grid .dashboard-task-sidebar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+  }
+
   if (viewMode === '日历') {
     return (
       <section className="view-stack">
@@ -8974,12 +8991,12 @@ return (
               role="button"
               tabIndex={0}
               onClick={() => {
-                onSelectTask(task.id)
+                selectTaskAndReveal(task.id)
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
-                  onSelectTask(task.id)
+                  selectTaskAndReveal(task.id)
                 }
               }}
               onContextMenu={(event) => openContextMenu(event, task)}
