@@ -465,44 +465,53 @@ export const api = {
       body: JSON.stringify({ taskId: payload.taskId, entryId: payload.entryId ?? '', fileName: file.name, contentType: file.type }),
     })
 
-    const partSize = 8 * 1024 * 1024
-    const totalParts = Math.ceil(file.size / partSize)
-    const parts: { partNumber: number; etag: string }[] = []
-    for (let index = 0; index < totalParts; index += 1) {
-      const start = index * partSize
-      const chunk = file.slice(start, Math.min(start + partSize, file.size))
-      const part = await xhrJson<{ partNumber: number; etag: string }>(
-        'PUT',
-        `/api/files/multipart/part?key=${encodeURIComponent(init.key)}&uploadId=${encodeURIComponent(init.uploadId)}&partNumber=${index + 1}`,
-        chunk,
-        (loaded) => onProgress?.(Math.min(0.99, (start + loaded) / file.size)),
-      )
-      parts.push(part)
-    }
+    try {
+      const partSize = 8 * 1024 * 1024
+      const totalParts = Math.ceil(file.size / partSize)
+      const parts: { partNumber: number; etag: string }[] = []
+      for (let index = 0; index < totalParts; index += 1) {
+        const start = index * partSize
+        const chunk = file.slice(start, Math.min(start + partSize, file.size))
+        const part = await xhrJson<{ partNumber: number; etag: string }>(
+          'PUT',
+          `/api/files/multipart/part?key=${encodeURIComponent(init.key)}&uploadId=${encodeURIComponent(init.uploadId)}&partNumber=${index + 1}`,
+          chunk,
+          (loaded) => onProgress?.(Math.min(0.99, (start + loaded) / file.size)),
+        )
+        parts.push(part)
+      }
 
-    const completeForm = new FormData()
-    completeForm.set('key', init.key)
-    completeForm.set('uploadId', init.uploadId)
-    completeForm.set('fileId', init.fileId)
-    completeForm.set('parts', JSON.stringify(parts))
-    completeForm.set('taskId', String(payload.taskId))
-    completeForm.set('entryId', payload.entryId ?? '')
-    completeForm.set('scope', payload.scope)
-    completeForm.set('name', file.name)
-    completeForm.set('type', payload.type)
-    completeForm.set('size', payload.size)
-    completeForm.set('fileSize', String(file.size))
-    completeForm.set('contentType', file.type)
-    completeForm.set('final', String(payload.final))
-    completeForm.set('visible', String(payload.visible))
-    completeForm.set('tag', payload.tag ?? '')
-    completeForm.set('analyze', String(payload.analyze ?? true))
-    if (payload.preview) {
-      completeForm.set('preview', payload.preview)
+      const completeForm = new FormData()
+      completeForm.set('key', init.key)
+      completeForm.set('uploadId', init.uploadId)
+      completeForm.set('fileId', init.fileId)
+      completeForm.set('parts', JSON.stringify(parts))
+      completeForm.set('taskId', String(payload.taskId))
+      completeForm.set('entryId', payload.entryId ?? '')
+      completeForm.set('scope', payload.scope)
+      completeForm.set('name', file.name)
+      completeForm.set('type', payload.type)
+      completeForm.set('size', payload.size)
+      completeForm.set('fileSize', String(file.size))
+      completeForm.set('contentType', file.type)
+      completeForm.set('final', String(payload.final))
+      completeForm.set('visible', String(payload.visible))
+      completeForm.set('tag', payload.tag ?? '')
+      completeForm.set('analyze', String(payload.analyze ?? true))
+      if (payload.preview) {
+        completeForm.set('preview', payload.preview)
+      }
+      const saved = await requestJson<FileAsset>('/api/files/multipart/complete', { method: 'POST', body: completeForm })
+      onProgress?.(1)
+      return saved
+    } catch (error) {
+      await requestJson<{ ok: true }>('/api/files/multipart/abort', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: init.key, uploadId: init.uploadId }),
+      }).catch(() => null)
+      throw error
     }
-    const saved = await requestJson<FileAsset>('/api/files/multipart/complete', { method: 'POST', body: completeForm })
-    onProgress?.(1)
-    return saved
   },
   updateFile: (fileId: number, payload: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) =>
     requestJson<FileAsset>(`/api/files/${fileId}`, {

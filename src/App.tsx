@@ -4439,7 +4439,7 @@ function ChatPanel({
         name: file.name,
         data,
         mimeType: file.type || 'text/plain',
-        preview: isImage ? URL.createObjectURL(file) : undefined,
+        preview: isImage ? `data:${file.type || 'image/jpeg'};base64,${data}` : undefined,
       })
     }
     setAttachments((prev) => [...prev, ...added].slice(0, 4))
@@ -4830,6 +4830,7 @@ function App() {
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
+  const taskActivityRequestRef = useRef(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
@@ -5390,7 +5391,7 @@ function App() {
             <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
               <BarChart3 size={15} />
             </button>
-            <button
+            {isAdmin && <button
               type="button"
               className="icon-button"
               title={canAcceptTask ? '去验收' : '当前不是待验收'}
@@ -5399,7 +5400,7 @@ function App() {
               onClick={(event) => { event.stopPropagation(); handleOpenTaskAcceptance(task.id) }}
             >
               <ClipboardCheck size={15} />
-            </button>
+            </button>}
           </div>}
         </div>
       </article>
@@ -5559,11 +5560,17 @@ function App() {
   }
 
   const loadTaskActivity = async (taskId: number) => {
+    const requestId = taskActivityRequestRef.current + 1
+    taskActivityRequestRef.current = requestId
     try {
       const result = await api.getTaskActivity(taskId)
-      setTaskActivity(result.items)
+      if (taskActivityRequestRef.current === requestId) {
+        setTaskActivity(result.items)
+      }
     } catch {
-      setTaskActivity([])
+      if (taskActivityRequestRef.current === requestId) {
+        setTaskActivity([])
+      }
     }
   }
 
@@ -5805,13 +5812,17 @@ function App() {
   }
 
   const handleOpenTaskAcceptance = (taskId: number) => {
+    if (!isAdmin) {
+      requireAdmin()
+      return
+    }
     setSelectedTaskId(taskId)
     setProgressModalTarget({ taskId, mode: 'progress', initialAcceptanceMode: true })
     void loadTaskActivity(taskId)
   }
 
   const handleSaveTaskEdit = (taskId: number, changes: Partial<Task>) => {
-    if (isAdmin) {
+    if (canWrite) {
       void handleUpdateTask(taskId, changes)
     } else {
       requireAdmin()
@@ -7381,7 +7392,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
             onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={canWrite ? handleConfirmTaskAcceptance : undefined}
+            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
             onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
@@ -7581,7 +7592,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           currentMonthValue={currentMonth.value}
           initialSupplemental={newTaskSupplemental}
           onClose={() => setIsModalOpen(false)}
-          onCreate={isAdmin ? handleCreateTask : async () => requireAdmin()}
+          onCreate={canWrite ? handleCreateTask : async () => requireAdmin()}
           onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
         />
       )}
@@ -7595,6 +7606,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onClose={() => setDetailTaskId(0)}
             onPreviewFile={setPreviewFile}
             onOpenAcceptance={handleOpenTaskAcceptance}
+            canAccept={isAdmin}
             onOpenEdit={(taskId) => {
               setDetailTaskId(0)
               handleOpenTaskEdit(taskId)
@@ -7615,7 +7627,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             currentMonthValue={currentMonth.value}
             editingTask={editTask}
             onClose={() => setEditTaskId(0)}
-            onCreate={isAdmin ? handleCreateTask : async () => requireAdmin()}
+            onCreate={canWrite ? handleCreateTask : async () => requireAdmin()}
             onSave={(changes) => handleSaveTaskEdit(editTask.id, changes)}
             onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
           />
@@ -7637,7 +7649,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onPreviewFile={setPreviewFile}
             onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={canWrite ? handleConfirmTaskAcceptance : undefined}
+            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
             onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
             initialAcceptanceMode={progressModalTarget.initialAcceptanceMode}
             hourlyRate={hourlyRate}
@@ -8304,10 +8316,10 @@ function TaskContextMenu({
             <BarChart3 size={15} />
             记录进展
           </button>
-          <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
+          {canDelete && <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
             <ClipboardCheck size={15} />
             {menu.task.status === '待验收' ? '去验收' : '去验收（非待验收）'}
-          </button>
+          </button>}
         </>
       )}
       {!isVoided && canWrite && !hasAcceptanceClosure && (
@@ -8453,7 +8465,7 @@ function DashboardTaskSidebar({
   const taskId = task?.id
   const entriesSignature = (task?.timeEntries ?? [])
     .filter((entry) => (entry.note ?? '').trim())
-    .map((entry) => `${entry.id}.${(entry.note ?? '').length}`)
+    .map((entry) => `${entry.id}.${(entry.note ?? '').trim()}`)
     .join('|')
   useEffect(() => {
     if (!task || activeTab !== 'progress' || !onAutoEstimateProgress || !entriesSignature) {
@@ -8616,7 +8628,7 @@ function DashboardTaskSidebar({
             </div>
           </dl>
           {canWrite && <div className="dashboard-side-info-actions">
-            {canAcceptTask && (
+            {canDelete && canAcceptTask && (
               <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
                 去验收
               </button>
@@ -9285,7 +9297,7 @@ return (
                   <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
                     <BarChart3 size={15} />
                   </button>
-                  <button
+                  {canDelete && <button
                     type="button"
                     className="icon-button"
                     title={canAcceptTask ? '去验收' : '当前不是待验收'}
@@ -9294,7 +9306,7 @@ return (
                     onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}
                   >
                     <ClipboardCheck size={15} />
-                  </button>
+                  </button>}
                 </div>}
               </div>
             </article>
@@ -11777,6 +11789,7 @@ function TaskDetailModal({
   onClose,
   onPreviewFile,
   onOpenAcceptance,
+  canAccept,
   onOpenEdit,
   onOpenProgress,
 }: {
@@ -11785,6 +11798,7 @@ function TaskDetailModal({
   onClose: () => void
   onPreviewFile: (file: FileAsset) => void
   onOpenAcceptance: (taskId: number) => void
+  canAccept: boolean
   onOpenEdit: (taskId: number) => void
   onOpenProgress: (taskId: number) => void
 }) {
@@ -11808,7 +11822,7 @@ function TaskDetailModal({
           <h2 id="task-detail-title">{task.title}</h2>
         </div>
         <div className="modal-header-actions">
-          {task.status === '待验收' ? (
+          {task.status === '待验收' && canAccept ? (
             <button
               type="button"
               className="status-badge status-待验收 detail-acceptance-status-button"
@@ -16934,11 +16948,16 @@ function NewTaskModal({
   const loadBriefFiles = async (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
     const files = Array.from(fileList ?? [])
     if (files.length === 0) return
+    const availableSlots = Math.max(0, 6 - briefFilesRef.current.length)
+    if (availableSlots === 0) {
+      setBriefError('最多添加 6 个需求附件')
+      return
+    }
     setBriefError('')
     setIsBriefLoading(true)
     const added: BriefItem[] = []
     try {
-      for (const file of files.slice(0, 6)) {
+      for (const file of files.slice(0, availableSlots)) {
         const displayName = source === 'paste' ? pastedImageName(file) : file.name
         if (file.type.startsWith('image/')) {
           const base64 = await new Promise<string>((resolve) => {
@@ -16965,8 +16984,15 @@ function NewTaskModal({
           }
         }
       }
-      if (added.length > 0) setBriefFiles((prev) => [...prev, ...added].slice(0, 6))
+      if (added.length > 0) {
+        setBriefFiles((prev) => {
+          const combined = [...prev, ...added]
+          combined.slice(6).forEach(revokeBriefPreview)
+          return combined.slice(0, 6)
+        })
+      }
     } catch {
+      added.forEach(revokeBriefPreview)
       setBriefError('读取附件失败，请换个文件或稍后重试')
     } finally {
       setIsBriefLoading(false)

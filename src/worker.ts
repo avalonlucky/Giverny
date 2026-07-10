@@ -2076,7 +2076,7 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const id = toId(Date.now())
+  const id = nextNumericId()
   const hourlyRate = await getHourlyRate(env)
   const billable = agentBool(draft.billable, true)
   const status: TaskStatus = billable ? '计划中' : '不计费'
@@ -4577,6 +4577,9 @@ async function setAdminPassword(env: Env, password: string) {
 
 const toId = (id: string | number) => String(id)
 
+// Keep numeric IDs compatible with the existing frontend while avoiding same-millisecond collisions.
+const nextNumericId = () => String(Date.now() * 1000 + crypto.getRandomValues(new Uint16Array(1))[0] % 1000)
+
 const nowIso = () => new Date().toISOString()
 
 const pad2 = (value: number) => String(value).padStart(2, '0')
@@ -4630,6 +4633,23 @@ const parseTimeEntries = (value: string | null): TimeEntry[] => {
 }
 
 const parseWaitingEntries = (value: string | null): WaitingEntry[] => parseTimeEntries(value)
+
+function actualHoursForTimeEntries(entries: TimeEntry[]) {
+  const minutes = entries.reduce((total, entry) => {
+    if (entry.isUncounted) {
+      return total
+    }
+    const startDate = entry.date
+    const endDate = entry.endDate || startDate
+    const start = Date.parse(`${startDate}T${entry.start}:00+08:00`)
+    const end = Date.parse(`${endDate}T${entry.end}:00+08:00`)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return total
+    }
+    return total + Math.round((end - start) / 60000)
+  }, 0)
+  return Math.round((minutes / 60) * 100) / 100
+}
 
 function acceptanceProgressEndDateTime(entries: TimeEntry[], fallbackDate: string | null | undefined) {
   const acceptanceEntries = entries.filter((entry) => entry.isAcceptanceProgress)
@@ -5667,7 +5687,7 @@ async function getSharedReport(env: Env, token: string) {
 
 async function createTask(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const task = (await request.json()) as Task
-  const id = toId(task.id || Date.now())
+  const id = nextNumericId()
   const hourlyRate = await getHourlyRate(env)
   // 所有任务都从「计划中」开始；是否计费由独立的 billable 标记决定（不随状态变化），
   // 这样「不计费任务」即便后续走完整验收流程，也始终不计费。
@@ -5731,11 +5751,33 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
   return ok({ ...task, id: Number(id), status: initialStatus, progress: 0, files: [] }, 201)
 }
 
-async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerExecutionContext) {
+async function updateTask(env: Env, id: string, request: Request, role: AuthRole, ctx?: WorkerExecutionContext) {
   const changes = (await request.json()) as Partial<Task>
   const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
   if (!current) {
     return fail('任务不存在', 404)
+  }
+  if (role === 'collaborator') {
+    const protectedFields = [
+      'status',
+      'stage',
+      'settlementMonth',
+      'isSupplemental',
+      'billable',
+      'actualDeliveryDate',
+      'acceptanceNote',
+      'feedbackRating',
+      'feedbackTags',
+      'feedbackNote',
+      'allowAcceptedTimeEdit',
+      'allowAcceptanceRollback',
+    ]
+    if (current.status === '已验收' || protectedFields.some((field) => Object.prototype.hasOwnProperty.call(changes, field))) {
+      return fail('协作者只能编辑任务基本信息和记录进展，验收、结算与状态变更仅限管理员', 403)
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'actualHours') && !Object.prototype.hasOwnProperty.call(changes, 'timeEntries')) {
+      return fail('实际工时必须由分段记录自动计算', 400)
+    }
   }
   if (await isLockedReportMonth(env, current.settlement_month)) {
     return fail('该任务所属月份已锁定结算，不能再修改任务明细', 409)
@@ -5751,6 +5793,7 @@ async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerEx
     }
   }
 
+  const nextTimeEntries = changes.timeEntries ?? parseTimeEntries(current.time_entries_json)
   const next = normalizeTaskClosure<TaskUpdateDraft>({
     title: changes.title ?? current.title,
     requirement: changes.requirement ?? current.requirement ?? '',
@@ -5762,7 +5805,9 @@ async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerEx
       ? Boolean(changes.isSupplemental)
       : Boolean(current.is_supplemental),
     estimatedHours: changes.estimatedHours ?? current.estimated_hours,
-    actualHours: changes.actualHours ?? current.actual_hours,
+    actualHours: Object.prototype.hasOwnProperty.call(changes, 'timeEntries')
+      ? actualHoursForTimeEntries(nextTimeEntries)
+      : changes.actualHours ?? current.actual_hours,
     requester: changes.requester ?? current.requester ?? '',
     contact: changes.contact ?? current.contact_person ?? '',
     reviewer: changes.reviewer ?? current.reviewer ?? '',
@@ -5776,7 +5821,7 @@ async function updateTask(env: Env, id: string, request: Request, ctx?: WorkerEx
     feedbackRating: Object.prototype.hasOwnProperty.call(changes, 'feedbackRating') ? normalizeFeedbackRating(changes.feedbackRating) : normalizeFeedbackRating(current.feedback_rating),
     feedbackTags: Object.prototype.hasOwnProperty.call(changes, 'feedbackTags') ? normalizeFeedbackTags(changes.feedbackTags) : parseFeedbackTags(current.feedback_tags_json),
     feedbackNote: Object.prototype.hasOwnProperty.call(changes, 'feedbackNote') ? String(changes.feedbackNote ?? '') : current.feedback_note ?? '',
-    timeEntries: changes.timeEntries ?? parseTimeEntries(current.time_entries_json),
+    timeEntries: nextTimeEntries,
     waitingEntries: changes.waitingEntries ?? parseWaitingEntries(current.waiting_entries_json),
     actualDeliveryDate: Object.prototype.hasOwnProperty.call(changes, 'actualDeliveryDate')
       ? String(changes.actualDeliveryDate ?? '')
@@ -5878,7 +5923,7 @@ async function deleteTask(env: Env, id: string) {
 
 async function createUpdate(env: Env, request: Request) {
   const update = (await request.json()) as TaskUpdate
-  const id = toId(update.id || Date.now())
+  const id = nextNumericId()
   const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(toId(update.taskId)).first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
@@ -5959,10 +6004,11 @@ async function getTaskActivity(env: Env, taskId: string) {
   const [rows, activeAttachmentRows] = await Promise.all([
     env.DB.prepare(
       `SELECT * FROM audit_log
-       WHERE (entity_type = 'task' AND entity_id = ?) OR entity_type IN ('attachment', 'update')
-       ORDER BY created_at DESC LIMIT 400`,
+       WHERE (entity_type = 'task' AND entity_id = ?)
+          OR (entity_type IN ('attachment', 'update') AND CAST(json_extract(payload_json, '$.taskId') AS TEXT) = ?)
+       ORDER BY created_at DESC LIMIT 120`,
     )
-      .bind(taskId)
+      .bind(taskId, taskId)
       .all<{ id: string; action: string; entity_type: string; entity_id: string; payload_json: string | null; created_at: string }>(),
     env.DB.prepare(
       'SELECT id FROM attachments WHERE task_id = ? AND deleted_at IS NULL',
@@ -6016,7 +6062,7 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
     return fail('缺少上传文件')
   }
 
-  const id = String(Date.now())
+  const id = nextNumericId()
   const taskId = String(form.get('taskId') ?? '')
   const entryId = String(form.get('entryId') ?? '').trim()
   const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
@@ -6029,37 +6075,43 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   await env.UPLOADS.put(r2Key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } })
 
   let previewKey: string | null = null
-  if (preview instanceof File && preview.size > 0) {
-    previewKey = `previews/${taskId}/${id}/${sanitizeFileName(preview.name)}`
-    await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
-  } else if (type === 'PNG' || type === 'JPG' || type === 'WEBP' || type === 'GIF' || type === 'SVG' || type === 'BMP') {
-    previewKey = r2Key
-  }
+  try {
+    if (preview instanceof File && preview.size > 0) {
+      previewKey = `previews/${taskId}/${id}/${sanitizeFileName(preview.name)}`
+      await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
+    } else if (type === 'PNG' || type === 'JPG' || type === 'WEBP' || type === 'GIF' || type === 'SVG' || type === 'BMP') {
+      previewKey = r2Key
+    }
 
-  const saved = await insertAttachment(env, {
-    id,
-    taskId,
-    entryId,
-    scope,
-    fileName: file.name,
-    fileType: type,
-    mimeType: file.type || null,
-    r2Key,
-    previewKey,
-    fileSize: file.size,
-    displaySize: String(form.get('size') || `${file.size} B`),
-    final: form.get('final') === 'true',
-    visible: form.get('visible') !== 'false',
-    tag: String(form.get('tag') ?? ''),
-    analyze: form.get('analyze') !== 'false',
-  })
-  if (saved instanceof Response) {
-    return saved
+    const saved = await insertAttachment(env, {
+      id,
+      taskId,
+      entryId,
+      scope,
+      fileName: file.name,
+      fileType: type,
+      mimeType: file.type || null,
+      r2Key,
+      previewKey,
+      fileSize: file.size,
+      displaySize: String(form.get('size') || `${file.size} B`),
+      final: form.get('final') === 'true',
+      visible: form.get('visible') !== 'false',
+      tag: String(form.get('tag') ?? ''),
+      analyze: form.get('analyze') !== 'false',
+    })
+    if (saved instanceof Response) {
+      await Promise.allSettled([env.UPLOADS.delete(r2Key), ...(previewKey && previewKey !== r2Key ? [env.UPLOADS.delete(previewKey)] : [])])
+      return saved
+    }
+    if (form.get('analyze') !== 'false') {
+      enqueueAnalysis(env, ctx, id)
+    }
+    return ok(saved, 201)
+  } catch (error) {
+    await Promise.allSettled([env.UPLOADS.delete(r2Key), ...(previewKey && previewKey !== r2Key ? [env.UPLOADS.delete(previewKey)] : [])])
+    throw error
   }
-  if (form.get('analyze') !== 'false') {
-    enqueueAnalysis(env, ctx, id)
-  }
-  return ok(saved, 201)
 }
 
 const sanitizeFileName = (name: string) => name.replace(/[^\w.\-一-龥]/g, '_')
@@ -6155,7 +6207,7 @@ async function initMultipartUpload(env: Env, request: Request) {
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
-  const fileId = String(Date.now())
+  const fileId = nextNumericId()
   const key = `uploads/${body.taskId}/${fileId}/${sanitizeFileName(body.fileName)}`
   const upload = await env.UPLOADS.createMultipartUpload(key, {
     httpMetadata: { contentType: body.contentType || 'application/octet-stream' },
@@ -6177,11 +6229,22 @@ async function uploadMultipartPart(env: Env, request: Request) {
   return ok(part)
 }
 
+async function abortMultipartUpload(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { key?: string; uploadId?: string }
+  const key = String(body.key ?? '')
+  const uploadId = String(body.uploadId ?? '')
+  if (!key || !uploadId || !key.startsWith('uploads/')) {
+    return fail('分片参数不完整')
+  }
+  await env.UPLOADS.resumeMultipartUpload(key, uploadId).abort()
+  return ok({ ok: true })
+}
+
 async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const form = await request.formData()
   const key = String(form.get('key') ?? '')
   const uploadId = String(form.get('uploadId') ?? '')
-  const fileId = String(form.get('fileId') ?? Date.now())
+  const fileId = String(form.get('fileId') ?? nextNumericId())
   const taskId = String(form.get('taskId') ?? '')
   const entryId = String(form.get('entryId') ?? '').trim()
   const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
@@ -6198,37 +6261,43 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
   await upload.complete(parts)
 
   let previewKey: string | null = null
-  const preview = form.get('preview')
-  if (preview instanceof File && preview.size > 0) {
-    previewKey = `previews/${taskId}/${fileId}/${sanitizeFileName(preview.name)}`
-    await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
-  }
+  try {
+    const preview = form.get('preview')
+    if (preview instanceof File && preview.size > 0) {
+      previewKey = `previews/${taskId}/${fileId}/${sanitizeFileName(preview.name)}`
+      await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
+    }
 
-  const fileName = String(form.get('name') ?? '未命名文件')
-  const saved = await insertAttachment(env, {
-    id: fileId,
-    taskId,
-    entryId,
-    scope,
-    fileName,
-    fileType: inferAttachmentFileType(fileName, String(form.get('contentType') ?? '') || null, String(form.get('type') ?? '')),
-    mimeType: String(form.get('contentType') ?? '') || null,
-    r2Key: key,
-    previewKey,
-    fileSize: Number(form.get('fileSize')) || null,
-    displaySize: String(form.get('size') ?? ''),
-    final: form.get('final') === 'true',
-    visible: form.get('visible') !== 'false',
-    tag: String(form.get('tag') ?? ''),
-    analyze: form.get('analyze') !== 'false',
-  })
-  if (saved instanceof Response) {
-    return saved
+    const fileName = String(form.get('name') ?? '未命名文件')
+    const saved = await insertAttachment(env, {
+      id: fileId,
+      taskId,
+      entryId,
+      scope,
+      fileName,
+      fileType: inferAttachmentFileType(fileName, String(form.get('contentType') ?? '') || null, String(form.get('type') ?? '')),
+      mimeType: String(form.get('contentType') ?? '') || null,
+      r2Key: key,
+      previewKey,
+      fileSize: Number(form.get('fileSize')) || null,
+      displaySize: String(form.get('size') ?? ''),
+      final: form.get('final') === 'true',
+      visible: form.get('visible') !== 'false',
+      tag: String(form.get('tag') ?? ''),
+      analyze: form.get('analyze') !== 'false',
+    })
+    if (saved instanceof Response) {
+      await Promise.allSettled([env.UPLOADS.delete(key), ...(previewKey ? [env.UPLOADS.delete(previewKey)] : [])])
+      return saved
+    }
+    if (form.get('analyze') !== 'false') {
+      enqueueAnalysis(env, ctx, fileId)
+    }
+    return ok(saved, 201)
+  } catch (error) {
+    await Promise.allSettled([env.UPLOADS.delete(key), ...(previewKey ? [env.UPLOADS.delete(previewKey)] : [])])
+    throw error
   }
-  if (form.get('analyze') !== 'false') {
-    enqueueAnalysis(env, ctx, fileId)
-  }
-  return ok(saved, 201)
 }
 
 async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
@@ -6274,10 +6343,16 @@ async function setFilePreview(env: Env, id: string, request: Request) {
 }
 
 async function getFilePreview(env: Env, id: string, request: Request) {
-  const row = await env.DB.prepare('SELECT preview_r2_key, mime_type, visible_to_client FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{
+  const row = await env.DB.prepare(`
+    SELECT attachments.preview_r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month
+    FROM attachments
+    LEFT JOIN tasks ON tasks.id = attachments.task_id
+    WHERE attachments.id = ? AND attachments.deleted_at IS NULL
+  `).bind(id).first<{
     preview_r2_key: string | null
     mime_type: string | null
     visible_to_client: number
+    settlement_month: string | null
   }>()
   if (!row?.preview_r2_key) {
     return fail('没有预览图', 404)
@@ -6287,7 +6362,11 @@ async function getFilePreview(env: Env, id: string, request: Request) {
   if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
     const url = new URL(request.url)
     const requestRole = await resolveRequestRole(env, request)
-    if (!requestRole && !row.visible_to_client) {
+    const canReadByRole = Boolean(requestRole && (
+      canSeeFullData(requestRole) ||
+      (requestRole === 'client' && row.settlement_month === monthPart(nowIso()))
+    ))
+    if (!row.visible_to_client && !canReadByRole) {
       const shareToken = url.searchParams.get('token') ?? ''
       const canRead = await canReadSharedFile(env, id, shareToken)
       if (!canRead) {
@@ -6310,11 +6389,17 @@ async function getFilePreview(env: Env, id: string, request: Request) {
 
 async function getFileSource(env: Env, id: string, request: Request) {
   const url = new URL(request.url)
-  const row = await env.DB.prepare('SELECT file_name, r2_key, mime_type, visible_to_client FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{
+  const row = await env.DB.prepare(`
+    SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month
+    FROM attachments
+    LEFT JOIN tasks ON tasks.id = attachments.task_id
+    WHERE attachments.id = ? AND attachments.deleted_at IS NULL
+  `).bind(id).first<{
     file_name: string
     r2_key: string
     mime_type: string | null
     visible_to_client: number
+    settlement_month: string | null
   }>()
   if (!row?.r2_key) {
     return fail('文件不存在', 404)
@@ -6322,7 +6407,11 @@ async function getFileSource(env: Env, id: string, request: Request) {
 
   if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
     const requestRole = await resolveRequestRole(env, request)
-    if (!requestRole && !row.visible_to_client) {
+    const canReadByRole = Boolean(requestRole && (
+      canSeeFullData(requestRole) ||
+      (requestRole === 'client' && row.settlement_month === monthPart(nowIso()))
+    ))
+    if (!row.visible_to_client && !canReadByRole) {
       const shareToken = url.searchParams.get('token') ?? ''
       const canRead = await canReadSharedFile(env, id, shareToken)
       if (!canRead) {
@@ -6349,7 +6438,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
 
 async function updateFileMetadata(env: Env, id: string, request: Request) {
   const body = (await request.json()) as { name?: string; tag?: string; scope?: string }
-  const current = await env.DB.prepare('SELECT file_name, file_tag FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ file_name: string; file_tag: string | null }>()
+  const current = await env.DB.prepare('SELECT task_id, file_name, file_tag FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ task_id: string; file_name: string; file_tag: string | null }>()
   if (!current) {
     return fail('文件不存在', 404)
   }
@@ -6362,7 +6451,7 @@ async function updateFileMetadata(env: Env, id: string, request: Request) {
   } else {
     await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ? WHERE id = ?').bind(nextName, nextTag, id).run()
   }
-  await audit(env, 'update', 'attachment', id, { fileName: nextName, tag: nextTag })
+  await audit(env, 'update', 'attachment', id, { taskId: Number(current.task_id), fileName: nextName, tag: nextTag, scope: nextScope })
 
   const row = await env.DB.prepare(`
     SELECT a.*, t.title AS task_title
@@ -8881,7 +8970,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return setEntryAttachmentsArchived(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/tasks/') && request.method === 'PATCH') {
-    return updateTask(env, path.split('/').pop() ?? '', request, ctx)
+    return updateTask(env, path.split('/').pop() ?? '', request, role, ctx)
   }
   if (path.startsWith('/api/tasks/') && path.endsWith('/void') && request.method === 'POST') {
     return voidTask(env, path.split('/')[3], request)
@@ -8912,6 +9001,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/files/multipart/part' && request.method === 'PUT') {
     return uploadMultipartPart(env, request)
+  }
+  if (path === '/api/files/multipart/abort' && request.method === 'POST') {
+    return abortMultipartUpload(env, request)
   }
   if (path === '/api/files/multipart/complete' && request.method === 'POST') {
     return completeMultipartUpload(env, request, ctx)
