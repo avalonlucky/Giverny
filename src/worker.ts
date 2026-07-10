@@ -1506,7 +1506,11 @@ ${JSON.stringify(payload)}`
       continue
     }
     try {
-      const output = await callAiEndpointText(endpoint, prompt, maxOutputTokens)
+      const output = await callWithAiTimeout(
+        (signal) => callAiEndpointText(endpoint, prompt, maxOutputTokens, signal),
+        30_000,
+        `${route === 'textPrimary' ? '文字主模型' : '文字备用模型'}响应超时`,
+      )
       const parsed = parseLooseJsonObject(output)
       if (Object.keys(parsed).length > 0) {
         return parsed as T
@@ -2452,6 +2456,7 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   await env.DB.prepare('UPDATE tasks SET time_entries_json = ?, actual_hours = ?, status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(JSON.stringify(entries), actualHours, nextStatus, nextStatus, nextProgress, actualDeliveryDate, task.id)
     .run()
+  await updateHourEstimateObservation(env, task.id, actualHours, nextStatus === '已验收')
   await audit(env, 'agent_append_progress', 'task', task.id, entry)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
@@ -5218,6 +5223,7 @@ type DailyKnowledgeToolArgs = {
 }
 
 type HourEstimateSample = {
+  id: string
   title: string
   requirement: string
   designType: string
@@ -5232,6 +5238,64 @@ type HourEstimateSample = {
   status: string
   deliveryCycleHours: number
 }
+
+type HourEstimateSampleRelation = 'exact' | 'semantic' | 'parent'
+
+type WeightedHourEstimateSample = HourEstimateSample & {
+  relation: HourEstimateSampleRelation
+  relevance: number
+}
+
+type HourEstimateConfidence = '低' | '中' | '高'
+
+type HourEstimateResult = {
+  suggestedHours: number
+  safeHours: number
+  confidence: HourEstimateConfidence
+  basis: string[]
+  historicalSummary: string
+  sampleCount: number
+  exactSampleCount: number
+  similarSampleCount: number
+  averageHours: number
+  medianHours: number
+  minHours: number
+  maxHours: number
+  averageDeliveryDays: number
+  matchedType: string
+  usedFallback: boolean
+  usedSemantic: boolean
+  matchedTasks: Array<{
+    id: number
+    title: string
+    type: string
+    actualHours: number
+    relation: '精确同类' | '语义相似' | '同大类参考'
+    score: number
+  }>
+}
+
+type HourEstimateRequest = {
+  title?: string
+  requirement?: string
+  selectedType?: string
+  requester?: string
+  startDate?: string
+  estimatedDate?: string
+  currentEstimatedHours?: number
+  attachmentText?: string
+  attachmentNames?: string[]
+}
+
+const hourEstimateSystemPrompt = `你是设计兼职任务的工时分析助理。系统已经用历史已验收任务算出稳健统计基线，你只能依据当前需求和提供的历史样本在合理范围内微调并解释。
+
+规则：
+- 工时是设计师实际投入，不是预计开始到交付之间的自然时间差；交付周期只能作为排期背景。
+- exact 是精确同类型样本，semantic 是需求语义相似样本，parent 只是同大类弱参考，不得混为同等证据。
+- 优先参考 weightedMedianHours、p80Hours 和 currentEstimatedHours；不要被单个极端值带偏。
+- 必须识别从零设计、复用既有风格、交付件数量、页数/尺寸/平台适配、改稿风险和甲方文案附件带来的工作量差异。
+- suggestedHours 应代表常规投入；不要编造不存在的历史数据。样本不足或相似度弱时必须降低置信度。
+- 依据要短、具体、可解释。`
 
 const taskAssistantCategoryRules = `\n\n【分类规则】\n- availableDesignTypeGroups 是当前已配置分类，不是封闭选项。\n- 已有大类合适但子类缺失时，复用该大类并输出新的子类。例如「视频剪辑」「短视频剪辑」「直播切片」若没有对应子类，可建议「传播类 / 视频剪辑」或更贴切的新子类。\n- 如果大类也不合适，可以输出新的大类。\n- 不要为了让 categoryExists=true 把任务硬套进「海报」「单页 / 折页」「官网 banner」「邀请函长图」等不准确分类。`
 
@@ -5320,29 +5384,6 @@ function parseTextToolArguments(value: unknown): TextAssistantToolArgs {
   return typeof value === 'object' ? (value as TextAssistantToolArgs) : {}
 }
 
-function parseHourEstimateToolArguments(value: unknown): HourEstimateToolArgs {
-  if (!value) {
-    return {}
-  }
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value) as HourEstimateToolArgs
-    } catch {
-      return {}
-    }
-  }
-  return typeof value === 'object' ? (value as HourEstimateToolArgs) : {}
-}
-
-function numberListMedian(values: number[]) {
-  if (values.length === 0) {
-    return 0
-  }
-  const sorted = [...values].sort((a, b) => a - b)
-  const middle = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
-}
-
 function roundToHalfHour(value: number) {
   return Math.max(0.5, Math.round(value * 2) / 2)
 }
@@ -5366,8 +5407,82 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
+function medianValue(values: number[]) {
+  if (values.length === 0) {
+    return 0
+  }
+  const sorted = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
+function weightedAverage(samples: WeightedHourEstimateSample[]) {
+  const totalWeight = samples.reduce((sum, sample) => sum + sample.relevance, 0)
+  if (totalWeight <= 0) {
+    return 0
+  }
+  return samples.reduce((sum, sample) => sum + sample.actualHours * sample.relevance, 0) / totalWeight
+}
+
+function weightedHourQuantile(samples: WeightedHourEstimateSample[], quantile: number) {
+  if (samples.length === 0) {
+    return 0
+  }
+  const sorted = [...samples].sort((a, b) => a.actualHours - b.actualHours)
+  const totalWeight = sorted.reduce((sum, sample) => sum + sample.relevance, 0)
+  const target = Math.max(0, Math.min(1, quantile)) * totalWeight
+  let cumulative = 0
+  for (const sample of sorted) {
+    cumulative += sample.relevance
+    if (cumulative >= target) {
+      return sample.actualHours
+    }
+  }
+  return sorted[sorted.length - 1].actualHours
+}
+
+function normalizeHourEstimateConfidence(value: unknown): HourEstimateConfidence {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === '高' || normalized === 'high') return '高'
+  if (normalized === '低' || normalized === 'low') return '低'
+  return '中'
+}
+
+function lowerHourEstimateConfidence(left: HourEstimateConfidence, right: HourEstimateConfidence): HourEstimateConfidence {
+  const rank: Record<HourEstimateConfidence, number> = { 低: 0, 中: 1, 高: 2 }
+  return rank[left] <= rank[right] ? left : right
+}
+
+function calibratedHourEstimateConfidence(
+  exactCount: number,
+  similarSamples: WeightedHourEstimateSample[],
+  p25Hours: number,
+  medianHours: number,
+  p80Hours: number,
+): HourEstimateConfidence {
+  if (medianHours <= 0) {
+    return '低'
+  }
+  const relativeSpread = (p80Hours - p25Hours) / medianHours
+  const strongSimilarCount = similarSamples.filter((sample) => sample.relation === 'semantic' && sample.relevance >= 0.62).length
+  if (exactCount >= 5 && relativeSpread <= 0.45) {
+    return '高'
+  }
+  if ((exactCount >= 3 && relativeSpread <= 0.8) || (exactCount >= 2 && strongSimilarCount >= 2 && relativeSpread <= 0.65)) {
+    return '中'
+  }
+  return '低'
+}
+
+function hourEstimateRelationLabel(relation: HourEstimateSampleRelation) {
+  if (relation === 'exact') return '精确同类' as const
+  if (relation === 'semantic') return '语义相似' as const
+  return '同大类参考' as const
+}
+
 function toHourEstimateSample(task: DbTask): HourEstimateSample {
   return {
+    id: String(task.id),
     title: task.title,
     requirement: task.requirement ?? '',
     designType: task.design_type ?? '',
@@ -5386,8 +5501,99 @@ function toHourEstimateSample(task: DbTask): HourEstimateSample {
       .join(' ／ ')
       .slice(0, 600),
     status: task.status,
-    deliveryCycleHours: hoursBetweenDates(task.start_date, task.actual_delivery_date || task.estimated_delivery_date),
+    deliveryCycleHours: hoursBetweenDates(task.start_date, task.actual_delivery_date),
   }
+}
+
+async function hourEstimateTasksByIds(env: Env, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => /^\d+$/.test(id)))).slice(0, 20)
+  if (uniqueIds.length === 0) {
+    return []
+  }
+  const placeholders = uniqueIds.map(() => '?').join(',')
+  const rows = await env.DB.prepare(
+    `SELECT * FROM tasks
+     WHERE id IN (${placeholders})
+       AND deleted_at IS NULL AND voided_at IS NULL
+       AND status = '已验收' AND actual_hours > 0`,
+  ).bind(...uniqueIds).all<DbTask>()
+  const byId = new Map((rows.results ?? []).map((task) => [String(task.id), task]))
+  return uniqueIds.map((id) => byId.get(id)).filter((task): task is DbTask => Boolean(task))
+}
+
+async function persistHourEstimateSuggestion(
+  env: Env,
+  body: HourEstimateRequest,
+  result: HourEstimateResult,
+  provider: string,
+) {
+  const suggestionId = crypto.randomUUID()
+  const inputFingerprint = await fingerprintInsightData({
+    title: String(body.title ?? '').trim(),
+    requirement: String(body.requirement ?? '').trim(),
+    selectedType: String(body.selectedType ?? '').trim(),
+    requester: String(body.requester ?? '').trim(),
+    attachmentText: String(body.attachmentText ?? '').trim(),
+    attachmentNames: Array.isArray(body.attachmentNames) ? body.attachmentNames.map(String) : [],
+  })
+  await env.DB.prepare(
+    `INSERT INTO hour_estimate_suggestions (
+       id, input_fingerprint, title, requirement, design_type, requester,
+       suggested_hours, safe_hours, confidence, exact_sample_count, similar_sample_count,
+       provider, basis_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    suggestionId,
+    inputFingerprint,
+    String(body.title ?? '').trim(),
+    String(body.requirement ?? '').trim(),
+    String(body.selectedType ?? '').trim(),
+    String(body.requester ?? '').trim(),
+    result.suggestedHours,
+    result.safeHours,
+    result.confidence,
+    result.exactSampleCount,
+    result.similarSampleCount,
+    provider,
+    JSON.stringify(result.basis),
+  ).run()
+  await audit(env, 'suggest', 'ai_hour_estimate', suggestionId, {
+    title: String(body.title ?? '').trim(),
+    selectedType: String(body.selectedType ?? '').trim(),
+    sampleCount: result.sampleCount,
+    exactSampleCount: result.exactSampleCount,
+    similarSampleCount: result.similarSampleCount,
+    suggestedHours: result.suggestedHours,
+    safeHours: result.safeHours,
+    confidence: result.confidence,
+    usedFallback: result.usedFallback,
+    provider,
+  })
+  return { suggestionId, ...result }
+}
+
+async function linkHourEstimateSuggestion(env: Env, suggestionId: string, taskId: string, selectedHours: number) {
+  if (!suggestionId || !/^[a-f0-9-]{20,}$/i.test(suggestionId)) {
+    return
+  }
+  await env.DB.prepare(
+    `UPDATE hour_estimate_suggestions
+     SET task_id = ?, selected_hours = ?,
+       status = CASE WHEN ABS(suggested_hours - ?) < 0.01 THEN 'adopted' ELSE 'edited' END,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND task_id IS NULL`,
+  ).bind(taskId, selectedHours, selectedHours, suggestionId).run()
+}
+
+async function updateHourEstimateObservation(env: Env, taskId: string, actualHours: number, accepted: boolean) {
+  if (!Number.isFinite(actualHours) || actualHours < 0) {
+    return
+  }
+  await env.DB.prepare(
+    `UPDATE hour_estimate_suggestions
+     SET actual_hours = ?, status = CASE WHEN ? THEN 'observed' ELSE status END, updated_at = CURRENT_TIMESTAMP
+     WHERE task_id = ?`,
+  ).bind(actualHours, accepted ? 1 : 0, taskId).run()
 }
 
 async function getDesignTypeGroups(env: Env) {
@@ -5974,6 +6180,8 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
     )
     .run()
 
+  await linkHourEstimateSuggestion(env, task.hourEstimateSuggestionId ?? '', id, Number(task.estimatedHours) || 0)
+
   const updateId = `${id}-created`
   await env.DB.prepare(
     `INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_to_client)
@@ -6116,6 +6324,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
     )
     .run()
 
+  await updateHourEstimateObservation(env, id, Number(next.actualHours) || 0, next.status === '已验收')
   await audit(env, 'update', 'task', id, changes)
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
   ctx?.waitUntil(indexTaskSearch(env, id))
@@ -6187,6 +6396,11 @@ async function createUpdate(env: Env, request: Request) {
     .bind(update.hours, update.visible ? 1 : 0, toId(update.taskId))
     .run()
 
+  const updatedTask = await env.DB.prepare('SELECT actual_hours, status FROM tasks WHERE id = ?').bind(toId(update.taskId)).first<{ actual_hours: number; status: string }>()
+  if (updatedTask) {
+    await updateHourEstimateObservation(env, toId(update.taskId), Number(updatedTask.actual_hours) || 0, updatedTask.status === '已验收')
+  }
+
   await audit(env, 'create', 'update', id, update)
   return ok({ ...update, id: Number(id) }, 201)
 }
@@ -6220,6 +6434,10 @@ async function updateUpdate(env: Env, id: string, request: Request) {
     )
       .bind(delta, current.task_id)
       .run()
+    const updatedTask = await env.DB.prepare('SELECT actual_hours, status FROM tasks WHERE id = ?').bind(current.task_id).first<{ actual_hours: number; status: string }>()
+    if (updatedTask) {
+      await updateHourEstimateObservation(env, current.task_id, Number(updatedTask.actual_hours) || 0, updatedTask.status === '已验收')
+    }
   }
 
   await audit(env, 'update', 'update', id, { ...changes, taskId: Number(current.task_id) })
@@ -6238,6 +6456,10 @@ async function deleteUpdate(env: Env, id: string) {
   )
     .bind(Number(current.hours), current.task_id)
     .run()
+  const updatedTask = await env.DB.prepare('SELECT actual_hours, status FROM tasks WHERE id = ?').bind(current.task_id).first<{ actual_hours: number; status: string }>()
+  if (updatedTask) {
+    await updateHourEstimateObservation(env, current.task_id, Number(updatedTask.actual_hours) || 0, updatedTask.status === '已验收')
+  }
   await audit(env, 'delete', 'update', id, { taskId: Number(current.task_id), hours: Number(current.hours), title: current.title })
   return ok({ ok: true })
 }
@@ -8744,311 +8966,202 @@ async function planAgentAction(env: Env, request: Request) {
 }
 
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
-  const body = (await request.json().catch(() => ({}))) as {
-    title?: string
-    requirement?: string
-    selectedType?: string
-    startDate?: string
-    estimatedDate?: string
-  }
-  const title = String(body.title ?? '').trim()
-  const requirement = String(body.requirement ?? '').trim()
-  const selectedType = String(body.selectedType ?? '').trim()
-  if (!selectedType && !title && !requirement) {
-    return fail('请先填写设计类型、项目名称或任务具体需求')
+  const body = (await request.json().catch(() => ({}))) as HourEstimateRequest
+  const title = String(body.title ?? '').trim().slice(0, 200)
+  const requirement = String(body.requirement ?? '').trim().slice(0, 6000)
+  const selectedType = String(body.selectedType ?? '').trim().slice(0, 120)
+  const requester = String(body.requester ?? '').trim().slice(0, 120)
+  const attachmentText = String(body.attachmentText ?? '').trim().slice(0, 5000)
+  const attachmentNames = (Array.isArray(body.attachmentNames) ? body.attachmentNames : []).map(String).map((name) => name.slice(0, 160)).slice(0, 6)
+  const currentEstimatedHours = roundToHalfHour(Number(body.currentEstimatedHours) > 0 ? Number(body.currentEstimatedHours) : 2)
+  if (!selectedType || (!title && !requirement)) {
+    return fail('请先选择设计类型，并填写任务名称或任务具体需求')
   }
 
   const exactRows = selectedType
     ? await env.DB.prepare(
         `SELECT * FROM tasks
          WHERE deleted_at IS NULL AND voided_at IS NULL
-           AND actual_hours > 0
-           AND design_type = ?
-         ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
-         LIMIT 24`,
-      )
-        .bind(selectedType)
-        .all<DbTask>()
+           AND status = '已验收' AND actual_hours > 0 AND design_type = ?
+         ORDER BY actual_delivery_date DESC, updated_at DESC
+         LIMIT 16`,
+      ).bind(selectedType).all<DbTask>()
     : { results: [] as DbTask[], success: true }
+  const exactSamples = (exactRows.results ?? []).map((task) => ({
+    ...toHourEstimateSample(task),
+    relation: 'exact' as const,
+    relevance: 1,
+  }))
+  const knownIds = new Set(exactSamples.map((sample) => sample.id))
 
-  let tasks = exactRows.results ?? []
-  let usedFallback = false
+  const semanticQuery = [title, selectedType, requirement, attachmentNames.join(' '), attachmentText.slice(0, 1500)].filter(Boolean).join('\n')
+  const semanticMatches = (await semanticTaskIds(env, semanticQuery, 16))
+    .filter((match) => match.score >= 0.52 && !knownIds.has(match.id))
+  const semanticScoreById = new Map(semanticMatches.map((match) => [match.id, match.score]))
+  const semanticRows = await hourEstimateTasksByIds(env, semanticMatches.map((match) => match.id))
+  const semanticSamples = semanticRows.map((task) => ({
+    ...toHourEstimateSample(task),
+    relation: 'semantic' as const,
+    relevance: Math.min(0.9, Math.max(0.5, semanticScoreById.get(String(task.id)) ?? 0.5)),
+  })).slice(0, 6)
+  semanticSamples.forEach((sample) => knownIds.add(sample.id))
+
   const parentType = selectedType.split('/')[0]?.trim()
-  if (tasks.length < 3 && parentType) {
-    const fallbackRows = await env.DB.prepare(
-      `SELECT * FROM tasks
-       WHERE deleted_at IS NULL AND voided_at IS NULL
-         AND actual_hours > 0
-         AND design_type LIKE ?
-       ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
-       LIMIT 24`,
-    )
-      .bind(`${parentType}%`)
-      .all<DbTask>()
-    const knownIds = new Set(tasks.map((task) => task.id))
-    tasks = [...tasks, ...((fallbackRows.results ?? []).filter((task) => !knownIds.has(task.id)))]
-    usedFallback = tasks.some((task) => task.design_type !== selectedType)
-  }
+  const parentRows = exactSamples.length + semanticSamples.length < 3 && parentType
+    ? await env.DB.prepare(
+        `SELECT * FROM tasks
+         WHERE deleted_at IS NULL AND voided_at IS NULL
+           AND status = '已验收' AND actual_hours > 0
+           AND design_type LIKE ? AND design_type != ?
+         ORDER BY actual_delivery_date DESC, updated_at DESC
+         LIMIT 8`,
+      ).bind(`${parentType}%`, selectedType).all<DbTask>()
+    : { results: [] as DbTask[], success: true }
+  const parentSamples = (parentRows.results ?? [])
+    .filter((task) => !knownIds.has(String(task.id)))
+    .map((task) => ({ ...toHourEstimateSample(task), relation: 'parent' as const, relevance: 0.35 }))
+    .slice(0, Math.max(0, 5 - exactSamples.length - semanticSamples.length))
 
-  if (tasks.length === 0) {
-    const fallbackRows = await env.DB.prepare(
-      `SELECT * FROM tasks
-       WHERE deleted_at IS NULL AND voided_at IS NULL
-         AND actual_hours > 0
-       ORDER BY CASE WHEN status = '已验收' THEN 0 ELSE 1 END, updated_at DESC
-       LIMIT 12`,
-    ).all<DbTask>()
-    tasks = fallbackRows.results ?? []
-    usedFallback = true
-  }
-
-  const samples = tasks.map(toHourEstimateSample).filter((sample) => sample.actualHours > 0)
-  const actualHours = samples.map((sample) => sample.actualHours)
-  const deliveryCycles = samples.map((sample) => sample.deliveryCycleHours).filter((value) => value > 0)
+  const similarSamples = [...semanticSamples, ...parentSamples]
+  const samples = [...exactSamples, ...similarSamples]
+  const exactSampleCount = exactSamples.length
+  const similarSampleCount = similarSamples.length
   const sampleCount = samples.length
-  const averageHours = Math.round(average(actualHours) * 100) / 100
-  const medianHours = Math.round(numberListMedian(actualHours) * 100) / 100
-  const minHours = actualHours.length ? Math.min(...actualHours) : 0
-  const maxHours = actualHours.length ? Math.max(...actualHours) : 0
-  const averageDeliveryDays = Math.round((average(deliveryCycles) / 24) * 10) / 10
-  const currentPlanHours = roundToHalfHour(hoursBetweenDates(String(body.startDate ?? ''), String(body.estimatedDate ?? '')) || 2)
-  const deterministicSuggestion = roundToHalfHour(sampleCount ? (medianHours * 0.6 + averageHours * 0.4) : currentPlanHours)
+  const usedSemantic = semanticSamples.length > 0
+  const usedFallback = similarSampleCount > 0
 
   if (sampleCount === 0) {
-    return ok({
-      suggestedHours: currentPlanHours,
+    const result: HourEstimateResult = {
+      suggestedHours: currentEstimatedHours,
+      safeHours: roundToHalfHour(currentEstimatedHours + 0.5),
       confidence: '低',
-      basis: ['暂无可用历史实际工时，暂按当前预计开始与交付时间推算。'],
-      historicalSummary: '还没有可用于同类工时分析的已记录实际工时。',
-      sampleCount,
-      averageHours,
-      medianHours,
-      minHours,
-      maxHours,
-      averageDeliveryDays,
+      basis: ['暂无可信的已验收相似任务；保留当前手工预估，并额外给出 0.5 小时稳妥余量。'],
+      historicalSummary: '当前没有足够历史证据，系统不会用交付日期跨度冒充实际投入工时。',
+      sampleCount: 0,
+      exactSampleCount: 0,
+      similarSampleCount: 0,
+      averageHours: 0,
+      medianHours: 0,
+      minHours: 0,
+      maxHours: 0,
+      averageDeliveryDays: 0,
       matchedType: selectedType,
-      usedFallback,
-    })
+      usedFallback: false,
+      usedSemantic: false,
+      matchedTasks: [],
+    }
+    return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history'))
   }
 
+  const actualHours = samples.map((sample) => sample.actualHours)
+  const deliveryCycles = samples.map((sample) => sample.deliveryCycleHours).filter((value) => value > 0)
+  const averageHours = Math.round(weightedAverage(samples) * 100) / 100
+  const p25Hours = weightedHourQuantile(samples, 0.25)
+  const medianHours = Math.round(weightedHourQuantile(samples, 0.5) * 100) / 100
+  const p80Hours = Math.round(weightedHourQuantile(samples, 0.8) * 100) / 100
+  const minHours = Math.min(...actualHours)
+  const maxHours = Math.max(...actualHours)
+  const averageDeliveryDays = Math.round((average(deliveryCycles) / 24) * 10) / 10
+  const calibrationRows = selectedType
+    ? await env.DB.prepare(
+        `SELECT suggested_hours, actual_hours
+         FROM hour_estimate_suggestions
+         WHERE design_type = ? AND status = 'observed'
+           AND suggested_hours > 0 AND actual_hours > 0
+         ORDER BY updated_at DESC
+         LIMIT 30`,
+      ).bind(selectedType).all<{ suggested_hours: number; actual_hours: number }>()
+    : { results: [] as Array<{ suggested_hours: number; actual_hours: number }>, success: true }
+  const calibrationRatios = (calibrationRows.results ?? [])
+    .map((row) => Number(row.actual_hours) / Number(row.suggested_hours))
+    .filter((ratio) => Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4)
+  const calibrationRatio = calibrationRatios.length >= 3
+    ? Math.min(1.6, Math.max(0.65, medianValue(calibrationRatios)))
+    : 1
+  const deterministicSuggestion = roundToHalfHour((medianHours || averageHours || currentEstimatedHours) * calibrationRatio)
+  const dataConfidence = calibratedHourEstimateConfidence(exactSampleCount, similarSamples, p25Hours, medianHours, p80Hours)
+  const matchedTasks = samples.slice(0, 5).map((sample) => ({
+    id: Number(sample.id),
+    title: sample.title,
+    type: sample.designType,
+    actualHours: sample.actualHours,
+    relation: hourEstimateRelationLabel(sample.relation),
+    score: Math.round(sample.relevance * 100) / 100,
+  }))
   const aiPayload = {
     currentTask: {
       title,
       requirement,
       selectedType,
-      startDate: body.startDate ?? '',
-      estimatedDate: body.estimatedDate ?? '',
-      currentPlanHours,
+      requester,
+      startDate: String(body.startDate ?? ''),
+      estimatedDate: String(body.estimatedDate ?? ''),
+      currentEstimatedHours,
+      attachmentNames,
+      attachmentText,
     },
     statistics: {
-      sampleCount,
-      averageHours,
-      medianHours,
+      exactSampleCount,
+      similarSampleCount,
+      weightedAverageHours: averageHours,
+      weightedMedianHours: medianHours,
+      p25Hours,
+      p80Hours,
       minHours,
       maxHours,
       averageDeliveryDays,
       deterministicSuggestion,
-      usedFallback,
+      dataConfidence,
+      calibrationCount: calibrationRatios.length,
+      calibrationRatio: Math.round(calibrationRatio * 100) / 100,
     },
     historicalSamples: samples.slice(0, 12),
   }
 
-  const runtimeSuggestion = await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
-  if (runtimeSuggestion) {
-    const parsedHours = Number(runtimeSuggestion.suggestedHours)
-    const suggestedHours = roundToHalfHour(Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion)
-    const confidence = sampleCount < 3 ? '低' : runtimeSuggestion.confidence === '高' || runtimeSuggestion.confidence === '中' || runtimeSuggestion.confidence === '低' ? runtimeSuggestion.confidence : '中'
-    const basis = Array.isArray(runtimeSuggestion.basis) ? runtimeSuggestion.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
-    const historicalSummary = String(runtimeSuggestion.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
-    await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
-      selectedType,
-      sampleCount,
-      suggestedHours,
-      confidence,
-      usedFallback,
-      provider: 'baml-runtime',
-    })
-    return ok({
-      suggestedHours,
-      confidence,
-      basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
-      historicalSummary,
-      sampleCount,
-      averageHours,
-      medianHours,
-      minHours,
-      maxHours,
-      averageDeliveryDays,
-      matchedType: selectedType,
-      usedFallback,
-    })
-  }
-
-  const normalizeHourSuggestion = async (parsed: HourEstimateToolArgs | null, provider: string) => {
-    if (!parsed) {
-      return null
-    }
-    const parsedHours = Number(parsed.suggestedHours)
-    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
-      return null
-    }
-    const suggestedHours = roundToHalfHour(parsedHours)
-    const confidence = sampleCount < 3 ? '低' : parsed.confidence === '高' || parsed.confidence === '中' || parsed.confidence === '低' ? parsed.confidence : '中'
-    const basis = Array.isArray(parsed.basis) ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
-    const historicalSummary = String(parsed.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
-    await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
-      selectedType,
-      sampleCount,
-      suggestedHours,
-      confidence,
-      usedFallback,
-      provider,
-    })
-    return ok({
-      suggestedHours,
-      confidence,
-      basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
-      historicalSummary,
-      sampleCount,
-      averageHours,
-      medianHours,
-      minHours,
-      maxHours,
-      averageDeliveryDays,
-      matchedType: selectedType,
-      usedFallback,
-    })
-  }
-
-  const callFallback = async () =>
-    normalizeHourSuggestion(
-      await callTextFallbackJson<HourEstimateToolArgs>(
-        env,
-        '你是一个设计兼职任务的工时分析助理。请只基于系统提供的历史任务样本、实际工时、交付周期、验收备注和当前任务需求，给出新任务的预估工时建议。不要编造不存在的历史数据；样本少于 3 条时必须降低置信度。',
-        aiPayload,
-        'suggestedHours:number, confidence:"低"|"中"|"高", basis:string[], historicalSummary:string',
-      ),
-      'text-fallback',
+  let provider = 'baml-runtime'
+  let parsed = await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
+  if (!parsed) {
+    provider = 'text-model-chain'
+    parsed = await callTextFallbackJson<HourEstimateToolArgs>(
+      env,
+      hourEstimateSystemPrompt,
+      aiPayload,
+      'suggestedHours:number, confidence:"低"|"中"|"高"|"Low"|"Medium"|"High", basis:string[], historicalSummary:string',
+      1400,
     )
-
-  if (!env.DEEPSEEK_API_KEY) {
-    const fallback = await callFallback()
-    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
+  }
+  if (!parsed) {
+    provider = 'statistical-fallback'
   }
 
-  const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
-  const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
-  const toolName = 'suggest_task_hour_estimate'
-  let response: Response
-  try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-        'content-type': 'application/json',
-        // 冷知识「换一条」需要每次新内容，跳过 AI Gateway 缓存（其他 AI 调用保留缓存以提速省钱）
-        'cf-aig-skip-cache': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.15,
-        messages: [
-        {
-          role: 'system',
-          content:
-            '你是一个设计兼职任务的工时分析助理。请只基于系统提供的历史任务样本、实际工时、交付周期、验收备注和当前任务需求，给出新任务的预估工时建议。\n\n要求：不要编造不存在的历史数据；样本少于 3 条时必须降低置信度；建议工时用小时数，优先参考历史实际工时的平均数和中位数，可以根据当前任务复杂度微调；依据要短、具体、可解释。\n\n【重点·读懂备注里的工时上下文】每条样本都带 progressNotes(进展备注)、acceptanceNote(验收备注)、feedbackNote(体感)。实际工时偏离预估往往有原因，必须从这些备注里读出来，不能只看数字：\n- 识别「基于已有方案 / 复用昨天的风格 / 系列物料主题与排版基本不变 / 只是在原稿上适配 / 同一套视觉延续」这类「在原有基础上设计」的情况——这类样本工时低是因为复用，绝不代表该设计类型本身就快。\n- 据此判断当前新任务是否同样属于复用/系列延续（看当前 requirement 是否提到基于已有、系列、同主题、延用风格等）：若当前任务也是复用，可取较低工时；若当前任务是从零设计，则应回归该类型从零设计的合理工时，不要被「因复用而偏低」的历史样本把预估拉低。\n- 同理也识别因返工、补传、甲方反复改稿导致工时偏高的样本，避免把偶发高值当常态。',
-        },
-        {
-          role: 'user',
-          content: JSON.stringify(aiPayload),
-        },
-      ],
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: toolName,
-            description: '返回基于历史任务数据的工时建议',
-            parameters: {
-              type: 'object',
-              properties: {
-                suggestedHours: {
-                  type: 'number',
-                  description: '建议预估工时，单位小时。必须基于历史实际工时和当前任务复杂度。',
-                },
-                confidence: {
-                  type: 'string',
-                  enum: ['低', '中', '高'],
-                  description: '置信度。样本少于 3 条时只能为低。',
-                },
-                basis: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: '2-5 条中文依据，说明参考了哪些历史工时、交付周期、验收备注或当前需求因素。',
-                },
-                historicalSummary: {
-                  type: 'string',
-                  description: '一句中文总结历史同类任务表现。',
-                },
-              },
-              required: ['suggestedHours', 'confidence', 'basis', 'historicalSummary'],
-            },
-          },
-        },
-      ],
-        tool_choice: { type: 'function', function: { name: toolName } },
-      }),
-    })
-  } catch (error) {
-    console.warn(JSON.stringify({ event: 'ai_hour_estimate_deepseek_failed', error: describeAiCallError(error) }))
-    const fallback = await callFallback()
-    return fallback ?? fail(`AI 工时建议暂时不可用：${describeAiCallError(error)}`, 503)
-  }
-
-  if (!response.ok) {
-    const fallback = await callFallback()
-    if (fallback) {
-      return fallback
-    }
-    const errorText = await response.text().catch(() => '')
-    return fail(`AI 工时建议请求失败：${response.status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`, 502)
-  }
-
-  const data = (await response.json().catch(() => null)) as {
-    choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>; content?: string } }>
-  } | null
-  const message = data?.choices?.[0]?.message
-  const toolCall = message?.tool_calls?.find((item) => item.function?.name === toolName)
-  let parsed = parseHourEstimateToolArguments(toolCall?.function?.arguments)
-  if (!parsed.suggestedHours && message?.content) {
-    parsed = parseHourEstimateToolArguments(message.content)
-  }
-  const fallbackResult = !parsed.suggestedHours ? await callFallback() : null
-  if (fallbackResult) {
-    return fallbackResult
-  }
-
-  const parsedHours = Number(parsed.suggestedHours)
-  const suggestedHours = roundToHalfHour(Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion)
-  const confidence = sampleCount < 3 ? '低' : parsed.confidence === '高' || parsed.confidence === '中' || parsed.confidence === '低' ? parsed.confidence : '中'
-  const basis = Array.isArray(parsed.basis) ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5) : []
-  const historicalSummary = String(parsed.historicalSummary ?? '').trim() || `已参考 ${sampleCount} 条历史任务，实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`
-
-  await audit(env, 'suggest', 'ai_hour_estimate', title || selectedType || 'untitled', {
-    selectedType,
-    sampleCount,
+  const parsedHours = Number(parsed?.suggestedHours)
+  const lowerBound = Math.max(0.5, p25Hours * 0.5)
+  const upperBound = Math.max(p80Hours * 2, maxHours + 4, currentEstimatedHours * 2)
+  const modelHours = Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion
+  const suggestedHours = roundToHalfHour(Math.min(upperBound, Math.max(lowerBound, modelHours)))
+  const modelConfidence = parsed ? normalizeHourEstimateConfidence(parsed.confidence) : dataConfidence
+  const confidence = lowerHourEstimateConfidence(dataConfidence, modelConfidence)
+  const bufferRate = confidence === '高' ? 0.1 : confidence === '中' ? 0.15 : 0.25
+  const safeHours = roundToHalfHour(Math.max(p80Hours, suggestedHours * (1 + bufferRate), suggestedHours + 0.5))
+  const basis = Array.isArray(parsed?.basis)
+    ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5)
+    : []
+  const defaultBasis = [
+    `精确同类 ${exactSampleCount} 条、相关参考 ${similarSampleCount} 条；加权中位数 ${medianHours} h。`,
+    `稳妥值参考历史 P80 ${p80Hours} h，并按${confidence}置信度保留风险余量。`,
+    ...(calibrationRatios.length >= 3 ? [`已用 ${calibrationRatios.length} 条历史预测结果校准高估/低估偏差。`] : []),
+  ]
+  const historicalSummary = String(parsed?.historicalSummary ?? '').trim()
+    || `已参考 ${sampleCount} 条已验收任务；精确同类 ${exactSampleCount} 条，相关参考 ${similarSampleCount} 条。`
+  const result: HourEstimateResult = {
     suggestedHours,
+    safeHours,
     confidence,
-    usedFallback,
-    provider: 'deepseek-direct',
-  })
-
-  return ok({
-    suggestedHours,
-    confidence,
-    basis: basis.length ? basis : [`历史实际工时中位数 ${medianHours} h，平均 ${averageHours} h。`],
+    basis: basis.length ? basis : defaultBasis,
     historicalSummary,
     sampleCount,
+    exactSampleCount,
+    similarSampleCount,
     averageHours,
     medianHours,
     minHours,
@@ -9056,7 +9169,10 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     averageDeliveryDays,
     matchedType: selectedType,
     usedFallback,
-  })
+    usedSemantic,
+    matchedTasks,
+  }
+  return ok(await persistHourEstimateSuggestion(env, body, result, provider))
 }
 
 async function generateMonthlyReport(env: Env, request: Request) {

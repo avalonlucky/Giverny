@@ -26,6 +26,8 @@ export type Task = {
   reviewer: string
   stage: string
   estimatedHours: number
+  /** 新建任务时关联本次 AI 工时建议，用于后续对照最终实际工时；不作为任务业务字段展示。 */
+  hourEstimateSuggestionId?: string
   actualHours: number
   status: TaskStatus
   progress: number

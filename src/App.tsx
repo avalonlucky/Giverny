@@ -16799,11 +16799,20 @@ function NewTaskModal({
   const briefInputRef = useRef<HTMLInputElement | null>(null)
   const briefFilesRef = useRef<BriefItem[]>([])
   const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
+  const [hourSuggestionInputSignature, setHourSuggestionInputSignature] = useState('')
   const [hourSuggestionError, setHourSuggestionError] = useState('')
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
+  const currentHourSuggestionSignature = useMemo(() => JSON.stringify({
+    title: title.trim(),
+    requirement: requirement.trim(),
+    type: type.trim(),
+    requester: requester.trim(),
+    attachments: briefFiles.map((file) => ({ name: file.name, chars: file.chars, text: file.text.slice(0, 1000) })),
+  }), [briefFiles, requester, requirement, title, type])
+  const hourSuggestionIsStale = Boolean(hourSuggestion && hourSuggestionInputSignature !== currentHourSuggestionSignature)
 
   const revokeBriefPreview = useCallback((item: BriefItem) => {
     if (item.previewUrl?.startsWith('blob:')) {
@@ -17008,6 +17017,7 @@ function NewTaskModal({
       reviewer: reviewer.trim() || requester.trim(),
       stage: status,
       estimatedHours: estimated,
+      hourEstimateSuggestionId: hourSuggestion && !hourSuggestionIsStale ? hourSuggestion.suggestionId : undefined,
       actualHours: 0,
       status,
       progress: 0,
@@ -17175,10 +17185,15 @@ function NewTaskModal({
         title,
         requirement,
         selectedType: type,
+        requester,
         startDate,
         estimatedDate,
+        currentEstimatedHours: estimatedMinutes / 60,
+        attachmentText: briefFiles.filter((file) => !file.isImage).map((file) => file.text).join('\n\n').slice(0, 5000) || undefined,
+        attachmentNames: briefFiles.map((file) => file.name),
       })
       setHourSuggestion(suggestion)
+      setHourSuggestionInputSignature(currentHourSuggestionSignature)
     } catch (error) {
       setHourSuggestionError(error instanceof Error ? error.message : 'AI 工时建议暂时不可用')
     } finally {
@@ -17186,11 +17201,11 @@ function NewTaskModal({
     }
   }
 
-  const applyHourSuggestion = () => {
-    if (!hourSuggestion) {
+  const applyHourSuggestion = (hours = hourSuggestion?.suggestedHours) => {
+    if (!hourSuggestion || hourSuggestionIsStale || !hours) {
       return
     }
-    updateEstimatedMinutes(snapDurationMinutes(hourSuggestion.suggestedHours * 60))
+    updateEstimatedMinutes(snapDurationMinutes(hours * 60))
   }
 
   return (
@@ -17501,7 +17516,7 @@ function NewTaskModal({
                   type="button"
                   className="new-task-ai-pill"
                   onClick={() => void requestHourSuggestion()}
-                  disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
+                  disabled={isHourSuggestionLoading || !type.trim() || (!title.trim() && !requirement.trim())}
                 >
                   <Sparkles size={14} />
                   {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
@@ -17532,7 +17547,7 @@ function NewTaskModal({
                   type="button"
                   className="ghost-button compact-button"
                   onClick={() => void requestHourSuggestion()}
-                  disabled={isHourSuggestionLoading || (!type.trim() && !title.trim() && !requirement.trim())}
+                  disabled={isHourSuggestionLoading || !type.trim() || (!title.trim() && !requirement.trim())}
                 >
                   <Sparkles size={14} />
                   {isHourSuggestionLoading ? '分析中' : 'AI 分析'}
@@ -17552,17 +17567,25 @@ function NewTaskModal({
             {hourSuggestion && (
               <div className="hour-estimate-result">
                 <div className="hour-estimate-main">
-                  <span>建议预估</span>
-                  <strong>{hourSuggestion.suggestedHours.toFixed(1)} h</strong>
+                  <div className="hour-estimate-primary-value">
+                    <span>常规预估</span>
+                    <strong>{hourSuggestion.suggestedHours.toFixed(1)} h</strong>
+                  </div>
+                  <div className="hour-estimate-safe-value">
+                    <span>稳妥预留</span>
+                    <strong>{hourSuggestion.safeHours.toFixed(1)} h</strong>
+                  </div>
                   <em className={`hour-confidence confidence-${hourSuggestion.confidence}`}>{hourSuggestion.confidence}置信度</em>
                 </div>
                 <div className="hour-estimate-stats">
-                  <span>{hourSuggestion.sampleCount} 条样本</span>
-                  <span>平均 {hourSuggestion.averageHours.toFixed(1)} h</span>
-                  <span>中位 {hourSuggestion.medianHours.toFixed(1)} h</span>
+                  <span>精确同类 {hourSuggestion.exactSampleCount} 条</span>
+                  <span>相关参考 {hourSuggestion.similarSampleCount} 条</span>
+                  {hourSuggestion.sampleCount > 0 && <span>历史中位 {hourSuggestion.medianHours.toFixed(1)} h</span>}
+                  {hourSuggestion.sampleCount > 0 && <span>范围 {hourSuggestion.minHours.toFixed(1)}–{hourSuggestion.maxHours.toFixed(1)} h</span>}
                   {hourSuggestion.averageDeliveryDays > 0 && <span>平均周期 {hourSuggestion.averageDeliveryDays.toFixed(1)} 天</span>}
                 </div>
                 <p>{hourSuggestion.historicalSummary}</p>
+                {hourSuggestionIsStale && <p className="hour-estimate-stale">任务信息已经变化，请重新分析后再采用。</p>}
                 {hourSuggestion.basis.length > 0 && (
                   <ul>
                     {hourSuggestion.basis.map((item, index) => (
@@ -17570,11 +17593,30 @@ function NewTaskModal({
                     ))}
                   </ul>
                 )}
+                {hourSuggestion.matchedTasks.length > 0 && (
+                  <details className="hour-estimate-samples">
+                    <summary>查看参考任务</summary>
+                    <div>
+                      {hourSuggestion.matchedTasks.map((sample) => (
+                        <p key={sample.id}>
+                          <span>{sample.relation}</span>
+                          <strong>{sample.title}</strong>
+                          <em>{sample.actualHours.toFixed(1)} h</em>
+                        </p>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <div className="hour-estimate-actions">
-                  {hourSuggestion.usedFallback && <small>同类型样本不足，已参考相近类型任务。</small>}
-                  <button type="button" className="primary-button compact-button" onClick={applyHourSuggestion}>
-                    采用建议
-                  </button>
+                  <small>{hourSuggestion.usedFallback ? '精确样本不足时，相关任务仅作为较低权重参考。' : '建议仅使用已验收任务的真实工时。'}</small>
+                  <div>
+                    <button type="button" className="ghost-button compact-button" disabled={hourSuggestionIsStale} onClick={() => applyHourSuggestion(hourSuggestion.safeHours)}>
+                      采用稳妥值
+                    </button>
+                    <button type="button" className="primary-button compact-button" disabled={hourSuggestionIsStale} onClick={() => applyHourSuggestion(hourSuggestion.suggestedHours)}>
+                      采用常规值
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

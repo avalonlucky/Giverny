@@ -10293,10 +10293,27 @@ button.file-chip:focus-visible {
   font-weight: 800;
 }
 
+.hour-estimate-primary-value,
+.hour-estimate-safe-value {
+  display: grid;
+  gap: 1px;
+}
+
 .hour-estimate-main strong {
   color: var(--color-primary-strong);
   font-size: 22px;
   font-weight: 900;
+}
+
+.hour-estimate-safe-value {
+  padding-left: 10px;
+  border-left: 1px solid var(--color-border);
+}
+
+.hour-estimate-safe-value strong {
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .hour-confidence {
@@ -10340,8 +10357,61 @@ button.file-chip:focus-visible {
   line-height: 1.7;
 }
 
+.hour-estimate-stale {
+  padding-left: 9px;
+  border-left: 2px solid var(--color-status-warning);
+  color: var(--color-status-warning) !important;
+}
+
+.hour-estimate-samples {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hour-estimate-samples summary {
+  padding: 7px 0;
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hour-estimate-samples > div {
+  padding-bottom: 6px;
+}
+
+.hour-estimate-samples p {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.hour-estimate-samples p span,
+.hour-estimate-samples p em {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.hour-estimate-samples p strong {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hour-estimate-actions {
   justify-content: space-between;
+}
+
+.hour-estimate-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .schedule-anchor-switch {

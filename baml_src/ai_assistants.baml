@@ -125,12 +125,16 @@ function OptimizeTaskText(payload_json: string) -> TextAssistantOutput {
 function SuggestHourEstimate(payload_json: string) -> HourEstimateOutput {
   client DeepSeekDefault
   prompt #"
-    你是一个设计兼职任务的工时分析助理。请只基于系统提供的历史任务样本、实际工时、交付周期、验收备注和当前任务需求，给出新任务的预估工时建议。
+    你是设计兼职任务的工时分析助理。系统已经用历史已验收任务算出稳健统计基线，你只能依据当前需求和提供的历史样本在合理范围内微调并解释。
 
     要求：
     - 不要编造不存在的历史数据。
-    - 样本少于 3 条时必须降低置信度。
-    - 建议工时用小时数，优先参考历史实际工时的平均数和中位数，可以根据当前任务复杂度微调。
+    - 工时是设计师实际投入，不是预计开始到交付之间的自然时间差；交付周期只能作为排期背景。
+    - exact 是精确同类型样本，semantic 是需求语义相似样本，parent 只是同大类弱参考，不得混为同等证据。
+    - 优先参考 statistics.weightedMedianHours、statistics.p80Hours 和 currentTask.currentEstimatedHours，可以根据当前任务复杂度微调。
+    - statistics.calibrationCount >= 3 时，必须考虑 calibrationRatio，它代表过去建议相对最终实际工时的系统性高估/低估偏差。
+    - 必须识别从零设计、复用既有风格、交付件数量、页数/尺寸/平台适配、改稿风险和甲方文案附件带来的工作量差异。
+    - 样本不足或相似度弱时必须降低置信度。
     - 依据要短、具体、可解释。
 
     【重点·读懂备注里的工时上下文】每条样本带 progressNotes(进展备注)、acceptanceNote(验收备注)、feedbackNote(体感)。实际工时偏离预估常有原因，必须从备注读出来，不能只看数字：

@@ -171,11 +171,15 @@ export type AttachmentNameSuggestion = {
 }
 
 export type HourEstimateSuggestion = {
+  suggestionId: string
   suggestedHours: number
+  safeHours: number
   confidence: '低' | '中' | '高'
   basis: string[]
   historicalSummary: string
   sampleCount: number
+  exactSampleCount: number
+  similarSampleCount: number
   averageHours: number
   medianHours: number
   minHours: number
@@ -183,14 +187,27 @@ export type HourEstimateSuggestion = {
   averageDeliveryDays: number
   matchedType: string
   usedFallback: boolean
+  usedSemantic: boolean
+  matchedTasks: Array<{
+    id: number
+    title: string
+    type: string
+    actualHours: number
+    relation: '精确同类' | '语义相似' | '同大类参考'
+    score: number
+  }>
 }
 
 export type HourEstimatePayload = {
   title: string
   requirement: string
   selectedType: string
+  requester: string
   startDate: string
   estimatedDate: string
+  currentEstimatedHours: number
+  attachmentText?: string
+  attachmentNames?: string[]
 }
 
 export type DailyKnowledgeSuggestion = {
