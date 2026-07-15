@@ -2,6 +2,7 @@ name = "giverny-agent-eval"
 main = "../src/worker.ts"
 compatibility_date = "2026-06-10"
 compatibility_flags = ["nodejs_compat"]
+keep_names = true
 
 [vars]
 ADMIN_TOKEN = "eval-admin-key"
@@ -14,6 +15,11 @@ GIVERNY_API_BASE_URL = "http://127.0.0.1:8798"
 [[durable_objects.bindings]]
 name = "ALICE_AGENT"
 class_name = "AliceAgent"
+
+[[workflows]]
+name = "giverny-agent-write-eval"
+binding = "AGENT_WRITE_WORKFLOW"
+class_name = "AgentWriteWorkflow"
 
 [[migrations]]
 tag = "v1-eval-alice-agent"

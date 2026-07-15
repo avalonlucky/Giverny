@@ -7,10 +7,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
+import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import type { AgentApproval, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
-export { AliceAgent }
+export { AliceAgent, AgentWriteWorkflow }
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -3107,7 +3108,78 @@ async function agentContextTool(env: Env, request: Request) {
   })
 }
 
-async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecutionContext) {
+const agentWorkflowWriteEndpoints = new Set([
+  'create-task',
+  'record-feedback',
+  'update-task-status',
+  'update-task-fields',
+  'append-progress',
+])
+
+async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const operationId = agentString(body.operationId, 180)
+  const endpoint = agentString(body.endpoint, 80)
+  const confirmationToken = agentString(body.confirmationToken, 5000)
+  if (!operationId || !agentWorkflowWriteEndpoints.has(endpoint) || !confirmationToken) {
+    return agentFail('Workflow 写入参数不完整', 400)
+  }
+  const existing = await env.DB.prepare(
+    'SELECT endpoint, status, result_json, error_message FROM agent_write_operations WHERE operation_id = ?',
+  ).bind(operationId).first<{ endpoint: string; status: string; result_json: string | null; error_message: string | null }>()
+  if (existing?.endpoint && existing.endpoint !== endpoint) return agentFail('Workflow operationId 与写入动作不匹配', 409)
+  if (existing?.status === 'completed' && existing.result_json) {
+    const result = JSON.parse(existing.result_json) as Record<string, unknown>
+    return agentOk({ ...result, workflowOperationId: operationId, replayed: true })
+  }
+  if (existing?.status === 'failed') return agentFail(existing.error_message || 'Workflow 写入此前已失败', 409)
+
+  await env.DB.prepare(
+    `INSERT INTO agent_write_operations (operation_id, endpoint, status)
+     VALUES (?, ?, 'processing')
+     ON CONFLICT(operation_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
+  ).bind(operationId, endpoint).run()
+  const toolRequest = new Request(`https://giverny.internal/api/agent/tools/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${getAgentToolToken(env)}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ confirmationToken }),
+  })
+  try {
+    const response: Response = await handleAgentToolApi(toolRequest, env, ctx)
+    const result = await response.json().catch(() => null) as Record<string, unknown> | null
+    if (!response.ok || !result) {
+      const message: string = String(result?.error || `写入工具返回 HTTP ${response.status}`)
+      if (response.status < 500) {
+        await env.DB.prepare(
+          `UPDATE agent_write_operations
+           SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE operation_id = ?`,
+        ).bind(message, operationId).run()
+      }
+      return agentFail(message, response.status || 500)
+    }
+    await env.DB.prepare(
+      `UPDATE agent_write_operations
+       SET status = 'completed', result_json = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE operation_id = ?`,
+    ).bind(JSON.stringify(result), operationId).run()
+    return agentOk({ ...result, workflowOperationId: operationId, replayed: false })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Workflow 写入异常'
+    await env.DB.prepare(
+      `UPDATE agent_write_operations
+       SET error_message = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE operation_id = ?`,
+    ).bind(message, operationId).run()
+    return agentFail(message, 500)
+  }
+}
+
+async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecutionContext): Promise<Response> {
   const url = new URL(request.url)
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: agentToolCorsHeaders })
@@ -3129,6 +3201,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/workflow-write' && request.method === 'POST') {
+    return agentWorkflowWriteTool(env, request, ctx)
   }
   if (url.pathname === '/api/agent/tools/create-task-preview' && request.method === 'POST') {
     return agentCreateTaskPreviewTool(env, request)
@@ -6192,6 +6267,14 @@ async function purgeExpiredProgressAttachments(env: Env, limit = 50) {
   }
 
   return rows.results?.length ?? 0
+}
+
+async function purgeAgentWriteOperations(env: Env) {
+  await env.DB.prepare(
+    `DELETE FROM agent_write_operations
+     WHERE (status IN ('completed', 'failed') AND datetime(updated_at) < datetime('now', '-30 days'))
+        OR (status = 'processing' AND datetime(updated_at) < datetime('now', '-1 day'))`,
+  ).run()
 }
 
 async function audit(env: Env, action: string, entityType: string, entityId: string, payload: unknown) {
@@ -10002,6 +10085,9 @@ export default {
       console.error('progress attachment retention cleanup failed', error)
     })
     await processPendingAttachmentAnalyses(env, 1)
+    await purgeAgentWriteOperations(env).catch((error) => {
+      console.error('agent write operation cleanup failed', error)
+    })
     await runEventDrivenInsights(env, 1).catch((error) => {
       console.error('insight event trigger failed', error)
     })

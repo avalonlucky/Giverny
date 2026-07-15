@@ -105,6 +105,80 @@ async function runMcpChecks() {
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }
 
+async function runWorkflowWriteCheck(cookie) {
+  const endpoint = 'http://127.0.0.1:8798/api/ai/chat'
+  const conversationId = `workflow-write-${crypto.randomUUID()}`
+  const request = async (message) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: message }],
+        month: '2026-07',
+        agentRuntimeConversationId: conversationId,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Workflow eval returned HTTP ${response.status}`)
+    return data
+  }
+  const preview = await request('新建一个 Workflow 隔离评测任务')
+  if (preview.approval?.status !== 'pending' || preview.approval?.action !== 'create_task') {
+    throw new Error('Workflow eval did not return a pending create-task approval')
+  }
+  let result = await request('确认')
+  for (let attempt = 0; result.approval?.status === 'processing' && attempt < 5; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    result = await request('确认')
+  }
+  if (result.approval?.status !== 'executed' || !result.approval?.result?.taskId) {
+    throw new Error(`Workflow write did not complete: ${JSON.stringify(result.approval || result)}`)
+  }
+  if (!Array.isArray(result.trace) || !result.trace.join('\n').includes('Workflow')) {
+    throw new Error('Workflow write response did not expose the durable execution trace')
+  }
+  process.stdout.write('Workflow approval and durable write check passed.\n')
+}
+
+async function runWorkflowReplayCheck() {
+  const headers = {
+    authorization: 'Bearer eval-agent-tool-token',
+    'content-type': 'application/json',
+  }
+  const previewResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/create-task-preview', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      title: 'Workflow 幂等评测任务',
+      requirement: '验证同一 operationId 不会重复创建任务',
+      type: '画册',
+      startDate: '2026-07-16T10:00',
+      estimatedDate: '2026-07-20T18:00',
+      settlementMonth: '2026-07',
+      estimatedHours: 2,
+    }),
+  })
+  const preview = await previewResponse.json().catch(() => ({}))
+  if (!previewResponse.ok || !preview.confirmationToken) throw new Error('Workflow replay preview failed')
+  const operationId = `workflow-replay-${crypto.randomUUID()}`
+  const execute = async () => {
+    const response = await fetch('http://127.0.0.1:8798/api/agent/tools/workflow-write', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ operationId, endpoint: 'create-task', confirmationToken: preview.confirmationToken }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Workflow replay returned HTTP ${response.status}`)
+    return data
+  }
+  const first = await execute()
+  const replay = await execute()
+  if (first.replayed !== false || replay.replayed !== true || first.task?.id !== replay.task?.id) {
+    throw new Error('Workflow operation replay was not idempotent')
+  }
+  process.stdout.write('Workflow idempotent replay check passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -121,6 +195,8 @@ try {
   if (!loginResponse.ok || !cookie) throw new Error('Isolated eval login failed')
 
   await runMcpChecks()
+  await runWorkflowWriteCheck(cookie)
+  await runWorkflowReplayCheck()
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {

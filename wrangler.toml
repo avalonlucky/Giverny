@@ -2,6 +2,7 @@ name = "designer-worklog"
 main = "src/worker.ts"
 compatibility_date = "2026-06-10"
 compatibility_flags = ["nodejs_compat"]
+keep_names = true
 account_id = "ccd312f47f0dca574199fa6e33758c6d"
 
 # workers.dev 保留为 Agent Runtime 调试入口；/api/agent/* 工具接口仍使用 AGENT_TOOL_TOKEN 保护，
@@ -61,6 +62,11 @@ class_name = "AgentRuntimeContainer"
 [[durable_objects.bindings]]
 name = "ALICE_AGENT"
 class_name = "AliceAgent"
+
+[[workflows]]
+name = "giverny-agent-write"
+binding = "AGENT_WRITE_WORKFLOW"
+class_name = "AgentWriteWorkflow"
 
 [[migrations]]
 tag = "v1-agent-runtime-container"

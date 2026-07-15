@@ -3,6 +3,7 @@ import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
+import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
@@ -11,6 +12,7 @@ type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_MODEL?: string
   AGENT_TOOL_TOKEN?: string
   GIVERNY_API_BASE_URL?: string
+  AGENT_WRITE_WORKFLOW?: unknown
 }
 
 type PendingActionSummary = {
@@ -35,6 +37,8 @@ type StoredMessage = {
 type StoredPendingAction = PendingActionSummary & {
   endpoint: string
   confirmationToken: string
+  workflowId: string
+  workflowApproved: boolean
 }
 
 type AgentToolResponse = Record<string, unknown> & {
@@ -140,12 +144,20 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         confirmation_token TEXT NOT NULL,
         draft_json TEXT NOT NULL,
         warnings_json TEXT NOT NULL DEFAULT '[]',
+        workflow_id TEXT NOT NULL DEFAULT '',
+        workflow_approved INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       )
     `
     const columns = this.sql<{ name: string }>`PRAGMA table_info(alice_pending_actions)`
     if (!columns.some((column) => column.name === 'warnings_json')) {
       void this.sql`ALTER TABLE alice_pending_actions ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'`
+    }
+    if (!columns.some((column) => column.name === 'workflow_id')) {
+      void this.sql`ALTER TABLE alice_pending_actions ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`
+    }
+    if (!columns.some((column) => column.name === 'workflow_approved')) {
+      void this.sql`ALTER TABLE alice_pending_actions ADD COLUMN workflow_approved INTEGER NOT NULL DEFAULT 0`
     }
   }
 
@@ -179,9 +191,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       confirmation_token: string
       draft_json: string
       warnings_json: string
+      workflow_id: string
+      workflow_approved: number
       created_at: number
     }>`
-      SELECT action, label, endpoint, confirmation_token, draft_json, warnings_json, created_at
+      SELECT action, label, endpoint, confirmation_token, draft_json, warnings_json,
+        workflow_id, workflow_approved, created_at
       FROM alice_pending_actions
       WHERE singleton = 1
     `
@@ -206,6 +221,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       confirmationToken: row.confirmation_token,
       draft,
       warnings,
+      workflowId: String(row.workflow_id || ''),
+      workflowApproved: Boolean(row.workflow_approved),
       createdAt: Number(row.created_at) || Date.now(),
     }
   }
@@ -213,10 +230,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   private setPendingAction(action: StoredPendingAction) {
     void this.sql`
       INSERT INTO alice_pending_actions (
-        singleton, action, label, endpoint, confirmation_token, draft_json, warnings_json, created_at
+        singleton, action, label, endpoint, confirmation_token, draft_json, warnings_json,
+        workflow_id, workflow_approved, created_at
       ) VALUES (
         1, ${action.action}, ${action.label}, ${action.endpoint}, ${action.confirmationToken},
-        ${JSON.stringify(action.draft)}, ${JSON.stringify(action.warnings)}, ${action.createdAt}
+        ${JSON.stringify(action.draft)}, ${JSON.stringify(action.warnings)}, ${action.workflowId},
+        ${action.workflowApproved ? 1 : 0}, ${action.createdAt}
       )
       ON CONFLICT(singleton) DO UPDATE SET
         action = excluded.action,
@@ -225,6 +244,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         confirmation_token = excluded.confirmation_token,
         draft_json = excluded.draft_json,
         warnings_json = excluded.warnings_json,
+        workflow_id = excluded.workflow_id,
+        workflow_approved = excluded.workflow_approved,
         created_at = excluded.created_at
     `
     this.setState({
@@ -275,14 +296,40 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const config = PREVIEW_ACTIONS[action]
     const confirmationToken = String(data.confirmationToken || '')
     if (config && data.ready === true && confirmationToken) {
+      const previous = this.getPendingAction()
+      if (previous?.workflowId && !previous.workflowApproved) {
+        await this.rejectWorkflow(previous.workflowId, { reason: '草稿已被新预览替换' }).catch(() => undefined)
+      }
+      const createdAt = Date.now()
+      let workflowId = ''
+      if (this.aliceEnv.AGENT_WRITE_WORKFLOW) {
+        const startWorkflow = this.runWorkflow as unknown as (
+          name: string,
+          params: AgentWriteWorkflowParams,
+          options: { id: string; metadata: Record<string, unknown>; agentBinding: string },
+        ) => Promise<string>
+        workflowId = await startWorkflow.call(this, 'AGENT_WRITE_WORKFLOW', {
+          action: action.replace(/_preview$/, ''),
+          label: config.label,
+          endpoint: config.executeEndpoint,
+          confirmationToken,
+          createdAt,
+        }, {
+          id: `agent-write-${crypto.randomUUID()}`,
+          metadata: { action: action.replace(/_preview$/, ''), createdAt },
+          agentBinding: 'ALICE_AGENT',
+        })
+      }
       this.setPendingAction({
         action: action.replace(/_preview$/, ''),
         label: config.label,
         endpoint: config.executeEndpoint,
         confirmationToken,
+        workflowId,
+        workflowApproved: false,
         draft: toJsonObject(data.draft),
         warnings: Array.isArray(data.warnings) ? data.warnings.map((item) => String(item)).filter(Boolean) : [],
-        createdAt: Date.now(),
+        createdAt,
       })
     }
     const safeData = { ...data }
@@ -423,28 +470,36 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
-  private async executePendingAction(pending: StoredPendingAction): Promise<AliceAgentChatResult> {
+  private completedActionResult(pending: StoredPendingAction, result: AgentToolResponse): AliceAgentChatResult {
+    const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
+    const task = toJsonObject(result.task)
+    return {
+      answer,
+      model: pending.workflowId ? 'cloudflare-workflow:durable-write' : 'cloudflare-agent:deterministic-write',
+      approval: {
+        ...this.approvalResult(pending, 'executed'),
+        result: {
+          taskId: Number(task.id) || undefined,
+          taskTitle: String(task.title || pending.draft.taskTitle || pending.draft.title || ''),
+        },
+      },
+      trace: [
+        { type: 'plan', label: '确认操作', detail: `读取已持久保存的${pending.label}预览。` },
+        {
+          type: 'tool',
+          label: `执行${pending.label}`,
+          detail: pending.workflowId ? 'Cloudflare Workflow 已完成持久化写入步骤。' : '使用签名确认凭证写入业务数据。',
+        },
+        { type: 'result', label: '写入完成', detail: '业务接口已返回成功结果。' },
+      ],
+    }
+  }
+
+  private async executePendingActionDirect(pending: StoredPendingAction): Promise<AliceAgentChatResult> {
     try {
       const result = await this.callTool(pending.endpoint, { confirmationToken: pending.confirmationToken })
       this.clearPendingAction()
-      const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
-      const task = toJsonObject(result.task)
-      return {
-        answer,
-        model: 'cloudflare-agent:deterministic-write',
-        approval: {
-          ...this.approvalResult(pending, 'executed'),
-          result: {
-            taskId: Number(task.id) || undefined,
-            taskTitle: String(task.title || pending.draft.taskTitle || pending.draft.title || ''),
-          },
-        },
-        trace: [
-          { type: 'plan', label: '确认操作', detail: `读取已持久保存的${pending.label}预览。` },
-          { type: 'tool', label: `执行${pending.label}`, detail: '使用签名确认凭证写入业务数据。' },
-          { type: 'result', label: '写入完成', detail: '业务接口已返回成功结果。' },
-        ],
-      }
+      return this.completedActionResult(pending, result)
     } catch (error) {
       const message = error instanceof Error ? error.message : '写入失败'
       const expired = /过期|校验失败|已失效|已使用/.test(message)
@@ -454,6 +509,62 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         model: 'cloudflare-agent:deterministic-write',
         approval: this.approvalResult(pending, expired ? 'expired' : 'failed', message),
         trace: [{ type: 'error', label: `${pending.label}失败`, detail: message }],
+      }
+    }
+  }
+
+  private async executePendingAction(pending: StoredPendingAction): Promise<AliceAgentChatResult> {
+    if (!pending.workflowId) return this.executePendingActionDirect(pending)
+    try {
+      const workflowStatus = this.getWorkflowStatus as unknown as (
+        name: string,
+        workflowId: string,
+      ) => Promise<{ status: string; output?: unknown; error?: { message?: string } }>
+      let status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
+      if (status.status === 'complete') {
+        this.clearPendingAction()
+        return this.completedActionResult(pending, toJsonObject(status.output))
+      }
+      if (status.status === 'errored' || status.status === 'terminated') {
+        throw new Error(status.error?.message || '持久化写入流程未能完成')
+      }
+      if (!pending.workflowApproved) {
+        await this.approveWorkflow(pending.workflowId, {
+          reason: '用户已在 Giverny 确认卡明确确认',
+          metadata: { approvedAt: Date.now() },
+        })
+        pending.workflowApproved = true
+        this.setPendingAction(pending)
+      }
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
+        if (status.status === 'complete') {
+          this.clearPendingAction()
+          return this.completedActionResult(pending, toJsonObject(status.output))
+        }
+        if (status.status === 'errored' || status.status === 'terminated') {
+          throw new Error(status.error?.message || '持久化写入流程未能完成')
+        }
+      }
+      return {
+        answer: `${pending.label}已经进入后台执行。Workflow 会继续完成这次操作，你可以稍后回复“确认”查看最终结果。`,
+        model: 'cloudflare-workflow:durable-write',
+        approval: this.approvalResult(pending, 'processing'),
+        trace: [
+          { type: 'plan', label: '确认操作', detail: `已确认${pending.label}。` },
+          { type: 'tool', label: '启动持久化 Workflow', detail: '写入将在后台继续，并保留步骤状态。' },
+        ],
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '持久化写入失败'
+      const expired = /过期|校验失败|已失效|已使用/.test(message)
+      if (expired) this.clearPendingAction()
+      return {
+        answer: `这次${pending.label}没有执行成功：${message}`,
+        model: 'cloudflare-workflow:durable-write',
+        approval: this.approvalResult(pending, expired ? 'expired' : 'failed', message),
+        trace: [{ type: 'error', label: `${pending.label} Workflow 失败`, detail: message }],
       }
     }
   }
@@ -520,6 +631,19 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       return result
     }
     if (pending && REJECT_RE.test(decision)) {
+      if (pending.workflowId && pending.workflowApproved) {
+        const answer = `${pending.label}已经进入持久化执行阶段，当前不能再取消。请稍后回复“确认”查看结果。`
+        this.saveMessage('assistant', answer)
+        return {
+          answer,
+          model: 'cloudflare-workflow:durable-write',
+          approval: this.approvalResult(pending, 'processing'),
+          trace: [{ type: 'result', label: 'Workflow 正在执行', detail: pending.label }],
+        }
+      }
+      if (pending.workflowId) {
+        await this.rejectWorkflow(pending.workflowId, { reason: '用户取消待确认操作' }).catch(() => undefined)
+      }
       this.clearPendingAction()
       const answer = `已取消${pending.label}，没有写入任何数据。`
       this.saveMessage('assistant', answer)

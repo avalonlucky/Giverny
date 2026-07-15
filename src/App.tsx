@@ -4487,7 +4487,11 @@ function AgentApprovalCard({
         <span className="agent-approval-status">{agentApprovalStatusLabel(approval.status)}</span>
       </header>
       <p className="agent-approval-hint">
-        {approval.status === 'executed' ? '操作已经写入网站数据。' : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
+        {approval.status === 'executed'
+          ? '操作已经写入网站数据。'
+          : approval.status === 'processing'
+            ? '操作已交给持久化 Workflow，页面关闭后仍会继续执行。'
+            : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
       </p>
       {editing ? (
         <div className="agent-approval-editor">

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-16 · v0.28.33（Agent 持久化写入）
+
+- 持久执行：创建任务、记录反馈、修改状态、修改字段和追加进展改由 Cloudflare Workflows 在用户确认后执行，页面关闭或 Worker 重启不再中断已确认流程。
+- 人工审批：preview 阶段即创建等待中的 Workflow，只有站内确认卡明确批准后才进入业务写入步骤，10 分钟未确认自动失效。
+- 步骤恢复：写入步骤增加超时、指数退避和最多 3 次重试；执行轨迹会明确显示 Workflow 状态，不展示模型思维链。
+- 幂等保护：新增 `agent_write_operations`，按 Workflow instance ID 缓存成功结果；恢复或重复请求直接重放首次结果，避免重复创建任务或重复记录进展。
+- 自动回归：隔离门禁新增 Workflow 确认后真实写入和相同 operationId 重放测试，原有 63 条 Agent 用例与 MCP 回归继续全量执行。
+
 ## 2026-07-16 · v0.28.32（只读 MCP 接入）
 
 - 远程 MCP：新增 `https://mayeai.com/mcp` Streamable HTTP 入口，可供支持远程 MCP 的外部 AI 客户端查询 Giverny 数据。

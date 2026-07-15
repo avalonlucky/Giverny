@@ -37,6 +37,7 @@
 │   └── record-production-deployment.yml
 ├── docs/
 │   ├── AI_AGENT_RUNTIME.md
+│   ├── AGENT_WORKFLOWS.md
 │   ├── AI_MODEL_ROUTING.md
 │   ├── MCP_SERVER.md
 │   ├── OPERATION_POLICIES.md
@@ -72,6 +73,7 @@
 │   ├── App.css
 │   ├── App.tsx
 │   ├── agentToolRegistry.ts
+│   ├── agentWriteWorkflow.ts
 │   ├── aliceAgent.ts
 │   ├── SharedReport.tsx
 │   ├── index.css
@@ -100,9 +102,11 @@
 - Independent BAML Node runtime: `ai-runtime/`
 - Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
 - Shared Agent/MCP read-tool registry: `src/agentToolRegistry.ts`
+- Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
 - Legacy Python Agent runtime fallback: `agent-runtime/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
+- Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`
 - Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - Domain types: `src/types/domain.ts`
@@ -125,6 +129,7 @@
 - `src/aliceAgent.ts` is the primary Agent Runtime. Each conversation uses a named `AliceAgent` Durable Object with SQLite history, typed tool calls, pending confirmation state, and a compact trace.
 - `agent_run_metrics` stores privacy-minimized Agent outcome metadata for the admin quality dashboard; evaluation-tagged traffic is retained separately and excluded from dashboard aggregates.
 - `/mcp` is a stateless Streamable HTTP server exposing only the shared read-tool registry. It requires a dedicated `mcp-read` access token that cannot authenticate to the website.
+- `AGENT_WRITE_WORKFLOW` runs confirmed Agent writes as durable Cloudflare Workflow instances. The Worker caches each operation result in `agent_write_operations` for idempotent replay.
 - `agent-runtime/` and `AGENT_RUNTIME_CONTAINER` remain temporarily as a legacy fallback while the Cloudflare-native path is validated in production.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 
