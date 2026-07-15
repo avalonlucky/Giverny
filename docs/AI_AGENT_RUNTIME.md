@@ -36,7 +36,8 @@ AliceAgent Durable Object
         ├── update_task_status_preview / update_task_status
         ├── update_task_fields_preview / update_task_fields
         ├── append_progress_preview / append_progress
-        └── start_monthly_review
+        ├── start_monthly_review
+        └── start_deep_analysis
         │
         ▼
 Giverny Worker Tool API
@@ -59,17 +60,18 @@ D1 / R2 / app data
 
 - `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、类型化 Tool Calling、确认状态和执行轨迹。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
-- `src/App.tsx`：新对话、当前对话和历史对话均保存对应 Agent 会话 ID；旧历史首次继续时自动导入上下文。
+- `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
 - `/api/agent/tools/*`：提供只读工具与写入工具。写入工具统一采用 preview/execute 两段式协议，execute 必须携带 preview 生成的 `confirmationToken`。
 - 前端确认卡：Tool Calling 生成的写入草稿通过结构化 `approval` 协议展示，用户可直接核对并确认或取消；签名 token 始终只保存在 Agent SQLite，不下发浏览器。
 - 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
-- `agent-evals/`：63 条固定回归用例覆盖月份查询、财务工时、任务详情、五类写入、同名消歧和安全边界。
+- `agent-evals/`：70 条固定回归用例覆盖查询、五类写入、同名消歧、六类后台分析和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露四个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
 - 持久写入：五类确认操作由 `AgentWriteWorkflow` 等待人工批准后执行；步骤支持重试，`agent_write_operations` 缓存完成结果，重复恢复不会重复创建任务或追加记录。
-- 后台分析：月度复盘由 `AgentAnalysisWorkflow` 独立收集 D1 权威数据并生成报告；对话任务卡展示真实进度，支持取消、失败重试和完成通知。原始快照在成功后清除，只保留最终报告。
+- 后台分析：月度复盘、周报、风险提示、跨任务专题、批量附件和趋势分析由 `AgentAnalysisWorkflow` 独立收集 D1 权威数据并生成报告；对话卡与任务中心展示真实进度，支持取消、失败重试和持久未读通知。原始快照在成功后清除，只保留最终报告。
+- 主动 Agent：Cron 按周期创建周报、上月复盘和逾期风险提示，D1 去重键保证同一周期只生成一次。
 - `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
 当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
@@ -78,10 +80,9 @@ D1 / R2 / app data
 
 ## 下一步
 
-1. 复用后台任务卡与主动通知协议，扩展批量文件理解和跨任务专题汇总。
-2. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。
-3. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
-4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
+1. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。
+2. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
+3. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
 
 ## 安全边界
 

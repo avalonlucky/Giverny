@@ -4,7 +4,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_API_KEY?: string
@@ -30,8 +30,11 @@ type AliceAgentState = {
 }
 
 type StoredMessage = {
+  id?: string
   role: 'user' | 'assistant'
   content: string
+  metadata_json?: string
+  created_at?: number
 }
 
 type StoredPendingAction = PendingActionSummary & {
@@ -77,6 +80,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 工作规则：
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
+- 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
 - 创建任务、记录反馈、修改字段、修改状态和追加进展只能调用对应的 preview 工具。
 - 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
@@ -115,6 +119,10 @@ function toJsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
+function parseJsonObject(value: string) {
+  try { return toJsonObject(JSON.parse(value || '{}')) } catch { return {} }
+}
+
 export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   private readonly aliceEnv: AliceAgentEnv
 
@@ -135,9 +143,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         id TEXT PRIMARY KEY,
         role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
         content TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
         created_at INTEGER NOT NULL
       )
     `
+    const messageColumns = this.sql<{ name: string }>`PRAGMA table_info(alice_messages)`
+    if (!messageColumns.some((column) => column.name === 'metadata_json')) {
+      void this.sql`ALTER TABLE alice_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'`
+    }
     void this.sql`
       CREATE TABLE IF NOT EXISTS alice_pending_actions (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -164,16 +177,68 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
-  private saveMessage(role: StoredMessage['role'], content: string) {
+  private saveMessage(role: StoredMessage['role'], content: string, metadata: Record<string, unknown> = {}) {
     void this.sql`
-      INSERT INTO alice_messages (id, role, content, created_at)
-      VALUES (${crypto.randomUUID()}, ${role}, ${content}, ${Date.now()})
+      INSERT INTO alice_messages (id, role, content, metadata_json, created_at)
+      VALUES (${crypto.randomUUID()}, ${role}, ${content}, ${JSON.stringify(metadata)}, ${Date.now()})
     `
     this.setState({
       ...this.state,
       messageCount: this.state.messageCount + 1,
       lastActiveAt: Date.now(),
     })
+  }
+
+  async conversationSnapshot(): Promise<{ messages: AgentConversationMessage[] }> {
+    const rows = this.sql<Required<Pick<StoredMessage, 'id' | 'role' | 'content' | 'metadata_json' | 'created_at'>>>`
+      SELECT id, role, content, metadata_json, created_at
+      FROM alice_messages
+      ORDER BY created_at ASC
+      LIMIT 100
+    `
+    return {
+      messages: rows.map((row) => {
+        const metadata = parseJsonObject(row.metadata_json)
+        return {
+          id: row.id,
+          role: row.role,
+          content: row.content,
+          ...(metadata.approval ? { approval: metadata.approval as AgentApproval } : {}),
+          ...(metadata.selection ? { selection: metadata.selection as AgentTaskSelection } : {}),
+          ...(metadata.backgroundTask ? { backgroundTask: metadata.backgroundTask as AgentBackgroundTask } : {}),
+          createdAt: row.created_at,
+        }
+      }),
+    }
+  }
+
+  async importConversation(request: { messages?: AgentConversationMessage[] }) {
+    const [{ count }] = this.sql<{ count: number }>`SELECT COUNT(*) AS count FROM alice_messages`
+    if (Number(count) > 0) return { imported: 0, skipped: true }
+    const messages = Array.isArray(request.messages) ? request.messages.slice(-40) : []
+    let imported = 0
+    for (const item of messages) {
+      if ((item.role !== 'user' && item.role !== 'assistant') || !String(item.content || '').trim()) continue
+      const createdAt = Number(item.createdAt) || Date.now() + imported
+      void this.sql`
+        INSERT OR IGNORE INTO alice_messages (id, role, content, metadata_json, created_at)
+        VALUES (${String(item.id || crypto.randomUUID())}, ${item.role}, ${String(item.content).trim()}, ${JSON.stringify({
+          approval: item.approval,
+          selection: item.selection,
+          backgroundTask: item.backgroundTask,
+        })}, ${createdAt})
+      `
+      imported += 1
+    }
+    this.setState({ ...this.state, messageCount: imported, lastActiveAt: imported ? Date.now() : null })
+    return { imported, skipped: false }
+  }
+
+  async clearConversation() {
+    void this.sql`DELETE FROM alice_messages`
+    void this.sql`DELETE FROM alice_pending_actions`
+    this.setState({ ...this.initialState })
+    return { cleared: true }
   }
 
   private recentMessages(limit = 20): ModelMessage[] {
@@ -413,6 +478,20 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           conversationId,
         }),
       }),
+      start_deep_analysis: tool({
+        description: '启动持久化深度分析。支持周报、风险扫描、跨任务比较、批量附件总结和多月趋势分析。',
+        inputSchema: z.object({
+          type: z.enum(['weekly_digest', 'risk_digest', 'cross_task_analysis', 'batch_attachment_analysis', 'trend_analysis']),
+          month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+          query: z.string().max(1000).optional(),
+          taskIds: z.array(z.number().int().positive()).max(30).optional(),
+        }),
+        execute: (input) => this.callTool('analysis-job-start', {
+          ...input,
+          month: input.month || currentMonth,
+          conversationId,
+        }),
+      }),
       create_task_preview: tool({
         description: '生成新任务草稿。只预览，不直接创建。',
         inputSchema: z.object({
@@ -640,13 +719,13 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const decision = normalizedDecision(message)
     if (pending && CONFIRM_RE.test(decision)) {
       const result = await this.executePendingAction(pending)
-      this.saveMessage('assistant', result.answer)
+      this.saveMessage('assistant', result.answer, { approval: result.approval })
       return result
     }
     if (pending && REJECT_RE.test(decision)) {
       if (pending.workflowId && pending.workflowApproved) {
         const answer = `${pending.label}已经进入持久化执行阶段，当前不能再取消。请稍后回复“确认”查看结果。`
-        this.saveMessage('assistant', answer)
+        this.saveMessage('assistant', answer, { approval: this.approvalResult(pending, 'processing') })
         return {
           answer,
           model: 'cloudflare-workflow:durable-write',
@@ -659,7 +738,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       }
       this.clearPendingAction()
       const answer = `已取消${pending.label}，没有写入任何数据。`
-      this.saveMessage('assistant', answer)
+      this.saveMessage('assistant', answer, { approval: this.approvalResult(pending, 'cancelled') })
       return {
         answer,
         model: 'cloudflare-agent:approval',
@@ -704,17 +783,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         selection = this.taskSelection(toolResult.output) || selection
         const output = toJsonObject(toolResult.output)
         const rawTask = toJsonObject(output.backgroundTask)
-        if (rawTask.id && rawTask.type === 'monthly_review') {
+        if (rawTask.id && rawTask.type) {
           backgroundTask = rawTask as unknown as AgentBackgroundTask
         }
       }
     }
-    this.saveMessage('assistant', answer)
     const nextPending = this.getPendingAction()
     const approval = nextPending && (!pending || nextPending.createdAt !== pending.createdAt)
       ? this.approvalResult(nextPending, 'pending')
       : undefined
-    return {
+    const response: AliceAgentChatResult = {
       answer,
       trace: trace.slice(0, 10),
       model: `deepseek:${modelName}`,
@@ -722,5 +800,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),
     }
+    this.saveMessage('assistant', answer, { approval, selection, backgroundTask })
+    return response
   }
 }

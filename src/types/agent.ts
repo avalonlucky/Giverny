@@ -36,11 +36,22 @@ export type AgentBackgroundTaskStatus = 'queued' | 'running' | 'completed' | 'fa
 
 export type AgentBackgroundTaskPhase = 'queued' | 'collecting' | 'analyzing' | 'completed' | 'failed' | 'cancelled'
 
+export type AgentBackgroundTaskType =
+  | 'monthly_review'
+  | 'weekly_digest'
+  | 'risk_digest'
+  | 'cross_task_analysis'
+  | 'batch_attachment_analysis'
+  | 'trend_analysis'
+
 export type AgentBackgroundTask = {
   id: string
-  type: 'monthly_review'
+  type: AgentBackgroundTaskType
   title: string
   month: string
+  query: string
+  source: 'manual' | 'scheduled'
+  unread: boolean
   status: AgentBackgroundTaskStatus
   phase: AgentBackgroundTaskPhase
   progress: number
@@ -49,4 +60,23 @@ export type AgentBackgroundTask = {
   createdAt: string
   updatedAt: string
   completedAt: string
+}
+
+export type AgentConversationMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  approval?: AgentApproval
+  selection?: AgentTaskSelection
+  backgroundTask?: AgentBackgroundTask
+  createdAt: number
+}
+
+export type AgentConversationSummary = {
+  id: string
+  title: string
+  lastMessagePreview: string
+  messageCount: number
+  createdAt: string
+  updatedAt: string
 }

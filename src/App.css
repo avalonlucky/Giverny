@@ -12603,6 +12603,7 @@ input::file-selector-button {
 }
 
 .chat-panel-icon-btn {
+  position: relative;
   border: 0;
   background: transparent;
   color: var(--color-text-secondary);
@@ -12621,6 +12622,27 @@ input::file-selector-button {
 
 .chat-panel-icon-btn.active {
   color: var(--color-primary);
+}
+
+.chat-panel-icon-btn.has-unread {
+  color: var(--color-primary);
+}
+
+.chat-task-unread {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-status-danger);
+  color: var(--color-surface-strong);
+  font-size: 9px;
+  line-height: 1;
+  border-radius: 7px;
 }
 
 .chat-panel-messages {
@@ -21463,6 +21485,56 @@ button.topbar-create-button kbd {
 }
 
 .chat-history-del:hover { opacity: 1; color: var(--color-status-danger); }
+
+.chat-task-item {
+  width: 100%;
+  min-height: 66px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-task-item:hover,
+.chat-task-item.unread {
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-strong));
+}
+
+.chat-task-item.unread {
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+.chat-task-item-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.chat-task-item-main strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-task-item-main small,
+.chat-task-item-meta {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+}
+
+.chat-task-item-meta {
+  flex: 0 0 auto;
+}
 
 /* ---------- UI audit cleanup: insight surfaces and Alice assistant ---------- */
 

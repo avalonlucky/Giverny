@@ -2,7 +2,6 @@ import { WorkflowEntrypoint } from 'cloudflare:workers'
 
 export type AgentAnalysisWorkflowParams = {
   jobId: string
-  month: string
 }
 
 type AgentAnalysisWorkflowEnv = {
@@ -49,17 +48,17 @@ export class AgentAnalysisWorkflow extends WorkflowEntrypoint<AgentAnalysisWorkf
   }
 
   async run(event: AgentAnalysisWorkflowEvent, step: DurableWorkflowStep) {
-    const { jobId, month } = event.payload
+    const { jobId } = event.payload
     try {
-      await step.do('collect-monthly-review-data', {
+      await step.do('collect-analysis-data', {
         retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
         timeout: '30 seconds',
-      }, () => this.callTool('monthly-review-prepare', { jobId, month }))
+      }, () => this.callTool('analysis-job-prepare', { jobId }))
 
-      const result = await step.do('generate-monthly-review', {
+      const result = await step.do('generate-analysis-report', {
         retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
         timeout: '2 minutes',
-      }, () => this.callTool('monthly-review-generate', { jobId, month }))
+      }, () => this.callTool('analysis-job-generate', { jobId }))
 
       return result
     } catch (error) {

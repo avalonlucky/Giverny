@@ -246,6 +246,55 @@ async function runBackgroundAnalysisCheck(cookie) {
   process.stdout.write('Background monthly review, cancellation, and retry checks passed.\n')
 }
 
+async function runAgentWorkspaceCheck(cookie) {
+  const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
+  const conversationId = `cloud-conversation-${crypto.randomUUID()}`
+  const chatResponse = await fetch('http://127.0.0.1:8798/api/ai/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: '查一下7月有哪些任务' }],
+      month: '2026-07',
+      agentRuntimeConversationId: conversationId,
+    }),
+  })
+  if (!chatResponse.ok) throw new Error('Cloud conversation seed chat failed')
+  const listResponse = await fetch('http://127.0.0.1:8798/api/ai/conversations', { headers: { cookie } })
+  const list = await listResponse.json().catch(() => ({}))
+  if (!listResponse.ok || !list.conversations?.some((item) => item.id === conversationId)) {
+    throw new Error('Cloud conversation index was not persisted')
+  }
+  const detailResponse = await fetch(`http://127.0.0.1:8798/api/ai/conversations/${conversationId}`, { headers: { cookie } })
+  const detail = await detailResponse.json().catch(() => ({}))
+  if (!detailResponse.ok || detail.messages?.length < 2) throw new Error('Cloud conversation messages were not restored')
+
+  const importedId = `imported-conversation-${crypto.randomUUID()}`
+  const syncResponse = await fetch('http://127.0.0.1:8798/api/ai/conversations/sync', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ conversations: [{
+      id: importedId,
+      title: '旧设备会话',
+      messages: [
+        { id: crypto.randomUUID(), role: 'user', content: '旧设备问题', createdAt: Date.now() - 2 },
+        { id: crypto.randomUUID(), role: 'assistant', content: '旧设备回答', createdAt: Date.now() - 1 },
+      ],
+    }] }),
+  })
+  if (!syncResponse.ok) throw new Error('Local conversation migration failed')
+  const deleteResponse = await fetch(`http://127.0.0.1:8798/api/ai/conversations/${importedId}`, { method: 'DELETE', headers })
+  if (!deleteResponse.ok) throw new Error('Cloud conversation deletion failed')
+
+  const jobsResponse = await fetch('http://127.0.0.1:8798/api/ai/analysis-jobs?unread=1', { headers: { cookie } })
+  const jobs = await jobsResponse.json().catch(() => ({}))
+  const unread = jobs.jobs?.find((job) => job.unread)
+  if (!jobsResponse.ok || !unread) throw new Error('Task center did not expose unread analysis jobs')
+  const readResponse = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${unread.id}/read`, { method: 'POST', headers })
+  const read = await readResponse.json().catch(() => ({}))
+  if (!readResponse.ok || read.job?.unread !== false) throw new Error('Task center read state was not persisted')
+  process.stdout.write('Cloud conversation, migration, deletion, and task notification checks passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -265,6 +314,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runBackgroundAnalysisCheck(cookie)
+  await runAgentWorkspaceCheck(cookie)
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {
@@ -278,6 +328,7 @@ try {
     .flatMap((entry) => entry.output().split('\n'))
     .filter((line) => line.includes('/api/agent/tools/') && !line.includes('200 OK'))
     .filter((line) => !line.includes('/monthly-review-generate 409 Conflict'))
+    .filter((line) => !line.includes('/analysis-job-generate 409 Conflict'))
   if (toolErrors.length) {
     throw new Error(`Agent tools returned non-200 responses:\n${toolErrors.join('\n')}`)
   }

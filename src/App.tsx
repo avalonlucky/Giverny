@@ -36,6 +36,7 @@ import {
   KeyRound,
   LayoutDashboard,
   List,
+  ListTodo,
   LoaderCircle,
   Lock,
   LogOut,
@@ -102,7 +103,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4138,7 +4139,7 @@ type ChatMessage = {
   backgroundTask?: AgentBackgroundTask
 }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
-type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string }
+type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
@@ -4159,7 +4160,7 @@ function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversat
 }
 
 const ALICE_WELCOME_ID = 'alice-welcome'
-const ALICE_SUGGESTED = ['今天完成了哪些工作？', '帮我分析本月收入', '我的效率怎么样？']
+const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
 
 function readChatModelChoice(): ChatModelChoice {
   try {
@@ -4652,8 +4653,8 @@ function AgentTaskSelectionCard({
 
 const AGENT_ANALYSIS_PHASES: Array<{ phase: AgentBackgroundTask['phase']; label: string }> = [
   { phase: 'queued', label: '排队等待' },
-  { phase: 'collecting', label: '汇总任务与工时' },
-  { phase: 'analyzing', label: '生成可核对复盘' },
+  { phase: 'collecting', label: '汇总工作资料' },
+  { phase: 'analyzing', label: '生成可核对报告' },
   { phase: 'completed', label: '保存分析结果' },
 ]
 
@@ -4768,12 +4769,14 @@ function ChatPanel({
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  const [showTaskCenter, setShowTaskCenter] = useState(false)
   const [showScopePopup, setShowScopePopup] = useState(false)
   const [showModelPopup, setShowModelPopup] = useState(false)
   const [selectedModelChoice, setSelectedModelChoice] = useState<ChatModelChoice>(() => readChatModelChoice())
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterFreeModel[]>([])
   const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false)
   const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
+  const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -4787,6 +4790,63 @@ function ChatPanel({
   useEffect(() => {
     if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
   }, [agentConversationId, conversationRecordId, isWelcome, messages])
+
+  const refreshCloudHistory = useCallback(async () => {
+    const response = await fetch('/api/ai/conversations')
+    const data = await response.json().catch(() => null) as { conversations?: AgentConversationSummary[] } | null
+    if (!response.ok || !Array.isArray(data?.conversations)) return
+    setHistoryList(data.conversations.map((item) => ({
+      id: item.id,
+      title: item.title,
+      messages: [],
+      savedAt: new Date(item.updatedAt).getTime(),
+      agentConversationId: item.id,
+      cloud: true,
+    })))
+  }, [])
+
+  const refreshAnalysisJobs = useCallback(async () => {
+    const response = await fetch('/api/ai/analysis-jobs?limit=50')
+    const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
+    if (response.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const migrateAndLoad = async () => {
+      const local = loadChatHistory()
+      if (local.length > 0) {
+        await fetch('/api/ai/conversations/sync', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ conversations: local.map((record) => ({
+            id: record.id,
+            agentConversationId: record.agentConversationId,
+            title: record.title,
+            messages: record.messages.map((message, index) => ({ ...message, createdAt: record.savedAt + index })),
+          })) }),
+        }).catch(() => undefined)
+      }
+      if (!cancelled) await Promise.all([refreshCloudHistory(), refreshAnalysisJobs()])
+    }
+    void migrateAndLoad()
+    return () => { cancelled = true }
+  }, [refreshAnalysisJobs, refreshCloudHistory])
+
+  useEffect(() => {
+    if (!initialAnalysisJobId) return
+    const local = loadChatHistory().find((record) => record.messages.some((message) => message.backgroundTask?.id === initialAnalysisJobId))
+    if (local) return
+    void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(initialAnalysisJobId)}`)
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }: { ok: boolean; data: { job?: AgentBackgroundTask } }) => {
+        if (!ok || !data.job) return
+        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: '', backgroundTask: data.job }])
+        void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(data.job.id)}/read`, { method: 'POST' })
+        setAnalysisJobs((current) => current.map((job) => job.id === data.job!.id ? { ...job, unread: false } : job))
+      })
+      .catch(() => undefined)
+  }, [initialAnalysisJobId])
 
   const activeAnalysisKey = messages
     .map((message) => message.backgroundTask)
@@ -4863,26 +4923,61 @@ function ChatPanel({
     setAttachments([])
     setShowModelPopup(false)
     setShowHistory(false)
+    setShowTaskCenter(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const openHistory = () => {
-    setHistoryList(loadChatHistory())
+    void refreshCloudHistory()
+    setShowTaskCenter(false)
     setShowHistory(true)
   }
 
-  const loadConversation = (record: ConversationRecord) => {
-    setMessages(record.messages)
+  const loadConversation = async (record: ConversationRecord) => {
+    let nextMessages = record.messages
+    if (record.cloud || nextMessages.length === 0) {
+      const response = await fetch(`/api/ai/conversations/${encodeURIComponent(record.agentConversationId || record.id)}`)
+      const data = await response.json().catch(() => null) as { messages?: AgentConversationMessage[] } | null
+      if (!response.ok || !Array.isArray(data?.messages)) {
+        onNotify('云端会话读取失败，请稍后重试', 'error')
+        return
+      }
+      nextMessages = data.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        approval: message.approval,
+        selection: message.selection,
+        backgroundTask: message.backgroundTask,
+      }))
+    }
+    setMessages(nextMessages)
     setConversationRecordId(record.id)
-    setAgentConversationId(record.agentConversationId)
+    setAgentConversationId(record.agentConversationId || record.id)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  const deleteHistoryItem = (id: string) => {
+  const deleteHistoryItem = async (id: string) => {
     const updated = historyList.filter((r) => r.id !== id)
     localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(updated))
     setHistoryList(updated)
+    await fetch(`/api/ai/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => undefined)
+  }
+
+  const openTaskCenter = () => {
+    void refreshAnalysisJobs()
+    setShowHistory(false)
+    setShowTaskCenter(true)
+  }
+
+  const openAnalysisJob = async (job: AgentBackgroundTask) => {
+    setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: '', backgroundTask: { ...job, unread: false } }])
+    setConversationRecordId(crypto.randomUUID())
+    setAgentConversationId(undefined)
+    setShowTaskCenter(false)
+    setAnalysisJobs((current) => current.map((item) => item.id === job.id ? { ...item, unread: false } : item))
+    await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(job.id)}/read`, { method: 'POST' }).catch(() => undefined)
   }
 
   const authHeaders = (): Record<string, string> => {
@@ -5122,6 +5217,10 @@ function ChatPanel({
           <button type="button" className="chat-panel-icon-btn" onClick={openHistory} title="历史记录" aria-label="历史记录">
             <History size={15} />
           </button>
+          <button type="button" className={`chat-panel-icon-btn ${analysisJobs.some((job) => job.unread) ? 'has-unread' : ''}`} onClick={openTaskCenter} title="Agent 任务中心" aria-label="Agent 任务中心">
+            <ListTodo size={15} />
+            {analysisJobs.filter((job) => job.unread).length > 0 && <span className="chat-task-unread">{Math.min(9, analysisJobs.filter((job) => job.unread).length)}</span>}
+          </button>
           <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭">
             <X size={15} />
           </button>
@@ -5343,14 +5442,14 @@ function ChatPanel({
             {historyList.length === 0 ? (
               <p className="chat-history-empty">暂无历史记录</p>
             ) : historyList.map((r) => (
-              <div key={r.id} className="chat-history-item" onClick={() => loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && loadConversation(r)}>
+              <div key={r.id} className="chat-history-item" onClick={() => void loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void loadConversation(r)}>
                 <span className="chat-history-item-title">{r.title}</span>
                 <div className="chat-history-item-meta">
                   <span>{new Date(r.savedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   <button
                     type="button"
                     className="chat-history-del"
-                    onClick={(e) => { e.stopPropagation(); deleteHistoryItem(r.id) }}
+                    onClick={(e) => { e.stopPropagation(); void deleteHistoryItem(r.id) }}
                     title="删除"
                     aria-label="删除"
                   >
@@ -5358,6 +5457,25 @@ function ChatPanel({
                   </button>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {showTaskCenter && (
+        <div className="chat-history-panel chat-task-center">
+          <div className="chat-history-header">
+            <span>Agent 任务中心</span>
+            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭任务中心"><X size={15} /></button>
+          </div>
+          <div className="chat-history-list">
+            {analysisJobs.length === 0 ? <p className="chat-history-empty">暂无后台分析任务</p> : analysisJobs.map((job) => (
+              <button key={job.id} type="button" className={`chat-task-item ${job.unread ? 'unread' : ''}`} onClick={() => void openAnalysisJob(job)}>
+                <span className="chat-task-item-main">
+                  <strong>{job.title}</strong>
+                  <small>{job.source === 'scheduled' ? '爱丽丝主动生成' : '对话中发起'} · {agentAnalysisStatusLabel(job.status)}</small>
+                </span>
+                <span className="chat-task-item-meta">{new Date(job.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -5430,6 +5548,7 @@ function App() {
   const toastTimersRef = useRef<number[]>([])
   const analysisJobStatusesRef = useRef<Map<string, AgentBackgroundTask['status']>>(new Map())
   const analysisJobsInitializedRef = useRef(false)
+  const analysisJobsNotifiedRef = useRef<Set<string>>(new Set())
   const updatingTaskIdsRef = useRef<Set<number>>(new Set())
   const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
@@ -5519,6 +5638,7 @@ function App() {
   useEffect(() => {
     if (!isAdmin) {
       analysisJobStatusesRef.current.clear()
+      analysisJobsNotifiedRef.current.clear()
       analysisJobsInitializedRef.current = false
       return
     }
@@ -5528,10 +5648,11 @@ function App() {
       const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
       if (!response.ok || cancelled || !Array.isArray(data?.jobs)) return
       const next = new Map(data.jobs.map((job) => [job.id, job.status]))
-      if (analysisJobsInitializedRef.current) {
-        for (const job of data.jobs) {
+      for (const job of data.jobs) {
+          const shouldNotify = job.unread && !analysisJobsNotifiedRef.current.has(job.id)
           const previous = analysisJobStatusesRef.current.get(job.id)
-          if (previous !== job.status && job.status === 'completed') {
+          if (shouldNotify && job.status === 'completed' && (!analysisJobsInitializedRef.current || previous !== job.status || job.source === 'scheduled')) {
+            analysisJobsNotifiedRef.current.add(job.id)
             notify(`${job.title}已完成`, 'success', {
               actionLabel: '查看结果',
               durationMs: 7200,
@@ -5541,7 +5662,8 @@ function App() {
               },
             })
           }
-          if (previous !== job.status && job.status === 'failed') {
+          if (shouldNotify && job.status === 'failed' && (!analysisJobsInitializedRef.current || previous !== job.status)) {
+            analysisJobsNotifiedRef.current.add(job.id)
             notify(`${job.title}失败，可在对话中重试`, 'error', {
               actionLabel: '打开爱丽丝',
               durationMs: 7200,
@@ -5551,7 +5673,6 @@ function App() {
               },
             })
           }
-        }
       }
       analysisJobStatusesRef.current = next
       analysisJobsInitializedRef.current = true

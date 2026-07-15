@@ -9,7 +9,7 @@ import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
-import type { AgentApproval, AgentBackgroundTask, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -388,9 +388,14 @@ type DbAgentAnalysisJob = {
   id: string
   workflow_id: string
   conversation_id: string | null
-  job_type: 'monthly_review'
+  job_type: AgentBackgroundTask['type']
   title: string
   month: string
+  query: string
+  scope_json: string
+  source: 'manual' | 'scheduled'
+  dedupe_key: string | null
+  read_at: string | null
   status: AgentBackgroundTask['status']
   phase: AgentBackgroundTask['phase']
   progress: number
@@ -2029,6 +2034,113 @@ async function reviseAgentApproval(env: Env, request: Request) {
   }
 }
 
+function toAgentConversationSummary(row: {
+  id: string
+  title: string
+  last_message_preview: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}): AgentConversationSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    lastMessagePreview: row.last_message_preview,
+    messageCount: Number(row.message_count) || 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+async function upsertAgentConversationIndex(env: Env, input: {
+  id: string
+  title: string
+  lastMessagePreview: string
+  messageCount: number
+}) {
+  if (!input.id) return
+  await env.DB.prepare(
+    `INSERT INTO agent_conversations (id, title, last_message_preview, message_count)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       title = CASE WHEN agent_conversations.title = '' THEN excluded.title ELSE agent_conversations.title END,
+       last_message_preview = excluded.last_message_preview,
+       message_count = MAX(agent_conversations.message_count, excluded.message_count),
+       updated_at = CURRENT_TIMESTAMP,
+       deleted_at = NULL`,
+  ).bind(
+    input.id,
+    input.title.slice(0, 80) || '新对话',
+    input.lastMessagePreview.slice(0, 160),
+    Math.max(0, input.messageCount),
+  ).run()
+}
+
+async function listAgentConversations(env: Env) {
+  const rows = await env.DB.prepare(
+    `SELECT id, title, last_message_preview, message_count, created_at, updated_at
+     FROM agent_conversations WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50`,
+  ).all<{
+    id: string
+    title: string
+    last_message_preview: string
+    message_count: number
+    created_at: string
+    updated_at: string
+  }>()
+  return ok({ conversations: (rows.results ?? []).map(toAgentConversationSummary) })
+}
+
+async function getAgentConversation(env: Env, id: string) {
+  if (!env.ALICE_AGENT) return fail('Cloudflare Agent Runtime 未启用', 503)
+  const index = await env.DB.prepare(
+    'SELECT id FROM agent_conversations WHERE id = ? AND deleted_at IS NULL',
+  ).bind(id).first<{ id: string }>()
+  if (!index) return fail('会话不存在', 404)
+  const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+  const snapshot = await agent.conversationSnapshot()
+  return ok({ id, messages: snapshot.messages })
+}
+
+async function syncAgentConversations(env: Env, request: Request) {
+  if (!env.ALICE_AGENT) return fail('Cloudflare Agent Runtime 未启用', 503)
+  const body = await request.json().catch(() => ({})) as { conversations?: Array<{
+    id?: string
+    agentConversationId?: string
+    title?: string
+    messages?: AgentConversationMessage[]
+  }> }
+  const conversations = Array.isArray(body.conversations) ? body.conversations.slice(0, 20) : []
+  let imported = 0
+  for (const item of conversations) {
+    const id = agentString(item.agentConversationId || item.id, 160)
+    if (!id || !Array.isArray(item.messages) || item.messages.length === 0) continue
+    const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+    const result = await agent.importConversation({ messages: item.messages })
+    const firstUser = item.messages.find((message) => message.role === 'user')
+    const last = item.messages[item.messages.length - 1]
+    await upsertAgentConversationIndex(env, {
+      id,
+      title: agentString(item.title, 80) || firstUser?.content.slice(0, 80) || '历史对话',
+      lastMessagePreview: last?.content || '',
+      messageCount: item.messages.length,
+    })
+    imported += result.imported
+  }
+  return ok({ imported })
+}
+
+async function deleteAgentConversation(env: Env, id: string) {
+  await env.DB.prepare(
+    'UPDATE agent_conversations SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  ).bind(id).run()
+  if (env.ALICE_AGENT) {
+    const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+    await agent.clearConversation()
+  }
+  return ok({ deleted: true })
+}
+
 const agentToolCorsHeaders = {
   ...jsonHeaders,
   'access-control-allow-origin': '*',
@@ -3147,6 +3259,9 @@ function toAgentBackgroundTask(row: DbAgentAnalysisJob): AgentBackgroundTask {
     type: row.job_type,
     title: row.title,
     month: row.month,
+    query: row.query || '',
+    source: row.source || 'manual',
+    unread: !row.read_at,
     status: row.status,
     phase: row.phase,
     progress: Math.max(0, Math.min(100, Number(row.progress) || 0)),
@@ -3164,9 +3279,72 @@ async function agentAnalysisJobById(env: Env, jobId: string) {
     .first<DbAgentAnalysisJob>()
 }
 
-async function startAgentAnalysisWorkflow(env: Env, jobId: string, month: string, workflowId: string) {
+async function startAgentAnalysisWorkflow(env: Env, jobId: string, workflowId: string) {
   if (!env.AGENT_ANALYSIS_WORKFLOW) throw new Error('AGENT_ANALYSIS_WORKFLOW 未配置')
-  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId, month } })
+  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId } })
+}
+
+const AGENT_ANALYSIS_TITLES: Record<AgentBackgroundTask['type'], (month: string) => string> = {
+  monthly_review: (month) => `${Number(month.slice(5, 7))} 月工作复盘`,
+  weekly_digest: () => '本周工作摘要',
+  risk_digest: () => '任务风险提示',
+  cross_task_analysis: () => '跨任务专题分析',
+  batch_attachment_analysis: () => '批量附件分析',
+  trend_analysis: () => '多月工作趋势',
+}
+
+function isAgentAnalysisType(value: string): value is AgentBackgroundTask['type'] {
+  return Object.prototype.hasOwnProperty.call(AGENT_ANALYSIS_TITLES, value)
+}
+
+async function createAgentAnalysisJob(env: Env, input: {
+  type: AgentBackgroundTask['type']
+  month: string
+  query?: string
+  taskIds?: number[]
+  conversationId?: string
+  source?: 'manual' | 'scheduled'
+  dedupeKey?: string
+  title?: string
+}) {
+  if (!/^\d{4}-\d{2}$/.test(input.month)) throw new Error('分析任务需要 YYYY-MM 格式的 month')
+  if (input.dedupeKey) {
+    const existing = await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE dedupe_key = ?')
+      .bind(input.dedupeKey).first<DbAgentAnalysisJob>()
+    if (existing) return existing
+  }
+  const jobId = `analysis-${crypto.randomUUID()}`
+  const workflowId = `agent-analysis-${crypto.randomUUID()}`
+  await env.DB.prepare(
+    `INSERT INTO agent_analysis_jobs (
+      id, workflow_id, conversation_id, job_type, title, month, query, scope_json, source,
+      dedupe_key, status, phase, progress
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 5)`,
+  ).bind(
+    jobId,
+    workflowId,
+    input.conversationId || null,
+    input.type,
+    input.title || AGENT_ANALYSIS_TITLES[input.type](input.month),
+    input.month,
+    String(input.query || '').slice(0, 1000),
+    JSON.stringify({ taskIds: (input.taskIds || []).slice(0, 30) }),
+    input.source || 'manual',
+    input.dedupeKey || null,
+  ).run()
+  try {
+    await startAgentAnalysisWorkflow(env, jobId, workflowId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '无法启动后台分析'
+    await env.DB.prepare(
+      `UPDATE agent_analysis_jobs SET status = 'failed', phase = 'failed', progress = 0,
+       error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(message, jobId).run()
+    throw new Error(message, { cause: error })
+  }
+  const row = await agentAnalysisJobById(env, jobId)
+  if (!row) throw new Error('后台分析任务创建失败')
+  return row
 }
 
 async function agentMonthlyReviewStartTool(env: Env, request: Request) {
@@ -3174,33 +3352,45 @@ async function agentMonthlyReviewStartTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   const month = agentString(body.month, 7)
   if (!/^\d{4}-\d{2}$/.test(month)) return agentFail('月度复盘需要 YYYY-MM 格式的 month', 400)
-  const jobId = `analysis-${crypto.randomUUID()}`
-  const workflowId = `agent-analysis-${crypto.randomUUID()}`
-  const title = `${Number(month.slice(5, 7))} 月工作复盘`
   const conversationId = agentString(body.conversationId, 160)
-  await env.DB.prepare(
-    `INSERT INTO agent_analysis_jobs (
-      id, workflow_id, conversation_id, job_type, title, month, status, phase, progress
-    ) VALUES (?, ?, ?, 'monthly_review', ?, ?, 'queued', 'queued', 5)`,
-  ).bind(jobId, workflowId, conversationId || null, title, month).run()
   try {
-    await startAgentAnalysisWorkflow(env, jobId, month, workflowId)
+    const row = await createAgentAnalysisJob(env, { type: 'monthly_review', month, conversationId })
+    return agentOk({
+      tool: 'start_monthly_review',
+      backgroundTask: toAgentBackgroundTask(row),
+      instruction: '复盘已进入后台 Workflow，请告诉用户可以关闭页面，不要在当前请求中等待结果。',
+      generatedAt: nowIso(),
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : '无法启动后台分析'
-    await env.DB.prepare(
-      `UPDATE agent_analysis_jobs
-       SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-    ).bind(message, jobId).run()
     return agentFail(message, 503)
   }
-  const row = await agentAnalysisJobById(env, jobId)
-  return agentOk({
-    tool: 'start_monthly_review',
-    backgroundTask: row ? toAgentBackgroundTask(row) : null,
-    instruction: '复盘已进入后台 Workflow，请告诉用户可以关闭页面，不要在当前请求中等待结果。',
-    generatedAt: nowIso(),
-  })
+}
+
+async function agentAnalysisJobStartTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const type = agentString(body.type, 40)
+  const month = agentString(body.month, 7)
+  if (!isAgentAnalysisType(type) || type === 'monthly_review') return agentFail('不支持的深度分析类型', 400)
+  if (!/^\d{4}-\d{2}$/.test(month)) return agentFail('深度分析需要 YYYY-MM 格式的 month', 400)
+  try {
+    const row = await createAgentAnalysisJob(env, {
+      type,
+      month,
+      query: agentString(body.query, 1000),
+      taskIds: Array.isArray(body.taskIds) ? body.taskIds.map(Number).filter((id) => Number.isInteger(id) && id > 0) : [],
+      conversationId: agentString(body.conversationId, 160),
+    })
+    return agentOk({
+      tool: 'start_deep_analysis',
+      backgroundTask: toAgentBackgroundTask(row),
+      instruction: '深度分析已进入后台任务中心，可以关闭页面，完成后会持久通知。',
+      generatedAt: nowIso(),
+    })
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法启动深度分析', 503)
+  }
 }
 
 function agentAnalysisStatusGuard(row: DbAgentAnalysisJob | null) {
@@ -3209,17 +3399,17 @@ function agentAnalysisStatusGuard(row: DbAgentAnalysisJob | null) {
   return row
 }
 
-async function agentMonthlyReviewPrepareTool(env: Env, request: Request) {
+async function agentAnalysisJobPrepareTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const jobId = agentString(body.jobId, 180)
-  const month = agentString(body.month, 7)
   let row: DbAgentAnalysisJob
   try {
     row = agentAnalysisStatusGuard(await agentAnalysisJobById(env, jobId))
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '任务状态无效', 409)
   }
+  const month = row.month
   if (row.status === 'completed') {
     return agentOk({ jobId, prepared: true, replayed: true })
   }
@@ -3229,29 +3419,33 @@ async function agentMonthlyReviewPrepareTool(env: Env, request: Request) {
      WHERE id = ?`,
   ).bind(jobId).run()
 
+  const isBroad = ['weekly_digest', 'risk_digest'].includes(row.job_type)
+  const isTrend = row.job_type === 'trend_analysis'
+  const taskQuery = isBroad
+    ? `SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC, created_at DESC LIMIT 120`
+    : isTrend
+      ? `SELECT * FROM tasks WHERE settlement_month >= date(?, '-5 months') AND deleted_at IS NULL AND voided_at IS NULL ORDER BY settlement_month ASC, start_date ASC LIMIT 240`
+      : `SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC LIMIT 120`
+  const taskRowsPromise = isBroad
+    ? env.DB.prepare(taskQuery).all<DbTask>()
+    : env.DB.prepare(taskQuery).bind(isTrend ? `${month}-01` : month).all<DbTask>()
   const [taskRows, updateRows, analysisRows, hourlyRate] = await Promise.all([
-    env.DB.prepare(
-      `SELECT * FROM tasks
-       WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL
-       ORDER BY start_date ASC, created_at ASC LIMIT 80`,
-    ).bind(month).all<DbTask>(),
-    env.DB.prepare(
-      `SELECT task_updates.* FROM task_updates
-       INNER JOIN tasks ON tasks.id = task_updates.task_id
-       WHERE tasks.settlement_month = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
-       ORDER BY task_updates.update_date ASC, task_updates.created_at ASC`,
-    ).bind(month).all<DbUpdate>(),
+    taskRowsPromise,
+    Promise.resolve({ results: [] as DbUpdate[], success: true }),
     env.DB.prepare(
       `SELECT attachment_analyses.* FROM attachment_analyses
        INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
-       WHERE tasks.settlement_month = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+       WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
          AND attachment_analyses.status = 'completed'
-       ORDER BY attachment_analyses.completed_at ASC`,
-    ).bind(month).all<DbAttachmentAnalysis>(),
+       ORDER BY attachment_analyses.completed_at DESC LIMIT 240`,
+    ).all<DbAttachmentAnalysis>(),
     getHourlyRate(env),
   ])
+  const taskIds = new Set((taskRows.results ?? []).map((task) => Number(task.id)))
+  const allUpdates = await env.DB.prepare('SELECT * FROM task_updates ORDER BY update_date ASC, created_at ASC LIMIT 1200').all<DbUpdate>()
   const updatesByTask = new Map<string, DbUpdate[]>()
-  for (const update of updateRows.results ?? []) {
+  for (const update of [...(updateRows.results ?? []), ...(allUpdates.results ?? [])]) {
+    if (!taskIds.has(Number(update.task_id))) continue
     const items = updatesByTask.get(String(update.task_id)) ?? []
     items.push(update)
     updatesByTask.set(String(update.task_id), items)
@@ -3263,7 +3457,13 @@ async function agentMonthlyReviewPrepareTool(env: Env, request: Request) {
     analysesByTask.set(String(analysis.task_id), items)
   }
   const today = nowIso().slice(0, 10)
-  const tasks = (taskRows.results ?? []).map((dbTask) => {
+  let scopedTaskRows = taskRows.results ?? []
+  try {
+    const scope = JSON.parse(row.scope_json || '{}') as { taskIds?: number[] }
+    const selectedIds = new Set((scope.taskIds || []).map(Number).filter(Boolean))
+    if (selectedIds.size > 0) scopedTaskRows = scopedTaskRows.filter((task) => selectedIds.has(Number(task.id)))
+  } catch { /* use the complete selected period */ }
+  const tasks = scopedTaskRows.map((dbTask) => {
     const task = toTask(dbTask)
     const closed = ['已验收', '终止', '不计费'].includes(task.status)
     return {
@@ -3321,6 +3521,9 @@ async function agentMonthlyReviewPrepareTool(env: Env, request: Request) {
   const totalHours = roundCents(tasks.reduce((sum, task) => sum + task.actualHours, 0))
   const billableHours = roundCents(tasks.filter((task) => task.billable && task.status !== '终止').reduce((sum, task) => sum + task.actualHours, 0))
   const snapshot = {
+    type: row.job_type,
+    query: row.query,
+    scope: (() => { try { return JSON.parse(row.scope_json || '{}') } catch { return {} } })(),
     month,
     generatedAt: nowIso(),
     summary: {
@@ -3350,7 +3553,7 @@ function cleanAgentAnalysisResult(value: string) {
     .trim()
 }
 
-async function agentMonthlyReviewGenerateTool(env: Env, request: Request) {
+async function agentAnalysisJobGenerateTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const jobId = agentString(body.jobId, 180)
@@ -3363,14 +3566,22 @@ async function agentMonthlyReviewGenerateTool(env: Env, request: Request) {
   if (row.status === 'completed' && row.result_markdown) {
     return agentOk({ backgroundTask: toAgentBackgroundTask(row), replayed: true })
   }
-  if (!row.source_snapshot_json) return agentFail('月度数据尚未准备完成', 409)
+  if (!row.source_snapshot_json) return agentFail('分析数据尚未准备完成', 409)
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
      SET status = 'running', phase = 'analyzing', progress = 72, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
   ).bind(jobId).run()
   const snapshotText = row.source_snapshot_json.slice(0, 90_000)
-  const prompt = `你是 Giverny 的月度工作复盘分析师。请仅根据下方结构化数据生成一份可核对的中文复盘。
+  const analysisInstructions: Record<AgentBackgroundTask['type'], string> = {
+    monthly_review: '固定结构：本月结论 / 完成与产出 / 未完成与风险 / 工作模式 / 下月动作。',
+    weekly_digest: '固定结构：本周结论 / 已完成 / 推进中 / 下周优先级。只关注最近 7 天的进展与当前状态。',
+    risk_digest: '固定结构：风险总览 / 逾期与阻塞 / 等待与反馈 / 建议动作。按紧急程度排序。',
+    cross_task_analysis: '围绕 query 比较相关任务，固定结构：结论 / 共同模式 / 差异 / 风险 / 可执行建议。',
+    batch_attachment_analysis: '综合附件分析结果，固定结构：交付概览 / 共性质量问题 / 风险 / 修改清单。',
+    trend_analysis: '按月份比较任务量、工时、完成率和改稿情况，固定结构：趋势结论 / 月度变化 / 异常点 / 后续建议。',
+  }
+  const prompt = `你是 Giverny 的工作分析师。请仅根据下方结构化数据生成一份可核对的中文报告。
 
 硬性要求：
 1. 数量、工时、金额、状态必须与 summary 一致，不得估算或编造。
@@ -3378,12 +3589,12 @@ async function agentMonthlyReviewGenerateTool(env: Env, request: Request) {
 3. 明确区分已验收、未完成、逾期和不计费任务。
 4. 从进展、改稿、等待、反馈和附件分析中提炼真实模式；没有数据时明确说明。
 5. 不输出思维链、<think> 或模型自我介绍。
-6. 使用 Markdown，固定结构：“本月结论 / 完成与产出 / 未完成与风险 / 工作模式 / 下月动作”。
+6. 使用 Markdown。${analysisInstructions[row.job_type]}
 
 数据：
 ${snapshotText}`
   const output = cleanAgentAnalysisResult(await callTextWithFallback(env, prompt, 2400))
-  if (!output) return agentFail('模型未返回有效月度复盘', 503)
+  if (!output) return agentFail('模型未返回有效分析报告', 503)
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
      SET status = 'completed', phase = 'completed', progress = 100, result_markdown = ?,
@@ -3411,10 +3622,20 @@ async function agentAnalysisJobFailTool(env: Env, request: Request) {
 
 async function listAgentAnalysisJobs(env: Env, request: Request) {
   const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit') || 20), 1), 50)
+  const unreadOnly = new URL(request.url).searchParams.get('unread') === '1'
   const rows = await env.DB.prepare(
-    'SELECT * FROM agent_analysis_jobs ORDER BY created_at DESC LIMIT ?',
+    `SELECT * FROM agent_analysis_jobs ${unreadOnly ? 'WHERE read_at IS NULL' : ''} ORDER BY created_at DESC LIMIT ?`,
   ).bind(limit).all<DbAgentAnalysisJob>()
   return ok({ jobs: (rows.results ?? []).map(toAgentBackgroundTask) })
+}
+
+async function markAgentAnalysisJobRead(env: Env, jobId?: string) {
+  if (jobId) {
+    await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(jobId).run()
+    return getAgentAnalysisJob(env, jobId)
+  }
+  await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL').run()
+  return ok({ updated: true })
 }
 
 async function getAgentAnalysisJob(env: Env, jobId: string) {
@@ -3453,7 +3674,7 @@ async function retryAgentAnalysisJob(env: Env, jobId: string) {
      WHERE id = ?`,
   ).bind(workflowId, jobId).run()
   try {
-    await startAgentAnalysisWorkflow(env, jobId, row.month, workflowId)
+    await startAgentAnalysisWorkflow(env, jobId, workflowId)
   } catch (error) {
     const message = error instanceof Error ? error.message : '无法重新启动后台分析'
     await env.DB.prepare(
@@ -3464,6 +3685,62 @@ async function retryAgentAnalysisJob(env: Env, jobId: string) {
   }
   const retried = await agentAnalysisJobById(env, jobId)
   return ok({ job: retried ? toAgentBackgroundTask(retried) : null })
+}
+
+function beijingClock(now = new Date()) {
+  const shifted = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return {
+    date: shifted.toISOString().slice(0, 10),
+    month: shifted.toISOString().slice(0, 7),
+    day: shifted.getUTCDate(),
+    weekday: shifted.getUTCDay(),
+    hour: shifted.getUTCHours(),
+  }
+}
+
+function previousMonth(month: string) {
+  const [year, value] = month.split('-').map(Number)
+  const date = new Date(Date.UTC(year, value - 2, 1))
+  return date.toISOString().slice(0, 7)
+}
+
+async function maybeScheduleProactiveAgentAnalyses(env: Env, now = new Date()) {
+  const clock = beijingClock(now)
+  if (clock.hour !== 9) return
+  if (clock.weekday === 1) {
+    await createAgentAnalysisJob(env, {
+      type: 'weekly_digest',
+      month: clock.month,
+      source: 'scheduled',
+      dedupeKey: `weekly:${clock.date}`,
+      title: `${clock.date} 周工作摘要`,
+    })
+  }
+  if (clock.day === 1) {
+    const month = previousMonth(clock.month)
+    await createAgentAnalysisJob(env, {
+      type: 'monthly_review',
+      month,
+      source: 'scheduled',
+      dedupeKey: `monthly:${month}`,
+      title: `${Number(month.slice(5, 7))} 月主动复盘`,
+    })
+  }
+  const riskRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM tasks
+     WHERE deleted_at IS NULL AND voided_at IS NULL
+       AND status NOT IN ('已验收', '终止', '不计费')
+       AND estimated_date IS NOT NULL AND substr(estimated_date, 1, 10) < ?`,
+  ).bind(clock.date).first<{ count: number }>()
+  if (Number(riskRow?.count || 0) > 0) {
+    await createAgentAnalysisJob(env, {
+      type: 'risk_digest',
+      month: clock.month,
+      source: 'scheduled',
+      dedupeKey: `risk:${clock.date}`,
+      title: `${clock.date} 任务风险提示`,
+    })
+  }
 }
 
 const agentWorkflowWriteEndpoints = new Set([
@@ -3563,11 +3840,14 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/monthly-review-start' && request.method === 'POST') {
     return agentMonthlyReviewStartTool(env, request)
   }
-  if (url.pathname === '/api/agent/tools/monthly-review-prepare' && request.method === 'POST') {
-    return agentMonthlyReviewPrepareTool(env, request)
+  if (url.pathname === '/api/agent/tools/analysis-job-start' && request.method === 'POST') {
+    return agentAnalysisJobStartTool(env, request)
   }
-  if (url.pathname === '/api/agent/tools/monthly-review-generate' && request.method === 'POST') {
-    return agentMonthlyReviewGenerateTool(env, request)
+  if ((url.pathname === '/api/agent/tools/analysis-job-prepare' || url.pathname === '/api/agent/tools/monthly-review-prepare') && request.method === 'POST') {
+    return agentAnalysisJobPrepareTool(env, request)
+  }
+  if ((url.pathname === '/api/agent/tools/analysis-job-generate' || url.pathname === '/api/agent/tools/monthly-review-generate') && request.method === 'POST') {
+    return agentAnalysisJobGenerateTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/analysis-job-fail' && request.method === 'POST') {
     return agentAnalysisJobFailTool(env, request)
@@ -9357,6 +9637,16 @@ async function chatWithAi(env: Env, request: Request) {
         })),
       })
       if (runtimeResult?.answer) {
+        const conversationId = String(runtimeResult.conversationId || '').trim()
+        if (conversationId) {
+          const firstUserMessage = messages.find((message) => message.role === 'user')?.content || lastMsg
+          await upsertAgentConversationIndex(env, {
+            id: conversationId,
+            title: firstUserMessage.slice(0, 80),
+            lastMessagePreview: runtimeResult.answer,
+            messageCount: messages.length + 1,
+          })
+        }
         return ok({
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,
@@ -10153,6 +10443,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path === '/api/ai/agent-metrics' ||
+      path.startsWith('/api/ai/conversations') ||
       path.startsWith('/api/ai/analysis-jobs') ||
       path === '/api/ai/chat' ||
       path === '/api/ai/approval' ||
@@ -10321,8 +10612,26 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/chat' && request.method === 'POST') {
     return chatWithAiInstrumented(env, request, ctx)
   }
+  if (path === '/api/ai/conversations' && request.method === 'GET') {
+    return listAgentConversations(env)
+  }
+  if (path === '/api/ai/conversations/sync' && request.method === 'POST') {
+    return syncAgentConversations(env, request)
+  }
+  if (path.startsWith('/api/ai/conversations/') && request.method === 'GET') {
+    return getAgentConversation(env, path.split('/')[4] || '')
+  }
+  if (path.startsWith('/api/ai/conversations/') && request.method === 'DELETE') {
+    return deleteAgentConversation(env, path.split('/')[4] || '')
+  }
   if (path === '/api/ai/analysis-jobs' && request.method === 'GET') {
     return listAgentAnalysisJobs(env, request)
+  }
+  if (path === '/api/ai/analysis-jobs/read-all' && request.method === 'POST') {
+    return markAgentAnalysisJobRead(env)
+  }
+  if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/read') && request.method === 'POST') {
+    return markAgentAnalysisJobRead(env, path.split('/')[4] || '')
   }
   if (path.startsWith('/api/ai/analysis-jobs/') && request.method === 'GET') {
     return getAgentAnalysisJob(env, path.split('/')[4] || '')
@@ -10477,6 +10786,9 @@ export default {
     })
     await maybeRefreshOpenRouterFreeModels(env).catch((error) => {
       console.error('openrouter free model refresh failed', error)
+    })
+    await maybeScheduleProactiveAgentAnalyses(env).catch((error) => {
+      console.error('proactive agent analysis scheduling failed', error)
     })
   },
   // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。

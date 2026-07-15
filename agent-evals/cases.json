@@ -58,6 +58,11 @@
 
     { "id": "analysis-01", "category": "background_analysis", "prompt": "帮我做一份7月工作复盘", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
     { "id": "analysis-02", "category": "background_analysis", "prompt": "后台分析一下2026年6月整月的任务、工时和风险", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
+    { "id": "analysis-03", "category": "background_analysis", "prompt": "生成本周工作摘要", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "weekly_digest" } },
+    { "id": "analysis-04", "category": "background_analysis", "prompt": "扫描一下当前任务风险提示", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "risk_digest" } },
+    { "id": "analysis-05", "category": "background_analysis", "prompt": "跨任务对比一下本月品牌项目", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "cross_task_analysis" } },
+    { "id": "analysis-06", "category": "background_analysis", "prompt": "把本月批量附件分析结果汇总一下", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "batch_attachment_analysis" } },
+    { "id": "analysis-07", "category": "background_analysis", "prompt": "分析最近几个月的工作趋势", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "trend_analysis" } },
 
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },

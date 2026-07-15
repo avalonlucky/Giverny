@@ -49,7 +49,13 @@ function ambiguousTitle(text) {
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
-  if (text.includes('Giverny 的月度工作复盘分析师')) {
+  if (text.includes('Giverny 的工作分析师')) {
+    if (!text.includes('"type":"monthly_review"')) {
+      return completion({
+        role: 'assistant',
+        content: '## 分析结论\n- 已按结构化数据完成专题分析。\n## 关键发现\n- 所有判断均来自任务与附件快照。\n## 建议动作\n- 优先处理明确风险并持续跟踪。',
+      })
+    }
     return completion({
       role: 'assistant',
       content: '## 本月结论\n- 隔离评测月度数据已核对。\n## 完成与产出\n- 任务结果以结构化快照为准。\n## 未完成与风险\n- 无额外编造。\n## 工作模式\n- 已汇总工时和进展。\n## 下月动作\n- 优先跟进未完成任务。',
@@ -69,6 +75,11 @@ function chooseTool(messages) {
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
     return toolCall('start_monthly_review', { month: /6\s*月|2026-06/.test(text) ? '2026-06' : '2026-07' })
   }
+  if (/本周工作摘要|周报/.test(text)) return toolCall('start_deep_analysis', { type: 'weekly_digest', month: '2026-07' })
+  if (/风险扫描|风险提示/.test(text)) return toolCall('start_deep_analysis', { type: 'risk_digest', month: '2026-07' })
+  if (/跨任务|对比.*任务/.test(text)) return toolCall('start_deep_analysis', { type: 'cross_task_analysis', month: '2026-07', query: text })
+  if (/批量附件|附件.*汇总/.test(text)) return toolCall('start_deep_analysis', { type: 'batch_attachment_analysis', month: '2026-07', query: text })
+  if (/趋势分析|几个月.*趋势/.test(text)) return toolCall('start_deep_analysis', { type: 'trend_analysis', month: '2026-07' })
   if (text.includes('最近一次反馈')) return toolCall('search_tasks', { query: '最近任务', month: '2026-07', limit: 5 })
   if (/预计收入|总工时|计费工时|收入|结算趋势|不计费工时|平均每个任务|最高|待验收金额|结算多少钱/.test(text)) {
     return toolCall('query_month_finance', {

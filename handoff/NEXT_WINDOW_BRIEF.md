@@ -1,5 +1,13 @@
 # Next Window Brief
 
+## 2026-07-16 · v0.28.35 Agent 工作空间
+
+- 已实现云端会话索引与旧浏览器历史迁移，消息正文和结构化卡片继续保存在 Alice Durable Object SQLite。
+- 爱丽丝顶部新增 Agent 任务中心，`agent_analysis_jobs.read_at` 提供跨设备可靠未读状态。
+- `AgentAnalysisWorkflow` 已通用化，支持月度复盘、周报、风险提示、跨任务、批量附件和趋势分析。
+- Cron 会创建去重的周摘要、上月复盘和逾期风险提示；发布门禁为 70/70。
+- 数据迁移：`db/migrations/0018_agent_workspace.sql`。
+
 最后整理：2026-06-23
 代码版本：v0.11.66
 分支：main
