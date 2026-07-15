@@ -1,12 +1,12 @@
 # Next Window Brief
 
-## 2026-07-16 · v0.28.35 Agent 工作空间
+## 2026-07-16 · v0.28.36 Agent 附件交付
 
-- 已实现云端会话索引与旧浏览器历史迁移，消息正文和结构化卡片继续保存在 Alice Durable Object SQLite。
-- 爱丽丝顶部新增 Agent 任务中心，`agent_analysis_jobs.read_at` 提供跨设备可靠未读状态。
-- `AgentAnalysisWorkflow` 已通用化，支持月度复盘、周报、风险提示、跨任务、批量附件和趋势分析。
-- Cron 会创建去重的周摘要、上月复盘和逾期风险提示；发布门禁为 70/70。
-- 数据迁移：`db/migrations/0018_agent_workspace.sql`。
+- 新增 `search_attachments` 只读工具，按任务语义、文件名、需求、标签和月份检索真实附件。
+- Agent 响应通过结构化 `attachments` 协议返回文件，前端显示缩略图、任务、格式、大小、标签及预览/打开操作，并随云端会话恢复。
+- 回答正文使用 `react-markdown` + `remark-gfm`，标题、列表、引用、链接和表格均使用产品化排版。
+- OpenAPI、MCP 和站内 Tool Calling 共用附件工具；MCP 当前为五个只读工具。
+- 隔离发布门禁扩展为 74/74；本版本无新增 D1 migration。
 
 最后整理：2026-06-23
 代码版本：v0.11.66

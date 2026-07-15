@@ -26,7 +26,7 @@
 
     { "id": "detail-01", "category": "task_detail", "prompt": "公司产品封套修改目前做到哪了", "expect": { "tools": ["get_task_detail"] } },
     { "id": "detail-02", "category": "task_detail", "prompt": "查一下解决方案彩页的所有进展", "expect": { "tools": ["get_task_detail"] } },
-    { "id": "detail-03", "category": "task_detail", "prompt": "年终冲刺动员令倒计时海报有哪些附件", "expect": { "tools": ["get_task_detail"] } },
+    { "id": "detail-03", "category": "attachment_search", "prompt": "年终冲刺动员令倒计时海报有哪些附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
     { "id": "detail-04", "category": "task_detail", "prompt": "AI Native发布会任务是谁提的需求", "expect": { "tools": ["get_task_detail"] } },
     { "id": "detail-05", "category": "task_detail", "prompt": "直播设计这个任务记录了几段工时", "expect": { "tools": ["get_task_detail"] } },
     { "id": "detail-06", "category": "task_detail", "prompt": "任务#1的验收情况", "expect": { "tools": ["get_task_detail"] } },
@@ -34,6 +34,11 @@
     { "id": "detail-08", "category": "task_detail", "prompt": "最近一次反馈是什么", "expect": { "tools": ["search_tasks", "get_task_detail"] } },
     { "id": "detail-09", "category": "task_detail", "prompt": "哪个任务提到了背景电流声降噪", "expect": { "tools": ["search_tasks"] } },
     { "id": "detail-10", "category": "task_detail", "prompt": "找一下和产品矩阵图相关的工作", "expect": { "tools": ["search_tasks"] } },
+
+    { "id": "attachment-01", "category": "attachment_search", "prompt": "帮我看一下关于直播海报邀请函的附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
+    { "id": "attachment-02", "category": "attachment_search", "prompt": "找到当天邀请V1.0B01.jpg这个文件", "expect": { "tools": ["search_attachments"], "attachments": true } },
+    { "id": "attachment-03", "category": "attachment_search", "prompt": "打开直播设计的验收附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
+    { "id": "attachment-04", "category": "attachment_search", "prompt": "我要下载倒计时海报的交付文件", "expect": { "tools": ["search_attachments"], "attachments": true } },
 
     { "id": "create-01", "category": "create_preview", "prompt": "新建任务：官网首页改版，明天下午开始，预计8小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-02", "category": "create_preview", "prompt": "帮我建一个Logo提案任务，需求人小陈，月底交付", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },

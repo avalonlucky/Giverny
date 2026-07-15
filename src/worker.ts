@@ -9,7 +9,7 @@ import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -1910,6 +1910,7 @@ type OpenAiAgentRuntimeResult = {
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
+  attachments?: AgentResultAttachment[]
 }
 
 function normalizeAgentRuntimeBaseUrl(env: Env) {
@@ -2894,6 +2895,25 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
+      '/api/agent/tools/search-attachments': {
+        get: {
+          operationId: 'search_attachments',
+          tags: ['Tasks'],
+          summary: 'Search task attachments',
+          description: 'Search real task attachments by task semantics, task title and file name.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'query', in: 'query', required: true, schema: { type: 'string' } },
+            { name: 'month', in: 'query', required: false, schema: { type: 'string' } },
+            { name: 'limit', in: 'query', required: false, schema: { type: 'integer' } },
+          ],
+          responses: {
+            '200': jsonResponse('Attachment search results', '#/components/schemas/SearchAttachmentsResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+          },
+        },
+      },
       '/api/agent/tools/context': {
         get: {
           operationId: 'get_giverny_context',
@@ -3020,6 +3040,20 @@ function agentOpenApiSpec(request: Request) {
               items: { type: 'object', additionalProperties: true },
             },
             attachmentAnalyses: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        SearchAttachmentsResponse: {
+          type: 'object',
+          required: ['tool', 'query', 'count', 'files', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['search_attachments'] },
+            query: { type: 'string' },
+            count: { type: 'integer' },
+            files: {
               type: 'array',
               items: { type: 'object', additionalProperties: true },
             },
@@ -3182,6 +3216,104 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   })
 }
 
+type AgentAttachmentSearchRow = DbAttachment & {
+  task_title: string
+  requirement: string | null
+  settlement_month: string | null
+}
+
+function normalizedAttachmentSearchText(value: string) {
+  return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+}
+
+function attachmentSearchTerms(query: string) {
+  const meaningful = query
+    .replace(/(?:帮我|看一下|查一下|查看|搜索|找一下|关于|相关|所有|哪些|附件|文件|交付件|预览|打开|下载)/g, '')
+    .trim()
+  const normalized = normalizedAttachmentSearchText(meaningful || query)
+  const terms = new Set<string>()
+  for (const match of normalized.matchAll(/[a-z0-9._-]{2,}/g)) terms.add(match[0])
+  const chinese = normalized.replace(/[a-z0-9._-]+/g, '')
+  if (chinese.length <= 4 && chinese.length >= 2) terms.add(chinese)
+  for (let index = 0; index < chinese.length - 1; index += 1) terms.add(chinese.slice(index, index + 2))
+  return { normalized, terms: [...terms].filter((term) => term.length >= 2).slice(0, 24) }
+}
+
+function toAgentResultAttachment(row: DbAttachment): AgentResultAttachment {
+  const file = toFile(row)
+  return {
+    id: file.id,
+    taskId: file.taskId,
+    taskTitle: file.task,
+    name: file.name,
+    type: file.type,
+    mimeType: file.mimeType || '',
+    size: file.size,
+    scope: file.scope,
+    tag: file.tag || '',
+    uploadedAt: file.uploadedAt,
+    previewUrl: file.previewUrl,
+    sourceUrl: file.sourceUrl || `/api/files/${file.id}/source`,
+  }
+}
+
+async function agentSearchAttachmentsTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const query = String(body.query ?? '').trim().slice(0, 200)
+  const month = String(body.month ?? '').trim().slice(0, 7)
+  const limit = Math.min(Math.max(Number(body.limit ?? 30) || 30, 1), 50)
+  const rows = month
+    ? await env.DB.prepare(
+        `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.settlement_month
+         FROM attachments
+         INNER JOIN tasks ON tasks.id = attachments.task_id
+         WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+           AND (tasks.settlement_month = ? OR tasks.start_date LIKE ?)
+         ORDER BY attachments.uploaded_at DESC
+         LIMIT 500`,
+      ).bind(month, `${month}%`).all<AgentAttachmentSearchRow>()
+    : await env.DB.prepare(
+        `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.settlement_month
+         FROM attachments
+         INNER JOIN tasks ON tasks.id = attachments.task_id
+         WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+         ORDER BY attachments.uploaded_at DESC
+         LIMIT 500`,
+      ).all<AgentAttachmentSearchRow>()
+  const semanticMatches = query ? await semanticTaskIds(env, query, 20, month) : []
+  const semanticScores = new Map(semanticMatches.map((item) => [item.id, item.score]))
+  const { normalized, terms } = attachmentSearchTerms(query)
+  const ranked = (rows.results ?? []).map((row) => {
+    const haystack = normalizedAttachmentSearchText([
+      row.file_name,
+      row.task_title,
+      row.requirement,
+      row.file_tag,
+    ].filter(Boolean).join(' '))
+    const semanticScore = semanticScores.get(String(row.task_id)) || 0
+    let score = semanticScore >= 0.5 ? 6 + semanticScore : 0
+    if (normalized.length >= 2 && haystack.includes(normalized)) score += 20
+    terms.forEach((term) => { if (haystack.includes(term)) score += 2 })
+    return { row, score }
+  })
+    .filter((item) => !query || item.score >= 4)
+    .sort((a, b) => b.score - a.score || String(b.row.uploaded_at).localeCompare(String(a.row.uploaded_at)))
+    .slice(0, limit)
+
+  return agentOk({
+    tool: 'search_attachments',
+    query,
+    month,
+    count: ranked.length,
+    searchMode: query ? 'semantic-task+filename' : 'recent',
+    files: ranked.map(({ row }) => toAgentResultAttachment(row)),
+    generatedAt: nowIso(),
+  })
+}
+
 async function agentTaskDetailTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) {
     return agentFail('Agent tool token missing or invalid', 401)
@@ -3209,19 +3341,7 @@ async function agentTaskDetailTool(env: Env, request: Request) {
     tool: 'get_task_detail',
     task: toTask(task),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
-    files: (fileRows.results ?? []).map(toFile).map((file) => ({
-      id: file.id,
-      entryId: file.entryId,
-      scope: file.scope,
-      name: file.name,
-      type: file.type,
-      mimeType: file.mimeType,
-      size: file.size,
-      uploadedAt: file.uploadedAt,
-      final: file.final,
-      visible: file.visible,
-      tag: file.tag,
-    })),
+    files: (fileRows.results ?? []).map(toAgentResultAttachment),
     attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
     generatedAt: nowIso(),
   })
@@ -3834,6 +3954,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/task-detail' && (request.method === 'POST' || request.method === 'GET')) {
     return agentTaskDetailTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/search-attachments' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentSearchAttachmentsTool(env, request)
+  }
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
   }
@@ -3961,6 +4084,15 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     annotations,
   }, async (input) => {
     try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+  const attachments = agentReadToolRegistry.search_attachments
+  server.registerTool('search_attachments', {
+    title: attachments.title,
+    description: attachments.description,
+    inputSchema: attachments.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, attachments.endpoint, input)) } catch (error) { return mcpToolError(error) }
   })
   const context = agentReadToolRegistry.get_giverny_context
   server.registerTool('get_giverny_context', {
@@ -9658,6 +9790,7 @@ async function chatWithAi(env: Env, request: Request) {
           approval: runtimeResult.approval,
           selection: runtimeResult.selection,
           backgroundTask: runtimeResult.backgroundTask,
+          attachments: runtimeResult.attachments,
         })
       }
       if (requiresRuntime) {
@@ -9904,6 +10037,7 @@ function agentMetricIntent(tools: string[], approvalAction: string, hasSelection
   if (hasSelection) return 'task_disambiguation'
   if (approvalAction) return `write_${approvalAction}`
   if (tools.includes('query_month_finance')) return 'month_finance'
+  if (tools.includes('search_attachments')) return 'attachment_search'
   if (tools.includes('get_task_detail')) return 'task_detail'
   if (tools.includes('search_tasks')) return 'task_search'
   if (tools.includes('get_giverny_context')) return 'workspace_context'

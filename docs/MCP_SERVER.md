@@ -6,6 +6,7 @@ Giverny 在 `https://mayeai.com/mcp` 提供基于 Streamable HTTP 的远程 MCP 
 
 - `query_month_finance`：查询月份收入、总工时、计费工时和结算统计。
 - `search_tasks`：按月份、状态意图、标题、需求或人员搜索任务。
+- `search_attachments`：按任务、文件名、需求、标签或月份搜索附件，返回结构化文件元数据以及受权限保护的预览/源文件路径。
 - `get_task_detail`：读取明确任务的详情、进展、附件和验收信息。
 - `get_giverny_context`：读取 Giverny 能力范围。
 
@@ -33,7 +34,8 @@ Giverny 在 `https://mayeai.com/mcp` 提供基于 Streamable HTTP 的远程 MCP 
 
 - 未授权 MCP 请求返回 401。
 - MCP 口令不能登录网站。
-- 工具清单只包含四个只读工具。
+- 工具清单只包含五个只读工具。
+- `search_attachments` 能返回真实的结构化附件列表。
 - `get_giverny_context` 能通过 MCP 协议实际调用。
 - 原有 Agent 查询、写入预览、消歧和安全用例不受影响。
 

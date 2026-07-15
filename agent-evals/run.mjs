@@ -103,6 +103,9 @@ for (const testCase of cases) {
     if (testCase.expect.backgroundTask && data.backgroundTask?.type !== testCase.expect.backgroundTask) {
       failures.push(`backgroundTask=${data.backgroundTask?.type || 'none'}，预期 ${testCase.expect.backgroundTask}`)
     }
+    if (testCase.expect.attachments && (!Array.isArray(data.attachments) || data.attachments.length === 0)) {
+      failures.push('未返回结构化附件')
+    }
     if (data.selection && !testCase.expect.selectionAllowed) failures.push('意外返回任务消歧')
     const candidateCount = Array.isArray(data.selection?.candidates) ? data.selection.candidates.length : 0
     if (testCase.expect.selectionRequired && candidateCount < 2) failures.push(`未返回有效消歧候选（${candidateCount} 个）`)

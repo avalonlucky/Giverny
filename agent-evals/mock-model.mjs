@@ -65,6 +65,12 @@ function chooseTool(messages) {
     if (text.includes('最近一次反馈') && !tools.includes('get_task_detail')) {
       return toolCall('get_task_detail', { taskId: 1 })
     }
+    if (tools.includes('search_attachments')) {
+      return completion({
+        role: 'assistant',
+        content: '已找到相关附件，可以直接在下方预览或打开。\n\n| 任务 | 文件数 | 主要类型 |\n| --- | ---: | --- |\n| 直播设计 | 2 | JPG 验收文件 |',
+      })
+    }
     return completion({ role: 'assistant', content: '评测工具已经返回，我会严格按照工具结果回答。' })
   }
 
@@ -80,6 +86,9 @@ function chooseTool(messages) {
   if (/跨任务|对比.*任务/.test(text)) return toolCall('start_deep_analysis', { type: 'cross_task_analysis', month: '2026-07', query: text })
   if (/批量附件|附件.*汇总/.test(text)) return toolCall('start_deep_analysis', { type: 'batch_attachment_analysis', month: '2026-07', query: text })
   if (/趋势分析|几个月.*趋势/.test(text)) return toolCall('start_deep_analysis', { type: 'trend_analysis', month: '2026-07' })
+  if (/附件|(?:找|找到|打开|预览|下载).*(?:文件|交付件)|(?:文件|交付件).*(?:找|打开|预览|下载)/.test(text)) {
+    return toolCall('search_attachments', { query: text, limit: 30 })
+  }
   if (text.includes('最近一次反馈')) return toolCall('search_tasks', { query: '最近任务', month: '2026-07', limit: 5 })
   if (/预计收入|总工时|计费工时|收入|结算趋势|不计费工时|平均每个任务|最高|待验收金额|结算多少钱/.test(text)) {
     return toolCall('query_month_finance', {

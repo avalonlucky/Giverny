@@ -29,6 +29,7 @@ AliceAgent Durable Object
         │
         ├── query_month_finance
         ├── search_tasks
+        ├── search_attachments
         ├── get_task_detail
         ├── get_giverny_context
         ├── create_task_preview / create_task
@@ -61,14 +62,15 @@ D1 / R2 / app data
 - `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、类型化 Tool Calling、确认状态和执行轨迹。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
 - `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
+- Agent 回答界面：正文使用 GFM 富文本渲染；附件查询返回独立结构化文件卡，支持缩略图、任务归属、格式、大小、预览和打开，不依赖模型在 Markdown 中拼接内部文件地址。
 - `/api/agent/tools/*`：提供只读工具与写入工具。写入工具统一采用 preview/execute 两段式协议，execute 必须携带 preview 生成的 `confirmationToken`。
 - 前端确认卡：Tool Calling 生成的写入草稿通过结构化 `approval` 协议展示，用户可直接核对并确认或取消；签名 token 始终只保存在 Agent SQLite，不下发浏览器。
 - 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
-- `agent-evals/`：70 条固定回归用例覆盖查询、五类写入、同名消歧、六类后台分析和安全边界。
+- `agent-evals/`：74 条固定回归用例覆盖查询、附件搜索、五类写入、同名消歧、六类后台分析和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
-- 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露四个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
+- 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露五个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；其中 `search_attachments` 返回可验证的结构化附件元数据和受权限保护的源文件/预览路径。MCP 仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
 - 持久写入：五类确认操作由 `AgentWriteWorkflow` 等待人工批准后执行；步骤支持重试，`agent_write_operations` 缓存完成结果，重复恢复不会重复创建任务或追加记录。
 - 后台分析：月度复盘、周报、风险提示、跨任务专题、批量附件和趋势分析由 `AgentAnalysisWorkflow` 独立收集 D1 权威数据并生成报告；对话卡与任务中心展示真实进度，支持取消、失败重试和持久未读通知。原始快照在成功后清除，只保留最终报告。
 - 主动 Agent：Cron 按周期创建周报、上月复盘和逾期风险提示，D1 去重键保证同一周期只生成一次。
@@ -93,5 +95,5 @@ D1 / R2 / app data
 - 模型只拥有 preview 工具；confirmation token 保存在 Agent SQLite 中，不进入模型输出和前端响应。
 - preview 会启动等待批准的 Workflow；确认后 Workflow 才能进入执行步骤，同一 operationId 的成功结果可安全重放。
 - Agent 不开放删除、作废、结算锁定、部署等高风险操作。
-- MCP 只开放共享注册表中的四个只读工具；MCP 口令不得用于网站登录，站内访问口令也不得调用 MCP。
+- MCP 只开放共享注册表中的五个只读工具；MCP 口令不得用于网站登录，站内访问口令也不得调用 MCP。
 - 如果密钥曾出现在截图、聊天记录或公开页面，应先轮换再上线。

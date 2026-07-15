@@ -32,6 +32,21 @@ export type AgentTaskSelection = {
   candidates: AgentTaskCandidate[]
 }
 
+export type AgentResultAttachment = {
+  id: number
+  taskId: number
+  taskTitle: string
+  name: string
+  type: string
+  mimeType: string
+  size: string
+  scope: 'progress' | 'acceptance'
+  tag: string
+  uploadedAt: string
+  previewUrl?: string
+  sourceUrl: string
+}
+
 export type AgentBackgroundTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export type AgentBackgroundTaskPhase = 'queued' | 'collecting' | 'analyzing' | 'completed' | 'failed' | 'cancelled'
@@ -69,6 +84,7 @@ export type AgentConversationMessage = {
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
+  attachments?: AgentResultAttachment[]
   createdAt: number
 }
 

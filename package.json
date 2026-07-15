@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.35",
+  "version": "0.28.36",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
@@ -34,6 +34,8 @@
     "pptx-preview": "^1.0.7",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

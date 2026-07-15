@@ -24,3 +24,11 @@ INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_
   ('u1', '1', '2026-07-03T21:24', '项目进展', '完成封套第一版与产品矩阵图调整', 0, 1),
   ('u2', '12', '2026-07-09T23:58', '项目进展', '更新公司介绍、使命愿景和页面结构', 0, 1),
   ('u3', '5', '2026-06-30T17:16', '验收进展', '完成三个产品视频背景电流声降噪', 0, 1);
+
+INSERT INTO attachments (
+  id, task_id, attachment_scope, file_name, file_type, mime_type, r2_key,
+  file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
+) VALUES
+  ('101', '13', 'acceptance', '当天邀请V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-invite.jpg', 344064, '336 KB', 1, 1, '验收文件', '2026-06-29T18:00:00'),
+  ('102', '13', 'acceptance', '直播封面V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-cover.jpg', 445440, '435 KB', 1, 1, '验收文件', '2026-06-29T18:05:00'),
+  ('103', '11', 'acceptance', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 1, 1, '验收文件', '2026-06-30T18:00:00');

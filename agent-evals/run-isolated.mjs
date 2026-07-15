@@ -96,11 +96,16 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_tasks']
+  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
     throw new Error('MCP context tool did not return text content')
+  }
+  const attachmentResult = await request(5, 'tools/call', { name: 'search_attachments', arguments: { query: '直播邀请', limit: 10 } })
+  const structuredFiles = attachmentResult.structuredContent?.files
+  if (attachmentResult.isError || !Array.isArray(structuredFiles) || structuredFiles.length === 0) {
+    throw new Error('MCP attachment search did not return structured files')
   }
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }

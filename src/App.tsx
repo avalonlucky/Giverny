@@ -1,5 +1,7 @@
 import { Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   AlarmClock,
   AlertTriangle,
@@ -103,7 +105,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4137,6 +4139,7 @@ type ChatMessage = {
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
+  attachments?: AgentResultAttachment[]
 }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
@@ -4211,6 +4214,20 @@ function renderPlainChatLines(lines: string[]) {
         </Fragment>
       ))}
     </>
+  )
+}
+
+function ChatMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+        table: ({ children }) => <div className="chat-markdown-table-wrap"><table>{children}</table></div>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   )
 }
 
@@ -4312,7 +4329,7 @@ function renderChatContent(content: string) {
         </details>
         {renderChatThinkingBlock(thinkingLines)}
         {answerLines.length > 0 && (
-          <div className="chat-final-answer">{renderPlainChatLines(answerLines)}</div>
+          <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>
         )}
       </>
     )
@@ -4321,7 +4338,7 @@ function renderChatContent(content: string) {
   return (
     <>
       {renderChatThinkingBlock(thinkingLines)}
-      {answerLines.length > 0 && <div className="chat-final-answer">{renderPlainChatLines(answerLines)}</div>}
+      {answerLines.length > 0 && <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>}
     </>
   )
 }
@@ -4749,6 +4766,70 @@ function AgentAnalysisTaskCard({
   )
 }
 
+function agentResultAttachmentToFile(file: AgentResultAttachment): FileAsset {
+  return {
+    id: file.id,
+    taskId: file.taskId,
+    scope: file.scope,
+    name: file.name,
+    task: file.taskTitle,
+    type: file.type,
+    mimeType: file.mimeType,
+    size: file.size,
+    uploadedAt: file.uploadedAt,
+    final: file.scope === 'acceptance',
+    visible: false,
+    tag: file.tag,
+    previewUrl: file.previewUrl,
+    sourceUrl: file.sourceUrl,
+  }
+}
+
+function AgentAttachmentResults({
+  attachments,
+  onPreview,
+}: {
+  attachments: AgentResultAttachment[]
+  onPreview: (file: FileAsset) => void
+}) {
+  return (
+    <section className="agent-attachment-results" aria-label={`附件结果，共 ${attachments.length} 个`}>
+      <header className="agent-attachment-results-header">
+        <div>
+          <small>找到的真实文件</small>
+          <strong>附件</strong>
+        </div>
+        <span>{attachments.length} 个</span>
+      </header>
+      <div className="agent-attachment-grid">
+        {attachments.map((attachment) => {
+          const file = agentResultAttachmentToFile(attachment)
+          return (
+            <article className="agent-attachment-card" key={attachment.id}>
+              <button type="button" className="agent-attachment-preview" onClick={() => onPreview(file)} aria-label={`预览 ${attachment.name}`} title="预览附件">
+                <FileThumbnailPreview file={file} />
+              </button>
+              <div className="agent-attachment-info">
+                <strong title={attachment.name}>{attachment.name}</strong>
+                <span title={attachment.taskTitle}>{attachment.taskTitle}</span>
+                <small>{[attachment.type, attachment.size, attachment.tag || (attachment.scope === 'acceptance' ? '验收附件' : '进展附件')].filter(Boolean).join(' · ')}</small>
+              </div>
+              <div className="agent-attachment-actions">
+                <button type="button" className="ghost-button compact-button" onClick={() => onPreview(file)}>
+                  <Eye size={13} />预览
+                </button>
+                <a className="ghost-button compact-button" href={authedPreviewUrl(attachment.sourceUrl)} target="_blank" rel="noreferrer">
+                  <ExternalLink size={13} />打开
+                </a>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function ChatPanel({
   currentMonthValue,
   aiModelConfig,
@@ -4779,6 +4860,7 @@ function ChatPanel({
   const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -4949,6 +5031,7 @@ function ChatPanel({
         approval: message.approval,
         selection: message.selection,
         backgroundTask: message.backgroundTask,
+        attachments: message.attachments,
       }))
     }
     setMessages(nextMessages)
@@ -5131,6 +5214,7 @@ function ChatPanel({
           approval?: AgentApproval
           selection?: AgentTaskSelection
           backgroundTask?: AgentBackgroundTask
+          attachments?: AgentResultAttachment[]
         }
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         stopLiveTrace()
@@ -5142,6 +5226,7 @@ function ChatPanel({
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
               ...(data.selection ? { selection: data.selection } : {}),
               ...(data.backgroundTask ? { backgroundTask: data.backgroundTask } : {}),
+              ...(data.attachments?.length ? { attachments: data.attachments } : {}),
             }
           }
           if (data.approval && m.approval?.id === data.approval.id) {
@@ -5273,6 +5358,9 @@ function ChatPanel({
                     onCancel={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'cancel')}
                     onRetry={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'retry')}
                   />
+                )}
+                {msg.role === 'assistant' && msg.attachments && msg.attachments.length > 0 && (
+                  <AgentAttachmentResults attachments={msg.attachments} onPreview={setAgentPreviewFile} />
                 )}
               </div>
             ))}
@@ -5428,6 +5516,7 @@ function ChatPanel({
       </div>
 
       {lightboxSrc && <ImageLightbox src={lightboxSrc} alt="附件预览" onClose={() => setLightboxSrc(null)} />}
+      {agentPreviewFile && <FilePreviewModal file={agentPreviewFile} onClose={() => setAgentPreviewFile(null)} />}
 
       {/* history panel (absolute overlay within chat-panel) */}
       {showHistory && (

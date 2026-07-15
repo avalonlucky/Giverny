@@ -30,6 +30,16 @@ export const agentReadToolRegistry = {
       title: z.string().optional(),
     }),
   },
+  search_attachments: {
+    title: '搜索任务附件',
+    description: '按任务语义、任务名和文件名搜索真实附件。用户要求查看、预览、打开或下载附件时必须优先调用。',
+    endpoint: 'search-attachments',
+    inputSchema: z.object({
+      query: z.string(),
+      month: z.string().optional(),
+      limit: z.number().int().min(1).max(50).default(30),
+    }),
+  },
   get_giverny_context: {
     title: '读取工作台能力',
     description: '读取当前 Giverny 工作台概览和能力边界。',

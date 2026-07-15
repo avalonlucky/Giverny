@@ -4,7 +4,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_API_KEY?: string
@@ -73,12 +73,14 @@ export type AliceAgentChatResult = {
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
+  attachments?: AgentResultAttachment[]
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
 
 工作规则：
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
+- 用户要查看、打开、预览或下载附件时，必须调用 search_attachments；答案只做简要概括，不要把内部文件 URL 写进正文，界面会另行显示可操作附件卡。
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
 - 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
@@ -87,6 +89,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - preview 返回后，清楚展示草稿、缺失项和风险；不要声称已经执行。
 - 真正写入由运行时在用户明确确认后完成，你无法也不应自行执行写操作。
 - 工具没有返回的数据必须说明缺失，不得编造。
+- 需要对比多条同类数据时可以输出标准 Markdown 表格，但不要把 Markdown 语法当作普通文字解释。
 - 先给结论，再给必要依据；语言自然、直接，不输出原始思维链或 <think> 标签。`
 
 const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint: string; label: string }> = {
@@ -113,6 +116,10 @@ function cleanAnswer(value: string) {
 
 function normalizedDecision(value: string) {
   return value.replace(/[。！!，,、；;：:\s]/g, '').slice(0, 40)
+}
+
+function wantsAttachmentResults(value: string) {
+  return /附件|(?:找|找到|打开|预览|下载).*(?:文件|交付件)|(?:文件|交付件).*(?:找|打开|预览|下载)/.test(value)
 }
 
 function toJsonObject(value: unknown): Record<string, unknown> {
@@ -206,6 +213,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           ...(metadata.approval ? { approval: metadata.approval as AgentApproval } : {}),
           ...(metadata.selection ? { selection: metadata.selection as AgentTaskSelection } : {}),
           ...(metadata.backgroundTask ? { backgroundTask: metadata.backgroundTask as AgentBackgroundTask } : {}),
+          ...(Array.isArray(metadata.attachments) ? { attachments: metadata.attachments as AgentResultAttachment[] } : {}),
           createdAt: row.created_at,
         }
       }),
@@ -226,6 +234,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           approval: item.approval,
           selection: item.selection,
           backgroundTask: item.backgroundTask,
+          attachments: item.attachments,
         })}, ${createdAt})
       `
       imported += 1
@@ -441,6 +450,25 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
+  private resultAttachments(value: unknown): AgentResultAttachment[] {
+    const record = toJsonObject(value)
+    const files = Array.isArray(record.files) ? record.files : []
+    return files.map((item) => toJsonObject(item)).map((file) => ({
+      id: Number(file.id) || 0,
+      taskId: Number(file.taskId) || 0,
+      taskTitle: String(file.taskTitle || file.task || ''),
+      name: String(file.name || ''),
+      type: String(file.type || 'FILE'),
+      mimeType: String(file.mimeType || ''),
+      size: String(file.size || ''),
+      scope: file.scope === 'acceptance' ? 'acceptance' as const : 'progress' as const,
+      tag: String(file.tag || ''),
+      uploadedAt: String(file.uploadedAt || ''),
+      previewUrl: file.previewUrl ? String(file.previewUrl) : undefined,
+      sourceUrl: String(file.sourceUrl || ''),
+    })).filter((file) => file.id > 0 && file.name && file.sourceUrl)
+  }
+
   private buildTools(currentMonth: string | undefined, conversationId: string | undefined) {
     const readTools = agentReadToolRegistry
     return {
@@ -462,6 +490,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: readTools.get_task_detail.description,
         inputSchema: readTools.get_task_detail.inputSchema,
         execute: (input) => this.callTool('task-detail', input, 'GET'),
+      }),
+      search_attachments: tool({
+        description: readTools.search_attachments.description,
+        inputSchema: readTools.search_attachments.inputSchema,
+        execute: (input) => this.callTool('search-attachments', input, 'GET'),
       }),
       get_giverny_context: tool({
         description: readTools.get_giverny_context.description,
@@ -774,6 +807,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     ]
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
+    const attachmentsById = new Map<number, AgentResultAttachment>()
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
         trace.push({ type: 'tool', label: `调用工具：${call.toolName}` })
@@ -782,6 +816,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         trace.push({ type: 'result', label: `工具已返回：${toolResult.toolName}` })
         selection = this.taskSelection(toolResult.output) || selection
         const output = toJsonObject(toolResult.output)
+        if (toolResult.toolName === 'search_attachments' || wantsAttachmentResults(message)) {
+          this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
+        }
         const rawTask = toJsonObject(output.backgroundTask)
         if (rawTask.id && rawTask.type) {
           backgroundTask = rawTask as unknown as AgentBackgroundTask
@@ -799,8 +836,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),
+      ...(attachmentsById.size ? { attachments: [...attachmentsById.values()].slice(0, 30) } : {}),
     }
-    this.saveMessage('assistant', answer, { approval, selection, backgroundTask })
+    this.saveMessage('assistant', answer, { approval, selection, backgroundTask, attachments: response.attachments })
     return response
   }
 }
