@@ -2,6 +2,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
+import type { AgentApproval, AgentApprovalStatus } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_API_KEY?: string
@@ -15,6 +16,7 @@ type PendingActionSummary = {
   action: string
   label: string
   draft: Record<string, unknown>
+  warnings: string[]
   createdAt: number
 }
 
@@ -59,6 +61,7 @@ export type AliceAgentChatResult = {
   answer: string
   trace: AliceAgentTraceItem[]
   model: string
+  approval?: AgentApproval
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
@@ -133,9 +136,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         endpoint TEXT NOT NULL,
         confirmation_token TEXT NOT NULL,
         draft_json TEXT NOT NULL,
+        warnings_json TEXT NOT NULL DEFAULT '[]',
         created_at INTEGER NOT NULL
       )
     `
+    const columns = this.sql<{ name: string }>`PRAGMA table_info(alice_pending_actions)`
+    if (!columns.some((column) => column.name === 'warnings_json')) {
+      void this.sql`ALTER TABLE alice_pending_actions ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'`
+    }
   }
 
   private saveMessage(role: StoredMessage['role'], content: string) {
@@ -167,18 +175,26 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       endpoint: string
       confirmation_token: string
       draft_json: string
+      warnings_json: string
       created_at: number
     }>`
-      SELECT action, label, endpoint, confirmation_token, draft_json, created_at
+      SELECT action, label, endpoint, confirmation_token, draft_json, warnings_json, created_at
       FROM alice_pending_actions
       WHERE singleton = 1
     `
     if (!row) return null
     let draft: Record<string, unknown>
+    let warnings: string[]
     try {
       draft = toJsonObject(JSON.parse(row.draft_json))
     } catch {
       draft = {}
+    }
+    try {
+      const parsed = JSON.parse(row.warnings_json)
+      warnings = Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : []
+    } catch {
+      warnings = []
     }
     return {
       action: row.action,
@@ -186,6 +202,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       endpoint: row.endpoint,
       confirmationToken: row.confirmation_token,
       draft,
+      warnings,
       createdAt: Number(row.created_at) || Date.now(),
     }
   }
@@ -193,10 +210,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   private setPendingAction(action: StoredPendingAction) {
     void this.sql`
       INSERT INTO alice_pending_actions (
-        singleton, action, label, endpoint, confirmation_token, draft_json, created_at
+        singleton, action, label, endpoint, confirmation_token, draft_json, warnings_json, created_at
       ) VALUES (
         1, ${action.action}, ${action.label}, ${action.endpoint}, ${action.confirmationToken},
-        ${JSON.stringify(action.draft)}, ${action.createdAt}
+        ${JSON.stringify(action.draft)}, ${JSON.stringify(action.warnings)}, ${action.createdAt}
       )
       ON CONFLICT(singleton) DO UPDATE SET
         action = excluded.action,
@@ -204,6 +221,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         endpoint = excluded.endpoint,
         confirmation_token = excluded.confirmation_token,
         draft_json = excluded.draft_json,
+        warnings_json = excluded.warnings_json,
         created_at = excluded.created_at
     `
     this.setState({
@@ -212,6 +230,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         action: action.action,
         label: action.label,
         draft: action.draft,
+        warnings: action.warnings,
         createdAt: action.createdAt,
       },
     })
@@ -259,12 +278,27 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         endpoint: config.executeEndpoint,
         confirmationToken,
         draft: toJsonObject(data.draft),
+        warnings: Array.isArray(data.warnings) ? data.warnings.map((item) => String(item)).filter(Boolean) : [],
         createdAt: Date.now(),
       })
     }
     const safeData = { ...data }
     delete safeData.confirmationToken
     return safeData
+  }
+
+  private approvalResult(pending: StoredPendingAction, status: AgentApprovalStatus, error?: string): AgentApproval {
+    return {
+      id: `${pending.action}:${pending.createdAt}`,
+      action: pending.action,
+      label: pending.label,
+      draft: pending.draft,
+      warnings: pending.warnings,
+      status,
+      createdAt: pending.createdAt,
+      expiresAt: pending.createdAt + 10 * 60 * 1000,
+      ...(error ? { error } : {}),
+    }
   }
 
   private buildTools(currentMonth: string | undefined) {
@@ -382,6 +416,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       return {
         answer,
         model: 'cloudflare-agent:deterministic-write',
+        approval: this.approvalResult(pending, 'executed'),
         trace: [
           { type: 'plan', label: '确认操作', detail: `读取已持久保存的${pending.label}预览。` },
           { type: 'tool', label: `执行${pending.label}`, detail: '使用签名确认凭证写入业务数据。' },
@@ -390,10 +425,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '写入失败'
-      if (/过期|校验失败|已失效|已使用/.test(message)) this.clearPendingAction()
+      const expired = /过期|校验失败|已失效|已使用/.test(message)
+      if (expired) this.clearPendingAction()
       return {
         answer: `这次${pending.label}没有执行成功：${message}`,
         model: 'cloudflare-agent:deterministic-write',
+        approval: this.approvalResult(pending, expired ? 'expired' : 'failed', message),
         trace: [{ type: 'error', label: `${pending.label}失败`, detail: message }],
       }
     }
@@ -434,6 +471,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       return {
         answer,
         model: 'cloudflare-agent:approval',
+        approval: this.approvalResult(pending, 'cancelled'),
         trace: [{ type: 'result', label: '已取消待确认操作', detail: pending.label }],
       }
     }
@@ -472,10 +510,15 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       }
     }
     this.saveMessage('assistant', answer)
+    const nextPending = this.getPendingAction()
+    const approval = nextPending && (!pending || nextPending.createdAt !== pending.createdAt)
+      ? this.approvalResult(nextPending, 'pending')
+      : undefined
     return {
       answer,
       trace: trace.slice(0, 10),
       model: `deepseek:${modelName}`,
+      ...(approval ? { approval } : {}),
     }
   }
 }

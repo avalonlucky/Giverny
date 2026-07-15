@@ -101,6 +101,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
+import type { AgentApproval, AgentApprovalStatus } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4127,7 +4128,7 @@ function KnowledgeView() {
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
-type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string }
+type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; approval?: AgentApproval }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
@@ -4370,6 +4371,116 @@ function formatAgentLiveTraceContent(trace: string[], totalSteps: number) {
   ].join('\n')
 }
 
+const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
+  title: '任务名称',
+  taskTitle: '任务',
+  requirement: '具体需求',
+  type: '设计类型',
+  date: '开始时间',
+  startDateTime: '开始时间',
+  endDateTime: '结束时间',
+  estimatedDate: '预计交付',
+  settlementMonth: '结算月份',
+  estimatedHours: '预估工时',
+  requester: '需求人',
+  contact: '对接人',
+  reviewer: '验收人',
+  billable: '计入结算',
+  isSupplemental: '补录任务',
+  note: '记录内容',
+  feedbackVersion: '反馈版本',
+  feedbackSource: '反馈来源',
+  dateTime: '记录时间',
+  fromStatus: '原状态',
+  status: '新状态',
+  progress: '任务进度',
+  reason: '修改原因',
+  isUncounted: '不计工时',
+  isRevision: '改稿轮次',
+  isAcceptanceProgress: '验收进展',
+  supplementalNote: '补录说明',
+  acceptanceNote: '验收备注',
+}
+
+function formatAgentApprovalValue(key: string, value: unknown) {
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (key === 'estimatedHours') return `${value} h`
+  if (key === 'progress') return `${value}%`
+  if (value === null || value === undefined || value === '') return '未填写'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value).replace('T', ' ')
+}
+
+function agentApprovalRows(approval: AgentApproval) {
+  const draft = approval.draft ?? {}
+  const changedFields = draft.fields && typeof draft.fields === 'object' && !Array.isArray(draft.fields)
+    ? draft.fields as Record<string, unknown>
+    : null
+  const source = changedFields ? { taskTitle: draft.taskTitle, ...changedFields } : draft
+  return Object.entries(source)
+    .filter(([key, value]) => key !== 'taskId' && key !== 'before' && value !== undefined && value !== '')
+    .map(([key, value]) => ({
+      key,
+      label: AGENT_APPROVAL_FIELD_LABELS[key] || key,
+      value: formatAgentApprovalValue(key, value),
+    }))
+}
+
+function agentApprovalStatusLabel(status: AgentApprovalStatus) {
+  if (status === 'processing') return '正在执行'
+  if (status === 'executed') return '已执行'
+  if (status === 'cancelled') return '已取消'
+  if (status === 'expired') return '已过期'
+  if (status === 'failed') return '执行失败'
+  return '等待确认'
+}
+
+function AgentApprovalCard({
+  approval,
+  busy,
+  onDecision,
+}: {
+  approval: AgentApproval
+  busy: boolean
+  onDecision: (decision: 'confirm' | 'cancel') => void
+}) {
+  const rows = agentApprovalRows(approval)
+  const canDecide = approval.status === 'pending' || approval.status === 'failed'
+  return (
+    <section className={`agent-approval-card status-${approval.status}`} aria-label={`${approval.label}确认卡片`}>
+      <header className="agent-approval-header">
+        <div>
+          <small>待确认操作</small>
+          <strong>{approval.label}</strong>
+        </div>
+        <span className="agent-approval-status">{agentApprovalStatusLabel(approval.status)}</span>
+      </header>
+      <p className="agent-approval-hint">请核对草稿。只有确认后，Agent 才会写入网站数据。</p>
+      <dl className="agent-approval-fields">
+        {rows.map((row) => (
+          <div key={row.key} className="agent-approval-field">
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {approval.warnings.length > 0 && (
+        <div className="agent-approval-warnings">
+          <AlertTriangle size={14} />
+          <span>{approval.warnings.join('；')}</span>
+        </div>
+      )}
+      {approval.error && <p className="agent-approval-error">{approval.error}</p>}
+      {canDecide && (
+        <footer className="agent-approval-actions">
+          <button type="button" className="ghost-button compact-button" disabled={busy} onClick={() => onDecision('cancel')}>取消</button>
+          <button type="button" className="primary-button compact-button" disabled={busy} onClick={() => onDecision('confirm')}>确认执行</button>
+        </footer>
+      )}
+    </section>
+  )
+}
+
 function ChatPanel({
   currentMonthValue,
   aiModelConfig,
@@ -4505,13 +4616,17 @@ function ChatPanel({
       .finally(() => setIsLoadingOpenRouterModels(false))
   }
 
-  const send = async (overrideText?: string) => {
+  const send = async (overrideText?: string, approvalDecision?: { messageId: string; approvalId: string }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim()
     if ((!text && attachments.length === 0) || loading) return
     const displayText = text || `[附件：${attachments.map((a) => a.name).join('、')}]`
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
     const assistantId = crypto.randomUUID()
-    const baseMessages = isWelcome ? [] : messages
+    const baseMessages = (isWelcome ? [] : messages).map((message) => (
+      approvalDecision && message.id === approvalDecision.messageId && message.approval?.id === approvalDecision.approvalId
+        ? { ...message, approval: { ...message.approval, status: 'processing' as const } }
+        : message
+    ))
     if (overrideText === undefined) setInput('')
     const sentAttachments = [...attachments]
     setAttachments([])
@@ -4566,10 +4681,25 @@ function ChatPanel({
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string }
+        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval }
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         stopLiveTrace()
-        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace) } : m))
+        setMessages((prev) => prev.map((m) => {
+          if (m.id === assistantId) {
+            return {
+              ...m,
+              content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace),
+              ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
+            }
+          }
+          if (data.approval && m.approval?.id === data.approval.id) {
+            return { ...m, approval: data.approval }
+          }
+          if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
+            return { ...m, approval: data.approval ?? { ...m.approval, status: 'failed', error: 'Agent 没有返回操作结果，请重新生成预览。' } }
+          }
+          return m
+        }))
         return
       }
       stopLiveTrace()
@@ -4597,7 +4727,13 @@ function ChatPanel({
     } catch (e) {
       stopLiveTrace()
       const msg = e instanceof Error ? e.message : '请求失败，请重试'
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: `⚠️ ${msg}` } : m))
+      setMessages((prev) => prev.map((m) => {
+        if (m.id === assistantId) return { ...m, content: `⚠️ ${msg}` }
+        if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
+          return { ...m, approval: { ...m.approval, status: 'failed', error: msg } }
+        }
+        return m
+      }))
     } finally {
       stopLiveTrace()
       setLoading(false)
@@ -4655,6 +4791,16 @@ function ChatPanel({
             {messages.map((msg) => (
               <div key={msg.id} className={`chat-bubble ${msg.role}`}>
                 {msg.content ? renderChatContent(msg.content) : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
+                {msg.role === 'assistant' && msg.approval && (
+                  <AgentApprovalCard
+                    approval={msg.approval}
+                    busy={loading}
+                    onDecision={(decision) => void send(decision === 'confirm' ? '确认执行' : '取消', {
+                      messageId: msg.id,
+                      approvalId: msg.approval!.id,
+                    })}
+                  />
+                )}
               </div>
             ))}
             <div ref={bottomRef} />

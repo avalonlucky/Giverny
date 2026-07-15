@@ -4,6 +4,7 @@ import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { getAgentByName } from 'agents'
 import JSZip from 'jszip'
 import { AliceAgent } from './aliceAgent'
+import type { AgentApproval } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent }
@@ -1863,6 +1864,7 @@ type OpenAiAgentRuntimeResult = {
   conversationId?: string
   model?: string
   trace?: OpenAiAgentRuntimeTraceItem[]
+  approval?: AgentApproval
 }
 
 function normalizeAgentRuntimeBaseUrl(env: Env) {
@@ -8717,6 +8719,7 @@ async function chatWithAi(env: Env, request: Request) {
             ...formatAgentRuntimeTrace(runtimeResult.trace),
             `生成答复：使用 ${runtimeResult.model || 'Agent Runtime'} 组织最终回答。`,
           ],
+          approval: runtimeResult.approval,
         })
       }
       if (requiresRuntime) {

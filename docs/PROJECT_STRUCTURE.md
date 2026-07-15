@@ -54,6 +54,7 @@
 │   │   ├── format.ts
 │   │   └── psdPreview.ts
 │   ├── types/
+│   │   ├── agent.ts
 │   │   └── domain.ts
 │   ├── App.css
 │   ├── App.tsx
