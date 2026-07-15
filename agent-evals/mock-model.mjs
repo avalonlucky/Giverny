@@ -49,6 +49,12 @@ function ambiguousTitle(text) {
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
+  if (text.includes('Giverny 的月度工作复盘分析师')) {
+    return completion({
+      role: 'assistant',
+      content: '## 本月结论\n- 隔离评测月度数据已核对。\n## 完成与产出\n- 任务结果以结构化快照为准。\n## 未完成与风险\n- 无额外编造。\n## 工作模式\n- 已汇总工时和进展。\n## 下月动作\n- 优先跟进未完成任务。',
+    })
+  }
   if (tools.length > 0) {
     if (text.includes('最近一次反馈') && !tools.includes('get_task_detail')) {
       return toolCall('get_task_detail', { taskId: 1 })
@@ -60,6 +66,9 @@ function chooseTool(messages) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
+  if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
+    return toolCall('start_monthly_review', { month: /6\s*月|2026-06/.test(text) ? '2026-06' : '2026-07' })
+  }
   if (text.includes('最近一次反馈')) return toolCall('search_tasks', { query: '最近任务', month: '2026-07', limit: 5 })
   if (/预计收入|总工时|计费工时|收入|结算趋势|不计费工时|平均每个任务|最高|待验收金额|结算多少钱/.test(text)) {
     return toolCall('query_month_finance', {

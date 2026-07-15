@@ -31,3 +31,22 @@ export type AgentTaskSelection = {
   prompt: string
   candidates: AgentTaskCandidate[]
 }
+
+export type AgentBackgroundTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export type AgentBackgroundTaskPhase = 'queued' | 'collecting' | 'analyzing' | 'completed' | 'failed' | 'cancelled'
+
+export type AgentBackgroundTask = {
+  id: string
+  type: 'monthly_review'
+  title: string
+  month: string
+  status: AgentBackgroundTaskStatus
+  phase: AgentBackgroundTaskPhase
+  progress: number
+  result: string
+  error: string
+  createdAt: string
+  updatedAt: string
+  completedAt: string
+}

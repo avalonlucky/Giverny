@@ -102,7 +102,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4129,7 +4129,14 @@ function KnowledgeView() {
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
-type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; approval?: AgentApproval; selection?: AgentTaskSelection }
+type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  approval?: AgentApproval
+  selection?: AgentTaskSelection
+  backgroundTask?: AgentBackgroundTask
+}
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
@@ -4142,12 +4149,12 @@ function loadChatHistory(): ConversationRecord[] {
   catch { return [] }
 }
 
-function saveToChatHistory(msgs: ChatMessage[], agentConversationId?: string) {
+function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversationId?: string) {
   const userMsgs = msgs.filter((m) => m.role === 'user')
   if (userMsgs.length === 0) return
   const title = userMsgs[0].content.slice(0, 30) + (userMsgs[0].content.length > 30 ? '…' : '')
-  const record: ConversationRecord = { id: crypto.randomUUID(), title, messages: msgs, savedAt: Date.now(), agentConversationId }
-  const prev = loadChatHistory().slice(0, 19)
+  const record: ConversationRecord = { id: recordId, title, messages: msgs, savedAt: Date.now(), agentConversationId }
+  const prev = loadChatHistory().filter((item) => item.id !== recordId).slice(0, 19)
   localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([record, ...prev]))
 }
 
@@ -4321,8 +4328,10 @@ function renderChatContent(content: string) {
 type ChatPanelProps = {
   currentMonthValue: string
   aiModelConfig: AiModelConfig | null
+  initialAnalysisJobId?: string
   onClose: () => void
   onOpenTask: (taskId: number) => void
+  onNotify: (message: string, tone?: ToastTone) => void
 }
 
 function formatAgentTraceContent(content: string, trace?: string[]) {
@@ -4641,14 +4650,118 @@ function AgentTaskSelectionCard({
   )
 }
 
+const AGENT_ANALYSIS_PHASES: Array<{ phase: AgentBackgroundTask['phase']; label: string }> = [
+  { phase: 'queued', label: '排队等待' },
+  { phase: 'collecting', label: '汇总任务与工时' },
+  { phase: 'analyzing', label: '生成可核对复盘' },
+  { phase: 'completed', label: '保存分析结果' },
+]
+
+function agentAnalysisStatusLabel(status: AgentBackgroundTask['status']) {
+  if (status === 'running') return '分析中'
+  if (status === 'completed') return '已完成'
+  if (status === 'failed') return '分析失败'
+  if (status === 'cancelled') return '已取消'
+  return '已排队'
+}
+
+function renderAgentAnalysisResult(result: string) {
+  const lines = result.split('\n')
+  const nodes: ReactNode[] = []
+  let bullets: string[] = []
+  const flushBullets = () => {
+    if (bullets.length === 0) return
+    nodes.push(
+      <ul key={`list-${nodes.length}`}>
+        {bullets.map((item, index) => <li key={`${index}-${item}`}>{renderRichChatLine(item)}</li>)}
+      </ul>,
+    )
+    bullets = []
+  }
+  lines.forEach((line) => {
+    const trimmed = line.trim()
+    const heading = trimmed.match(/^#{1,3}\s+(.+)$/)
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/)
+    if (bullet) {
+      bullets.push(bullet[1])
+      return
+    }
+    flushBullets()
+    if (heading) {
+      nodes.push(<h4 key={`heading-${nodes.length}`}>{renderRichChatLine(heading[1])}</h4>)
+    } else if (trimmed) {
+      nodes.push(<p key={`paragraph-${nodes.length}`}>{renderRichChatLine(trimmed)}</p>)
+    }
+  })
+  flushBullets()
+  return nodes
+}
+
+function AgentAnalysisTaskCard({
+  task,
+  busy,
+  onCancel,
+  onRetry,
+}: {
+  task: AgentBackgroundTask
+  busy: boolean
+  onCancel: () => void
+  onRetry: () => void
+}) {
+  const activePhaseIndex = AGENT_ANALYSIS_PHASES.findIndex((item) => item.phase === task.phase)
+  const terminal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  return (
+    <section className={`agent-analysis-card status-${task.status}`} aria-label={`${task.title}后台分析`}>
+      <header className="agent-analysis-header">
+        <div>
+          <small>后台分析任务</small>
+          <strong>{task.title}</strong>
+        </div>
+        <span className="agent-analysis-status">{agentAnalysisStatusLabel(task.status)}</span>
+      </header>
+      {!terminal && (
+        <div className="agent-analysis-progress" aria-label={`分析进度 ${task.progress}%`}>
+          <div><span style={{ width: `${task.progress}%` }} /></div>
+          <small>{task.progress}%</small>
+        </div>
+      )}
+      <ol className="agent-analysis-steps">
+        {AGENT_ANALYSIS_PHASES.map((item, index) => {
+          const completed = task.status === 'completed' || activePhaseIndex > index
+          const active = !terminal && item.phase === task.phase
+          return <li key={item.phase} className={`${completed ? 'complete' : ''} ${active ? 'active' : ''}`}>{item.label}</li>
+        })}
+      </ol>
+      {task.result && <div className="agent-analysis-result">{renderAgentAnalysisResult(task.result)}</div>}
+      {task.error && <p className="agent-analysis-error">{task.error}</p>}
+      {(task.status === 'queued' || task.status === 'running' || task.status === 'failed' || task.status === 'cancelled') && (
+        <footer className="agent-analysis-actions">
+          {(task.status === 'queued' || task.status === 'running') && (
+            <button type="button" className="ghost-button compact-button" disabled={busy} onClick={onCancel}>取消分析</button>
+          )}
+          {(task.status === 'failed' || task.status === 'cancelled') && (
+            <button type="button" className="primary-button compact-button" disabled={busy} onClick={onRetry}>重新分析</button>
+          )}
+        </footer>
+      )}
+    </section>
+  )
+}
+
 function ChatPanel({
   currentMonthValue,
   aiModelConfig,
+  initialAnalysisJobId,
   onClose,
   onOpenTask,
+  onNotify,
 }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
-  const [agentConversationId, setAgentConversationId] = useState<string | undefined>()
+  const initialConversation = initialAnalysisJobId
+    ? loadChatHistory().find((record) => record.messages.some((message) => message.backgroundTask?.id === initialAnalysisJobId))
+    : undefined
+  const [messages, setMessages] = useState<ChatMessage[]>(initialConversation?.messages ?? [{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+  const [conversationRecordId, setConversationRecordId] = useState<string>(() => initialConversation?.id ?? crypto.randomUUID())
+  const [agentConversationId, setAgentConversationId] = useState<string | undefined>(initialConversation?.agentConversationId)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [useKnowledge, setUseKnowledge] = useState(true)
@@ -4671,6 +4784,44 @@ function ChatPanel({
 
   useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
   useEffect(() => { inputRef.current?.focus() }, [])
+  useEffect(() => {
+    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
+  }, [agentConversationId, conversationRecordId, isWelcome, messages])
+
+  const activeAnalysisKey = messages
+    .map((message) => message.backgroundTask)
+    .filter((task): task is AgentBackgroundTask => Boolean(task && (task.status === 'queued' || task.status === 'running')))
+    .map((task) => task.id)
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    const ids = activeAnalysisKey ? activeAnalysisKey.split(',').filter(Boolean) : []
+    if (ids.length === 0) return
+    let cancelled = false
+    const refresh = async () => {
+      const tasks = await Promise.all(ids.map(async (id) => {
+        const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(id)}`)
+        const data = await response.json().catch(() => null) as { job?: AgentBackgroundTask } | null
+        return response.ok ? data?.job : undefined
+      }))
+      if (cancelled) return
+      const byId = new Map(tasks.filter((task): task is AgentBackgroundTask => Boolean(task)).map((task) => [task.id, task]))
+      if (byId.size > 0) {
+        setMessages((current) => current.map((message) => (
+          message.backgroundTask && byId.has(message.backgroundTask.id)
+            ? { ...message, backgroundTask: byId.get(message.backgroundTask.id) }
+            : message
+        )))
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 2500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [activeAnalysisKey])
 
   useEffect(() => {
     if (!showScopePopup) return
@@ -4703,9 +4854,10 @@ function ChatPanel({
   }, [selectedModelChoice])
 
   const newConversation = () => {
-    if (!isWelcome) saveToChatHistory(messages, agentConversationId)
+    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
     setHistoryList(loadChatHistory())
     setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+    setConversationRecordId(crypto.randomUUID())
     setAgentConversationId(undefined)
     setInput('')
     setAttachments([])
@@ -4721,6 +4873,7 @@ function ChatPanel({
 
   const loadConversation = (record: ConversationRecord) => {
     setMessages(record.messages)
+    setConversationRecordId(record.id)
     setAgentConversationId(record.agentConversationId)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
@@ -4795,6 +4948,22 @@ function ChatPanel({
     )))
   }
 
+  const updateAnalysisTask = async (messageId: string, taskId: string, action: 'cancel' | 'retry') => {
+    const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(taskId)}/${action}`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    const data = await response.json().catch(() => null) as { job?: AgentBackgroundTask; error?: string } | null
+    if (!response.ok || !data?.job) {
+      onNotify(data?.error || (action === 'cancel' ? '取消分析失败' : '重新分析失败'), 'error')
+      return
+    }
+    setMessages((current) => current.map((message) => (
+      message.id === messageId ? { ...message, backgroundTask: data.job } : message
+    )))
+    onNotify(action === 'cancel' ? '后台分析已取消' : '已重新启动后台分析', action === 'cancel' ? 'info' : 'success')
+  }
+
   const send = async (overrideText?: string, approvalDecision?: { messageId: string; approvalId: string }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim()
     if ((!text && attachments.length === 0) || loading) return
@@ -4860,7 +5029,14 @@ function ChatPanel({
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval; selection?: AgentTaskSelection }
+        const data = (await res.json()) as {
+          content?: string
+          trace?: string[]
+          agentRuntimeConversationId?: string
+          approval?: AgentApproval
+          selection?: AgentTaskSelection
+          backgroundTask?: AgentBackgroundTask
+        }
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         stopLiveTrace()
         setMessages((prev) => prev.map((m) => {
@@ -4870,6 +5046,7 @@ function ChatPanel({
               content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace),
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
               ...(data.selection ? { selection: data.selection } : {}),
+              ...(data.backgroundTask ? { backgroundTask: data.backgroundTask } : {}),
             }
           }
           if (data.approval && m.approval?.id === data.approval.id) {
@@ -4988,6 +5165,14 @@ function ChatPanel({
                     selection={msg.selection}
                     busy={loading}
                     onSelect={(candidate) => void send(`选择任务 #${candidate.id}：${candidate.title}`)}
+                  />
+                )}
+                {msg.role === 'assistant' && msg.backgroundTask && (
+                  <AgentAnalysisTaskCard
+                    task={msg.backgroundTask}
+                    busy={loading}
+                    onCancel={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'cancel')}
+                    onRetry={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'retry')}
                   />
                 )}
               </div>
@@ -5223,6 +5408,7 @@ function App() {
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
+  const [chatAnalysisFocusId, setChatAnalysisFocusId] = useState('')
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
   const [dailyKnowledgeSession] = useState(() => prepareDailyKnowledgeSession())
   const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(dailyKnowledgeSession.current)
@@ -5242,6 +5428,8 @@ function App() {
   const [showFireworks, setShowFireworks] = useState(false)
   const [toastQueue, setToastQueue] = useState<ToastState[]>([])
   const toastTimersRef = useRef<number[]>([])
+  const analysisJobStatusesRef = useRef<Map<string, AgentBackgroundTask['status']>>(new Map())
+  const analysisJobsInitializedRef = useRef(false)
   const updatingTaskIdsRef = useRef<Set<number>>(new Set())
   const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
@@ -5307,7 +5495,7 @@ function App() {
   const effectiveCalendarFocusDate = calendarFocusDate.startsWith(currentMonth.value) ? calendarFocusDate : `${currentMonth.value}-01`
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
 
-  const notify = (
+  const notify = useCallback((
     message: string,
     tone: ToastTone = inferToastTone(message),
     options: Pick<ToastState, 'actionLabel' | 'onAction' | 'durationMs'> = {},
@@ -5321,7 +5509,60 @@ function App() {
       toastTimersRef.current = toastTimersRef.current.filter((value) => value !== timer)
     }, duration)
     toastTimersRef.current = [...toastTimersRef.current, timer]
-  }
+  }, [])
+
+  const toggleChat = useCallback(() => {
+    if (!isChatOpen) setChatAnalysisFocusId('')
+    setIsChatOpen((current) => !current)
+  }, [isChatOpen])
+
+  useEffect(() => {
+    if (!isAdmin) {
+      analysisJobStatusesRef.current.clear()
+      analysisJobsInitializedRef.current = false
+      return
+    }
+    let cancelled = false
+    const poll = async () => {
+      const response = await fetch('/api/ai/analysis-jobs?limit=20')
+      const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
+      if (!response.ok || cancelled || !Array.isArray(data?.jobs)) return
+      const next = new Map(data.jobs.map((job) => [job.id, job.status]))
+      if (analysisJobsInitializedRef.current) {
+        for (const job of data.jobs) {
+          const previous = analysisJobStatusesRef.current.get(job.id)
+          if (previous !== job.status && job.status === 'completed') {
+            notify(`${job.title}已完成`, 'success', {
+              actionLabel: '查看结果',
+              durationMs: 7200,
+              onAction: () => {
+                setChatAnalysisFocusId(job.id)
+                setIsChatOpen(true)
+              },
+            })
+          }
+          if (previous !== job.status && job.status === 'failed') {
+            notify(`${job.title}失败，可在对话中重试`, 'error', {
+              actionLabel: '打开爱丽丝',
+              durationMs: 7200,
+              onAction: () => {
+                setChatAnalysisFocusId(job.id)
+                setIsChatOpen(true)
+              },
+            })
+          }
+        }
+      }
+      analysisJobStatusesRef.current = next
+      analysisJobsInitializedRef.current = true
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [isAdmin, notify])
 
   useEffect(() => {
     taskItemsRef.current = taskItems
@@ -5593,7 +5834,7 @@ function App() {
       setIsLoaded(true)
       notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
     })
-  }, [auth])
+  }, [auth, notify])
 
   const analysisPollingRef = useRef({ signature: '', attempts: 0, inFlight: false })
   useEffect(() => {
@@ -7172,7 +7413,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
       if (event.altKey && !event.metaKey && !event.shiftKey) {
         if (event.code === 'KeyA' && isAdmin) {
           event.preventDefault()
-          setIsChatOpen((v) => !v)
+          toggleChat()
           return
         }
       }
@@ -7441,7 +7682,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
                 className={`topbar-shortcut ${isChatOpen ? 'active' : ''}`}
                 title="工作助手 AI 对话"
                 aria-label="打开工作助手"
-                onClick={() => setIsChatOpen((v) => !v)}
+                onClick={toggleChat}
               >
                 <Bot size={16} />
               </button>
@@ -7982,13 +8223,25 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
       )}
       {isChatOpen && isAdmin && (
         <>
-          <div className="chat-backdrop" onDoubleClick={() => setIsChatOpen(false)} />
+          <div
+            className="chat-backdrop"
+            onDoubleClick={() => {
+              setIsChatOpen(false)
+              setChatAnalysisFocusId('')
+            }}
+          />
           <ChatPanel
             currentMonthValue={currentMonth.value}
             aiModelConfig={aiModelConfig}
-            onClose={() => setIsChatOpen(false)}
+            initialAnalysisJobId={chatAnalysisFocusId || undefined}
+            onNotify={notify}
+            onClose={() => {
+              setIsChatOpen(false)
+              setChatAnalysisFocusId('')
+            }}
             onOpenTask={(taskId) => {
               setIsChatOpen(false)
+              setChatAnalysisFocusId('')
               void refreshState().then(() => handleOpenTaskDetail(taskId))
             }}
           />

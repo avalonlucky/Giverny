@@ -56,6 +56,9 @@
     { "id": "progress-03", "category": "write_preview", "prompt": "给任务#1追加验收进展：全部文件已经交付", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "progress-04", "category": "write_preview", "prompt": "记录任务#1改稿一轮，从19:00做到20:30", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
 
+    { "id": "analysis-01", "category": "background_analysis", "prompt": "帮我做一份7月工作复盘", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
+    { "id": "analysis-02", "category": "background_analysis", "prompt": "后台分析一下2026年6月整月的任务、工时和风险", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
+
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-03", "category": "disambiguation", "prompt": "把视频任务的进度改成80%", "expect": { "tools": ["update_task_status_preview"], "selectionAllowed": true, "selectionRequired": true } },

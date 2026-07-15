@@ -68,6 +68,11 @@ name = "giverny-agent-write"
 binding = "AGENT_WRITE_WORKFLOW"
 class_name = "AgentWriteWorkflow"
 
+[[workflows]]
+name = "giverny-agent-analysis"
+binding = "AGENT_ANALYSIS_WORKFLOW"
+class_name = "AgentAnalysisWorkflow"
+
 [[migrations]]
 tag = "v1-agent-runtime-container"
 new_sqlite_classes = [ "AgentRuntimeContainer" ]

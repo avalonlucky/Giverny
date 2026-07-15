@@ -4,7 +4,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
-import type { AgentApproval, AgentApprovalStatus, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_API_KEY?: string
@@ -52,6 +52,7 @@ type AgentToolResponse = Record<string, unknown> & {
 export type AliceAgentChatRequest = {
   message: string
   currentMonth?: string
+  conversationId?: string
   history?: StoredMessage[]
   context?: string
 }
@@ -68,12 +69,14 @@ export type AliceAgentChatResult = {
   model: string
   approval?: AgentApproval
   selection?: AgentTaskSelection
+  backgroundTask?: AgentBackgroundTask
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
 
 工作规则：
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
+- 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
 - 创建任务、记录反馈、修改字段、修改状态和追加进展只能调用对应的 preview 工具。
 - 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
@@ -373,7 +376,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
-  private buildTools(currentMonth: string | undefined) {
+  private buildTools(currentMonth: string | undefined, conversationId: string | undefined) {
     const readTools = agentReadToolRegistry
     return {
       query_month_finance: tool({
@@ -399,6 +402,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: readTools.get_giverny_context.description,
         inputSchema: readTools.get_giverny_context.inputSchema,
         execute: () => this.callTool('context', {}, 'GET'),
+      }),
+      start_monthly_review: tool({
+        description: '启动指定月份的持久化后台工作复盘。用于“复盘本月”、“整体分析 7 月工作”等耗时请求，不要用于单个数字查询。',
+        inputSchema: z.object({
+          month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        }),
+        execute: (input) => this.callTool('monthly-review-start', {
+          month: input.month || currentMonth,
+          conversationId,
+        }),
       }),
       create_task_preview: tool({
         description: '生成新任务草稿。只预览，不直接创建。',
@@ -670,7 +683,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       model: provider(modelName),
       system: `${SYSTEM_PROMPT}\n\n当前月份：${request.currentMonth || '未知'}${pending ? `\n当前仍有一项待确认操作：${pending.label}。除非用户明确确认或取消，否则不要执行。` : ''}${request.context ? `\n\n本轮参考上下文：\n${request.context.slice(0, 10000)}` : ''}`,
       messages,
-      tools: this.buildTools(request.currentMonth),
+      tools: this.buildTools(request.currentMonth, request.conversationId),
       toolChoice: 'auto',
       stopWhen: stepCountIs(8),
       temperature: 0.2,
@@ -681,6 +694,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       { type: 'plan', label: '理解问题', detail: '结合持久会话判断是否需要读取或修改 Giverny 数据。' },
     ]
     let selection: AgentTaskSelection | undefined
+    let backgroundTask: AgentBackgroundTask | undefined
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
         trace.push({ type: 'tool', label: `调用工具：${call.toolName}` })
@@ -688,6 +702,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       for (const toolResult of step.toolResults) {
         trace.push({ type: 'result', label: `工具已返回：${toolResult.toolName}` })
         selection = this.taskSelection(toolResult.output) || selection
+        const output = toJsonObject(toolResult.output)
+        const rawTask = toJsonObject(output.backgroundTask)
+        if (rawTask.id && rawTask.type === 'monthly_review') {
+          backgroundTask = rawTask as unknown as AgentBackgroundTask
+        }
       }
     }
     this.saveMessage('assistant', answer)
@@ -701,6 +720,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       model: `deepseek:${modelName}`,
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
+      ...(backgroundTask ? { backgroundTask } : {}),
     }
   }
 }

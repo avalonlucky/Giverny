@@ -13010,6 +13010,173 @@ input::file-selector-button {
   border-top: 1px solid var(--color-border);
 }
 
+.agent-analysis-card {
+  width: min(620px, 100%);
+  margin-top: 18px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+.agent-analysis-card.status-completed {
+  border-left: 3px solid var(--color-primary);
+}
+
+.agent-analysis-card.status-failed,
+.agent-analysis-card.status-cancelled {
+  background: var(--color-surface-alt);
+}
+
+.agent-analysis-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 16px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.agent-analysis-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-analysis-header small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agent-analysis-header strong {
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.agent-analysis-status {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.status-queued .agent-analysis-status,
+.status-running .agent-analysis-status,
+.status-completed .agent-analysis-status {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-strong));
+}
+
+.agent-analysis-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 4px;
+}
+
+.agent-analysis-progress > div {
+  height: 4px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.agent-analysis-progress > div > span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 240ms ease;
+}
+
+.agent-analysis-progress small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: right;
+}
+
+.agent-analysis-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 14px 16px 16px;
+  list-style: none;
+}
+
+.agent-analysis-steps li {
+  position: relative;
+  min-width: 0;
+  padding: 18px 10px 0 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-analysis-steps li::before {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+  content: '';
+}
+
+.agent-analysis-steps li.complete,
+.agent-analysis-steps li.active {
+  color: var(--color-primary);
+}
+
+.agent-analysis-steps li.complete::before,
+.agent-analysis-steps li.active::before {
+  background: var(--color-primary);
+}
+
+.agent-analysis-result {
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.agent-analysis-result h4 {
+  margin: 16px 0 7px;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.agent-analysis-result p,
+.agent-analysis-result ul {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.agent-analysis-result ul {
+  padding-left: 18px;
+}
+
+.agent-analysis-error {
+  margin: 12px 16px;
+  padding: 9px 10px;
+  background: var(--color-surface-strong);
+  color: var(--color-status-danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agent-analysis-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
 .agent-selection-card {
   width: min(560px, 100%);
   margin-top: 18px;
@@ -13090,6 +13257,22 @@ input::file-selector-button {
     padding-left: 0;
     padding-right: 0;
     border-left: 0;
+  }
+
+  .agent-analysis-steps {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .agent-analysis-steps li {
+    padding: 0 0 0 18px;
+    border-top: 0;
+    border-left: 1px solid var(--color-border);
+  }
+
+  .agent-analysis-steps li::before {
+    top: 5px;
+    left: -4px;
   }
 }
 

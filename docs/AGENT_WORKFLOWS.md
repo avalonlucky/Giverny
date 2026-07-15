@@ -1,6 +1,6 @@
 # Agent Durable Workflows
 
-Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作。Agent 继续负责对话、工具选择和确认卡；Workflow 负责等待人工确认、持久化执行、步骤重试与结果恢复。
+Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作与耗时只读分析。Agent 继续负责对话和工具选择；Workflow 负责持久执行、步骤重试与结果恢复。
 
 ## 执行链路
 
@@ -17,6 +17,20 @@ Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作。Ag
 ```
 
 当前覆盖五类操作：创建任务、记录反馈、修改任务状态、修改任务字段、追加任务进展。模型仍然只有 preview 权限，不能直接启动 execute。
+
+## 后台月度复盘
+
+```text
+模型调用 start_monthly_review
+  -> Worker 创建 agent_analysis_jobs 记录
+  -> AgentAnalysisWorkflow 收集整月权威数据
+  -> 文字模型生成结构化复盘
+  -> D1 保存最终报告并清除原始快照
+  -> 对话任务卡轮询完成状态
+  -> 全站主动通知用户查看结果
+```
+
+复盘数据覆盖该月全部有效任务、状态、工时、进展、改稿、等待、反馈与已完成附件分析。数量、工时与金额由 Worker 确定性计算，模型只负责归纳。任务卡支持取消和失败重试；取消后的 Workflow 不会写入报告。
 
 ## 可靠性
 
@@ -42,4 +56,5 @@ Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作。Ag
 - 生成创建任务确认卡后，Workflow 等待并接收确认。
 - Workflow 完成真实隔离 D1 写入并返回任务结果。
 - 相同 `operationId` 重放时返回同一任务，并标记 `replayed: true`。
+- 后台月度复盘会完成数据收集和报告生成，并验证取消、重试及最终恢复。
 - 原有 Agent、MCP 和遥测隔离用例继续通过。

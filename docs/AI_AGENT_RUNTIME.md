@@ -35,7 +35,8 @@ AliceAgent Durable Object
         ├── record_feedback_preview / record_feedback
         ├── update_task_status_preview / update_task_status
         ├── update_task_fields_preview / update_task_fields
-        └── append_progress_preview / append_progress
+        ├── append_progress_preview / append_progress
+        └── start_monthly_review
         │
         ▼
 Giverny Worker Tool API
@@ -68,6 +69,7 @@ D1 / R2 / app data
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露四个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
 - 持久写入：五类确认操作由 `AgentWriteWorkflow` 等待人工批准后执行；步骤支持重试，`agent_write_operations` 缓存完成结果，重复恢复不会重复创建任务或追加记录。
+- 后台分析：月度复盘由 `AgentAnalysisWorkflow` 独立收集 D1 权威数据并生成报告；对话任务卡展示真实进度，支持取消、失败重试和完成通知。原始快照在成功后清除，只保留最终报告。
 - `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
 当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
@@ -76,7 +78,7 @@ D1 / R2 / app data
 
 ## 下一步
 
-1. 为真正耗时的只读分析增加后台任务卡与主动完成通知，例如月度复盘、批量文件理解和跨任务汇总。
+1. 复用后台任务卡与主动通知协议，扩展批量文件理解和跨任务专题汇总。
 2. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。
 3. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
 4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。

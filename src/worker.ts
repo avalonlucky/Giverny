@@ -8,10 +8,11 @@ import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
-import type { AgentApproval, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
+import type { AgentApproval, AgentBackgroundTask, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
-export { AliceAgent, AgentWriteWorkflow }
+export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
 
 type D1Result<T = unknown> = { results?: T[]; success: boolean; meta?: { changes?: number } }
 type D1PreparedStatement = {
@@ -71,6 +72,7 @@ type Env = {
   AGENT_TOOL_TOKEN?: string
   AGENT_RUNTIME_CONTAINER?: ContainerNamespace
   ALICE_AGENT?: unknown
+  AGENT_ANALYSIS_WORKFLOW?: WorkflowBinding<AgentAnalysisWorkflowParams>
   AGENT_MODEL_PROVIDER?: string
   OPENAI_AGENT_MODEL?: string
   OPENAI_BASE_URL?: string
@@ -122,6 +124,16 @@ type ContainerNamespace = {
 
 type WorkerExecutionContext = {
   waitUntil: (promise: Promise<unknown>) => void
+}
+
+type WorkflowInstanceHandle = {
+  id: string
+  terminate: () => Promise<void>
+}
+
+type WorkflowBinding<Params> = {
+  create: (options: { id: string; params: Params }) => Promise<WorkflowInstanceHandle>
+  get: (id: string) => Promise<WorkflowInstanceHandle>
 }
 
 export class AgentRuntimeContainer extends Container<Env> {
@@ -370,6 +382,24 @@ type DbInsightHistory = {
   status: InsightHistoryStatus
   trigger_key: string | null
   trigger_fingerprint: string | null
+}
+
+type DbAgentAnalysisJob = {
+  id: string
+  workflow_id: string
+  conversation_id: string | null
+  job_type: 'monthly_review'
+  title: string
+  month: string
+  status: AgentBackgroundTask['status']
+  phase: AgentBackgroundTask['phase']
+  progress: number
+  source_snapshot_json: string | null
+  result_markdown: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
 }
 
 type DbReport = {
@@ -1874,6 +1904,7 @@ type OpenAiAgentRuntimeResult = {
   trace?: OpenAiAgentRuntimeTraceItem[]
   approval?: AgentApproval
   selection?: AgentTaskSelection
+  backgroundTask?: AgentBackgroundTask
 }
 
 function normalizeAgentRuntimeBaseUrl(env: Env) {
@@ -1912,6 +1943,7 @@ async function callAgentRuntime(
       const result = await agent.chat({
         message: cleanQuery,
         currentMonth: args.currentMonth,
+        conversationId,
         history: args.history,
         context: args.context,
       })
@@ -3094,6 +3126,7 @@ async function agentContextTool(env: Env, request: Request) {
       '查询任务、任务详情、进展、验收附件和交付件分析',
       '统计收入、计费工时、结算月份和任务明细',
       '整理需求、甲方反馈、进展记录、验收备注和月报',
+      '在后台汇总整月任务、工时、进展、改稿、等待和反馈，生成可核对的月度复盘',
       '在用户确认后创建任务、记录反馈、修改状态、修改任务字段和追加进展',
       '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
       '闲聊、解释概念、头脑风暴、写作润色和效率规划',
@@ -3106,6 +3139,331 @@ async function agentContextTool(env: Env, request: Request) {
     ],
     generatedAt: nowIso(),
   })
+}
+
+function toAgentBackgroundTask(row: DbAgentAnalysisJob): AgentBackgroundTask {
+  return {
+    id: row.id,
+    type: row.job_type,
+    title: row.title,
+    month: row.month,
+    status: row.status,
+    phase: row.phase,
+    progress: Math.max(0, Math.min(100, Number(row.progress) || 0)),
+    result: row.result_markdown || '',
+    error: row.error_message || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at || '',
+  }
+}
+
+async function agentAnalysisJobById(env: Env, jobId: string) {
+  return env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE id = ?')
+    .bind(jobId)
+    .first<DbAgentAnalysisJob>()
+}
+
+async function startAgentAnalysisWorkflow(env: Env, jobId: string, month: string, workflowId: string) {
+  if (!env.AGENT_ANALYSIS_WORKFLOW) throw new Error('AGENT_ANALYSIS_WORKFLOW 未配置')
+  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId, month } })
+}
+
+async function agentMonthlyReviewStartTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const month = agentString(body.month, 7)
+  if (!/^\d{4}-\d{2}$/.test(month)) return agentFail('月度复盘需要 YYYY-MM 格式的 month', 400)
+  const jobId = `analysis-${crypto.randomUUID()}`
+  const workflowId = `agent-analysis-${crypto.randomUUID()}`
+  const title = `${Number(month.slice(5, 7))} 月工作复盘`
+  const conversationId = agentString(body.conversationId, 160)
+  await env.DB.prepare(
+    `INSERT INTO agent_analysis_jobs (
+      id, workflow_id, conversation_id, job_type, title, month, status, phase, progress
+    ) VALUES (?, ?, ?, 'monthly_review', ?, ?, 'queued', 'queued', 5)`,
+  ).bind(jobId, workflowId, conversationId || null, title, month).run()
+  try {
+    await startAgentAnalysisWorkflow(env, jobId, month, workflowId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '无法启动后台分析'
+    await env.DB.prepare(
+      `UPDATE agent_analysis_jobs
+       SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    ).bind(message, jobId).run()
+    return agentFail(message, 503)
+  }
+  const row = await agentAnalysisJobById(env, jobId)
+  return agentOk({
+    tool: 'start_monthly_review',
+    backgroundTask: row ? toAgentBackgroundTask(row) : null,
+    instruction: '复盘已进入后台 Workflow，请告诉用户可以关闭页面，不要在当前请求中等待结果。',
+    generatedAt: nowIso(),
+  })
+}
+
+function agentAnalysisStatusGuard(row: DbAgentAnalysisJob | null) {
+  if (!row) throw new Error('后台分析任务不存在')
+  if (row.status === 'cancelled') throw new Error('后台分析已取消')
+  return row
+}
+
+async function agentMonthlyReviewPrepareTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const jobId = agentString(body.jobId, 180)
+  const month = agentString(body.month, 7)
+  let row: DbAgentAnalysisJob
+  try {
+    row = agentAnalysisStatusGuard(await agentAnalysisJobById(env, jobId))
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '任务状态无效', 409)
+  }
+  if (row.status === 'completed') {
+    return agentOk({ jobId, prepared: true, replayed: true })
+  }
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET status = 'running', phase = 'collecting', progress = 20, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  ).bind(jobId).run()
+
+  const [taskRows, updateRows, analysisRows, hourlyRate] = await Promise.all([
+    env.DB.prepare(
+      `SELECT * FROM tasks
+       WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL
+       ORDER BY start_date ASC, created_at ASC LIMIT 80`,
+    ).bind(month).all<DbTask>(),
+    env.DB.prepare(
+      `SELECT task_updates.* FROM task_updates
+       INNER JOIN tasks ON tasks.id = task_updates.task_id
+       WHERE tasks.settlement_month = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+       ORDER BY task_updates.update_date ASC, task_updates.created_at ASC`,
+    ).bind(month).all<DbUpdate>(),
+    env.DB.prepare(
+      `SELECT attachment_analyses.* FROM attachment_analyses
+       INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
+       WHERE tasks.settlement_month = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+         AND attachment_analyses.status = 'completed'
+       ORDER BY attachment_analyses.completed_at ASC`,
+    ).bind(month).all<DbAttachmentAnalysis>(),
+    getHourlyRate(env),
+  ])
+  const updatesByTask = new Map<string, DbUpdate[]>()
+  for (const update of updateRows.results ?? []) {
+    const items = updatesByTask.get(String(update.task_id)) ?? []
+    items.push(update)
+    updatesByTask.set(String(update.task_id), items)
+  }
+  const analysesByTask = new Map<string, DbAttachmentAnalysis[]>()
+  for (const analysis of analysisRows.results ?? []) {
+    const items = analysesByTask.get(String(analysis.task_id)) ?? []
+    items.push(analysis)
+    analysesByTask.set(String(analysis.task_id), items)
+  }
+  const today = nowIso().slice(0, 10)
+  const tasks = (taskRows.results ?? []).map((dbTask) => {
+    const task = toTask(dbTask)
+    const closed = ['已验收', '终止', '不计费'].includes(task.status)
+    return {
+      id: task.id,
+      title: task.title,
+      type: task.type,
+      requirement: task.requirement.slice(0, 1200),
+      status: task.status,
+      progress: task.progress,
+      startDate: task.date,
+      estimatedDate: task.estimatedDate,
+      actualDeliveryDate: task.actualDeliveryDate,
+      estimatedHours: task.estimatedHours,
+      actualHours: task.actualHours,
+      billable: task.billable,
+      overdue: !closed && Boolean(task.estimatedDate) && task.estimatedDate.slice(0, 10) < today,
+      acceptanceNote: (task.acceptanceNote ?? '').slice(0, 1200),
+      feedbackRating: task.feedbackRating,
+      feedbackTags: task.feedbackTags,
+      feedbackNote: (task.feedbackNote ?? '').slice(0, 800),
+      progressEntries: (task.timeEntries ?? []).slice(0, 30).map((entry) => ({
+        date: entry.date,
+        start: entry.start,
+        endDate: entry.endDate,
+        end: entry.end,
+        note: (entry.note ?? '').slice(0, 600),
+        isRevision: Boolean(entry.isRevision),
+        isAcceptanceProgress: Boolean(entry.isAcceptanceProgress),
+        isUncounted: Boolean(entry.isUncounted),
+      })),
+      waitingEntries: (task.waitingEntries ?? []).slice(0, 20).map((entry) => ({
+        date: entry.date,
+        start: entry.start,
+        endDate: entry.endDate,
+        end: entry.end,
+        reason: entry.reason,
+        note: (entry.note ?? '').slice(0, 400),
+      })),
+      updates: (updatesByTask.get(String(task.id)) ?? []).slice(0, 30).map((update) => ({
+        date: update.update_date,
+        title: update.title,
+        body: update.body.slice(0, 600),
+        hours: Number(update.hours) || 0,
+      })),
+      attachmentAnalyses: (analysesByTask.get(String(task.id)) ?? []).slice(0, 12).map((analysis) => ({
+        summary: (analysis.summary || '').slice(0, 800),
+        qualityIssues: (analysis.quality_issues_json || '').slice(0, 800),
+        risks: (analysis.risks_json || '').slice(0, 800),
+        suggestions: (analysis.suggestions_json || '').slice(0, 800),
+      })),
+    }
+  })
+  const completedTasks = tasks.filter((task) => task.status === '已验收')
+  const unfinishedTasks = tasks.filter((task) => !['已验收', '终止', '不计费'].includes(task.status))
+  const totalHours = roundCents(tasks.reduce((sum, task) => sum + task.actualHours, 0))
+  const billableHours = roundCents(tasks.filter((task) => task.billable && task.status !== '终止').reduce((sum, task) => sum + task.actualHours, 0))
+  const snapshot = {
+    month,
+    generatedAt: nowIso(),
+    summary: {
+      totalTasks: tasks.length,
+      completedTasks: completedTasks.length,
+      unfinishedTasks: unfinishedTasks.length,
+      overdueTasks: tasks.filter((task) => task.overdue).length,
+      totalHours,
+      billableHours,
+      hourlyRate,
+      estimatedIncome: roundCents(billableHours * hourlyRate),
+    },
+    tasks,
+  }
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET source_snapshot_json = ?, phase = 'analyzing', progress = 55, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status != 'cancelled'`,
+  ).bind(JSON.stringify(snapshot), jobId).run()
+  return agentOk({ jobId, prepared: true, replayed: false, taskCount: tasks.length })
+}
+
+function cleanAgentAnalysisResult(value: string) {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    .trim()
+}
+
+async function agentMonthlyReviewGenerateTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const jobId = agentString(body.jobId, 180)
+  let row: DbAgentAnalysisJob
+  try {
+    row = agentAnalysisStatusGuard(await agentAnalysisJobById(env, jobId))
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '任务状态无效', 409)
+  }
+  if (row.status === 'completed' && row.result_markdown) {
+    return agentOk({ backgroundTask: toAgentBackgroundTask(row), replayed: true })
+  }
+  if (!row.source_snapshot_json) return agentFail('月度数据尚未准备完成', 409)
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET status = 'running', phase = 'analyzing', progress = 72, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  ).bind(jobId).run()
+  const snapshotText = row.source_snapshot_json.slice(0, 90_000)
+  const prompt = `你是 Giverny 的月度工作复盘分析师。请仅根据下方结构化数据生成一份可核对的中文复盘。
+
+硬性要求：
+1. 数量、工时、金额、状态必须与 summary 一致，不得估算或编造。
+2. 每个具体结论尽量标注相关任务名，不要只给空泛建议。
+3. 明确区分已验收、未完成、逾期和不计费任务。
+4. 从进展、改稿、等待、反馈和附件分析中提炼真实模式；没有数据时明确说明。
+5. 不输出思维链、<think> 或模型自我介绍。
+6. 使用 Markdown，固定结构：“本月结论 / 完成与产出 / 未完成与风险 / 工作模式 / 下月动作”。
+
+数据：
+${snapshotText}`
+  const output = cleanAgentAnalysisResult(await callTextWithFallback(env, prompt, 2400))
+  if (!output) return agentFail('模型未返回有效月度复盘', 503)
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET status = 'completed', phase = 'completed', progress = 100, result_markdown = ?,
+       source_snapshot_json = NULL, error_message = NULL,
+       completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status != 'cancelled'`,
+  ).bind(output, jobId).run()
+  const completed = await agentAnalysisJobById(env, jobId)
+  if (!completed || completed.status !== 'completed') return agentFail('复盘在完成前已被取消', 409)
+  return agentOk({ backgroundTask: toAgentBackgroundTask(completed), replayed: false })
+}
+
+async function agentAnalysisJobFailTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const jobId = agentString(body.jobId, 180)
+  const error = agentString(body.error, 1200) || '后台分析失败'
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status NOT IN ('completed', 'cancelled')`,
+  ).bind(error, jobId).run()
+  return agentOk({ failed: true })
+}
+
+async function listAgentAnalysisJobs(env: Env, request: Request) {
+  const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit') || 20), 1), 50)
+  const rows = await env.DB.prepare(
+    'SELECT * FROM agent_analysis_jobs ORDER BY created_at DESC LIMIT ?',
+  ).bind(limit).all<DbAgentAnalysisJob>()
+  return ok({ jobs: (rows.results ?? []).map(toAgentBackgroundTask) })
+}
+
+async function getAgentAnalysisJob(env: Env, jobId: string) {
+  const row = await agentAnalysisJobById(env, jobId)
+  return row ? ok({ job: toAgentBackgroundTask(row) }) : fail('后台分析任务不存在', 404)
+}
+
+async function cancelAgentAnalysisJob(env: Env, jobId: string) {
+  const row = await agentAnalysisJobById(env, jobId)
+  if (!row) return fail('后台分析任务不存在', 404)
+  if (row.status === 'completed') return fail('复盘已完成，无需取消', 409)
+  if (row.status === 'cancelled') return ok({ job: toAgentBackgroundTask(row) })
+  if (env.AGENT_ANALYSIS_WORKFLOW) {
+    const instance = await env.AGENT_ANALYSIS_WORKFLOW.get(row.workflow_id).catch(() => null)
+    await instance?.terminate().catch(() => undefined)
+  }
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET status = 'cancelled', phase = 'cancelled', progress = 0, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  ).bind(jobId).run()
+  const cancelled = await agentAnalysisJobById(env, jobId)
+  return ok({ job: cancelled ? toAgentBackgroundTask(cancelled) : null })
+}
+
+async function retryAgentAnalysisJob(env: Env, jobId: string) {
+  const row = await agentAnalysisJobById(env, jobId)
+  if (!row) return fail('后台分析任务不存在', 404)
+  if (row.status !== 'failed' && row.status !== 'cancelled') return fail('只能重试失败或已取消的复盘', 409)
+  const workflowId = `agent-analysis-${crypto.randomUUID()}`
+  await env.DB.prepare(
+    `UPDATE agent_analysis_jobs
+     SET workflow_id = ?, status = 'queued', phase = 'queued', progress = 5,
+       source_snapshot_json = NULL, result_markdown = NULL, error_message = NULL,
+       completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  ).bind(workflowId, jobId).run()
+  try {
+    await startAgentAnalysisWorkflow(env, jobId, row.month, workflowId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '无法重新启动后台分析'
+    await env.DB.prepare(
+      `UPDATE agent_analysis_jobs SET status = 'failed', phase = 'failed', progress = 0,
+       error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(message, jobId).run()
+    return fail(message, 503)
+  }
+  const retried = await agentAnalysisJobById(env, jobId)
+  return ok({ job: retried ? toAgentBackgroundTask(retried) : null })
 }
 
 const agentWorkflowWriteEndpoints = new Set([
@@ -3201,6 +3559,18 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/monthly-review-start' && request.method === 'POST') {
+    return agentMonthlyReviewStartTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/monthly-review-prepare' && request.method === 'POST') {
+    return agentMonthlyReviewPrepareTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/monthly-review-generate' && request.method === 'POST') {
+    return agentMonthlyReviewGenerateTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/analysis-job-fail' && request.method === 'POST') {
+    return agentAnalysisJobFailTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/workflow-write' && request.method === 'POST') {
     return agentWorkflowWriteTool(env, request, ctx)
@@ -8997,6 +9367,7 @@ async function chatWithAi(env: Env, request: Request) {
           ],
           approval: runtimeResult.approval,
           selection: runtimeResult.selection,
+          backgroundTask: runtimeResult.backgroundTask,
         })
       }
       if (requiresRuntime) {
@@ -9782,6 +10153,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path === '/api/ai/agent-metrics' ||
+      path.startsWith('/api/ai/analysis-jobs') ||
       path === '/api/ai/chat' ||
       path === '/api/ai/approval' ||
       path === '/api/ai/task-edits' ||
@@ -9948,6 +10320,18 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/chat' && request.method === 'POST') {
     return chatWithAiInstrumented(env, request, ctx)
+  }
+  if (path === '/api/ai/analysis-jobs' && request.method === 'GET') {
+    return listAgentAnalysisJobs(env, request)
+  }
+  if (path.startsWith('/api/ai/analysis-jobs/') && request.method === 'GET') {
+    return getAgentAnalysisJob(env, path.split('/')[4] || '')
+  }
+  if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/cancel') && request.method === 'POST') {
+    return cancelAgentAnalysisJob(env, path.split('/')[4] || '')
+  }
+  if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/retry') && request.method === 'POST') {
+    return retryAgentAnalysisJob(env, path.split('/')[4] || '')
   }
   if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
     return getAgentRunMetrics(env, request)

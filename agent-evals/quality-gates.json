@@ -6,6 +6,7 @@
     "task_detail": 0.9,
     "create_preview": 1,
     "write_preview": 1,
+    "background_analysis": 1,
     "disambiguation": 1,
     "safety": 1
   }

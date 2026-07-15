@@ -179,6 +179,73 @@ async function runWorkflowReplayCheck() {
   process.stdout.write('Workflow idempotent replay check passed.\n')
 }
 
+async function runBackgroundAnalysisCheck(cookie) {
+  const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
+  const startResponse = await fetch('http://127.0.0.1:8798/api/ai/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: '帮我做一份 7 月工作复盘' }],
+      month: '2026-07',
+      agentRuntimeConversationId: `background-analysis-${crypto.randomUUID()}`,
+    }),
+  })
+  const started = await startResponse.json().catch(() => ({}))
+  if (!startResponse.ok || started.backgroundTask?.type !== 'monthly_review') {
+    throw new Error(`Background analysis did not start: ${JSON.stringify(started)}`)
+  }
+  const taskId = started.backgroundTask.id
+  let completed
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const response = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${taskId}`, { headers: { cookie } })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Background analysis status HTTP ${response.status}`)
+    if (data.job?.status === 'completed') {
+      completed = data.job
+      break
+    }
+    if (data.job?.status === 'failed') throw new Error(data.job.error || 'Background analysis failed')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  if (!completed?.result?.includes('本月结论') || completed.progress !== 100) {
+    throw new Error(`Background analysis did not complete: ${JSON.stringify(completed || started.backgroundTask)}`)
+  }
+
+  const secondStart = await fetch('http://127.0.0.1:8798/api/ai/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: '后台分析一下 6 月整月工作' }],
+      month: '2026-06',
+      agentRuntimeConversationId: `background-cancel-${crypto.randomUUID()}`,
+    }),
+  })
+  const second = await secondStart.json().catch(() => ({}))
+  if (!secondStart.ok || !second.backgroundTask?.id) throw new Error('Cancelable background analysis did not start')
+  const cancelResponse = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${second.backgroundTask.id}/cancel`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+  })
+  const cancelled = await cancelResponse.json().catch(() => ({}))
+  if (!cancelResponse.ok || cancelled.job?.status !== 'cancelled') throw new Error('Background analysis cancellation failed')
+  const retryResponse = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${second.backgroundTask.id}/retry`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+  })
+  const retried = await retryResponse.json().catch(() => ({}))
+  if (!retryResponse.ok || !['queued', 'running', 'completed'].includes(retried.job?.status)) throw new Error('Background analysis retry failed')
+  let retryCompleted = retried.job?.status === 'completed' ? retried.job : null
+  for (let attempt = 0; !retryCompleted && attempt < 40; attempt += 1) {
+    const response = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${second.backgroundTask.id}`, { headers: { cookie } })
+    const data = await response.json().catch(() => ({}))
+    if (data.job?.status === 'completed') retryCompleted = data.job
+    if (data.job?.status === 'failed') throw new Error('Retried background analysis failed')
+    if (!retryCompleted) await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  if (!retryCompleted) throw new Error('Retried background analysis did not complete')
+  process.stdout.write('Background monthly review, cancellation, and retry checks passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -197,6 +264,7 @@ try {
   await runMcpChecks()
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
+  await runBackgroundAnalysisCheck(cookie)
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {
@@ -209,6 +277,7 @@ try {
   const toolErrors = children
     .flatMap((entry) => entry.output().split('\n'))
     .filter((line) => line.includes('/api/agent/tools/') && !line.includes('200 OK'))
+    .filter((line) => !line.includes('/monthly-review-generate 409 Conflict'))
   if (toolErrors.length) {
     throw new Error(`Agent tools returned non-200 responses:\n${toolErrors.join('\n')}`)
   }
