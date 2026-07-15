@@ -2,7 +2,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
-import type { AgentApproval, AgentApprovalStatus } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
   DEEPSEEK_API_KEY?: string
@@ -62,6 +62,7 @@ export type AliceAgentChatResult = {
   trace: AliceAgentTraceItem[]
   model: string
   approval?: AgentApproval
+  selection?: AgentTaskSelection
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
@@ -70,17 +71,18 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
 - 创建任务、记录反馈、修改字段、修改状态和追加进展只能调用对应的 preview 工具。
+- 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
 - preview 返回后，清楚展示草稿、缺失项和风险；不要声称已经执行。
 - 真正写入由运行时在用户明确确认后完成，你无法也不应自行执行写操作。
 - 工具没有返回的数据必须说明缺失，不得编造。
 - 先给结论，再给必要依据；语言自然、直接，不输出原始思维链或 <think> 标签。`
 
-const PREVIEW_ACTIONS: Record<string, { executeEndpoint: string; label: string }> = {
-  create_task_preview: { executeEndpoint: 'create-task', label: '创建任务' },
-  record_feedback_preview: { executeEndpoint: 'record-feedback', label: '记录反馈' },
-  update_task_status_preview: { executeEndpoint: 'update-task-status', label: '修改任务状态' },
-  update_task_fields_preview: { executeEndpoint: 'update-task-fields', label: '修改任务字段' },
-  append_progress_preview: { executeEndpoint: 'append-progress', label: '追加任务进展' },
+const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint: string; label: string }> = {
+  create_task_preview: { previewEndpoint: 'create-task-preview', executeEndpoint: 'create-task', label: '创建任务' },
+  record_feedback_preview: { previewEndpoint: 'record-feedback-preview', executeEndpoint: 'record-feedback', label: '记录反馈' },
+  update_task_status_preview: { previewEndpoint: 'update-task-status-preview', executeEndpoint: 'update-task-status', label: '修改任务状态' },
+  update_task_fields_preview: { previewEndpoint: 'update-task-fields-preview', executeEndpoint: 'update-task-fields', label: '修改任务字段' },
+  append_progress_preview: { previewEndpoint: 'append-progress-preview', executeEndpoint: 'append-progress', label: '追加任务进展' },
 }
 
 const CONFIRM_RE = /^(?:好的?|没问题)?(?:确认(?:执行|创建|记录|修改)?|执行吧|可以(?:执行|创建|记录|修改)|同意(?:执行|创建|记录|修改)|就这样(?:执行|创建|记录)?)$/
@@ -301,6 +303,28 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
+  private taskSelection(value: unknown): AgentTaskSelection | undefined {
+    const record = toJsonObject(value)
+    const rawSelection = toJsonObject(record.selection)
+    const candidates = Array.isArray(rawSelection.candidates)
+      ? rawSelection.candidates.map((item) => toJsonObject(item)).map((item) => ({
+          id: Number(item.id) || 0,
+          title: String(item.title || ''),
+          type: String(item.type || ''),
+          status: String(item.status || ''),
+          startDate: String(item.startDate || ''),
+          settlementMonth: String(item.settlementMonth || ''),
+        })).filter((item) => item.id > 0 && item.title)
+      : []
+    if (record.needsDisambiguation !== true || candidates.length < 2) return undefined
+    return {
+      id: String(rawSelection.id || `task-selection:${Date.now()}`),
+      kind: 'task',
+      prompt: String(rawSelection.prompt || '请选择要操作的任务。'),
+      candidates,
+    }
+  }
+
   private buildTools(currentMonth: string | undefined) {
     return {
       query_month_finance: tool({
@@ -413,10 +437,17 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       const result = await this.callTool(pending.endpoint, { confirmationToken: pending.confirmationToken })
       this.clearPendingAction()
       const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
+      const task = toJsonObject(result.task)
       return {
         answer,
         model: 'cloudflare-agent:deterministic-write',
-        approval: this.approvalResult(pending, 'executed'),
+        approval: {
+          ...this.approvalResult(pending, 'executed'),
+          result: {
+            taskId: Number(task.id) || undefined,
+            taskTitle: String(task.title || pending.draft.taskTitle || pending.draft.title || ''),
+          },
+        },
         trace: [
           { type: 'plan', label: '确认操作', detail: `读取已持久保存的${pending.label}预览。` },
           { type: 'tool', label: `执行${pending.label}`, detail: '使用签名确认凭证写入业务数据。' },
@@ -441,6 +472,39 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const title = String(task.title || '')
     if (title) return `任务：${title}`
     return '系统已保存本次操作，并返回成功状态。'
+  }
+
+  async reviseApproval(request: { approvalId: string; draft: Record<string, unknown> }): Promise<AliceAgentChatResult> {
+    const pending = this.getPendingAction()
+    if (!pending || `${pending.action}:${pending.createdAt}` !== String(request.approvalId || '')) {
+      throw new Error('待确认草稿已变化或不存在，请重新生成。')
+    }
+    if (pending.action !== 'create_task') {
+      throw new Error('当前仅支持在确认前编辑新建任务草稿。')
+    }
+    const previewName = `${pending.action}_preview`
+    const config = PREVIEW_ACTIONS[previewName]
+    if (!config) throw new Error('找不到对应的草稿校验工具。')
+    const safeDraft = toJsonObject(request.draft)
+    const data = await this.previewTool(previewName, config.previewEndpoint, {
+      ...pending.draft,
+      ...safeDraft,
+    })
+    if (data.ready !== true) {
+      const missing = Array.isArray(data.missing) ? data.missing.map(String).join('、') : '必填字段'
+      throw new Error(`草稿仍缺少：${missing}`)
+    }
+    const nextPending = this.getPendingAction()
+    if (!nextPending) throw new Error('草稿更新后未生成确认状态。')
+    return {
+      answer: '任务草稿已更新，请再次核对后确认。',
+      model: 'cloudflare-agent:approval-revision',
+      approval: this.approvalResult(nextPending, 'pending'),
+      trace: [
+        { type: 'tool', label: '重新校验创建任务草稿' },
+        { type: 'result', label: '草稿与确认凭证已更新' },
+      ],
+    }
   }
 
   async chat(request: AliceAgentChatRequest): Promise<AliceAgentChatResult> {
@@ -501,12 +565,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const trace: AliceAgentTraceItem[] = [
       { type: 'plan', label: '理解问题', detail: '结合持久会话判断是否需要读取或修改 Giverny 数据。' },
     ]
+    let selection: AgentTaskSelection | undefined
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
         trace.push({ type: 'tool', label: `调用工具：${call.toolName}` })
       }
       for (const toolResult of step.toolResults) {
         trace.push({ type: 'result', label: `工具已返回：${toolResult.toolName}` })
+        selection = this.taskSelection(toolResult.output) || selection
       }
     }
     this.saveMessage('assistant', answer)
@@ -519,6 +585,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       trace: trace.slice(0, 10),
       model: `deepseek:${modelName}`,
       ...(approval ? { approval } : {}),
+      ...(selection ? { selection } : {}),
     }
   }
 }

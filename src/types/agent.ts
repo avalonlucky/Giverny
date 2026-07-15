@@ -10,4 +10,24 @@ export type AgentApproval = {
   createdAt: number
   expiresAt: number
   error?: string
+  result?: {
+    taskId?: number
+    taskTitle?: string
+  }
+}
+
+export type AgentTaskCandidate = {
+  id: number
+  title: string
+  type: string
+  status: string
+  startDate: string
+  settlementMonth: string
+}
+
+export type AgentTaskSelection = {
+  id: string
+  kind: 'task'
+  prompt: string
+  candidates: AgentTaskCandidate[]
 }

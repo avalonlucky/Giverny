@@ -1,13 +1,15 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.29",
+  "version": "0.28.30",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
     "dev": "vite",
     "build": "npm run baml:generate && tsc -b && vite build",
     "lint": "eslint .",
+    "agent:eval:check": "node agent-evals/run.mjs --validate-only",
+    "agent:eval": "node agent-evals/run.mjs",
     "preview": "vite preview",
     "deploy:pages": "npm run build && npx wrangler pages deploy dist --project-name designer-worklog",
     "deploy:worker": "npm run build && npx wrangler deploy"

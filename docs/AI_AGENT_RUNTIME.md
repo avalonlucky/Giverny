@@ -61,6 +61,9 @@ D1 / R2 / app data
 - `src/App.tsx`：新对话、当前对话和历史对话均保存对应 Agent 会话 ID；旧历史首次继续时自动导入上下文。
 - `/api/agent/tools/*`：提供只读工具与写入工具。写入工具统一采用 preview/execute 两段式协议，execute 必须携带 preview 生成的 `confirmationToken`。
 - 前端确认卡：Tool Calling 生成的写入草稿通过结构化 `approval` 协议展示，用户可直接核对并确认或取消；签名 token 始终只保存在 Agent SQLite，不下发浏览器。
+- 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
+- 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
+- `agent-evals/`：63 条固定回归用例覆盖月份查询、财务工时、任务详情、五类写入、同名消歧和安全边界。
 - `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
 当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
@@ -69,7 +72,7 @@ D1 / R2 / app data
 
 ## 下一步
 
-1. 建立覆盖真实月份查询、同名任务消歧、多轮追问和五类写入的固定评测集。
+1. 使用真实匿名化业务夹具定期运行 `agent-evals/` 在线评测，并将稳定通过率纳入 Agent 模型与提示词升级门禁。
 2. 将内部工具定义抽成共享注册表，并在独立 OAuth 权限边界完成后发布只读 MCP Server，供 Codex、Claude 等外部客户端复用；站内 Agent 继续使用低延迟的类型化 Tool Calling。
 3. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
 4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。

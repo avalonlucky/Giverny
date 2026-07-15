@@ -4,7 +4,7 @@ import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { getAgentByName } from 'agents'
 import JSZip from 'jszip'
 import { AliceAgent } from './aliceAgent'
-import type { AgentApproval } from './types/agent'
+import type { AgentApproval, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent }
@@ -1865,6 +1865,7 @@ type OpenAiAgentRuntimeResult = {
   model?: string
   trace?: OpenAiAgentRuntimeTraceItem[]
   approval?: AgentApproval
+  selection?: AgentTaskSelection
 }
 
 function normalizeAgentRuntimeBaseUrl(env: Env) {
@@ -1959,6 +1960,33 @@ async function callAgentRuntime(
   const payload = (await res.json().catch(() => null)) as OpenAiAgentRuntimeResult | null
   if (!payload || !String(payload.answer || '').trim()) return null
   return payload
+}
+
+async function reviseAgentApproval(env: Env, request: Request) {
+  if (!env.ALICE_AGENT) return fail('Cloudflare Agent Runtime 未启用', 503)
+  const body = (await request.json().catch(() => ({}))) as {
+    agentRuntimeConversationId?: string
+    conversationId?: string
+    approvalId?: string
+    draft?: Record<string, unknown>
+  }
+  const conversationId = agentString(body.agentRuntimeConversationId ?? body.conversationId, 120)
+  const approvalId = agentString(body.approvalId, 160)
+  if (!conversationId || !approvalId || !body.draft || typeof body.draft !== 'object') {
+    return fail('缺少会话、确认卡或草稿数据', 400)
+  }
+  try {
+    const agent = await getAgentByName(env.ALICE_AGENT as never, conversationId) as unknown as AliceAgent
+    const result = await agent.reviseApproval({ approvalId, draft: body.draft })
+    return ok({
+      content: result.answer,
+      approval: result.approval,
+      agentRuntimeConversationId: conversationId,
+      trace: formatAgentRuntimeTrace(result.trace),
+    })
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '任务草稿更新失败', 409)
+  }
 }
 
 const agentToolCorsHeaders = {
@@ -2133,16 +2161,66 @@ async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAc
   return payload.draft ?? {}
 }
 
+class AgentTaskSelectionRequired extends Error {
+  candidates: AgentTaskCandidate[]
+
+  constructor(candidates: AgentTaskCandidate[]) {
+    super('匹配到多个任务，需要用户选择。')
+    this.name = 'AgentTaskSelectionRequired'
+    this.candidates = candidates
+  }
+}
+
+function toAgentTaskCandidate(task: DbTask): AgentTaskCandidate {
+  return {
+    id: Number(task.id),
+    title: task.title,
+    type: task.design_type ?? '',
+    status: task.status,
+    startDate: task.start_date ?? '',
+    settlementMonth: task.settlement_month ?? '',
+  }
+}
+
 async function agentTaskByRef(env: Env, body: Record<string, unknown>) {
   const taskId = agentNumber(body.taskId, 0)
   const title = agentString(body.taskTitle ?? body.title, 160)
   const task = taskId > 0
     ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
-    : title
-      ? await env.DB.prepare('SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ? ORDER BY start_date DESC, created_at DESC LIMIT 1').bind(`%${title}%`).first<DbTask>()
-      : null
+    : null
+  if (task) return task
+  if (title) {
+    const rows = await env.DB.prepare(
+      `SELECT * FROM tasks
+       WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ?
+       ORDER BY CASE WHEN title = ? THEN 0 ELSE 1 END, start_date DESC, created_at DESC
+       LIMIT 6`,
+    ).bind(`%${title}%`, title).all<DbTask>()
+    const matches = rows.results ?? []
+    const exactMatches = matches.filter((item) => item.title === title)
+    if (exactMatches.length === 1) return exactMatches[0]
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1) throw new AgentTaskSelectionRequired(matches.map(toAgentTaskCandidate))
+  }
   if (!task) throw new Error('没有匹配到明确任务，请提供 taskId 或更完整的任务标题。')
   return task
+}
+
+function agentTaskSelectionResponse(error: AgentTaskSelectionRequired, toolName: string) {
+  const selection: AgentTaskSelection = {
+    id: `task-selection:${crypto.randomUUID()}`,
+    kind: 'task',
+    prompt: '匹配到多个相似任务，请选择要继续操作的任务。',
+    candidates: error.candidates,
+  }
+  return agentOk({
+    tool: toolName,
+    mode: 'selection',
+    ready: false,
+    needsDisambiguation: true,
+    selection,
+    instruction: '必须让用户从候选任务中选择；不要自行挑选，不要继续执行写入。',
+  })
 }
 
 async function agentPreview(env: Env, action: string, draft: Record<string, unknown>, missing: string[] = [], warnings: string[] = []) {
@@ -2266,6 +2344,7 @@ async function agentRecordFeedbackPreviewTool(env: Env, request: Request) {
     const missing = [!draft.note && 'note'].filter(Boolean) as string[]
     return agentPreview(env, 'record_feedback_preview', draft, missing)
   } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'record_feedback_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成反馈预览', 400)
   }
 }
@@ -2325,6 +2404,7 @@ async function agentUpdateTaskStatusPreviewTool(env: Env, request: Request) {
     const warnings = task.status === '已验收' && status !== '已验收' ? ['已验收任务回退状态属于敏感操作，本工具不会回退验收锁定。'] : []
     return agentPreview(env, 'update_task_status_preview', draft, missing, warnings)
   } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'update_task_status_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成状态修改预览', 400)
   }
 }
@@ -2379,12 +2459,19 @@ async function agentUpdateTaskFieldsPreviewTool(env: Env, request: Request) {
         estimatedDate: task.estimated_delivery_date ?? '',
         settlementMonth: task.settlement_month ?? '',
         estimatedHours: Number(task.estimated_hours) || 0,
+        requester: task.requester ?? '',
+        contact: task.contact_person ?? '',
+        reviewer: task.reviewer ?? '',
         billable: Number(task.is_billable) !== 0,
+        isSupplemental: Number(task.is_supplemental) !== 0,
+        supplementalNote: task.supplemental_note ?? '',
+        acceptanceNote: task.acceptance_note ?? '',
       },
     }
     const missing = Object.keys(fields).length === 0 ? ['fields'] : []
     return agentPreview(env, 'update_task_fields_preview', draft, missing)
   } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'update_task_fields_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成字段修改预览', 400)
   }
 }
@@ -2447,6 +2534,7 @@ async function agentAppendProgressPreviewTool(env: Env, request: Request) {
     const missing = [!draft.note && 'note'].filter(Boolean) as string[]
     return agentPreview(env, 'append_progress_preview', draft, missing)
   } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'append_progress_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成进展预览', 400)
   }
 }
@@ -2947,15 +3035,12 @@ async function agentTaskDetailTool(env: Env, request: Request) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
-  const taskId = Number(body.taskId)
-  const title = String(body.title ?? '').trim().slice(0, 160)
-  const task = Number.isFinite(taskId) && taskId > 0
-    ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
-    : title
-      ? await env.DB.prepare('SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ? ORDER BY start_date DESC, created_at DESC LIMIT 1').bind(`%${title}%`).first<DbTask>()
-      : null
-  if (!task) {
-    return agentFail('任务不存在或已作废', 404)
+  let task: DbTask
+  try {
+    task = await agentTaskByRef(env, { taskId: body.taskId, taskTitle: body.title })
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'get_task_detail')
+    return agentFail(error instanceof Error ? error.message : '任务不存在或已作废', 404)
   }
   const [updateRows, fileRows, analysisRows] = await Promise.all([
     env.DB.prepare('SELECT * FROM task_updates WHERE task_id = ? ORDER BY update_date ASC, created_at ASC').bind(task.id).all<DbUpdate>(),
@@ -8720,6 +8805,7 @@ async function chatWithAi(env: Env, request: Request) {
             `生成答复：使用 ${runtimeResult.model || 'Agent Runtime'} 组织最终回答。`,
           ],
           approval: runtimeResult.approval,
+          selection: runtimeResult.selection,
         })
       }
       if (requiresRuntime) {
@@ -9318,6 +9404,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path === '/api/ai/chat' ||
+      path === '/api/ai/approval' ||
       path === '/api/ai/task-edits' ||
       path === '/api/ai/task-title-edits' ||
       path === '/api/ai/task-type-choices' ||
@@ -9482,6 +9569,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/chat' && request.method === 'POST') {
     return chatWithAi(env, request)
+  }
+  if (path === '/api/ai/approval' && request.method === 'POST') {
+    return reviseAgentApproval(env, request)
   }
   if (path === '/api/knowledge' && request.method === 'GET') {
     const notes = await listKnowledgeNotes(env)

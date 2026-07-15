@@ -101,7 +101,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4128,7 +4128,7 @@ function KnowledgeView() {
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
-type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; approval?: AgentApproval }
+type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; approval?: AgentApproval; selection?: AgentTaskSelection }
 type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
@@ -4321,6 +4321,7 @@ type ChatPanelProps = {
   currentMonthValue: string
   aiModelConfig: AiModelConfig | null
   onClose: () => void
+  onOpenTask: (taskId: number) => void
 }
 
 function formatAgentTraceContent(content: string, trace?: string[]) {
@@ -4416,6 +4417,9 @@ function agentApprovalRows(approval: AgentApproval) {
   const changedFields = draft.fields && typeof draft.fields === 'object' && !Array.isArray(draft.fields)
     ? draft.fields as Record<string, unknown>
     : null
+  const before = changedFields && draft.before && typeof draft.before === 'object' && !Array.isArray(draft.before)
+    ? draft.before as Record<string, unknown>
+    : null
   const source = changedFields ? { taskTitle: draft.taskTitle, ...changedFields } : draft
   return Object.entries(source)
     .filter(([key, value]) => key !== 'taskId' && key !== 'before' && value !== undefined && value !== '')
@@ -4423,6 +4427,9 @@ function agentApprovalRows(approval: AgentApproval) {
       key,
       label: AGENT_APPROVAL_FIELD_LABELS[key] || key,
       value: formatAgentApprovalValue(key, value),
+      beforeValue: before && key in before && before[key] !== value
+        ? formatAgentApprovalValue(key, before[key])
+        : undefined,
     }))
 }
 
@@ -4439,31 +4446,128 @@ function AgentApprovalCard({
   approval,
   busy,
   onDecision,
+  onRevise,
+  onOpenTask,
 }: {
   approval: AgentApproval
   busy: boolean
   onDecision: (decision: 'confirm' | 'cancel') => void
+  onRevise: (draft: Record<string, unknown>) => Promise<void>
+  onOpenTask: (taskId: number) => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState<Record<string, unknown>>(approval.draft)
+  const [saving, setSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [activePickerId, setActivePickerId] = useState<string | null>(null)
   const rows = agentApprovalRows(approval)
   const canDecide = approval.status === 'pending' || approval.status === 'failed'
+  const canEdit = canDecide && approval.action === 'create_task'
+  const setDraftField = (key: string, value: unknown) => setEditDraft((current) => ({ ...current, [key]: value }))
+  const saveDraft = async () => {
+    setSaving(true)
+    setEditError('')
+    try {
+      await onRevise(editDraft)
+      setEditing(false)
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : '草稿更新失败')
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
     <section className={`agent-approval-card status-${approval.status}`} aria-label={`${approval.label}确认卡片`}>
       <header className="agent-approval-header">
         <div>
-          <small>待确认操作</small>
+          <small>{approval.status === 'executed' ? '操作结果' : '待确认操作'}</small>
           <strong>{approval.label}</strong>
         </div>
         <span className="agent-approval-status">{agentApprovalStatusLabel(approval.status)}</span>
       </header>
-      <p className="agent-approval-hint">请核对草稿。只有确认后，Agent 才会写入网站数据。</p>
-      <dl className="agent-approval-fields">
-        {rows.map((row) => (
-          <div key={row.key} className="agent-approval-field">
-            <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
+      <p className="agent-approval-hint">
+        {approval.status === 'executed' ? '操作已经写入网站数据。' : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
+      </p>
+      {editing ? (
+        <div className="agent-approval-editor">
+          <label className="agent-approval-editor-field agent-approval-editor-wide">
+            <span>任务名称</span>
+            <input value={String(editDraft.title ?? '')} onChange={(event) => setDraftField('title', event.target.value)} />
+          </label>
+          <label className="agent-approval-editor-field agent-approval-editor-wide">
+            <span>具体需求</span>
+            <textarea rows={4} value={String(editDraft.requirement ?? '')} onChange={(event) => setDraftField('requirement', event.target.value)} />
+          </label>
+          <label className="agent-approval-editor-field">
+            <span>设计类型</span>
+            <input value={String(editDraft.type ?? '')} onChange={(event) => setDraftField('type', event.target.value)} />
+          </label>
+          <label className="agent-approval-editor-field">
+            <span>结算月份</span>
+            <input type="month" value={String(editDraft.settlementMonth ?? '')} onChange={(event) => setDraftField('settlementMonth', event.target.value)} />
+          </label>
+          <div className="agent-approval-editor-field">
+            <PlanDateTimeField
+              label="开始时间"
+              value={String(editDraft.date ?? '')}
+              onChange={(value) => setDraftField('date', value)}
+              pickerId="agent-create-date"
+              activePickerId={activePickerId}
+              onActivePickerChange={setActivePickerId}
+            />
           </div>
-        ))}
-      </dl>
+          <div className="agent-approval-editor-field">
+            <PlanDateTimeField
+              label="预计交付"
+              value={String(editDraft.estimatedDate ?? '')}
+              onChange={(value) => setDraftField('estimatedDate', value)}
+              pickerId="agent-create-estimated-date"
+              activePickerId={activePickerId}
+              onActivePickerChange={setActivePickerId}
+            />
+          </div>
+          {(['estimatedHours', 'requester', 'contact', 'reviewer'] as const).map((key) => (
+            <label key={key} className="agent-approval-editor-field">
+              <span>{AGENT_APPROVAL_FIELD_LABELS[key]}</span>
+              <input
+                type={key === 'estimatedHours' ? 'number' : 'text'}
+                min={key === 'estimatedHours' ? '0' : undefined}
+                step={key === 'estimatedHours' ? '0.5' : undefined}
+                value={String(editDraft[key] ?? '')}
+                onChange={(event) => setDraftField(key, key === 'estimatedHours' ? Number(event.target.value) : event.target.value)}
+              />
+            </label>
+          ))}
+          <div className="agent-approval-editor-options agent-approval-editor-wide">
+            {(['billable', 'isSupplemental'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="switch"
+                aria-checked={Boolean(editDraft[key])}
+                className={`agent-approval-editor-toggle ${editDraft[key] ? 'active' : ''}`}
+                onClick={() => setDraftField(key, !editDraft[key])}
+              >
+                <span aria-hidden="true" />
+                {AGENT_APPROVAL_FIELD_LABELS[key]}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <dl className="agent-approval-fields">
+          {rows.map((row) => (
+            <div key={row.key} className="agent-approval-field">
+              <dt>{row.label}</dt>
+              <dd>
+                {row.beforeValue !== undefined ? (
+                  <span className="agent-approval-diff"><del>{row.beforeValue}</del><span aria-hidden="true">→</span><ins>{row.value}</ins></span>
+                ) : row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {approval.warnings.length > 0 && (
         <div className="agent-approval-warnings">
           <AlertTriangle size={14} />
@@ -4471,12 +4575,63 @@ function AgentApprovalCard({
         </div>
       )}
       {approval.error && <p className="agent-approval-error">{approval.error}</p>}
+      {editError && <p className="agent-approval-error">{editError}</p>}
       {canDecide && (
         <footer className="agent-approval-actions">
-          <button type="button" className="ghost-button compact-button" disabled={busy} onClick={() => onDecision('cancel')}>取消</button>
-          <button type="button" className="primary-button compact-button" disabled={busy} onClick={() => onDecision('confirm')}>确认执行</button>
+          {editing ? (
+            <>
+              <button type="button" className="ghost-button compact-button" disabled={saving} onClick={() => { setEditing(false); setEditDraft(approval.draft); setEditError('') }}>放弃修改</button>
+              <button type="button" className="primary-button compact-button" disabled={saving} onClick={() => void saveDraft()}>{saving ? '保存中…' : '保存草稿'}</button>
+            </>
+          ) : (
+            <>
+              {canEdit && <button type="button" className="ghost-button compact-button" disabled={busy} onClick={() => setEditing(true)}>编辑草稿</button>}
+              <button type="button" className="ghost-button compact-button" disabled={busy} onClick={() => onDecision('cancel')}>取消</button>
+              <button type="button" className="primary-button compact-button" disabled={busy} onClick={() => onDecision('confirm')}>确认执行</button>
+            </>
+          )}
         </footer>
       )}
+      {approval.status === 'executed' && approval.result?.taskId && (
+        <footer className="agent-approval-actions">
+          <button type="button" className="primary-button compact-button" onClick={() => onOpenTask(approval.result!.taskId!)}>查看任务</button>
+        </footer>
+      )}
+    </section>
+  )
+}
+
+function AgentTaskSelectionCard({
+  selection,
+  busy,
+  onSelect,
+}: {
+  selection: AgentTaskSelection
+  busy: boolean
+  onSelect: (candidate: AgentTaskCandidate) => void
+}) {
+  return (
+    <section className="agent-selection-card" aria-label="选择任务">
+      <header className="agent-selection-header">
+        <small>需要你确认</small>
+        <strong>{selection.prompt}</strong>
+      </header>
+      <div className="agent-selection-list">
+        {selection.candidates.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            className="agent-selection-option"
+            disabled={busy}
+            onClick={() => onSelect(candidate)}
+          >
+            <span className="agent-selection-main">{candidate.title}</span>
+            <span className="agent-selection-meta">
+              {[candidate.startDate.slice(0, 10), candidate.type, candidate.status].filter(Boolean).join(' · ')}
+            </span>
+          </button>
+        ))}
+      </div>
     </section>
   )
 }
@@ -4485,6 +4640,7 @@ function ChatPanel({
   currentMonthValue,
   aiModelConfig,
   onClose,
+  onOpenTask,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
   const [agentConversationId, setAgentConversationId] = useState<string | undefined>()
@@ -4616,6 +4772,24 @@ function ChatPanel({
       .finally(() => setIsLoadingOpenRouterModels(false))
   }
 
+  const reviseApproval = async (messageId: string, approvalId: string, draft: Record<string, unknown>) => {
+    if (!agentConversationId) throw new Error('当前会话已失效，请重新生成任务草稿。')
+    const res = await fetch('/api/ai/approval', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        agentRuntimeConversationId: agentConversationId,
+        approvalId,
+        draft,
+      }),
+    })
+    const data = (await res.json().catch(() => null)) as { approval?: AgentApproval; error?: string } | null
+    if (!res.ok || !data?.approval) throw new Error(data?.error ?? '草稿更新失败')
+    setMessages((current) => current.map((message) => (
+      message.id === messageId ? { ...message, approval: data.approval } : message
+    )))
+  }
+
   const send = async (overrideText?: string, approvalDecision?: { messageId: string; approvalId: string }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim()
     if ((!text && attachments.length === 0) || loading) return
@@ -4681,7 +4855,7 @@ function ChatPanel({
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval }
+        const data = (await res.json()) as { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval; selection?: AgentTaskSelection }
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         stopLiveTrace()
         setMessages((prev) => prev.map((m) => {
@@ -4690,6 +4864,7 @@ function ChatPanel({
               ...m,
               content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace),
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
+              ...(data.selection ? { selection: data.selection } : {}),
             }
           }
           if (data.approval && m.approval?.id === data.approval.id) {
@@ -4795,10 +4970,19 @@ function ChatPanel({
                   <AgentApprovalCard
                     approval={msg.approval}
                     busy={loading}
+                    onRevise={(draft) => reviseApproval(msg.id, msg.approval!.id, draft)}
+                    onOpenTask={onOpenTask}
                     onDecision={(decision) => void send(decision === 'confirm' ? '确认执行' : '取消', {
                       messageId: msg.id,
                       approvalId: msg.approval!.id,
                     })}
+                  />
+                )}
+                {msg.role === 'assistant' && msg.selection && (
+                  <AgentTaskSelectionCard
+                    selection={msg.selection}
+                    busy={loading}
+                    onSelect={(candidate) => void send(`选择任务 #${candidate.id}：${candidate.title}`)}
                   />
                 )}
               </div>
@@ -7798,6 +7982,10 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             currentMonthValue={currentMonth.value}
             aiModelConfig={aiModelConfig}
             onClose={() => setIsChatOpen(false)}
+            onOpenTask={(taskId) => {
+              setIsChatOpen(false)
+              void refreshState().then(() => handleOpenTaskDetail(taskId))
+            }}
           />
         </>
       )}

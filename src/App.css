@@ -12859,6 +12859,128 @@ input::file-selector-button {
   overflow-wrap: anywhere;
 }
 
+.agent-approval-diff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+}
+
+.agent-approval-diff del {
+  color: var(--color-text-secondary);
+  text-decoration-color: var(--color-status-danger);
+}
+
+.agent-approval-diff ins {
+  color: var(--color-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.agent-approval-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  padding: 14px 16px 16px;
+}
+
+.agent-approval-editor-wide {
+  grid-column: 1 / -1;
+}
+
+.agent-approval-editor-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.agent-approval-editor-field > span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agent-approval-editor-field > input,
+.agent-approval-editor-field > textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.agent-approval-editor-field > input {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.agent-approval-editor-field > textarea {
+  min-height: 92px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.agent-approval-editor-field > input:focus,
+.agent-approval-editor-field > textarea:focus {
+  border-color: var(--color-primary);
+}
+
+.agent-approval-editor-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.agent-approval-editor-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-approval-editor-toggle > span {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  transition: background 160ms ease;
+}
+
+.agent-approval-editor-toggle > span::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-surface-strong);
+  content: '';
+  transition: transform 160ms ease;
+}
+
+.agent-approval-editor-toggle.active {
+  color: var(--color-primary);
+}
+
+.agent-approval-editor-toggle.active > span {
+  background: var(--color-primary);
+}
+
+.agent-approval-editor-toggle.active > span::after {
+  transform: translateX(14px);
+}
+
 .agent-approval-warnings,
 .agent-approval-error {
   margin: 0 16px 12px;
@@ -12888,9 +13010,79 @@ input::file-selector-button {
   border-top: 1px solid var(--color-border);
 }
 
+.agent-selection-card {
+  width: min(560px, 100%);
+  margin-top: 18px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-strong);
+}
+
+.agent-selection-header {
+  display: grid;
+  gap: 3px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.agent-selection-header small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agent-selection-header strong {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.agent-selection-list {
+  display: grid;
+}
+
+.agent-selection-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-selection-option:last-child {
+  border-bottom: 0;
+}
+
+.agent-selection-option:hover:not(:disabled) {
+  background: var(--color-surface-alt);
+}
+
+.agent-selection-option:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.agent-selection-main {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agent-selection-meta {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
 @media (max-width: 720px) {
-  .agent-approval-fields {
+  .agent-approval-fields,
+  .agent-approval-editor {
     grid-template-columns: 1fr;
+  }
+
+  .agent-approval-editor-wide {
+    grid-column: auto;
   }
 
   .agent-approval-field:nth-child(odd),

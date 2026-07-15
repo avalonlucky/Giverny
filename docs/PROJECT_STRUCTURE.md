@@ -23,6 +23,10 @@
 │   ├── Dockerfile
 │   ├── README.md
 │   └── requirements.txt
+├── agent-evals/
+│   ├── cases.json
+│   ├── run.mjs
+│   └── README.md
 ├── docs/
 │   ├── AI_AGENT_RUNTIME.md
 │   ├── AI_MODEL_ROUTING.md
@@ -85,6 +89,7 @@
 - Generated BAML TypeScript client: `src/baml_client/baml_client/`
 - Independent BAML Node runtime: `ai-runtime/`
 - Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
+- Agent regression suite: `agent-evals/`
 - Legacy Python Agent runtime fallback: `agent-runtime/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
