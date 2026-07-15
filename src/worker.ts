@@ -2,7 +2,10 @@ import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, default
 import { Container } from '@cloudflare/containers'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { getAgentByName } from 'agents'
+import { createMcpHandler } from 'agents/mcp'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
+import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import type { AgentApproval, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
@@ -197,7 +200,7 @@ type PublicAiModelConfig = {
 // client       甲方（口令）——见当月任务/进展/交付件 + 当月结算，只读，看不到往月与全年财务、看不到后台配置
 // guest        对客访客（口令/匿名）——只看进展和对客可见交付件，只读
 type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
-type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
+type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read'
 
 type AuthPrincipal = {
   role: AuthRole
@@ -208,6 +211,10 @@ type AuthPrincipal = {
 
 function scopeToRole(scope: string | null | undefined): AuthRole {
   return scope === 'collaborator' || scope === 'viewer' || scope === 'client' ? scope : 'guest'
+}
+
+function normalizeTokenScope(scope: string | null | undefined): TokenScope {
+  return scope === 'collaborator' || scope === 'viewer' || scope === 'client' || scope === 'mcp-read' ? scope : 'guest'
 }
 
 // 能看到管理员级全量数据（含作废任务、全部交付件与分析）
@@ -3156,6 +3163,104 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   return agentFail('Agent tool not found', 404)
 }
 
+async function verifyMcpReadRequest(env: Env, request: Request) {
+  const authorization = request.headers.get('authorization') || ''
+  const token = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
+  if (!token) return false
+  await ensureAccessTokenScope(env)
+  const row = await env.DB.prepare(
+    `SELECT id, expires_at
+     FROM access_tokens
+     WHERE token = ? AND scope = 'mcp-read' AND disabled = 0`,
+  ).bind(token).first<{ id: string; expires_at: string | null }>()
+  if (!row || (row.expires_at && row.expires_at < nowIso())) return false
+  await env.DB.prepare(
+    "UPDATE access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ? AND (last_used_at IS NULL OR last_used_at < datetime('now', '-5 minutes'))",
+  ).bind(row.id).run()
+  return true
+}
+
+async function callMcpReadTool(env: Env, endpoint: string, input: Record<string, unknown>) {
+  if (!env.AGENT_TOOL_TOKEN) throw new Error('AGENT_TOOL_TOKEN 未配置，MCP 无法访问业务工具。')
+  const url = new URL(`https://giverny.internal/api/agent/tools/${endpoint}`)
+  Object.entries(input).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  })
+  const response = await handleAgentToolApi(new Request(url, {
+    headers: { authorization: `Bearer ${env.AGENT_TOOL_TOKEN}` },
+  }), env)
+  const data = await response.json().catch(() => null) as Record<string, unknown> | null
+  if (!response.ok || !data) throw new Error(String(data?.error || `工具调用失败：HTTP ${response.status}`))
+  return data
+}
+
+function mcpToolResult(data: Record<string, unknown>) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    structuredContent: data,
+  }
+}
+
+function mcpToolError(error: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: error instanceof Error ? error.message : '工具调用失败' }],
+    isError: true,
+  }
+}
+
+function registerGivernyMcpTools(server: McpServer, env: Env) {
+  const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  const finance = agentReadToolRegistry.query_month_finance
+  server.registerTool('query_month_finance', {
+    title: finance.title,
+    description: finance.description,
+    inputSchema: finance.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, finance.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+  const search = agentReadToolRegistry.search_tasks
+  server.registerTool('search_tasks', {
+    title: search.title,
+    description: search.description,
+    inputSchema: search.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, search.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+  const detail = agentReadToolRegistry.get_task_detail
+  server.registerTool('get_task_detail', {
+    title: detail.title,
+    description: detail.description,
+    inputSchema: detail.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+  const context = agentReadToolRegistry.get_giverny_context
+  server.registerTool('get_giverny_context', {
+    title: context.title,
+    description: context.description,
+    inputSchema: context.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, context.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+}
+
+async function handleMcp(request: Request, env: Env, ctx: WorkerExecutionContext) {
+  if (request.method !== 'OPTIONS' && !(await verifyMcpReadRequest(env, request))) {
+    return Response.json(
+      { error: '需要有效的 MCP 只读口令' },
+      { status: 401, headers: { 'www-authenticate': 'Bearer realm="Giverny MCP"', 'cache-control': 'no-store' } },
+    )
+  }
+  const server = new McpServer({ name: 'Giverny', version: '1.0.0' })
+  registerGivernyMcpTools(server, env)
+  const handler = createMcpHandler(server, { route: '/mcp', enableJsonResponse: true })
+  return handler(request, env, ctx as Parameters<typeof handler>[2])
+}
+
 async function callAiEndpointVision(
   endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>,
   prompt: string,
@@ -5726,7 +5831,7 @@ const toAccessToken = (row: DbAccessToken) => ({
   id: row.id,
   token: row.token,
   label: row.label ?? '',
-  scope: scopeToRole(row.scope) as TokenScope,
+  scope: normalizeTokenScope(row.scope),
   expiresAt: formatBeijing(row.expires_at),
   disabled: Boolean(row.disabled),
   expired: Boolean(row.expires_at && row.expires_at < nowIso()),
@@ -5764,6 +5869,9 @@ async function resolvePrincipal(env: Env, key: string, email: string): Promise<A
   await ensureAccessTokenScope(env)
   const row = await env.DB.prepare('SELECT * FROM access_tokens WHERE token = ?').bind(trimmedKey).first<DbAccessToken>()
   if (!row || row.disabled) {
+    return null
+  }
+  if (normalizeTokenScope(row.scope) === 'mcp-read') {
     return null
   }
   if (row.expires_at && row.expires_at < nowIso()) {
@@ -6005,7 +6113,7 @@ async function createAccessToken(env: Env, request: Request) {
   const token = `wk_${Array.from(randomBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   const days = Number(body.expiresInDays)
   const expiresAt = Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null
-  const scope = scopeToRole(body.scope) as TokenScope
+  const scope = normalizeTokenScope(body.scope)
 
   await env.DB.prepare(
     `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled) VALUES (?, ?, ?, ?, ?, 0)`,
@@ -9863,10 +9971,19 @@ export default {
         'content-security-policy',
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com; frame-src 'self' blob: https://challenges.cloudflare.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
       )
-      if (url.pathname.startsWith('/api/') && !headers.has('cache-control')) {
+      if ((url.pathname.startsWith('/api/') || url.pathname === '/mcp') && !headers.has('cache-control')) {
         headers.set('cache-control', 'no-store')
       }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+    }
+
+    if (url.pathname === '/mcp') {
+      try {
+        return withSecurityHeaders(await handleMcp(request, env, ctx))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'MCP 服务异常'
+        return withSecurityHeaders(fail(message, 500))
+      }
     }
 
     if (url.pathname.startsWith('/api/')) {

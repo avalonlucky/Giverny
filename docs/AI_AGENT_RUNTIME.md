@@ -66,6 +66,7 @@ D1 / R2 / app data
 - `agent-evals/`：63 条固定回归用例覆盖月份查询、财务工时、任务详情、五类写入、同名消歧和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
+- 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露四个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
 - `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
 当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
@@ -74,8 +75,8 @@ D1 / R2 / app data
 
 ## 下一步
 
-1. 将内部工具定义抽成共享注册表，并在独立 OAuth 权限边界完成后发布只读 MCP Server，供 Codex、Claude 等外部客户端复用；站内 Agent 继续使用低延迟的类型化 Tool Calling。
-2. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
+1. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
+2. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。
 3. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
 4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
 
@@ -87,4 +88,5 @@ D1 / R2 / app data
 - 写入工具必须先 preview，再 execute；execute 的 `confirmationToken` 由 Worker 使用服务端密钥签名，默认 10 分钟有效。
 - 模型只拥有 preview 工具；confirmation token 保存在 Agent SQLite 中，不进入模型输出和前端响应。
 - Agent 不开放删除、作废、结算锁定、部署等高风险操作。
+- MCP 只开放共享注册表中的四个只读工具；MCP 口令不得用于网站登录，站内访问口令也不得调用 MCP。
 - 如果密钥曾出现在截图、聊天记录或公开页面，应先轮换再上线。

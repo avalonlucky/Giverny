@@ -57,6 +57,54 @@ function stopChildren() {
   }
 }
 
+async function runMcpChecks() {
+  const endpoint = 'http://127.0.0.1:8798/mcp'
+  const unauthorized = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+  })
+  if (unauthorized.status !== 401) throw new Error(`MCP unauthorized check returned HTTP ${unauthorized.status}`)
+
+  const loginWithMcpToken = await fetch('http://127.0.0.1:8798/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'mcp@example.com', key: 'mcp_eval_read_token' }),
+  })
+  if (loginWithMcpToken.status !== 401) throw new Error('MCP read token unexpectedly authenticated to the website')
+
+  const headers = {
+    authorization: 'Bearer mcp_eval_read_token',
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+  }
+  const request = async (id, method, params) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || data.error) throw new Error(`MCP ${method} failed: ${JSON.stringify(data.error || data)}`)
+    return data.result
+  }
+
+  await request(2, 'initialize', {
+    protocolVersion: '2025-03-26',
+    capabilities: {},
+    clientInfo: { name: 'giverny-isolated-eval', version: '1.0.0' },
+  })
+  const listed = await request(3, 'tools/list', {})
+  const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
+  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_tasks']
+  if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
+  const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
+  if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
+    throw new Error('MCP context tool did not return text content')
+  }
+  process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -71,6 +119,8 @@ try {
   })
   const cookie = (loginResponse.headers.get('set-cookie') || '').split(';')[0]
   if (!loginResponse.ok || !cookie) throw new Error('Isolated eval login failed')
+
+  await runMcpChecks()
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {

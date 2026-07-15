@@ -15354,6 +15354,7 @@ function SettingsView({
     { value: 'viewer', label: '只读全局', desc: '看管理员所见的全部数据，但完全只读——什么都改不了。适合给对接测试或老板审阅。' },
     { value: 'client', label: '甲方', desc: '看当月任务、进展、交付件和当月结算回单（含金额），只读；看不到往月与全年财务、看不到后台配置。' },
     { value: 'guest', label: '对客访客', desc: '只看进展和对客可见的交付件，只读。适合对外分享。' },
+    { value: 'mcp-read', label: 'MCP 只读', desc: '仅允许外部 AI 客户端通过 MCP 查询任务、财务、工时和任务详情；不能登录网站，也不能执行任何写入。' },
   ]
   const tokenScopeLabel = (scope: TokenScope) => tokenScopeOptions.find((option) => option.value === scope)?.label ?? scope
   const activeTokenScope = tokenScopeOptions.find((option) => option.value === tokenScope)

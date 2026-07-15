@@ -24,7 +24,7 @@ npm run agent:eval
 npm run agent:eval:isolated
 ```
 
-隔离评测会创建临时本地 D1，导入 `fixture.sql` 的匿名任务，启动本地 Worker 与 OpenAI-compatible 模拟模型，执行全部 63 条工具链用例后删除临时目录。它不会读取或修改正式 D1，也不会调用外部模型。
+隔离评测会创建临时本地 D1，导入 `fixture.sql` 的匿名任务，启动本地 Worker 与 OpenAI-compatible 模拟模型，执行全部 63 条工具链用例和 MCP 鉴权/工具协议回归后删除临时目录。它不会读取或修改正式 D1，也不会调用外部模型。
 
 `quality-gates.json` 定义总体和分类通过率。创建、写入预览、消歧与安全场景必须 100% 通过；任何工具接口返回非 200、应消歧却未返回候选，或评测流量进入正式指标统计，都会让门禁失败。
 

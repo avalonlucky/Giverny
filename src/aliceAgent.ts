@@ -2,6 +2,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
+import { agentReadToolRegistry } from './agentToolRegistry'
 import type { AgentApproval, AgentApprovalStatus, AgentTaskSelection } from './types/agent'
 
 type AliceAgentEnv = Record<string, unknown> & {
@@ -326,14 +327,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private buildTools(currentMonth: string | undefined) {
+    const readTools = agentReadToolRegistry
     return {
       query_month_finance: tool({
-        description: '查询真实的月份收入、工时、计费与结算统计。',
-        inputSchema: z.object({
-          question: z.string(),
-          currentMonth: z.string().optional(),
-          months: z.string().optional(),
-        }),
+        description: readTools.query_month_finance.description,
+        inputSchema: readTools.query_month_finance.inputSchema,
         execute: (input) => this.callTool('month-finance', {
           question: input.question,
           currentMonth: input.currentMonth || currentMonth,
@@ -341,25 +339,18 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         }, 'GET'),
       }),
       search_tasks: tool({
-        description: '按月份、状态意图、任务名、需求或人员搜索任务。月份问题必须传 month。',
-        inputSchema: z.object({
-          query: z.string(),
-          month: z.string().optional(),
-          limit: z.number().int().min(1).max(50).default(30),
-        }),
+        description: readTools.search_tasks.description,
+        inputSchema: readTools.search_tasks.inputSchema,
         execute: (input) => this.callTool('search-tasks', input, 'GET'),
       }),
       get_task_detail: tool({
-        description: '按任务 ID 或近似标题读取任务详情、进展、附件与验收信息。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          title: z.string().optional(),
-        }),
+        description: readTools.get_task_detail.description,
+        inputSchema: readTools.get_task_detail.inputSchema,
         execute: (input) => this.callTool('task-detail', input, 'GET'),
       }),
       get_giverny_context: tool({
-        description: '读取当前 Giverny 工作台概览和能力边界。',
-        inputSchema: z.object({}),
+        description: readTools.get_giverny_context.description,
+        inputSchema: readTools.get_giverny_context.inputSchema,
         execute: () => this.callTool('context', {}, 'GET'),
       }),
       create_task_preview: tool({

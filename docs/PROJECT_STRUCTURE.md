@@ -38,6 +38,7 @@
 ├── docs/
 │   ├── AI_AGENT_RUNTIME.md
 │   ├── AI_MODEL_ROUTING.md
+│   ├── MCP_SERVER.md
 │   ├── OPERATION_POLICIES.md
 │   ├── PROJECT_STRUCTURE.md
 │   ├── DEPLOYMENT.md
@@ -70,6 +71,7 @@
 │   │   └── domain.ts
 │   ├── App.css
 │   ├── App.tsx
+│   ├── agentToolRegistry.ts
 │   ├── aliceAgent.ts
 │   ├── SharedReport.tsx
 │   ├── index.css
@@ -97,9 +99,11 @@
 - Generated BAML TypeScript client: `src/baml_client/baml_client/`
 - Independent BAML Node runtime: `ai-runtime/`
 - Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
+- Shared Agent/MCP read-tool registry: `src/agentToolRegistry.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
 - Legacy Python Agent runtime fallback: `agent-runtime/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
+- Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - Domain types: `src/types/domain.ts`
 - App version and defaults: `src/config/appConfig.ts`
@@ -120,6 +124,7 @@
 - The production Cloudflare Worker does not import BAML directly. It can call the independent `ai-runtime/` Node service first, then fall back to DeepSeek direct if the runtime is unavailable.
 - `src/aliceAgent.ts` is the primary Agent Runtime. Each conversation uses a named `AliceAgent` Durable Object with SQLite history, typed tool calls, pending confirmation state, and a compact trace.
 - `agent_run_metrics` stores privacy-minimized Agent outcome metadata for the admin quality dashboard; evaluation-tagged traffic is retained separately and excluded from dashboard aggregates.
+- `/mcp` is a stateless Streamable HTTP server exposing only the shared read-tool registry. It requires a dedicated `mcp-read` access token that cannot authenticate to the website.
 - `agent-runtime/` and `AGENT_RUNTIME_CONTAINER` remain temporarily as a legacy fallback while the Cloudflare-native path is validated in production.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 

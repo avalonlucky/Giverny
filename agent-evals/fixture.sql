@@ -1,3 +1,6 @@
+INSERT INTO access_tokens (id, token, label, scope, disabled)
+VALUES ('mcp-eval', 'mcp_eval_read_token', 'MCP 隔离评测', 'mcp-read', 0);
+
 INSERT INTO tasks (
   id, title, requirement, design_type, start_date, estimated_delivery_date, settlement_month,
   is_supplemental, estimated_hours, actual_hours, hourly_rate, requester, contact_person,

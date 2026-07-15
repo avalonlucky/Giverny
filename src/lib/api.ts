@@ -25,7 +25,7 @@ export type ActivityItem = {
 
 export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
 
-export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest'
+export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read'
 
 export type OpenRouterFreeModel = {
   id: string
