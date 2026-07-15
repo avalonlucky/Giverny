@@ -85,6 +85,7 @@ import {
   type AiModelConfig,
   type AiModelEndpointConfig,
   type AiModelRouteKey,
+  type AgentRunMetrics,
   type AttachmentNameSuggestion,
   type AuthRole,
   type BackendState,
@@ -15211,6 +15212,26 @@ function aiRoutesFromConfig(config: AiModelConfig | null): Record<AiModelRouteKe
   }, {} as Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>)
 }
 
+const agentMetricIntentLabels: Record<string, string> = {
+  month_finance: '月份财务',
+  task_detail: '任务详情',
+  task_search: '任务搜索',
+  task_disambiguation: '任务消歧',
+  workspace_context: '工作台概览',
+  general_chat: '普通对话',
+  write_create_task: '创建任务',
+  write_record_feedback: '记录反馈',
+  write_update_task_status: '修改状态',
+  write_update_task_fields: '修改字段',
+  write_append_progress: '追加进展',
+}
+
+function formatAgentMetricDuration(value: number) {
+  if (value <= 0) return '—'
+  if (value < 1000) return `${value}ms`
+  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s`
+}
+
 function SettingsView({
   hourlyRate,
   pdfTitle,
@@ -15298,6 +15319,10 @@ function SettingsView({
   const [orScannedAt, setOrScannedAt] = useState('')
   const [orScanning, setOrScanning] = useState(false)
   const [orError, setOrError] = useState('')
+  const [agentMetrics, setAgentMetrics] = useState<AgentRunMetrics | null>(null)
+  const [agentMetricsDays, setAgentMetricsDays] = useState<7 | 30>(7)
+  const [agentMetricsLoading, setAgentMetricsLoading] = useState(false)
+  const [agentMetricsError, setAgentMetricsError] = useState('')
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'design' | 'security' | 'system'>('settlement')
   const [securityTab, setSecurityTab] = useState<'tokens' | 'account'>('tokens')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
@@ -15498,6 +15523,22 @@ function SettingsView({
     setAiRouteDrafts(aiRoutesFromConfig(aiModelConfig))
     setAiRouteKeyDrafts({})
   }, [aiModelConfig])
+
+  const loadAgentMetrics = useCallback(async (days: 7 | 30 = agentMetricsDays) => {
+    setAgentMetricsLoading(true)
+    setAgentMetricsError('')
+    try {
+      setAgentMetrics(await api.getAgentRunMetrics(days))
+    } catch (error) {
+      setAgentMetricsError(error instanceof Error ? error.message : 'Agent 运行指标读取失败')
+    } finally {
+      setAgentMetricsLoading(false)
+    }
+  }, [agentMetricsDays])
+
+  useEffect(() => {
+    if (settingsTab === 'ai' && role === 'admin') void loadAgentMetrics()
+  }, [loadAgentMetrics, role, settingsTab])
 
   const updateAiRouteDraft = (route: AiModelRouteKey, changes: Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>) => {
     setAiRouteDrafts((current) => {
@@ -15782,6 +15823,105 @@ function SettingsView({
       )}
       {settingsTab === 'ai' && role === 'admin' && (
         <div className="settings-group-body settings-tab-body">
+            <section className="panel settings-ai-panel agent-quality-panel">
+              <div className="panel-header compact agent-quality-header">
+                <div>
+                  <h2>Agent 运行质量</h2>
+                  <p>仅统计意图、工具、耗时与结果状态，不保存问题、回答、任务名或确认草稿</p>
+                </div>
+                <div className="agent-quality-actions">
+                  <div className="agent-quality-period" aria-label="统计周期">
+                    {([7, 30] as const).map((days) => (
+                      <button
+                        key={days}
+                        type="button"
+                        className={agentMetricsDays === days ? 'active' : ''}
+                        aria-pressed={agentMetricsDays === days}
+                        onClick={() => setAgentMetricsDays(days)}
+                      >
+                        {days} 天
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="ghost-button compact-button" disabled={agentMetricsLoading} onClick={() => void loadAgentMetrics()}>
+                    <RotateCcw size={14} />
+                    {agentMetricsLoading ? '刷新中…' : '刷新'}
+                  </button>
+                </div>
+              </div>
+              {agentMetricsError && <p className="settings-inline-error">{agentMetricsError}</p>}
+              {!agentMetrics && agentMetricsLoading && <p className="calendar-empty-hint">正在读取 Agent 运行指标…</p>}
+              {agentMetrics && (
+                <>
+                  <div className="agent-quality-metrics" aria-label={`最近 ${agentMetrics.periodDays} 天 Agent 指标`}>
+                    <article>
+                      <span>总运行</span>
+                      <strong>{agentMetrics.summary.totalRuns}</strong>
+                      <small>{agentMetrics.periodDays} 天真实请求</small>
+                    </article>
+                    <article>
+                      <span>运行成功率</span>
+                      <strong>{agentMetrics.summary.totalRuns ? `${agentMetrics.summary.successRate}%` : '—'}</strong>
+                      <small>{agentMetrics.summary.errorRuns} 次失败</small>
+                    </article>
+                    <article>
+                      <span>P95 响应</span>
+                      <strong>{formatAgentMetricDuration(agentMetrics.summary.p95DurationMs)}</strong>
+                      <small>平均 {formatAgentMetricDuration(agentMetrics.summary.avgDurationMs)}</small>
+                    </article>
+                    <article>
+                      <span>工具调用率</span>
+                      <strong>{agentMetrics.summary.totalRuns ? `${agentMetrics.summary.toolUseRate}%` : '—'}</strong>
+                      <small>{agentMetrics.summary.approvalRuns} 次审批 · {agentMetrics.summary.selectionRuns} 次消歧</small>
+                    </article>
+                  </div>
+                  <div className="agent-quality-details">
+                    <div>
+                      <h3>请求类型</h3>
+                      {agentMetrics.intents.length > 0 ? (
+                        <div className="agent-quality-list">
+                          {agentMetrics.intents.slice(0, 6).map((item) => (
+                            <div key={item.name}><span>{agentMetricIntentLabels[item.name] || item.name}</span><strong>{item.count}</strong></div>
+                          ))}
+                        </div>
+                      ) : <p className="calendar-empty-hint">当前周期还没有运行记录。</p>}
+                    </div>
+                    <div>
+                      <h3>工具调用</h3>
+                      {agentMetrics.tools.length > 0 ? (
+                        <div className="agent-quality-list">
+                          {agentMetrics.tools.slice(0, 6).map((item) => (
+                            <div key={item.name}><code>{item.name}</code><strong>{item.count}</strong></div>
+                          ))}
+                        </div>
+                      ) : <p className="calendar-empty-hint">当前周期还没有工具调用。</p>}
+                    </div>
+                    <div>
+                      <h3>质量信号</h3>
+                      <div className="agent-quality-list">
+                        <div><span>候选消歧</span><strong>{agentMetrics.summary.selectionRuns}</strong></div>
+                        <div><span>模型回落</span><strong>{agentMetrics.summary.fallbackRuns}</strong></div>
+                        <div><span>执行失败</span><strong>{agentMetrics.summary.errorRuns}</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                  {agentMetrics.recentFailures.length > 0 && (
+                    <details className="agent-quality-failures">
+                      <summary>最近失败记录 <span>{agentMetrics.recentFailures.length}</span></summary>
+                      <div>
+                        {agentMetrics.recentFailures.map((item) => (
+                          <p key={`${item.createdAt}-${item.intent}`}>
+                            <span>{item.createdAt.replace('T', ' ').slice(0, 16)}</span>
+                            <strong>{agentMetricIntentLabels[item.intent] || item.intent}</strong>
+                            <em>HTTP {item.status} · {formatAgentMetricDuration(item.durationMs)}</em>
+                          </p>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
+              )}
+            </section>
             <section className="panel settings-ai-panel">
               <div className="panel-header compact">
                 <div>

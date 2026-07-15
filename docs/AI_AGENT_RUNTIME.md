@@ -64,6 +64,8 @@ D1 / R2 / app data
 - 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
 - `agent-evals/`：63 条固定回归用例覆盖月份查询、财务工时、任务详情、五类写入、同名消歧和安全边界。
+- Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
+- 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
 
 当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
@@ -72,9 +74,9 @@ D1 / R2 / app data
 
 ## 下一步
 
-1. 使用真实匿名化业务夹具定期运行 `agent-evals/` 在线评测，并将稳定通过率纳入 Agent 模型与提示词升级门禁。
-2. 将内部工具定义抽成共享注册表，并在独立 OAuth 权限边界完成后发布只读 MCP Server，供 Codex、Claude 等外部客户端复用；站内 Agent 继续使用低延迟的类型化 Tool Calling。
-3. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
+1. 将内部工具定义抽成共享注册表，并在独立 OAuth 权限边界完成后发布只读 MCP Server，供 Codex、Claude 等外部客户端复用；站内 Agent 继续使用低延迟的类型化 Tool Calling。
+2. 对耗时写入和跨系统操作接入 Cloudflare Workflows，增加步骤级重试、审批等待和恢复。
+3. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
 4. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
 
 ## 安全边界

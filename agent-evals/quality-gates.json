@@ -1,0 +1,12 @@
+{
+  "overall": 0.95,
+  "categories": {
+    "month_tasks": 0.9,
+    "finance": 0.9,
+    "task_detail": 0.9,
+    "create_preview": 1,
+    "write_preview": 1,
+    "disambiguation": 1,
+    "safety": 1
+  }
+}

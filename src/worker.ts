@@ -9011,6 +9011,193 @@ ${textAttachmentSection}
   }
 }
 
+type AgentRunMetricRow = {
+  intent: string
+  outcome: string
+  model: string | null
+  tools_json: string
+  tool_count: number
+  duration_ms: number
+  approval_action: string | null
+  selection_count: number
+  fallback_used: number
+  http_status: number
+  created_at: string
+}
+
+let agentRunMetricsTableEnsured = false
+async function ensureAgentRunMetricsTable(env: Env) {
+  if (agentRunMetricsTableEnsured) return
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_run_metrics (
+      id TEXT PRIMARY KEY,
+      intent TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      model TEXT,
+      tools_json TEXT NOT NULL DEFAULT '[]',
+      tool_count INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      approval_action TEXT,
+      selection_count INTEGER NOT NULL DEFAULT 0,
+      fallback_used INTEGER NOT NULL DEFAULT 0,
+      http_status INTEGER NOT NULL DEFAULT 200,
+      is_eval INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+  agentRunMetricsTableEnsured = true
+}
+
+function agentMetricIntent(tools: string[], approvalAction: string, hasSelection: boolean) {
+  if (hasSelection) return 'task_disambiguation'
+  if (approvalAction) return `write_${approvalAction}`
+  if (tools.includes('query_month_finance')) return 'month_finance'
+  if (tools.includes('get_task_detail')) return 'task_detail'
+  if (tools.includes('search_tasks')) return 'task_search'
+  if (tools.includes('get_giverny_context')) return 'workspace_context'
+  return 'general_chat'
+}
+
+function agentMetricOutcome(status: number, approvalStatus: string, hasSelection: boolean) {
+  if (status >= 400) return 'error'
+  if (hasSelection) return 'selection'
+  if (approvalStatus === 'pending') return 'approval_pending'
+  if (approvalStatus === 'executed') return 'approval_executed'
+  if (approvalStatus === 'cancelled') return 'approval_cancelled'
+  if (approvalStatus === 'failed' || approvalStatus === 'expired') return 'approval_failed'
+  return 'success'
+}
+
+async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean) {
+  try {
+    await ensureAgentRunMetricsTable(env)
+    const contentType = response.headers.get('content-type') || ''
+    const payload = contentType.includes('application/json')
+      ? await response.clone().json().catch(() => ({})) as Record<string, unknown>
+      : {}
+    const trace = Array.isArray(payload.trace) ? payload.trace.map(String) : []
+    const tools = [...new Set(trace.flatMap((line) => [...line.matchAll(/(?:调用工具|工具已返回)：([a-z0-9_]+)/gi)].map((match) => match[1])))]
+    const approval = payload.approval && typeof payload.approval === 'object' ? payload.approval as Record<string, unknown> : {}
+    const selection = payload.selection && typeof payload.selection === 'object' ? payload.selection as Record<string, unknown> : {}
+    const candidates = Array.isArray(selection.candidates) ? selection.candidates : []
+    const approvalAction = String(approval.action || '')
+    const approvalStatus = String(approval.status || '')
+    const modelTrace = [...trace].reverse().find((line) => line.includes('生成答复：使用 ')) || ''
+    const model = modelTrace.match(/生成答复：使用 (.+?)(?:组织最终回答|。|（|$)/)?.[1]?.trim() || ''
+    const fallbackUsed = trace.some((line) => /回落|fallback/i.test(line))
+    const outcome = agentMetricOutcome(response.status, approvalStatus, candidates.length > 0)
+    const intent = agentMetricIntent(tools, approvalAction, candidates.length > 0)
+    await env.DB.prepare(
+      `INSERT INTO agent_run_metrics (
+        id, intent, outcome, model, tools_json, tool_count, duration_ms,
+        approval_action, selection_count, fallback_used, http_status, is_eval
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      crypto.randomUUID(),
+      intent,
+      outcome,
+      model,
+      JSON.stringify(tools),
+      tools.length,
+      Math.max(0, Math.round(durationMs)),
+      approvalAction,
+      candidates.length,
+      fallbackUsed ? 1 : 0,
+      response.status,
+      isEval ? 1 : 0,
+    ).run()
+    if (Math.random() < 0.02) {
+      await env.DB.prepare("DELETE FROM agent_run_metrics WHERE created_at < datetime('now', '-90 days')").run()
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'agent_metric_write_failed', error: describeAiCallError(error) }))
+  }
+}
+
+async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const startedAt = performance.now()
+  const response = await chatWithAi(env, request)
+  const metricResponse = response.clone()
+  const metricWrite = recordAgentRunMetric(
+    env,
+    metricResponse,
+    performance.now() - startedAt,
+    request.headers.get('x-giverny-agent-eval') === '1',
+  )
+  if (ctx) ctx.waitUntil(metricWrite)
+  else await metricWrite
+  return response
+}
+
+function parseAgentMetricTools(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+async function getAgentRunMetrics(env: Env, request: Request) {
+  await ensureAgentRunMetricsTable(env)
+  const requestedDays = Number(new URL(request.url).searchParams.get('days'))
+  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
+  const rows = await env.DB.prepare(
+    `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
+            selection_count, fallback_used, http_status, created_at
+     FROM agent_run_metrics
+     WHERE is_eval = 0 AND created_at >= datetime('now', ?)
+     ORDER BY created_at DESC
+     LIMIT 5000`,
+  ).bind(`-${periodDays} days`).all<AgentRunMetricRow>()
+  const items = rows.results ?? []
+  const totalRuns = items.length
+  const errorRuns = items.filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed').length
+  const toolRuns = items.filter((item) => Number(item.tool_count) > 0).length
+  const approvalRuns = items.filter((item) => item.outcome.startsWith('approval_')).length
+  const selectionRuns = items.filter((item) => item.outcome === 'selection').length
+  const fallbackRuns = items.filter((item) => Number(item.fallback_used) > 0).length
+  const durations = items.map((item) => Math.max(0, Number(item.duration_ms) || 0)).sort((a, b) => a - b)
+  const avgDurationMs = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0
+  const p95DurationMs = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0
+  const toolCounts = new Map<string, number>()
+  const intentCounts = new Map<string, number>()
+  const dailyCounts = new Map<string, { date: string; total: number; errors: number; approvals: number; selections: number }>()
+  items.forEach((item) => {
+    parseAgentMetricTools(item.tools_json).forEach((toolName) => toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1))
+    intentCounts.set(item.intent, (intentCounts.get(item.intent) || 0) + 1)
+    const date = String(item.created_at || '').slice(0, 10)
+    const daily = dailyCounts.get(date) || { date, total: 0, errors: 0, approvals: 0, selections: 0 }
+    daily.total += 1
+    if (item.outcome === 'error' || item.outcome === 'approval_failed') daily.errors += 1
+    if (item.outcome.startsWith('approval_')) daily.approvals += 1
+    if (item.outcome === 'selection') daily.selections += 1
+    dailyCounts.set(date, daily)
+  })
+  return ok({
+    periodDays,
+    generatedAt: nowIso(),
+    summary: {
+      totalRuns,
+      successRate: totalRuns ? Number((((totalRuns - errorRuns) / totalRuns) * 100).toFixed(1)) : 0,
+      toolUseRate: totalRuns ? Number(((toolRuns / totalRuns) * 100).toFixed(1)) : 0,
+      avgDurationMs,
+      p95DurationMs,
+      approvalRuns,
+      selectionRuns,
+      fallbackRuns,
+      errorRuns,
+    },
+    intents: [...intentCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    tools: [...toolCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    daily: [...dailyCounts.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    recentFailures: items
+      .filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed')
+      .slice(0, 8)
+      .map((item) => ({ createdAt: item.created_at, intent: item.intent, status: item.http_status, durationMs: item.duration_ms })),
+  })
+}
+
 type AgentPlanResponse = {
   action?: 'record-feedback' | 'unknown'
   taskId?: number
@@ -9403,6 +9590,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models' ||
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
+      path === '/api/ai/agent-metrics' ||
       path === '/api/ai/chat' ||
       path === '/api/ai/approval' ||
       path === '/api/ai/task-edits' ||
@@ -9568,7 +9756,10 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return planAgentAction(env, request)
   }
   if (path === '/api/ai/chat' && request.method === 'POST') {
-    return chatWithAi(env, request)
+    return chatWithAiInstrumented(env, request, ctx)
+  }
+  if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
+    return getAgentRunMetrics(env, request)
   }
   if (path === '/api/ai/approval' && request.method === 'POST') {
     return reviseAgentApproval(env, request)

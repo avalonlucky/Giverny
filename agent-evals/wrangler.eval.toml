@@ -1,0 +1,32 @@
+name = "giverny-agent-eval"
+main = "../src/worker.ts"
+compatibility_date = "2026-06-10"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ADMIN_TOKEN = "eval-admin-key"
+LOCAL_DEV = "1"
+AGENT_TOOL_TOKEN = "eval-agent-tool-token"
+DEEPSEEK_API_KEY = "eval-model-key"
+DEEPSEEK_BASE_URL = "http://127.0.0.1:8898"
+GIVERNY_API_BASE_URL = "http://127.0.0.1:8798"
+
+[[durable_objects.bindings]]
+name = "ALICE_AGENT"
+class_name = "AliceAgent"
+
+[[migrations]]
+tag = "v1-eval-alice-agent"
+new_sqlite_classes = ["AliceAgent"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "giverny-agent-eval"
+database_id = "00000000-0000-0000-0000-000000000015"
+migrations_dir = "../db/migrations"
+
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true

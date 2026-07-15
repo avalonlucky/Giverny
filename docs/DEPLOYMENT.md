@@ -14,8 +14,8 @@
 用户已明确要求：以后涉及代码或前端体验的改动，不要只停留在本地，也不再额外等待人工验收确认。完成本地验证、正式站部署和线上关键路径回归后，默认直接同步 GitHub、tag 和 Release。
 
 1. 本地修改。
-2. 跑 `npm run lint`。
-3. 跑 `npm run build`。
+2. 跑 `npm run agent:quality:gate`（包含 build、lint 和隔离 Agent 全链路评测）。
+3. 涉及新增 D1 migration 时，先在隔离环境验证，再应用正式迁移。
 4. 部署正式站。
 5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
 6. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
@@ -43,6 +43,7 @@
 ```bash
 npm run lint
 npm run build
+npm run agent:quality:gate
 mkdir -p /private/tmp/giverny-npm-cache
 env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u http_proxy \
   npm_config_cache=/private/tmp/giverny-npm-cache \
@@ -57,3 +58,5 @@ env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u htt
 ## 数据安全
 
 正式站已经进入试运营，不要在正式 D1/R2 上做清表测试或无意义测试上传。涉及数据结构、结算口径、文件删除、权限等高风险改动时，先在本地或临时隔离环境验证清楚，再部署正式站。
+
+Agent 评测统一使用 `agent-evals/run-isolated.mjs` 创建的临时本地 D1。不要把固定评测任务写入正式库；在线专项评测必须携带 `x-giverny-agent-eval: 1`，避免污染真实运行质量统计。

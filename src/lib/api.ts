@@ -36,6 +36,26 @@ export type OpenRouterFreeModel = {
 }
 export type OpenRouterFreeModelsResult = { scannedAt: string; models: OpenRouterFreeModel[] }
 
+export type AgentRunMetrics = {
+  periodDays: number
+  generatedAt: string
+  summary: {
+    totalRuns: number
+    successRate: number
+    toolUseRate: number
+    avgDurationMs: number
+    p95DurationMs: number
+    approvalRuns: number
+    selectionRuns: number
+    fallbackRuns: number
+    errorRuns: number
+  }
+  intents: Array<{ name: string; count: number }>
+  tools: Array<{ name: string; count: number }>
+  daily: Array<{ date: string; total: number; errors: number; approvals: number; selections: number }>
+  recentFailures: Array<{ createdAt: string; intent: string; status: number; durationMs: number }>
+}
+
 export type AccessToken = {
   id: string
   token: string
@@ -631,6 +651,8 @@ export const api = {
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models'),
   scanOpenRouterFreeModels: () =>
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models/scan', { method: 'POST' }),
+  getAgentRunMetrics: (days = 7) =>
+    requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
   estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
     requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
       method: 'POST',
