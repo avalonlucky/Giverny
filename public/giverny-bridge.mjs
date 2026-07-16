@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname, platform, arch } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
 const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
@@ -212,9 +212,9 @@ function parseCliEvent(adapterId, line, state) {
   if (adapterId === 'codex') {
     if (type === 'thread.started') {
       state.sessionId = String(event.thread_id || '').slice(0, 160)
-      appendTrace(state, 'Codex CLI 已建立本机执行会话')
+      appendTrace(state, '已连接 Codex CLI')
     } else if (type === 'turn.started') {
-      appendTrace(state, 'Codex CLI 正在分析问题与规划工具调用')
+      appendTrace(state, '正在分析问题')
     } else if (type === 'item.started' || type === 'item.completed') {
       const item = event.item || {}
       if (item.type === 'command_execution') appendTrace(state, `执行本机命令：${compact(item.command || '受控命令', 100)}`)
@@ -246,16 +246,25 @@ function parseCliEvent(adapterId, line, state) {
   if (type.includes('error') || type.includes('failed')) state.error = compact(event.error?.message || event.message || event.error || '本机 CLI 执行失败', 600)
 }
 
-function cliInvocation(adapterId, prompt, mcpUrl) {
+function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '') {
   if (adapterId === 'codex') {
+    const sharedConfig = [
+      '-c', 'approval_policy="never"',
+      '-c', 'sandbox_mode="workspace-write"',
+      '-c', 'sandbox_workspace_write.network_access=true',
+      '-c', `mcp_servers.giverny.url=${JSON.stringify(mcpUrl)}`,
+      '-c', 'mcp_servers.giverny.bearer_token_env_var="GIVERNY_MCP_TOKEN"',
+    ]
+    if (resumeSessionId) {
+      return {
+        args: ['exec', 'resume', '--json', '--skip-git-repo-check', ...sharedConfig, resumeSessionId, prompt],
+      }
+    }
     return {
       args: [
-        'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ephemeral',
+        'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check',
         '-C', WORKSPACE_DIR,
-        '-c', 'approval_policy="never"',
-        '-c', 'sandbox_workspace_write.network_access=true',
-        '-c', `mcp_servers.giverny.url=${JSON.stringify(mcpUrl)}`,
-        '-c', 'mcp_servers.giverny.bearer_token_env_var="GIVERNY_MCP_TOKEN"',
+        ...sharedConfig,
         prompt,
       ],
     }
@@ -289,16 +298,21 @@ async function executeRunCommand(config, command) {
     return
   }
   mkdirSync(WORKSPACE_DIR, { recursive: true, mode: 0o700 })
-  const state = { trace: ['Bridge 已领取本机执行任务'], content: '', plainOutput: '', sessionId: '', error: '' }
+  const state = { trace: [payload.resumeSessionId ? '继续上次对话' : '已进入本机执行环境'], content: '', plainOutput: '', sessionId: '', error: '' }
   const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 180_000, 30_000), 300_000)
   let invocation
   try {
-    invocation = cliInvocation(adapterId, String(payload.prompt || '').slice(0, 40_000), String(payload.mcpUrl || ''))
+    invocation = cliInvocation(
+      adapterId,
+      String(payload.prompt || '').slice(0, 40_000),
+      String(payload.mcpUrl || ''),
+      String(payload.resumeSessionId || ''),
+    )
   } catch (error) {
     await completeCommand(config, command.id, state, compact(error?.message || error, 600))
     return
   }
-  appendTrace(state, `启动 ${adapter.name}`)
+  appendTrace(state, payload.resumeSessionId ? `继续 ${adapter.name} 会话` : `连接 ${adapter.name}`)
   await reportCommandProgress(config, command.id, state)
   await new Promise((resolve) => {
     const child = spawn(adapter.command, invocation.args, {

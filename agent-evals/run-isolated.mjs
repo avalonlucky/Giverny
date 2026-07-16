@@ -334,7 +334,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const bridgePairResponse = await fetch(`${base}/api/local-cli/bridge/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.2.0', clis: initialClis }),
+    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.3.0', clis: initialClis }),
   })
   const bridgePair = await bridgePairResponse.json().catch(() => ({}))
   if (!bridgePairResponse.ok || !bridgePair.deviceId || !bridgePair.token) throw new Error(`Local CLI bridge pairing failed: ${JSON.stringify(bridgePair)}`)
@@ -350,7 +350,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const heartbeat = await fetch(`${base}/api/local-cli/bridge/heartbeat`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ bridgeVersion: '0.2.0', clis: initialClis }),
+    body: JSON.stringify({ bridgeVersion: '0.3.0', clis: initialClis }),
   })
   if (!heartbeat.ok) throw new Error(`Local CLI heartbeat failed: ${heartbeat.status}`)
 
@@ -382,10 +382,10 @@ async function runLocalCliBridgeCheck(cookie) {
   const selectResponse = await fetch(`${base}/api/local-cli/devices/${bridgePair.deviceId}/select`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', cookie },
-    body: JSON.stringify({ cliId: 'claude' }),
+    body: JSON.stringify({ cliId: 'codex' }),
   })
   const selected = await selectResponse.json().catch(() => ({}))
-  if (!selectResponse.ok || selected.device?.selectedCliId !== 'claude' || !selected.device?.clis?.find((item) => item.id === 'claude')?.selected) {
+  if (!selectResponse.ok || selected.device?.selectedCliId !== 'codex' || !selected.device?.clis?.find((item) => item.id === 'codex')?.selected) {
     throw new Error(`Local CLI adapter selection failed: ${JSON.stringify(selected)}`)
   }
 
@@ -403,6 +403,7 @@ async function runLocalCliBridgeCheck(cookie) {
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
     body: JSON.stringify({
       browserDeviceKey,
+      localCliConversationId: 'eval-local-conversation',
       month: '2026-07',
       messages: [{ role: 'user', content: '请说明当前本机 CLI 的连接情况' }],
     }),
@@ -417,23 +418,23 @@ async function runLocalCliBridgeCheck(cookie) {
   ])
   if (earlyChatResult) throw new Error(`Local CLI chat ended before Bridge pickup: ${earlyChatResult}`)
   const runCommand = await waitForBridgeRun()
-  if (runCommand.payload?.adapterId !== 'claude' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP')) {
+  if (runCommand.payload?.adapterId !== 'codex' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP')) {
     throw new Error(`Local CLI run payload is incomplete or unsafe: ${JSON.stringify(runCommand.payload)}`)
   }
   const progressResponse = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/events`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ result: { trace: ['Claude Code 已建立执行会话', '读取 Giverny 数据：search_tasks'], content: '正在整理' } }),
+    body: JSON.stringify({ result: { trace: ['已连接 Codex CLI', '读取 Giverny 数据：search_tasks'], content: '正在整理' } }),
   })
   if (!progressResponse.ok) throw new Error(`Local CLI progress event failed: ${progressResponse.status}`)
   const runComplete = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/complete`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ result: { trace: ['Claude Code 已建立执行会话', '读取 Giverny 数据：search_tasks', '本机 CLI 已完成执行'], content: '这是本机 Claude Code 的回答。', workspace: '/tmp/giverny' } }),
+    body: JSON.stringify({ result: { trace: ['已连接 Codex CLI', '读取 Giverny 数据：search_tasks', '本机 CLI 已完成执行'], content: '这是本机 Codex CLI 的回答。', sessionId: 'eval-codex-session', workspace: '/tmp/giverny' } }),
   })
   if (!runComplete.ok) throw new Error(`Local CLI run completion failed: ${runComplete.status}`)
   const chatText = await chatTextPromise
-  if (!chatText.includes('"runtime":"local-cli"') || !chatText.includes('这是本机 Claude Code 的回答') || !chatText.includes('读取 Giverny 数据')) {
+  if (!chatText.includes('"runtime":"local-cli"') || !chatText.includes('这是本机 Codex CLI 的回答') || !chatText.includes('读取 Giverny 数据')) {
     throw new Error(`Local CLI SSE did not expose route, progress, and result: ${chatText}`)
   }
   const expiredMcpToken = await fetch(`${base}/mcp`, {
@@ -446,10 +447,13 @@ async function runLocalCliBridgeCheck(cookie) {
   const cancelChatResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
-    body: JSON.stringify({ browserDeviceKey, month: '2026-07', messages: [{ role: 'user', content: '请分析一个普通设计问题' }] }),
+    body: JSON.stringify({ browserDeviceKey, localCliConversationId: 'eval-local-conversation', month: '2026-07', messages: [{ role: 'user', content: '请分析一个普通设计问题' }] }),
   })
   const cancelTextPromise = cancelChatResponse.text()
   const cancellableCommand = await waitForBridgeRun()
+  if (cancellableCommand.payload?.resumeSessionId !== 'eval-codex-session') {
+    throw new Error(`Codex CLI conversation was not resumed: ${JSON.stringify(cancellableCommand.payload)}`)
+  }
   const cancelResponse = await fetch(`${base}/api/local-cli/commands/${cancellableCommand.id}/cancel`, { method: 'POST', headers: { cookie } })
   if (!cancelResponse.ok) throw new Error(`Local CLI cancellation failed: ${cancelResponse.status}`)
   const bridgeStateResponse = await fetch(`${base}/api/local-cli/bridge/commands/${cancellableCommand.id}`, { headers: bridgeHeaders })

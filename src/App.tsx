@@ -4404,7 +4404,7 @@ function AgentExecutionTimeline({
   return (
     <details className={`chat-agent-timeline status-${status}`} open={running}>
       <summary>
-        <span>{running ? '正在执行' : status === 'failed' ? '执行中断' : '执行记录'}</span>
+        <span>{running ? '思考中…' : status === 'failed' ? '执行中断' : '执行记录'}</span>
         <small>{running ? displayTraceLine(trace.at(-1) ?? '') : '已完成，可展开查看'}</small>
         <ChevronDown size={13} />
       </summary>
@@ -5296,7 +5296,7 @@ function ChatPanel({
       id: assistantId,
       role: 'assistant',
       content: '',
-      trace: ['理解你的问题'],
+      trace: ['思考中…'],
       traceStatus: 'running',
     }])
     setLoading(true)
@@ -5316,6 +5316,7 @@ function ChatPanel({
           modelChoice: selectedModelChoice,
           attachments: sentAttachments.filter((item) => item.type !== 'file').map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
           agentRuntimeConversationId: agentConversationId,
+          localCliConversationId: conversationRecordId,
           browserDeviceKey: localCliBrowserDeviceKey(),
         }),
       })
@@ -10735,7 +10736,7 @@ function TaskProgressModal({
   files: FileAsset[]
   activity: ActivityItem[]
   onClose: () => void
-  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
+  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void | Promise<boolean>
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
   onPreviewFile: (file: FileAsset) => void
@@ -11595,105 +11596,118 @@ function TaskProgressModal({
     if (isSaving) {
       return
     }
-    setIsSaving(true)
     setTimeEntryError('')
-    try {
-      const shouldKeepAcceptanceProgress = isEditingAcceptanceEntry && isAcceptanceMode
-      const shouldAllowAcceptedTimeEdit = isEditingAcceptanceEntry && task.status === '已验收'
-      const nextEntry = buildDraftTimeEntry({ isAcceptanceProgress: shouldKeepAcceptanceProgress })
-      // 0 时长进展不占时间段，跳过重叠校验
-      if (nextEntry && minutesForTimeEntry(nextEntry) > 0) {
-        const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
-        if (conflict) {
-          setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
-          return
-        }
-      }
-      await saveDirtyExistingAttachmentNames()
-      await demoteRollbackAcceptanceAttachments()
-      // 附件在保存时上传，避免取消表单留下孤儿文件。
-      const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
-      if (uploadFailures.length > 0) {
-        setUploadErrors(uploadFailures)
+    const shouldKeepAcceptanceProgress = isEditingAcceptanceEntry && isAcceptanceMode
+    const shouldAllowAcceptedTimeEdit = isEditingAcceptanceEntry && task.status === '已验收'
+    const nextEntry = buildDraftTimeEntry({ isAcceptanceProgress: shouldKeepAcceptanceProgress })
+    // 0 时长进展不占时间段，跳过重叠校验。
+    if (nextEntry && minutesForTimeEntry(nextEntry) > 0) {
+      const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
+      if (conflict) {
+        setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
         return
       }
-      recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
-      recordAppliedAttachmentNameLearning()
-      const planScheduleChanges = buildPlanScheduleChanges()
-      const hasPlanScheduleChanges = Object.keys(planScheduleChanges).length > 0
-      const shouldStartFromProgress = task.status === '计划中' && !isWaitingMode && !isFeedbackMode && !isEditingEntry
-      const nextTimeEntries = !isWaitingMode
-        ? isEditingEntry && nextEntry
-          ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
-          : (() => {
-              const newSegs = [...pendingExtraSegments, ...(nextEntry ? [nextEntry] : [])]
-              const batchGroupId = newSegs.length > 1 ? crypto.randomUUID() : undefined
-              const taggedSegs = batchGroupId ? newSegs.map((s) => ({ ...s, groupId: batchGroupId })) : newSegs
-              return [...draftTimeEntries, ...taggedSegs]
-            })()
-        : draftTimeEntries
-      const nextWaitingEntries = isWaitingMode && nextEntry
-        ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]
-        : draftWaitingEntries
-      if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0 || shouldStartFromProgress)) {
-        const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
-        onUpdateTask(task.id, {
-          ...planScheduleChanges,
-          timeEntries: nextTimeEntries,
-          actualHours: nextActualHours,
-          ...(shouldStartFromProgress ? { startFromProgress: true } : {}),
-          ...(shouldAllowAcceptedTimeEdit ? { allowAcceptedTimeEdit: true } : {}),
-          ...(isRollingBackAcceptanceEntry ? {
-            status: '待验收',
-            progress: Math.min(task.progress, 80),
-            actualDeliveryDate: '',
-            acceptanceNote: '',
-            acceptanceFiles: [],
-            feedbackRating: '',
-            feedbackTags: [],
-            feedbackNote: '',
-            allowAcceptanceRollback: true,
-          } : {}),
-        })
-      } else if (hasPlanScheduleChanges) {
-        onUpdateTask(task.id, planScheduleChanges)
-      }
-      if (isWaitingMode && (waitingDirty || nextEntry)) {
-        onUpdateTask(task.id, { waitingEntries: nextWaitingEntries })
-      }
-      // 单独标记为验收文件的附件：更新 scope/tag，并追加到 task.acceptanceFiles
-      const perAcceptanceAttachments = !isAcceptanceMode && !isRollingBackAcceptanceEntry
-        ? pendingAttachments.filter((a) => a.isAcceptanceFile && a.uploadedFile)
-        : []
-      if (perAcceptanceAttachments.length > 0) {
-        await Promise.all(perAcceptanceAttachments.map((a) =>
-          onUpdateFile(a.uploadedFile!.id, { tag: '验收文件', scope: 'acceptance' }),
-        ))
-        const perAcceptanceNames = perAcceptanceAttachments.map((a) => sanitizeAttachmentName(a.name, a.originalName))
-        onUpdateTask(task.id, {
-          acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...perAcceptanceNames])),
-        })
-      }
-      const body = note.trim() || nextEntry?.note?.trim() || ''
-      if (body || finalizedUploadedNames.length > 0) {
-        await onCreateTaskUpdate(task.id, {
-          title: isRollingBackAcceptanceEntry
-            ? '验收进展已撤回'
-            : isEditingEntry
-              ? (isWaitingMode ? '等待记录已修改' : isFeedbackMode ? '反馈记录已修改' : '进展记录已修改')
-              : (isWaitingMode ? '等待记录' : isFeedbackMode ? '甲方反馈' : '进展更新'),
-          body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
-          hours: 0,
-          visible: false,
-        })
-      }
-      clearDraftCache(progressDraftKey)
-      progressAttachmentDraftCache.delete(progressDraftKey)
-      stagedEntryIdCache.delete(progressDraftKey)
-      onClose()
-    } finally {
-      setIsSaving(false)
     }
+
+    setIsSaving(true)
+    onClose()
+    onNotify(pendingAttachments.some((attachment) => attachment.uploadStatus !== 'done')
+      ? '进展已提交，附件将在后台继续上传'
+      : '进展已提交，正在后台同步', 'info')
+
+    void (async () => {
+      try {
+        const persistTaskChanges = async (changes: Parameters<typeof onUpdateTask>[1]) => {
+          const saved = await Promise.resolve(onUpdateTask(task.id, changes))
+          if (saved === false) {
+            throw new Error('任务数据同步失败')
+          }
+        }
+
+        await saveDirtyExistingAttachmentNames()
+        await demoteRollbackAcceptanceAttachments()
+        const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
+        if (uploadFailures.length > 0) {
+          throw new Error(uploadFailures.join('；'))
+        }
+        recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
+        recordAppliedAttachmentNameLearning()
+        const planScheduleChanges = buildPlanScheduleChanges()
+        const hasPlanScheduleChanges = Object.keys(planScheduleChanges).length > 0
+        const shouldStartFromProgress = task.status === '计划中' && !isWaitingMode && !isFeedbackMode && !isEditingEntry
+        const nextTimeEntries = !isWaitingMode
+          ? isEditingEntry && nextEntry
+            ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
+            : (() => {
+                const newSegs = [...pendingExtraSegments, ...(nextEntry ? [nextEntry] : [])]
+                const batchGroupId = newSegs.length > 1 ? crypto.randomUUID() : undefined
+                const taggedSegs = batchGroupId ? newSegs.map((s) => ({ ...s, groupId: batchGroupId })) : newSegs
+                return [...draftTimeEntries, ...taggedSegs]
+              })()
+          : draftTimeEntries
+        const nextWaitingEntries = isWaitingMode && nextEntry
+          ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]
+          : draftWaitingEntries
+        if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0 || shouldStartFromProgress)) {
+          const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
+          await persistTaskChanges({
+            ...planScheduleChanges,
+            timeEntries: nextTimeEntries,
+            actualHours: nextActualHours,
+            ...(shouldStartFromProgress ? { startFromProgress: true } : {}),
+            ...(shouldAllowAcceptedTimeEdit ? { allowAcceptedTimeEdit: true } : {}),
+            ...(isRollingBackAcceptanceEntry ? {
+              status: '待验收',
+              progress: Math.min(task.progress, 80),
+              actualDeliveryDate: '',
+              acceptanceNote: '',
+              acceptanceFiles: [],
+              feedbackRating: '',
+              feedbackTags: [],
+              feedbackNote: '',
+              allowAcceptanceRollback: true,
+            } : {}),
+          })
+        } else if (hasPlanScheduleChanges) {
+          await persistTaskChanges(planScheduleChanges)
+        }
+        if (isWaitingMode && (waitingDirty || nextEntry)) {
+          await persistTaskChanges({ waitingEntries: nextWaitingEntries })
+        }
+        // 单独标记为验收文件的附件：更新 scope/tag，并追加到 task.acceptanceFiles
+        const perAcceptanceAttachments = !isAcceptanceMode && !isRollingBackAcceptanceEntry
+          ? pendingAttachments.filter((a) => a.isAcceptanceFile && a.uploadedFile)
+          : []
+        if (perAcceptanceAttachments.length > 0) {
+          await Promise.all(perAcceptanceAttachments.map((a) =>
+            onUpdateFile(a.uploadedFile!.id, { tag: '验收文件', scope: 'acceptance' }),
+          ))
+          const perAcceptanceNames = perAcceptanceAttachments.map((a) => sanitizeAttachmentName(a.name, a.originalName))
+          await persistTaskChanges({
+            acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...perAcceptanceNames])),
+          })
+        }
+        const body = note.trim() || nextEntry?.note?.trim() || ''
+        if (body || finalizedUploadedNames.length > 0) {
+          await onCreateTaskUpdate(task.id, {
+            title: isRollingBackAcceptanceEntry
+              ? '验收进展已撤回'
+              : isEditingEntry
+                ? (isWaitingMode ? '等待记录已修改' : isFeedbackMode ? '反馈记录已修改' : '进展记录已修改')
+                : (isWaitingMode ? '等待记录' : isFeedbackMode ? '甲方反馈' : '进展更新'),
+            body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
+            hours: 0,
+            visible: false,
+          })
+        }
+        clearDraftCache(progressDraftKey)
+        progressAttachmentDraftCache.delete(progressDraftKey)
+        stagedEntryIdCache.delete(progressDraftKey)
+        onNotify(isWaitingMode ? '等待记录已同步' : isFeedbackMode ? '修改建议已同步' : '进展与附件已同步', 'success')
+      } catch (error) {
+        onNotify(error instanceof Error ? `后台保存进展失败：${error.message}` : '后台保存进展失败，请重新打开任务重试', 'error')
+      }
+    })()
   }
 
   // 验收进展：先记录本次进展（工时/附件），再触发验收确认
@@ -16717,7 +16731,7 @@ function formatAgentMetricDuration(value: number) {
 }
 
 const LOCAL_CLI_BROWSER_KEY = 'giverny-local-cli-browser-device'
-const LOCAL_CLI_RUNTIME_VERSION = '0.2.0'
+const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
 
 function localCliRuntimeReady(version: string) {
   const current = String(version || '').split('.').map((item) => Number(item.replace(/\D.*$/, '')) || 0)

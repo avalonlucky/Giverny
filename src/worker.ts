@@ -12869,6 +12869,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     messages?: Array<{ role?: string; content?: string }>
     attachments?: Array<{ type?: string; name?: string; data?: string }>
     agentRuntimeConversationId?: string
+    localCliConversationId?: string
   }
   const browserDeviceKey = String(body.browserDeviceKey || '').trim().slice(0, 128)
   if (!browserDeviceKey) return { route: null, cloudReason: '' }
@@ -12905,12 +12906,25 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const tokenBytes = crypto.getRandomValues(new Uint8Array(24))
   const mcpToken = `lc_${Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   const expiresAt = new Date(Date.now() + LOCAL_CLI_RUN_TTL_MS).toISOString()
+  const conversationId = String(body.localCliConversationId || body.agentRuntimeConversationId || '').trim().slice(0, 160)
+  const previousSession = adapter.adapter_id === 'codex' && conversationId
+    ? await env.DB.prepare(
+      `SELECT json_extract(result_json, '$.sessionId') AS session_id
+       FROM local_cli_commands
+       WHERE device_id = ? AND principal_id = ? AND command_type = 'run' AND status = 'completed'
+         AND json_extract(payload_json, '$.conversationId') = ?
+         AND COALESCE(json_extract(result_json, '$.sessionId'), '') <> ''
+       ORDER BY completed_at DESC LIMIT 1`,
+    ).bind(device.id, principal.principalId, conversationId).first<{ session_id: string }>()
+    : null
+  const resumeSessionId = String(previousSession?.session_id || '').slice(0, 160)
   const textAttachments = attachments
     .filter((item) => item?.type === 'text')
     .slice(0, 3)
     .map((item) => `【${String(item.name || '文档').slice(0, 120)}】\n${String(item.data || '').slice(0, 4000)}`)
     .join('\n\n')
-  const history = messages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
+  const historyMessages = resumeSessionId ? messages.slice(-1) : messages
+  const history = historyMessages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
   const prompt = `你是 Giverny 工作助手爱丽丝，现在运行在用户当前电脑上的 ${adapter.name}。\n\n` +
     `执行边界：\n` +
     `1. 查询任务、工时、收入、附件和工作区数据时，必须优先调用 giverny MCP 工具，不得凭空猜测。\n` +
@@ -12936,7 +12950,8 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
       mcpUrl: `${new URL(request.url).origin}/mcp`,
       mcpToken,
       timeoutMs: 180_000,
-      conversationId: String(body.agentRuntimeConversationId || '').slice(0, 160),
+      conversationId,
+      resumeSessionId,
     }), expiresAt),
   ])
   await audit(env, 'queue', 'local_cli_command', commandId, {
@@ -12964,9 +12979,9 @@ async function waitForLocalCliChat(
     if (!command) return { status: 'failed' as const, error: '本机命令记录不存在' }
     const result = normalizeLocalCliCommandResult(command.result_json ? JSON.parse(command.result_json) : null)
     const routeTrace = uniqueAgentTrace([
-      '理解你的问题',
-      `路由到当前电脑：${route.deviceName} · ${route.cliName}`,
-      command.claimed_at ? '本机 Bridge 已领取任务' : '等待本机 Bridge 领取任务',
+      '思考中…',
+      `使用当前电脑的 ${route.cliName}`,
+      command.claimed_at ? '已进入本机执行环境' : '正在连接本机执行环境',
       ...result.trace,
     ])
     const signature = JSON.stringify(routeTrace)
@@ -13003,9 +13018,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
         const promptTokens = await estimateAgentRequestTokens(metricsRequest)
-        send({ type: 'trace', status: 'running', trace: ['理解你的问题'] })
-        await waitForAgentTimeline(140)
-        const routingTrace = ['理解你的问题', '规划执行路径：判断使用本机 CLI 还是云端确认流程']
+        send({ type: 'trace', status: 'running', trace: ['思考中…'] })
+        const routingTrace = ['思考中…']
         send({ type: 'trace', status: 'running', trace: routingTrace })
 
         const localDecision = await queueLocalCliChat(env, localRouteRequest)
@@ -13807,7 +13821,7 @@ const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
 const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
 const LOCAL_CLI_RUN_TTL_MS = 5 * 60 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
-const LOCAL_CLI_RUNTIME_VERSION = '0.2.0'
+const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
 
 function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
   if (!value || typeof value !== 'object') return null
