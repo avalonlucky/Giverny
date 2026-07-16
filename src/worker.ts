@@ -585,7 +585,7 @@ function defaultAiModelConfig(env: Env): StoredAiModelConfig {
     mode: 'deepseek-direct',
     provider: 'deepseek',
     baseUrl: (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
-    model: env.DEEPSEEK_MODEL || 'deepseek-chat',
+    model: normalizeDeepSeekModel(env.DEEPSEEK_MODEL),
     runtimeUrl: (env.AI_RUNTIME_URL || '').replace(/\/$/, ''),
     routes: defaultAiModelRoutes(env),
   }
@@ -604,6 +604,13 @@ function normalizeAiProvider(value: unknown): AiModelProvider {
     : 'deepseek'
 }
 
+function normalizeDeepSeekModel(value: unknown) {
+  const model = String(value || '').trim()
+  return !model || model === 'deepseek-chat' || model === 'deepseek-reasoner'
+    ? 'deepseek-v4-flash'
+    : model
+}
+
 function normalizeAiMode(value: unknown): AiModelMode {
   return value === 'baml-runtime' ? 'baml-runtime' : 'deepseek-direct'
 }
@@ -613,7 +620,7 @@ function defaultAiModelRoutes(env: Env): Record<AiModelRouteKey, StoredAiModelEn
     textPrimary: {
       provider: 'deepseek',
       baseUrl: (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
-      model: env.DEEPSEEK_MODEL || 'deepseek-chat',
+      model: normalizeDeepSeekModel(env.DEEPSEEK_MODEL),
     },
     textFallback: {
       provider: 'kimi',
@@ -635,12 +642,14 @@ function defaultAiModelRoutes(env: Env): Record<AiModelRouteKey, StoredAiModelEn
 
 function normalizeAiEndpoint(route: AiModelRouteKey, value: Partial<StoredAiModelEndpointConfig> | undefined, env: Env): StoredAiModelEndpointConfig {
   const fallback = defaultAiModelRoutes(env)[route]
+  const provider = normalizeAiProvider(value?.provider ?? fallback.provider)
+  const requestedModel = String(value?.model || fallback.model).trim()
   return {
     ...fallback,
     ...value,
-    provider: normalizeAiProvider(value?.provider ?? fallback.provider),
+    provider,
     baseUrl: String(value?.baseUrl || fallback.baseUrl).trim().replace(/\/$/, ''),
-    model: String(value?.model || fallback.model).trim(),
+    model: provider === 'deepseek' ? normalizeDeepSeekModel(requestedModel) : requestedModel,
     apiKeyEncrypted: value?.apiKeyEncrypted,
     apiKeyPreview: value?.apiKeyPreview,
   }
@@ -726,7 +735,9 @@ async function getStoredAiModelConfig(env: Env) {
       mode: normalizeAiMode(parsed.mode),
       provider: normalizeAiProvider(parsed.provider),
       baseUrl: String(parsed.baseUrl || fallback.baseUrl).replace(/\/$/, ''),
-      model: String(parsed.model || fallback.model),
+      model: normalizeAiProvider(parsed.provider) === 'deepseek'
+        ? normalizeDeepSeekModel(parsed.model || fallback.model)
+        : String(parsed.model || fallback.model),
       runtimeUrl: String(parsed.runtimeUrl || fallback.runtimeUrl).replace(/\/$/, ''),
       routes: {
         textPrimary: normalizeAiEndpoint('textPrimary', parsedRoutes.textPrimary, env),
@@ -1435,14 +1446,14 @@ async function callWithAiTimeout<T>(
   }
 }
 
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
 type ChatModelTarget =
   | { kind: 'endpoint'; endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>; label: string; note?: string }
   | { kind: 'workers-ai'; label: string; note?: string }
 
 function normalizeChatModelChoice(value: unknown): ChatModelChoice {
   const raw = String(value ?? 'auto').trim()
-  if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
+  if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
   if (raw === 'route:textPrimary' || raw === 'route:textFallback' || raw === 'route:visionPrimary' || raw === 'route:visionFallback') {
     return raw as ChatModelChoice
   }
@@ -1466,6 +1477,24 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
         keySource: apiKey ? 'environment' : 'missing',
       },
       note: apiKey ? undefined : '豆包 API Key 未配置，已回落到默认模型链路。',
+    }
+  }
+  if (choice === 'deepseek-v4-flash' || choice === 'deepseek-v4-pro') {
+    const configured = await resolveAiEndpoint(env, 'textPrimary')
+    const apiKey = configured.provider === 'deepseek' ? configured.apiKey : (env.DEEPSEEK_API_KEY || '')
+    return {
+      kind: 'endpoint',
+      label: choice === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : 'DeepSeek V4 Flash',
+      endpoint: {
+        provider: 'deepseek',
+        baseUrl: configured.provider === 'deepseek'
+          ? configured.baseUrl
+          : (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+        model: choice,
+        apiKey,
+        keySource: configured.provider === 'deepseek' ? configured.keySource : apiKey ? 'environment' : 'missing',
+      },
+      note: apiKey ? undefined : 'DeepSeek API Key 未配置，已回落到默认模型链路。',
     }
   }
   if (choice.startsWith('openrouter:')) {
@@ -1748,6 +1777,22 @@ function isFinanceQuestion(text: string) {
 
 function isWorkDataQuestion(text: string) {
   return /(?:任务|工作|项目|进展|进度|完成|未完成|没完成|验收|附件|收入|金额|多少钱|工时|计时|结算|明细|统计|查询|查看|查一下|列出|有哪些|哪几个|新增|新建|创建|记录|写入|修改|反馈|改稿|确认执行|可以新建)/.test(text)
+}
+
+function isBackgroundAnalysisQuestion(text: string) {
+  return /(?:多月|跨月|最近几个月|近几个月|过去几个月|月度).{0,16}(?:趋势|复盘|分析|总结)|(?:趋势|复盘).{0,16}(?:任务|工作|工时|收入|结算)/.test(text)
+}
+
+function selectedCloudModelLabel(choice: ChatModelChoice) {
+  if (choice === 'deepseek-v4-flash') return 'DeepSeek V4 Flash'
+  if (choice === 'deepseek-v4-pro') return 'DeepSeek V4 Pro'
+  if (choice === 'doubao-seed-2-1-pro') return '豆包 Seed 2.1 Pro'
+  if (choice === 'workers-ai') return 'Workers AI'
+  if (choice.startsWith('openrouter:')) return `OpenRouter / ${choice.replace(/^openrouter:/, '')}`
+  if (choice === 'route:textFallback') return '文字备用模型'
+  if (choice === 'route:visionPrimary') return '识图主模型'
+  if (choice === 'route:visionFallback') return '识图备用模型'
+  return '文字主模型'
 }
 
 function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number) {
@@ -10783,7 +10828,7 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
   }
   let parsed: ProgressModelResult | null = null
   if (env.DEEPSEEK_API_KEY) {
-    const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+    const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
     const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
     const toolName = 'report_task_milestone'
     let response: Response | null = null
@@ -11035,7 +11080,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
   }
 
-  const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+  const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'suggest_task_requirement_and_design_type'
   let response: Response
@@ -11286,7 +11331,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
   }
 
-  const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
+  const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
   const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
   const toolName = 'optimize_task_worklog_text'
   let response: Response
@@ -12400,7 +12445,7 @@ async function chatWithAi(env: Env, request: Request) {
   // ===== Agent Runtime 优先 =====
   // 工作数据问题必须进入项目自有 Runtime；失败时显式报错，避免旧本地逻辑伪装成智能体。
   // 触发联网搜索或带图片时仍走本地链路。
-  if (imageAttachments.length === 0 && !webSearchResult) {
+  if (modelChoice === 'auto' && imageAttachments.length === 0 && !webSearchResult) {
     const knowledgeSection = useKnowledge && knowledgeNotes.length
       ? `\n\n[参考资料：用户的个人知识库笔记，仅在与问题相关时引用]\n${knowledgeNotes
           .map((n) => `【${n.title || '笔记'}】\n${n.content}`)
@@ -12925,19 +12970,27 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const body = await request.json().catch(() => ({})) as {
     browserDeviceKey?: string
     month?: string
+    modelChoice?: string
     messages?: Array<{ role?: string; content?: string }>
     attachments?: Array<{ type?: string; name?: string; data?: string }>
     agentRuntimeConversationId?: string
     localCliConversationId?: string
   }
-  const browserDeviceKey = String(body.browserDeviceKey || '').trim().slice(0, 128)
-  if (!browserDeviceKey) return { route: null, cloudReason: '' }
   const messages = (Array.isArray(body.messages) ? body.messages : [])
     .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: String(message.content || '').trim().slice(0, 5000) }))
     .filter((message) => message.content)
     .slice(-14)
   const lastMessage = messages.at(-1)?.content || ''
   if (!lastMessage) return { route: null, cloudReason: '' }
+  const modelChoice = normalizeChatModelChoice(body.modelChoice)
+  if (modelChoice !== 'auto') {
+    return { route: null, cloudReason: `已按你的选择直接使用 ${selectedCloudModelLabel(modelChoice)}，不经过本机 CLI` }
+  }
+  if (isBackgroundAnalysisQuestion(lastMessage)) {
+    return { route: null, cloudReason: '识别为多月深度分析，已直接进入站内后台分析流程' }
+  }
+  const browserDeviceKey = String(body.browserDeviceKey || '').trim().slice(0, 128)
+  if (!browserDeviceKey) return { route: null, cloudReason: '' }
   if (isLocalCliWriteIntent(lastMessage)) {
     return { route: null, cloudReason: '检测到站内写入意图，已切换云端 Agent 的预览确认流程' }
   }

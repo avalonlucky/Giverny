@@ -32,11 +32,14 @@ function assertAuthorized(value: string | undefined) {
 function normalizeModelConfig(model: RuntimeModelConfig | undefined) {
   const provider = model?.provider ?? 'deepseek'
   const defaultBaseUrl = provider === 'deepseek' ? 'https://api.deepseek.com' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''
-  const defaultModel = provider === 'deepseek' ? 'deepseek-chat' : provider === 'openai' ? 'gpt-4.1-mini' : ''
+  const defaultModel = provider === 'deepseek' ? 'deepseek-v4-flash' : provider === 'openai' ? 'gpt-4.1-mini' : ''
+  const requestedModel = model?.model || defaultModel
   return {
     provider,
     baseUrl: (model?.baseUrl || defaultBaseUrl).replace(/\/$/, ''),
-    model: model?.model || defaultModel,
+    model: provider === 'deepseek' && (requestedModel === 'deepseek-chat' || requestedModel === 'deepseek-reasoner')
+      ? 'deepseek-v4-flash'
+      : requestedModel,
     apiKey: model?.apiKey || '',
   }
 }

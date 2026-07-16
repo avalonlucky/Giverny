@@ -122,7 +122,7 @@ import deepseekBrandIcon from '@lobehub/icons-static-svg/icons/deepseek-color.sv
 import doubaoBrandIcon from '@lobehub/icons-static-svg/icons/doubao-color.svg?url'
 import geminiBrandIcon from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
 import grokBrandIcon from '@lobehub/icons-static-svg/icons/grok.svg?url'
-import kimiBrandIcon from '@lobehub/icons-static-svg/icons/kimi-color.svg?url'
+import kimiBrandIcon from '@lobehub/icons-static-svg/icons/kimi.svg?url'
 import openrouterBrandIcon from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
 import './App.css'
 
@@ -4230,7 +4230,7 @@ type ChatMessage = {
 }
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
 type AiBrandKey = 'antigravity' | 'claude' | 'cloudflare' | 'codex' | 'deepseek' | 'doubao' | 'gemini' | 'grok' | 'kimi' | 'openrouter' | 'auto'
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
 
@@ -4293,7 +4293,7 @@ const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作�
 function readChatModelChoice(): ChatModelChoice {
   try {
     const raw = window.localStorage.getItem(CHAT_MODEL_CHOICE_KEY) ?? ''
-    if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
+    if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
       return raw as ChatModelChoice
     }
   } catch {
@@ -4313,6 +4313,8 @@ function chatModelChoiceLabel(choice: ChatModelChoice, aiModelConfig: AiModelCon
   if (choice === 'auto') return '自动'
   if (choice === 'workers-ai') return 'Workers AI'
   if (choice === 'doubao-seed-2-1-pro') return '豆包 Seed 2.1 Pro'
+  if (choice === 'deepseek-v4-flash') return 'DeepSeek V4 Flash'
+  if (choice === 'deepseek-v4-pro') return 'DeepSeek V4 Pro'
   if (choice.startsWith('openrouter:')) return choice.replace(/^openrouter:/, '').replace(/:free$/, '').split('/').pop() || 'OpenRouter'
   const route = choice.replace(/^route:/, '') as AiModelRouteKey
   const model = aiModelConfig?.[route]?.model || aiRouteDefaults[route]?.model || chatRouteLabel(route)
@@ -5586,15 +5588,17 @@ function ChatPanel({
 
   const scopeActive = useKnowledge || useWebSearch
   const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey; disabled?: boolean }> = [
-    { value: 'auto', label: '云端自动路由', meta: '本机 CLI 不可用或任务需要识图时自动选择', brand: 'auto' },
-    { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '火山方舟 · doubao-seed-2-1-pro-260628', brand: 'doubao' },
-    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: `${chatRouteLabel('textPrimary')} · ${aiModelConfig?.textPrimary.provider || 'DeepSeek'}`, brand: aiBrandForValue(`${aiModelConfig?.textPrimary.provider || 'deepseek'} ${aiModelConfig?.textPrimary.model || ''}`) },
-    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || '文字备用', meta: `${chatRouteLabel('textFallback')} · ${aiModelConfig?.textFallback.provider || 'Kimi'}`, brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
-    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: `${chatRouteLabel('visionPrimary')} · 可处理图片问题`, brand: aiBrandForValue(`${aiModelConfig?.visionPrimary.provider || 'gemini'} ${aiModelConfig?.visionPrimary.model || ''}`) },
-    { value: 'workers-ai', label: 'Workers AI', meta: 'Cloudflare 边缘兜底模型', brand: 'cloudflare' },
+    { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析、写入和识图自动使用站内 Agent' : '本机 CLI 不可用时由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
+    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', meta: '直接调用云端模型 · 快速/经济，不经过本机 CLI', brand: 'deepseek' },
+    { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', meta: '直接调用云端模型 · 深度推理，不经过本机 CLI', brand: 'deepseek' },
+    { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '直接调用火山方舟，不经过本机 CLI', brand: 'doubao' },
+    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || 'Kimi 文字备用', meta: '直接调用 Kimi，不经过本机 CLI', brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
+    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: '直接调用识图模型，不经过本机 CLI', brand: aiBrandForValue(`${aiModelConfig?.visionPrimary.provider || 'gemini'} ${aiModelConfig?.visionPrimary.model || ''}`) },
+    { value: 'workers-ai', label: 'Workers AI', meta: '直接调用 Cloudflare 边缘兜底模型', brand: 'cloudflare' },
   ]
-  const activeRuntimeLabel = activeLocalCliRoute?.name || chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
-  const activeRuntimeBrand = activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
+  const usesLocalCli = selectedModelChoice === 'auto' && Boolean(activeLocalCliRoute)
+  const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
+  const activeRuntimeBrand = usesLocalCli ? aiBrandForValue(activeLocalCliRoute!.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
 
   return (
     <div className="chat-panel" role="dialog" aria-label="爱丽丝">
@@ -5717,7 +5721,7 @@ function ChatPanel({
         )}
         {showModelPopup && (
           <div className="alice-model-popup">
-            {activeLocalCliRoute && (
+            {usesLocalCli && activeLocalCliRoute && (
               <div className="alice-runtime-current">
                 <AiBrandIcon brand={aiBrandForValue(activeLocalCliRoute.adapterId)} size={22} />
                 <span>
@@ -5728,7 +5732,7 @@ function ChatPanel({
               </div>
             )}
             <div className="alice-model-popup-section">
-              <div className="alice-model-popup-title">{activeLocalCliRoute ? '云端回退与识图模型' : '当前模型'}</div>
+              <div className="alice-model-popup-title">回答路线</div>
               {modelOptions.map((option) => (
                 <button
                   key={option.value}
@@ -5817,7 +5821,7 @@ function ChatPanel({
             <div style={{ flex: 1 }} />
             <button
               type="button"
-              className={`alice-tool-btn alice-model-btn ${activeLocalCliRoute || selectedModelChoice !== 'auto' ? 'active' : ''}`}
+              className={`alice-tool-btn alice-model-btn ${usesLocalCli || selectedModelChoice !== 'auto' ? 'active' : ''}`}
               onClick={openModelPicker}
               title={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}；点击查看云端回退模型` : '选择模型'}
               aria-label={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}` : '选择模型'}
@@ -16700,7 +16704,7 @@ const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
 
 const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> = {
-  textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
   textFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
   visionPrimary: { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3-flash-preview' },
   visionFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
@@ -16773,7 +16777,7 @@ function isGatewayBaseUrl(url: string): boolean {
 function defaultModelForProvider(provider: AiModelConfig['provider']): string {
   switch (provider) {
     case 'deepseek':
-      return 'deepseek-chat'
+      return 'deepseek-v4-flash'
     case 'gemini':
       return 'gemini-3-flash-preview'
     case 'kimi':
@@ -17138,7 +17142,7 @@ function SettingsView({
   const [aiModeDraft, setAiModeDraft] = useState<AiModelConfig['mode']>(aiModelConfig?.mode ?? 'deepseek-direct')
   const [aiProviderDraft, setAiProviderDraft] = useState<AiModelConfig['provider']>(aiModelConfig?.provider ?? 'deepseek')
   const [aiBaseUrlDraft, setAiBaseUrlDraft] = useState(aiModelConfig?.baseUrl ?? 'https://api.deepseek.com')
-  const [aiModelDraft, setAiModelDraft] = useState(aiModelConfig?.model ?? 'deepseek-chat')
+  const [aiModelDraft, setAiModelDraft] = useState(aiModelConfig?.model ?? 'deepseek-v4-flash')
   const [aiRuntimeUrlDraft, setAiRuntimeUrlDraft] = useState(aiModelConfig?.runtimeUrl ?? '')
   const [aiApiKeyDraft, setAiApiKeyDraft] = useState('')
   const [aiRouteDrafts, setAiRouteDrafts] = useState(aiRoutesFromConfig(aiModelConfig))
@@ -17352,7 +17356,7 @@ function SettingsView({
     setAiModeDraft(aiModelConfig?.mode ?? 'deepseek-direct')
     setAiProviderDraft(aiModelConfig?.provider ?? 'deepseek')
     setAiBaseUrlDraft(aiModelConfig?.baseUrl ?? 'https://api.deepseek.com')
-    setAiModelDraft(aiModelConfig?.model ?? 'deepseek-chat')
+    setAiModelDraft(aiModelConfig?.model ?? 'deepseek-v4-flash')
     setAiRuntimeUrlDraft(aiModelConfig?.runtimeUrl ?? '')
     setAiApiKeyDraft('')
     setAiRouteDrafts(aiRoutesFromConfig(aiModelConfig))

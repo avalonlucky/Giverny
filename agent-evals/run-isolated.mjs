@@ -419,6 +419,36 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Deterministic finance query did not use the direct read-only route: ${financeText}`)
   }
 
+  const explicitModelResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'deepseek-v4-flash',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请介绍一下你能做什么' }],
+    }),
+  })
+  const explicitModelText = await explicitModelResponse.text()
+  if (!explicitModelResponse.ok || !explicitModelText.includes('直接使用 DeepSeek V4 Flash') || explicitModelText.includes('"commandId"')) {
+    throw new Error(`Explicit cloud model selection still entered the local CLI route: ${explicitModelText}`)
+  }
+
+  const trendResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'auto',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '分析最近几个月的工作趋势' }],
+    }),
+  })
+  const trendText = await trendResponse.text()
+  if (!trendResponse.ok || !trendText.includes('多月深度分析') || trendText.includes('"commandId"') || trendText.includes('本机 CLI 未完成')) {
+    throw new Error(`Background trend analysis unnecessarily waited for the local CLI: ${trendText}`)
+  }
+
   const waitForBridgeRun = async () => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const response = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
@@ -491,7 +521,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (bridgeState.status !== 'cancelled') throw new Error(`Bridge did not observe cancellation: ${JSON.stringify(bridgeState)}`)
   const cancelText = await cancelTextPromise
   if (!cancelText.includes('已停止本机 CLI 执行')) throw new Error(`Cancelled local CLI chat did not close cleanly: ${cancelText}`)
-  process.stdout.write('Local CLI identity, deterministic site-tool routing, data prefetch, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
+  process.stdout.write('Local CLI identity, explicit cloud selection, background-analysis routing, deterministic site-tool routing, data prefetch, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
 }
 
 async function runAgentOrchestrationCheck(cookie) {

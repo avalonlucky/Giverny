@@ -884,7 +884,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
 
     const apiKey = String(this.aliceEnv.DEEPSEEK_API_KEY || '').trim()
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未配置。')
-    const modelName = String(this.aliceEnv.DEEPSEEK_MODEL || 'deepseek-v4-flash').trim()
+    const configuredModel = String(this.aliceEnv.DEEPSEEK_MODEL || '').trim()
+    const modelName = !configuredModel || configuredModel === 'deepseek-chat' || configuredModel === 'deepseek-reasoner'
+      ? 'deepseek-v4-flash'
+      : configuredModel
     const provider = createOpenAICompatible({
       name: 'deepseek',
       apiKey,
