@@ -372,6 +372,12 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!Array.isArray(result.riskFactors) || !result.accuracy?.summary) {
     throw new Error('Hour estimate reliability details are missing')
   }
+  if (!(result.pricing?.regularAmount > 0) || !(result.pricing.safeAmount >= result.pricing.regularAmount)) {
+    throw new Error(`Hour estimate pricing is invalid: ${JSON.stringify(result.pricing)}`)
+  }
+  if (result.modelVersion?.algorithm !== '2.0.0' || !result.modelVersion?.prompt || !result.modelVersion?.provider) {
+    throw new Error(`Hour estimate version metadata is missing: ${JSON.stringify(result.modelVersion)}`)
+  }
   const adaptation = result.complexity?.dimensions?.find((item) => item.key === 'adaptation')
   if (!adaptation?.value?.includes('3')) {
     throw new Error(`Chinese adaptation count was not parsed: ${JSON.stringify(adaptation)}`)
@@ -382,6 +388,23 @@ async function runHourEstimateLearningCheck(cookie) {
   }
   if (!result.matchedTasks?.some((task) => task.similarityReasons?.includes('近期已验收任务'))) {
     throw new Error('Recent historical sample was not identified')
+  }
+  const feedbackSample = result.matchedTasks?.[0]
+  if (feedbackSample) {
+    const sampleFeedbackResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/sample-feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        suggestionId: result.suggestionId,
+        sampleTaskId: feedbackSample.id,
+        relevant: false,
+        reason: '隔离评测标记为不相似',
+      }),
+    })
+    const sampleFeedback = await sampleFeedbackResponse.json().catch(() => ({}))
+    if (!sampleFeedbackResponse.ok || sampleFeedback.relevant !== false) {
+      throw new Error(`Hour estimate sample feedback failed: ${JSON.stringify(sampleFeedback)}`)
+    }
   }
 
   const createResponse = await fetch('http://127.0.0.1:8798/api/tasks', {
@@ -448,7 +471,29 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!metrics.byType?.some((item) => item.name === '视频剪辑') || !metrics.byRequester?.some((item) => item.name === '陈义君')) {
     throw new Error(`Hour estimate calibration groups are missing: ${JSON.stringify(metrics)}`)
   }
-  process.stdout.write('AI hour estimate recency, semantic retrieval, outcome review, metrics, and calibration checks passed.\n')
+  const review = metrics.recent.find((item) => item.taskId === created.id)
+  if (!review?.requirementChange?.changed || !metrics.trends?.some((item) => item.month === '2026-07')) {
+    throw new Error(`Requirement change or cross-month trend is missing: ${JSON.stringify(review)}`)
+  }
+  if (!metrics.versions?.some((item) => item.current && item.algorithm === '2.0.0')) {
+    throw new Error(`Hour estimate version comparison is missing: ${JSON.stringify(metrics.versions)}`)
+  }
+  const correctionResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/outcome-correction', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ taskId: created.id, factors: ['需求中途追加', '多尺寸 / 多版本'], note: '隔离评测人工校正' }),
+  })
+  const correction = await correctionResponse.json().catch(() => ({}))
+  if (!correctionResponse.ok || correction.factors?.length !== 2) {
+    throw new Error(`Hour estimate outcome correction failed: ${JSON.stringify(correction)}`)
+  }
+  const correctedMetricsResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/metrics?month=2026-07', { headers: { cookie } })
+  const correctedMetrics = await correctedMetricsResponse.json().catch(() => ({}))
+  const correctedReview = correctedMetrics.recent?.find((item) => item.taskId === created.id)
+  if (!correctedMetricsResponse.ok || correctedReview?.correction?.note !== '隔离评测人工校正') {
+    throw new Error(`Hour estimate corrected review is missing: ${JSON.stringify(correctedReview)}`)
+  }
+  process.stdout.write('AI hour estimate pricing, semantic feedback, requirement change, version comparison, correction, trends, and calibration checks passed.\n')
 }
 
 try {

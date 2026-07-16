@@ -10481,6 +10481,49 @@ button.file-chip:focus-visible {
   border-bottom: 1px solid var(--color-border);
 }
 
+.hour-pricing-suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hour-pricing-suggestion header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hour-pricing-suggestion header strong,
+.hour-pricing-suggestion p strong {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.hour-pricing-suggestion header span,
+.hour-pricing-suggestion p span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.hour-pricing-suggestion > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hour-pricing-suggestion p {
+  display: grid;
+  gap: 3px;
+  padding: 5px 12px 5px 0;
+}
+
+.hour-pricing-suggestion p + p {
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+}
+
 .hour-estimate-reliability > div {
   display: grid;
   gap: 3px;
@@ -10544,11 +10587,26 @@ button.file-chip:focus-visible {
 
 .hour-estimate-samples p {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   padding: 5px 0;
   border-top: 1px solid var(--color-border);
+}
+
+.hour-estimate-samples p > button {
+  padding: 3px 0;
+  border: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.hour-estimate-samples p > button:hover,
+.hour-estimate-samples p > button.active {
+  color: var(--color-primary);
 }
 
 .hour-estimate-samples p span,
@@ -10672,6 +10730,31 @@ button.file-chip:focus-visible {
 
   .hour-estimate-feedback-reasons {
     grid-column: auto;
+  }
+
+  .hour-pricing-suggestion header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .hour-pricing-suggestion > div {
+    grid-template-columns: 1fr;
+  }
+
+  .hour-pricing-suggestion p + p {
+    padding-left: 0;
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+
+  .hour-estimate-samples p {
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+  }
+
+  .hour-estimate-samples p > button {
+    grid-column: 2 / -1;
+    justify-self: start;
   }
 }
 
@@ -20570,6 +20653,72 @@ button.topbar-create-button kbd {
   font-size: 19px;
 }
 
+.hour-trend-list,
+.hour-version-list {
+  display: grid;
+}
+
+.hour-trend-row {
+  display: grid;
+  grid-template-columns: 52px minmax(100px, 1fr) 82px 104px minmax(180px, 0.8fr);
+  gap: 14px;
+  align-items: center;
+  min-height: 42px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.hour-trend-row > strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.hour-trend-row small {
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.hour-trend-track {
+  height: 4px;
+  overflow: hidden;
+  background: var(--color-surface-alt);
+}
+
+.hour-trend-track span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+}
+
+.hour-version-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) 76px 76px 110px;
+  gap: 16px;
+  align-items: center;
+  min-height: 52px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.hour-version-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.hour-version-row > div strong,
+.hour-version-row > strong {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.hour-version-row > div span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
 .hour-calibration-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -20657,6 +20806,61 @@ button.topbar-create-button kbd {
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.hour-review-state small {
+  color: var(--color-admin-only);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.hour-review-state .ghost-button {
+  width: fit-content;
+  min-height: 26px;
+  padding: 3px 0;
+  border: 0;
+  color: var(--color-primary);
+}
+
+.hour-correction-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.hour-correction-body {
+  display: grid;
+  gap: 20px;
+  padding: 24px 28px;
+}
+
+.hour-correction-body > p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.hour-correction-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hour-correction-options button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hour-correction-options button.active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-strong));
 }
 
 .hour-review-values {
@@ -20750,6 +20954,27 @@ button.topbar-create-button kbd {
 
   .hour-review-row {
     gap: 8px;
+  }
+
+  .hour-trend-row,
+  .hour-version-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 12px;
+    padding: 10px 0;
+  }
+
+  .hour-trend-track,
+  .hour-version-row > div {
+    grid-column: 1 / -1;
+  }
+
+  .hour-trend-row small,
+  .hour-version-row > strong {
+    grid-column: 1 / -1;
+  }
+
+  .hour-correction-body {
+    padding: 20px;
   }
 }
 

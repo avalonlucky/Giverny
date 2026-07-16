@@ -1525,6 +1525,7 @@ const hourEstimateFeedbackOptions: Array<{ value: HourEstimateFeedbackRating; la
 ]
 
 const hourEstimateFeedbackReasons = ['交付数量', '尺寸适配', '内容整理', '专项处理', '沟通改稿', '参考样本']
+const hourOutcomeCorrectionReasons = ['需求中途追加', '改稿轮次增加', '素材延迟或缺失', '多尺寸 / 多版本', '专项制作增加', '沟通等待', '个人效率变化', '参考样本不准确']
 
 function aiLearningAction(draft: AiLearningDraft, userFinal: string): AiLearningAction {
   const normalizedFinal = userFinal.trim()
@@ -14040,11 +14041,47 @@ function InsightsView({
   const [historyError, setHistoryError] = useState('')
   const [hourMetrics, setHourMetrics] = useState<HourEstimateMetrics | null>(null)
   const [hourMetricsFailure, setHourMetricsFailure] = useState<{ month: string; message: string } | null>(null)
+  const [hourCorrectionTarget, setHourCorrectionTarget] = useState<HourEstimateMetrics['recent'][number] | null>(null)
+  const [hourCorrectionFactors, setHourCorrectionFactors] = useState<string[]>([])
+  const [hourCorrectionNote, setHourCorrectionNote] = useState('')
+  const [hourCorrectionSaving, setHourCorrectionSaving] = useState(false)
+  const [hourCorrectionError, setHourCorrectionError] = useState('')
   const [activeInsightKey, setActiveInsightKey] = useState<string>('rv:month')
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
   const hourMetricsError = hourMetricsFailure?.month === currentMonth.value ? hourMetricsFailure.message : ''
   const hourMetricsLoading = !hourMetricsError && hourMetrics?.month !== currentMonth.value
+
+  const openHourCorrection = (item: HourEstimateMetrics['recent'][number]) => {
+    setHourCorrectionTarget(item)
+    setHourCorrectionFactors(item.correction?.factors ?? item.factors)
+    setHourCorrectionNote(item.correction?.note ?? '')
+    setHourCorrectionError('')
+  }
+
+  const saveHourCorrection = async () => {
+    if (!hourCorrectionTarget || hourCorrectionSaving) return
+    setHourCorrectionSaving(true)
+    setHourCorrectionError('')
+    try {
+      const correction = await api.correctHourEstimateOutcome({
+        taskId: hourCorrectionTarget.taskId,
+        factors: hourCorrectionFactors,
+        note: hourCorrectionNote,
+      })
+      setHourMetrics((current) => current ? {
+        ...current,
+        recent: current.recent.map((item) => item.taskId === correction.taskId
+          ? { ...item, factors: correction.factors, correction }
+          : item),
+      } : current)
+      setHourCorrectionTarget(null)
+    } catch (error) {
+      setHourCorrectionError(error instanceof Error ? error.message : '偏差原因保存失败')
+    } finally {
+      setHourCorrectionSaving(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -14687,6 +14724,46 @@ function InsightsView({
 
                   <section className="hour-learning-section">
                     <div className="hour-learning-head">
+                      <h3>跨月准确率趋势</h3>
+                      <p>同时观察命中率、低估与高估，确认系统是否持续变准</p>
+                    </div>
+                    {hourMetrics.trends.length > 0 ? (
+                      <div className="hour-trend-list">
+                        {hourMetrics.trends.map((item) => (
+                          <div className="hour-trend-row" key={item.month}>
+                            <strong>{Number(item.month.slice(5))} 月</strong>
+                            <div className="hour-trend-track" aria-label={`${item.month} 命中率 ${item.within20Rate}%`}>
+                              <span style={{ width: `${item.within20Rate}%` }} />
+                            </div>
+                            <span>命中 {item.within20Rate}%</span>
+                            <span>中位误差 {item.medianErrorRate}%</span>
+                            <small>{item.samples} 条 · 低估 {item.underRate}% · 高估 {item.overRate}%</small>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="hour-learning-empty">跨月样本不足，验收任务积累后自动生成趋势。</p>}
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>预测版本对照</h3>
+                      <p>算法、提示词和模型路由分开记录；新版需用真实验收结果证明改善</p>
+                    </div>
+                    <div className="hour-version-list">
+                      {hourMetrics.versions.map((item) => (
+                        <div className="hour-version-row" key={`${item.algorithm}-${item.prompt}-${item.provider}`}>
+                          <div><strong>算法 {item.algorithm}</strong><span>{item.current ? '当前版本' : '历史版本'} · {item.provider}</span></div>
+                          <span>提示词 {item.prompt}</span>
+                          <span>{item.samples} 条样本</span>
+                          <span>命中 {item.within20Rate}%</span>
+                          <strong>中位误差 {item.medianErrorRate}%</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
                       <h3>类型与需求方校准</h3>
                       <p>样本达到 3 条后才建议应用独立系数；系数高于 1 表示历史实际投入更高</p>
                     </div>
@@ -14716,6 +14793,10 @@ function InsightsView({
                           <div className={`hour-review-state ${item.direction}`}>
                             <strong>{item.direction === 'accurate' ? '命中' : item.direction === 'under' ? '偏低' : '偏高'} {item.errorRate}%</strong>
                             <span>{item.factors.length ? item.factors.join('、') : '暂无明确偏差因素'}</span>
+                            {item.requirementChange.changed && <small>{item.requirementChange.summary}</small>}
+                            <button type="button" className="ghost-button compact-button" onClick={() => openHourCorrection(item)}>
+                              {item.correction ? '修改偏差原因' : '校正偏差原因'}
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -14903,6 +14984,46 @@ function InsightsView({
           })()}
         </section>
       </div>
+      {hourCorrectionTarget && (
+        <ModalShell className="task-action-modal hour-correction-modal" labelledBy="hour-correction-title" onClose={() => setHourCorrectionTarget(null)}>
+          <header className="progress-lite-header">
+            <div>
+              <h2 id="hour-correction-title">校正工时偏差原因</h2>
+              <small>{hourCorrectionTarget.title} · 采用 {hourCorrectionTarget.selectedHours.toFixed(1)}h / 实际 {hourCorrectionTarget.actualHours.toFixed(1)}h</small>
+            </div>
+            <button type="button" className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={() => setHourCorrectionTarget(null)}>
+              <X size={18} />
+            </button>
+          </header>
+          <div className="hour-correction-body">
+            <p>选择可验证的真实原因。人工校正会覆盖自动归因，并参与后续同类任务复盘。</p>
+            <div className="hour-correction-options" role="group" aria-label="工时偏差原因">
+              {hourOutcomeCorrectionReasons.map((reason) => (
+                <button
+                  type="button"
+                  key={reason}
+                  className={hourCorrectionFactors.includes(reason) ? 'active' : ''}
+                  aria-pressed={hourCorrectionFactors.includes(reason)}
+                  onClick={() => setHourCorrectionFactors((current) => current.includes(reason) ? current.filter((item) => item !== reason) : [...current, reason])}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <label className="field">
+              <span>补充说明（选填）</span>
+              <textarea value={hourCorrectionNote} onChange={(event) => setHourCorrectionNote(event.target.value)} placeholder="例如：甲方在第二轮新增了 3 个横版尺寸，不属于原始任务范围。" />
+            </label>
+            {hourCorrectionError && <p className="error-text">{hourCorrectionError}</p>}
+          </div>
+          <footer className="modal-footer">
+            <button type="button" className="ghost-button" onClick={() => setHourCorrectionTarget(null)}>取消</button>
+            <button type="button" data-modal-save="true" className="primary-button" disabled={hourCorrectionSaving || (!hourCorrectionFactors.length && !hourCorrectionNote.trim())} onClick={() => void saveHourCorrection()}>
+              {hourCorrectionSaving ? '保存中…' : '保存校正'}
+            </button>
+          </footer>
+        </ModalShell>
+      )}
     </section>
   )
 }
@@ -18001,6 +18122,7 @@ function NewTaskModal({
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
   const [hourSuggestionFeedback, setHourSuggestionFeedback] = useState<HourEstimateFeedbackRating | null>(null)
   const [hourSuggestionFeedbackReasons, setHourSuggestionFeedbackReasons] = useState<string[]>([])
+  const [hourSampleFeedback, setHourSampleFeedback] = useState<Record<number, boolean>>({})
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
@@ -18445,6 +18567,7 @@ function NewTaskModal({
     setHourSuggestion(null)
     setHourSuggestionFeedback(null)
     setHourSuggestionFeedbackReasons([])
+    setHourSampleFeedback({})
     setIsHourSuggestionLoading(true)
     try {
       const suggestion = await api.suggestHourEstimate({
@@ -18472,6 +18595,21 @@ function NewTaskModal({
       return
     }
     updateEstimatedMinutes(snapDurationMinutes(hours * 60))
+  }
+
+  const toggleHourSampleFeedback = (sampleTaskId: number) => {
+    if (!hourSuggestion || hourSuggestionIsStale) return
+    const relevant = hourSampleFeedback[sampleTaskId] === false
+    setHourSampleFeedback((current) => ({ ...current, [sampleTaskId]: relevant }))
+    void api.recordHourEstimateSampleFeedback({
+      suggestionId: hourSuggestion.suggestionId,
+      sampleTaskId,
+      relevant,
+      reason: relevant ? '恢复为可参考样本' : '当前任务与该历史样本不相似',
+    }).catch((error) => {
+      setHourSampleFeedback((current) => ({ ...current, [sampleTaskId]: !relevant }))
+      setHourSuggestionError(error instanceof Error ? error.message : '参考样本反馈保存失败')
+    })
   }
 
   const recordHourSuggestionFeedback = (rating: HourEstimateFeedbackRating) => {
@@ -18905,6 +19043,18 @@ function NewTaskModal({
                   {hourSuggestion.sampleCount > 0 && <span>范围 {hourSuggestion.minHours.toFixed(1)}–{hourSuggestion.maxHours.toFixed(1)} h</span>}
                   {hourSuggestion.averageDeliveryDays > 0 && <span>平均周期 {hourSuggestion.averageDeliveryDays.toFixed(1)} 天</span>}
                 </div>
+                <section className="hour-pricing-suggestion" aria-label="报价建议">
+                  <header>
+                    <strong>报价建议</strong>
+                    <span>按 ¥{hourSuggestion.pricing.hourlyRate.toLocaleString()} / 小时，仅供确认前参考</span>
+                  </header>
+                  <div>
+                    <p><span>常规报价</span><strong>¥{hourSuggestion.pricing.regularAmount.toLocaleString()}</strong></p>
+                    <p><span>稳妥报价</span><strong>¥{hourSuggestion.pricing.safeAmount.toLocaleString()}</strong></p>
+                    <p><span>建议范围</span><strong>¥{hourSuggestion.pricing.rangeLowAmount.toLocaleString()}–{hourSuggestion.pricing.rangeHighAmount.toLocaleString()}</strong></p>
+                  </div>
+                  <small>{hourSuggestion.pricing.summary} 风险预留参考 {hourSuggestion.pricing.riskReserveRate}%。</small>
+                </section>
                 <p>{hourSuggestion.historicalSummary}</p>
                 <div className="hour-estimate-explain-grid">
                   <section className="hour-estimate-explain-section">
@@ -18988,6 +19138,14 @@ function NewTaskModal({
                             {sample.similarityReasons.length > 0 && <small>{sample.similarityReasons.join(' · ')}</small>}
                           </strong>
                           <em>{sample.actualHours.toFixed(1)} h</em>
+                          <button
+                            type="button"
+                            className={hourSampleFeedback[sample.id] === false ? 'active' : ''}
+                            disabled={hourSuggestionIsStale}
+                            onClick={() => toggleHourSampleFeedback(sample.id)}
+                          >
+                            {hourSampleFeedback[sample.id] === false ? '已标记不相似' : '不相似'}
+                          </button>
                         </p>
                       ))}
                     </div>
@@ -19029,7 +19187,7 @@ function NewTaskModal({
                   )}
                 </div>
                 <div className="hour-estimate-actions">
-                  <small>{hourSuggestion.usedFallback ? '精确样本不足时，相关任务仅作为较低权重参考。' : '建议仅使用已验收任务的真实工时。'}</small>
+                  <small>{hourSuggestion.usedFallback ? '精确样本不足时，相关任务仅作为较低权重参考。' : '建议仅使用已验收任务的真实工时。'} · 算法 {hourSuggestion.modelVersion.algorithm}</small>
                   <div>
                     <button type="button" className="ghost-button compact-button" disabled={hourSuggestionIsStale} onClick={() => applyHourSuggestion(hourSuggestion.safeHours)}>
                       采用稳妥值

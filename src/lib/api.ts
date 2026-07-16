@@ -79,6 +79,23 @@ export type HourEstimateMetrics = {
   }
   byType: HourEstimateCalibrationGroup[]
   byRequester: HourEstimateCalibrationGroup[]
+  trends: Array<{
+    month: string
+    samples: number
+    within20Rate: number
+    medianErrorRate: number
+    underRate: number
+    overRate: number
+  }>
+  versions: Array<{
+    algorithm: string
+    prompt: string
+    provider: string
+    samples: number
+    within20Rate: number
+    medianErrorRate: number
+    current: boolean
+  }>
   recent: Array<{
     taskId: number
     title: string
@@ -92,6 +109,18 @@ export type HourEstimateMetrics = {
     direction: 'accurate' | 'under' | 'over'
     adoptionMode: 'suggested' | 'safe' | 'edited'
     factors: string[]
+    correction: {
+      factors: string[]
+      note: string
+      correctedAt: string
+    } | null
+    requirementChange: {
+      changed: boolean
+      scoreDelta: number
+      lengthDelta: number
+      factors: string[]
+      summary: string
+    }
     reviewedAt: string
   }>
 }
@@ -302,6 +331,20 @@ export type HourEstimateSuggestion = {
     medianErrorRate: number
     within20Rate: number
     summary: string
+  }
+  pricing: {
+    hourlyRate: number
+    regularAmount: number
+    safeAmount: number
+    rangeLowAmount: number
+    rangeHighAmount: number
+    riskReserveRate: number
+    summary: string
+  }
+  modelVersion: {
+    algorithm: string
+    prompt: string
+    provider: string
   }
   matchedTasks: Array<{
     id: number
@@ -687,6 +730,18 @@ export const api = {
   getInsightHistory: () => requestJson<InsightHistoryItem[]>('/api/insights/history'),
   getHourEstimateMetrics: (month = '') =>
     requestJson<HourEstimateMetrics>(`/api/ai/hour-estimate/metrics?month=${encodeURIComponent(month)}`),
+  correctHourEstimateOutcome: (payload: { taskId: number; factors: string[]; note: string }) =>
+    requestJson<{ taskId: number; factors: string[]; note: string; correctedAt: string }>('/api/ai/hour-estimate/outcome-correction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  recordHourEstimateSampleFeedback: (payload: { suggestionId: string; sampleTaskId: number; relevant: boolean; reason?: string }) =>
+    requestJson<{ suggestionId: string; sampleTaskId: number; relevant: boolean; reason: string }>('/api/ai/hour-estimate/sample-feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   setHourlyRate: (hourlyRate: number) =>
     requestJson<{ hourlyRate: number }>('/api/settings/hourly-rate', {
       method: 'PATCH',
