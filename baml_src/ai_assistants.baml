@@ -135,6 +135,9 @@ function SuggestHourEstimate(payload_json: string) -> HourEstimateOutput {
     - exact 是精确同类型样本，semantic 是需求语义相似样本，parent 只是同大类弱参考，不得混为同等证据。
     - 优先参考 statistics.weightedMedianHours、statistics.p80Hours 和 currentTask.currentEstimatedHours，可以根据当前任务复杂度微调。
     - statistics.calibrationCount >= 3 时，必须考虑 calibrationRatio，它代表过去建议相对最终实际工时的系统性高估/低估偏差。
+    - complexityProfile 是系统从当前需求确定性提取的复杂度画像，包含从零/复用、交付规模、内容准备、多尺寸适配、专项处理、改稿与加急风险；不得忽略或反向解释这些证据。
+    - requesterAdjustment.applied=true 时，必须考虑该需求人的历史实际/预估系数、平均改稿轮次和需求完整率；未达到最低样本门槛时不得自行放大其影响。
+    - historicalSamples 已按“类型关系 + 需求语义 + 复杂度画像 + 同一需求人”重新排序，relevance 越高越应优先参考；similarityReasons 用于解释样本为何相关。
     - 必须识别从零设计、复用既有风格、交付件数量、页数/尺寸/平台适配、改稿风险和甲方文案附件带来的工作量差异。
     - 样本不足或相似度弱时必须降低置信度。
     - 依据要短、具体、可解释。

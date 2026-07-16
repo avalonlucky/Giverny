@@ -210,6 +210,32 @@ export type HourEstimateSuggestion = {
   matchedType: string
   usedFallback: boolean
   usedSemantic: boolean
+  complexity: {
+    score: number
+    level: '低' | '中' | '高'
+    dimensions: Array<{
+      key: string
+      label: string
+      value: string
+      impact: '降低' | '中性' | '提高'
+      evidence: string
+    }>
+  }
+  breakdown: Array<{
+    label: string
+    hours: number
+    reason: string
+  }>
+  clarificationQuestions: string[]
+  requesterAdjustment: {
+    requester: string
+    sampleCount: number
+    ratio: number
+    applied: boolean
+    averageRevisionRounds: number
+    completeRequirementRate: number
+    summary: string
+  }
   matchedTasks: Array<{
     id: number
     title: string
@@ -217,6 +243,7 @@ export type HourEstimateSuggestion = {
     actualHours: number
     relation: '精确同类' | '语义相似' | '同大类参考'
     score: number
+    similarityReasons: string[]
   }>
 }
 

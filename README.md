@@ -461,6 +461,7 @@ env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u htt
 - [设计规范](./docs/DESIGN.md)：UI 视觉层级、颜色和组件规则。
 - [交互优化审计](./docs/UX_OPTIMIZATION_AUDIT.md)：交互流程和操作路径规范。
 - [运营规范](./docs/OPERATION_POLICIES.md)：排序、文件清理、发布和数据安全规则。
+- [AI 工时建议](./docs/AI_HOUR_ESTIMATE.md)：复杂度画像、历史样本、工时拆分和持续校准口径。
 - [项目结构](./docs/PROJECT_STRUCTURE.md)：目录、模块和关键入口。
 - [版本规范](./docs/VERSIONING.md)：版本号、Release 和发布纪律。
 - [部署说明](./docs/DEPLOYMENT.md)：Cloudflare 正式站部署流程。

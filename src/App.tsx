@@ -18672,6 +18672,9 @@ function NewTaskModal({
                     <strong>{hourSuggestion.safeHours.toFixed(1)} h</strong>
                   </div>
                   <em className={`hour-confidence confidence-${hourSuggestion.confidence}`}>{hourSuggestion.confidence}置信度</em>
+                  <em className={`hour-complexity complexity-${hourSuggestion.complexity.level}`}>
+                    {hourSuggestion.complexity.level}复杂度 · {hourSuggestion.complexity.score}
+                  </em>
                 </div>
                 <div className="hour-estimate-stats">
                   <span>精确同类 {hourSuggestion.exactSampleCount} 条</span>
@@ -18681,6 +18684,52 @@ function NewTaskModal({
                   {hourSuggestion.averageDeliveryDays > 0 && <span>平均周期 {hourSuggestion.averageDeliveryDays.toFixed(1)} 天</span>}
                 </div>
                 <p>{hourSuggestion.historicalSummary}</p>
+                <div className="hour-estimate-explain-grid">
+                  <section className="hour-estimate-explain-section">
+                    <header>
+                      <strong>复杂度画像</strong>
+                      <span>按当前需求确定性提取</span>
+                    </header>
+                    <div>
+                      {hourSuggestion.complexity.dimensions.map((dimension) => (
+                        <p key={dimension.key} title={dimension.evidence}>
+                          <span>{dimension.label}</span>
+                          <strong>{dimension.value}</strong>
+                          <em className={`impact-${dimension.impact}`}>{dimension.impact}</em>
+                        </p>
+                      ))}
+                    </div>
+                  </section>
+                  <section className="hour-estimate-explain-section">
+                    <header>
+                      <strong>工时拆分</strong>
+                      <span>合计 {hourSuggestion.suggestedHours.toFixed(1)} h</span>
+                    </header>
+                    <div>
+                      {hourSuggestion.breakdown.map((item) => (
+                        <p key={item.label} title={item.reason}>
+                          <span>{item.label}</span>
+                          <strong>{item.reason}</strong>
+                          <em>{item.hours.toFixed(1)} h</em>
+                        </p>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+                {hourSuggestion.requesterAdjustment.requester && (
+                  <div className={`hour-requester-adjustment ${hourSuggestion.requesterAdjustment.applied ? 'applied' : ''}`}>
+                    <strong>需求人校准</strong>
+                    <span>{hourSuggestion.requesterAdjustment.summary}</span>
+                  </div>
+                )}
+                {hourSuggestion.clarificationQuestions.length > 0 && (
+                  <div className="hour-estimate-questions">
+                    <strong>补充这些信息，建议会更准</strong>
+                    <ol>
+                      {hourSuggestion.clarificationQuestions.map((question) => <li key={question}>{question}</li>)}
+                    </ol>
+                  </div>
+                )}
                 {hourSuggestionIsStale && <p className="hour-estimate-stale">任务信息已经变化，请重新分析后再采用。</p>}
                 {hourSuggestion.basis.length > 0 && (
                   <ul>
@@ -18696,7 +18745,10 @@ function NewTaskModal({
                       {hourSuggestion.matchedTasks.map((sample) => (
                         <p key={sample.id}>
                           <span>{sample.relation}</span>
-                          <strong>{sample.title}</strong>
+                          <strong>
+                            {sample.title}
+                            {sample.similarityReasons.length > 0 && <small>{sample.similarityReasons.join(' · ')}</small>}
+                          </strong>
                           <em>{sample.actualHours.toFixed(1)} h</em>
                         </p>
                       ))}

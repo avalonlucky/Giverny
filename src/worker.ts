@@ -6305,6 +6305,7 @@ type HourEstimateSample = {
   title: string
   requirement: string
   designType: string
+  requester: string
   estimatedHours: number
   actualHours: number
   startDate: string
@@ -6322,9 +6323,52 @@ type HourEstimateSampleRelation = 'exact' | 'semantic' | 'parent'
 type WeightedHourEstimateSample = HourEstimateSample & {
   relation: HourEstimateSampleRelation
   relevance: number
+  similarityReasons: string[]
 }
 
 type HourEstimateConfidence = '低' | '中' | '高'
+type HourEstimateImpact = '降低' | '中性' | '提高'
+
+type HourEstimateDimension = {
+  key: string
+  label: string
+  value: string
+  impact: HourEstimateImpact
+  evidence: string
+}
+
+type HourEstimateComplexityProfile = {
+  score: number
+  level: '低' | '中' | '高'
+  dimensions: HourEstimateDimension[]
+  signals: {
+    basis: 'reuse' | 'scratch' | 'unknown'
+    deliverableCount: number
+    pageCount: number
+    adaptationCount: number
+    contentReadiness: 'ready' | 'missing' | 'unknown'
+    specialtyCount: number
+    specialties: string[]
+    revisionRisk: boolean
+    urgent: boolean
+  }
+}
+
+type HourEstimateBreakdownItem = {
+  label: string
+  hours: number
+  reason: string
+}
+
+type HourEstimateRequesterAdjustment = {
+  requester: string
+  sampleCount: number
+  ratio: number
+  applied: boolean
+  averageRevisionRounds: number
+  completeRequirementRate: number
+  summary: string
+}
 
 type HourEstimateResult = {
   suggestedHours: number
@@ -6343,6 +6387,10 @@ type HourEstimateResult = {
   matchedType: string
   usedFallback: boolean
   usedSemantic: boolean
+  complexity: Omit<HourEstimateComplexityProfile, 'signals'>
+  breakdown: HourEstimateBreakdownItem[]
+  clarificationQuestions: string[]
+  requesterAdjustment: HourEstimateRequesterAdjustment
   matchedTasks: Array<{
     id: number
     title: string
@@ -6350,6 +6398,7 @@ type HourEstimateResult = {
     actualHours: number
     relation: '精确同类' | '语义相似' | '同大类参考'
     score: number
+    similarityReasons: string[]
   }>
 }
 
@@ -6494,6 +6543,331 @@ function medianValue(values: number[]) {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function maxMatchedNumber(text: string, unitPattern: string) {
+  const matches = Array.from(text.matchAll(new RegExp(`(\\d{1,3})\\s*(?:${unitPattern})`, 'g')))
+  return matches.reduce((max, match) => Math.max(max, Number(match[1]) || 0), 0)
+}
+
+function hourEstimateComplexityProfile(input: {
+  title?: string
+  requirement?: string
+  attachmentText?: string
+  attachmentNames?: string[]
+}): HourEstimateComplexityProfile {
+  const text = [
+    input.title,
+    input.requirement,
+    input.attachmentText,
+    ...(input.attachmentNames ?? []),
+  ].filter(Boolean).join(' ').replace(/\s+/g, ' ')
+
+  const reuse = /复用|沿用|延用|延续|基于.{0,12}(?:原|已有|现有|上一|昨天)|套版|改字|换图|同系列|主题不变|适配现有/.test(text)
+  const scratch = /从零|全新设计|重新设计|重新创作|新建视觉|新视觉|原创|无现成|没有现成|重新梳理/.test(text)
+  const basis = reuse && !scratch ? 'reuse' : scratch && !reuse ? 'scratch' : 'unknown'
+  const deliverableCount = Math.max(
+    maxMatchedNumber(text, '张|版|套|个|幅|条|款|份|支|屏'),
+    /多个|多张|多版|一组|一套/.test(text) ? 2 : 0,
+  )
+  const pageCount = maxMatchedNumber(text, '页|P|p')
+  const explicitAdaptationCount = maxMatchedNumber(text, '个?尺寸|个?平台|个?端|个?比例|个?规格')
+  const adaptationCount = Math.max(
+    explicitAdaptationCount,
+    /横竖版|多尺寸|多平台|多端|尺寸适配|平台适配|不同规格|多个比例/.test(text) ? 2 : 0,
+  )
+  const contentReady = /文案已定|文案齐全|素材齐全|内容已定|资料齐全|附件为准|已提供.{0,8}(?:文案|素材|图片|资料)/.test(text)
+    || String(input.attachmentText ?? '').trim().length >= 120
+  const contentMissing = /文案待|素材待|内容待|资料待|未提供|未明确|待补|需要整理|需要梳理|需提炼|需撰写/.test(text)
+  const contentReadiness = contentReady && !contentMissing ? 'ready' : contentMissing ? 'missing' : 'unknown'
+  const specialtyPatterns: Array<[string, RegExp]> = [
+    ['插画', /插画|手绘|原创图形/],
+    ['图表/信息可视化', /图表|数据可视化|信息图|信息可视化/],
+    ['精修/合成', /精修|修图|抠图|合成|P图|p图/],
+    ['三维', /三维|3D|3d|建模|渲染/],
+    ['动效/视频', /动效|动画|视频|剪辑|字幕|包装/],
+    ['复杂排版', /PPT|ppt|画册|手册|报告|方案排版|长文档/],
+  ]
+  const specialties = specialtyPatterns.filter(([, pattern]) => pattern.test(text)).map(([label]) => label)
+  const revisionRisk = /多轮|(?:\d+|[一二三四五六七八九十两]+)轮|反复|多人确认|多方确认|领导确认|甲方反馈|边做边改|需求未定|方向未定|先出.*方案|多个方案/.test(text)
+  const urgent = /加急|当天|今日完成|今晚|明天交|立即|尽快|紧急|临时/.test(text)
+
+  let score = 46
+  if (basis === 'reuse') score -= 12
+  if (basis === 'scratch') score += 14
+  if (deliverableCount >= 10) score += 18
+  else if (deliverableCount >= 5) score += 12
+  else if (deliverableCount >= 2) score += 6
+  if (pageCount >= 30) score += 20
+  else if (pageCount >= 15) score += 14
+  else if (pageCount >= 6) score += 8
+  if (adaptationCount >= 4) score += 12
+  else if (adaptationCount >= 2) score += 7
+  if (contentReadiness === 'ready') score -= 4
+  if (contentReadiness === 'missing') score += 9
+  score += Math.min(16, specialties.length * 5)
+  if (revisionRisk) score += 8
+  if (urgent) score += 9
+  score = Math.round(clampNumber(score, 15, 95))
+
+  const level = score >= 70 ? '高' : score < 42 ? '低' : '中'
+  const dimensions: HourEstimateDimension[] = [
+    {
+      key: 'basis',
+      label: '设计基础',
+      value: basis === 'reuse' ? '复用既有方案' : basis === 'scratch' ? '从零设计' : '尚未明确',
+      impact: basis === 'reuse' ? '降低' : basis === 'scratch' ? '提高' : '中性',
+      evidence: basis === 'reuse' ? '需求出现复用、延续或适配现有方案的信号。' : basis === 'scratch' ? '需求明确包含全新创作或重新设计。' : '暂未说明是否已有可复用的视觉基础。',
+    },
+    {
+      key: 'scope',
+      label: '交付规模',
+      value: pageCount > 0 ? `${pageCount} 页级内容` : deliverableCount > 0 ? `约 ${deliverableCount} 个交付单元` : '数量尚未明确',
+      impact: pageCount >= 6 || deliverableCount >= 2 ? '提高' : deliverableCount === 1 ? '降低' : '中性',
+      evidence: pageCount > 0 || deliverableCount > 0 ? '从需求中的页数、张数、版本或交付件数量提取。' : '需求未给出明确页数、张数或版本数量。',
+    },
+    {
+      key: 'content',
+      label: '内容准备',
+      value: contentReadiness === 'ready' ? '文案素材较完整' : contentReadiness === 'missing' ? '仍需整理或补充' : '准备程度未知',
+      impact: contentReadiness === 'ready' ? '降低' : contentReadiness === 'missing' ? '提高' : '中性',
+      evidence: contentReadiness === 'ready' ? '已有附件正文或明确说明文案、素材已提供。' : contentReadiness === 'missing' ? '需求包含待补、未定、整理或提炼等信号。' : '目前无法判断文案和素材是否齐备。',
+    },
+    {
+      key: 'adaptation',
+      label: '版本适配',
+      value: adaptationCount > 0 ? `约 ${adaptationCount} 个尺寸/平台` : '未发现明确适配',
+      impact: adaptationCount >= 2 ? '提高' : '中性',
+      evidence: adaptationCount > 0 ? '需求包含多尺寸、多平台、横竖版或多规格适配。' : '当前文本未出现额外版本适配要求。',
+    },
+    {
+      key: 'specialty',
+      label: '专项处理',
+      value: specialties.length > 0 ? specialties.join('、') : '常规设计处理',
+      impact: specialties.length > 0 ? '提高' : '中性',
+      evidence: specialties.length > 0 ? '专项能力通常会增加制作与复核时间。' : '未识别到插画、三维、精修、视频等专项工作。',
+    },
+    {
+      key: 'risk',
+      label: '协作风险',
+      value: [revisionRisk ? '改稿风险' : '', urgent ? '时间紧' : ''].filter(Boolean).join('、') || '常规',
+      impact: revisionRisk || urgent ? '提高' : '中性',
+      evidence: revisionRisk || urgent ? '需求存在多轮确认、方向未定或加急交付信号。' : '当前未发现明显加急或多轮确认风险。',
+    },
+  ]
+
+  return {
+    score,
+    level,
+    dimensions,
+    signals: {
+      basis,
+      deliverableCount,
+      pageCount,
+      adaptationCount,
+      contentReadiness,
+      specialtyCount: specialties.length,
+      specialties,
+      revisionRisk,
+      urgent,
+    },
+  }
+}
+
+function hourEstimateProfileSimilarity(current: HourEstimateComplexityProfile, sample: HourEstimateComplexityProfile) {
+  const currentSignals = current.signals
+  const sampleSignals = sample.signals
+  let score = 0
+  let weight = 0
+  const add = (value: number, partWeight: number) => {
+    score += clampNumber(value, 0, 1) * partWeight
+    weight += partWeight
+  }
+  add(currentSignals.basis === 'unknown' || sampleSignals.basis === 'unknown' ? 0.55 : currentSignals.basis === sampleSignals.basis ? 1 : 0, 0.2)
+  add(1 - Math.min(1, Math.abs(currentSignals.deliverableCount - sampleSignals.deliverableCount) / Math.max(3, currentSignals.deliverableCount, sampleSignals.deliverableCount)), 0.2)
+  add(1 - Math.min(1, Math.abs(currentSignals.pageCount - sampleSignals.pageCount) / Math.max(6, currentSignals.pageCount, sampleSignals.pageCount)), 0.15)
+  add(1 - Math.min(1, Math.abs(currentSignals.adaptationCount - sampleSignals.adaptationCount) / Math.max(3, currentSignals.adaptationCount, sampleSignals.adaptationCount)), 0.15)
+  const specialtyUnion = new Set([...currentSignals.specialties, ...sampleSignals.specialties])
+  const specialtyIntersection = currentSignals.specialties.filter((item) => sampleSignals.specialties.includes(item)).length
+  add(specialtyUnion.size === 0 ? 1 : specialtyIntersection / specialtyUnion.size, 0.15)
+  add(currentSignals.contentReadiness === 'unknown' || sampleSignals.contentReadiness === 'unknown' ? 0.6 : currentSignals.contentReadiness === sampleSignals.contentReadiness ? 1 : 0.2, 0.1)
+  add(currentSignals.revisionRisk === sampleSignals.revisionRisk && currentSignals.urgent === sampleSignals.urgent ? 1 : 0.45, 0.05)
+  return weight > 0 ? score / weight : 0
+}
+
+function rerankHourEstimateSample(
+  sample: WeightedHourEstimateSample,
+  currentProfile: HourEstimateComplexityProfile,
+  requester: string,
+): WeightedHourEstimateSample {
+  const sampleProfile = hourEstimateComplexityProfile({
+    title: sample.title,
+    requirement: sample.requirement,
+    attachmentText: [sample.progressNotes, sample.acceptanceNote, sample.feedbackNote].filter(Boolean).join(' '),
+  })
+  const profileScore = hourEstimateProfileSimilarity(currentProfile, sampleProfile)
+  const relationBase = sample.relation === 'exact'
+    ? 0.68
+    : sample.relation === 'semantic'
+      ? 0.38 + sample.relevance * 0.28
+      : 0.24
+  const sameRequester = Boolean(requester && sample.requester && requester === sample.requester)
+  const basisMismatch = currentProfile.signals.basis !== 'unknown'
+    && sampleProfile.signals.basis !== 'unknown'
+    && currentProfile.signals.basis !== sampleProfile.signals.basis
+  const relevance = clampNumber(
+    (relationBase + profileScore * 0.25 + (sameRequester ? 0.07 : 0)) * (basisMismatch ? 0.35 : 1),
+    0.12,
+    1,
+  )
+  const reasons = [
+    sample.relation === 'exact' ? '同一设计类型' : sample.relation === 'semantic' ? '需求语义接近' : '同一设计大类',
+    profileScore >= 0.76 ? '复杂度画像接近' : profileScore >= 0.58 ? '部分工作量维度接近' : '',
+    sameRequester ? '同一需求人' : '',
+    currentProfile.signals.basis !== 'unknown' && currentProfile.signals.basis === sampleProfile.signals.basis
+      ? currentProfile.signals.basis === 'reuse' ? '同为复用型任务' : '同为从零设计'
+      : '',
+    currentProfile.signals.specialties.filter((item) => sampleProfile.signals.specialties.includes(item)).slice(0, 2).join('、'),
+  ].filter(Boolean)
+  return { ...sample, relevance, similarityReasons: reasons.slice(0, 4) }
+}
+
+function hourEstimateClarificationQuestions(profile: HourEstimateComplexityProfile) {
+  const questions: string[] = []
+  if (profile.signals.basis === 'unknown') questions.push('这次是从零设计，还是基于已有视觉/上一版继续修改？')
+  if (profile.signals.deliverableCount === 0 && profile.signals.pageCount === 0) questions.push('最终需要交付多少张、多少页或多少个版本？')
+  if (profile.signals.contentReadiness === 'unknown') questions.push('文案、图片和品牌素材是否已经齐全并确认？')
+  if (profile.signals.adaptationCount === 0) questions.push('是否还需要横竖版、多尺寸或多个平台的适配版本？')
+  if (!profile.signals.revisionRisk) questions.push('预计由几方确认，通常需要预留几轮修改？')
+  return questions.slice(0, 4)
+}
+
+function hourEstimateBreakdown(hours: number, profile: HourEstimateComplexityProfile): HourEstimateBreakdownItem[] {
+  const signals = profile.signals
+  const weighted = [
+    {
+      label: '核心设计',
+      weight: signals.basis === 'reuse' ? 0.48 : signals.basis === 'scratch' ? 0.62 : 0.56,
+      reason: signals.basis === 'reuse' ? '基于既有方案延展，减少探索时间。' : signals.basis === 'scratch' ? '包含方向探索与从零搭建设计。' : '按常规设计制作投入估算。',
+    },
+    {
+      label: '批量制作',
+      weight: signals.pageCount >= 6
+        ? 0.08 + Math.min(0.2, signals.pageCount * 0.006)
+        : signals.deliverableCount >= 2
+          ? 0.07 + Math.min(0.16, signals.deliverableCount * 0.018)
+          : 0,
+      reason: signals.pageCount >= 6
+        ? `包含约 ${signals.pageCount} 页内容的延展与一致性检查。`
+        : signals.deliverableCount >= 2
+          ? `包含约 ${signals.deliverableCount} 个交付单元的批量制作。`
+          : '',
+    },
+    {
+      label: '内容整理',
+      weight: signals.contentReadiness === 'missing' ? 0.17 : signals.contentReadiness === 'ready' ? 0.06 : 0.1,
+      reason: signals.contentReadiness === 'missing' ? '仍需整理、提炼或补齐文案素材。' : '用于内容核对和版面组织。',
+    },
+    {
+      label: '版本适配',
+      weight: signals.adaptationCount >= 2 ? 0.08 + Math.min(0.1, signals.adaptationCount * 0.02) : 0,
+      reason: signals.adaptationCount > 0 ? `包含约 ${signals.adaptationCount} 个尺寸或平台版本。` : '',
+    },
+    {
+      label: '专项处理',
+      weight: signals.specialtyCount > 0 ? 0.08 + Math.min(0.1, signals.specialtyCount * 0.025) : 0,
+      reason: signals.specialties.length > 0 ? `涉及${signals.specialties.join('、')}。` : '',
+    },
+    {
+      label: '沟通与改稿',
+      weight: signals.revisionRisk ? 0.16 : 0.09,
+      reason: signals.revisionRisk ? '存在多轮确认或需求变化风险。' : '保留常规对接和一轮调整时间。',
+    },
+    {
+      label: '交付整理',
+      weight: 0.07,
+      reason: '用于文件检查、命名、导出和交付复核。',
+    },
+  ].filter((item) => item.weight > 0)
+  const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0)
+  const items = weighted.map((item) => ({
+    label: item.label,
+    hours: Math.max(0.1, Math.round((hours * item.weight / totalWeight) * 10) / 10),
+    reason: item.reason,
+  }))
+  const roundedTotal = Math.round(items.reduce((sum, item) => sum + item.hours, 0) * 10) / 10
+  if (items.length > 0 && Math.abs(roundedTotal - hours) >= 0.05) {
+    items[0].hours = Math.max(0.1, Math.round((items[0].hours + hours - roundedTotal) * 10) / 10)
+  }
+  return items
+}
+
+function hourEstimateComplexityMultiplier(profile: HourEstimateComplexityProfile) {
+  return clampNumber(1 + (profile.score - 50) * 0.004, 0.86, 1.18)
+}
+
+async function hourEstimateRequesterAdjustment(
+  env: Env,
+  requester: string,
+  selectedType: string,
+): Promise<HourEstimateRequesterAdjustment> {
+  const empty: HourEstimateRequesterAdjustment = {
+    requester,
+    sampleCount: 0,
+    ratio: 1,
+    applied: false,
+    averageRevisionRounds: 0,
+    completeRequirementRate: 0,
+    summary: requester ? `“${requester}”的已验收样本不足 3 条，本次不做独立系数调整。` : '未填写需求人，本次不做需求人独立校准。',
+  }
+  if (!requester) {
+    return empty
+  }
+  const parentType = selectedType.split('/')[0]?.trim()
+  const rows = await env.DB.prepare(
+    `SELECT estimated_hours, actual_hours, requirement, time_entries_json, design_type
+     FROM tasks
+     WHERE deleted_at IS NULL AND voided_at IS NULL
+       AND status = '已验收' AND actual_hours > 0 AND estimated_hours > 0
+       AND requester = ?
+     ORDER BY
+       CASE WHEN design_type = ? THEN 0 WHEN design_type LIKE ? THEN 1 ELSE 2 END,
+       actual_delivery_date DESC, updated_at DESC
+     LIMIT 24`,
+  ).bind(requester, selectedType, `${parentType}%`).all<Pick<DbTask, 'estimated_hours' | 'actual_hours' | 'requirement' | 'time_entries_json' | 'design_type'>>()
+  const samples = rows.results ?? []
+  if (samples.length === 0) {
+    return empty
+  }
+  const ratios = samples
+    .map((row) => Number(row.actual_hours) / Number(row.estimated_hours))
+    .filter((ratio) => Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4)
+  const revisionRounds = samples.map((row) => parseTimeEntries(row.time_entries_json).filter((entry) => entry.isRevision).length)
+  const completeRequirementCount = samples.filter((row) => {
+    const requirement = String(row.requirement ?? '').trim()
+    return requirement.length >= 30 && !/未明确|待确认|待补|需求未定/.test(requirement)
+  }).length
+  const sampleCount = ratios.length
+  const averageRevisionRounds = Math.round(average(revisionRounds) * 10) / 10
+  const completeRequirementRate = samples.length > 0 ? Math.round((completeRequirementCount / samples.length) * 100) : 0
+  const applied = sampleCount >= 3
+  const ratio = applied ? clampNumber(medianValue(ratios), 0.8, 1.3) : 1
+  const direction = ratio >= 1.08 ? '历史实际投入通常高于原预估' : ratio <= 0.92 ? '历史实际投入通常低于原预估' : '历史预估与实际投入整体接近'
+  return {
+    requester,
+    sampleCount,
+    ratio: Math.round(ratio * 100) / 100,
+    applied,
+    averageRevisionRounds,
+    completeRequirementRate,
+    summary: applied
+      ? `“${requester}”已有 ${sampleCount} 条完整样本，${direction}；平均改稿 ${averageRevisionRounds} 轮，需求完整率约 ${completeRequirementRate}%。`
+      : `“${requester}”目前只有 ${sampleCount} 条完整样本，未达到 3 条门槛；平均改稿 ${averageRevisionRounds} 轮，暂不调整建议值。`,
+  }
+}
+
 function weightedAverage(samples: WeightedHourEstimateSample[]) {
   const totalWeight = samples.reduce((sum, sample) => sum + sample.relevance, 0)
   if (totalWeight <= 0) {
@@ -6564,6 +6938,7 @@ function toHourEstimateSample(task: DbTask): HourEstimateSample {
     title: task.title,
     requirement: task.requirement ?? '',
     designType: task.design_type ?? '',
+    requester: task.requester ?? '',
     estimatedHours: Number(task.estimated_hours) || 0,
     actualHours: Number(task.actual_hours) || 0,
     startDate: task.start_date ?? '',
@@ -6633,7 +7008,15 @@ async function persistHourEstimateSuggestion(
     result.exactSampleCount,
     result.similarSampleCount,
     provider,
-    JSON.stringify(result.basis),
+    JSON.stringify({
+      basis: result.basis,
+      historicalSummary: result.historicalSummary,
+      complexity: result.complexity,
+      breakdown: result.breakdown,
+      clarificationQuestions: result.clarificationQuestions,
+      requesterAdjustment: result.requesterAdjustment,
+      matchedTasks: result.matchedTasks,
+    }),
   ).run()
   await audit(env, 'suggest', 'ai_hour_estimate', suggestionId, {
     title: String(body.title ?? '').trim(),
@@ -6645,6 +7028,8 @@ async function persistHourEstimateSuggestion(
     safeHours: result.safeHours,
     confidence: result.confidence,
     usedFallback: result.usedFallback,
+    complexityScore: result.complexity.score,
+    requesterAdjustmentApplied: result.requesterAdjustment.applied,
     provider,
   })
   return { suggestionId, ...result }
@@ -10459,6 +10844,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   if (!selectedType || (!title && !requirement)) {
     return fail('请先选择设计类型，并填写任务名称或任务具体需求')
   }
+  const currentProfile = hourEstimateComplexityProfile({ title, requirement, attachmentText, attachmentNames })
+  const requesterAdjustment = await hourEstimateRequesterAdjustment(env, requester, selectedType)
 
   const exactRows = selectedType
     ? await env.DB.prepare(
@@ -10473,6 +10860,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     ...toHourEstimateSample(task),
     relation: 'exact' as const,
     relevance: 1,
+    similarityReasons: [],
   }))
   const knownIds = new Set(exactSamples.map((sample) => sample.id))
 
@@ -10485,6 +10873,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     ...toHourEstimateSample(task),
     relation: 'semantic' as const,
     relevance: Math.min(0.9, Math.max(0.5, semanticScoreById.get(String(task.id)) ?? 0.5)),
+    similarityReasons: [],
   })).slice(0, 6)
   semanticSamples.forEach((sample) => knownIds.add(sample.id))
 
@@ -10501,11 +10890,18 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     : { results: [] as DbTask[], success: true }
   const parentSamples = (parentRows.results ?? [])
     .filter((task) => !knownIds.has(String(task.id)))
-    .map((task) => ({ ...toHourEstimateSample(task), relation: 'parent' as const, relevance: 0.35 }))
+    .map((task) => ({
+      ...toHourEstimateSample(task),
+      relation: 'parent' as const,
+      relevance: 0.35,
+      similarityReasons: [],
+    }))
     .slice(0, Math.max(0, 5 - exactSamples.length - semanticSamples.length))
 
-  const similarSamples = [...semanticSamples, ...parentSamples]
-  const samples = [...exactSamples, ...similarSamples]
+  const samples = [...exactSamples, ...semanticSamples, ...parentSamples]
+    .map((sample) => rerankHourEstimateSample(sample, currentProfile, requester))
+    .sort((left, right) => right.relevance - left.relevance)
+  const similarSamples = samples.filter((sample) => sample.relation !== 'exact')
   const exactSampleCount = exactSamples.length
   const similarSampleCount = similarSamples.length
   const sampleCount = samples.length
@@ -10530,6 +10926,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       matchedType: selectedType,
       usedFallback: false,
       usedSemantic: false,
+      complexity: {
+        score: currentProfile.score,
+        level: currentProfile.level,
+        dimensions: currentProfile.dimensions,
+      },
+      breakdown: hourEstimateBreakdown(currentEstimatedHours, currentProfile),
+      clarificationQuestions: hourEstimateClarificationQuestions(currentProfile),
+      requesterAdjustment,
       matchedTasks: [],
     }
     return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history'))
@@ -10560,7 +10964,12 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const calibrationRatio = calibrationRatios.length >= 3
     ? Math.min(1.6, Math.max(0.65, medianValue(calibrationRatios)))
     : 1
-  const deterministicSuggestion = roundToHalfHour((medianHours || averageHours || currentEstimatedHours) * calibrationRatio)
+  const complexityMultiplier = hourEstimateComplexityMultiplier(currentProfile)
+  const requesterRatio = requesterAdjustment.applied ? requesterAdjustment.ratio : 1
+  const combinedAdjustment = clampNumber(calibrationRatio * requesterRatio * complexityMultiplier, 0.7, 1.55)
+  const deterministicSuggestion = roundToHalfHour(
+    (medianHours || averageHours || currentEstimatedHours) * combinedAdjustment,
+  )
   const dataConfidence = calibratedHourEstimateConfidence(exactSampleCount, similarSamples, p25Hours, medianHours, p80Hours)
   const matchedTasks = samples.slice(0, 5).map((sample) => ({
     id: Number(sample.id),
@@ -10569,6 +10978,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     actualHours: sample.actualHours,
     relation: hourEstimateRelationLabel(sample.relation),
     score: Math.round(sample.relevance * 100) / 100,
+    similarityReasons: sample.similarityReasons,
   }))
   const aiPayload = {
     currentTask: {
@@ -10596,7 +11006,12 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       dataConfidence,
       calibrationCount: calibrationRatios.length,
       calibrationRatio: Math.round(calibrationRatio * 100) / 100,
+      complexityMultiplier: Math.round(complexityMultiplier * 100) / 100,
+      requesterRatio,
+      combinedAdjustment: Math.round(combinedAdjustment * 100) / 100,
     },
+    complexityProfile: currentProfile,
+    requesterAdjustment,
     historicalSamples: samples.slice(0, 12),
   }
 
@@ -10617,8 +11032,11 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   }
 
   const parsedHours = Number(parsed?.suggestedHours)
-  const lowerBound = Math.max(0.5, p25Hours * 0.5)
-  const upperBound = Math.max(p80Hours * 2, maxHours + 4, currentEstimatedHours * 2)
+  const lowerBound = Math.max(0.5, p25Hours * 0.5, deterministicSuggestion * 0.7)
+  const upperBound = Math.max(lowerBound, Math.min(
+    Math.max(p80Hours * 2, maxHours + 4, currentEstimatedHours * 2),
+    deterministicSuggestion * 1.35,
+  ))
   const modelHours = Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : deterministicSuggestion
   const suggestedHours = roundToHalfHour(Math.min(upperBound, Math.max(lowerBound, modelHours)))
   const modelConfidence = parsed ? normalizeHourEstimateConfidence(parsed.confidence) : dataConfidence
@@ -10631,7 +11049,9 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const defaultBasis = [
     `精确同类 ${exactSampleCount} 条、相关参考 ${similarSampleCount} 条；加权中位数 ${medianHours} h。`,
     `稳妥值参考历史 P80 ${p80Hours} h，并按${confidence}置信度保留风险余量。`,
+    `当前任务复杂度为${currentProfile.level}（${currentProfile.score}/100），已按交付规模、内容准备、适配和专项处理调整。`,
     ...(calibrationRatios.length >= 3 ? [`已用 ${calibrationRatios.length} 条历史预测结果校准高估/低估偏差。`] : []),
+    ...(requesterAdjustment.applied ? [requesterAdjustment.summary] : []),
   ]
   const historicalSummary = String(parsed?.historicalSummary ?? '').trim()
     || `已参考 ${sampleCount} 条已验收任务；精确同类 ${exactSampleCount} 条，相关参考 ${similarSampleCount} 条。`
@@ -10652,6 +11072,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     matchedType: selectedType,
     usedFallback,
     usedSemantic,
+    complexity: {
+      score: currentProfile.score,
+      level: currentProfile.level,
+      dimensions: currentProfile.dimensions,
+    },
+    breakdown: hourEstimateBreakdown(suggestedHours, currentProfile),
+    clarificationQuestions: hourEstimateClarificationQuestions(currentProfile),
+    requesterAdjustment,
     matchedTasks,
   }
   return ok(await persistHourEstimateSuggestion(env, body, result, provider))
