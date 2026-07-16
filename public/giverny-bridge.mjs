@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname, platform, arch } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 
-const VERSION = '0.3.0'
+const VERSION = '0.3.1'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
 const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
@@ -255,11 +255,6 @@ function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '') {
       '-c', `mcp_servers.giverny.url=${JSON.stringify(mcpUrl)}`,
       '-c', 'mcp_servers.giverny.bearer_token_env_var="GIVERNY_MCP_TOKEN"',
     ]
-    if (resumeSessionId) {
-      return {
-        args: ['exec', 'resume', '--json', '--skip-git-repo-check', ...sharedConfig, resumeSessionId, prompt],
-      }
-    }
     return {
       args: [
         'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check',
@@ -299,7 +294,7 @@ async function executeRunCommand(config, command) {
   }
   mkdirSync(WORKSPACE_DIR, { recursive: true, mode: 0o700 })
   const state = { trace: [payload.resumeSessionId ? '继续上次对话' : '已进入本机执行环境'], content: '', plainOutput: '', sessionId: '', error: '' }
-  const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 180_000, 30_000), 300_000)
+  const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 75_000, 30_000), 120_000)
   let invocation
   try {
     invocation = cliInvocation(

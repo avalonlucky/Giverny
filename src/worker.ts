@@ -12856,6 +12856,7 @@ type LocalCliChatDecision = {
     trace: string[]
     cliName: string
     deviceName: string
+    runtime?: 'site-tools' | 'local-cli'
   }
 }
 
@@ -12870,6 +12871,52 @@ function isLocalCliWriteIntent(message: string) {
   if (/^(确认执行|取消执行|取消)$/.test(normalized)) return true
   return /(?:新建|创建|新增|添加|记录|修改|更新|改成|改为|设置为|标记为|验收通过|确认验收|作废|删除|恢复|撤销).{0,24}(?:任务|进展|反馈|状态|等待|附件|工时|验收|交付)/.test(normalized)
     || /(?:任务|进展|反馈|状态|等待|附件|工时|验收|交付).{0,24}(?:新建|创建|新增|添加|记录|修改|更新|改成|改为|设置为|标记为|作废|删除|恢复|撤销)/.test(normalized)
+}
+
+async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string) {
+  const requestedMonths = extractRequestedMonths(question, currentMonth)
+  if (isFinanceQuestion(question) && requestedMonths.length > 0) {
+    const hourlyRate = await getHourlyRate(env)
+    const stats = await computeMonthFinanceStats(env, requestedMonths, hourlyRate)
+    return {
+      immediate: renderMonthFinanceAnswer(stats, hourlyRate),
+      trace: [
+        '识别为站内确定性数据查询',
+        `只读工具已查询 ${requestedMonths.join('、')} 的结算数据`,
+        '完成金额与计费工时核算',
+      ],
+      context: '',
+    }
+  }
+
+  if (!isWorkDataQuestion(question)) return { immediate: '', trace: [] as string[], context: '' }
+
+  const rows = await env.DB.prepare(
+    `SELECT id, title, design_type, status, progress, actual_hours, estimated_hours,
+            start_date, estimated_delivery_date, settlement_month, is_billable
+       FROM tasks
+      WHERE deleted_at IS NULL AND voided_at IS NULL
+      ORDER BY start_date DESC, created_at DESC
+      LIMIT 40`,
+  ).all<DbTask>()
+  const tasks = (rows.results || []).map((task) => ({
+    id: task.id,
+    title: task.title || '未命名',
+    type: task.design_type || '未分类',
+    status: task.status || '',
+    progress: Number(task.progress) || 0,
+    actualHours: Number(task.actual_hours) || 0,
+    estimatedHours: Number(task.estimated_hours) || 0,
+    startDate: task.start_date || '',
+    endDate: task.estimated_delivery_date || '',
+    settlementMonth: task.settlement_month || '',
+    billable: isBillableDbTask(task),
+  }))
+  return {
+    immediate: '',
+    trace: ['站内只读工具已预取任务数据', `已提供 ${tasks.length} 条任务摘要给本机 CLI`],
+    context: `\n\n=== Giverny 站内只读工具预取结果 ===\n${JSON.stringify({ tasks })}\n=== 预取结果结束 ===\n`,
+  }
 }
 
 async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliChatDecision> {
@@ -12927,33 +12974,37 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     }
   }
 
+  const readContext = await prepareLocalCliReadContext(env, lastMessage, String(body.month || '').slice(0, 7))
+  if (readContext.immediate) {
+    return {
+      route: null,
+      cloudReason: '',
+      immediate: {
+        content: readContext.immediate,
+        trace: readContext.trace,
+        cliName: 'Giverny 只读工具',
+        deviceName: device.name,
+        runtime: 'site-tools',
+      },
+    }
+  }
+
   await ensureAccessTokenScope(env)
   const commandId = crypto.randomUUID()
   const tokenBytes = crypto.getRandomValues(new Uint8Array(24))
   const mcpToken = `lc_${Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   const expiresAt = new Date(Date.now() + LOCAL_CLI_RUN_TTL_MS).toISOString()
   const conversationId = String(body.localCliConversationId || body.agentRuntimeConversationId || '').trim().slice(0, 160)
-  const previousSession = adapter.adapter_id === 'codex' && conversationId
-    ? await env.DB.prepare(
-      `SELECT json_extract(result_json, '$.sessionId') AS session_id
-       FROM local_cli_commands
-       WHERE device_id = ? AND principal_id = ? AND command_type = 'run' AND status = 'completed'
-         AND json_extract(payload_json, '$.conversationId') = ?
-         AND COALESCE(json_extract(result_json, '$.sessionId'), '') <> ''
-       ORDER BY completed_at DESC LIMIT 1`,
-    ).bind(device.id, principal.principalId, conversationId).first<{ session_id: string }>()
-    : null
-  const resumeSessionId = String(previousSession?.session_id || '').slice(0, 160)
   const textAttachments = attachments
     .filter((item) => item?.type === 'text')
     .slice(0, 3)
     .map((item) => `【${String(item.name || '文档').slice(0, 120)}】\n${String(item.data || '').slice(0, 4000)}`)
     .join('\n\n')
-  const historyMessages = resumeSessionId ? messages.slice(-1) : messages
+  const historyMessages = messages.slice(-8)
   const history = historyMessages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
   const prompt = `你是 Giverny 工作助手爱丽丝，现在运行在用户当前电脑上的 ${adapter.name}。\n\n` +
     `执行边界：\n` +
-    `1. 查询任务、工时、收入、附件和工作区数据时，必须优先调用 giverny MCP 工具，不得凭空猜测。\n` +
+    `1. 查询任务、工时、收入、附件和工作区数据时，优先使用下方由网站只读工具预取的结果；数据不足时再调用 giverny MCP 工具，不得凭空猜测。\n` +
     `2. 站内任务创建、状态修改、进展、反馈、验收等写入必须回到网页的确认流程；本轮不得绕过确认直接修改 Giverny 数据。\n` +
     `3. 如需在本机生成或下载文件，只能写入当前 Giverny 专用工作目录，并在回答中给出完整文件路径。\n` +
     `4. 不读取密钥、浏览器资料、SSH 配置或 Giverny 工作目录之外的私人文件，除非用户明确指定文件。\n` +
@@ -12961,6 +13012,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     `6. 你的运行入口是 ${adapter.name}，不是 Claude、豆包或其他云端模型。若用户询问具体底层模型，只说明网页能确认 ${adapter.name}，但无法可靠读取 CLI 账号实际选用的精确模型，不得猜测型号。\n\n` +
     `当前结算月：${String(body.month || '').slice(0, 7) || '未指定'}\n` +
     `${textAttachments ? `\n用户上传的文档：\n${textAttachments}\n` : ''}` +
+    `${readContext.context}` +
     `\n对话上下文：\n${history}`
   await env.DB.batch([
     env.DB.prepare(
@@ -12976,9 +13028,9 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
       prompt,
       mcpUrl: `${new URL(request.url).origin}/mcp`,
       mcpToken,
-      timeoutMs: 180_000,
+      timeoutMs: 75_000,
       conversationId,
-      resumeSessionId,
+      resumeSessionId: '',
     }), expiresAt),
   ])
   await audit(env, 'queue', 'local_cli_command', commandId, {
@@ -13058,6 +13110,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
               deviceName: localDecision.immediate.deviceName,
               cliName: localDecision.immediate.cliName,
             },
+            runtime: localDecision.immediate.runtime || 'local-cli',
           }
           const metricWrite = recordAgentRunMetric(
             env,

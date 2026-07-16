@@ -404,6 +404,21 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Local CLI runtime identity answer was inaccurate or unnecessarily queued: ${identityText}`)
   }
 
+  const financeResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      localCliConversationId: 'eval-local-finance',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请问 6 月和 7 月的收入加起来是多少？' }],
+    }),
+  })
+  const financeText = await financeResponse.text()
+  if (!financeResponse.ok || !financeText.includes('"runtime":"site-tools"') || !financeText.includes('计费工时') || financeText.includes('"commandId"')) {
+    throw new Error(`Deterministic finance query did not use the direct read-only route: ${financeText}`)
+  }
+
   const waitForBridgeRun = async () => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const response = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
@@ -433,7 +448,7 @@ async function runLocalCliBridgeCheck(cookie) {
   ])
   if (earlyChatResult) throw new Error(`Local CLI chat ended before Bridge pickup: ${earlyChatResult}`)
   const runCommand = await waitForBridgeRun()
-  if (runCommand.payload?.adapterId !== 'codex' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP')) {
+  if (runCommand.payload?.adapterId !== 'codex' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP') || !String(runCommand.payload?.prompt || '').includes('站内只读工具预取结果')) {
     throw new Error(`Local CLI run payload is incomplete or unsafe: ${JSON.stringify(runCommand.payload)}`)
   }
   const progressResponse = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/events`, {
@@ -466,8 +481,8 @@ async function runLocalCliBridgeCheck(cookie) {
   })
   const cancelTextPromise = cancelChatResponse.text()
   const cancellableCommand = await waitForBridgeRun()
-  if (cancellableCommand.payload?.resumeSessionId !== 'eval-codex-session') {
-    throw new Error(`Codex CLI conversation was not resumed: ${JSON.stringify(cancellableCommand.payload)}`)
+  if (cancellableCommand.payload?.resumeSessionId) {
+    throw new Error(`Codex CLI unexpectedly attempted to resume a prior session: ${JSON.stringify(cancellableCommand.payload)}`)
   }
   const cancelResponse = await fetch(`${base}/api/local-cli/commands/${cancellableCommand.id}/cancel`, { method: 'POST', headers: { cookie } })
   if (!cancelResponse.ok) throw new Error(`Local CLI cancellation failed: ${cancelResponse.status}`)
@@ -476,7 +491,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (bridgeState.status !== 'cancelled') throw new Error(`Bridge did not observe cancellation: ${JSON.stringify(bridgeState)}`)
   const cancelText = await cancelTextPromise
   if (!cancelText.includes('已停止本机 CLI 执行')) throw new Error(`Cancelled local CLI chat did not close cleanly: ${cancelText}`)
-  process.stdout.write('Local CLI identity, pairing, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
+  process.stdout.write('Local CLI identity, deterministic site-tool routing, data prefetch, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
 }
 
 async function runAgentOrchestrationCheck(cookie) {
