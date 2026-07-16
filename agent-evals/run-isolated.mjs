@@ -295,6 +295,24 @@ async function runPlannedProgressTransitionCheck(cookie) {
   process.stdout.write('Planned task first-progress transition and decimal estimate checks passed.\n')
 }
 
+async function runUploadLimitCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/files/multipart/init', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      taskId: 1,
+      fileName: 'oversized-video.mp4',
+      contentType: 'video/mp4',
+      fileSize: 200 * 1024 * 1024 + 1,
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (response.status !== 413 || !String(payload.error ?? '').includes('200MB')) {
+    throw new Error(`Upload hard limit check failed: ${response.status} ${JSON.stringify(payload)}`)
+  }
+  process.stdout.write('Multipart upload 200MB server limit check passed.\n')
+}
+
 async function runAgentOrchestrationCheck(cookie) {
   const toolHeaders = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
   const conversationId = `plan-${crypto.randomUUID()}`
@@ -851,6 +869,7 @@ try {
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
   await runPlannedProgressTransitionCheck(cookie)
+  await runUploadLimitCheck(cookie)
   await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)

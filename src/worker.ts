@@ -83,6 +83,8 @@ type Env = {
   ANALYSIS_QUEUE?: AnalysisQueue
 }
 
+const MAX_UPLOAD_FILE_SIZE = 200 * 1024 * 1024
+
 // Queues 生产者绑定的最小类型。
 type AnalysisMessage = { attachmentId: string }
 type AnalysisQueue = { send: (body: AnalysisMessage) => Promise<void> }
@@ -9874,6 +9876,9 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   if (!(file instanceof File)) {
     return fail('缺少上传文件')
   }
+  if (file.size > MAX_UPLOAD_FILE_SIZE) {
+    return fail('单个文件不能超过 200MB，请压缩后再上传', 413)
+  }
 
   const id = nextNumericId()
   const taskId = String(form.get('taskId') ?? '')
@@ -10012,9 +10017,15 @@ async function insertAttachment(
 }
 
 async function initMultipartUpload(env: Env, request: Request) {
-  const body = (await request.json()) as { taskId: number; entryId?: string; fileName: string; contentType?: string }
+  const body = (await request.json()) as { taskId: number; entryId?: string; fileName: string; contentType?: string; fileSize?: number }
   if (!body.fileName || !body.taskId) {
     return fail('缺少文件名或关联任务')
+  }
+  if (!Number.isFinite(body.fileSize) || Number(body.fileSize) <= 0) {
+    return fail('缺少有效文件大小')
+  }
+  if (Number(body.fileSize) > MAX_UPLOAD_FILE_SIZE) {
+    return fail('单个文件不能超过 200MB，请压缩后再上传', 413)
   }
   const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(toId(body.taskId)).first<{ id: string }>()
   if (!task) {
@@ -10062,8 +10073,12 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
   const entryId = String(form.get('entryId') ?? '').trim()
   const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
   const parts = JSON.parse(String(form.get('parts') ?? '[]')) as R2UploadedPart[]
+  const fileSize = Number(form.get('fileSize') ?? 0)
   if (!key || !uploadId || parts.length === 0) {
     return fail('分片信息不完整')
+  }
+  if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_UPLOAD_FILE_SIZE) {
+    return fail('文件大小无效或超过 200MB', 413)
   }
   const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(taskId).first<{ id: string }>()
   if (!task) {
@@ -10092,7 +10107,7 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
       mimeType: String(form.get('contentType') ?? '') || null,
       r2Key: key,
       previewKey,
-      fileSize: Number(form.get('fileSize')) || null,
+      fileSize,
       displaySize: String(form.get('size') ?? ''),
       final: form.get('final') === 'true',
       visible: form.get('visible') !== 'false',

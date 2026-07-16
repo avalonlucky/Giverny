@@ -708,7 +708,7 @@ export const api = {
       method: 'DELETE',
     }),
   /**
-   * 智能上传：90MB 以内整体上传，超过则自动走 R2 分片上传（绕开 Workers 请求体上限）。
+   * 智能上传：12MB 以内整体上传，超过则自动走 R2 分片上传（绕开 Workers 请求体上限）。
    * onProgress 回调 0–1 的总体进度。
    */
   uploadFile: async (
@@ -752,7 +752,7 @@ export const api = {
     const init = await requestJson<{ fileId: string; key: string; uploadId: string }>('/api/files/multipart/init', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ taskId: payload.taskId, entryId: payload.entryId ?? '', fileName: file.name, contentType: file.type }),
+      body: JSON.stringify({ taskId: payload.taskId, entryId: payload.entryId ?? '', fileName: file.name, contentType: file.type, fileSize: file.size }),
     })
 
     try {

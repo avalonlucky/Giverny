@@ -1497,8 +1497,8 @@ function nowStamp() {
   return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 
-// Cloudflare Workers Free/Pro 计划单次请求体上限 100MB，留出 multipart 开销后取 95MB 作为硬上限。
-const UPLOAD_HARD_LIMIT = 95 * 1024 * 1024
+// 大文件会自动拆成 8MB 分片写入 R2，不受 Worker 单次请求体 100MB 限制。
+const UPLOAD_HARD_LIMIT = 200 * 1024 * 1024
 const UPLOAD_SOFT_LIMIT = 50 * 1024 * 1024
 
 type AcceptancePayload = {
@@ -12807,28 +12807,28 @@ function TaskProgressModal({
               <button type="button" className="progress-lite-upload-box" onClick={() => fileInputRef.current?.click()} disabled={isSaving}>
                 <Plus size={15} />
                 {isAcceptanceMode ? '添加验收截图 / 最终稿' : '添加过程截图 / 文件'}
-                <small>也可以直接 Ctrl+V 粘贴图片</small>
+                <small>单文件最大 200MB，大文件自动分片上传；也可以 Ctrl+V 粘贴图片</small>
               </button>
               <input
                 ref={fileInputRef}
                 className="task-row-upload-input"
                 type="file"
                 multiple
-                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov,.webm,.m4v,.ogv"
                 onChange={(event) => addPendingFiles(event.target.files)}
               />
               <input
                 ref={replacementInputRef}
                 className="task-row-upload-input"
                 type="file"
-                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov,.webm,.m4v,.ogv"
                 onChange={(event) => replacePendingAttachment(event.target.files)}
               />
               <input
                 ref={existingReplacementInputRef}
                 className="task-row-upload-input"
                 type="file"
-                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.pdf,.psd,.ai,.eps,.fig,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov,.webm,.m4v,.ogv"
                 onChange={(event) => void addReplacementExistingAttachment(event.target.files)}
               />
             </section>
