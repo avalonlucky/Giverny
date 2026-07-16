@@ -16702,6 +16702,8 @@ const aiRouteMeta: Array<{ key: AiModelRouteKey; title: string; description: str
 
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
+const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+const QWEN_DEFAULT_MODEL = 'qwen3.7-plus'
 
 const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> = {
   textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
@@ -16719,6 +16721,7 @@ const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string
   { value: 'gemini', label: 'Gemini' },
   { value: 'kimi', label: 'Kimi' },
   { value: 'doubao', label: '豆包 / Doubao' },
+  { value: 'qwen', label: '通义千问 / Qwen' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'anthropic', label: 'Anthropic Claude' },
@@ -16755,6 +16758,8 @@ function directBaseUrlForProvider(provider: AiModelConfig['provider']): string {
       return 'https://api.moonshot.cn/v1'
     case 'doubao':
       return DOUBAO_BASE_URL
+    case 'qwen':
+      return QWEN_BASE_URL
     case 'openrouter':
       return 'https://openrouter.ai/api/v1'
     case 'anthropic':
@@ -16784,6 +16789,8 @@ function defaultModelForProvider(provider: AiModelConfig['provider']): string {
       return 'kimi-k2.6'
     case 'doubao':
       return DOUBAO_SEED_PRO_MODEL
+    case 'qwen':
+      return QWEN_DEFAULT_MODEL
     case 'openai':
       return 'gpt-4o-mini'
     case 'openrouter':
@@ -16791,6 +16798,29 @@ function defaultModelForProvider(provider: AiModelConfig['provider']): string {
     case 'anthropic':
       return 'claude-sonnet-4-6'
     case 'custom-openai':
+    default:
+      return ''
+  }
+}
+
+function officialApiKeyUrlForProvider(provider: AiModelConfig['provider']): string {
+  switch (provider) {
+    case 'deepseek':
+      return 'https://platform.deepseek.com/api_keys'
+    case 'gemini':
+      return 'https://aistudio.google.com/app/apikey'
+    case 'kimi':
+      return 'https://platform.moonshot.cn/console/api-keys'
+    case 'doubao':
+      return 'https://console.volcengine.com/ark/region:ark+cn-beijing/apikey'
+    case 'qwen':
+      return 'https://bailian.console.aliyun.com/cn-beijing?tab=globalset'
+    case 'openai':
+      return 'https://platform.openai.com/api-keys'
+    case 'openrouter':
+      return 'https://openrouter.ai/settings/keys'
+    case 'anthropic':
+      return 'https://console.anthropic.com/settings/keys'
     default:
       return ''
   }
@@ -17422,7 +17452,11 @@ function SettingsView({
     setFetchingModelsRoute(route)
     setAiRouteModelError((errors) => ({ ...errors, [route]: undefined }))
     try {
-      const result = await api.listAiModels(route)
+      const draft = aiRouteDrafts[route]
+      const result = await api.listAiModels(route, { ...draft, apiKey: aiRouteKeyDrafts[route] })
+      if (result.provider !== draft.provider) {
+        throw new Error(`供应商校验失败：当前选择 ${draft.provider}，接口却返回 ${result.provider}`)
+      }
       setAiRouteModelOptions((options) => ({ ...options, [route]: result.models }))
       if (!result.models.length) {
         setAiRouteModelError((errors) => ({ ...errors, [route]: '该供应商没有返回可用模型' }))
@@ -17974,7 +18008,20 @@ function SettingsView({
                           {modelError && <small className="settings-inline-error">{modelError}</small>}
                         </label>
                         <label className="field">
-                          <span>API Key</span>
+                          <span className="settings-ai-baseurl-label">
+                            API Key
+                            {officialApiKeyUrlForProvider(draft.provider) && (
+                              <a
+                                className="settings-ai-key-link"
+                                href={officialApiKeyUrlForProvider(draft.provider)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                获取官方 API Key
+                                <ExternalLink size={12} />
+                              </a>
+                            )}
+                          </span>
                           <input
                             type="password"
                             value={aiRouteKeyDrafts[route.key] ?? ''}

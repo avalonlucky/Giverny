@@ -311,7 +311,7 @@ export type AccessToken = {
   lastUsedAt: string
 }
 
-export type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+export type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'qwen' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 export type AiModelMode = 'deepseek-direct' | 'baml-runtime'
 
@@ -999,8 +999,15 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  listAiModels: (route: AiModelRouteKey) =>
-    requestJson<{ provider: AiModelProvider; models: string[] }>(`/api/ai/models?route=${encodeURIComponent(route)}`),
+  listAiModels: (
+    route: AiModelRouteKey,
+    draft: Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'> & { apiKey?: string },
+  ) =>
+    requestJson<{ provider: AiModelProvider; models: string[] }>('/api/ai/models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ route, ...draft }),
+    }),
   getOpenRouterFreeModels: () =>
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models'),
   scanOpenRouterFreeModels: () =>

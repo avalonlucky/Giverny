@@ -46,7 +46,7 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 
 - Cloudflare Worker 只负责鉴权、租户配置、数据查询、密钥解密和请求转发。
 - AI Runtime 只接收本次调用的模型配置，调用 BAML client。
-- 租户可选择 DeepSeek、OpenAI、OpenRouter、Claude 兼容网关等。
+- 租户可选择 DeepSeek、豆包、通义千问、Kimi、OpenAI、OpenRouter、Claude 兼容网关等。
 - Runtime API：
   - `GET /health`
   - `POST /v1/suggest-task`
@@ -65,8 +65,12 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - 文字主模型 / 文字备用模型
 - 识图主模型 / 识图备用模型
 - 每一路模型的测试按钮
+- 按当前未保存配置调用供应商 `/models` 的模型发现按钮
+- 供应商官方 API Key 控制台入口
 
 当前仍存放在全站 `app_settings.aiModelConfig`。多租户上线时，把这个配置移动到 tenant-scoped setting 即可。
+
+模型发现不会读取另一家供应商的旧配置。前端会把当前表单中的供应商、Base URL、模型名和本次输入的 API Key 一并提交给 Worker；Worker 优先使用本次输入的 Key，其次才使用同一供应商已保存的 Key 或环境变量。豆包候选只保留 `doubao-*`，通义千问只保留 `qwen*` / `qwq*`，并把实际响应供应商返回给前端做二次一致性校验。
 
 下一阶段可继续扩展：
 
@@ -130,7 +134,7 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 - 前端只显示 `hasApiKey` 和 `apiKeyPreview`，不会返回明文 API Key。
 - Runtime 与 Worker 之间使用 `AI_RUNTIME_KEY` 请求头鉴权。
 - 生产环境保存租户 API Key 前必须配置 `AI_SETTINGS_SECRET`。
-- 平台默认 Gemini / Kimi Key 应优先写入 Cloudflare Secret：`GEMINI_API_KEY`、`KIMI_API_KEY`，避免进入前端或 Git 仓库。
+- 平台默认 Gemini / Kimi / 通义千问 Key 应优先写入 Cloudflare Secret：`GEMINI_API_KEY`、`KIMI_API_KEY`、`DASHSCOPE_API_KEY`，避免进入前端或 Git 仓库。
 
 ## 注意事项
 

@@ -180,6 +180,17 @@ function chooseTool(messages) {
 }
 
 const server = http.createServer((request, response) => {
+  if (request.method === 'GET' && request.url?.endsWith('/models')) {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      data: [
+        { id: 'deepseek-v4-flash' },
+        { id: 'doubao-seed-eval' },
+        { id: 'qwen3.7-plus' },
+      ],
+    }))
+    return
+  }
   let body = ''
   request.on('data', (chunk) => { body += chunk })
   request.on('end', () => {

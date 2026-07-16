@@ -59,6 +59,7 @@ type Env = {
   DOUBAO_API_KEY?: string
   DOUBAO_BASE_URL?: string
   DOUBAO_MODEL?: string
+  DASHSCOPE_API_KEY?: string
   OPENROUTER_API_KEY?: string
   OPENAI_API_KEY?: string
   ANTHROPIC_API_KEY?: string
@@ -135,7 +136,7 @@ const PASSWORD_ITERATIONS = 100000
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
 
-type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
+type AiModelProvider = 'deepseek' | 'gemini' | 'kimi' | 'doubao' | 'qwen' | 'openai' | 'openrouter' | 'anthropic' | 'custom-openai'
 
 type AiModelMode = 'deepseek-direct' | 'baml-runtime'
 
@@ -596,6 +597,7 @@ function normalizeAiProvider(value: unknown): AiModelProvider {
     value === 'gemini' ||
     value === 'kimi' ||
     value === 'doubao' ||
+    value === 'qwen' ||
     value === 'openai' ||
     value === 'openrouter' ||
     value === 'anthropic' ||
@@ -667,6 +669,9 @@ function providerEnvironmentKey(env: Env, provider: AiModelProvider) {
   }
   if (provider === 'doubao') {
     return env.DOUBAO_API_KEY || ''
+  }
+  if (provider === 'qwen') {
+    return env.DASHSCOPE_API_KEY || ''
   }
   if (provider === 'openrouter') {
     return env.OPENROUTER_API_KEY || ''
@@ -6363,19 +6368,33 @@ async function testAiModelRoute(env: Env, request: Request) {
 }
 
 async function listAiModelsForRoute(env: Env, request: Request) {
-  let route: AiModelRouteKey | null
-  try {
-    const url = new URL(request.url)
-    route = parseAiRouteKey(url.searchParams.get('route'))
-  } catch {
-    route = null
-  }
+  const body = request.method === 'POST'
+    ? await request.json().catch(() => ({})) as { route?: string; provider?: string; baseUrl?: string; model?: string; apiKey?: string }
+    : {}
+  const url = new URL(request.url)
+  const route = parseAiRouteKey(body.route || url.searchParams.get('route'))
   if (!route) {
     return fail('未知的模型路由')
   }
-  const endpoint = await resolveAiEndpoint(env, route)
+  const savedEndpoint = await resolveAiEndpoint(env, route)
+  const provider = body.provider ? normalizeAiProvider(body.provider) : savedEndpoint.provider
+  const draftApiKey = String(body.apiKey || '').trim()
+  const endpoint = {
+    ...savedEndpoint,
+    provider,
+    baseUrl: String(body.baseUrl || savedEndpoint.baseUrl).trim().replace(/\/$/, ''),
+    model: String(body.model || savedEndpoint.model).trim(),
+    apiKey: draftApiKey || (savedEndpoint.provider === provider ? savedEndpoint.apiKey : providerEnvironmentKey(env, provider)),
+    keySource: draftApiKey
+      ? 'setting' as const
+      : savedEndpoint.provider === provider
+        ? savedEndpoint.keySource
+        : providerEnvironmentKey(env, provider)
+          ? 'environment' as const
+          : 'missing' as const,
+  }
   if (endpoint.keySource === 'missing') {
-    return fail('该路由还没有可用的 API Key，请先填写并保存或在环境变量中配置')
+    return fail('当前供应商还没有可用的 API Key，请填写 Key，或先在部署环境中配置')
   }
   const baseUrl = endpoint.baseUrl.replace(/\/$/, '')
   try {
@@ -6393,10 +6412,7 @@ async function listAiModelsForRoute(env: Env, request: Request) {
         .filter(Boolean)
       return ok({ provider: endpoint.provider, models: Array.from(new Set(models)).sort() })
     }
-    if (endpoint.provider === 'doubao') {
-      return ok({ provider: endpoint.provider, models: [env.DOUBAO_MODEL || DOUBAO_SEED_PRO_MODEL] })
-    }
-    // OpenAI 兼容（DeepSeek / Kimi / OpenAI / OpenRouter / 自定义网关）：GET /models
+    // OpenAI 兼容（DeepSeek / Kimi / 豆包 / 通义千问 / OpenAI / OpenRouter / 自定义网关）：GET /models
     const response = await fetch(`${baseUrl}/models`, {
       headers: { Authorization: `Bearer ${endpoint.apiKey || ''}` },
     })
@@ -6404,7 +6420,12 @@ async function listAiModelsForRoute(env: Env, request: Request) {
     if (!response.ok) {
       return fail(data?.error?.message || `获取模型失败（${response.status}）`, 502)
     }
-    const models = (data?.data || []).map((item) => item.id || '').filter(Boolean)
+    let models = (data?.data || []).map((item) => item.id || '').filter(Boolean)
+    if (endpoint.provider === 'doubao') {
+      models = models.filter((model) => /^doubao-/i.test(model))
+    } else if (endpoint.provider === 'qwen') {
+      models = models.filter((model) => /^(?:qwen|qwq)/i.test(model))
+    }
     return ok({ provider: endpoint.provider, models: Array.from(new Set(models)).sort() })
   } catch (error) {
     return fail(error instanceof Error ? error.message : '获取模型失败', 502)
@@ -14698,7 +14719,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/openrouter/free-models/scan' && request.method === 'POST') {
     return ok(await scanOpenRouterFreeModels(env))
   }
-  if (path === '/api/ai/models' && request.method === 'GET') {
+  if (path === '/api/ai/models' && (request.method === 'GET' || request.method === 'POST')) {
     return listAiModelsForRoute(env, request)
   }
   if (path === '/api/insights/attachment-analyses/backfill' && request.method === 'POST') {

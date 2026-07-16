@@ -313,6 +313,35 @@ async function runUploadLimitCheck(cookie) {
   process.stdout.write('Multipart upload 200MB server limit check passed.\n')
 }
 
+async function runAiModelDraftListCheck(cookie) {
+  const endpoint = 'http://127.0.0.1:8798/api/ai/models'
+  const requestModels = async (provider) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        route: 'textPrimary',
+        provider,
+        baseUrl: 'http://127.0.0.1:8898',
+        model: provider === 'doubao' ? 'doubao-seed-eval' : 'qwen3.7-plus',
+        apiKey: 'eval-model-key',
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Draft model list returned HTTP ${response.status}`)
+    return data
+  }
+  const doubao = await requestModels('doubao')
+  if (doubao.provider !== 'doubao' || JSON.stringify(doubao.models) !== JSON.stringify(['doubao-seed-eval'])) {
+    throw new Error(`Doubao draft model list leaked another provider: ${JSON.stringify(doubao)}`)
+  }
+  const qwen = await requestModels('qwen')
+  if (qwen.provider !== 'qwen' || JSON.stringify(qwen.models) !== JSON.stringify(['qwen3.7-plus'])) {
+    throw new Error(`Qwen draft model list leaked another provider: ${JSON.stringify(qwen)}`)
+  }
+  process.stdout.write('Draft provider model discovery and provider filtering checks passed.\n')
+}
+
 async function runLocalCliBridgeCheck(cookie) {
   const base = 'http://127.0.0.1:8798'
   const browserDeviceKey = `eval-browser-${crypto.randomUUID()}`
@@ -1150,6 +1179,7 @@ try {
   await runAgentLifecycleWriteCheck()
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
+  await runAiModelDraftListCheck(cookie)
   await runLocalCliBridgeCheck(cookie)
   await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)
