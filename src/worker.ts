@@ -6422,8 +6422,23 @@ type HourEstimateDecision = {
   reason: string
 }
 
-const HOUR_ESTIMATE_ALGORITHM_VERSION = '3.0.0'
-const HOUR_ESTIMATE_PROMPT_VERSION = '2026-07-16.3'
+type HourEstimateCompletionOption = {
+  key: string
+  label: string
+  appendText: string
+}
+
+type HourEstimateChangeAudit = {
+  hasPrevious: boolean
+  previousSuggestedHours: number
+  previousAt: string
+  deltaHours: number
+  reasons: string[]
+  summary: string
+}
+
+const HOUR_ESTIMATE_ALGORITHM_VERSION = '3.1.0'
+const HOUR_ESTIMATE_PROMPT_VERSION = '2026-07-16.4'
 
 type HourEstimateResult = {
   suggestedHours: number
@@ -6457,6 +6472,8 @@ type HourEstimateResult = {
   modelVersion: HourEstimateModelVersion
   requirementQuality: HourEstimateRequirementQuality
   decision: HourEstimateDecision
+  completionOptions: HourEstimateCompletionOption[]
+  changeAudit: HourEstimateChangeAudit
   matchedTasks: Array<{
     id: number
     title: string
@@ -6985,6 +7002,89 @@ function hourEstimateRequirementQuality(profile: HourEstimateComplexityProfile, 
   }
 }
 
+function hourEstimateCompletionOptions(profile: HourEstimateComplexityProfile, requirement: string): HourEstimateCompletionOption[] {
+  const options: HourEstimateCompletionOption[] = []
+  if (profile.signals.basis === 'unknown') {
+    options.push(
+      { key: 'basis-reuse', label: '复用已有方案', appendText: '设计基础：复用已有方案和视觉风格。' },
+      { key: 'basis-scratch', label: '从零设计', appendText: '设计基础：本次需要从零设计新的视觉方向。' },
+    )
+  }
+  if (profile.signals.deliverableCount === 0 && profile.signals.pageCount === 0) {
+    options.push({ key: 'deliverable-one', label: '1 个交付件', appendText: '交付范围：最终交付 1 个完整成果。' })
+  }
+  if (profile.signals.contentReadiness === 'unknown') {
+    options.push(
+      { key: 'materials-ready', label: '素材已齐', appendText: '素材状态：甲方文案、图片和品牌素材已经齐全并确认。' },
+      { key: 'materials-pending', label: '素材待补', appendText: '素材状态：部分文案或图片待甲方补充，需预留整理时间。' },
+    )
+  }
+  if (profile.signals.adaptationCount === 0 && !/无需适配|单尺寸/.test(requirement)) {
+    options.push(
+      { key: 'adaptation-none', label: '单尺寸', appendText: '适配范围：只交付单一尺寸，无需其他平台适配。' },
+      { key: 'adaptation-three', label: '3 个尺寸', appendText: '适配范围：需要完成 3 个尺寸的版式适配。' },
+    )
+  }
+  if (!/确认|对接|验收|修改|改稿|反馈/.test(requirement)) {
+    options.push({ key: 'revision-one', label: '1 轮修改', appendText: '协作边界：由需求人统一确认，包含 1 轮集中修改。' })
+  }
+  return options.slice(0, 8)
+}
+
+async function hourEstimateChangeAudit(env: Env, selectedType: string, requester: string, current: {
+  suggestedHours: number
+  complexityScore: number
+  requirementQualityScore: number
+  sampleCount: number
+  requesterApplied: boolean
+  learningApplied: boolean
+}): Promise<HourEstimateChangeAudit> {
+  const previous = await env.DB.prepare(
+    `SELECT suggested_hours, requested_at, basis_json FROM hour_estimate_suggestions
+     WHERE design_type = ? AND (? = '' OR requester = ?)
+     ORDER BY requested_at DESC LIMIT 1`,
+  ).bind(selectedType, requester, requester).first<{ suggested_hours: number; requested_at: string; basis_json: string | null }>()
+  if (!previous) {
+    return {
+      hasPrevious: false,
+      previousSuggestedHours: 0,
+      previousAt: '',
+      deltaHours: 0,
+      reasons: ['暂无同类型、同需求人的上一次建议可对比。'],
+      summary: '这是当前对比维度的首次建议，将作为后续变化基线。',
+    }
+  }
+  const basis = parseJsonRecord(previous.basis_json)
+  const complexity = typeof basis.complexity === 'object' && basis.complexity ? basis.complexity as Record<string, unknown> : {}
+  const quality = typeof basis.requirementQuality === 'object' && basis.requirementQuality ? basis.requirementQuality as Record<string, unknown> : {}
+  const requesterAdjustment = typeof basis.requesterAdjustment === 'object' && basis.requesterAdjustment ? basis.requesterAdjustment as Record<string, unknown> : {}
+  const learningAdjustment = typeof basis.learningAdjustment === 'object' && basis.learningAdjustment ? basis.learningAdjustment as Record<string, unknown> : {}
+  const matchedTasks = Array.isArray(basis.matchedTasks) ? basis.matchedTasks : []
+  const previousHours = Number(previous.suggested_hours) || 0
+  const deltaHours = Math.round((current.suggestedHours - previousHours) * 10) / 10
+  const complexityDelta = current.complexityScore - (Number(complexity.score) || 0)
+  const qualityDelta = current.requirementQualityScore - (Number(quality.score) || 0)
+  const sampleDelta = current.sampleCount - matchedTasks.length
+  const reasons = [
+    Math.abs(complexityDelta) >= 8 ? `任务复杂度${complexityDelta > 0 ? '提高' : '降低'} ${Math.abs(complexityDelta)} 分。` : '',
+    Math.abs(qualityDelta) >= 8 ? `需求完整度${qualityDelta > 0 ? '提高' : '降低'} ${Math.abs(qualityDelta)} 分。` : '',
+    sampleDelta !== 0 ? `当前可用参考样本比上次${sampleDelta > 0 ? '增加' : '减少'} ${Math.abs(sampleDelta)} 条。` : '',
+    current.requesterApplied && requesterAdjustment.applied !== true ? '本次首次启用需求人独立校准。' : '',
+    current.learningApplied && learningAdjustment.applied !== true ? '本次首次启用个人采用偏好校准。' : '',
+  ].filter(Boolean)
+  if (!reasons.length) reasons.push('主要由近期历史工时分布和模型解释的小幅差异造成。')
+  return {
+    hasPrevious: true,
+    previousSuggestedHours: previousHours,
+    previousAt: previous.requested_at,
+    deltaHours,
+    reasons: reasons.slice(0, 5),
+    summary: Math.abs(deltaHours) < 0.1
+      ? `与上次 ${previousHours.toFixed(1)}h 建议基本一致。`
+      : `相比上次 ${previousHours.toFixed(1)}h，本次${deltaHours > 0 ? '上调' : '下调'} ${Math.abs(deltaHours).toFixed(1)}h。`,
+  }
+}
+
 function hourEstimateDecision(
   confidence: HourEstimateConfidence,
   quality: HourEstimateRequirementQuality,
@@ -7490,6 +7590,8 @@ async function persistHourEstimateSuggestion(
       modelVersion,
       requirementQuality: result.requirementQuality,
       decision: result.decision,
+      completionOptions: result.completionOptions,
+      changeAudit: result.changeAudit,
       matchedTasks: result.matchedTasks,
     }),
   ).run()
@@ -7510,6 +7612,7 @@ async function persistHourEstimateSuggestion(
     accuracySampleCount: result.accuracy.sampleCount,
     requirementQualityScore: result.requirementQuality.score,
     decisionMode: result.decision.mode,
+    changeAudit: result.changeAudit,
     provider,
     modelVersion,
   })
@@ -8052,11 +8155,141 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
       reason: rule?.reason ?? '',
     }
   }).filter((item) => item.issues.length > 0 || item.excluded).slice(0, 30)
+  const validLearningItems = allItems.filter((row) => {
+    const taskId = Number(row.task_id)
+    return !sampleQualityRules.get(taskId)?.excluded
+      && !hourEstimateRequirementChange(row.initial_requirement ?? '', row.final_requirement ?? '', row.title).changed
+  })
+  const completeLifecycleItems = validLearningItems.filter((row) => quoteOutcomes.has(Number(row.task_id)))
+  const observationTarget = 20
+  const observationProgress = Math.min(100, Math.round((completeLifecycleItems.length / observationTarget) * 100))
+  const observationStatus = completeLifecycleItems.length >= observationTarget
+    ? 'ready'
+    : completeLifecycleItems.length >= 10 ? 'calibrating' : 'collecting'
+  const observationReadiness = {
+    target: observationTarget,
+    observedCount: allItems.length,
+    healthyCount: validLearningItems.length,
+    quotedCount: quoteOutcomes.size,
+    completeLifecycleCount: completeLifecycleItems.length,
+    activeDays: new Set(validLearningItems.map((row) => row.updated_at.slice(0, 10))).size,
+    progress: observationProgress,
+    status: observationStatus,
+    summary: observationStatus === 'ready'
+      ? '已达到首轮完整生命周期样本门槛，可以结合分类诊断与漂移提醒做下一轮校准。'
+      : observationStatus === 'calibrating'
+        ? `已进入校准期，还需 ${observationTarget - completeLifecycleItems.length} 条包含报价结果的完整样本。`
+        : `当前处于真实数据观察期，还需 ${observationTarget - completeLifecycleItems.length} 条完整样本；暂不宣称模型已稳定提升。`,
+  }
+  const diagnosticGroups = new Map<string, { dimension: 'type' | 'basis'; name: string; rows: HourEstimateMetricRow[] }>()
+  validLearningItems.forEach((row) => {
+    const typeName = String(row.design_type ?? '').trim() || '未分类'
+    const typeKey = `type:${typeName}`
+    const typeGroup = diagnosticGroups.get(typeKey) ?? { dimension: 'type' as const, name: typeName, rows: [] }
+    typeGroup.rows.push(row)
+    diagnosticGroups.set(typeKey, typeGroup)
+    const profile = hourEstimateComplexityProfile({ requirement: row.final_requirement ?? '', title: row.title })
+    const basisName = profile.signals.basis === 'reuse' ? '复用旧稿' : profile.signals.basis === 'scratch' ? '从零设计' : '基础未知'
+    const basisKey = `basis:${basisName}`
+    const basisGroup = diagnosticGroups.get(basisKey) ?? { dimension: 'basis' as const, name: basisName, rows: [] }
+    basisGroup.rows.push(row)
+    diagnosticGroups.set(basisKey, basisGroup)
+  })
+  const classificationDiagnostics = [...diagnosticGroups.values()].map((group) => {
+    const groupErrors = group.rows.map((row) => hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
+    const underCount = group.rows.filter((row) => (Number(row.selected_hours) || Number(row.suggested_hours)) < Number(row.actual_hours) * 0.8).length
+    const overCount = group.rows.filter((row) => (Number(row.selected_hours) || Number(row.suggested_hours)) > Number(row.actual_hours) * 1.2).length
+    const factorCounts = new Map<string, number>()
+    group.rows.forEach((row) => {
+      const task = { ...row, requirement: row.final_requirement } as unknown as DbTask
+      hourEstimateOutcomeFactors(task, Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)).forEach((factor) => {
+        factorCounts.set(factor, (factorCounts.get(factor) ?? 0) + 1)
+      })
+    })
+    return {
+      dimension: group.dimension,
+      name: group.name,
+      samples: group.rows.length,
+      medianErrorRate: Math.round(medianValue(groupErrors) * 100),
+      underRate: Math.round((underCount / group.rows.length) * 100),
+      overRate: Math.round((overCount / group.rows.length) * 100),
+      topFactors: [...factorCounts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 3).map(([factor]) => factor),
+    }
+  }).sort((left, right) => right.medianErrorRate - left.medianErrorRate || right.samples - left.samples).slice(0, 12)
+  const driftGroups = new Map<string, HourEstimateMetricRow[]>()
+  validLearningItems.forEach((row) => {
+    const name = String(row.design_type ?? '').trim() || '未分类'
+    driftGroups.set(name, [...(driftGroups.get(name) ?? []), row])
+  })
+  const driftAlerts = [...driftGroups.entries()].flatMap(([designType, group]) => {
+    if (group.length < 6) return []
+    const chronological = [...group].sort((left, right) => left.updated_at.localeCompare(right.updated_at))
+    const previousAverageHours = average(chronological.slice(-6, -3).map((row) => Number(row.actual_hours)))
+    const recentAverageHours = average(chronological.slice(-3).map((row) => Number(row.actual_hours)))
+    const changeRate = previousAverageHours > 0 ? Math.round(((recentAverageHours - previousAverageHours) / previousAverageHours) * 100) : 0
+    if (Math.abs(changeRate) < 20) return []
+    const direction = changeRate > 0 ? 'up' as const : 'down' as const
+    return [{
+      designType,
+      previousAverageHours: Math.round(previousAverageHours * 10) / 10,
+      recentAverageHours: Math.round(recentAverageHours * 10) / 10,
+      changeRate,
+      direction,
+      severity: Math.abs(changeRate) >= 35 ? 'warning' as const : 'notice' as const,
+      summary: changeRate > 0
+        ? '近期真实工时明显上升，建议检查任务范围、改稿轮次与模板复用是否变化。'
+        : '近期真实工时明显下降，建议确认是否形成了可复用模板或个人效率提升。',
+    }]
+  }).sort((left, right) => Math.abs(right.changeRate) - Math.abs(left.changeRate)).slice(0, 8)
   const quoteItems = [...quoteOutcomes.values()]
   const quoteAccepted = quoteItems.filter((item) => item.status === 'accepted' || item.status === 'adjusted')
   const quoteSettlementErrors = quoteItems
     .filter((item) => item.quotedAmount > 0 && item.settledAmount > 0)
     .map((item) => Math.abs(item.quotedAmount - item.settledAmount) / item.settledAmount)
+  const quoteTaskItems = [...quoteOutcomes.entries()].flatMap(([taskId, outcome]) => {
+    const row = allItems.find((item) => Number(item.task_id) === taskId)
+    return row ? [{ row, outcome }] : []
+  })
+  const pricingGroupRows = new Map<string, { dimension: 'all' | 'type' | 'requester'; name: string; items: typeof quoteTaskItems }>()
+  const appendPricingGroup = (key: string, dimension: 'all' | 'type' | 'requester', name: string, item: typeof quoteTaskItems[number]) => {
+    const group = pricingGroupRows.get(key) ?? { dimension, name, items: [] }
+    group.items.push(item)
+    pricingGroupRows.set(key, group)
+  }
+  quoteTaskItems.forEach((item) => {
+    appendPricingGroup('all', 'all', '全部报价', item)
+    appendPricingGroup(`type:${item.row.design_type || '未分类'}`, 'type', item.row.design_type || '未分类', item)
+    appendPricingGroup(`requester:${item.row.requester || '未填需求方'}`, 'requester', item.row.requester || '未填需求方', item)
+  })
+  const pricingStrategies = [...pricingGroupRows.values()].map((group) => {
+    const accepted = group.items.filter(({ outcome }) => outcome.status === 'accepted' || outcome.status === 'adjusted')
+    const settlementErrors = group.items.filter(({ outcome }) => outcome.quotedAmount > 0 && outcome.settledAmount > 0)
+      .map(({ outcome }) => Math.abs(outcome.quotedAmount - outcome.settledAmount) / outcome.settledAmount)
+    const underEstimatedAcceptedCount = accepted.filter(({ row }) => (Number(row.selected_hours) || Number(row.suggested_hours)) < Number(row.actual_hours) * 0.8).length
+    const accurateRejectedCount = group.items.filter(({ row, outcome }) => outcome.status === 'rejected'
+      && hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)) <= 0.2).length
+    const acceptedRate = Math.round((accepted.length / group.items.length) * 100)
+    const settlementMedianErrorRate = settlementErrors.length ? Math.round(medianValue(settlementErrors) * 100) : 0
+    const recommendation = group.items.length < 3
+      ? '样本仍少，先记录报价、是否成交与最终结算，不宜调整价格策略。'
+      : underEstimatedAcceptedCount > 0
+        ? '报价可以成交，但存在工时低估；优先提高工时基线或增加风险预留。'
+        : accurateRejectedCount > 0
+          ? '工时估算基本准确但报价被拒，建议复查单价、价值说明与客户预算匹配。'
+          : settlementMedianErrorRate > 15
+            ? '报价与结算偏差偏高，建议在报价前明确改稿轮次和范围变更规则。'
+            : '当前成交与结算表现稳定，继续按同口径积累样本。'
+    return {
+      dimension: group.dimension,
+      name: group.name,
+      samples: group.items.length,
+      acceptedRate,
+      medianSettlementErrorRate: settlementMedianErrorRate,
+      underEstimatedAcceptedCount,
+      accurateRejectedCount,
+      recommendation,
+    }
+  }).sort((left, right) => Number(left.dimension !== 'all') - Number(right.dimension !== 'all') || right.samples - left.samples).slice(0, 12)
   const efficiencyGroups = new Map<string, HourEstimateMetricRow[]>()
   allItems.forEach((row) => {
     const key = String(row.design_type ?? '').trim() || '未分类'
@@ -8119,11 +8352,15 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
           ? '候选历史基线回放误差高于允许阈值，应阻止预测算法发布。'
           : '可回放样本不足 3 条，暂不宣称算法提升；继续保守发布并观察。',
     },
+    observationReadiness,
+    classificationDiagnostics,
+    driftAlerts,
     quoteSummary: {
       recordedCount: quoteItems.length,
       acceptedRate: quoteItems.length ? Math.round((quoteAccepted.length / quoteItems.length) * 100) : 0,
       settlementMedianErrorRate: quoteSettlementErrors.length ? Math.round(medianValue(quoteSettlementErrors) * 100) : 0,
     },
+    pricingStrategies,
     sampleQuality,
     efficiencyProfiles,
     recent,
@@ -11917,6 +12154,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   }
   const currentProfile = hourEstimateComplexityProfile({ title, requirement, attachmentText, attachmentNames })
   const requirementQuality = hourEstimateRequirementQuality(currentProfile, { ...body, title, requirement })
+  const completionOptions = hourEstimateCompletionOptions(currentProfile, requirement)
   const [requesterAdjustment, learningAdjustment, hourlyRate, sampleFeedbackRules, sampleQualityRules] = await Promise.all([
     hourEstimateRequesterAdjustment(env, requester, selectedType),
     hourEstimateLearningAdjustment(env, selectedType),
@@ -12004,6 +12242,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     const riskFactors = hourEstimateRiskFactors(currentProfile, 0, 0, 0, 0)
     const safeHours = roundToHalfHour(currentEstimatedHours + 0.5)
     const decision = hourEstimateDecision('低', requirementQuality, 0, riskFactors, expectedRange)
+    const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, {
+      suggestedHours: currentEstimatedHours,
+      complexityScore: currentProfile.score,
+      requirementQualityScore: requirementQuality.score,
+      sampleCount: 0,
+      requesterApplied: requesterAdjustment.applied,
+      learningApplied: learningAdjustment.applied,
+    })
     const result: HourEstimateResult = {
       suggestedHours: currentEstimatedHours,
       safeHours,
@@ -12037,6 +12283,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       modelVersion: { algorithm: HOUR_ESTIMATE_ALGORITHM_VERSION, prompt: HOUR_ESTIMATE_PROMPT_VERSION, provider: 'statistical-no-history' },
       requirementQuality,
       decision,
+      completionOptions,
+      changeAudit,
       matchedTasks: [],
     }
     return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history'))
@@ -12176,6 +12424,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const accuracy = hourEstimateAccuracy(stableCalibrationRows)
   const riskFactors = hourEstimateRiskFactors(currentProfile, sampleCount, p25Hours, medianHours, p80Hours)
   const decision = hourEstimateDecision(confidence, requirementQuality, sampleCount, riskFactors, expectedRange)
+  const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, {
+    suggestedHours,
+    complexityScore: currentProfile.score,
+    requirementQualityScore: requirementQuality.score,
+    sampleCount,
+    requesterApplied: requesterAdjustment.applied,
+    learningApplied: learningAdjustment.applied,
+  })
   const basis = Array.isArray(parsed?.basis)
     ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5)
     : []
@@ -12222,6 +12478,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     modelVersion: { algorithm: HOUR_ESTIMATE_ALGORITHM_VERSION, prompt: HOUR_ESTIMATE_PROMPT_VERSION, provider },
     requirementQuality,
     decision,
+    completionOptions,
+    changeAudit,
     matchedTasks,
   }
   return ok(await persistHourEstimateSuggestion(env, body, result, provider))

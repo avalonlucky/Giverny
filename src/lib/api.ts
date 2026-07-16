@@ -104,11 +104,50 @@ export type HourEstimateMetrics = {
     toleranceRate: number
     summary: string
   }
+  observationReadiness: {
+    target: number
+    observedCount: number
+    healthyCount: number
+    quotedCount: number
+    completeLifecycleCount: number
+    activeDays: number
+    progress: number
+    status: 'collecting' | 'calibrating' | 'ready'
+    summary: string
+  }
+  classificationDiagnostics: Array<{
+    dimension: 'type' | 'basis'
+    name: string
+    samples: number
+    medianErrorRate: number
+    underRate: number
+    overRate: number
+    topFactors: string[]
+  }>
+  driftAlerts: Array<{
+    designType: string
+    previousAverageHours: number
+    recentAverageHours: number
+    changeRate: number
+    direction: 'up' | 'down'
+    severity: 'notice' | 'warning'
+    summary: string
+  }>
   quoteSummary: {
     recordedCount: number
     acceptedRate: number
     settlementMedianErrorRate: number
   }
+  pricingStrategies: Array<{
+    dimension: 'all' | 'type' | 'requester'
+    name: string
+    samples: number
+    acceptedRate: number
+    medianSettlementErrorRate: number
+    underEstimatedAcceptedCount: number
+    accurateRejectedCount: number
+    recommendation: string
+  }>
   sampleQuality: Array<{
     taskId: number
     title: string
@@ -401,6 +440,19 @@ export type HourEstimateSuggestion = {
     mode: 'estimate' | 'range_only' | 'needs_info'
     canApply: boolean
     reason: string
+  }
+  completionOptions: Array<{
+    key: string
+    label: string
+    appendText: string
+  }>
+  changeAudit: {
+    hasPrevious: boolean
+    previousSuggestedHours: number
+    previousAt: string
+    deltaHours: number
+    reasons: string[]
+    summary: string
   }
   matchedTasks: Array<{
     id: number

@@ -14764,10 +14764,10 @@ function InsightsView({
               </div>
               {hourMetricsLoading && <p className="hour-learning-empty">AI 正在整理工时复盘…</p>}
               {!hourMetricsLoading && hourMetricsError && <p className="hour-learning-empty error-text">{hourMetricsError}</p>}
-              {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount === 0 && (
+              {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount === 0 && hourMetrics.observationReadiness.observedCount === 0 && (
                 <p className="hour-learning-empty">当月还没有“使用过 AI 工时建议且已验收”的任务。完成验收后，这里会自动生成偏差和校准结果。</p>
               )}
-              {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount > 0 && (
+              {!hourMetricsLoading && !hourMetricsError && hourMetrics && (hourMetrics.summary.observedCount > 0 || hourMetrics.observationReadiness.observedCount > 0) && (
                 <article className="hour-learning-report">
                   <dl className="hour-learning-metrics">
                     <div><dt>已复盘预测</dt><dd>{hourMetrics.summary.observedCount}</dd><small>已验收任务</small></div>
@@ -14785,6 +14785,16 @@ function InsightsView({
                     <small>{hourMetrics.releaseGate.samples} 条无未来数据回放 · 候选中位误差 {hourMetrics.releaseGate.candidateMedianErrorRate}% · 线上基线 {hourMetrics.releaseGate.baselineMedianErrorRate}%</small>
                   </section>
 
+                  <section className={`hour-observation-readiness ${hourMetrics.observationReadiness.status}`}>
+                    <div className="hour-observation-head">
+                      <div><strong>真实数据观察期</strong><span>{hourMetrics.observationReadiness.status === 'ready' ? '首轮样本就绪' : hourMetrics.observationReadiness.status === 'calibrating' ? '进入校准期' : '持续采集'}</span></div>
+                      <strong>{hourMetrics.observationReadiness.completeLifecycleCount} / {hourMetrics.observationReadiness.target}</strong>
+                    </div>
+                    <div className="hour-observation-track" aria-label={`完整生命周期样本进度 ${hourMetrics.observationReadiness.progress}%`}><span style={{ width: `${hourMetrics.observationReadiness.progress}%` }} /></div>
+                    <p>{hourMetrics.observationReadiness.summary}</p>
+                    <small>{hourMetrics.observationReadiness.healthyCount} 条健康验收样本 · {hourMetrics.observationReadiness.quotedCount} 条报价结果 · 覆盖 {hourMetrics.observationReadiness.activeDays} 个记录日</small>
+                  </section>
+
                   <section className="hour-learning-section">
                     <div className="hour-learning-head">
                       <h3>报价结果闭环</h3>
@@ -14799,6 +14809,21 @@ function InsightsView({
 
                   <section className="hour-learning-section">
                     <div className="hour-learning-head">
+                      <h3>报价策略诊断</h3>
+                      <p>把工时准确度、成交结果和最终结算放在同一条链路分析</p>
+                    </div>
+                    {hourMetrics.pricingStrategies.length ? <div className="hour-strategy-list">
+                      {hourMetrics.pricingStrategies.map((item) => <div className="hour-strategy-row" key={`${item.dimension}-${item.name}`}>
+                        <div><strong>{item.name}</strong><span>{item.dimension === 'all' ? '整体' : item.dimension === 'type' ? '设计类型' : '需求方'} · {item.samples} 条</span></div>
+                        <span>接受 {item.acceptedRate}%</span>
+                        <span>结算偏差 {item.medianSettlementErrorRate}%</span>
+                        <p>{item.recommendation}</p>
+                      </div>)}
+                    </div> : <p className="hour-learning-empty">记录报价结果后，将自动生成成交与结算策略建议。</p>}
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
                       <h3>建议采用效果</h3>
                       <p>比较常规值、稳妥值与手工修改后的最终准确度</p>
                     </div>
@@ -14808,6 +14833,35 @@ function InsightsView({
                         return <div key={item.mode}><span>{label}</span><strong>{item.count} 次</strong><small>中位误差 {item.count ? `${item.medianErrorRate}%` : '—'}</small></div>
                       })}
                     </div>
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>分类误差诊断</h3>
+                      <p>区分设计类型与从零 / 复用基础，定位误差集中在哪一层</p>
+                    </div>
+                    {hourMetrics.classificationDiagnostics.length ? <div className="hour-diagnostic-list">
+                      {hourMetrics.classificationDiagnostics.map((item) => <div className="hour-diagnostic-row" key={`${item.dimension}-${item.name}`}>
+                        <div><strong>{item.name}</strong><span>{item.dimension === 'type' ? '设计类型' : '设计基础'} · {item.samples} 条</span></div>
+                        <span>中位误差 {item.medianErrorRate}%</span>
+                        <span>低估 {item.underRate}% · 高估 {item.overRate}%</span>
+                        <small>{item.topFactors.join('、') || '暂无集中偏差因素'}</small>
+                      </div>)}
+                    </div> : <p className="hour-learning-empty">健康样本不足，暂不生成分类结论。</p>}
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>预测漂移提醒</h3>
+                      <p>同类型最近 3 条与此前 3 条真实工时相差 20% 以上时提醒复核</p>
+                    </div>
+                    {hourMetrics.driftAlerts.length ? <div className="hour-drift-list">
+                      {hourMetrics.driftAlerts.map((item) => <div className={`hour-drift-row ${item.severity}`} key={item.designType}>
+                        <div><strong>{item.designType}</strong><span>{item.previousAverageHours.toFixed(1)}h → {item.recentAverageHours.toFixed(1)}h</span></div>
+                        <strong>{item.changeRate > 0 ? '+' : ''}{item.changeRate}%</strong>
+                        <p>{item.summary}</p>
+                      </div>)}
+                    </div> : <p className="hour-learning-empty">当前没有达到提醒阈值的类型，或同类型样本尚不足 6 条。</p>}
                   </section>
 
                   <section className="hour-learning-section">
@@ -18763,6 +18817,11 @@ function NewTaskModal({
     updateEstimatedMinutes(snapDurationMinutes(hours * 60))
   }
 
+  const applyHourCompletionOption = (appendText: string) => {
+    if (!appendText || requirement.includes(appendText)) return
+    setRequirement([requirement.trim(), appendText].filter(Boolean).join('\n'))
+  }
+
   const toggleHourSampleFeedback = (sampleTaskId: number) => {
     if (!hourSuggestion || hourSuggestionIsStale) return
     const relevant = hourSampleFeedback[sampleTaskId] === false
@@ -19216,6 +19275,23 @@ function NewTaskModal({
                   </div>
                   <p>{hourSuggestion.decision.reason}</p>
                   <small>{hourSuggestion.requirementQuality.summary}</small>
+                </section>
+                {hourSuggestion.completionOptions.length > 0 && (
+                  <section className="hour-requirement-completion">
+                    <div><strong>快速补全需求</strong><span>点击后写入需求，再重新分析</span></div>
+                    <div>
+                      {hourSuggestion.completionOptions.map((option) => (
+                        <button type="button" key={option.key} disabled={requirement.includes(option.appendText)} onClick={() => applyHourCompletionOption(option.appendText)}>
+                          {requirement.includes(option.appendText) ? '已补充 · ' : ''}{option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                <section className="hour-change-audit">
+                  <div><strong>相比上次建议</strong><span>{hourSuggestion.changeAudit.hasPrevious ? `${hourSuggestion.changeAudit.deltaHours >= 0 ? '+' : ''}${hourSuggestion.changeAudit.deltaHours.toFixed(1)} h` : '首次基线'}</span></div>
+                  <p>{hourSuggestion.changeAudit.summary}</p>
+                  {hourSuggestion.changeAudit.reasons.length > 0 && <small>{hourSuggestion.changeAudit.reasons.join('；')}</small>}
                 </section>
                 <section className="hour-pricing-suggestion" aria-label="报价建议">
                   <header>

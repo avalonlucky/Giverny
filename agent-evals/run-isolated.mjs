@@ -378,8 +378,11 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!(result.pricing?.regularAmount > 0) || !(result.pricing.safeAmount >= result.pricing.regularAmount)) {
     throw new Error(`Hour estimate pricing is invalid: ${JSON.stringify(result.pricing)}`)
   }
-  if (result.modelVersion?.algorithm !== '3.0.0' || !result.modelVersion?.prompt || !result.modelVersion?.provider) {
+  if (result.modelVersion?.algorithm !== '3.1.0' || !result.modelVersion?.prompt || !result.modelVersion?.provider) {
     throw new Error(`Hour estimate version metadata is missing: ${JSON.stringify(result.modelVersion)}`)
+  }
+  if (!Array.isArray(result.completionOptions) || !result.changeAudit?.summary) {
+    throw new Error(`Hour estimate completion or change audit is missing: ${JSON.stringify({ completionOptions: result.completionOptions, changeAudit: result.changeAudit })}`)
   }
   const adaptation = result.complexity?.dimensions?.find((item) => item.key === 'adaptation')
   if (!adaptation?.value?.includes('3')) {
@@ -465,7 +468,8 @@ async function runHourEstimateLearningCheck(cookie) {
     throw new Error(`Hour estimate review acceptance failed: ${JSON.stringify(accepted)}`)
   }
 
-  for (let index = 0; index < 5; index += 1) {
+  let replayQuoteTaskId = 0
+  for (let index = 0; index < 6; index += 1) {
     const replaySuggestionResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate', {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie },
@@ -482,6 +486,9 @@ async function runHourEstimateLearningCheck(cookie) {
     const replaySuggestion = await replaySuggestionResponse.json().catch(() => ({}))
     if (!replaySuggestionResponse.ok || !replaySuggestion.suggestionId) {
       throw new Error(`Hour estimate replay suggestion failed: ${JSON.stringify(replaySuggestion)}`)
+    }
+    if (!replaySuggestion.changeAudit?.hasPrevious) {
+      throw new Error(`Hour estimate replay change audit did not find the previous suggestion: ${JSON.stringify(replaySuggestion.changeAudit)}`)
     }
     const day = String(17 + index).padStart(2, '0')
     const replayCreateResponse = await fetch('http://127.0.0.1:8798/api/tasks', {
@@ -514,6 +521,8 @@ async function runHourEstimateLearningCheck(cookie) {
     if (!replayCreateResponse.ok || !replayTask.id) {
       throw new Error(`Hour estimate replay task creation failed: ${JSON.stringify(replayTask)}`)
     }
+    if (index === 0) replayQuoteTaskId = replayTask.id
+    const replayEnd = index < 3 ? '14:00' : '16:00'
     const replayAcceptResponse = await fetch(`http://127.0.0.1:8798/api/tasks/${replayTask.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', cookie },
@@ -521,12 +530,12 @@ async function runHourEstimateLearningCheck(cookie) {
         status: '已验收',
         stage: '已验收',
         progress: 100,
-        actualDeliveryDate: `2026-07-${day}T14:00`,
+        actualDeliveryDate: `2026-07-${day}T${replayEnd}`,
         timeEntries: [{
           id: `hour-replay-entry-${index + 1}`,
           date: `2026-07-${day}`,
           start: '09:00',
-          end: '14:00',
+          end: replayEnd,
           note: '完成降噪、三个尺寸适配和一轮修改',
           isAcceptanceProgress: true,
         }],
@@ -547,6 +556,14 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!quoteResponse.ok || quote.status !== 'adjusted') {
     throw new Error(`Hour estimate quote outcome failed: ${JSON.stringify(quote)}`)
   }
+  const replayQuoteResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/quote-outcome', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ taskId: replayQuoteTaskId, quotedAmount: 1500, settledAmount: 1500, status: 'accepted', note: '隔离评测完整生命周期报价' }),
+  })
+  if (!replayQuoteResponse.ok) {
+    throw new Error(`Hour estimate replay quote outcome failed: ${await replayQuoteResponse.text()}`)
+  }
   const metricsResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/metrics?month=2026-07', {
     headers: { cookie },
   })
@@ -561,10 +578,10 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!review?.requirementChange?.changed || !metrics.trends?.some((item) => item.month === '2026-07')) {
     throw new Error(`Requirement change or cross-month trend is missing: ${JSON.stringify(review)}`)
   }
-  if (!metrics.versions?.some((item) => item.current && item.algorithm === '3.0.0')) {
+  if (!metrics.versions?.some((item) => item.current && item.algorithm === '3.1.0')) {
     throw new Error(`Hour estimate version comparison is missing: ${JSON.stringify(metrics.versions)}`)
   }
-  if (metrics.releaseGate?.status !== 'pass' || metrics.releaseGate?.sampleCount < 3) {
+  if (metrics.releaseGate?.status !== 'pass' || metrics.releaseGate?.samples < 3) {
     throw new Error(`Hour estimate chronological replay gate did not pass: ${JSON.stringify(metrics.releaseGate)}`)
   }
   if (metrics.quoteSummary?.recordedCount < 1 || review?.quoteOutcome?.status !== 'adjusted') {
@@ -572,6 +589,15 @@ async function runHourEstimateLearningCheck(cookie) {
   }
   if (!metrics.efficiencyProfiles?.some((item) => item.name === '视频剪辑') || !Array.isArray(review?.requirementTimeline)) {
     throw new Error(`Hour estimate efficiency profile or requirement timeline is missing: ${JSON.stringify({ efficiencyProfiles: metrics.efficiencyProfiles, timeline: review?.requirementTimeline })}`)
+  }
+  if (metrics.observationReadiness?.completeLifecycleCount < 1 || !metrics.classificationDiagnostics?.length) {
+    throw new Error(`Hour estimate observation readiness or classification diagnostics are missing: ${JSON.stringify({ observation: metrics.observationReadiness, diagnostics: metrics.classificationDiagnostics })}`)
+  }
+  if (!metrics.driftAlerts?.some((item) => item.designType === '视频剪辑' && item.direction === 'up')) {
+    throw new Error(`Hour estimate drift alert is missing: ${JSON.stringify(metrics.driftAlerts)}`)
+  }
+  if (!metrics.pricingStrategies?.some((item) => item.dimension === 'all')) {
+    throw new Error(`Hour estimate pricing strategy is missing: ${JSON.stringify(metrics.pricingStrategies)}`)
   }
 
   const qualityResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/sample-quality', {
@@ -601,7 +627,7 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!correctedMetrics.sampleQuality?.some((item) => item.taskId === created.id && item.excluded === true)) {
     throw new Error(`Hour estimate excluded sample is missing: ${JSON.stringify(correctedMetrics.sampleQuality)}`)
   }
-  process.stdout.write('AI hour estimate quality scoring, refusal, pricing, chronological replay gate, quote feedback, sample quality, requirement timeline, efficiency profile, correction, trends, and calibration checks passed.\n')
+  process.stdout.write('AI hour estimate quality scoring, completion, change audit, observation readiness, classification diagnostics, drift alerts, pricing strategy, replay gate, and learning checks passed.\n')
 }
 
 try {
