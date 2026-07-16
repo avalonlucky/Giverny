@@ -42,6 +42,7 @@
   --row-fill-plan: #e3fdfd;
   --row-fill-active: #eaf0f4;
   --row-fill-pending: #f5f0e6;
+  --row-fill-accepted: #e9f5ea;
   --color-alert-accent: #94652f;
   --color-editorial-surface: #fbfbf8;
   --color-editorial-surface-alt: #f4f4ee;
@@ -1362,7 +1363,7 @@ button.topbar-create-button:hover {
   position: relative;
   margin-bottom: 14px;
   padding: 13px 18px;
-  background: #e9f5ea;
+  background: var(--row-fill-accepted);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -2042,6 +2043,46 @@ button.topbar-create-button:hover {
   line-height: 1.2;
 }
 
+.dashboard-task-title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.task-row-theme-toggle {
+  min-height: 28px;
+  gap: 7px;
+  padding: 0;
+}
+
+.task-row-theme-toggle .giverny-toggle-label,
+.task-row-theme-state {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.task-row-theme-toggle.on .giverny-toggle-label,
+.task-row-theme-toggle.on .task-row-theme-state {
+  color: var(--color-primary-strong);
+}
+
+.task-row-theme-toggle .giverny-toggle-track {
+  width: 32px;
+  height: 18px;
+}
+
+.task-row-theme-toggle .giverny-toggle-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.task-row-theme-toggle.on .giverny-toggle-thumb {
+  transform: translateX(14px);
+}
+
 .dashboard-task-heading-row p {
   margin: 0;
   color: var(--color-text-muted);
@@ -2062,8 +2103,7 @@ button.topbar-create-button:hover {
 
 .no-row-theme .task-row.selected {
   border-color: transparent;
-  background: color-mix(in srgb, var(--color-text) 5%, var(--color-surface-alt));
-  box-shadow: inset 2px 0 0 var(--color-primary);
+  background: color-mix(in srgb, var(--color-text) 7%, var(--color-surface-alt));
 }
 
 .dashboard-task-search {
@@ -2848,6 +2888,7 @@ button.topbar-create-button:hover {
      进行中=淡蓝、待验收=淡米、已验收=淡绿；临期/逾期再覆盖为暖橙/干净红。
      低饱和、无边框无标记，底色即可区分状态。 */
   --row-fill: var(--row-fill-plan);
+  --row-accent: var(--color-status-planning);
   background: var(--row-fill);
   display: grid;
   grid-template-columns: 92px minmax(220px, 1fr) 100px auto;
@@ -2874,23 +2915,28 @@ button.topbar-create-button:hover {
 
 .task-row[data-status="进行中"] {
   --row-fill: var(--row-fill-active);
+  --row-accent: var(--color-status-active);
 }
 
 .task-row[data-status="待验收"] {
   --row-fill: var(--row-fill-pending);
+  --row-accent: var(--color-status-pending);
 }
 
 .task-row[data-status="已验收"] {
-  --row-fill: color-mix(in srgb, var(--color-status-accepted) 10%, var(--color-surface-alt));
+  --row-fill: var(--row-fill-accepted);
+  --row-accent: var(--color-status-accepted);
 }
 
 /* 临期/逾期：以紧迫状态为准覆盖背景色，状态区分已由右侧文字标注承担 */
 .task-row[data-due="soon"] {
   --row-fill: color-mix(in srgb, var(--color-due-soon) 14%, transparent);
+  --row-accent: var(--color-due-soon);
 }
 
 .task-row[data-due="overdue"] {
   --row-fill: color-mix(in srgb, var(--color-due-overdue) 12%, transparent);
+  --row-accent: var(--color-due-overdue);
 }
 
 .task-row:hover,
@@ -2905,18 +2951,8 @@ button.topbar-create-button:hover {
 }
 
 .task-row.selected {
-  background: var(--row-fill);
+  background: color-mix(in srgb, var(--row-fill) 84%, var(--row-accent) 16%);
   border-color: transparent;
-}
-
-.task-row.selected::before {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 0;
-  width: 2px;
-  background: var(--color-primary);
-  content: "";
 }
 
 .task-date b,
@@ -15437,12 +15473,6 @@ textarea:focus-visible {
   border: 0;
   background: transparent;
   padding: 0;
-}
-
-.giverny-settings-panel > .appearance-setting-row {
-  margin: 20px 0 0;
-  padding-top: 18px;
-  border-top: 1px solid var(--color-border);
 }
 
 .giverny-season-pref {

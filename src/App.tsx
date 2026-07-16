@@ -8278,7 +8278,21 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             <section className="panel task-panel dashboard-task-panel">
               <div className="dashboard-task-header">
                 <div className="dashboard-task-heading-row">
-                  <h2>任务明细</h2>
+                  <div className="dashboard-task-title-group">
+                    <h2>任务明细</h2>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={rowThemeOn}
+                      className={`giverny-toggle task-row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
+                      title={rowThemeOn ? '关闭任务状态配色' : '打开任务状态配色'}
+                      onClick={toggleRowTheme}
+                    >
+                      <span className="giverny-toggle-label">状态色</span>
+                      <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
+                      <span className="task-row-theme-state">{rowThemeOn ? '打开' : '关闭'}</span>
+                    </button>
+                  </div>
                   <p>按月份汇总工作内容、工时与验收</p>
                   <button
                     type="button"
@@ -8620,7 +8634,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               role={role}
               accessTokens={accessTokens}
               newTokenId={newTokenId}
-              rowThemeOn={rowThemeOn}
               onRateChange={handleRateChange}
               onPdfTitleChange={handlePdfTitleChange}
               onServiceCompanyNameChange={handleServiceCompanyNameChange}
@@ -8634,7 +8647,6 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               onToggleToken={handleToggleAccessToken}
               onDeleteToken={handleDeleteAccessToken}
               onCopyToken={handleCopyAccessToken}
-              onToggleRowTheme={toggleRowTheme}
             />
           ) : (
             <section className="panel read-only-settings-panel">
@@ -9151,13 +9163,7 @@ function Fireworks() {
 }
 
 // 设置页 · 吉维尼模式：默认关闭，用户手动开启。开启后主题随季节自动流转，也可手动指定季节。
-function GivernyModeSettings({
-  rowThemeOn,
-  onToggleRowTheme,
-}: {
-  rowThemeOn: boolean
-  onToggleRowTheme: () => void
-}) {
+function GivernyModeSettings() {
   const [on, setOn] = useState<boolean>(() =>
     typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
   )
@@ -9247,22 +9253,6 @@ function GivernyModeSettings({
               <p className="giverny-season-hint">默认跟随当前真实季节；也可手动锁定某一季。</p>
             </div>
           )}
-          <div className="panel-header compact appearance-setting-row">
-            <div>
-              <h2>任务状态配色</h2>
-              <p>开启后，任务行使用低饱和底色区分计划中、进行中和待验收；关闭后统一为中性纸面。</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={rowThemeOn}
-              className={`giverny-toggle ${rowThemeOn ? 'on' : ''}`}
-              onClick={onToggleRowTheme}
-            >
-              <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
-              <span className="giverny-toggle-label">{rowThemeOn ? '已开启' : '已关闭'}</span>
-            </button>
-          </div>
         </section>
       </div>
     </details>
@@ -16476,7 +16466,6 @@ function SettingsView({
   role,
   accessTokens,
   newTokenId,
-  rowThemeOn,
   onRateChange,
   onPdfTitleChange,
   onServiceCompanyNameChange,
@@ -16490,7 +16479,6 @@ function SettingsView({
   onToggleToken,
   onDeleteToken,
   onCopyToken,
-  onToggleRowTheme,
 }: {
   hourlyRate: number
   pdfTitle: string
@@ -16501,7 +16489,6 @@ function SettingsView({
   role: AuthRole
   accessTokens: AccessToken[]
   newTokenId: string
-  rowThemeOn: boolean
   onRateChange: (rate: number) => void
   onPdfTitleChange: (title: string) => void
   onServiceCompanyNameChange: (name: string) => void
@@ -16523,7 +16510,6 @@ function SettingsView({
   onToggleToken: (tokenId: string, disabled: boolean) => void
   onDeleteToken: (tokenId: string) => void
   onCopyToken: (token: string) => void
-  onToggleRowTheme: () => void
 }) {
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenExpiry, setTokenExpiry] = useState('permanent')
@@ -17014,7 +17000,7 @@ function SettingsView({
         </button>
       </div>
       {settingsTab === 'appearance' && (
-        <GivernyModeSettings rowThemeOn={rowThemeOn} onToggleRowTheme={onToggleRowTheme} />
+        <GivernyModeSettings />
       )}
       {settingsTab === 'settlement' && (
         <div className="settings-group-body settings-tab-body">
