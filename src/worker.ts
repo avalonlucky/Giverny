@@ -496,15 +496,25 @@ async function createAuthSession(env: Env, principal: AuthPrincipal) {
   return { token, maxAge: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) }
 }
 
-async function resolveSessionRole(env: Env, request: Request): Promise<AuthRole | null> {
+async function resolveSessionPrincipal(env: Env, request: Request): Promise<AuthPrincipal | null> {
   const token = requestCookie(request, AUTH_SESSION_COOKIE)
   if (!token) return null
   await ensureAuthSessionsTable(env)
   const tokenHash = await hashSessionToken(token)
-  const row = await env.DB.prepare('SELECT role FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
+  const row = await env.DB.prepare('SELECT role, email, principal_id, expires_at FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
     .bind(tokenHash, nowIso())
-    .first<{ role: string }>()
-  return row && ['admin', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role) ? row.role as AuthRole : null
+    .first<{ role: string; email: string | null; principal_id: string; expires_at: string }>()
+  if (!row || !['admin', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role)) return null
+  return {
+    role: row.role as AuthRole,
+    email: row.email || '',
+    principalId: row.principal_id,
+    expiresAt: row.expires_at,
+  }
+}
+
+async function resolveSessionRole(env: Env, request: Request): Promise<AuthRole | null> {
+  return (await resolveSessionPrincipal(env, request))?.role ?? null
 }
 
 async function deleteRequestSession(env: Env, request: Request) {
@@ -9019,6 +9029,16 @@ async function resolveRequestRole(env: Env, request: Request): Promise<AuthRole 
   )
 }
 
+async function resolveRequestPrincipal(env: Env, request: Request): Promise<AuthPrincipal | null> {
+  const sessionPrincipal = await resolveSessionPrincipal(env, request)
+  if (sessionPrincipal) return sessionPrincipal
+  return resolvePrincipal(
+    env,
+    request.headers.get('x-auth-key') ?? '',
+    request.headers.get('x-auth-email') ?? '',
+  )
+}
+
 // ===== 登录防爆破（撞库/暴力破解）限流 =====
 // 按来源 IP 统计失败次数：10 分钟内失败达 6 次即临时锁定 10 分钟，期间该 IP 一律拒绝登录。
 // 登录成功立即清零。纯 worker + D1 实现，不依赖任何后台配置。
@@ -13265,6 +13285,353 @@ async function rotateMonthlyReportToken(env: Env, reportId: string) {
   return ok({ report: toReport(updated ?? { ...existing, public_token: publicToken, viewed_at: null, view_count: 0 }) })
 }
 
+type LocalCliStatus = 'available' | 'needs_auth' | 'unsupported' | 'not_installed' | 'unavailable'
+
+type LocalCliReport = {
+  id: string
+  name: string
+  command: string
+  version: string
+  status: LocalCliStatus
+  authStatus: 'authenticated' | 'signed_out' | 'unknown'
+  supportsStreaming: boolean
+  supportsMcp: boolean
+  detail: string
+}
+
+type DbLocalCliDevice = {
+  id: string
+  principal_id: string
+  role: string
+  browser_device_key: string
+  name: string
+  platform: string
+  arch: string
+  bridge_version: string
+  selected_cli_id: string | null
+  last_seen_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+type DbLocalCliAdapter = {
+  device_id: string
+  adapter_id: string
+  name: string
+  command: string
+  version: string
+  status: LocalCliStatus
+  auth_status: string
+  supports_streaming: number
+  supports_mcp: number
+  detail: string
+  detected_at: string
+}
+
+type DbLocalCliCommand = {
+  id: string
+  device_id: string
+  principal_id: string
+  command_type: string
+  payload_json: string
+  status: string
+  result_json: string | null
+  error_message: string | null
+  expires_at: string
+  created_at: string
+  claimed_at: string | null
+  completed_at: string | null
+}
+
+const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
+const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
+const LOCAL_CLI_ONLINE_MS = 45 * 1000
+
+function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
+  if (!value || typeof value !== 'object') return null
+  const item = value as Record<string, unknown>
+  const id = String(item.id || '').trim().slice(0, 40)
+  const name = String(item.name || '').trim().slice(0, 80)
+  const status = String(item.status || '') as LocalCliStatus
+  const authStatus = String(item.authStatus || 'unknown') as LocalCliReport['authStatus']
+  if (!id || !name || !['available', 'needs_auth', 'unsupported', 'not_installed', 'unavailable'].includes(status)) return null
+  return {
+    id,
+    name,
+    command: String(item.command || '').trim().slice(0, 500),
+    version: String(item.version || '').trim().slice(0, 120),
+    status,
+    authStatus: ['authenticated', 'signed_out', 'unknown'].includes(authStatus) ? authStatus : 'unknown',
+    supportsStreaming: Boolean(item.supportsStreaming),
+    supportsMcp: Boolean(item.supportsMcp),
+    detail: String(item.detail || '').trim().slice(0, 500),
+  }
+}
+
+function normalizeLocalCliReports(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeLocalCliReport).filter((item): item is LocalCliReport => Boolean(item)).slice(0, 12)
+}
+
+async function replaceLocalCliAdapters(env: Env, deviceId: string, reports: LocalCliReport[]) {
+  const statements: D1PreparedStatement[] = [env.DB.prepare('DELETE FROM local_cli_adapters WHERE device_id = ?').bind(deviceId)]
+  for (const item of reports) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO local_cli_adapters (
+          device_id, adapter_id, name, command, version, status, auth_status,
+          supports_streaming, supports_mcp, detail, detected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ).bind(
+        deviceId,
+        item.id,
+        item.name,
+        item.command,
+        item.version,
+        item.status,
+        item.authStatus,
+        item.supportsStreaming ? 1 : 0,
+        item.supportsMcp ? 1 : 0,
+        item.detail,
+      ),
+    )
+  }
+  await env.DB.batch(statements)
+}
+
+function localCliPairingCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bytes = crypto.getRandomValues(new Uint8Array(8))
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join('')
+}
+
+function localCliBearerToken(request: Request) {
+  const authorization = request.headers.get('authorization') || ''
+  return authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
+}
+
+async function resolveLocalCliBridgeDevice(env: Env, request: Request) {
+  const token = localCliBearerToken(request)
+  if (!token) return null
+  const tokenHash = await hashSessionToken(token)
+  return env.DB.prepare('SELECT * FROM local_cli_devices WHERE token_hash = ? AND revoked_at IS NULL')
+    .bind(tokenHash)
+    .first<DbLocalCliDevice>()
+}
+
+function localCliIsOnline(lastSeenAt: string | null) {
+  if (!lastSeenAt) return false
+  const timestamp = Date.parse(`${lastSeenAt.replace(' ', 'T')}Z`)
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= LOCAL_CLI_ONLINE_MS
+}
+
+function toLocalCliAdapter(row: DbLocalCliAdapter, selectedId: string | null) {
+  return {
+    id: row.adapter_id,
+    name: row.name,
+    command: row.command,
+    version: row.version,
+    status: row.status,
+    authStatus: row.auth_status,
+    supportsStreaming: Boolean(row.supports_streaming),
+    supportsMcp: Boolean(row.supports_mcp),
+    detail: row.detail,
+    detectedAt: row.detected_at,
+    selected: row.adapter_id === selectedId,
+  }
+}
+
+async function toLocalCliDevice(env: Env, row: DbLocalCliDevice) {
+  const adapters = await env.DB.prepare('SELECT * FROM local_cli_adapters WHERE device_id = ? ORDER BY CASE status WHEN \'available\' THEN 0 WHEN \'needs_auth\' THEN 1 WHEN \'unsupported\' THEN 2 ELSE 3 END, name')
+    .bind(row.id)
+    .all<DbLocalCliAdapter>()
+  return {
+    id: row.id,
+    browserDeviceKey: row.browser_device_key,
+    name: row.name,
+    platform: row.platform,
+    arch: row.arch,
+    bridgeVersion: row.bridge_version,
+    selectedCliId: row.selected_cli_id,
+    online: localCliIsOnline(row.last_seen_at),
+    lastSeenAt: row.last_seen_at || '',
+    createdAt: row.created_at,
+    clis: (adapters.results || []).map((item) => toLocalCliAdapter(item, row.selected_cli_id)),
+  }
+}
+
+async function createLocalCliPairing(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再连接本机 CLI', 401)
+  const body = await request.json().catch(() => ({})) as { browserDeviceKey?: string }
+  const browserDeviceKey = String(body.browserDeviceKey || '').trim().slice(0, 128)
+  if (!browserDeviceKey) return fail('缺少当前浏览器设备标识')
+  await env.DB.prepare('DELETE FROM local_cli_pairings WHERE expires_at <= ? OR consumed_at IS NOT NULL').bind(nowIso()).run()
+  let code = ''
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    code = localCliPairingCode()
+    const existing = await env.DB.prepare('SELECT id FROM local_cli_pairings WHERE code_hash = ?').bind(await hashSessionToken(code)).first<{ id: string }>()
+    if (!existing) break
+  }
+  const id = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + LOCAL_CLI_PAIRING_TTL_MS).toISOString()
+  await env.DB.prepare(
+    'INSERT INTO local_cli_pairings (id, principal_id, role, code_hash, browser_device_key, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(id, principal.principalId, principal.role, await hashSessionToken(code), browserDeviceKey, expiresAt).run()
+  return ok({ code, expiresAt, bridgeUrl: `${new URL(request.url).origin}/giverny-bridge.mjs` }, 201)
+}
+
+async function pairLocalCliBridge(env: Env, request: Request) {
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>
+  const code = String(body.code || '').replace(/\s+/g, '').toUpperCase()
+  if (!code) return fail('缺少配对码')
+  const pairing = await env.DB.prepare(
+    'SELECT id, principal_id, role, browser_device_key, expires_at FROM local_cli_pairings WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?',
+  ).bind(await hashSessionToken(code), nowIso()).first<{ id: string; principal_id: string; role: string; browser_device_key: string; expires_at: string }>()
+  if (!pairing) return fail('配对码无效或已过期', 404)
+  const consumed = await env.DB.prepare('UPDATE local_cli_pairings SET consumed_at = CURRENT_TIMESTAMP WHERE id = ? AND consumed_at IS NULL')
+    .bind(pairing.id)
+    .run()
+  if (!Number(consumed.meta?.changes)) return fail('配对码已被使用', 409)
+  const deviceId = crypto.randomUUID()
+  const token = agentBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+  const name = String(body.name || '我的电脑').trim().slice(0, 100) || '我的电脑'
+  await env.DB.batch([
+    env.DB.prepare('UPDATE local_cli_devices SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE principal_id = ? AND browser_device_key = ? AND revoked_at IS NULL')
+      .bind(pairing.principal_id, pairing.browser_device_key),
+    env.DB.prepare(
+      `INSERT INTO local_cli_devices (
+        id, principal_id, role, browser_device_key, name, platform, arch, bridge_version,
+        token_hash, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    ).bind(
+      deviceId,
+      pairing.principal_id,
+      pairing.role,
+      pairing.browser_device_key,
+      name,
+      String(body.platform || '').slice(0, 40),
+      String(body.arch || '').slice(0, 40),
+      String(body.bridgeVersion || '').slice(0, 40),
+      await hashSessionToken(token),
+    ),
+  ])
+  await replaceLocalCliAdapters(env, deviceId, normalizeLocalCliReports(body.clis))
+  return ok({ deviceId, deviceName: name, token }, 201)
+}
+
+async function heartbeatLocalCliBridge(env: Env, request: Request) {
+  const device = await resolveLocalCliBridgeDevice(env, request)
+  if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>
+  await env.DB.prepare('UPDATE local_cli_devices SET bridge_version = ?, last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(String(body.bridgeVersion || device.bridge_version).slice(0, 40), device.id)
+    .run()
+  if (Array.isArray(body.clis)) await replaceLocalCliAdapters(env, device.id, normalizeLocalCliReports(body.clis))
+  return ok({ ok: true, deviceId: device.id, selectedCliId: device.selected_cli_id })
+}
+
+async function pollLocalCliBridgeCommand(env: Env, request: Request) {
+  const device = await resolveLocalCliBridgeDevice(env, request)
+  if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  await env.DB.prepare("UPDATE local_cli_commands SET status = 'expired', completed_at = CURRENT_TIMESTAMP WHERE device_id = ? AND status IN ('queued', 'running') AND expires_at <= ?")
+    .bind(device.id, nowIso())
+    .run()
+  const command = await env.DB.prepare("SELECT * FROM local_cli_commands WHERE device_id = ? AND status = 'queued' AND expires_at > ? ORDER BY created_at LIMIT 1")
+    .bind(device.id, nowIso())
+    .first<DbLocalCliCommand>()
+  if (!command) return ok({ command: null })
+  const claimed = await env.DB.prepare("UPDATE local_cli_commands SET status = 'running', claimed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'")
+    .bind(command.id)
+    .run()
+  if (!Number(claimed.meta?.changes)) return ok({ command: null })
+  return ok({ command: { id: command.id, type: command.command_type, payload: JSON.parse(command.payload_json || '{}') } })
+}
+
+async function completeLocalCliBridgeCommand(env: Env, commandId: string, request: Request) {
+  const device = await resolveLocalCliBridgeDevice(env, request)
+  if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  const body = await request.json().catch(() => ({})) as { result?: Record<string, unknown>; error?: string }
+  const command = await env.DB.prepare('SELECT * FROM local_cli_commands WHERE id = ? AND device_id = ?').bind(commandId, device.id).first<DbLocalCliCommand>()
+  if (!command) return fail('本机命令不存在', 404)
+  const reports = normalizeLocalCliReports(body.result?.clis)
+  if (command.command_type === 'scan' && reports.length) await replaceLocalCliAdapters(env, device.id, reports)
+  const error = String(body.error || '').trim().slice(0, 1000)
+  await env.DB.prepare("UPDATE local_cli_commands SET status = ?, result_json = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(error ? 'failed' : 'completed', JSON.stringify(body.result || {}), error || null, command.id)
+    .run()
+  await env.DB.prepare('UPDATE local_cli_devices SET last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(device.id).run()
+  return ok({ ok: true })
+}
+
+async function listLocalCliDevices(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再查看本机 CLI', 401)
+  const browserDeviceKey = new URL(request.url).searchParams.get('browserDeviceKey')?.trim().slice(0, 128) || ''
+  const result = browserDeviceKey
+    ? await env.DB.prepare('SELECT * FROM local_cli_devices WHERE principal_id = ? AND browser_device_key = ? AND revoked_at IS NULL ORDER BY updated_at DESC')
+      .bind(principal.principalId, browserDeviceKey).all<DbLocalCliDevice>()
+    : await env.DB.prepare('SELECT * FROM local_cli_devices WHERE principal_id = ? AND revoked_at IS NULL ORDER BY updated_at DESC LIMIT 20')
+      .bind(principal.principalId).all<DbLocalCliDevice>()
+  const devices = await Promise.all((result.results || []).map((row) => toLocalCliDevice(env, row)))
+  return ok({ devices, browserDeviceKey })
+}
+
+async function queueLocalCliScan(env: Env, deviceId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再扫描本机 CLI', 401)
+  const device = await env.DB.prepare('SELECT * FROM local_cli_devices WHERE id = ? AND principal_id = ? AND revoked_at IS NULL')
+    .bind(deviceId, principal.principalId).first<DbLocalCliDevice>()
+  if (!device) return fail('当前账号下没有这台电脑', 404)
+  if (!localCliIsOnline(device.last_seen_at)) return fail('本机 Bridge 不在线，请先在这台电脑上启动连接器', 409)
+  const id = crypto.randomUUID()
+  await env.DB.prepare(
+    "INSERT INTO local_cli_commands (id, device_id, principal_id, command_type, status, expires_at) VALUES (?, ?, ?, 'scan', 'queued', ?)",
+  ).bind(id, device.id, principal.principalId, new Date(Date.now() + LOCAL_CLI_COMMAND_TTL_MS).toISOString()).run()
+  return ok({ commandId: id, status: 'queued' }, 202)
+}
+
+async function getLocalCliCommand(env: Env, commandId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const command = await env.DB.prepare('SELECT * FROM local_cli_commands WHERE id = ? AND principal_id = ?')
+    .bind(commandId, principal.principalId).first<DbLocalCliCommand>()
+  if (!command) return fail('扫描任务不存在', 404)
+  return ok({
+    id: command.id,
+    deviceId: command.device_id,
+    status: command.status,
+    result: command.result_json ? JSON.parse(command.result_json) : null,
+    error: command.error_message || '',
+    createdAt: command.created_at,
+    completedAt: command.completed_at || '',
+  })
+}
+
+async function selectLocalCliAdapter(env: Env, deviceId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再连接本机 CLI', 401)
+  const body = await request.json().catch(() => ({})) as { cliId?: string }
+  const cliId = String(body.cliId || '').trim().slice(0, 40)
+  const device = await env.DB.prepare('SELECT * FROM local_cli_devices WHERE id = ? AND principal_id = ? AND revoked_at IS NULL')
+    .bind(deviceId, principal.principalId).first<DbLocalCliDevice>()
+  if (!device) return fail('当前账号下没有这台电脑', 404)
+  if (!localCliIsOnline(device.last_seen_at)) return fail('本机 Bridge 不在线', 409)
+  const adapter = await env.DB.prepare("SELECT * FROM local_cli_adapters WHERE device_id = ? AND adapter_id = ? AND status = 'available'")
+    .bind(device.id, cliId).first<DbLocalCliAdapter>()
+  if (!adapter) return fail('该 CLI 尚不可用，请完成登录或重新扫描', 409)
+  await env.DB.prepare('UPDATE local_cli_devices SET selected_cli_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(cliId, device.id).run()
+  return ok({ device: await toLocalCliDevice(env, { ...device, selected_cli_id: cliId }) })
+}
+
+async function revokeLocalCliDevice(env: Env, deviceId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const result = await env.DB.prepare('UPDATE local_cli_devices SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND principal_id = ? AND revoked_at IS NULL')
+    .bind(deviceId, principal.principalId).run()
+  return Number(result.meta?.changes) ? ok({ ok: true }) : fail('设备不存在', 404)
+}
+
 async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContext) {
   const url = new URL(request.url)
   const path = url.pathname
@@ -13274,6 +13641,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   const isPublic =
     path === '/api/health' ||
     path.startsWith('/api/agent/') ||
+    path.startsWith('/api/local-cli/bridge/') ||
     path === '/api/auth/login' ||
     path === '/api/auth/logout' ||
     path === '/api/auth/password-reset/request' ||
@@ -13339,7 +13707,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (!isPublic && !isGet && role !== 'admin') {
     // 协作者可写非敏感接口（记进展/传附件/改任务/AI 助手）；其余角色一律只读。
     const collaboratorAllowed = role === 'collaborator' && isCollaboratorWritablePath(path, request.method)
-    if (!collaboratorAllowed) {
+    const localCliAllowed = path.startsWith('/api/local-cli/')
+    if (!collaboratorAllowed && !localCliAllowed) {
       return fail('当前口令没有该操作权限（敏感操作仅管理员可用）', 403)
     }
   }
@@ -13349,6 +13718,18 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/agent/')) {
     return handleAgentToolApi(request, env, ctx)
+  }
+  if (path === '/api/local-cli/bridge/pair' && request.method === 'POST') {
+    return pairLocalCliBridge(env, request)
+  }
+  if (path === '/api/local-cli/bridge/heartbeat' && request.method === 'POST') {
+    return heartbeatLocalCliBridge(env, request)
+  }
+  if (path === '/api/local-cli/bridge/commands' && request.method === 'GET') {
+    return pollLocalCliBridgeCommand(env, request)
+  }
+  if (path.startsWith('/api/local-cli/bridge/commands/') && path.endsWith('/complete') && request.method === 'POST') {
+    return completeLocalCliBridgeCommand(env, path.split('/')[5] || '', request)
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)
@@ -13364,6 +13745,24 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/auth/password' && request.method === 'POST') {
     return changeAdminPassword(env, request)
+  }
+  if (path === '/api/local-cli/pairings' && request.method === 'POST') {
+    return createLocalCliPairing(env, request)
+  }
+  if (path === '/api/local-cli/devices' && request.method === 'GET') {
+    return listLocalCliDevices(env, request)
+  }
+  if (path.startsWith('/api/local-cli/devices/') && path.endsWith('/scan') && request.method === 'POST') {
+    return queueLocalCliScan(env, path.split('/')[4] || '', request)
+  }
+  if (path.startsWith('/api/local-cli/devices/') && path.endsWith('/select') && request.method === 'POST') {
+    return selectLocalCliAdapter(env, path.split('/')[4] || '', request)
+  }
+  if (path.startsWith('/api/local-cli/devices/') && request.method === 'DELETE') {
+    return revokeLocalCliDevice(env, path.split('/')[4] || '', request)
+  }
+  if (path.startsWith('/api/local-cli/commands/') && request.method === 'GET') {
+    return getLocalCliCommand(env, path.split('/')[4] || '', request)
   }
   if (path.startsWith('/api/shared/') && isGet) {
     return getSharedReport(env, path.split('/').pop() ?? '')

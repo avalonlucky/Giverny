@@ -15811,6 +15811,323 @@ textarea:focus-visible {
   background: transparent;
 }
 
+.local-cli-panel {
+  grid-column: 1 / -1;
+  border: 0;
+  background: transparent;
+}
+
+.local-cli-panel-header {
+  align-items: flex-start;
+}
+
+.local-cli-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-cli-header-actions a {
+  text-decoration: none;
+}
+
+.local-cli-error {
+  margin: 10px 0;
+}
+
+.local-cli-empty {
+  min-height: 210px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.local-cli-empty strong {
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.local-cli-empty p {
+  max-width: 560px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.local-cli-pairing {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.34fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 22px 0;
+  border-top: 1px solid var(--color-border-soft);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.local-cli-pairing > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.local-cli-pairing-code,
+.local-cli-pairing-command {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.local-cli-pairing-code span,
+.local-cli-pairing-command span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.local-cli-install-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.local-cli-install-target > div {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+}
+
+.local-cli-install-target button {
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  padding: 5px 9px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.local-cli-install-target button:last-child {
+  border-right: 0;
+}
+
+.local-cli-install-target button.active {
+  color: var(--color-accent);
+  background: var(--brand-glow-soft);
+}
+
+.local-cli-pairing-code strong {
+  color: var(--color-text);
+  font-size: 30px;
+  letter-spacing: 2px;
+}
+
+.local-cli-pairing-code small {
+  color: var(--color-text-secondary);
+}
+
+.local-cli-pairing-command code {
+  display: block;
+  min-height: 72px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-border-soft);
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.local-cli-pairing-command button {
+  justify-self: start;
+}
+
+.local-cli-device {
+  margin-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.local-cli-device > header {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.local-cli-device > header > div {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-cli-device > header strong {
+  color: var(--color-text);
+}
+
+.local-cli-device > header small {
+  color: var(--color-text-secondary);
+}
+
+.local-cli-device > header > em {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.local-cli-device > header > em.online {
+  color: var(--color-primary);
+}
+
+.local-cli-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.local-cli-online-dot.online {
+  background: var(--color-primary);
+  box-shadow: 0 0 0 4px var(--brand-glow);
+}
+
+.local-cli-list {
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.local-cli-row {
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: 42px minmax(220px, 1fr) minmax(130px, auto) minmax(150px, auto);
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.local-cli-row.connected {
+  background: var(--brand-glow-soft);
+}
+
+.local-cli-row-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  color: var(--color-primary);
+  background: var(--color-surface);
+}
+
+.local-cli-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.local-cli-row-main strong {
+  color: var(--color-text);
+}
+
+.local-cli-row-main span,
+.local-cli-row-main small {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-cli-row-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.local-cli-row-capabilities span {
+  padding: 3px 7px;
+  border: 1px solid var(--color-border-soft);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.local-cli-row-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.local-cli-row-status em {
+  min-width: 54px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-style: normal;
+  text-align: right;
+}
+
+.local-cli-row-status .status-available,
+.local-cli-row-status .status-authenticated,
+.local-cli-row-status .status-connected {
+  color: var(--color-primary);
+}
+
+.local-cli-row-status .status-needs_auth {
+  color: var(--color-status-warning);
+}
+
+.local-cli-note {
+  margin-top: 18px;
+}
+
+@media (max-width: 760px) {
+  .local-cli-panel-header,
+  .local-cli-device > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .local-cli-header-actions {
+    align-items: stretch;
+  }
+
+  .local-cli-header-actions > * {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .local-cli-pairing {
+    grid-template-columns: 1fr;
+  }
+
+  .local-cli-install-target {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-cli-pairing > p {
+    grid-column: auto;
+  }
+
+  .local-cli-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .local-cli-row-capabilities,
+  .local-cli-row-status {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .local-cli-row-status em {
+    text-align: left;
+  }
+}
+
 .settings-settlement-panel .panel-header {
   margin-bottom: 4px;
 }

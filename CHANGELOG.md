@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-16 23:30 · v0.28.52（本机 CLI 发现与连接）
+
+- 设置页新增「本机 CLI」，可为当前登录账号和当前浏览器生成 10 分钟一次性配对码，识别命令来自哪位用户的哪台电脑。
+- 新增无入站端口的 Node 连接器，提供 macOS / Linux shell 与 Windows PowerShell 安装命令，可扫描 Codex CLI、Claude Code、Grok Build 和 Antigravity，回传版本、登录态、结构化输出能力及安全适配状态。
+- 支持「测试并重新扫描」和单 CLI 连接选择；界面区分可用、已连接、需要登录、待适配以及 Bridge 在线 / 离线状态。
+- 多租户安全边界落地：设备按 `principal_id + browser device key` 隔离，一次性配对码不可重放，Bridge 凭证服务端只保存哈希。
+- Antigravity 暂不调用跳过权限参数；未确认安全无头协议前明确显示待适配。
+- 当前阶段不切换工作助手执行路径，聊天仍由云端 `AliceAgent` 回答；本机 run / stream / cancel / resume 将在下一阶段接入。
+- 新增 migration `0022_local_cli_bridge.sql`、隔离 API 闭环测试和本机 CLI Bridge 使用 / 安全文档。
+
 ## 2026-07-16 22:31 · v0.28.51（200MB 验收附件）
 
 - 过程附件与验收附件的单文件上限由 95MB 提升到 200MB；12MB 以上继续自动使用 8MB R2 分片上传，不占用单次 Worker 大请求。

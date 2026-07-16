@@ -313,6 +313,84 @@ async function runUploadLimitCheck(cookie) {
   process.stdout.write('Multipart upload 200MB server limit check passed.\n')
 }
 
+async function runLocalCliBridgeCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const browserDeviceKey = `eval-browser-${crypto.randomUUID()}`
+  const unauthenticated = await fetch(`${base}/api/local-cli/devices?browserDeviceKey=${encodeURIComponent(browserDeviceKey)}`)
+  if (unauthenticated.status !== 401) throw new Error(`Local CLI device list allowed unauthenticated access: ${unauthenticated.status}`)
+
+  const pairingResponse = await fetch(`${base}/api/local-cli/pairings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ browserDeviceKey }),
+  })
+  const pairing = await pairingResponse.json().catch(() => ({}))
+  if (!pairingResponse.ok || !pairing.code || !pairing.bridgeUrl) throw new Error(`Local CLI pairing creation failed: ${JSON.stringify(pairing)}`)
+
+  const initialClis = [
+    { id: 'codex', name: 'Codex CLI', command: '/usr/local/bin/codex', version: 'codex-cli eval', status: 'available', authStatus: 'authenticated', supportsStreaming: true, supportsMcp: true, detail: 'eval' },
+    { id: 'claude', name: 'Claude Code', command: '/usr/local/bin/claude', version: 'claude eval', status: 'needs_auth', authStatus: 'signed_out', supportsStreaming: true, supportsMcp: true, detail: 'login required' },
+  ]
+  const bridgePairResponse = await fetch(`${base}/api/local-cli/bridge/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.1.0', clis: initialClis }),
+  })
+  const bridgePair = await bridgePairResponse.json().catch(() => ({}))
+  if (!bridgePairResponse.ok || !bridgePair.deviceId || !bridgePair.token) throw new Error(`Local CLI bridge pairing failed: ${JSON.stringify(bridgePair)}`)
+
+  const replayPair = await fetch(`${base}/api/local-cli/bridge/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: pairing.code, name: 'Replay device' }),
+  })
+  if (replayPair.status !== 404) throw new Error(`Local CLI pairing code replay was not rejected: ${replayPair.status}`)
+
+  const bridgeHeaders = { authorization: `Bearer ${bridgePair.token}`, 'content-type': 'application/json' }
+  const heartbeat = await fetch(`${base}/api/local-cli/bridge/heartbeat`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ bridgeVersion: '0.1.0', clis: initialClis }),
+  })
+  if (!heartbeat.ok) throw new Error(`Local CLI heartbeat failed: ${heartbeat.status}`)
+
+  const listedResponse = await fetch(`${base}/api/local-cli/devices?browserDeviceKey=${encodeURIComponent(browserDeviceKey)}`, { headers: { cookie } })
+  const listed = await listedResponse.json().catch(() => ({}))
+  const device = listed.devices?.[0]
+  if (!listedResponse.ok || !device?.online || device.clis?.length !== 2) throw new Error(`Local CLI device discovery failed: ${JSON.stringify(listed)}`)
+
+  const scanResponse = await fetch(`${base}/api/local-cli/devices/${bridgePair.deviceId}/scan`, { method: 'POST', headers: { cookie } })
+  const scan = await scanResponse.json().catch(() => ({}))
+  if (scanResponse.status !== 202 || !scan.commandId) throw new Error(`Local CLI scan queue failed: ${JSON.stringify(scan)}`)
+
+  const pollResponse = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
+  const polled = await pollResponse.json().catch(() => ({}))
+  if (!pollResponse.ok || polled.command?.id !== scan.commandId || polled.command?.type !== 'scan') throw new Error(`Local CLI bridge command poll failed: ${JSON.stringify(polled)}`)
+
+  const scannedClis = initialClis.map((item) => item.id === 'claude' ? { ...item, status: 'available', authStatus: 'authenticated', detail: 'ready' } : item)
+  const completeResponse = await fetch(`${base}/api/local-cli/bridge/commands/${scan.commandId}/complete`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { clis: scannedClis } }),
+  })
+  if (!completeResponse.ok) throw new Error(`Local CLI scan completion failed: ${completeResponse.status}`)
+
+  const commandResponse = await fetch(`${base}/api/local-cli/commands/${scan.commandId}`, { headers: { cookie } })
+  const command = await commandResponse.json().catch(() => ({}))
+  if (!commandResponse.ok || command.status !== 'completed') throw new Error(`Local CLI scan result failed: ${JSON.stringify(command)}`)
+
+  const selectResponse = await fetch(`${base}/api/local-cli/devices/${bridgePair.deviceId}/select`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ cliId: 'claude' }),
+  })
+  const selected = await selectResponse.json().catch(() => ({}))
+  if (!selectResponse.ok || selected.device?.selectedCliId !== 'claude' || !selected.device?.clis?.find((item) => item.id === 'claude')?.selected) {
+    throw new Error(`Local CLI adapter selection failed: ${JSON.stringify(selected)}`)
+  }
+  process.stdout.write('Local CLI pairing, tenant isolation, scan command, heartbeat, and adapter selection checks passed.\n')
+}
+
 async function runAgentOrchestrationCheck(cookie) {
   const toolHeaders = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
   const conversationId = `plan-${crypto.randomUUID()}`
@@ -870,6 +948,7 @@ try {
   await runAgentLifecycleWriteCheck()
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
+  await runLocalCliBridgeCheck(cookie)
   await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)

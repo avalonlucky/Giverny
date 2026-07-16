@@ -37,6 +37,44 @@ export type OpenRouterFreeModel = {
 }
 export type OpenRouterFreeModelsResult = { scannedAt: string; models: OpenRouterFreeModel[] }
 
+export type LocalCliAdapter = {
+  id: string
+  name: string
+  command: string
+  version: string
+  status: 'available' | 'needs_auth' | 'unsupported' | 'not_installed' | 'unavailable'
+  authStatus: 'authenticated' | 'signed_out' | 'unknown'
+  supportsStreaming: boolean
+  supportsMcp: boolean
+  detail: string
+  detectedAt: string
+  selected: boolean
+}
+
+export type LocalCliDevice = {
+  id: string
+  browserDeviceKey: string
+  name: string
+  platform: string
+  arch: string
+  bridgeVersion: string
+  selectedCliId: string | null
+  online: boolean
+  lastSeenAt: string
+  createdAt: string
+  clis: LocalCliAdapter[]
+}
+
+export type LocalCliCommand = {
+  id: string
+  deviceId: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'expired'
+  result: { clis?: LocalCliAdapter[] } | null
+  error: string
+  createdAt: string
+  completedAt: string
+}
+
 export type AgentRunMetrics = {
   periodDays: number
   generatedAt: string
@@ -930,6 +968,26 @@ export const api = {
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models'),
   scanOpenRouterFreeModels: () =>
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models/scan', { method: 'POST' }),
+  createLocalCliPairing: (browserDeviceKey: string) =>
+    requestJson<{ code: string; expiresAt: string; bridgeUrl: string }>('/api/local-cli/pairings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ browserDeviceKey }),
+    }),
+  getLocalCliDevices: (browserDeviceKey: string) =>
+    requestJson<{ devices: LocalCliDevice[]; browserDeviceKey: string }>(`/api/local-cli/devices?browserDeviceKey=${encodeURIComponent(browserDeviceKey)}`),
+  scanLocalCliDevice: (deviceId: string) =>
+    requestJson<{ commandId: string; status: string }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}/scan`, { method: 'POST' }),
+  getLocalCliCommand: (commandId: string) =>
+    requestJson<LocalCliCommand>(`/api/local-cli/commands/${encodeURIComponent(commandId)}`),
+  selectLocalCliAdapter: (deviceId: string, cliId: string) =>
+    requestJson<{ device: LocalCliDevice }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}/select`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cliId }),
+    }),
+  revokeLocalCliDevice: (deviceId: string) =>
+    requestJson<{ ok: boolean }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
   getAgentRunMetrics: (days = 7) =>
     requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
   getAgentFailures: () =>

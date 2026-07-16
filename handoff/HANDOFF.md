@@ -1,19 +1,19 @@
 # Giverny Handoff
 
-## 最新状态（2026-07-16 · v0.28.51）
+## 最新状态（2026-07-16 · v0.28.52）
 
-过程附件与验收附件单文件上限已提升到 200MB，大文件继续按 8MB 分片上传到 R2；附件选择器已支持常见视频格式。500MB 视频压缩的 Cloudflare Container + FFmpeg 方案已记录在 `docs/MEDIA_UPLOADS.md`，尚未作为产品功能上线。
+设置页已新增本机 CLI 发现与连接：网页生成一次性配对码，`public/giverny-bridge.mjs` 在当前电脑扫描 Codex、Claude Code、Grok 和 Antigravity，并按登录身份与浏览器设备隔离。当前只完成发现、测试和连接选择，聊天仍由云端 `AliceAgent` 执行。
 
-本地验证覆盖 build、Lint、79/79 隔离 Agent 门禁，以及完整任务生命周期、计划控制、记忆纠正 / 清空、失败状态处置和成本指标检查。
+本地验证覆盖 build、Lint、79/79 隔离 Agent 门禁、本机 CLI 配对 / 心跳 / 扫描 / 选择闭环，以及桌面与 390px 移动端视觉回归。
 
 最后整理时间：2026-07-16
-当前代码版本：v0.28.51
+当前代码版本：v0.28.52
 当前分支：main
 GitHub：https://github.com/avalonlucky/Giverny
 正式站：https://mayeai.com
-正式站 Worker Version ID：7fc6ce7b-447d-4652-8e4d-9129013e7e61
-最新已知 tag：v0.28.51
-本次交接性质：200MB 大文件分片上传与媒体压缩实施方案。
+正式站 Worker Version ID：933bd97b-414a-41c5-9ba5-4616cd946e35
+最新已知 tag：v0.28.52
+本次交接性质：多租户本机 CLI 发现、测试与连接选择基础设施。
 
 ## 1. 新窗口先读
 
@@ -42,15 +42,14 @@ Giverny 是设计兼职任务管理、工时、文件、验收、洞察和月度
 
 用户明确要求网站整体采用参考稿的直角、纸张感、轻标题、轻按钮、低装饰风格。不要圆角卡片堆叠、重阴影、默认浏览器表单、随意加粗、黑重标题、过大的字号。新增 UI 前必须先搜索复用现有组件和类名；优先参考 `giverny-redesign/index.html` 的排版、行距、段距、按钮和输入形态。
 
-## 4. 当前本地改动范围
+## 4. 本次改动范围
 
-本地有大量未提交变更，覆盖：
-
-- `src/App.tsx` / `src/App.css`：工作台、任务详情、记录进展/等待、验收、文件库、新建/编辑任务、每日小知识、命令面板等。
-- `src/worker.ts` / `src/lib/api.ts` / `src/types/domain.ts`：附件、AI、验收、补录、字段和 API 行为。
-- `db/schema.sql` 与 migrations 0010-0013。
-- `docs/*`、`CHANGELOG.md`、`使用手册.md`、`AGENTS.md`。
-- `package.json` / `src/config/appConfig.ts` 版本为 `0.28.44`。
+- `src/App.tsx` / `src/App.css`：本机 CLI 设置页、配对引导、设备与 CLI 状态、扫描和连接选择。
+- `src/worker.ts` / `src/lib/api.ts`：登录主体解析、浏览器设备 API 与 Bridge 出站通信协议。
+- `public/giverny-bridge.mjs`：无第三方依赖的 Node 本机连接器。
+- `db/schema.sql` / migration `0022_local_cli_bridge.sql`：配对、设备、CLI 适配器和短期命令记录。
+- `agent-evals/run-isolated.mjs`：租户隔离、一次性配对、心跳、扫描和选择闭环。
+- `docs/LOCAL_CLI_BRIDGE.md` / `使用手册.md`：用户操作、安全边界和下一阶段说明。
 
 ## 5. 必须交代的遗留问题
 
