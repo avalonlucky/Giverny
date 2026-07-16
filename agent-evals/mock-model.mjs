@@ -86,6 +86,18 @@ function chooseTool(messages) {
   if (/跨任务|对比.*任务/.test(text)) return toolCall('start_deep_analysis', { type: 'cross_task_analysis', month: '2026-07', query: text })
   if (/批量附件|附件.*汇总/.test(text)) return toolCall('start_deep_analysis', { type: 'batch_attachment_analysis', month: '2026-07', query: text })
   if (/趋势分析|几个月.*趋势/.test(text)) return toolCall('start_deep_analysis', { type: 'trend_analysis', month: '2026-07' })
+  if (!/暂停|改成.*状态|状态改成/.test(text) && /记录等待|等待记录|等甲方|等待甲方|等待资料/.test(text)) {
+    return toolCall('append_waiting_preview', { taskId: 1, note: '等待甲方补充资料', reason: '等待补充资料', startDateTime: '2026-07-16T10:00', endDateTime: '2026-07-16T12:00' })
+  }
+  if (/完整验收|确认验收|完成验收/.test(text)) {
+    return toolCall('complete_acceptance_preview', { taskId: 1, acceptanceNote: '已完成全部设计修改并交付最终文件。', progressNote: '完成终稿整理与交付。', endDateTime: '2026-07-16T18:00', countTime: false, attachmentIds: [104] })
+  }
+  if (/标记.*验收文件|设为验收文件/.test(text)) {
+    return toolCall('mark_acceptance_files_preview', { taskId: 1, attachmentIds: [104] })
+  }
+  if (/删除.*等待记录|编辑.*等待记录|维护.*记录/.test(text)) {
+    return toolCall('manage_record_preview', { taskId: 1, recordType: 'waiting', action: 'delete', recordId: 'eval-waiting-record' })
+  }
   if (/附件|(?:找|找到|打开|预览|下载).*(?:文件|交付件)|(?:文件|交付件).*(?:找|打开|预览|下载)/.test(text)) {
     return toolCall('search_attachments', { query: text, limit: 30 })
   }

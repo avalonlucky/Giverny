@@ -2733,6 +2733,285 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   return agentOk({ tool: 'append_progress', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
 }
 
+function agentAttachmentIds(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 30)
+}
+
+async function agentTaskAttachments(env: Env, taskId: number, attachmentIds: number[]) {
+  if (!attachmentIds.length) return []
+  const placeholders = attachmentIds.map(() => '?').join(', ')
+  const rows = await env.DB.prepare(
+    `SELECT id, file_name, attachment_scope, is_final, file_tag FROM attachments
+     WHERE task_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`,
+  ).bind(String(taskId), ...attachmentIds.map(String)).all<{ id: string; file_name: string; attachment_scope: string; is_final: number; file_tag: string | null }>()
+  return rows.results ?? []
+}
+
+async function agentAppendWaitingPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const startDateTime = agentDateTime(body.startDateTime ?? body.start)
+    const endDateTime = agentDateTime(body.endDateTime ?? body.end, startDateTime)
+    const reason = agentString(body.reason, 30) as WaitingReason
+    const draft = {
+      taskId: Number(task.id),
+      taskTitle: task.title,
+      note: agentString(body.note, 2000),
+      reason: (['等待甲方意见', '等待补充资料', '等待排期', '其他'] as WaitingReason[]).includes(reason) ? reason : '其他',
+      startDateTime,
+      endDateTime,
+    }
+    const missing = [!draft.note && 'note'].filter(Boolean) as string[]
+    return agentPreview(env, 'append_waiting_preview', draft, missing)
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'append_waiting_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成等待记录预览', 400)
+  }
+}
+
+async function agentAppendWaitingTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_waiting')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再记录等待', 409)
+  if (task.status === '已验收') return agentFail('已验收任务已闭环，不能再追加等待记录', 409)
+  const startDateTime = agentDateTime(draft.startDateTime)
+  const endDateTime = agentDateTime(draft.endDateTime, startDateTime)
+  const entry: WaitingEntry = {
+    id: crypto.randomUUID(),
+    date: agentDatePart(startDateTime),
+    endDate: agentDatePart(endDateTime),
+    start: agentTimePart(startDateTime),
+    end: agentTimePart(endDateTime),
+    note: agentString(draft.note, 2000),
+    reason: agentString(draft.reason, 30) as WaitingReason,
+    isUncounted: true,
+  }
+  const entries = [...parseWaitingEntries(task.waiting_entries_json), entry]
+  await env.DB.prepare('UPDATE tasks SET waiting_entries_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(JSON.stringify(entries), task.id).run()
+  await audit(env, 'agent_append_waiting', 'task', task.id, entry)
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'append_waiting', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
+}
+
+function agentRecordCollection(task: DbTask, recordType: string) {
+  if (recordType === 'waiting') return parseWaitingEntries(task.waiting_entries_json)
+  const entries = parseTimeEntries(task.time_entries_json)
+  return recordType === 'feedback' ? entries.filter((entry) => entry.isClientFeedback) : entries.filter((entry) => !entry.isClientFeedback)
+}
+
+async function agentManageRecordPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const recordType = agentString(body.recordType, 20)
+    const action = agentString(body.action, 20)
+    const recordId = agentString(body.recordId, 120)
+    const record = agentRecordCollection(task, recordType).find((entry) => entry.id === recordId)
+    const changes = typeof body.changes === 'object' && body.changes ? body.changes as Record<string, unknown> : {}
+    const draft = { taskId: Number(task.id), taskTitle: task.title, recordType, action, recordId, before: record ?? null, changes }
+    const missing = [
+      !['progress', 'feedback', 'waiting'].includes(recordType) && 'recordType',
+      !['edit', 'delete'].includes(action) && 'action',
+      !recordId && 'recordId',
+      recordId && !record && 'recordId:not_found',
+      action === 'edit' && Object.keys(changes).length === 0 && 'changes',
+    ].filter(Boolean) as string[]
+    const warnings = action === 'delete' ? ['删除后关联过程附件会一并归档；该操作不会删除 R2 原文件。'] : []
+    return agentPreview(env, 'manage_record_preview', draft, missing, warnings)
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'manage_record_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成记录维护预览', 400)
+  }
+}
+
+async function agentManageRecordTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_record')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能维护记录', 409)
+  if (task.status === '已验收') return agentFail('已验收任务记录已锁定，不能通过 Agent 编辑或删除', 409)
+  const recordType = agentString(draft.recordType, 20)
+  const action = agentString(draft.action, 20)
+  const recordId = agentString(draft.recordId, 120)
+  const changes = typeof draft.changes === 'object' && draft.changes ? draft.changes as Record<string, unknown> : {}
+  const isWaiting = recordType === 'waiting'
+  const sourceEntries: Array<TimeEntry | WaitingEntry> = isWaiting ? parseWaitingEntries(task.waiting_entries_json) : parseTimeEntries(task.time_entries_json)
+  const index = sourceEntries.findIndex((entry) => entry.id === recordId && (recordType !== 'feedback' || entry.isClientFeedback) && (recordType !== 'progress' || !entry.isClientFeedback))
+  if (index < 0) return agentFail('指定记录不存在或类型不匹配', 404)
+  const before = sourceEntries[index]
+  let nextEntries = [...sourceEntries]
+  if (action === 'delete') {
+    nextEntries = sourceEntries.filter((entry) => entry.id !== recordId)
+  } else if (action === 'edit') {
+    const startDateTime = Object.hasOwn(changes, 'startDateTime') ? agentDateTime(changes.startDateTime) : `${before.date ?? task.start_date?.slice(0, 10) ?? nowIso().slice(0, 10)}T${before.start}`
+    const endDateTime = Object.hasOwn(changes, 'endDateTime') ? agentDateTime(changes.endDateTime, startDateTime) : `${before.endDate ?? before.date ?? task.start_date?.slice(0, 10) ?? nowIso().slice(0, 10)}T${before.end}`
+    nextEntries[index] = {
+      ...before,
+      date: agentDatePart(startDateTime),
+      endDate: agentDatePart(endDateTime),
+      start: agentTimePart(startDateTime),
+      end: agentTimePart(endDateTime),
+      note: Object.hasOwn(changes, 'note') ? agentString(changes.note, 2000) : before.note,
+      ...(isWaiting ? { reason: Object.hasOwn(changes, 'reason') ? agentString(changes.reason, 30) as WaitingReason : (before as WaitingEntry).reason } : {}),
+      ...(!isWaiting && recordType === 'progress' ? {
+        isUncounted: Object.hasOwn(changes, 'isUncounted') ? agentBool(changes.isUncounted) : before.isUncounted,
+        isRevision: Object.hasOwn(changes, 'isRevision') ? agentBool(changes.isRevision) : before.isRevision,
+      } : {}),
+      ...(!isWaiting && recordType === 'feedback' ? {
+        feedbackVersion: Object.hasOwn(changes, 'feedbackVersion') ? agentString(changes.feedbackVersion, 30).toUpperCase() : before.feedbackVersion,
+        feedbackSource: Object.hasOwn(changes, 'feedbackSource') ? agentString(changes.feedbackSource, 80) : before.feedbackSource,
+      } : {}),
+    }
+  } else {
+    return agentFail('记录维护动作不合法', 400)
+  }
+  const statements = [isWaiting
+    ? env.DB.prepare('UPDATE tasks SET waiting_entries_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(JSON.stringify(nextEntries), task.id)
+    : env.DB.prepare('UPDATE tasks SET time_entries_json = ?, actual_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(JSON.stringify(nextEntries), agentEntryHours(nextEntries as TimeEntry[]), task.id)]
+  if (action === 'delete') {
+    statements.push(env.DB.prepare('UPDATE attachments SET deleted_at = CURRENT_TIMESTAMP WHERE task_id = ? AND entry_id = ? AND deleted_at IS NULL').bind(task.id, recordId))
+  }
+  await env.DB.batch(statements)
+  if (!isWaiting) await updateHourEstimateObservation(env, task.id, agentEntryHours(nextEntries as TimeEntry[]), false)
+  await audit(env, `agent_${action}_record`, 'task', task.id, { recordType, recordId, before, changes })
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'manage_record', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, recordId, action })
+}
+
+async function agentMarkAcceptanceFilesPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const attachmentIds = agentAttachmentIds(body.attachmentIds)
+    const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
+    const draft = { taskId: Number(task.id), taskTitle: task.title, attachmentIds, files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) }
+    const missing = [!attachmentIds.length && 'attachmentIds', files.length !== attachmentIds.length && 'attachmentIds:not_found'].filter(Boolean) as string[]
+    return agentPreview(env, 'mark_acceptance_files_preview', draft, missing)
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'mark_acceptance_files_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成验收文件预览', 400)
+  }
+}
+
+async function agentMarkAcceptanceFilesTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'mark_acceptance_files')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能调整验收文件', 409)
+  const attachmentIds = agentAttachmentIds(draft.attachmentIds)
+  const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
+  if (!attachmentIds.length || files.length !== attachmentIds.length) return agentFail('部分附件不存在或不属于该任务', 409)
+  const placeholders = attachmentIds.map(() => '?').join(', ')
+  await env.DB.prepare(`UPDATE attachments SET attachment_scope = 'acceptance', is_final = 1, visible_to_client = 1, file_tag = '验收文件' WHERE task_id = ? AND id IN (${placeholders})`)
+    .bind(String(task.id), ...attachmentIds.map(String)).run()
+  await audit(env, 'agent_mark_acceptance_files', 'task', task.id, { attachmentIds })
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  return agentOk({ tool: 'mark_acceptance_files', mode: 'execute', ok: true, task: toTask(task), files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) })
+}
+
+async function agentCompleteAcceptancePreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const attachmentIds = agentAttachmentIds(body.attachmentIds)
+    const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
+    const startDateTime = body.startDateTime ? agentDateTime(body.startDateTime) : ''
+    const endDateTime = body.endDateTime ? agentDateTime(body.endDateTime, startDateTime || nowIso().slice(0, 16)) : nowIso().slice(0, 16)
+    const draft = {
+      taskId: Number(task.id), taskTitle: task.title,
+      acceptanceNote: agentString(body.acceptanceNote, 3000),
+      progressNote: agentString(body.progressNote ?? body.note, 2000),
+      startDateTime, endDateTime,
+      countTime: agentBool(body.countTime, Boolean(startDateTime)),
+      isRevision: agentBool(body.isRevision, false),
+      attachmentIds,
+      files: files.map((file) => ({ id: Number(file.id), name: file.file_name })),
+    }
+    const missing = [!draft.acceptanceNote && 'acceptanceNote', !draft.progressNote && 'progressNote', files.length !== attachmentIds.length && 'attachmentIds:not_found', draft.countTime && !draft.startDateTime && 'startDateTime'].filter(Boolean) as string[]
+    const warnings = attachmentIds.length ? [] : ['本次验收没有选择附件；如需交付文件，请先上传或选择该任务已有附件。']
+    return agentPreview(env, 'complete_acceptance_preview', draft, missing, warnings)
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'complete_acceptance_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成完整验收预览', 400)
+  }
+}
+
+async function agentCompleteAcceptanceTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try {
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'complete_acceptance')
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
+  }
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能执行验收', 409)
+  if (task.status === '已验收') return agentFail('任务已经验收，请勿重复执行完整验收', 409)
+  const attachmentIds = agentAttachmentIds(draft.attachmentIds)
+  const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
+  if (files.length !== attachmentIds.length) return agentFail('部分验收附件不存在或不属于该任务', 409)
+  const countTime = agentBool(draft.countTime, false)
+  const startDateTime = countTime ? agentDateTime(draft.startDateTime) : agentDateTime(draft.endDateTime)
+  const endDateTime = agentDateTime(draft.endDateTime, startDateTime)
+  const entryId = crypto.randomUUID()
+  const entry: TimeEntry = {
+    id: entryId,
+    date: agentDatePart(startDateTime), endDate: agentDatePart(endDateTime), start: agentTimePart(startDateTime), end: agentTimePart(endDateTime),
+    note: agentString(draft.progressNote, 2000),
+    isAcceptanceProgress: true,
+    isRevision: agentBool(draft.isRevision, false),
+    isUncounted: !countTime,
+  }
+  const entries = [...parseTimeEntries(task.time_entries_json), entry]
+  const actualHours = agentEntryHours(entries)
+  const statements = [env.DB.prepare(
+    `UPDATE tasks SET acceptance_note = ?, time_entries_json = ?, actual_hours = ?, status = '已验收', stage = '已验收', progress = 100, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+  ).bind(agentString(draft.acceptanceNote, 3000), JSON.stringify(entries), actualHours, endDateTime, task.id)]
+  if (attachmentIds.length) {
+    const placeholders = attachmentIds.map(() => '?').join(', ')
+    statements.push(env.DB.prepare(`UPDATE attachments SET attachment_scope = 'acceptance', is_final = 1, visible_to_client = 1, file_tag = '验收文件', entry_id = ? WHERE task_id = ? AND id IN (${placeholders})`).bind(entryId, String(task.id), ...attachmentIds.map(String)))
+  }
+  await env.DB.batch(statements)
+  await updateHourEstimateObservation(env, task.id, actualHours, true)
+  await audit(env, 'agent_complete_acceptance', 'task', task.id, { acceptanceNote: draft.acceptanceNote, entry, attachmentIds })
+  ctx?.waitUntil(indexTaskSearch(env, task.id))
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'complete_acceptance', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry, files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) })
+}
+
 function normalizedAgentMonths(value: unknown, question: string, currentMonth: string) {
   const fromList = Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter((item) => /^\d{4}-\d{2}$/.test(item))
@@ -2937,6 +3216,14 @@ function agentOpenApiSpec(request: Request) {
       '/api/agent/tools/update-task-fields': writeToolPath('update_task_fields', 'Update task fields after confirmation'),
       '/api/agent/tools/append-progress-preview': writeToolPath('append_progress_preview', 'Preview appending task progress'),
       '/api/agent/tools/append-progress': writeToolPath('append_progress', 'Append task progress after confirmation'),
+      '/api/agent/tools/append-waiting-preview': writeToolPath('append_waiting_preview', 'Preview appending a waiting record'),
+      '/api/agent/tools/append-waiting': writeToolPath('append_waiting', 'Append a waiting record after confirmation'),
+      '/api/agent/tools/manage-record-preview': writeToolPath('manage_record_preview', 'Preview editing or deleting an existing task record'),
+      '/api/agent/tools/manage-record': writeToolPath('manage_record', 'Edit or delete an existing task record after confirmation'),
+      '/api/agent/tools/mark-acceptance-files-preview': writeToolPath('mark_acceptance_files_preview', 'Preview marking existing files as acceptance files'),
+      '/api/agent/tools/mark-acceptance-files': writeToolPath('mark_acceptance_files', 'Mark existing files as acceptance files after confirmation'),
+      '/api/agent/tools/complete-acceptance-preview': writeToolPath('complete_acceptance_preview', 'Preview a complete task acceptance package'),
+      '/api/agent/tools/complete-acceptance': writeToolPath('complete_acceptance', 'Complete task acceptance after confirmation'),
     },
     components: {
       securitySchemes: {
@@ -3359,14 +3646,15 @@ async function agentContextTool(env: Env, request: Request) {
       '统计收入、计费工时、结算月份和任务明细',
       '整理需求、甲方反馈、进展记录、验收备注和月报',
       '在后台汇总整月任务、工时、进展、改稿、等待和反馈，生成可核对的月度复盘',
-      '在用户确认后创建任务、记录反馈、修改状态、修改任务字段和追加进展',
+      '在用户确认后创建任务、记录反馈、修改状态、修改任务字段、追加进展、记录等待和维护已有记录',
+      '把已有附件标记为验收文件，并通过完整验收包一次写入验收备注、最终进展、工时、附件与验收状态',
       '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
       '闲聊、解释概念、头脑风暴、写作润色和效率规划',
     ],
     constraints: [
       '涉及金额、工时、状态和验收时优先调用工具，不凭空编造。',
       '写入动作必须先调用 preview 工具生成草稿和 confirmationToken，并等待用户明确确认后再调用 execute 工具。',
-      '删除、作废、结算锁定、部署等高风险动作不开放给 Agent 工具。',
+      '允许删除单条进展、反馈或等待记录，但整任务删除、作废、结算锁定、付款和部署仍不开放给 Agent 工具。',
       '不要自称 DeepSeek、Gemini、GPT 或其他底层模型。',
     ],
     generatedAt: nowIso(),
@@ -3871,6 +4159,10 @@ const agentWorkflowWriteEndpoints = new Set([
   'update-task-status',
   'update-task-fields',
   'append-progress',
+  'append-waiting',
+  'manage-record',
+  'mark-acceptance-files',
+  'complete-acceptance',
 ])
 
 async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
@@ -4009,6 +4301,30 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/append-progress' && request.method === 'POST') {
     return agentAppendProgressTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/append-waiting-preview' && request.method === 'POST') {
+    return agentAppendWaitingPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/append-waiting' && request.method === 'POST') {
+    return agentAppendWaitingTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/manage-record-preview' && request.method === 'POST') {
+    return agentManageRecordPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/manage-record' && request.method === 'POST') {
+    return agentManageRecordTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/mark-acceptance-files-preview' && request.method === 'POST') {
+    return agentMarkAcceptanceFilesPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/mark-acceptance-files' && request.method === 'POST') {
+    return agentMarkAcceptanceFilesTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/complete-acceptance-preview' && request.method === 'POST') {
+    return agentCompleteAcceptancePreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/complete-acceptance' && request.method === 'POST') {
+    return agentCompleteAcceptanceTool(env, request, ctx)
   }
   return agentFail('Agent tool not found', 404)
 }

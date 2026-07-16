@@ -84,7 +84,9 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
 - 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
-- 创建任务、记录反馈、修改字段、修改状态和追加进展只能调用对应的 preview 工具。
+- 创建任务、记录反馈、修改字段、修改状态、追加进展、记录等待、维护已有记录、标记验收文件和完整验收只能调用对应的 preview 工具。
+- 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
+- 附件工具只能选择网站里已经存在的 attachmentId；用户电脑上的新文件必须先上传，不能伪造文件或文件地址。
 - 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
 - preview 返回后，清楚展示草稿、缺失项和风险；不要声称已经执行。
 - 真正写入由运行时在用户明确确认后完成，你无法也不应自行执行写操作。
@@ -98,6 +100,10 @@ const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint
   update_task_status_preview: { previewEndpoint: 'update-task-status-preview', executeEndpoint: 'update-task-status', label: '修改任务状态' },
   update_task_fields_preview: { previewEndpoint: 'update-task-fields-preview', executeEndpoint: 'update-task-fields', label: '修改任务字段' },
   append_progress_preview: { previewEndpoint: 'append-progress-preview', executeEndpoint: 'append-progress', label: '追加任务进展' },
+  append_waiting_preview: { previewEndpoint: 'append-waiting-preview', executeEndpoint: 'append-waiting', label: '记录等待' },
+  manage_record_preview: { previewEndpoint: 'manage-record-preview', executeEndpoint: 'manage-record', label: '维护任务记录' },
+  mark_acceptance_files_preview: { previewEndpoint: 'mark-acceptance-files-preview', executeEndpoint: 'mark-acceptance-files', label: '标记验收文件' },
+  complete_acceptance_preview: { previewEndpoint: 'complete-acceptance-preview', executeEndpoint: 'complete-acceptance', label: '完成任务验收' },
 }
 
 const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: string }> = {
@@ -111,6 +117,10 @@ const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: stri
   update_task_status_preview: { running: '核对状态变更', completed: '状态变更草稿已生成' },
   update_task_fields_preview: { running: '核对任务字段', completed: '字段修改草稿已生成' },
   append_progress_preview: { running: '整理进展记录', completed: '进展草稿已生成' },
+  append_waiting_preview: { running: '整理等待记录', completed: '等待草稿已生成' },
+  manage_record_preview: { running: '核对已有记录', completed: '记录维护草稿已生成' },
+  mark_acceptance_files_preview: { running: '核对验收文件', completed: '验收文件草稿已生成' },
+  complete_acceptance_preview: { running: '整理完整验收包', completed: '验收草稿已生成' },
   start_monthly_review: { running: '创建月度复盘任务', completed: '月度复盘已进入后台执行' },
   start_deep_analysis: { running: '创建深度分析任务', completed: '深度分析已进入后台执行' },
 }
@@ -614,6 +624,54 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           isAcceptanceProgress: z.boolean().optional(),
         }),
         execute: (input) => this.previewTool('append_progress_preview', 'append-progress-preview', input),
+      }),
+      append_waiting_preview: tool({
+        description: '生成等待记录预览。等待时长不计入实际工时或结算。',
+        inputSchema: z.object({
+          taskId: z.number().int().positive().optional(),
+          taskTitle: z.string().optional(),
+          note: z.string(),
+          reason: z.enum(['等待甲方意见', '等待补充资料', '等待排期', '其他']).optional(),
+          startDateTime: z.string().optional(),
+          endDateTime: z.string().optional(),
+        }),
+        execute: (input) => this.previewTool('append_waiting_preview', 'append-waiting-preview', input),
+      }),
+      manage_record_preview: tool({
+        description: '生成编辑或删除已有进展、反馈、等待记录的预览。必须先读取任务详情取得 recordId。',
+        inputSchema: z.object({
+          taskId: z.number().int().positive().optional(),
+          taskTitle: z.string().optional(),
+          recordType: z.enum(['progress', 'feedback', 'waiting']),
+          action: z.enum(['edit', 'delete']),
+          recordId: z.string(),
+          changes: z.record(z.string(), z.unknown()).optional(),
+        }),
+        execute: (input) => this.previewTool('manage_record_preview', 'manage-record-preview', input),
+      }),
+      mark_acceptance_files_preview: tool({
+        description: '把任务已有附件标记为验收文件。必须先通过任务详情或附件搜索获得 attachmentId。',
+        inputSchema: z.object({
+          taskId: z.number().int().positive().optional(),
+          taskTitle: z.string().optional(),
+          attachmentIds: z.array(z.number().int().positive()).min(1).max(30),
+        }),
+        execute: (input) => this.previewTool('mark_acceptance_files_preview', 'mark-acceptance-files-preview', input),
+      }),
+      complete_acceptance_preview: tool({
+        description: '生成完整验收包预览，一次确认验收备注、最终进展、实际工时和已有验收附件。',
+        inputSchema: z.object({
+          taskId: z.number().int().positive().optional(),
+          taskTitle: z.string().optional(),
+          acceptanceNote: z.string(),
+          progressNote: z.string(),
+          startDateTime: z.string().optional(),
+          endDateTime: z.string().optional(),
+          countTime: z.boolean().optional(),
+          isRevision: z.boolean().optional(),
+          attachmentIds: z.array(z.number().int().positive()).max(30).optional(),
+        }),
+        execute: (input) => this.previewTool('complete_acceptance_preview', 'complete-acceptance-preview', input),
       }),
     }
   }

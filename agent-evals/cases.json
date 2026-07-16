@@ -60,6 +60,9 @@
     { "id": "progress-02", "category": "write_preview", "prompt": "公司产品封套修改记录一条不计时进展：完成产品矩阵图调整", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "progress-03", "category": "write_preview", "prompt": "给任务#1追加验收进展：全部文件已经交付", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "progress-04", "category": "write_preview", "prompt": "记录任务#1改稿一轮，从19:00做到20:30", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
+    { "id": "waiting-01", "category": "write_preview", "prompt": "给任务#1记录等待：10点到12点等待甲方补充资料", "expect": { "tools": ["append_waiting_preview"], "approval": "append_waiting" } },
+    { "id": "acceptance-file-01", "category": "write_preview", "prompt": "把任务#1的附件104标记为验收文件", "expect": { "tools": ["mark_acceptance_files_preview"], "approval": "mark_acceptance_files" } },
+    { "id": "acceptance-01", "category": "write_preview", "prompt": "完整验收任务#1：已完成全部修改并交付最终文件", "expect": { "tools": ["complete_acceptance_preview"], "approval": "complete_acceptance" } },
 
     { "id": "analysis-01", "category": "background_analysis", "prompt": "帮我做一份7月工作复盘", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
     { "id": "analysis-02", "category": "background_analysis", "prompt": "后台分析一下2026年6月整月的任务、工时和风险", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },

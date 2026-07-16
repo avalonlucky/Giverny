@@ -184,6 +184,65 @@ async function runWorkflowReplayCheck() {
   process.stdout.write('Workflow idempotent replay check passed.\n')
 }
 
+async function runAgentLifecycleWriteCheck() {
+  const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const previewAndExecute = async (previewEndpoint, executeEndpoint, payload) => {
+    const previewResponse = await fetch(`http://127.0.0.1:8798/api/agent/tools/${previewEndpoint}`, {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    })
+    const preview = await previewResponse.json().catch(() => ({}))
+    if (!previewResponse.ok || preview.ready !== true || !preview.confirmationToken) {
+      throw new Error(`${previewEndpoint} preview failed: ${JSON.stringify(preview)}`)
+    }
+    const response = await fetch('http://127.0.0.1:8798/api/agent/tools/workflow-write', {
+      method: 'POST', headers,
+      body: JSON.stringify({ operationId: `lifecycle-${crypto.randomUUID()}`, endpoint: executeEndpoint, confirmationToken: preview.confirmationToken }),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || result.ok !== true) throw new Error(`${executeEndpoint} execute failed: ${JSON.stringify(result)}`)
+    return result
+  }
+  const created = await previewAndExecute('create-task-preview', 'create-task', {
+    title: 'Agent 全生命周期隔离评测', requirement: '验证等待、记录维护与完整验收原子写入', type: '画册',
+    startDate: '2026-07-16T09:00', estimatedDate: '2026-07-20T18:00', settlementMonth: '2026-07', estimatedHours: 4,
+  })
+  const taskId = Number(created.task?.id)
+  if (!taskId) throw new Error('Lifecycle task was not created')
+  const progress = await previewAndExecute('append-progress-preview', 'append-progress', {
+    taskId, note: '完成第一版排版', startDateTime: '2026-07-16T09:00', endDateTime: '2026-07-16T11:00',
+  })
+  const waiting = await previewAndExecute('append-waiting-preview', 'append-waiting', {
+    taskId, note: '等待甲方补充文字', reason: '等待补充资料', startDateTime: '2026-07-16T11:00', endDateTime: '2026-07-16T12:00',
+  })
+  await previewAndExecute('manage-record-preview', 'manage-record', {
+    taskId, recordType: 'progress', action: 'edit', recordId: progress.entry.id, changes: { note: '完成第一版排版与校对' },
+  })
+  await previewAndExecute('manage-record-preview', 'manage-record', {
+    taskId, recordType: 'waiting', action: 'delete', recordId: waiting.entry.id,
+  })
+  await previewAndExecute('mark-acceptance-files-preview', 'mark-acceptance-files', { taskId: 1, attachmentIds: [104] })
+  const accepted = await previewAndExecute('complete-acceptance-preview', 'complete-acceptance', {
+    taskId,
+    acceptanceNote: '已完成排版、校对与最终交付。',
+    progressNote: '完成最终文件整理并提交验收。',
+    endDateTime: '2026-07-16T18:00',
+    countTime: false,
+  })
+  if (accepted.task?.status !== '已验收' || accepted.task?.progress !== 100 || accepted.task?.acceptanceNote !== '已完成排版、校对与最终交付。') {
+    throw new Error(`Complete acceptance package is inconsistent: ${JSON.stringify(accepted.task)}`)
+  }
+  if (accepted.task?.waitingEntries?.length !== 0 || !accepted.task?.timeEntries?.some((entry) => entry.note === '完成第一版排版与校对')) {
+    throw new Error(`Lifecycle record maintenance is inconsistent: ${JSON.stringify(accepted.task)}`)
+  }
+  const fileResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/search-attachments?query=封套过程稿V1', { headers })
+  const fileResult = await fileResponse.json().catch(() => ({}))
+  const marked = fileResult.files?.find((file) => file.id === 104)
+  if (!fileResponse.ok || marked?.scope !== 'acceptance' || marked?.tag !== '验收文件') {
+    throw new Error(`Acceptance file marking is inconsistent: ${JSON.stringify(fileResult)}`)
+  }
+  process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
+}
+
 async function runBackgroundAnalysisCheck(cookie) {
   const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
   const startResponse = await fetch('http://127.0.0.1:8798/api/ai/chat', {
@@ -648,6 +707,7 @@ try {
   await runMcpChecks()
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
+  await runAgentLifecycleWriteCheck()
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
   await runAiLearningCheck(cookie)

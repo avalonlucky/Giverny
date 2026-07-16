@@ -4419,26 +4419,41 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   isAcceptanceProgress: '验收进展',
   supplementalNote: '补录说明',
   acceptanceNote: '验收备注',
+  progressNote: '最终进展',
+  countTime: '计入工时',
+  recordType: '记录类型',
+  action: '操作',
+  recordId: '记录 ID',
+  attachmentIds: '附件 ID',
+  files: '验收文件',
+  changes: '修改内容',
 }
 
-function formatAgentApprovalValue(key: string, value: unknown) {
+function formatAgentApprovalValue(key: string, value: unknown): string {
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'estimatedHours') return `${value} h`
   if (key === 'progress') return `${value}%`
   if (value === null || value === undefined || value === '') return '未填写'
-  if (typeof value === 'object') return JSON.stringify(value)
+  if (key === 'files' && Array.isArray(value)) {
+    return value.map((item) => typeof item === 'object' && item ? String((item as Record<string, unknown>).name || (item as Record<string, unknown>).id || '') : String(item)).filter(Boolean).join('、') || '未选择'
+  }
+  if (Array.isArray(value)) return value.map(String).join('、')
+  if (typeof value === 'object') return Object.entries(value as Record<string, unknown>).map(([field, fieldValue]) => `${AGENT_APPROVAL_FIELD_LABELS[field] || field}：${formatAgentApprovalValue(field, fieldValue)}`).join('；')
   return String(value).replace('T', ' ')
 }
 
 function agentApprovalRows(approval: AgentApproval) {
   const draft = approval.draft ?? {}
-  const changedFields = draft.fields && typeof draft.fields === 'object' && !Array.isArray(draft.fields)
-    ? draft.fields as Record<string, unknown>
+  const changeSource = draft.fields ?? draft.changes
+  const changedFields = changeSource && typeof changeSource === 'object' && !Array.isArray(changeSource)
+    ? changeSource as Record<string, unknown>
     : null
   const before = changedFields && draft.before && typeof draft.before === 'object' && !Array.isArray(draft.before)
     ? draft.before as Record<string, unknown>
     : null
-  const source = changedFields ? { taskTitle: draft.taskTitle, ...changedFields } : draft
+  const source = changedFields
+    ? { taskTitle: draft.taskTitle, ...(draft.recordType ? { recordType: draft.recordType, action: draft.action, recordId: draft.recordId } : {}), ...changedFields }
+    : draft
   return Object.entries(source)
     .filter(([key, value]) => key !== 'taskId' && key !== 'before' && value !== undefined && value !== '')
     .map(([key, value]) => ({
