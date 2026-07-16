@@ -9007,6 +9007,9 @@ function GivernyModeSettings({
 
 // Cloudflare Turnstile 站点密钥（公开，可放前端）；密钥(secret)只在 Worker 后端环境变量里。
 const TURNSTILE_SITE_KEY = '0x4AAAAAADq6J7chw6N3buxI'
+// 本地预览旁路：sitekey 绑定 mayeai.com，在 localhost 上组件必然失败；
+// 本地后端未配 TURNSTILE_SECRET_KEY 时会跳过校验，前端同步放行。
+const TURNSTILE_LOCAL_BYPASS = ['localhost', '127.0.0.1'].includes(window.location.hostname)
 
 function AdminLoginModal({
   error,
@@ -9020,12 +9023,15 @@ function AdminLoginModal({
   const [email, setEmail] = useState('')
   const [key, setKey] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [turnstileToken, setTurnstileToken] = useState('')
+  const [turnstileToken, setTurnstileToken] = useState(TURNSTILE_LOCAL_BYPASS ? 'local-preview' : '')
   const turnstileRef = useRef<HTMLDivElement | null>(null)
   const turnstileWidgetId = useRef<string | null>(null)
 
   // 渲染 Cloudflare Turnstile 人机验证小组件，拿到 token 后才允许登录
   useEffect(() => {
+    if (TURNSTILE_LOCAL_BYPASS) {
+      return
+    }
     let cancelled = false
     let timer: number | undefined
     const renderWidget = () => {
