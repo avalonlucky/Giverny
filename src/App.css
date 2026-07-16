@@ -1,84 +1,82 @@
 :root {
-  /* ===== Geist Design System · Light（Vercel）=====
-     高对比、克制用色：留白分区、色阶表意（100 底/400 边框/700 实色/900 次要文字/1000 主文字）。
-     颜色只用来表达状态与层级，不做装饰。Dark 主题见下方 [data-theme="dark"] 块。 */
+  /* ===== Giverny 亮色（保持已上线的绿 + 纸张感）=====
+     编辑式平面分区调色板：深度靠色调，分隔靠留白，浮起靠反白。绿色全站只有一支 sage。
+     暗色主题见下方 [data-theme="dark"]：柔和墨绿夜色，非纯黑。 */
   color-scheme: light;
   --font-sans: "Geist Sans", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-serif: var(--font-sans);
-  --font-editorial: var(--font-sans);
-  --color-text: #171717;             /* gray-1000 */
-  --color-text-secondary: #4d4d4d;   /* gray-900 */
-  --color-text-muted: #7d7d7d;       /* gray-800 */
-  --color-surface: #ffffff;          /* background-100 */
-  --color-surface-strong: #ffffff;
-  --color-surface-alt: #fafafa;      /* background-200，仅做轻分隔 */
-  --color-sidebar: #fafafa;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  --font-editorial: var(--font-serif);
+  --color-text: #1f2a27;
+  --color-text-secondary: #586460;
+  --color-text-muted: #66716d;
+  --color-surface: #fbfbf8;
+  --color-surface-strong: #fbfbf8;
+  --color-surface-alt: #f4f4ee;
+  --color-sidebar: #fbfbf8;
   --color-card: #ffffff;
-  /* 品牌主色 → Geist blue（链接/焦点/选中态）。实心主按钮另走 --button-primary-*（gray-1000 反白）。 */
-  --brand-primary: #006bff;          /* blue-700 */
-  --brand-primary-strong: #0059ec;   /* blue-800 */
-  --brand-glow: #dfefff;             /* blue-300 */
-  --brand-glow-soft: #f0f7ff;        /* blue-100 */
+  --brand-primary: #3c6b61;
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.10);
+  --brand-glow-soft: rgba(60, 107, 97, 0.05);
   --color-primary: var(--brand-primary);
   --color-primary-strong: var(--brand-primary-strong);
   --color-primary-hover: var(--brand-primary-strong);
-  --button-primary-bg: #171717;      /* Geist 主按钮：gray-1000 实心 */
-  --button-primary-bg-hover: #383838;
+  --button-primary-bg: #2f564e;
+  --button-primary-bg-hover: #26473f;
   --button-primary-ink: #ffffff;
-  --focus-ring-color: #006bff;       /* 焦点环：2px 表面色间隙 + 2px blue */
-  --color-admin-only: #aa4d00;       /* amber-900 */
-  --color-supplement: #0059ec;
-  --color-supplement-bg: #e9f4ff;    /* blue-200 */
-  --color-status-danger: #d8001b;    /* red-900 */
-  --color-status-warning: #aa4d00;   /* amber-900 */
-  --danger-soft-bg: #ffeeef;         /* red-100 */
-  --danger-soft-border: #ffd7d6;     /* red-400 */
-  --danger-solid: #ea001d;           /* red-800，Geist error button */
-  /* 状态色 → Geist accent 色阶（900 档保证文字对比度） */
-  --color-status-planning: #8f8f8f;  /* gray-700 */
-  --color-status-active: #005ff2;    /* blue-900 */
-  --color-status-pending: #aa4d00;   /* amber-900 */
-  --color-status-accepted: #107d32;  /* green-900 */
-  --color-status-hold: #7d00cc;      /* purple-900 */
-  --color-status-stopped: #d8001b;   /* red-900 */
-  --color-status-disabled: #a8a8a8;  /* gray-600 */
-  --color-due-soon: #ff9300;         /* amber-800 */
-  --color-due-overdue: #ea001d;      /* red-800 */
-  --color-alert-surface: #fff6de;    /* amber-100 */
-  --color-alert-accent: #aa4d00;
-  /* 任务行状态填充 → 各 accent 的 100 档 */
-  --row-fill-plan: #fafafa;
-  --row-fill-active: #f0f7ff;        /* blue-100 */
-  --row-fill-pending: #fff6de;       /* amber-100 */
-  --color-editorial-surface: #ffffff;
-  --color-editorial-surface-alt: #fafafa;
-  --color-editorial-text: #171717;
-  --color-editorial-text-secondary: #4d4d4d;
-  --color-editorial-text-muted: #7d7d7d;
-  --color-editorial-primary: #006bff;
-  --color-editorial-primary-hover: #0059ec;
-  --color-editorial-menu: #ffffff;
-  --color-editorial-backdrop: rgba(0, 0, 0, 0.4);
-  --color-surface-deep: #f2f2f2;     /* gray-100 */
-  --color-border: #00000014;         /* gray-alpha-400 */
-  --color-border-soft: #0000000d;    /* gray-alpha-100 */
-  --color-border-strong: #0000003d;  /* gray-alpha-600 */
-  /* 浮层（右键菜单 / 命令面板 / Toast）：Geist 亮色浮层 = 白底 + alpha 描边 + 柔和投影 */
-  --color-menu: #ffffff;
-  --color-menu-2: #fafafa;
-  --color-menu-ink: #171717;
-  --color-menu-ink-2: #7d7d7d;
-  --color-menu-accent: #006bff;
-  --color-menu-danger: #ea001d;
-  --color-menu-border: #00000014;
-  --radius-control: 6px;             /* Geist：控件/卡片 6px */
-  --radius-panel: 6px;
-  --radius-menu: 12px;               /* 菜单/弹窗 12px */
-  --radius-pill: 9999px;
-  --shadow-card: 0 2px 2px rgba(0, 0, 0, 0.04);
-  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.02), 0 4px 8px -4px rgba(0, 0, 0, 0.04), 0 16px 24px -8px rgba(0, 0, 0, 0.06);
-  --shadow-float: 0 1px 1px rgba(0, 0, 0, 0.02), 0 8px 16px -4px rgba(0, 0, 0, 0.04), 0 24px 32px -8px rgba(0, 0, 0, 0.06);
+  --focus-ring-color: #3c6b61;
+  --color-admin-only: #94652f;
+  --color-supplement: #3c6b61;
+  --color-supplement-bg: rgba(60, 107, 97, 0.1);
+  --color-status-danger: #97474a;
+  --color-status-warning: #94652f;
+  --danger-soft-bg: rgba(242, 95, 92, 0.08);
+  --danger-soft-border: rgba(242, 95, 92, 0.24);
+  --danger-solid: #c2484b;
+  --color-status-planning: #7a8590;
+  --color-status-active: #3a7bb5;
+  --color-status-pending: #b08438;
+  --color-status-accepted: #3c6b61;
+  --color-status-hold: #7a6e94;
+  --color-status-stopped: #97474a;
+  --color-status-disabled: #949c96;
+  --color-due-soon: #cf8b3e;
+  --color-due-overdue: #c25450;
+  --color-alert-surface: #f2ebdf;
+  --color-alert-accent: #94652f;
+  --row-fill-plan: #e3fdfd;
+  --row-fill-active: #eaf0f4;
+  --row-fill-pending: #f5f0e6;
+  --color-editorial-surface: #fbfbf8;
+  --color-editorial-surface-alt: #f4f4ee;
+  --color-editorial-text: #1f2a27;
+  --color-editorial-text-secondary: #586460;
+  --color-editorial-text-muted: #66716d;
+  --color-editorial-primary: #3c6b61;
+  --color-editorial-primary-hover: #2f564e;
+  --color-editorial-menu: #20302c;
+  --color-editorial-backdrop: rgba(20, 28, 26, 0.34);
+  --color-surface-deep: #ecede5;
+  --color-border: rgba(31, 42, 39, 0.08);
+  --color-border-soft: rgba(31, 42, 39, 0.045);
+  --color-border-strong: rgba(31, 42, 39, 0.14);
+  --color-panel-border: var(--color-border-soft);
+  /* 浮层与纸面同色，靠投影浮起（保持上线版观感），亮色下不描边 */
+  --color-menu: #fbfbf8;
+  --color-menu-2: #f4f4ee;
+  --color-menu-ink: #1f2a27;
+  --color-menu-ink-2: #66716d;
+  --color-menu-accent: #3c6b61;
+  --color-menu-danger: #c2484b;
+  --color-menu-border: transparent;
+  --radius-control: 4px;
+  --radius-panel: 0;
+  --radius-menu: 8px;
+  --radius-pill: 999px;
+  --shadow-card: none;
+  --shadow-popover: 0 8px 26px rgba(20, 28, 26, 0.14), 0 2px 6px rgba(20, 28, 26, 0.08);
+  --shadow-float: 0 8px 26px rgba(20, 28, 26, 0.14), 0 2px 6px rgba(20, 28, 26, 0.08);
   --z-base: 1;
   --z-sticky: 20;
   --z-floating: 40;
@@ -88,74 +86,73 @@
   accent-color: var(--color-primary);
 }
 
-/* ===== Geist Design System · Dark =====
-   纯黑基底 + gray-alpha 描边分层；accent 换用 Dark 色阶（900 档文字 / 100 档底色）。 */
+/* ===== Giverny 暗色：柔和墨绿夜色 =====
+   不用纯黑：墨绿灰基底 + 低对比分层 + sage 点缀，状态色整体降饱和，久看不刺眼。 */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-text: #ededed;             /* gray-1000 */
-  --color-text-secondary: #a0a0a0;   /* gray-900 */
-  --color-text-muted: #878787;       /* gray-600 */
-  --color-surface: #000000;          /* background-100 */
-  --color-surface-strong: #0a0a0a;
-  --color-surface-alt: #141414;
-  --color-sidebar: #0a0a0a;
-  --color-card: #0a0a0a;
-  --brand-primary: #47a8ff;          /* blue-900：暗底上的链接/强调 */
-  --brand-primary-strong: #0090ff;   /* blue-600 */
-  --brand-glow: #002f62;             /* blue-300 */
-  --brand-glow-soft: #06193a;        /* blue-100 */
-  --button-primary-bg: #ededed;      /* 暗色主按钮：亮色实心反白 */
-  --button-primary-bg-hover: #cccccc;
-  --button-primary-ink: #0a0a0a;
-  --focus-ring-color: #47a8ff;
-  --color-admin-only: #ff9300;       /* amber-900 */
-  --color-supplement: #47a8ff;
-  --color-supplement-bg: #022248;    /* blue-200 */
-  --color-status-danger: #ff565f;    /* red-900 */
-  --color-status-warning: #ffae00;   /* amber-700 */
-  --danger-soft-bg: #330a11;         /* red-100 */
-  --danger-soft-border: #6f101b;     /* red-400 */
-  --danger-solid: #e2162a;           /* red-800 */
-  --color-status-planning: #878787;
-  --color-status-active: #47a8ff;    /* blue-900 */
-  --color-status-pending: #ffae00;   /* amber-700 */
-  --color-status-accepted: #00ca50;  /* green-900 */
-  --color-status-hold: #c472fb;      /* purple-900 */
-  --color-status-stopped: #ff565f;   /* red-900 */
-  --color-status-disabled: #666666;
-  --color-due-soon: #ff9300;
-  --color-due-overdue: #ff565f;
-  --color-alert-surface: #2a1700;    /* amber-100 */
-  --color-alert-accent: #ffae00;
-  --row-fill-plan: #111111;
-  --row-fill-active: #06193a;        /* blue-100 */
-  --row-fill-pending: #2a1700;       /* amber-100 */
-  --color-editorial-surface: #0a0a0a;
-  --color-editorial-surface-alt: #141414;
-  --color-editorial-text: #ededed;
-  --color-editorial-text-secondary: #a0a0a0;
-  --color-editorial-text-muted: #878787;
-  --color-editorial-primary: #47a8ff;
-  --color-editorial-primary-hover: #0090ff;
-  --color-editorial-menu: #1f1f1f;
-  --color-editorial-backdrop: rgba(0, 0, 0, 0.6);
-  --color-surface-deep: #1a1a1a;     /* gray-100 */
-  --color-border: #ffffff24;         /* gray-alpha-400 */
-  --color-border-soft: #ffffff12;    /* gray-alpha-100 */
-  --color-border-strong: #ffffff3d;  /* gray-alpha-500 */
-  --color-menu: #1f1f1f;             /* gray-200 浮层 */
-  --color-menu-2: #292929;
-  --color-menu-ink: #ededed;
-  --color-menu-ink-2: #a0a0a0;
-  --color-menu-accent: #47a8ff;
-  --color-menu-danger: #ff565f;
-  --color-menu-border: #ffffff21;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16);
-  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.02), 0 4px 8px -4px rgba(0, 0, 0, 0.04), 0 16px 24px -8px rgba(0, 0, 0, 0.06);
-  --shadow-float: 0 1px 1px rgba(0, 0, 0, 0.02), 0 8px 16px -4px rgba(0, 0, 0, 0.04), 0 24px 32px -8px rgba(0, 0, 0, 0.06);
+  --color-text: #e4e8e4;
+  --color-text-secondary: #a8b0aa;
+  --color-text-muted: #8d958f;
+  --color-surface: #141715;
+  --color-surface-strong: #1b1f1c;
+  --color-surface-alt: #222723;
+  --color-sidebar: #171b18;
+  --color-card: #1b1f1c;
+  --brand-primary: #8fbcaf;
+  --brand-primary-strong: #a3cdc0;
+  --brand-glow: rgba(143, 188, 175, 0.16);
+  --brand-glow-soft: rgba(143, 188, 175, 0.08);
+  --button-primary-bg: #47796d;
+  --button-primary-bg-hover: #538a7d;
+  --button-primary-ink: #ffffff;
+  --focus-ring-color: #8fbcaf;
+  --color-admin-only: #d9a959;
+  --color-supplement: #8fbcaf;
+  --color-supplement-bg: rgba(143, 188, 175, 0.12);
+  --color-status-danger: #dc8f8c;
+  --color-status-warning: #d9a959;
+  --danger-soft-bg: rgba(224, 122, 118, 0.12);
+  --danger-soft-border: rgba(224, 122, 118, 0.32);
+  --danger-solid: #b95c5f;
+  --color-status-planning: #8b928c;
+  --color-status-active: #6fa3d8;
+  --color-status-pending: #d9a959;
+  --color-status-accepted: #8fbcaf;
+  --color-status-hold: #a99bc9;
+  --color-status-stopped: #dc8f8c;
+  --color-status-disabled: #6b716c;
+  --color-due-soon: #dc9a55;
+  --color-due-overdue: #e07a76;
+  --color-alert-surface: #2b251c;
+  --color-alert-accent: #d9a959;
+  --row-fill-plan: #1c2321;
+  --row-fill-active: #1b222a;
+  --row-fill-pending: #282218;
+  --color-editorial-surface: #1b1f1c;
+  --color-editorial-surface-alt: #222723;
+  --color-editorial-text: #e4e8e4;
+  --color-editorial-text-secondary: #a8b0aa;
+  --color-editorial-text-muted: #8d958f;
+  --color-editorial-primary: #8fbcaf;
+  --color-editorial-primary-hover: #a3cdc0;
+  --color-editorial-menu: #242a26;
+  --color-editorial-backdrop: rgba(8, 12, 10, 0.55);
+  --color-surface-deep: #262c27;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-soft: rgba(255, 255, 255, 0.05);
+  --color-border-strong: rgba(255, 255, 255, 0.17);
+  --color-panel-border: rgba(255, 255, 255, 0.07);
+  --color-menu: #242a26;
+  --color-menu-2: #2c332e;
+  --color-menu-ink: #e4e8e4;
+  --color-menu-ink-2: #9aa29c;
+  --color-menu-accent: #8fbcaf;
+  --color-menu-danger: #dc8f8c;
+  --color-menu-border: rgba(255, 255, 255, 0.08);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-popover: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
-
-/* 工具模式（默认）主色固定为 var(--color-primary)，不随季节漂移——季节只在「吉维尼模式」里生效。 */
 
 /* ===== 吉维尼模式（Geist 预览分支已停用）=====
    本分支主视觉切换为 Geist Design System；季节 token 覆盖与 Geist 色板互斥，暂时下线。
@@ -22351,14 +22348,14 @@ button.topbar-create-button kbd {
    焦点环 / 浮层描边 / 卡片投影 / 等宽数字 / 主题切换按钮
    ============================================================ */
 
-/* 卡片：白底 + alpha 描边 + 极轻投影（Geist Raised Card） */
+/* 卡片：纸面 + 极淡描边（亮色无投影，暗色一层轻投影） */
 .panel {
-  border-color: var(--color-border);
+  border-color: var(--color-panel-border);
   box-shadow: var(--shadow-card);
 }
 
-/* 浮层统一补 Geist 描边：原深墨浮层靠明暗对比浮起，
-   换成 Geist 亮/暗浮层后需要 alpha 描边 + 分层投影做图底分离 */
+/* 浮层：亮色与纸面同色、无描边、靠投影浮起（上线版观感）；
+   暗色浮层比卡片略亮一档 + alpha 描边做图底分离 */
 .task-context-menu,
 .toast,
 .sidebar-account-menu {
@@ -22371,14 +22368,8 @@ button.topbar-create-button kbd {
 .shortcut-help,
 .semantic-search {
   border: 1px solid var(--color-menu-border);
-  background: var(--color-menu);
-  border-radius: var(--radius-menu);
+  background: var(--color-surface-strong);
   box-shadow: var(--shadow-float);
-}
-
-.task-context-menu,
-.sidebar-account-menu {
-  border-radius: var(--radius-menu);
 }
 
 /* 焦点环：2px 表面色间隙 + 2px 焦点蓝，仅键盘聚焦显示 */

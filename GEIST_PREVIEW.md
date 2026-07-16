@@ -2,16 +2,17 @@
 
 > 分支：`geist-visual-refactor`（基于 main `876e527`）。仅做主视觉重构预览，**不影响 main 与线上站点**。
 
-## 改了什么
+## 改了什么（v2 方向）
 
-按 Vercel Geist Design System（Light + Dark 双主题规范）重构主视觉：
+结构借鉴 Geist Design System（token 化、双主题、焦点环、组件规格），配色按用户反馈定制：
 
-- **Token 层重写**（`src/App.css` 顶部）：全部语义 token 换成 Geist 色板——亮色以白纸黑字为基底（gray-1000 主文字 / gray-alpha 描边），暗色为纯黑基底；品牌青绿改为 Geist blue（链接/焦点/选中），状态色对齐各 accent 色阶（进行中=blue、待验收=amber、已验收=green、逾期=red、搁置=purple）。
-- **暗色主题**：新增 `:root[data-theme="dark"]` 整套 token；右下角悬浮按钮 ◐ 一键切换，跟随系统偏好初始化，localStorage 记忆。
-- **字体**：全站 Geist Sans（CDN 引入），代码/快捷键/对齐数字用 Geist Mono；原「Iowan Old Style」衬线标题全部收归无衬线。
-- **组件精修**：主按钮改 Geist 实心反白（亮=黑底白字、暗=白底黑字）；次级按钮白底 alpha 描边；控件统一 40px 高、6px 圆角，菜单/弹窗 12px；浮层从「深墨反白」改为 Geist 亮/暗浮层 + alpha 描边 + 分层投影；焦点环 2px 间隙 + 2px 蓝。
+- **亮色 = 上线版的绿 + 纸张感**：sage 绿主色、米白纸面、衬线标题（Iowan Old Style）、原状态色与行填充全部保留，和 mayeai.com 现有观感一致。
+- **暗色 = 柔和墨绿夜色（非纯黑）**：墨绿灰基底 `#141715` + 卡片分层 + sage 点缀；文字用低对比暖灰绿，状态色整体降饱和，久看不刺眼。
+- **双主题机制**：`:root[data-theme="dark"]` 整套 token；右下角悬浮按钮 ◐ 一键切换，跟随系统偏好初始化，localStorage 记忆。
+- **字体**：正文 Geist Sans（近似 Inter，CDN 引入），标题保留衬线，代码/快捷键/对齐数字用 Geist Mono。
 - **硬编码色收敛**：约 320 处散落色值映射到语义 token，暗色主题因此自动全站生效。
-- **吉维尼季节模式暂停用**（与 Geist token 互斥，恢复方法见 App.css 注释）。
+- **焦点环**：键盘聚焦时 2px 间隙 + 2px 品牌色环（Geist 规范），无障碍加分。
+- **吉维尼季节模式暂停用**（与双主题 token 冲突，恢复方法见 App.css 注释）。
 
 ## 如何本地预览
 
