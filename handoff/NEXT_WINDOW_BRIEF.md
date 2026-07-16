@@ -1,12 +1,12 @@
 # Next Window Brief
 
-## 2026-07-16 · v0.28.38 Agent 执行时间线与长图阅读器
+## 2026-07-16 · v0.28.39 AI 反馈学习闭环
 
-- `/api/ai/chat` 在前端请求 SSE 时逐步返回 `trace`、`result`、`error` 事件；前端删除固定间隔伪步骤，使用真实轨迹展示执行中、已完成和执行中断状态。
-- Agent 工具轨迹保留机器可核对标识，界面通过统一时间线仅显示中文动作；云端会话会保存并恢复 trace。
-- 后台分析结果改用现有 `ChatMarkdown` + GFM 渲染，标准表格不再以 Markdown 源码显示。
-- `ImagePreviewReader` 为工作助手、文件库、进展和验收提供滚动、25%-300% 缩放、适合窗口、1:1 和 Command/Ctrl + 滚轮缩放。
-- 隔离发布门禁 74/74；本版本无新增 D1 migration。
+- 新增 `db/migrations/0019_ai_feedback_learning.sql` 和 `ai_learning_events`，统一保存原始输入、AI 建议、最终人工结果及 adopted / edited / rejected。
+- 新建/编辑任务的需求与名称即使未点击采用，也会在最终提交时交叉比对；差异继续进入既有增量风格蒸馏。
+- 进展、修改意见、验收备注和附件命名接入同一反馈学习协议；修改意见拥有独立 prompt 和风格画像。
+- 编辑已有任务时生成的工时建议会绑定最终预估，验收后以实际工时进入偏差校准。
+- build、lint、隔离 D1、真实 HTTP 落库和 Agent 门禁 74/74 均通过。
 
 最后整理：2026-06-23
 代码版本：v0.11.66

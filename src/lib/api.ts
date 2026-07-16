@@ -144,8 +144,10 @@ export type TaskAssistantSuggestion = {
   }
 }
 
-export type TextAssistantMode = 'acceptance' | 'progress'
+export type TextAssistantMode = 'acceptance' | 'progress' | 'feedback'
 export type TextLearningContext = TextAssistantMode | 'attachment_name'
+export type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | TextLearningContext
+export type AiLearningAction = 'adopted' | 'edited' | 'rejected'
 
 export type TextAssistantSuggestion = {
   optimizedText: string
@@ -666,25 +668,41 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   recordTaskEditPair: (payload: { aiOutput: string; userFinal: string; designType?: string }) =>
-    fetch('/api/ai/task-edits', {
+    requestJson<{ saved: boolean }>('/api/ai/task-edits', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(() => null),
   recordTaskTitleEditPair: (payload: { aiOutput: string; userFinal: string; designType?: string }) =>
-    fetch('/api/ai/task-title-edits', {
+    requestJson<{ saved: boolean }>('/api/ai/task-title-edits', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(() => null),
   recordTaskTypeChoice: (payload: { requirement: string; title: string; finalType: string; aiSuggestedType?: string }) =>
-    fetch('/api/ai/task-type-choices', {
+    requestJson<{ saved: boolean }>('/api/ai/task-type-choices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(() => null),
   recordTextEditPair: (payload: { context: TextLearningContext; aiOutput: string; userFinal: string; designType?: string; taskId?: number; taskTitle?: string }) =>
-    fetch('/api/ai/text-edits', {
+    requestJson<{ saved: boolean }>('/api/ai/text-edits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null),
+  recordAiLearningEvent: (payload: {
+    context: AiLearningContext
+    sourceInput?: string
+    aiOutput: string
+    userFinal?: string
+    action: AiLearningAction
+    designType?: string
+    taskId?: number
+    taskTitle?: string
+    metadata?: Record<string, unknown>
+  }) =>
+    requestJson<{ saved: boolean }>('/api/ai/learning-events', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

@@ -39,6 +39,7 @@
 │   ├── AI_AGENT_RUNTIME.md
 │   ├── AGENT_WORKFLOWS.md
 │   ├── AI_MODEL_ROUTING.md
+│   ├── AI_LEARNING.md
 │   ├── MCP_SERVER.md
 │   ├── OPERATION_POLICIES.md
 │   ├── PROJECT_STRUCTURE.md
@@ -111,6 +112,7 @@
 - Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`
 - Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
+- AI feedback learning, style distillation and hour calibration: `docs/AI_LEARNING.md`
 - Domain types: `src/types/domain.ts`
 - App version and defaults: `src/config/appConfig.ts`
 - D1 full schema: `db/schema.sql`
@@ -133,6 +135,7 @@
 - Agent chat requests prefer SSE. `src/worker.ts` emits verifiable trace/result/error events, while `AgentExecutionTimeline` progressively displays friendly actions and keeps machine tool markers hidden for evaluation and audit compatibility.
 - Image attachment previews share `ImagePreviewReader`, which owns fit-to-window, 1:1, 25%-300% zoom and internal scrolling across Agent, progress, acceptance and file-library entry points.
 - `agent_run_metrics` stores privacy-minimized Agent outcome metadata for the admin quality dashboard; evaluation-tagged traffic is retained separately and excluded from dashboard aggregates.
+- `ai_learning_events` stores the auditable “source input → AI suggestion → final user result” loop. Writing style is distilled incrementally by context and design type; hour estimates use a separate observed-outcome calibration table.
 - `/mcp` is a stateless Streamable HTTP server exposing only the shared read-tool registry. It requires a dedicated `mcp-read` access token that cannot authenticate to the website.
 - `AGENT_WRITE_WORKFLOW` runs confirmed Agent writes as durable Cloudflare Workflow instances. The Worker caches each operation result in `agent_write_operations` for idempotent replay.
 - `AGENT_ANALYSIS_WORKFLOW` runs long read-only analysis independently from chat requests. `agent_analysis_jobs` stores status and final reports; temporary source snapshots are cleared after completion.

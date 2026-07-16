@@ -300,6 +300,27 @@ async function runAgentWorkspaceCheck(cookie) {
   process.stdout.write('Cloud conversation, migration, deletion, and task notification checks passed.\n')
 }
 
+async function runAiLearningCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/ai/learning-events', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      context: 'task_requirement',
+      action: 'rejected',
+      sourceInput: '做一张直播邀请海报',
+      aiOutput: '1、设计背景：直播活动邀请。\n2、设计要求：科技感蓝色。\n3、输出文件：海报。',
+      userFinal: '1、设计背景：用于直播当天邀请。\n2、设计要求：沿用现有主视觉，不新增配色。\n3、输出文件：邀请长图 JPG。',
+      designType: '传播类 / 海报',
+      taskTitle: 'AI 学习隔离评测',
+    }),
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok || result.saved !== true) {
+    throw new Error(`AI learning event was not persisted: ${JSON.stringify(result)}`)
+  }
+  process.stdout.write('AI feedback learning endpoint check passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -320,6 +341,7 @@ try {
   await runWorkflowReplayCheck()
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
+  await runAiLearningCheck(cookie)
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {

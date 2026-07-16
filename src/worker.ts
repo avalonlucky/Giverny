@@ -7414,6 +7414,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
     .run()
 
   await updateHourEstimateObservation(env, id, Number(next.actualHours) || 0, next.status === '已验收')
+  await linkHourEstimateSuggestion(env, changes.hourEstimateSuggestionId ?? '', id, Number(next.estimatedHours) || 0)
   await audit(env, 'update', 'task', id, changes)
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
   ctx?.waitUntil(indexTaskSearch(env, id))
@@ -8613,7 +8614,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       isUncounted?: boolean
     }>
   }
-  const mode = body.mode === 'acceptance' ? 'acceptance' : 'progress'
+  const mode = body.mode === 'acceptance' ? 'acceptance' : body.mode === 'feedback' ? 'feedback' : 'progress'
   const text = String(body.text ?? '').trim()
   const files = Array.isArray(body.files) ? body.files.slice(0, 40) : []
   const uploadedFileNames = Array.isArray(body.uploadedFileNames) ? body.uploadedFileNames.slice(0, 20).map(String) : []
@@ -8658,15 +8659,19 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     ? await getAcceptanceAttachmentAiContexts(env, body.task?.id)
     : []
   const textStyleGuide = await getOrBuildTextStyleGuide(env, mode, taskType)
+  const modeLabel = mode === 'acceptance' ? '验收备注' : mode === 'feedback' ? '修改意见' : '进展记录'
   const textStyleGuideInjection = textStyleGuide
-    ? `\n\n【用户${mode === 'acceptance' ? '验收备注' : '进展记录'}写法偏好】以下来自用户采纳 AI 后的真实改写，请优先遵循：\n${textStyleGuide}`
+    ? `\n\n【用户${modeLabel}写法偏好】以下来自用户对历史 AI 建议的真实取舍和改写，请优先遵循：\n${textStyleGuide}`
     : ''
   const acceptanceModeRules = mode === 'acceptance'
     ? `\n\n【验收备注专用规则】这次不是单纯润色用户备注，而是生成面向甲方的项目收尾说明。必须同时分析四类信息：\n1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。\n2. acceptanceContext.projectProgressHistory：从项目开始到验收前的全部分段进展，已按时间排序；包括普通进展、改稿轮次、甲方反馈、不计时进展和对应附件。\n3. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。\n4. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。\n\n写法要求：\n- 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新、修改、改稿和甲方反馈响应。\n- 至少明确说明项目最终完成了什么，以及从开始到验收一共更新和修改了哪些关键内容。\n- 语言面向甲方，写成清楚的项目交付总结，不出现“系统记录”“isUncounted”等内部字段，也不要夸大。\n- 推荐按“完成与交付概况 → 主要更新和修改 → 反馈响应 / 版本迭代 → 最终文件”的顺序组织；结算、补录或等待情况只在输入明确且确有必要时写。\n- 如果用户备注很短或为空，但历史进展足够明确，也必须根据任务需求 + 全部历史进展生成完整验收备注。\n- 如果是海报、长图、PPT、品牌物料等复杂任务，要结合历史进展和附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有输入明确出现具体风格时才可以写。\n- 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。\n- 不要凭空写客户已确认、已通过、无问题、符合规范、已上线等事实；除非输入明确提供。\n- 输出必须使用「1、」「2、」「3、」连续分点，每点一行，一行一件事。`
     : ''
+  const feedbackModeRules = mode === 'feedback'
+    ? `\n\n【修改意见专用规则】将甲方或客户给出的反馈整理为可执行的修改清单：\n- 保留版本号、反馈来源、明确修改对象、原问题和目标结果。\n- 合并重复表达，但不要遗漏否定词、数量、尺寸、颜色、文案、页面或文件版本等关键约束。\n- 不要写成已经完成的进展，也不要擅自承诺交付时间或判断客户已确认。\n- 输出按优先级组织；信息不足时保持原意，不自行补充设计方案。`
+    : ''
 
   if (!text && files.length === 0 && uploadedFileNames.length === 0 && activity.length === 0 && acceptanceAttachmentContexts.length === 0 && projectProgressHistory.length === 0) {
-    return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : '请先填写进展内容或上传过程附件')
+    return fail(mode === 'acceptance' ? '请先填写验收备注或上传验收文件' : mode === 'feedback' ? '请先填写修改意见或上传反馈附件' : '请先填写进展内容或上传过程附件')
   }
 
   const aiPayload = {
@@ -8708,7 +8713,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TextAssistantToolArgs>(
       env,
-      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${acceptanceModeRules}${textStyleGuideInjection}`,
+      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${acceptanceModeRules}${feedbackModeRules}${textStyleGuideInjection}`,
       aiPayload,
       'optimizedText:string, summary:string',
     )
@@ -8751,7 +8756,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：像内部工作记录，分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nacceptance 模式：写成面向甲方的项目交付总结，必须结合任务初始需求、全部历史分段进展、验收附件分析结果和用户原始验收备注；明确项目完成内容、全过程重要更新与修改、版本迭代及最终文件。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
+            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：像内部工作记录，分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nfeedback 模式：整理成尚待执行的修改清单，保留版本、来源和关键约束；不要把反馈写成已经完成的进展。\nacceptance 模式：写成面向甲方的项目交付总结，必须结合任务初始需求、全部历史分段进展、验收附件分析结果和用户原始验收备注；明确项目完成内容、全过程重要更新与修改、版本迭代及最终文件。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}${feedbackModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
         },
         {
           role: 'user',
@@ -8769,7 +8774,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
               properties: {
                 optimizedText: {
                   type: 'string',
-                  description: '优化后的中文文本，必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。可直接写入进展记录或验收备注；保留事实，不编造文件内容、交付物、客户确认或验收结果。',
+                  description: '优化后的中文文本，必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。可直接写入进展记录、修改意见或验收备注；保留事实，不编造文件内容、交付物、客户确认或验收结果。',
                 },
                 summary: {
                   type: 'string',
@@ -9210,6 +9215,21 @@ async function ensureTaskLearningTables(env: Env) {
       created_at INTEGER NOT NULL
     )`,
   ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS ai_learning_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      context TEXT NOT NULL,
+      action TEXT NOT NULL,
+      source_input TEXT NOT NULL DEFAULT '',
+      ai_output TEXT NOT NULL,
+      user_final TEXT NOT NULL DEFAULT '',
+      design_type TEXT NOT NULL DEFAULT '',
+      task_id INTEGER,
+      task_title TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    )`,
+  ).run()
 }
 
 async function saveTaskEditPair(env: Env, request: Request) {
@@ -9266,13 +9286,101 @@ async function saveTaskTypeChoice(env: Env, request: Request) {
   return ok({ saved: true })
 }
 
-type TextLearningContext = 'progress' | 'acceptance' | 'attachment_name'
+type TextLearningContext = 'progress' | 'feedback' | 'acceptance' | 'attachment_name'
+type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | TextLearningContext
+type AiLearningAction = 'adopted' | 'edited' | 'rejected'
 
 function normalizeTextLearningContext(value: unknown): TextLearningContext {
-  if (value === 'acceptance' || value === 'attachment_name') {
+  if (value === 'feedback' || value === 'acceptance' || value === 'attachment_name') {
     return value
   }
   return 'progress'
+}
+
+function normalizeAiLearningContext(value: unknown): AiLearningContext {
+  if (
+    value === 'task_requirement'
+    || value === 'task_title'
+    || value === 'task_type'
+    || value === 'hour_estimate'
+    || value === 'feedback'
+    || value === 'acceptance'
+    || value === 'attachment_name'
+  ) {
+    return value
+  }
+  return 'progress'
+}
+
+function normalizeAiLearningAction(value: unknown, aiOutput: string, userFinal: string): AiLearningAction {
+  if (value === 'adopted' || value === 'edited' || value === 'rejected') {
+    return value
+  }
+  return aiOutput === userFinal ? 'adopted' : 'edited'
+}
+
+async function saveAiLearningEvent(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    context?: string
+    action?: string
+    sourceInput?: string
+    aiOutput?: string
+    userFinal?: string
+    designType?: string
+    taskId?: number
+    taskTitle?: string
+    metadata?: Record<string, unknown>
+  }
+  const context = normalizeAiLearningContext(body.context)
+  const sourceInput = String(body.sourceInput ?? '').trim().slice(0, 6000)
+  const aiOutput = String(body.aiOutput ?? '').trim().slice(0, 6000)
+  const userFinal = String(body.userFinal ?? '').trim().slice(0, 6000)
+  const designType = String(body.designType ?? '').trim().slice(0, 120)
+  const taskTitle = String(body.taskTitle ?? '').trim().slice(0, 200)
+  const taskId = Number(body.taskId)
+  if (!aiOutput) {
+    return ok({ saved: false })
+  }
+  const action = normalizeAiLearningAction(body.action, aiOutput, userFinal)
+  await ensureTaskLearningTables(env)
+  await env.DB.prepare(
+    `INSERT INTO ai_learning_events
+      (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      context,
+      action,
+      sourceInput,
+      aiOutput,
+      userFinal,
+      designType,
+      Number.isFinite(taskId) ? taskId : null,
+      taskTitle,
+      JSON.stringify(body.metadata ?? {}).slice(0, 4000),
+      Date.now(),
+    )
+    .run()
+
+  // 可用于归纳写作偏好的样本继续写入现有增量蒸馏表，兼容既有历史数据。
+  if (userFinal && aiOutput !== userFinal) {
+    if (context === 'task_requirement') {
+      await env.DB.prepare(
+        'INSERT INTO task_requirement_edits (ai_output, user_final, design_type, created_at) VALUES (?, ?, ?, ?)',
+      ).bind(aiOutput, userFinal, designType, Date.now()).run()
+    } else if (context === 'task_title') {
+      await env.DB.prepare(
+        'INSERT INTO task_title_edits (ai_output, user_final, design_type, created_at) VALUES (?, ?, ?, ?)',
+      ).bind(aiOutput, userFinal, designType, Date.now()).run()
+    } else if (context === 'progress' || context === 'feedback' || context === 'acceptance' || context === 'attachment_name') {
+      await env.DB.prepare(
+        'INSERT INTO ai_text_edits (context, ai_output, user_final, design_type, task_id, task_title, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+        .bind(context, aiOutput, userFinal, designType, Number.isFinite(taskId) ? taskId : null, taskTitle, Date.now())
+        .run()
+    }
+  }
+  return ok({ saved: true })
 }
 
 async function saveTextEditPair(env: Env, request: Request) {
@@ -9380,6 +9488,7 @@ async function countTextEditsForContextType(env: Env, context: TextLearningConte
 
 function textContextLabel(context: TextLearningContext): string {
   if (context === 'acceptance') return '验收备注'
+  if (context === 'feedback') return '修改意见'
   if (context === 'attachment_name') return '附件命名'
   return '进展记录'
 }
@@ -10661,6 +10770,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/task-title-edits' ||
       path === '/api/ai/task-type-choices' ||
       path === '/api/ai/text-edits' ||
+      path === '/api/ai/learning-events' ||
       path === '/api/knowledge' ||
       path.startsWith('/api/knowledge/') ||
       path === '/api/search' ||
@@ -10800,6 +10910,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/text-edits' && request.method === 'POST') {
     return saveTextEditPair(env, request)
+  }
+  if (path === '/api/ai/learning-events' && request.method === 'POST') {
+    return saveAiLearningEvent(env, request)
   }
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)

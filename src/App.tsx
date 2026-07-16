@@ -88,6 +88,7 @@ import {
   setStoredAuth,
   type AccessToken,
   type ActivityItem,
+  type AiLearningAction,
   type AiModelConfig,
   type AiModelEndpointConfig,
   type AiModelRouteKey,
@@ -1506,6 +1507,23 @@ type AcceptancePayload = {
 type TaskUpdateChanges = Partial<Task> & {
   allowAcceptedTimeEdit?: boolean
   allowAcceptanceRollback?: boolean
+}
+
+type AiLearningDraft = {
+  sourceInput: string
+  aiOutput: string
+  applied: boolean
+}
+
+function aiLearningAction(draft: AiLearningDraft, userFinal: string): AiLearningAction {
+  const normalizedFinal = userFinal.trim()
+  if (normalizedFinal === draft.aiOutput.trim()) {
+    return 'adopted'
+  }
+  if (normalizedFinal === draft.sourceInput.trim()) {
+    return 'rejected'
+  }
+  return draft.applied ? 'edited' : 'rejected'
 }
 
 function validateUploadFile(file: File) {
@@ -10444,9 +10462,9 @@ function TaskProgressModal({
   const [progressAiSuggestion, setProgressAiSuggestion] = useState<TextAssistantSuggestion | null>(null)
   const [progressAiError, setProgressAiError] = useState('')
   const [isProgressAiLoading, setIsProgressAiLoading] = useState(false)
-  const progressAiSuggestionAppliedRef = useRef<{ context: TextLearningContext; aiOutput: string } | null>(null)
-  const pendingAttachmentAiNameAppliedRef = useRef<Record<string, string>>({})
-  const existingAttachmentAiNameAppliedRef = useRef<Record<number, string>>({})
+  const progressAiSuggestionAppliedRef = useRef<({ context: TextLearningContext } & AiLearningDraft) | null>(null)
+  const pendingAttachmentAiNameAppliedRef = useRef<Record<string, AiLearningDraft>>({})
+  const existingAttachmentAiNameAppliedRef = useRef<Record<number, AiLearningDraft>>({})
   const uploadedNames = pendingAttachments.map((attachment) => sanitizeAttachmentName(attachment.name, attachment.originalName))
   const projectProgressHistory = taskAssistantProgressHistory(task, files)
   const savedTimeSignature = JSON.stringify(task.timeEntries ?? [])
@@ -10848,6 +10866,11 @@ function TaskProgressModal({
       setPendingAttachments((current) => current.map((item) =>
         item.id === attachmentId ? { ...item, aiLoading: false, aiSuggestion: suggestion } : item,
       ))
+      pendingAttachmentAiNameAppliedRef.current[attachmentId] = {
+        sourceInput: sanitizeAttachmentName(attachment.name, attachment.originalName),
+        aiOutput: suggestion.suggestedName,
+        applied: false,
+      }
     } catch (error) {
       setPendingAttachments((current) => current.map((item) =>
         item.id === attachmentId
@@ -10861,12 +10884,14 @@ function TaskProgressModal({
     const draftName = existingAttachmentDrafts[file.id] ?? file.name
     const nextName = sanitizeAttachmentName(draftName, file.name)
     setExistingAttachmentDrafts((current) => ({ ...current, [file.id]: nextName }))
-    const appliedName = existingAttachmentAiNameAppliedRef.current[file.id]?.trim() ?? ''
-    if (appliedName && nextName && nextName !== appliedName) {
-      void api.recordTextEditPair({
+    const learning = existingAttachmentAiNameAppliedRef.current[file.id]
+    if (learning) {
+      void api.recordAiLearningEvent({
         context: 'attachment_name',
-        aiOutput: appliedName,
+        sourceInput: learning.sourceInput,
+        aiOutput: learning.aiOutput,
         userFinal: nextName,
+        action: aiLearningAction(learning, nextName),
         designType: task.type,
         taskId: task.id,
         taskTitle: task.title,
@@ -10966,6 +10991,11 @@ function TaskProgressModal({
         ...current,
         [file.id]: { loading: false, suggestion },
       }))
+      existingAttachmentAiNameAppliedRef.current[file.id] = {
+        sourceInput: sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name),
+        aiOutput: suggestion.suggestedName,
+        applied: false,
+      }
     } catch (error) {
       setExistingAttachmentAiState((current) => ({
         ...current,
@@ -10987,13 +11017,15 @@ function TaskProgressModal({
     const applied = progressAiSuggestionAppliedRef.current
     const userFinal = finalText.trim()
     const aiOutput = applied?.aiOutput.trim() ?? ''
-    if (!applied || !userFinal || !aiOutput || userFinal === aiOutput) {
+    if (!applied || !aiOutput) {
       return
     }
-    void api.recordTextEditPair({
+    void api.recordAiLearningEvent({
       context: applied.context,
+      sourceInput: applied.sourceInput,
       aiOutput,
       userFinal,
+      action: aiLearningAction(applied, userFinal),
       designType: task.type,
       taskId: task.id,
       taskTitle: task.title,
@@ -11003,13 +11035,15 @@ function TaskProgressModal({
 
   const recordAppliedAttachmentNameLearning = () => {
     pendingAttachments.forEach((attachment) => {
-      const aiOutput = pendingAttachmentAiNameAppliedRef.current[attachment.id]?.trim() ?? ''
+      const learning = pendingAttachmentAiNameAppliedRef.current[attachment.id]
       const userFinal = sanitizeAttachmentName(attachment.name, attachment.originalName)
-      if (aiOutput && userFinal && userFinal !== aiOutput) {
-        void api.recordTextEditPair({
+      if (learning) {
+        void api.recordAiLearningEvent({
           context: 'attachment_name',
-          aiOutput,
+          sourceInput: learning.sourceInput,
+          aiOutput: learning.aiOutput,
           userFinal,
+          action: aiLearningAction(learning, userFinal),
           designType: task.type,
           taskId: task.id,
           taskTitle: task.title,
@@ -11229,7 +11263,7 @@ function TaskProgressModal({
     setIsProgressAiLoading(true)
     try {
       const suggestion = await api.optimizeTaskTextAssistant({
-        mode: isAcceptanceMode ? 'acceptance' : 'progress',
+        mode: isAcceptanceMode ? 'acceptance' : isFeedbackMode ? 'feedback' : 'progress',
         text: note,
         task,
         files: taskAssistantFiles(task, files, uploadedNames),
@@ -11238,6 +11272,12 @@ function TaskProgressModal({
         progressHistory: isAcceptanceMode ? projectProgressHistory : undefined,
       })
       setProgressAiSuggestion(suggestion)
+      progressAiSuggestionAppliedRef.current = {
+        context: isAcceptanceMode ? 'acceptance' : isFeedbackMode ? 'feedback' : 'progress',
+        sourceInput: note.trim(),
+        aiOutput: suggestion.optimizedText,
+        applied: false,
+      }
     } catch (error) {
       setProgressAiError(error instanceof Error ? error.message : 'AI 助手暂时不可用')
     } finally {
@@ -12113,9 +12153,12 @@ function TaskProgressModal({
                           type="button"
                           className="ghost-button compact-button"
                           onClick={() => {
+                            const currentLearning = progressAiSuggestionAppliedRef.current
                             progressAiSuggestionAppliedRef.current = {
-                              context: isAcceptanceMode ? 'acceptance' : 'progress',
+                              context: isAcceptanceMode ? 'acceptance' : isFeedbackMode ? 'feedback' : 'progress',
+                              sourceInput: currentLearning?.sourceInput ?? note.trim(),
                               aiOutput: progressAiSuggestion.optimizedText,
+                              applied: true,
                             }
                             setNote(progressAiSuggestion.optimizedText)
                             if (!isAcceptanceMode) {
@@ -12296,7 +12339,12 @@ function TaskProgressModal({
                                   onClick={() => {
                                     const nextName = sanitizeAttachmentName(aiState.suggestion?.suggestedName ?? draftName, file.name)
                                     if (nextName) {
-                                      existingAttachmentAiNameAppliedRef.current[file.id] = nextName
+                                      const learning = existingAttachmentAiNameAppliedRef.current[file.id]
+                                      existingAttachmentAiNameAppliedRef.current[file.id] = {
+                                        sourceInput: learning?.sourceInput ?? sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name),
+                                        aiOutput: nextName,
+                                        applied: true,
+                                      }
                                     }
                                     setExistingAttachmentDrafts((current) => ({ ...current, [file.id]: nextName }))
                                     setExistingAttachmentAiState((current) => ({
@@ -12408,7 +12456,12 @@ function TaskProgressModal({
                               onClick={() => {
                                 const nextName = sanitizeAttachmentName(attachment.aiSuggestion?.suggestedName ?? attachment.name, attachment.originalName)
                                 if (nextName) {
-                                  pendingAttachmentAiNameAppliedRef.current[attachment.id] = nextName
+                                  const learning = pendingAttachmentAiNameAppliedRef.current[attachment.id]
+                                  pendingAttachmentAiNameAppliedRef.current[attachment.id] = {
+                                    sourceInput: learning?.sourceInput ?? sanitizeAttachmentName(attachment.name, attachment.originalName),
+                                    aiOutput: nextName,
+                                    applied: true,
+                                  }
                                 }
                                 setPendingAttachments((current) => current.map((item) =>
                                   item.id === attachment.id
@@ -17776,8 +17829,8 @@ function NewTaskModal({
   const [aiError, setAiError] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
   // 记录 AI 生成的建议文本（用于提交时对比用户最终输入，保存差异供学习）
-  const aiSuggestionAppliedRef = useRef<string | null>(null)
-  const aiTitleSuggestionAppliedRef = useRef<string | null>(null)
+  const aiSuggestionAppliedRef = useRef<AiLearningDraft | null>(null)
+  const aiTitleSuggestionAppliedRef = useRef<AiLearningDraft | null>(null)
   // 甲方文案附件：仅用于 AI 需求分析（前端就地抽取文字或图片 base64），不随任务持久化
   type BriefItem = {
     id: string
@@ -17926,14 +17979,31 @@ function NewTaskModal({
   }
 
   const recordTaskAssistantLearning = (finalTitle: string, finalRequirement: string, finalType: string) => {
-    // 若用户采用了 AI 建议后又做了修改，记录差异供 AI 持续学习。
-    const appliedSuggestion = aiSuggestionAppliedRef.current
-    if (appliedSuggestion && appliedSuggestion !== finalRequirement) {
-      void api.recordTaskEditPair({ aiOutput: appliedSuggestion, userFinal: finalRequirement, designType: finalType })
+    const requirementLearning = aiSuggestionAppliedRef.current
+    if (requirementLearning) {
+      void api.recordAiLearningEvent({
+        context: 'task_requirement',
+        sourceInput: requirementLearning.sourceInput,
+        aiOutput: requirementLearning.aiOutput,
+        userFinal: finalRequirement,
+        action: aiLearningAction(requirementLearning, finalRequirement),
+        designType: finalType,
+        taskId: editingTask?.id,
+        taskTitle: finalTitle,
+      })
     }
-    const appliedTitle = aiTitleSuggestionAppliedRef.current
-    if (appliedTitle && appliedTitle !== finalTitle) {
-      void api.recordTaskTitleEditPair({ aiOutput: appliedTitle, userFinal: finalTitle, designType: finalType })
+    const titleLearning = aiTitleSuggestionAppliedRef.current
+    if (titleLearning) {
+      void api.recordAiLearningEvent({
+        context: 'task_title',
+        sourceInput: titleLearning.sourceInput,
+        aiOutput: titleLearning.aiOutput,
+        userFinal: finalTitle,
+        action: aiLearningAction(titleLearning, finalTitle),
+        designType: finalType,
+        taskId: editingTask?.id,
+        taskTitle: finalTitle,
+      })
     }
     // 无论是否使用 AI，每次提交都记录最终选择的设计类型，供分类建议模型学习。
     if (finalTitle || finalRequirement) {
@@ -17943,6 +18013,18 @@ function NewTaskModal({
         finalType,
         aiSuggestedType: aiSuggestion?.suggestedType ?? undefined,
       })
+      if (aiSuggestion?.suggestedType) {
+        void api.recordAiLearningEvent({
+          context: 'task_type',
+          sourceInput: initialDraft.type,
+          aiOutput: aiSuggestion.suggestedType,
+          userFinal: finalType,
+          action: finalType === aiSuggestion.suggestedType ? 'adopted' : 'rejected',
+          designType: finalType,
+          taskId: editingTask?.id,
+          taskTitle: finalTitle,
+        })
+      }
     }
     aiSuggestionAppliedRef.current = null
     aiTitleSuggestionAppliedRef.current = null
@@ -17993,6 +18075,7 @@ function NewTaskModal({
         contact: nextContact,
         reviewer: nextReviewer,
         estimatedHours: estimated,
+        hourEstimateSuggestionId: hourSuggestion && !hourSuggestionIsStale ? hourSuggestion.suggestionId : undefined,
         supplementalNote: isSupplemental ? supplementalNote.trim() : '',
         acceptanceNote: editingTask.acceptanceNote ?? '',
       })
@@ -18123,6 +18206,13 @@ function NewTaskModal({
         attachmentImages: imageFiles.map((f) => ({ base64: f.base64!, mimeType: f.mimeType ?? 'image/jpeg', name: f.name })),
       })
       setAiSuggestion(suggestion)
+      const optimizedRequirement = taskAssistantRequirementWithoutOutputFiles(suggestion.optimizedRequirement)
+      aiSuggestionAppliedRef.current = optimizedRequirement
+        ? { sourceInput: requirement.trim(), aiOutput: optimizedRequirement, applied: false }
+        : null
+      aiTitleSuggestionAppliedRef.current = suggestion.suggestedTitle
+        ? { sourceInput: title.trim(), aiOutput: suggestion.suggestedTitle, applied: false }
+        : null
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'AI 助手暂时不可用')
     } finally {
@@ -18132,7 +18222,11 @@ function NewTaskModal({
 
   const applyAiTitle = () => {
     if (!aiSuggestion?.suggestedTitle) return
-    aiTitleSuggestionAppliedRef.current = aiSuggestion.suggestedTitle
+    aiTitleSuggestionAppliedRef.current = {
+      sourceInput: aiTitleSuggestionAppliedRef.current?.sourceInput ?? title.trim(),
+      aiOutput: aiSuggestion.suggestedTitle,
+      applied: true,
+    }
     setTitle(aiSuggestion.suggestedTitle)
   }
 
@@ -18141,7 +18235,11 @@ function NewTaskModal({
       return
     }
     const nextRequirement = taskAssistantRequirementWithoutOutputFiles(aiSuggestion.optimizedRequirement)
-    aiSuggestionAppliedRef.current = nextRequirement
+    aiSuggestionAppliedRef.current = {
+      sourceInput: aiSuggestionAppliedRef.current?.sourceInput ?? requirement.trim(),
+      aiOutput: nextRequirement,
+      applied: true,
+    }
     setRequirement(nextRequirement)
   }
 
