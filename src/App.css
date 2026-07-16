@@ -9549,8 +9549,8 @@ button.file-chip:focus-visible {
 }
 
 .new-task-modal {
-  width: min(640px, 94vw);
-  max-height: 84vh;
+  width: min(960px, 96vw);
+  max-height: 90vh;
   border-radius: 0;
   color: var(--color-editorial-text);
   background: var(--color-editorial-surface);
@@ -9878,6 +9878,17 @@ button.file-chip:focus-visible {
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+
+.new-task-modal .new-task-schedule-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.new-task-modal .new-task-schedule-row .date-field,
+.new-task-modal .new-task-schedule-row > .field {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 6px;
 }
 
 .new-task-schedule-row .date-field,
@@ -18578,7 +18589,8 @@ textarea:focus-visible {
     gap: 20px;
   }
 
-  .new-task-schedule-row {
+  .new-task-schedule-row,
+  .new-task-modal .new-task-schedule-row {
     grid-template-columns: 1fr;
   }
 

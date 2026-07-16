@@ -889,6 +889,7 @@ function addMinutesToPlanDateTime(value: string, minutes: number) {
 
 const TIME_STEP_MINUTES = 5   // 时间选择器分钟列步进（5分钟）
 const DURATION_STEP_MINUTES = 30  // 工时输入最小粒度（30分钟 = 0.5h）
+const ESTIMATED_HOURS_STEP_MINUTES = 6 // 新建任务的预估工时支持 0.1h 精度
 
 function snapDurationMinutes(value: number, minimum = DURATION_STEP_MINUTES) {
   if (!Number.isFinite(value)) {
@@ -907,6 +908,13 @@ function formatExactHoursInputValue(minutes: number) {
   const safeMinutes = Math.max(0, Math.round(Number.isFinite(minutes) ? minutes : 0))
   const hours = safeMinutes / 60
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+function normalizeEstimatedMinutes(value: number) {
+  if (!Number.isFinite(value)) {
+    return ESTIMATED_HOURS_STEP_MINUTES
+  }
+  return Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round(value / ESTIMATED_HOURS_STEP_MINUTES) * ESTIMATED_HOURS_STEP_MINUTES)
 }
 
 function exactDurationMinutesBetween(startValue: string, endValue: string) {
@@ -1508,6 +1516,7 @@ type AcceptancePayload = {
 type TaskUpdateChanges = Partial<Task> & {
   allowAcceptedTimeEdit?: boolean
   allowAcceptanceRollback?: boolean
+  startFromProgress?: boolean
 }
 
 type AiLearningDraft = {
@@ -1882,7 +1891,7 @@ function normalizeTaskClosure(task: Task): Task {
 }
 
 function canRecordNewProgress(task: Pick<Task, 'status' | 'timeEntries'>) {
-  return isTaskStarted(task) && task.status !== '已验收' && !hasAcceptanceProgress(task)
+  return task.status !== '已验收' && !hasAcceptanceProgress(task)
 }
 
 function taskDisplayProgress(task: Pick<Task, 'status' | 'progress' | 'timeEntries'>) {
@@ -6707,10 +6716,6 @@ function App() {
 
   const handleOpenTaskProgress = (taskId: number, mode: ProgressRecordMode = 'progress', editEntryId?: string, initialAcceptanceMode = false) => {
     const task = taskItemsRef.current.find((item) => item.id === taskId)
-    if (task && !editEntryId && !initialAcceptanceMode && !isTaskStarted(task)) {
-      notify('任务仍在计划中。请先把状态改为进行中，再记录进展或等待时间。', 'error')
-      return
-    }
     if (task && mode === 'progress' && !editEntryId && !initialAcceptanceMode && !canRecordNewProgress(task)) {
       notify('任务已进入验收闭环。如需继续记录，请先编辑或删除右侧的验收进展。', 'error')
       return
@@ -9432,6 +9437,7 @@ function TaskContextMenu({
 
   const isVoided = Boolean(menu.task.voidedAt)
   const canRecordProgress = canRecordNewProgress(menu.task)
+  const canAdjustProgress = canRecordProgress && isTaskStarted(menu.task)
   const hasAcceptanceClosure = menu.task.status === '已验收' || hasAcceptanceProgress(menu.task)
   const progressOptions = [0, 20, 40, 60, 80, 100]
   const snappedProgress = taskDisplayProgress(menu.task)
@@ -9448,7 +9454,7 @@ function TaskContextMenu({
             <Pencil size={15} />
             编辑任务
           </button>
-          <button type="button" disabled={!canRecordProgress} title={canRecordProgress ? '记录进展' : menu.task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => run(() => onOpenProgress(menu.task))}>
+          <button type="button" disabled={!canRecordProgress} title={canRecordProgress ? (menu.task.status === '计划中' ? '记录进展并自动进入进行中' : '记录进展') : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => run(() => onOpenProgress(menu.task))}>
             <BarChart3 size={15} />
             记录进展
           </button>
@@ -9460,7 +9466,7 @@ function TaskContextMenu({
       )}
       {!isVoided && canWrite && !hasAcceptanceClosure && (
         <div className="context-submenu">
-          <button type="button" className="context-menu-parent" aria-haspopup="menu" disabled={!canRecordProgress} title={canRecordProgress ? '快速改进度' : '计划中进度保持为 0'}>
+          <button type="button" className="context-menu-parent" aria-haspopup="menu" disabled={!canAdjustProgress} title={canAdjustProgress ? '快速改进度' : '首次记录进展后可调整进度'}>
             <BarChart3 size={15} />
             快速改进度
             <span>{snappedProgress}%</span>
@@ -9470,7 +9476,7 @@ function TaskContextMenu({
             {progressOptions.map((progress) => {
               const active = snappedProgress === progress
               return (
-              <button type="button" key={progress} className={active ? 'selected' : ''} disabled={!canRecordProgress} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
+              <button type="button" key={progress} className={active ? 'selected' : ''} disabled={!canAdjustProgress} onClick={() => run(() => onUpdateTask(menu.task.id, { progress }))}>
                 {active ? <CheckCircle2 size={15} /> : <BarChart3 size={15} />}
                 {progress}%
               </button>
@@ -9629,6 +9635,7 @@ function DashboardTaskSidebar({
   const waitingMinutes = sumWaitingEntries(task)
   const canAcceptTask = task.status === '待验收'
   const canRecordProgress = canRecordNewProgress(task)
+  const canAdjustProgress = canRecordProgress && isTaskStarted(task)
   const demandPerson = task.requester || task.contact || '待确认'
   const snappedProgress = taskDisplayProgress(task)
   const displayedProgress = task.status === '计划中' ? 0 : snappedProgress
@@ -9793,19 +9800,22 @@ function DashboardTaskSidebar({
                   key={value}
                   aria-label={`设置进度为 ${value}%`}
                   aria-pressed={displayedProgress === value}
-                  disabled={!canWrite || !canRecordProgress}
-                  title={!canWrite ? '当前为只读访问' : canRecordProgress ? `设置进度为 ${value}%` : task.status === '计划中' ? '任务仍在计划中，进度保持为 0' : '任务已进入验收闭环，需先编辑或删除验收进展'}
+                  disabled={!canWrite || !canAdjustProgress}
+                  title={!canWrite ? '当前为只读访问' : canAdjustProgress ? `设置进度为 ${value}%` : task.status === '计划中' ? '首次记录进展后可调整整体进度' : '任务已进入验收闭环，需先编辑或删除验收进展'}
                   onClick={() => onUpdateTask(task.id, { progress: value })}
                 >
                   {value}%
                 </button>
               ))}
             </div>
-            {!canRecordProgress && (
+            {task.status === '计划中' && (
               <p className="dashboard-side-muted dashboard-side-planned-note">
-                {task.status === '计划中'
-                  ? '任务仍在计划中。改为进行中后，才会开始记录真实进展、等待与生命周期。'
-                  : '任务已进入验收闭环。如需继续记录，请先编辑或删除右侧的验收进展。'}
+                首次保存「记录进展」后，任务会自动进入进行中，无需手动改状态。
+              </p>
+            )}
+            {!canRecordProgress && task.status !== '计划中' && (
+              <p className="dashboard-side-muted dashboard-side-planned-note">
+                任务已进入验收闭环。如需继续记录，请先编辑或删除右侧的验收进展。
               </p>
             )}
           </div>
@@ -9826,7 +9836,7 @@ function DashboardTaskSidebar({
             <div className="dashboard-side-subsection dashboard-side-record-pane" role="tabpanel">
               <div className="dashboard-side-subsection-title">
                 <span>分段计时</span>
-                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
+                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? (task.status === '计划中' ? '记录进展并自动进入进行中' : '记录进展') : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
                   <Plus size={15} />
                   记录进展
                 </button>}
@@ -10224,9 +10234,6 @@ function TasksView({
   }
 
   const openProgress = (task: Task, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode = false) => {
-    if (!editEntryId && !initialAcceptanceMode && !isTaskStarted(task)) {
-      return
-    }
     if ((mode ?? 'progress') === 'progress' && !editEntryId && !initialAcceptanceMode && !canRecordNewProgress(task)) {
       return
     }
@@ -11384,6 +11391,7 @@ function TaskProgressModal({
       recordAppliedAttachmentNameLearning()
       const planScheduleChanges = buildPlanScheduleChanges()
       const hasPlanScheduleChanges = Object.keys(planScheduleChanges).length > 0
+      const shouldStartFromProgress = task.status === '计划中' && !isWaitingMode && !isFeedbackMode && !isEditingEntry
       const nextTimeEntries = !isWaitingMode
         ? isEditingEntry && nextEntry
           ? draftTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
@@ -11397,12 +11405,13 @@ function TaskProgressModal({
       const nextWaitingEntries = isWaitingMode && nextEntry
         ? isEditingEntry ? draftWaitingEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry) : [...draftWaitingEntries, nextEntry]
         : draftWaitingEntries
-      if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0)) {
+      if (!isWaitingMode && (timeDirty || nextEntry || pendingExtraSegments.length > 0 || shouldStartFromProgress)) {
         const nextActualHours = Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
         onUpdateTask(task.id, {
           ...planScheduleChanges,
           timeEntries: nextTimeEntries,
           actualHours: nextActualHours,
+          ...(shouldStartFromProgress ? { startFromProgress: true } : {}),
           ...(shouldAllowAcceptedTimeEdit ? { allowAcceptedTimeEdit: true } : {}),
           ...(isRollingBackAcceptanceEntry ? {
             status: '待验收',
@@ -18568,7 +18577,7 @@ const clearNewTaskDraftCache = () => {
 
 const newTaskDraftFromTask = (task: Task, fallbackType: string, fallbackSettlementMonth: string): NewTaskDraftCache => {
   const startDate = task.date || isoDateTime()
-  const estimatedMinutes = Math.max(30, Math.round((Number(task.estimatedHours) || 2) * 60))
+  const estimatedMinutes = Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round((Number(task.estimatedHours) || 2) * 60))
   return {
     title: task.title ?? '',
     requirement: task.requirement ?? '',
@@ -18620,6 +18629,7 @@ function NewTaskModal({
   const [type, setType] = useState(initialDraft.type)
   const [startDate, setStartDate] = useState(initialDraft.startDate)
   const [estimatedMinutes, setEstimatedMinutes] = useState(initialDraft.estimatedMinutes)
+  const [estimatedHoursInput, setEstimatedHoursInput] = useState(() => formatExactHoursInputValue(initialDraft.estimatedMinutes))
   const [estimatedDate, setEstimatedDate] = useState(initialDraft.estimatedDate)
   const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
   const [isSupplemental, setIsSupplemental] = useState(initialSupplemental || initialDraft.isSupplemental)
@@ -18743,6 +18753,7 @@ function NewTaskModal({
       const nextMinutes = exactDurationMinutesBetween(value, estimatedDate)
       if (nextMinutes > 0) {
         setEstimatedMinutes(nextMinutes)
+        setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
       }
       return
     }
@@ -18762,20 +18773,44 @@ function NewTaskModal({
       const nextMinutes = exactDurationMinutesBetween(startDate, value)
       if (nextMinutes > 0) {
         setEstimatedMinutes(nextMinutes)
+        setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
       }
       return
     }
     setStartDate(addMinutesToPlanDateTime(value, -estimatedMinutes))
   }
 
-  const updateEstimatedMinutes = (value: number) => {
-    const nextMinutes = snapDurationMinutes(value)
+  const updateEstimatedMinutes = (value: number, preserveInput = false) => {
+    const nextMinutes = normalizeEstimatedMinutes(value)
     setEstimatedMinutes(nextMinutes)
+    if (!preserveInput) {
+      setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
+    }
     if (scheduleDerivedField === 'start') {
       setStartDate(addMinutesToPlanDateTime(estimatedDate, -nextMinutes))
       return
     }
     setEstimatedDate(addMinutesToPlanDateTime(startDate, nextMinutes))
+  }
+
+  const updateEstimatedHoursInput = (value: string) => {
+    const normalizedValue = value.replace(',', '.')
+    if (!/^\d*(?:\.\d*)?$/.test(normalizedValue)) {
+      return
+    }
+    setEstimatedHoursInput(normalizedValue)
+    if (!normalizedValue.trim()) {
+      return
+    }
+    const hours = Number(normalizedValue)
+    if (Number.isFinite(hours) && hours > 0) {
+      updateEstimatedMinutes(hours * 60, true)
+    }
+  }
+
+  const commitEstimatedHoursInput = () => {
+    const hours = Number(estimatedHoursInput)
+    updateEstimatedMinutes(Number.isFinite(hours) && hours > 0 ? hours * 60 : estimatedMinutes)
   }
 
   const clearFieldError = (field: string) => {
@@ -19135,7 +19170,7 @@ function NewTaskModal({
     if (!hourSuggestion || hourSuggestionIsStale || !hourSuggestion.decision.canApply || !hours) {
       return
     }
-    updateEstimatedMinutes(snapDurationMinutes(hours * 60))
+    updateEstimatedMinutes(hours * 60)
   }
 
   const applyHourCompletionOption = (appendText: string) => {
@@ -19505,11 +19540,12 @@ function NewTaskModal({
                 ) : (
                   <input
                     className="new-task-hours-input"
-                    type="number"
-                    min="0.5"
-                    step="0.5"
-                    value={formatHoursInputValue(estimatedMinutes)}
-                    onChange={(event) => updateEstimatedMinutes(Number(event.target.value || 0) * 60)}
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.]?[0-9]*"
+                    value={estimatedHoursInput}
+                    onChange={(event) => updateEstimatedHoursInput(event.target.value)}
+                    onBlur={commitEstimatedHoursInput}
                     aria-label="预估工时"
                   />
                 )}

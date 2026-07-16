@@ -243,6 +243,58 @@ async function runAgentLifecycleWriteCheck() {
   process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
 }
 
+async function runPlannedProgressTransitionCheck(cookie) {
+  const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
+  const createResponse = await fetch('http://127.0.0.1:8798/api/tasks', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      id: 0,
+      title: '计划中直接记录进展评测',
+      requirement: '验证首次记录进展会自动开始任务，并保留 0.1h 精度的预估工时。',
+      type: '传播类 / 海报',
+      date: '2026-07-16T09:00',
+      estimatedDate: '2026-07-16T10:12',
+      settlementMonth: '2026-07',
+      estimatedHours: 1.2,
+      actualHours: 0,
+      requester: '陈义君',
+      contact: '黄媚',
+      reviewer: '陈义君',
+      stage: '计划中',
+      status: '计划中',
+      progress: 0,
+      billable: true,
+      files: [],
+      timeEntries: [],
+      waitingEntries: [],
+    }),
+  })
+  const created = await createResponse.json().catch(() => ({}))
+  if (!createResponse.ok || created.status !== '计划中' || created.estimatedHours !== 1.2) {
+    throw new Error(`Planned progress task creation failed: ${JSON.stringify(created)}`)
+  }
+  const progressResponse = await fetch(`http://127.0.0.1:8798/api/tasks/${created.id}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({
+      startFromProgress: true,
+      timeEntries: [{
+        id: `planned-progress-${crypto.randomUUID()}`,
+        date: '2026-07-16',
+        start: '09:00',
+        end: '09:30',
+        note: '完成初版布局',
+      }],
+    }),
+  })
+  const progressed = await progressResponse.json().catch(() => ({}))
+  if (!progressResponse.ok || progressed.status !== '进行中' || progressed.stage !== '进行中' || progressed.progress < 10 || progressed.estimatedHours !== 1.2) {
+    throw new Error(`Planned task did not start from its first progress entry: ${JSON.stringify(progressed)}`)
+  }
+  process.stdout.write('Planned task first-progress transition and decimal estimate checks passed.\n')
+}
+
 async function runAgentOrchestrationCheck(cookie) {
   const toolHeaders = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
   const conversationId = `plan-${crypto.randomUUID()}`
@@ -798,6 +850,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
+  await runPlannedProgressTransitionCheck(cookie)
   await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)

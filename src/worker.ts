@@ -9549,7 +9549,7 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
 }
 
 async function updateTask(env: Env, id: string, request: Request, role: AuthRole, ctx?: WorkerExecutionContext) {
-  const changes = (await request.json()) as Partial<Task>
+  const changes = (await request.json()) as Partial<Task> & { startFromProgress?: boolean }
   const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
   if (!current) {
     return fail('任务不存在', 404)
@@ -9581,6 +9581,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
   }
   const allowAcceptedTimeEdit = Boolean((changes as { allowAcceptedTimeEdit?: boolean }).allowAcceptedTimeEdit)
   const allowAcceptanceRollback = Boolean((changes as { allowAcceptanceRollback?: boolean }).allowAcceptanceRollback)
+  const startFromProgress = current.status === '计划中' && changes.startFromProgress === true
   if (current.status === '已验收') {
     if (changes.status && changes.status !== '已验收' && !allowAcceptanceRollback) {
       return fail('已验收任务状态已锁定，不能直接改回其他状态', 409)
@@ -9608,9 +9609,9 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
     requester: changes.requester ?? current.requester ?? '',
     contact: changes.contact ?? current.contact_person ?? '',
     reviewer: changes.reviewer ?? current.reviewer ?? '',
-    stage: changes.stage ?? current.stage ?? '',
-    status: changes.status ?? current.status,
-    progress: changes.progress ?? current.progress,
+    stage: startFromProgress ? '进行中' : changes.stage ?? current.stage ?? '',
+    status: startFromProgress ? '进行中' : changes.status ?? current.status,
+    progress: startFromProgress ? Math.max(10, Number(current.progress) || 0) : changes.progress ?? current.progress,
     suspendReason: changes.suspendReason ?? current.suspend_reason ?? '',
     terminateReason: changes.terminateReason ?? current.terminate_reason ?? '',
     supplementalNote: changes.supplementalNote ?? current.supplemental_note ?? '',
