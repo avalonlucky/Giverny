@@ -1,19 +1,19 @@
 # Giverny Handoff
 
-## 最新状态（2026-07-16 · v0.28.40）
+## 最新状态（2026-07-16 · v0.28.41）
 
-新建 / 编辑任务的 AI 工时建议升级为多维学习：确定性复杂度画像、类型与语义分层检索、画像重排、可解释工时拆分、需求人最低样本校准和缺失信息提醒已经接通。完整分析快照写入既有 `hour_estimate_suggestions.basis_json`，验收真实工时继续回写，不新增 migration。专题口径见 `docs/AI_HOUR_ESTIMATE.md`，用户说明见 `使用手册.md`。
+AI 工时建议新增历史样本时间衰减、常规预测区间、历史命中率、本次不确定因素、个人采用校准和显式准确性反馈。任务保存会把 AI 建议与最终采用值写入现有 `ai_learning_events`；同类至少 3 次后启用受控校准，同一次建议反馈去重。完整快照继续写入 `hour_estimate_suggestions.basis_json`，无新增 migration。
 
-本地验证已覆盖 build、Lint、74/74 隔离 Agent 门禁、全新临时 D1、真实 HTTP 高 / 低复杂度对照、需求人 3 条门槛、分析快照与桌面 / 窄屏视觉布局。
+本地验证已覆盖 build、Lint、74/74 隔离 Agent 门禁，以及新增的近期样本、三次采用门槛、预测区间与可靠性字段专项检查。
 
 最后整理时间：2026-07-16
-当前代码版本：v0.28.40
+当前代码版本：v0.28.41
 当前分支：main
 GitHub：https://github.com/avalonlucky/Giverny
 正式站：https://mayeai.com
-正式站 Worker Version ID：0caee578-2817-4c01-92f7-49b25b1f9399
-最新已知 tag：v0.28.40
-本次交接性质：完成 AI 工时多维学习、文档和正式发布闭环。
+正式站 Worker Version ID：244f05b4-d6a3-4b87-8497-b73bdfd60d46
+最新已知 tag：v0.28.41
+本次交接性质：完成 AI 工时可靠性与反馈校准、文档和正式发布闭环。
 
 ## 1. 新窗口先读
 

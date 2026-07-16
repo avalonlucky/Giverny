@@ -10474,6 +10474,38 @@ button.file-chip:focus-visible {
   line-height: 1.65;
 }
 
+.hour-estimate-reliability {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hour-estimate-reliability > div {
+  display: grid;
+  gap: 3px;
+  padding: 8px 0;
+}
+
+.hour-estimate-reliability > div + div {
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+}
+
+.hour-estimate-reliability strong,
+.hour-estimate-feedback strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hour-estimate-reliability span,
+.hour-estimate-feedback span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 .hour-estimate-questions {
   border-left-color: var(--color-status-warning);
 }
@@ -10545,6 +10577,59 @@ button.file-chip:focus-visible {
   white-space: nowrap;
 }
 
+.hour-estimate-feedback {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.hour-estimate-feedback > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.hour-estimate-feedback-options,
+.hour-estimate-feedback-reasons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.hour-estimate-feedback-options button,
+.hour-estimate-feedback-reasons button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-strong);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hour-estimate-feedback-options button:hover,
+.hour-estimate-feedback-reasons button:hover,
+.hour-estimate-feedback-options button.active,
+.hour-estimate-feedback-reasons button.active {
+  border-color: var(--color-primary);
+  color: var(--color-primary-strong);
+  background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface-strong));
+}
+
+.hour-estimate-feedback-options button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.hour-estimate-feedback-reasons {
+  grid-column: 1 / -1;
+}
+
 .hour-estimate-actions {
   justify-content: space-between;
 }
@@ -10572,6 +10657,21 @@ button.file-chip:focus-visible {
 
   .hour-estimate-explain-section p {
     grid-template-columns: 68px minmax(0, 1fr) auto;
+  }
+
+  .hour-estimate-reliability,
+  .hour-estimate-feedback {
+    grid-template-columns: 1fr;
+  }
+
+  .hour-estimate-reliability > div + div {
+    padding-left: 0;
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+
+  .hour-estimate-feedback-reasons {
+    grid-column: auto;
   }
 }
 

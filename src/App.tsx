@@ -1515,6 +1515,16 @@ type AiLearningDraft = {
   applied: boolean
 }
 
+type HourEstimateFeedbackRating = 'too_low' | 'accurate' | 'too_high'
+
+const hourEstimateFeedbackOptions: Array<{ value: HourEstimateFeedbackRating; label: string }> = [
+  { value: 'too_low', label: '偏低' },
+  { value: 'accurate', label: '合适' },
+  { value: 'too_high', label: '偏高' },
+]
+
+const hourEstimateFeedbackReasons = ['交付数量', '尺寸适配', '内容整理', '专项处理', '沟通改稿', '参考样本']
+
 function aiLearningAction(draft: AiLearningDraft, userFinal: string): AiLearningAction {
   const normalizedFinal = userFinal.trim()
   if (normalizedFinal === draft.aiOutput.trim()) {
@@ -17853,6 +17863,8 @@ function NewTaskModal({
   const [hourSuggestionInputSignature, setHourSuggestionInputSignature] = useState('')
   const [hourSuggestionError, setHourSuggestionError] = useState('')
   const [isHourSuggestionLoading, setIsHourSuggestionLoading] = useState(false)
+  const [hourSuggestionFeedback, setHourSuggestionFeedback] = useState<HourEstimateFeedbackRating | null>(null)
+  const [hourSuggestionFeedbackReasons, setHourSuggestionFeedbackReasons] = useState<string[]>([])
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const supplementalMonthOptions = useMemo(() => supplementalMonthSelectOptions(monthPart(isoDate())), [])
@@ -18025,6 +18037,26 @@ function NewTaskModal({
           taskTitle: finalTitle,
         })
       }
+    }
+    if (hourSuggestion && !hourSuggestionIsStale) {
+      const selectedHours = Math.round((estimatedMinutes / 60) * 100) / 100
+      void api.recordAiLearningEvent({
+        context: 'hour_estimate',
+        sourceInput: currentHourSuggestionSignature,
+        aiOutput: String(hourSuggestion.suggestedHours),
+        userFinal: String(selectedHours),
+        action: Math.abs(selectedHours - hourSuggestion.suggestedHours) < 0.01 ? 'adopted' : 'edited',
+        designType: finalType,
+        taskId: editingTask?.id,
+        taskTitle: finalTitle,
+        metadata: {
+          suggestionId: hourSuggestion.suggestionId,
+          source: 'task_submit',
+          safeHours: hourSuggestion.safeHours,
+          feedbackRating: hourSuggestionFeedback,
+          feedbackReasons: hourSuggestionFeedbackReasons,
+        },
+      })
     }
     aiSuggestionAppliedRef.current = null
     aiTitleSuggestionAppliedRef.current = null
@@ -18275,6 +18307,8 @@ function NewTaskModal({
   const requestHourSuggestion = async () => {
     setHourSuggestionError('')
     setHourSuggestion(null)
+    setHourSuggestionFeedback(null)
+    setHourSuggestionFeedbackReasons([])
     setIsHourSuggestionLoading(true)
     try {
       const suggestion = await api.suggestHourEstimate({
@@ -18302,6 +18336,57 @@ function NewTaskModal({
       return
     }
     updateEstimatedMinutes(snapDurationMinutes(hours * 60))
+  }
+
+  const recordHourSuggestionFeedback = (rating: HourEstimateFeedbackRating) => {
+    if (!hourSuggestion || hourSuggestionIsStale) {
+      return
+    }
+    setHourSuggestionFeedback(rating)
+    if (rating === 'accurate') {
+      setHourSuggestionFeedbackReasons([])
+    }
+    void api.recordAiLearningEvent({
+      context: 'hour_estimate',
+      sourceInput: currentHourSuggestionSignature,
+      aiOutput: String(hourSuggestion.suggestedHours),
+      userFinal: '',
+      action: rating === 'accurate' ? 'adopted' : 'rejected',
+      designType: type.trim(),
+      taskId: editingTask?.id,
+      taskTitle: title.trim(),
+      metadata: {
+        suggestionId: hourSuggestion.suggestionId,
+        source: 'explicit_feedback',
+        rating,
+      },
+    })
+  }
+
+  const toggleHourSuggestionFeedbackReason = (reason: string) => {
+    if (!hourSuggestion || !hourSuggestionFeedback || hourSuggestionFeedback === 'accurate') {
+      return
+    }
+    setHourSuggestionFeedbackReasons((current) => {
+      const next = current.includes(reason) ? current.filter((item) => item !== reason) : [...current, reason]
+      void api.recordAiLearningEvent({
+        context: 'hour_estimate',
+        sourceInput: currentHourSuggestionSignature,
+        aiOutput: String(hourSuggestion.suggestedHours),
+        userFinal: '',
+        action: 'rejected',
+        designType: type.trim(),
+        taskId: editingTask?.id,
+        taskTitle: title.trim(),
+        metadata: {
+          suggestionId: hourSuggestion.suggestionId,
+          source: 'explicit_feedback',
+          rating: hourSuggestionFeedback,
+          reasons: next,
+        },
+      })
+      return next
+    })
   }
 
   return (
@@ -18677,6 +18762,7 @@ function NewTaskModal({
                   </em>
                 </div>
                 <div className="hour-estimate-stats">
+                  <span>常规区间 {hourSuggestion.expectedRange.low.toFixed(1)}–{hourSuggestion.expectedRange.high.toFixed(1)} h</span>
                   <span>精确同类 {hourSuggestion.exactSampleCount} 条</span>
                   <span>相关参考 {hourSuggestion.similarSampleCount} 条</span>
                   {hourSuggestion.sampleCount > 0 && <span>历史中位 {hourSuggestion.medianHours.toFixed(1)} h</span>}
@@ -18722,6 +18808,22 @@ function NewTaskModal({
                     <span>{hourSuggestion.requesterAdjustment.summary}</span>
                   </div>
                 )}
+                <div className={`hour-requester-adjustment ${hourSuggestion.learningAdjustment.applied ? 'applied' : ''}`}>
+                  <strong>个人采用校准</strong>
+                  <span>{hourSuggestion.learningAdjustment.summary}</span>
+                </div>
+                <div className="hour-estimate-reliability">
+                  <div>
+                    <strong>历史命中率</strong>
+                    <span>{hourSuggestion.accuracy.summary}</span>
+                  </div>
+                  {hourSuggestion.riskFactors.length > 0 && (
+                    <div>
+                      <strong>本次不确定因素</strong>
+                      <span>{hourSuggestion.riskFactors.join('；')}</span>
+                    </div>
+                  )}
+                </div>
                 {hourSuggestion.clarificationQuestions.length > 0 && (
                   <div className="hour-estimate-questions">
                     <strong>补充这些信息，建议会更准</strong>
@@ -18755,6 +18857,41 @@ function NewTaskModal({
                     </div>
                   </details>
                 )}
+                <div className="hour-estimate-feedback">
+                  <div>
+                    <strong>这次建议准确吗？</strong>
+                    <span>反馈会在同类样本达到门槛后参与后续校准。</span>
+                  </div>
+                  <div className="hour-estimate-feedback-options" role="group" aria-label="评价 AI 工时建议">
+                    {hourEstimateFeedbackOptions.map((option) => (
+                      <button
+                        type="button"
+                        key={option.value}
+                        className={hourSuggestionFeedback === option.value ? 'active' : ''}
+                        aria-pressed={hourSuggestionFeedback === option.value}
+                        disabled={hourSuggestionIsStale}
+                        onClick={() => recordHourSuggestionFeedback(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {hourSuggestionFeedback && hourSuggestionFeedback !== 'accurate' && (
+                    <div className="hour-estimate-feedback-reasons" role="group" aria-label="工时建议偏差原因">
+                      {hourEstimateFeedbackReasons.map((reason) => (
+                        <button
+                          type="button"
+                          key={reason}
+                          className={hourSuggestionFeedbackReasons.includes(reason) ? 'active' : ''}
+                          aria-pressed={hourSuggestionFeedbackReasons.includes(reason)}
+                          onClick={() => toggleHourSuggestionFeedbackReason(reason)}
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="hour-estimate-actions">
                   <small>{hourSuggestion.usedFallback ? '精确样本不足时，相关任务仅作为较低权重参考。' : '建议仅使用已验收任务的真实工时。'}</small>
                   <div>

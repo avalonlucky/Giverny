@@ -236,6 +236,23 @@ export type HourEstimateSuggestion = {
     completeRequirementRate: number
     summary: string
   }
+  learningAdjustment: {
+    sampleCount: number
+    ratio: number
+    applied: boolean
+    summary: string
+  }
+  expectedRange: {
+    low: number
+    high: number
+  }
+  riskFactors: string[]
+  accuracy: {
+    sampleCount: number
+    medianErrorRate: number
+    within20Rate: number
+    summary: string
+  }
   matchedTasks: Array<{
     id: number
     title: string

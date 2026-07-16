@@ -321,6 +321,71 @@ async function runAiLearningCheck(cookie) {
   process.stdout.write('AI feedback learning endpoint check passed.\n')
 }
 
+async function runHourEstimateLearningCheck(cookie) {
+  for (let index = 0; index < 3; index += 1) {
+    const learningResponse = await fetch('http://127.0.0.1:8798/api/ai/learning-events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        context: 'hour_estimate',
+        action: 'edited',
+        sourceInput: '三个产品视频背景降噪',
+        aiOutput: '4',
+        userFinal: String(5 + index * 0.5),
+        designType: '视频剪辑',
+        taskTitle: `工时学习隔离评测 ${index + 1}`,
+        metadata: {
+          suggestionId: `hour-eval-${index + 1}`,
+          source: 'task_submit',
+        },
+      }),
+    })
+    const learning = await learningResponse.json().catch(() => ({}))
+    if (!learningResponse.ok || learning.saved !== true) {
+      throw new Error(`Hour estimate learning event failed: ${JSON.stringify(learning)}`)
+    }
+  }
+
+  const response = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      title: '发布会产品视频降噪',
+      requirement: '复用现有剪辑工程，处理产品视频的背景电流声，适配三个尺寸并导出。',
+      selectedType: '视频剪辑',
+      requester: '陈义君',
+      startDate: '2026-07-16T09:00',
+      estimatedDate: '2026-07-16T18:00',
+      currentEstimatedHours: 4,
+    }),
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(`Hour estimate request failed: ${JSON.stringify(result)}`)
+  }
+  if (result.learningAdjustment?.applied !== true || result.learningAdjustment?.sampleCount < 3) {
+    throw new Error(`Hour estimate learning adjustment was not applied: ${JSON.stringify(result.learningAdjustment)}`)
+  }
+  if (!(result.expectedRange?.low > 0) || result.expectedRange.high < result.expectedRange.low) {
+    throw new Error(`Hour estimate range is invalid: ${JSON.stringify(result.expectedRange)}`)
+  }
+  if (!Array.isArray(result.riskFactors) || !result.accuracy?.summary) {
+    throw new Error('Hour estimate reliability details are missing')
+  }
+  const adaptation = result.complexity?.dimensions?.find((item) => item.key === 'adaptation')
+  if (!adaptation?.value?.includes('3')) {
+    throw new Error(`Chinese adaptation count was not parsed: ${JSON.stringify(adaptation)}`)
+  }
+  const scope = result.complexity?.dimensions?.find((item) => item.key === 'scope')
+  if (scope?.value?.includes('3')) {
+    throw new Error(`Adaptation count leaked into deliverable count: ${JSON.stringify(scope)}`)
+  }
+  if (!result.matchedTasks?.some((task) => task.similarityReasons?.includes('近期已验收任务'))) {
+    throw new Error('Recent historical sample was not identified')
+  }
+  process.stdout.write('AI hour estimate recency, range, and learning adjustment checks passed.\n')
+}
+
 try {
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
   await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
@@ -342,6 +407,7 @@ try {
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
   await runAiLearningCheck(cookie)
+  await runHourEstimateLearningCheck(cookie)
 
   await run('node', ['agent-evals/run.mjs'], {
     env: {
