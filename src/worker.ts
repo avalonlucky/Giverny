@@ -1671,6 +1671,61 @@ type VisionFallbackResult = {
   model: string
 }
 
+function selectedChatModelCanTryVision(choice: ChatModelChoice, target: ChatModelTarget) {
+  if (choice === 'auto' || target.kind !== 'endpoint') return false
+  if (choice === 'deepseek-v4-flash' || choice === 'deepseek-v4-pro') return false
+  if (choice === 'route:visionPrimary' || choice === 'route:visionFallback') return true
+  return ['gemini', 'doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai'].includes(target.endpoint.provider)
+}
+
+async function callMultimodalWithSelectedModel(
+  env: Env,
+  choice: ChatModelChoice,
+  prompt: string,
+  assets: MultimodalAsset[],
+  options: VisionFallbackOptions = {},
+): Promise<{ text: string; modelLabel: string; fallbackUsed: boolean; notes: string[] }> {
+  const notes: string[] = []
+  if (choice !== 'auto') {
+    const target = await resolveChatModelTarget(env, choice)
+    if (target.note) notes.push(target.note)
+    if (selectedChatModelCanTryVision(choice, target) && target.kind === 'endpoint') {
+      try {
+        if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
+        const compatibleAssets = target.endpoint.provider === 'gemini'
+          ? assets
+          : assets.filter((asset) => asset.mimeType.startsWith('image/'))
+        if (!compatibleAssets.length) throw new Error('当前模型没有可读取的图片预览')
+        const text = await callWithAiTimeout(
+          (signal) => callAiEndpointMultimodal(
+            target.endpoint,
+            prompt,
+            compatibleAssets,
+            signal,
+            options.structuredJson ?? false,
+            options.maxOutputTokens ?? 3200,
+          ),
+          options.timeoutMs ?? 90_000,
+          `${target.label} 识图响应超时`,
+        )
+        if (text.trim()) return { text, modelLabel: target.label, fallbackUsed: false, notes }
+        throw new Error('模型未返回内容')
+      } catch (error) {
+        notes.push(`${target.label} 识图失败：${describeAiCallError(error)}；已回落到识图模型链路。`)
+      }
+    } else {
+      notes.push(`${target.label} 未声明可用的识图能力，已使用识图模型链路。`)
+    }
+  }
+  const fallback = await callMultimodalWithVisionFallbackResult(env, prompt, assets, options)
+  return {
+    text: fallback.text,
+    modelLabel: fallback.model,
+    fallbackUsed: choice !== 'auto',
+    notes,
+  }
+}
+
 async function callMultimodalWithVisionFallbackResult(
   env: Env,
   prompt: string,
@@ -12733,8 +12788,14 @@ ${textAttachmentSection}
     const visionPrompt = `${systemPrompt}\n\n用户问题：${lastUserContent}`
     const assets: MultimodalAsset[] = imageAttachments.map((a) => ({ base64: a.data, mimeType: a.mimeType }))
     try {
-      const text = await callMultimodalWithVisionFallback(env, visionPrompt, assets)
-      return ok({ content: text })
+      const answer = await callMultimodalWithSelectedModel(env, modelChoice, visionPrompt, assets)
+      return ok({
+        content: answer.text,
+        trace: [
+          `识图答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
+          ...answer.notes,
+        ],
+      })
     } catch (e) {
       try {
         const imageNames = imageAttachments.map((item) => item.name).filter(Boolean).join('、') || '未命名图片'

@@ -5589,10 +5589,11 @@ function ChatPanel({
   const scopeActive = useKnowledge || useWebSearch
   const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey; disabled?: boolean }> = [
     { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析、写入和识图自动使用站内 Agent' : '本机 CLI 不可用时由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
+    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: '手动最高优先级；模型支持识图时图片也优先使用', brand: aiBrandForValue(`${aiModelConfig?.textPrimary.provider || 'deepseek'} ${aiModelConfig?.textPrimary.model || ''}`) },
     { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', meta: '直接调用云端模型 · 快速/经济，不经过本机 CLI', brand: 'deepseek' },
     { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', meta: '直接调用云端模型 · 深度推理，不经过本机 CLI', brand: 'deepseek' },
     { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '直接调用火山方舟，不经过本机 CLI', brand: 'doubao' },
-    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || 'Kimi 文字备用', meta: '直接调用 Kimi，不经过本机 CLI', brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
+    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || 'Kimi 文字备用', meta: '手动最高优先级；模型支持识图时图片也优先使用', brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
     { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: '直接调用识图模型，不经过本机 CLI', brand: aiBrandForValue(`${aiModelConfig?.visionPrimary.provider || 'gemini'} ${aiModelConfig?.visionPrimary.model || ''}`) },
     { value: 'workers-ai', label: 'Workers AI', meta: '直接调用 Cloudflare 边缘兜底模型', brand: 'cloudflare' },
   ]

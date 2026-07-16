@@ -481,6 +481,25 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Explicit Doubao did not own the full chat turn before fallback: ${JSON.stringify({ newModelRequests, doubaoPriorityText })}`)
   }
 
+  const visionRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const doubaoVisionResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'doubao-seed-2-1-pro',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请描述这张测试图片' }],
+      attachments: [{ type: 'image', name: 'eval.png', mimeType: 'image/png', data: 'aXNvbGF0ZWQtZXZhbC1pbWFnZQ==' }],
+    }),
+  })
+  const doubaoVisionText = await doubaoVisionResponse.text()
+  const visionRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const newVisionRequests = (visionRequestsAfter.requests || []).slice((visionRequestsBefore.requests || []).length)
+  if (!doubaoVisionResponse.ok || newVisionRequests[0]?.model !== 'doubao-seed-eval' || !doubaoVisionText.includes('识图答复：使用 豆包 Seed 2.1 Pro')) {
+    throw new Error(`Vision-capable explicit model was not preferred for image understanding: ${JSON.stringify({ newVisionRequests, doubaoVisionText })}`)
+  }
+
   const trendResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
