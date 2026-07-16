@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname, platform, arch } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
+const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
 const DEFAULT_SERVER = 'https://mayeai.com'
 
 function compact(value, max = 240) {
@@ -167,6 +168,206 @@ async function completeCommand(config, commandId, result, error = '') {
   })
 }
 
+async function reportCommandProgress(config, commandId, result) {
+  await request(config.server, `/api/local-cli/bridge/commands/${encodeURIComponent(commandId)}/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.token}` },
+    body: JSON.stringify({ result }),
+  })
+}
+
+async function commandState(config, commandId) {
+  return request(config.server, `/api/local-cli/bridge/commands/${encodeURIComponent(commandId)}`, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${config.token}` },
+  })
+}
+
+function appendTrace(state, value) {
+  const line = compact(value, 180)
+  if (!line || state.trace.includes(line)) return
+  state.trace = [...state.trace, line].slice(-16)
+}
+
+function appendContent(state, value) {
+  const text = String(value ?? '')
+  if (!text) return
+  if (!state.content) state.content = text
+  else if (!state.content.endsWith(text)) state.content += text
+  state.content = state.content.slice(-40_000)
+}
+
+function parseCliEvent(adapterId, line, state) {
+  const trimmed = String(line || '').trim()
+  if (!trimmed) return
+  let event
+  try {
+    event = JSON.parse(trimmed)
+  } catch {
+    state.plainOutput = `${state.plainOutput}${state.plainOutput ? '\n' : ''}${trimmed}`.slice(-20_000)
+    return
+  }
+  const type = String(event.type || '')
+  if (event.thread_id || event.session_id) state.sessionId = String(event.thread_id || event.session_id).slice(0, 160)
+  if (adapterId === 'codex') {
+    if (type === 'thread.started') {
+      state.sessionId = String(event.thread_id || '').slice(0, 160)
+      appendTrace(state, 'Codex CLI 已建立本机执行会话')
+    } else if (type === 'turn.started') {
+      appendTrace(state, 'Codex CLI 正在分析问题与规划工具调用')
+    } else if (type === 'item.started' || type === 'item.completed') {
+      const item = event.item || {}
+      if (item.type === 'command_execution') appendTrace(state, `执行本机命令：${compact(item.command || '受控命令', 100)}`)
+      else if (item.type === 'mcp_tool_call') appendTrace(state, `读取 Giverny 数据：${compact(item.tool || item.name || 'MCP 工具', 80)}`)
+      else if (item.type === 'agent_message' && type === 'item.completed') state.content = String(item.text || '').slice(0, 40_000)
+      else if (item.type === 'reasoning') appendTrace(state, 'Codex CLI 正在核对信息')
+    } else if (type === 'turn.completed') {
+      appendTrace(state, 'Codex CLI 已完成本机执行')
+    } else if (type.includes('failed') || type.includes('error')) {
+      state.error = compact(event.error?.message || event.message || 'Codex CLI 执行失败', 600)
+    }
+    return
+  }
+  if (type === 'system') appendTrace(state, `${adapterId === 'claude' ? 'Claude Code' : '本机 CLI'} 已建立执行会话`)
+  if (type === 'assistant') {
+    const blocks = Array.isArray(event.message?.content) ? event.message.content : []
+    for (const block of blocks) {
+      if (block?.type === 'tool_use') appendTrace(state, `执行工具：${compact(block.name || '本机工具', 100)}`)
+      if (block?.type === 'text') appendContent(state, block.text)
+    }
+  }
+  if (type === 'content_block_delta' && event.delta?.text) appendContent(state, event.delta.text)
+  if (type === 'result') {
+    if (event.result) state.content = String(event.result).slice(0, 40_000)
+    if (event.is_error) state.error = compact(event.result || event.error || '本机 CLI 执行失败', 600)
+    appendTrace(state, '本机 CLI 已完成执行')
+  }
+  if (type.includes('tool') && (event.name || event.tool_name)) appendTrace(state, `执行工具：${compact(event.name || event.tool_name, 100)}`)
+  if (type.includes('error') || type.includes('failed')) state.error = compact(event.error?.message || event.message || event.error || '本机 CLI 执行失败', 600)
+}
+
+function cliInvocation(adapterId, prompt, mcpUrl) {
+  if (adapterId === 'codex') {
+    return {
+      args: [
+        'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ephemeral',
+        '-C', WORKSPACE_DIR,
+        '-c', 'approval_policy="never"',
+        '-c', 'sandbox_workspace_write.network_access=true',
+        '-c', `mcp_servers.giverny.url=${JSON.stringify(mcpUrl)}`,
+        '-c', 'mcp_servers.giverny.bearer_token_env_var="GIVERNY_MCP_TOKEN"',
+        prompt,
+      ],
+    }
+  }
+  if (adapterId === 'claude') {
+    const mcpConfig = JSON.stringify({
+      mcpServers: { giverny: { type: 'http', url: mcpUrl, headers: { Authorization: 'Bearer ${GIVERNY_MCP_TOKEN}' } } },
+    })
+    return {
+      args: [
+        '-p', prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk',
+        '--mcp-config', mcpConfig, '--strict-mcp-config', '--no-session-persistence',
+        '--tools', 'Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,mcp__giverny__*',
+      ],
+    }
+  }
+  if (adapterId === 'grok') {
+    return {
+      args: ['--single', prompt, '--output-format', 'streaming-json', '--permission-mode', 'dontAsk', '--cwd', WORKSPACE_DIR],
+    }
+  }
+  throw new Error('当前 CLI 尚未开放安全执行适配')
+}
+
+async function executeRunCommand(config, command) {
+  const payload = command.payload || {}
+  const adapterId = String(payload.adapterId || '')
+  const adapter = scanLocalClis().find((item) => item.id === adapterId && item.status === 'available' && item.command)
+  if (!adapter) {
+    await completeCommand(config, command.id, {}, '所选 CLI 当前不可用，请重新扫描或登录')
+    return
+  }
+  mkdirSync(WORKSPACE_DIR, { recursive: true, mode: 0o700 })
+  const state = { trace: ['Bridge 已领取本机执行任务'], content: '', plainOutput: '', sessionId: '', error: '' }
+  const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 180_000, 30_000), 300_000)
+  let invocation
+  try {
+    invocation = cliInvocation(adapterId, String(payload.prompt || '').slice(0, 40_000), String(payload.mcpUrl || ''))
+  } catch (error) {
+    await completeCommand(config, command.id, state, compact(error?.message || error, 600))
+    return
+  }
+  appendTrace(state, `启动 ${adapter.name}`)
+  await reportCommandProgress(config, command.id, state)
+  await new Promise((resolve) => {
+    const child = spawn(adapter.command, invocation.args, {
+      cwd: WORKSPACE_DIR,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: false,
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        TERM: 'dumb',
+        GIVERNY_MCP_TOKEN: String(payload.mcpToken || ''),
+      },
+    })
+    let stdoutBuffer = ''
+    let stderrOutput = ''
+    let closed = false
+    let publishChain = Promise.resolve()
+    const publish = () => {
+      publishChain = publishChain
+        .then(() => reportCommandProgress(config, command.id, state))
+        .catch(() => undefined)
+    }
+    const consume = (chunk) => {
+      stdoutBuffer += String(chunk)
+      const lines = stdoutBuffer.split(/\r?\n/)
+      stdoutBuffer = lines.pop() || ''
+      for (const line of lines) parseCliEvent(adapterId, line, state)
+      publish()
+    }
+    child.stdout.on('data', consume)
+    child.stderr.on('data', (chunk) => { stderrOutput = `${stderrOutput}${String(chunk)}`.slice(-4000) })
+    child.on('error', (error) => { state.error = compact(error.message, 600) })
+    const heartbeatTimer = setInterval(() => { void heartbeat(config, undefined).catch(() => undefined) }, 15_000)
+    const cancelTimer = setInterval(() => {
+      void commandState(config, command.id).then((result) => {
+        if (result.status === 'cancelled' && !closed) {
+          state.error = '用户已停止本机 CLI 执行'
+          child.kill('SIGTERM')
+        }
+      }).catch(() => undefined)
+    }, 1_500)
+    const timeoutTimer = setTimeout(() => {
+      if (!closed) {
+        state.error = `本机 CLI 执行超过 ${Math.round(timeoutMs / 1000)} 秒，已停止`
+        child.kill('SIGTERM')
+      }
+    }, timeoutMs)
+    child.on('close', async (code) => {
+      closed = true
+      clearInterval(heartbeatTimer)
+      clearInterval(cancelTimer)
+      clearTimeout(timeoutTimer)
+      if (stdoutBuffer.trim()) parseCliEvent(adapterId, stdoutBuffer, state)
+      if (!state.content && state.plainOutput) state.content = state.plainOutput
+      if (!state.error && code !== 0) state.error = compact(stderrOutput || `命令退出码 ${code}`, 600)
+      if (!state.error && !state.content) state.error = '本机 CLI 没有返回可显示的回答'
+      await publishChain
+      await completeCommand(config, command.id, {
+        trace: state.trace,
+        content: state.content,
+        sessionId: state.sessionId,
+        workspace: WORKSPACE_DIR,
+      }, state.error)
+      resolve()
+    })
+  })
+}
+
 async function pollCommand(config) {
   const payload = await request(config.server, '/api/local-cli/bridge/commands', {
     method: 'GET',
@@ -177,6 +378,10 @@ async function pollCommand(config) {
     const clis = scanLocalClis()
     await completeCommand(config, payload.command.id, { clis })
     return clis
+  }
+  if (payload.command.type === 'run') {
+    await executeRunCommand(config, payload.command)
+    return null
   }
   await completeCommand(config, payload.command.id, {}, '当前 Bridge 不支持该命令')
   return null

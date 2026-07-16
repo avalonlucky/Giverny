@@ -334,7 +334,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const bridgePairResponse = await fetch(`${base}/api/local-cli/bridge/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.1.0', clis: initialClis }),
+    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.2.0', clis: initialClis }),
   })
   const bridgePair = await bridgePairResponse.json().catch(() => ({}))
   if (!bridgePairResponse.ok || !bridgePair.deviceId || !bridgePair.token) throw new Error(`Local CLI bridge pairing failed: ${JSON.stringify(bridgePair)}`)
@@ -350,7 +350,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const heartbeat = await fetch(`${base}/api/local-cli/bridge/heartbeat`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ bridgeVersion: '0.1.0', clis: initialClis }),
+    body: JSON.stringify({ bridgeVersion: '0.2.0', clis: initialClis }),
   })
   if (!heartbeat.ok) throw new Error(`Local CLI heartbeat failed: ${heartbeat.status}`)
 
@@ -388,7 +388,76 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!selectResponse.ok || selected.device?.selectedCliId !== 'claude' || !selected.device?.clis?.find((item) => item.id === 'claude')?.selected) {
     throw new Error(`Local CLI adapter selection failed: ${JSON.stringify(selected)}`)
   }
-  process.stdout.write('Local CLI pairing, tenant isolation, scan command, heartbeat, and adapter selection checks passed.\n')
+
+  const waitForBridgeRun = async () => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const response = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
+      const payload = await response.json().catch(() => ({}))
+      if (payload.command?.type === 'run') return payload.command
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error('Local CLI chat command was not queued for the selected browser device')
+  }
+  const chatResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请说明当前本机 CLI 的连接情况' }],
+    }),
+  })
+  if (!chatResponse.ok || !String(chatResponse.headers.get('content-type')).includes('text/event-stream')) {
+    throw new Error(`Local CLI chat did not start an SSE response: ${chatResponse.status}`)
+  }
+  const chatTextPromise = chatResponse.text()
+  const earlyChatResult = await Promise.race([
+    chatTextPromise.then((text) => text),
+    new Promise((resolve) => setTimeout(() => resolve(''), 500)),
+  ])
+  if (earlyChatResult) throw new Error(`Local CLI chat ended before Bridge pickup: ${earlyChatResult}`)
+  const runCommand = await waitForBridgeRun()
+  if (runCommand.payload?.adapterId !== 'claude' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP')) {
+    throw new Error(`Local CLI run payload is incomplete or unsafe: ${JSON.stringify(runCommand.payload)}`)
+  }
+  const progressResponse = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/events`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { trace: ['Claude Code 已建立执行会话', '读取 Giverny 数据：search_tasks'], content: '正在整理' } }),
+  })
+  if (!progressResponse.ok) throw new Error(`Local CLI progress event failed: ${progressResponse.status}`)
+  const runComplete = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/complete`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { trace: ['Claude Code 已建立执行会话', '读取 Giverny 数据：search_tasks', '本机 CLI 已完成执行'], content: '这是本机 Claude Code 的回答。', workspace: '/tmp/giverny' } }),
+  })
+  if (!runComplete.ok) throw new Error(`Local CLI run completion failed: ${runComplete.status}`)
+  const chatText = await chatTextPromise
+  if (!chatText.includes('"runtime":"local-cli"') || !chatText.includes('这是本机 Claude Code 的回答') || !chatText.includes('读取 Giverny 数据')) {
+    throw new Error(`Local CLI SSE did not expose route, progress, and result: ${chatText}`)
+  }
+  const expiredMcpToken = await fetch(`${base}/mcp`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${runCommand.payload.mcpToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'eval', version: '1' } } }),
+  })
+  if (expiredMcpToken.status !== 401) throw new Error('Local CLI MCP token remained valid after command completion')
+
+  const cancelChatResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({ browserDeviceKey, month: '2026-07', messages: [{ role: 'user', content: '请分析一个普通设计问题' }] }),
+  })
+  const cancelTextPromise = cancelChatResponse.text()
+  const cancellableCommand = await waitForBridgeRun()
+  const cancelResponse = await fetch(`${base}/api/local-cli/commands/${cancellableCommand.id}/cancel`, { method: 'POST', headers: { cookie } })
+  if (!cancelResponse.ok) throw new Error(`Local CLI cancellation failed: ${cancelResponse.status}`)
+  const bridgeStateResponse = await fetch(`${base}/api/local-cli/bridge/commands/${cancellableCommand.id}`, { headers: bridgeHeaders })
+  const bridgeState = await bridgeStateResponse.json().catch(() => ({}))
+  if (bridgeState.status !== 'cancelled') throw new Error(`Bridge did not observe cancellation: ${JSON.stringify(bridgeState)}`)
+  const cancelText = await cancelTextPromise
+  if (!cancelText.includes('已停止本机 CLI 执行')) throw new Error(`Cancelled local CLI chat did not close cleanly: ${cancelText}`)
+  process.stdout.write('Local CLI pairing, tenant isolation, streaming chat routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
 }
 
 async function runAgentOrchestrationCheck(cookie) {

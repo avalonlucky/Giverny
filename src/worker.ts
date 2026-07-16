@@ -12841,23 +12841,229 @@ function uniqueAgentTrace(trace: unknown) {
   return [...new Set(trace.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 10)
 }
 
+type LocalCliChatRoute = {
+  commandId: string
+  deviceName: string
+  cliName: string
+  adapterId: string
+}
+
+type LocalCliChatDecision = {
+  route: LocalCliChatRoute | null
+  cloudReason: string
+}
+
+function isLocalCliWriteIntent(message: string) {
+  const normalized = message.replace(/\s+/g, '')
+  if (/^(确认执行|取消执行|取消)$/.test(normalized)) return true
+  return /(?:新建|创建|新增|添加|记录|修改|更新|改成|改为|设置为|标记为|验收通过|确认验收|作废|删除|恢复|撤销).{0,24}(?:任务|进展|反馈|状态|等待|附件|工时|验收|交付)/.test(normalized)
+    || /(?:任务|进展|反馈|状态|等待|附件|工时|验收|交付).{0,24}(?:新建|创建|新增|添加|记录|修改|更新|改成|改为|设置为|标记为|作废|删除|恢复|撤销)/.test(normalized)
+}
+
+async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliChatDecision> {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return { route: null, cloudReason: '' }
+  const body = await request.json().catch(() => ({})) as {
+    browserDeviceKey?: string
+    month?: string
+    messages?: Array<{ role?: string; content?: string }>
+    attachments?: Array<{ type?: string; name?: string; data?: string }>
+    agentRuntimeConversationId?: string
+  }
+  const browserDeviceKey = String(body.browserDeviceKey || '').trim().slice(0, 128)
+  if (!browserDeviceKey) return { route: null, cloudReason: '' }
+  const messages = (Array.isArray(body.messages) ? body.messages : [])
+    .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: String(message.content || '').trim().slice(0, 5000) }))
+    .filter((message) => message.content)
+    .slice(-14)
+  const lastMessage = messages.at(-1)?.content || ''
+  if (!lastMessage) return { route: null, cloudReason: '' }
+  if (isLocalCliWriteIntent(lastMessage)) {
+    return { route: null, cloudReason: '检测到站内写入意图，已切换云端 Agent 的预览确认流程' }
+  }
+  const attachments = Array.isArray(body.attachments) ? body.attachments : []
+  if (attachments.some((item) => item?.type === 'image')) {
+    return { route: null, cloudReason: '图片理解继续由云端视觉模型处理' }
+  }
+  const device = await env.DB.prepare(
+    `SELECT * FROM local_cli_devices
+     WHERE principal_id = ? AND browser_device_key = ? AND revoked_at IS NULL
+     ORDER BY updated_at DESC LIMIT 1`,
+  ).bind(principal.principalId, browserDeviceKey).first<DbLocalCliDevice>()
+  if (!device?.selected_cli_id) return { route: null, cloudReason: '' }
+  if (!localCliIsOnline(device.last_seen_at)) return { route: null, cloudReason: '当前电脑的 Bridge 离线，已回退云端 Agent' }
+  if (!localCliVersionAtLeast(device.bridge_version, LOCAL_CLI_RUNTIME_VERSION)) {
+    return { route: null, cloudReason: `本机 Bridge ${device.bridge_version || '未知版本'} 需要更新，已回退云端 Agent` }
+  }
+  const adapter = await env.DB.prepare(
+    "SELECT * FROM local_cli_adapters WHERE device_id = ? AND adapter_id = ? AND status = 'available'",
+  ).bind(device.id, device.selected_cli_id).first<DbLocalCliAdapter>()
+  if (!adapter) return { route: null, cloudReason: '所选本机 CLI 当前不可用，已回退云端 Agent' }
+
+  await ensureAccessTokenScope(env)
+  const commandId = crypto.randomUUID()
+  const tokenBytes = crypto.getRandomValues(new Uint8Array(24))
+  const mcpToken = `lc_${Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  const expiresAt = new Date(Date.now() + LOCAL_CLI_RUN_TTL_MS).toISOString()
+  const textAttachments = attachments
+    .filter((item) => item?.type === 'text')
+    .slice(0, 3)
+    .map((item) => `【${String(item.name || '文档').slice(0, 120)}】\n${String(item.data || '').slice(0, 4000)}`)
+    .join('\n\n')
+  const history = messages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
+  const prompt = `你是 Giverny 工作助手爱丽丝，现在运行在用户当前电脑上的 ${adapter.name}。\n\n` +
+    `执行边界：\n` +
+    `1. 查询任务、工时、收入、附件和工作区数据时，必须优先调用 giverny MCP 工具，不得凭空猜测。\n` +
+    `2. 站内任务创建、状态修改、进展、反馈、验收等写入必须回到网页的确认流程；本轮不得绕过确认直接修改 Giverny 数据。\n` +
+    `3. 如需在本机生成或下载文件，只能写入当前 Giverny 专用工作目录，并在回答中给出完整文件路径。\n` +
+    `4. 不读取密钥、浏览器资料、SSH 配置或 Giverny 工作目录之外的私人文件，除非用户明确指定文件。\n` +
+    `5. 回答使用简洁自然的中文；可以展示执行结论，但不要暴露隐藏思维链。\n\n` +
+    `当前结算月：${String(body.month || '').slice(0, 7) || '未指定'}\n` +
+    `${textAttachments ? `\n用户上传的文档：\n${textAttachments}\n` : ''}` +
+    `\n对话上下文：\n${history}`
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled)
+       VALUES (?, ?, ?, 'mcp-read', ?, 0)`,
+    ).bind(crypto.randomUUID(), mcpToken, `local-cli:${commandId}`, expiresAt),
+    env.DB.prepare(
+      `INSERT INTO local_cli_commands (
+        id, device_id, principal_id, command_type, payload_json, status, expires_at
+       ) VALUES (?, ?, ?, 'run', ?, 'queued', ?)`,
+    ).bind(commandId, device.id, principal.principalId, JSON.stringify({
+      adapterId: adapter.adapter_id,
+      prompt,
+      mcpUrl: `${new URL(request.url).origin}/mcp`,
+      mcpToken,
+      timeoutMs: 180_000,
+      conversationId: String(body.agentRuntimeConversationId || '').slice(0, 160),
+    }), expiresAt),
+  ])
+  await audit(env, 'queue', 'local_cli_command', commandId, {
+    principalId: principal.principalId,
+    deviceId: device.id,
+    adapterId: adapter.adapter_id,
+    promptLength: lastMessage.length,
+  })
+  return {
+    route: { commandId, deviceName: device.name, cliName: adapter.name, adapterId: adapter.adapter_id },
+    cloudReason: '',
+  }
+}
+
+async function waitForLocalCliChat(
+  env: Env,
+  route: LocalCliChatRoute,
+  send: (payload: Record<string, unknown>) => void,
+) {
+  const startedAt = Date.now()
+  let sentContent = ''
+  let lastTraceSignature = ''
+  while (Date.now() - startedAt < LOCAL_CLI_RUN_TTL_MS) {
+    const command = await env.DB.prepare('SELECT * FROM local_cli_commands WHERE id = ?').bind(route.commandId).first<DbLocalCliCommand>()
+    if (!command) return { status: 'failed' as const, error: '本机命令记录不存在' }
+    const result = normalizeLocalCliCommandResult(command.result_json ? JSON.parse(command.result_json) : null)
+    const routeTrace = uniqueAgentTrace([
+      '理解你的问题',
+      `路由到当前电脑：${route.deviceName} · ${route.cliName}`,
+      command.claimed_at ? '本机 Bridge 已领取任务' : '等待本机 Bridge 领取任务',
+      ...result.trace,
+    ])
+    const signature = JSON.stringify(routeTrace)
+    if (signature !== lastTraceSignature) {
+      send({ type: 'trace', status: 'running', trace: routeTrace })
+      lastTraceSignature = signature
+    }
+    if (result.content && result.content.startsWith(sentContent) && result.content.length > sentContent.length) {
+      send({ t: result.content.slice(sentContent.length) })
+      sentContent = result.content
+    }
+    if (command.status === 'completed') {
+      return { status: 'completed' as const, result, trace: uniqueAgentTrace([...routeTrace, `${route.cliName} 已返回结果`]) }
+    }
+    if (command.status === 'cancelled') return { status: 'cancelled' as const, result, trace: routeTrace }
+    if (command.status === 'failed' || command.status === 'expired') {
+      return { status: 'failed' as const, error: command.error_message || '本机 CLI 执行失败', trace: routeTrace }
+    }
+    await waitForAgentTimeline(900)
+  }
+  await env.DB.prepare("UPDATE local_cli_commands SET status = 'expired', error_message = '本机 CLI 执行超时', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('queued', 'running')")
+    .bind(route.commandId).run()
+  return { status: 'failed' as const, error: '本机 CLI 执行超时' }
+}
+
 function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const encoder = new TextEncoder()
   const startedAt = performance.now()
+  const metricsRequest = request.clone()
+  const localRouteRequest = request.clone()
+  const cloudRequest = request.clone()
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
-        const promptTokens = await estimateAgentRequestTokens(request)
+        const promptTokens = await estimateAgentRequestTokens(metricsRequest)
         send({ type: 'trace', status: 'running', trace: ['理解你的问题'] })
         await waitForAgentTimeline(140)
-        send({
-          type: 'trace',
-          status: 'running',
-          trace: ['理解你的问题', '规划执行路径：判断需要读取哪些任务、工时、附件或分析数据'],
-        })
+        const routingTrace = ['理解你的问题', '规划执行路径：判断使用本机 CLI 还是云端确认流程']
+        send({ type: 'trace', status: 'running', trace: routingTrace })
 
-        const response = await chatWithAi(env, request)
+        const localDecision = await queueLocalCliChat(env, localRouteRequest)
+        if (localDecision.route) {
+          send({
+            type: 'route',
+            status: 'running',
+            commandId: localDecision.route.commandId,
+            runtime: 'local-cli',
+            runtimeLabel: `${localDecision.route.cliName} · ${localDecision.route.deviceName}`,
+          })
+          const localOutcome = await waitForLocalCliChat(env, localDecision.route, send)
+          if (localOutcome.status === 'completed') {
+            const localTrace = uniqueAgentTrace([
+              ...(localOutcome.trace || routingTrace),
+              `生成答复：使用本机 ${localDecision.route.cliName}。`,
+            ])
+            const payload = {
+              content: localOutcome.result.content,
+              trace: localTrace,
+              localCli: {
+                deviceName: localDecision.route.deviceName,
+                cliName: localDecision.route.cliName,
+                workspace: localOutcome.result.workspace,
+              },
+            }
+            const metricWrite = recordAgentRunMetric(
+              env,
+              Response.json(payload),
+              performance.now() - startedAt,
+              request.headers.get('x-giverny-agent-eval') === '1',
+              promptTokens,
+            )
+            if (ctx) ctx.waitUntil(metricWrite)
+            else await metricWrite
+            send({ type: 'result', status: 'completed', ...payload })
+            send({ type: 'done' })
+            return
+          }
+          if (localOutcome.status === 'cancelled') {
+            send({
+              type: 'result',
+              status: 'completed',
+              content: '已停止本机 CLI 执行。',
+              trace: uniqueAgentTrace([...(localOutcome.trace || routingTrace), '用户已停止本机 CLI 执行']),
+            })
+            send({ type: 'done' })
+            return
+          }
+          routingTrace.push(`本机 CLI 未完成：${String(localOutcome.error || '未知原因').slice(0, 160)}`)
+          routingTrace.push('已自动回退云端 Agent')
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace(routingTrace) })
+        } else if (localDecision.cloudReason) {
+          routingTrace.push(localDecision.cloudReason)
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace(routingTrace) })
+        }
+
+        const response = await chatWithAi(env, cloudRequest)
         const metricResponse = response.clone()
         const metricWrite = recordAgentRunMetric(
           env,
@@ -12878,8 +13084,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
 
         const trace = uniqueAgentTrace(payload.trace)
         const visibleTrace = uniqueAgentTrace([
-          '理解你的问题',
-          '规划执行路径：判断需要读取哪些任务、工时、附件或分析数据',
+          ...routingTrace,
           ...(trace.length > 0 ? trace : ['整理回答']),
         ])
         for (let index = 0; index < visibleTrace.length; index += 1) {
@@ -13600,7 +13805,9 @@ type DbLocalCliCommand = {
 
 const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
 const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
+const LOCAL_CLI_RUN_TTL_MS = 5 * 60 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
+const LOCAL_CLI_RUNTIME_VERSION = '0.2.0'
 
 function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
   if (!value || typeof value !== 'object') return null
@@ -13678,6 +13885,16 @@ function localCliIsOnline(lastSeenAt: string | null) {
   if (!lastSeenAt) return false
   const timestamp = Date.parse(`${lastSeenAt.replace(' ', 'T')}Z`)
   return Number.isFinite(timestamp) && Date.now() - timestamp <= LOCAL_CLI_ONLINE_MS
+}
+
+function localCliVersionAtLeast(version: string, minimum: string) {
+  const parts = String(version || '').split('.').map((item) => Number(item.replace(/\D.*$/, '')) || 0)
+  const minimumParts = minimum.split('.').map(Number)
+  for (let index = 0; index < Math.max(parts.length, minimumParts.length); index += 1) {
+    if ((parts[index] || 0) > (minimumParts[index] || 0)) return true
+    if ((parts[index] || 0) < (minimumParts[index] || 0)) return false
+  }
+  return true
 }
 
 function toLocalCliAdapter(row: DbLocalCliAdapter, selectedId: string | null) {
@@ -13796,11 +14013,49 @@ async function pollLocalCliBridgeCommand(env: Env, request: Request) {
     .bind(device.id, nowIso())
     .first<DbLocalCliCommand>()
   if (!command) return ok({ command: null })
-  const claimed = await env.DB.prepare("UPDATE local_cli_commands SET status = 'running', claimed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'")
-    .bind(command.id)
+  const payload = JSON.parse(command.payload_json || '{}') as Record<string, unknown>
+  const sanitizedPayload = command.command_type === 'run'
+    ? { ...payload, mcpToken: undefined }
+    : payload
+  const claimed = await env.DB.prepare("UPDATE local_cli_commands SET status = 'running', claimed_at = CURRENT_TIMESTAMP, payload_json = ? WHERE id = ? AND status = 'queued'")
+    .bind(JSON.stringify(sanitizedPayload), command.id)
     .run()
   if (!Number(claimed.meta?.changes)) return ok({ command: null })
-  return ok({ command: { id: command.id, type: command.command_type, payload: JSON.parse(command.payload_json || '{}') } })
+  return ok({ command: { id: command.id, type: command.command_type, payload } })
+}
+
+function normalizeLocalCliCommandResult(value: unknown) {
+  if (!value || typeof value !== 'object') return { trace: [] as string[], content: '', sessionId: '', workspace: '' }
+  const item = value as Record<string, unknown>
+  return {
+    trace: (Array.isArray(item.trace) ? item.trace : []).map((line) => String(line).trim().slice(0, 180)).filter(Boolean).slice(-16),
+    content: String(item.content || '').slice(0, 40_000),
+    sessionId: String(item.sessionId || '').slice(0, 160),
+    workspace: String(item.workspace || '').slice(0, 500),
+  }
+}
+
+async function updateLocalCliBridgeCommandEvents(env: Env, commandId: string, request: Request) {
+  const device = await resolveLocalCliBridgeDevice(env, request)
+  if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  const command = await env.DB.prepare('SELECT * FROM local_cli_commands WHERE id = ? AND device_id = ?').bind(commandId, device.id).first<DbLocalCliCommand>()
+  if (!command) return fail('本机命令不存在', 404)
+  if (command.status !== 'running') return fail(command.status === 'cancelled' ? '本机命令已停止' : '本机命令不在运行中', 409)
+  const body = await request.json().catch(() => ({})) as { result?: Record<string, unknown> }
+  const result = normalizeLocalCliCommandResult(body.result)
+  await env.DB.prepare('UPDATE local_cli_commands SET result_json = ? WHERE id = ? AND status = \'running\'')
+    .bind(JSON.stringify(result), command.id)
+    .run()
+  await env.DB.prepare('UPDATE local_cli_devices SET last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(device.id).run()
+  return ok({ ok: true })
+}
+
+async function getLocalCliBridgeCommandState(env: Env, commandId: string, request: Request) {
+  const device = await resolveLocalCliBridgeDevice(env, request)
+  if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  const command = await env.DB.prepare('SELECT status FROM local_cli_commands WHERE id = ? AND device_id = ?').bind(commandId, device.id).first<{ status: string }>()
+  if (!command) return fail('本机命令不存在', 404)
+  return ok({ status: command.status })
 }
 
 async function completeLocalCliBridgeCommand(env: Env, commandId: string, request: Request) {
@@ -13812,9 +14067,15 @@ async function completeLocalCliBridgeCommand(env: Env, commandId: string, reques
   const reports = normalizeLocalCliReports(body.result?.clis)
   if (command.command_type === 'scan' && reports.length) await replaceLocalCliAdapters(env, device.id, reports)
   const error = String(body.error || '').trim().slice(0, 1000)
+  if (command.status === 'cancelled') {
+    await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
+    return ok({ ok: true, cancelled: true })
+  }
+  const result = normalizeLocalCliCommandResult(body.result)
   await env.DB.prepare("UPDATE local_cli_commands SET status = ?, result_json = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(error ? 'failed' : 'completed', JSON.stringify(body.result || {}), error || null, command.id)
+    .bind(error ? 'failed' : 'completed', JSON.stringify(result), error || null, command.id)
     .run()
+  await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
   await env.DB.prepare('UPDATE local_cli_devices SET last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(device.id).run()
   return ok({ ok: true })
 }
@@ -13861,6 +14122,21 @@ async function getLocalCliCommand(env: Env, commandId: string, request: Request)
     createdAt: command.created_at,
     completedAt: command.completed_at || '',
   })
+}
+
+async function cancelLocalCliCommand(env: Env, commandId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const result = await env.DB.prepare(
+    "UPDATE local_cli_commands SET status = 'cancelled', error_message = '用户已停止', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND principal_id = ? AND status IN ('queued', 'running')",
+  ).bind(commandId, principal.principalId).run()
+  if (!Number(result.meta?.changes)) {
+    const existing = await env.DB.prepare('SELECT status FROM local_cli_commands WHERE id = ? AND principal_id = ?').bind(commandId, principal.principalId).first<{ status: string }>()
+    if (!existing) return fail('本机命令不存在', 404)
+    return ok({ ok: true, status: existing.status })
+  }
+  await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${commandId}`).run()
+  return ok({ ok: true, status: 'cancelled' })
 }
 
 async function selectLocalCliAdapter(env: Env, deviceId: string, request: Request) {
@@ -13986,6 +14262,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path.startsWith('/api/local-cli/bridge/commands/') && path.endsWith('/complete') && request.method === 'POST') {
     return completeLocalCliBridgeCommand(env, path.split('/')[5] || '', request)
   }
+  if (path.startsWith('/api/local-cli/bridge/commands/') && path.endsWith('/events') && request.method === 'POST') {
+    return updateLocalCliBridgeCommandEvents(env, path.split('/')[5] || '', request)
+  }
+  if (path.startsWith('/api/local-cli/bridge/commands/') && request.method === 'GET') {
+    return getLocalCliBridgeCommandState(env, path.split('/')[5] || '', request)
+  }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)
   }
@@ -14018,6 +14300,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/local-cli/commands/') && request.method === 'GET') {
     return getLocalCliCommand(env, path.split('/')[4] || '', request)
+  }
+  if (path.startsWith('/api/local-cli/commands/') && path.endsWith('/cancel') && request.method === 'POST') {
+    return cancelLocalCliCommand(env, path.split('/')[4] || '', request)
   }
   if (path.startsWith('/api/shared/') && isGet) {
     return getSharedReport(env, path.split('/').pop() ?? '')

@@ -4943,6 +4943,8 @@ function ChatPanel({
   const [memoryNoteDrafts, setMemoryNoteDrafts] = useState<Record<number, string>>({})
   const [memoryForgetConfirmId, setMemoryForgetConfirmId] = useState(0)
   const [taskCenterBusy, setTaskCenterBusy] = useState('')
+  const [activeLocalCommandId, setActiveLocalCommandId] = useState('')
+  const [isCancellingLocalCommand, setIsCancellingLocalCommand] = useState(false)
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
@@ -5314,6 +5316,7 @@ function ChatPanel({
           modelChoice: selectedModelChoice,
           attachments: sentAttachments.filter((item) => item.type !== 'file').map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
           agentRuntimeConversationId: agentConversationId,
+          browserDeviceKey: localCliBrowserDeviceKey(),
         }),
       })
       if (!res.ok) {
@@ -5383,10 +5386,13 @@ function ChatPanel({
           if (payload === '[DONE]') break
           try {
             const event = JSON.parse(payload) as AgentChatResult & {
-              type?: 'trace' | 'result' | 'error' | 'done'
+              type?: 'trace' | 'route' | 'result' | 'error' | 'done'
               status?: 'running' | 'completed'
               error?: string
               t?: string
+              commandId?: string
+              runtime?: string
+              runtimeLabel?: string
             }
             if (event.type === 'trace' && event.trace?.length) {
               setMessages((prev) => prev.map((m) => (
@@ -5394,6 +5400,8 @@ function ChatPanel({
                   ? { ...m, trace: event.trace, traceStatus: 'running' }
                   : m
               )))
+            } else if (event.type === 'route' && event.runtime === 'local-cli' && event.commandId) {
+              setActiveLocalCommandId(event.commandId)
             } else if (event.type === 'result') {
               receivedResult = true
               applyAgentResult(event)
@@ -5431,7 +5439,21 @@ function ChatPanel({
       }))
     } finally {
       setLoading(false)
+      setActiveLocalCommandId('')
+      setIsCancellingLocalCommand(false)
       void refreshAnalysisJobs()
+    }
+  }
+
+  const stopLocalCliExecution = async () => {
+    if (!activeLocalCommandId || isCancellingLocalCommand) return
+    setIsCancellingLocalCommand(true)
+    try {
+      await api.cancelLocalCliCommand(activeLocalCommandId)
+      onNotify('正在停止本机 CLI…', 'info')
+    } catch (error) {
+      setIsCancellingLocalCommand(false)
+      onNotify(error instanceof Error ? error.message : '停止本机 CLI 失败', 'error')
     }
   }
 
@@ -5710,11 +5732,12 @@ function ChatPanel({
             <button
               type="button"
               className="alice-send-btn"
-              onClick={() => void send()}
-              disabled={(!input.trim() && attachments.length === 0) || loading}
-              aria-label="发送"
+              onClick={() => loading ? void stopLocalCliExecution() : void send()}
+              disabled={loading ? !activeLocalCommandId || isCancellingLocalCommand : (!input.trim() && attachments.length === 0)}
+              aria-label={loading ? '停止本机 CLI' : '发送'}
+              title={loading ? (activeLocalCommandId ? '停止本机 CLI' : 'Agent 正在运行') : '发送'}
             >
-              <ArrowUp size={17} />
+              {loading ? <X size={17} /> : <ArrowUp size={17} />}
             </button>
           </div>
         </div>
@@ -16694,6 +16717,17 @@ function formatAgentMetricDuration(value: number) {
 }
 
 const LOCAL_CLI_BROWSER_KEY = 'giverny-local-cli-browser-device'
+const LOCAL_CLI_RUNTIME_VERSION = '0.2.0'
+
+function localCliRuntimeReady(version: string) {
+  const current = String(version || '').split('.').map((item) => Number(item.replace(/\D.*$/, '')) || 0)
+  const required = LOCAL_CLI_RUNTIME_VERSION.split('.').map(Number)
+  for (let index = 0; index < Math.max(current.length, required.length); index += 1) {
+    if ((current[index] || 0) > (required[index] || 0)) return true
+    if ((current[index] || 0) < (required[index] || 0)) return false
+  }
+  return true
+}
 
 function localCliBrowserDeviceKey() {
   try {
@@ -16879,10 +16913,15 @@ function LocalCliConnectionPanel() {
               </div>
               <em className={device.online ? 'online' : ''}>{device.online ? 'Bridge 已在线' : 'Bridge 已离线'}</em>
             </header>
+            {device.online && !localCliRuntimeReady(device.bridgeVersion) && (
+              <p className="settings-inline-error local-cli-error">连接器版本过旧。请重新下载并启动 Bridge {LOCAL_CLI_RUNTIME_VERSION}，否则工作助手会继续回退云端。</p>
+            )}
             <div className="local-cli-list">
               {device.clis.map((cli) => {
-                const connected = device.online && cli.selected
-                const selectable = device.online && cli.status === 'available'
+                const runtimeReady = localCliRuntimeReady(device.bridgeVersion)
+                const connected = device.online && runtimeReady && cli.selected
+                const selectedNeedsUpdate = device.online && cli.selected && !runtimeReady
+                const selectable = device.online && runtimeReady && cli.status === 'available'
                 return (
                   <div className={`local-cli-row ${connected ? 'connected' : ''}`} key={cli.id}>
                     <div className="local-cli-row-icon"><Bot size={18} /></div>
@@ -16896,14 +16935,14 @@ function LocalCliConnectionPanel() {
                       {cli.supportsMcp && <span>MCP</span>}
                     </div>
                     <div className="local-cli-row-status">
-                      <em className={`status-${cli.status}`}>{connected ? '已连接' : statusLabel(cli.status)}</em>
+                      <em className={`status-${cli.status}`}>{connected ? '已连接并用于工作助手' : selectedNeedsUpdate ? '需更新 Bridge' : statusLabel(cli.status)}</em>
                       <button
                         type="button"
                         className={connected ? 'ghost-button compact-button' : 'primary-button compact-button'}
-                        disabled={!selectable || connected || busy.startsWith('select:')}
+                        disabled={!selectable || connected || selectedNeedsUpdate || busy.startsWith('select:')}
                         onClick={() => void selectCli(device, cli.id)}
                       >
-                        {connected ? <><CheckCircle2 size={14} /> 已连接</> : '连接'}
+                        {connected ? <><CheckCircle2 size={14} /> 已连接</> : selectedNeedsUpdate ? '需更新' : '连接'}
                       </button>
                     </div>
                   </div>
@@ -16912,7 +16951,7 @@ function LocalCliConnectionPanel() {
             </div>
           </article>
         ))}
-        <p className="settings-tool-note local-cli-note">当前版本完成设备配对、CLI 扫描、可用性测试和连接选择。工作助手对话转发将在下一阶段启用；在此之前，云端 Agent 仍是实际回答路径。</p>
+        <p className="settings-tool-note local-cli-note">连接后，工作助手的普通问答、站内只读查询和本机文件任务会优先使用当前电脑的 CLI；创建、修改、记录进展和验收等站内写入仍交给云端 Agent 生成确认草稿。本机离线、超时或执行失败时会自动回退云端。</p>
       </section>
     </div>
   )

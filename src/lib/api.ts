@@ -105,8 +105,8 @@ export type LocalCliDevice = {
 export type LocalCliCommand = {
   id: string
   deviceId: string
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'expired'
-  result: { clis?: LocalCliAdapter[] } | null
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'expired' | 'cancelled'
+  result: { clis?: LocalCliAdapter[]; trace?: string[]; content?: string; sessionId?: string; workspace?: string } | null
   error: string
   createdAt: string
   completedAt: string
@@ -1017,6 +1017,8 @@ export const api = {
     requestJson<{ commandId: string; status: string }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}/scan`, { method: 'POST' }),
   getLocalCliCommand: (commandId: string) =>
     requestJson<LocalCliCommand>(`/api/local-cli/commands/${encodeURIComponent(commandId)}`),
+  cancelLocalCliCommand: (commandId: string) =>
+    requestJson<{ ok: boolean; status: string }>(`/api/local-cli/commands/${encodeURIComponent(commandId)}/cancel`, { method: 'POST' }),
   selectLocalCliAdapter: (deviceId: string, cliId: string) =>
     requestJson<{ device: LocalCliDevice }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}/select`, {
       method: 'POST',

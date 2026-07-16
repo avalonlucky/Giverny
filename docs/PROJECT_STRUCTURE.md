@@ -152,7 +152,7 @@
 - Agent Runtime is Cloudflare-native only: `AliceAgent` Durable Object + Workflow + D1/R2 tools. The legacy Python Container fallback has been retired.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 - Local CLI devices are paired to the authenticated `principal_id` and the current browser device key. `giverny-bridge.mjs` only makes outbound requests, while D1 stores pairings, devices, detected adapters and short-lived command records.
-- Local CLI discovery/test/selection is available in settings. Chat execution still uses cloud `AliceAgent`; local CLI run/stream/cancel routing is a separate next phase.
+- Local CLI discovery/test/selection and `run / stream / cancel` routing are available. Normal chat and read-only business queries prefer the selected CLI on the current browser's paired computer; confirmed site writes, vision requests and unavailable local runtimes use cloud `AliceAgent`.
 
 ## Auth Notes
 
