@@ -98,6 +98,7 @@ import {
   type BackendState,
   type DailyKnowledgeSuggestion,
   type HourEstimateSuggestion,
+  type HourEstimateMetrics,
   type ReportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
@@ -13992,6 +13993,31 @@ function AnalysisList({ title, items, emptyText }: { title: string; items: strin
   )
 }
 
+function HourCalibrationTable({ title, rows }: { title: string; rows: HourEstimateMetrics['byType'] }) {
+  return (
+    <section className="hour-calibration-table">
+      <h4>{title}</h4>
+      {rows.length === 0 ? (
+        <p>暂无可校准样本</p>
+      ) : (
+        <div className="hour-calibration-rows">
+          <div className="hour-calibration-row header" aria-hidden="true">
+            <span>对象</span><span>样本</span><span>命中</span><span>系数</span>
+          </div>
+          {rows.slice(0, 8).map((row) => (
+            <div className="hour-calibration-row" key={row.name}>
+              <span title={row.name}>{row.name}</span>
+              <span>{row.samples}</span>
+              <span>{row.within20Rate}%</span>
+              <strong className={row.samples >= 3 ? '' : 'muted'}>{row.samples >= 3 ? row.calibrationRatio.toFixed(2) : '待积累'}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function InsightsView({
   tasks,
   updates,
@@ -14012,9 +14038,33 @@ function InsightsView({
   const [period, setPeriod] = useState<InsightPeriod>('month')
   const [insightHistory, setInsightHistory] = useState<InsightHistoryItem[]>([])
   const [historyError, setHistoryError] = useState('')
+  const [hourMetrics, setHourMetrics] = useState<HourEstimateMetrics | null>(null)
+  const [hourMetricsFailure, setHourMetricsFailure] = useState<{ month: string; message: string } | null>(null)
   const [activeInsightKey, setActiveInsightKey] = useState<string>('rv:month')
   const range = useMemo(() => insightPeriodRange(period, currentMonth.value), [currentMonth.value, period])
   const rangeLabel = formatInsightRange(range)
+  const hourMetricsError = hourMetricsFailure?.month === currentMonth.value ? hourMetricsFailure.message : ''
+  const hourMetricsLoading = !hourMetricsError && hourMetrics?.month !== currentMonth.value
+
+  useEffect(() => {
+    let active = true
+    api.getHourEstimateMetrics(currentMonth.value)
+      .then((result) => {
+        if (active) {
+          setHourMetrics(result)
+          setHourMetricsFailure(null)
+        }
+      })
+      .catch((error) => {
+        if (active) setHourMetricsFailure({
+          month: currentMonth.value,
+          message: error instanceof Error ? error.message : 'AI 工时学习数据读取失败',
+        })
+      })
+    return () => {
+      active = false
+    }
+  }, [currentMonth.value])
 
   const periodTasks = useMemo(
     () =>
@@ -14450,6 +14500,18 @@ function InsightsView({
           </div>
           <div className="insight-tree-group">
             <button type="button" className="insight-tree-head">
+              <span>AI 工时学习</span>
+            </button>
+            <button
+              type="button"
+              className={`insight-tree-item ${selectedInsightKind === 'he' ? 'active' : ''}`}
+              onClick={() => setActiveInsightKey(`he:${currentMonth.value}`)}
+            >
+              <span>准确率与校准</span>
+            </button>
+          </div>
+          <div className="insight-tree-group">
+            <button type="button" className="insight-tree-head">
               <span>项目诊断 · {currentMonth.label}</span>
             </button>
             {projectDiagnosisRows.map((item, index) => (
@@ -14587,6 +14649,80 @@ function InsightsView({
                 已完成 {completedAnalyses.length} 个交付件内容分析；{visualReadyCount} 个附件可预览；{lockedReports} 期结算已锁定；追踪中的历史洞察 {insightHistory.filter((item) => item.status === 'open' || item.status === 'improved').length} 条。
                 {historyError ? ` ${historyError}` : ''}
               </div>
+            </>
+          )}
+
+          {selectedInsightKind === 'he' && (
+            <>
+              <div className="sec-head">
+                <h2>AI 工时准确率与学习复盘</h2>
+                <p>{currentMonth.label} · 只统计已验收任务，对比 AI 建议、最终采用值与真实工时</p>
+              </div>
+              {hourMetricsLoading && <p className="hour-learning-empty">AI 正在整理工时复盘…</p>}
+              {!hourMetricsLoading && hourMetricsError && <p className="hour-learning-empty error-text">{hourMetricsError}</p>}
+              {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount === 0 && (
+                <p className="hour-learning-empty">当月还没有“使用过 AI 工时建议且已验收”的任务。完成验收后，这里会自动生成偏差和校准结果。</p>
+              )}
+              {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount > 0 && (
+                <article className="hour-learning-report">
+                  <dl className="hour-learning-metrics">
+                    <div><dt>已复盘预测</dt><dd>{hourMetrics.summary.observedCount}</dd><small>已验收任务</small></div>
+                    <div><dt>误差≤20%</dt><dd>{hourMetrics.summary.within20Rate}%</dd><small>历史命中率</small></div>
+                    <div><dt>中位误差</dt><dd>{hourMetrics.summary.medianErrorRate}%</dd><small>避免被极端值带偏</small></div>
+                    <div><dt>采用后改善</dt><dd>{hourMetrics.summary.selectionImprovement >= 0 ? '+' : ''}{hourMetrics.summary.selectionImprovement}%</dd><small>相对 AI 原建议</small></div>
+                  </dl>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>建议采用效果</h3>
+                      <p>比较常规值、稳妥值与手工修改后的最终准确度</p>
+                    </div>
+                    <div className="hour-adoption-grid">
+                      {hourMetrics.adoption.performance.map((item) => {
+                        const label = item.mode === 'suggested' ? '常规值' : item.mode === 'safe' ? '稳妥值' : '手工修改'
+                        return <div key={item.mode}><span>{label}</span><strong>{item.count} 次</strong><small>中位误差 {item.count ? `${item.medianErrorRate}%` : '—'}</small></div>
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>类型与需求方校准</h3>
+                      <p>样本达到 3 条后才建议应用独立系数；系数高于 1 表示历史实际投入更高</p>
+                    </div>
+                    <div className="hour-calibration-grid">
+                      <HourCalibrationTable title="按设计类型" rows={hourMetrics.byType} />
+                      <HourCalibrationTable title="按需求方 / 客户" rows={hourMetrics.byRequester} />
+                    </div>
+                  </section>
+
+                  <section className="hour-learning-section">
+                    <div className="hour-learning-head">
+                      <h3>逐任务自动复盘</h3>
+                      <p>验收时自动生成，偏差原因会进入后续同类任务的参考与校准</p>
+                    </div>
+                    <div className="hour-review-list">
+                      {hourMetrics.recent.map((item) => (
+                        <div className="hour-review-row" key={`${item.taskId}-${item.reviewedAt}`}>
+                          <div className="hour-review-main">
+                            <strong>{item.title}</strong>
+                            <span>{item.designType || '未分类'} · {item.requester || '未填需求方'}</span>
+                          </div>
+                          <div className="hour-review-values">
+                            <span>建议 {item.suggestedHours.toFixed(1)}h</span>
+                            <span>采用 {item.selectedHours.toFixed(1)}h</span>
+                            <strong>实际 {item.actualHours.toFixed(1)}h</strong>
+                          </div>
+                          <div className={`hour-review-state ${item.direction}`}>
+                            <strong>{item.direction === 'accurate' ? '命中' : item.direction === 'under' ? '偏低' : '偏高'} {item.errorRate}%</strong>
+                            <span>{item.factors.length ? item.factors.join('、') : '暂无明确偏差因素'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </article>
+              )}
             </>
           )}
 

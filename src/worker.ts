@@ -6882,22 +6882,30 @@ async function hourEstimateRequesterAdjustment(
   }
   const parentType = selectedType.split('/')[0]?.trim()
   const rows = await env.DB.prepare(
-    `SELECT estimated_hours, actual_hours, requirement, time_entries_json, design_type
+    `SELECT tasks.estimated_hours, tasks.actual_hours, tasks.requirement, tasks.time_entries_json, tasks.design_type,
+            COALESCE(
+              (SELECT COALESCE(hour_estimate_suggestions.selected_hours, hour_estimate_suggestions.suggested_hours)
+               FROM hour_estimate_suggestions
+               WHERE hour_estimate_suggestions.task_id = CAST(tasks.id AS TEXT)
+                 AND hour_estimate_suggestions.status = 'observed'
+               ORDER BY hour_estimate_suggestions.updated_at DESC LIMIT 1),
+              tasks.estimated_hours
+            ) AS prediction_hours
      FROM tasks
-     WHERE deleted_at IS NULL AND voided_at IS NULL
-       AND status = '已验收' AND actual_hours > 0 AND estimated_hours > 0
-       AND requester = ?
+     WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+       AND tasks.status = '已验收' AND tasks.actual_hours > 0 AND tasks.estimated_hours > 0
+       AND tasks.requester = ?
      ORDER BY
-       CASE WHEN design_type = ? THEN 0 WHEN design_type LIKE ? THEN 1 ELSE 2 END,
-       actual_delivery_date DESC, updated_at DESC
+       CASE WHEN tasks.design_type = ? THEN 0 WHEN tasks.design_type LIKE ? THEN 1 ELSE 2 END,
+       tasks.actual_delivery_date DESC, tasks.updated_at DESC
      LIMIT 24`,
-  ).bind(requester, selectedType, `${parentType}%`).all<Pick<DbTask, 'estimated_hours' | 'actual_hours' | 'requirement' | 'time_entries_json' | 'design_type'>>()
+  ).bind(requester, selectedType, `${parentType}%`).all<Pick<DbTask, 'estimated_hours' | 'actual_hours' | 'requirement' | 'time_entries_json' | 'design_type'> & { prediction_hours: number }>()
   const samples = rows.results ?? []
   if (samples.length === 0) {
     return empty
   }
   const ratios = samples
-    .map((row) => Number(row.actual_hours) / Number(row.estimated_hours))
+    .map((row) => Number(row.actual_hours) / Number(row.prediction_hours))
     .filter((ratio) => Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4)
   const revisionRounds = samples.map((row) => parseTimeEntries(row.time_entries_json).filter((entry) => entry.isRevision).length)
   const completeRequirementCount = samples.filter((row) => {
@@ -7248,6 +7256,223 @@ async function updateHourEstimateObservation(env: Env, taskId: string, actualHou
      SET actual_hours = ?, status = CASE WHEN ? THEN 'observed' ELSE status END, updated_at = CURRENT_TIMESTAMP
      WHERE task_id = ?`,
   ).bind(actualHours, accepted ? 1 : 0, taskId).run()
+  if (accepted) {
+    await recordHourEstimateOutcome(env, taskId, actualHours)
+  }
+}
+
+function hourEstimateOutcomeFactors(task: DbTask, baselineHours: number, actualHours: number) {
+  const profile = hourEstimateComplexityProfile({
+    title: task.title,
+    requirement: task.requirement ?? '',
+  })
+  const revisionRounds = parseTimeEntries(task.time_entries_json).filter((entry) => entry.isRevision).length
+  const waitingHours = waitingHoursForTask(task)
+  const factors = [
+    revisionRounds > 0 ? `改稿 ${revisionRounds} 轮` : '',
+    waitingHours >= 0.5 ? `等待 ${waitingHours}h` : '',
+    profile.signals.contentReadiness === 'missing' ? '内容或素材需补充' : '',
+    profile.signals.adaptationCount >= 2 ? `适配 ${profile.signals.adaptationCount} 个版本` : '',
+    profile.signals.specialties.length > 0 ? profile.signals.specialties.join('、') : '',
+    profile.signals.urgent ? '加急交付' : '',
+    ...parseFeedbackTags(task.feedback_tags_json),
+    baselineHours > 0 && actualHours > baselineHours * 1.2 ? '实际投入高于采用值' : '',
+    baselineHours > 0 && actualHours < baselineHours * 0.8 ? '实际投入低于采用值' : '',
+  ].filter(Boolean)
+  return Array.from(new Set(factors)).slice(0, 6)
+}
+
+async function recordHourEstimateOutcome(env: Env, taskId: string, actualHours: number) {
+  const suggestion = await env.DB.prepare(
+    `SELECT id, suggested_hours, safe_hours, selected_hours, design_type, requester
+     FROM hour_estimate_suggestions
+     WHERE task_id = ? ORDER BY requested_at DESC LIMIT 1`,
+  ).bind(taskId).first<{
+    id: string
+    suggested_hours: number
+    safe_hours: number
+    selected_hours: number | null
+    design_type: string | null
+    requester: string | null
+  }>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(taskId).first<DbTask>()
+  if (!suggestion || !task || actualHours <= 0) {
+    return
+  }
+  const suggestedHours = Number(suggestion.suggested_hours) || 0
+  const safeHours = Number(suggestion.safe_hours) || suggestedHours
+  const selectedHours = Number(suggestion.selected_hours) || suggestedHours
+  const errorRate = selectedHours > 0 ? Math.abs(selectedHours - actualHours) / actualHours : 0
+  const direction = errorRate <= 0.2 ? 'accurate' : selectedHours < actualHours ? 'under' : 'over'
+  const adoptionMode = Math.abs(selectedHours - suggestedHours) < 0.01
+    ? 'suggested'
+    : Math.abs(selectedHours - safeHours) < 0.01
+      ? 'safe'
+      : 'edited'
+  const factors = hourEstimateOutcomeFactors(task, selectedHours, actualHours)
+  const metadata = {
+    suggestionId: suggestion.id,
+    suggestedHours,
+    safeHours,
+    selectedHours,
+    actualHours,
+    errorRate: Math.round(errorRate * 1000) / 1000,
+    direction,
+    adoptionMode,
+    requester: suggestion.requester ?? task.requester ?? '',
+    factors,
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_outcome' AND task_id = ?").bind(Number(taskId)),
+    env.DB.prepare(
+      `INSERT INTO ai_learning_events (
+         context, action, source_input, ai_output, user_final, design_type,
+         task_id, task_title, metadata_json, created_at
+       ) VALUES ('hour_estimate_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      direction,
+      task.requirement ?? '',
+      String(selectedHours),
+      String(actualHours),
+      suggestion.design_type ?? task.design_type ?? '',
+      Number(taskId),
+      task.title,
+      JSON.stringify(metadata),
+      Date.now(),
+    ),
+  ])
+}
+
+type HourEstimateMetricRow = {
+  suggestion_id: string
+  task_id: string
+  title: string
+  design_type: string
+  requester: string
+  suggested_hours: number
+  safe_hours: number
+  selected_hours: number | null
+  actual_hours: number
+  start_date: string | null
+  settlement_month: string
+  time_entries_json: string | null
+  waiting_entries_json: string | null
+  requirement: string | null
+  feedback_tags_json: string | null
+  updated_at: string
+}
+
+function hourEstimateMetricError(predicted: number, actual: number) {
+  return actual > 0 ? Math.abs(predicted - actual) / actual : 0
+}
+
+function summarizeHourEstimateMetricGroup(rows: HourEstimateMetricRow[], key: 'design_type' | 'requester') {
+  const groups = new Map<string, HourEstimateMetricRow[]>()
+  rows.forEach((row) => {
+    const name = String(row[key] || '').trim() || '未填写'
+    groups.set(name, [...(groups.get(name) ?? []), row])
+  })
+  return [...groups.entries()].map(([name, items]) => {
+    const errors = items.map((row) => hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
+    const ratios = items.map((row) => Number(row.actual_hours) / (Number(row.selected_hours) || Number(row.suggested_hours))).filter(Number.isFinite)
+    const revisions = items.map((row) => parseTimeEntries(row.time_entries_json).filter((entry) => entry.isRevision).length)
+    const completeRequirements = items.filter((row) => {
+      const profile = hourEstimateComplexityProfile({ title: row.title, requirement: row.requirement ?? '' })
+      return profile.signals.basis !== 'unknown'
+        && (profile.signals.deliverableCount > 0 || profile.signals.pageCount > 0)
+        && profile.signals.contentReadiness !== 'unknown'
+    }).length
+    return {
+      name,
+      samples: items.length,
+      within20Rate: Math.round((errors.filter((value) => value <= 0.2).length / items.length) * 100),
+      medianErrorRate: Math.round(medianValue(errors) * 100),
+      calibrationRatio: Math.round(clampNumber(medianValue(ratios), 0.7, 1.5) * 100) / 100,
+      averageRevisionRounds: Math.round(average(revisions) * 10) / 10,
+      completeRequirementRate: Math.round((completeRequirements / items.length) * 100),
+    }
+  }).sort((left, right) => right.samples - left.samples || left.medianErrorRate - right.medianErrorRate)
+}
+
+async function getHourEstimateMetrics(env: Env, request: Request) {
+  const month = new URL(request.url).searchParams.get('month')?.trim() ?? ''
+  const rows = await env.DB.prepare(
+    `SELECT hs.id AS suggestion_id, hs.task_id, t.title, t.design_type, t.requester,
+            hs.suggested_hours, hs.safe_hours, hs.selected_hours, hs.actual_hours,
+            t.start_date, t.settlement_month, t.time_entries_json, t.waiting_entries_json,
+            t.requirement, t.feedback_tags_json, hs.updated_at
+     FROM hour_estimate_suggestions hs
+     JOIN tasks t ON CAST(t.id AS TEXT) = hs.task_id
+     WHERE hs.status = 'observed' AND hs.actual_hours > 0
+       AND t.deleted_at IS NULL AND t.voided_at IS NULL
+       AND (? = '' OR t.settlement_month = ?)
+     ORDER BY hs.updated_at DESC LIMIT 300`,
+  ).bind(month, month).all<HourEstimateMetricRow>()
+  const items = rows.results ?? []
+  const errors = items.map((row) => hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
+  const suggestionErrors = items.map((row) => hourEstimateMetricError(Number(row.suggested_hours), Number(row.actual_hours)))
+  const modes = { suggested: 0, safe: 0, edited: 0 }
+  const modeErrors: Record<keyof typeof modes, number[]> = { suggested: [], safe: [], edited: [] }
+  const adoptionModeFor = (row: HourEstimateMetricRow): keyof typeof modes => {
+    const selectedHours = Number(row.selected_hours) || Number(row.suggested_hours)
+    if (Math.abs(selectedHours - Number(row.suggested_hours)) < 0.01) return 'suggested'
+    if (Math.abs(selectedHours - Number(row.safe_hours)) < 0.01) return 'safe'
+    return 'edited'
+  }
+  items.forEach((row) => {
+    const mode = adoptionModeFor(row)
+    modes[mode] += 1
+    modeErrors[mode].push(hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
+  })
+  const recent = items.slice(0, 20).map((row) => {
+    const selectedHours = Number(row.selected_hours) || Number(row.suggested_hours)
+    const suggestedHours = Number(row.suggested_hours)
+    const safeHours = Number(row.safe_hours)
+    const actualHours = Number(row.actual_hours)
+    const mode = adoptionModeFor(row)
+    const errorRate = hourEstimateMetricError(selectedHours, actualHours)
+    return {
+      taskId: Number(row.task_id),
+      title: row.title,
+      designType: row.design_type,
+      requester: row.requester,
+      suggestedHours,
+      safeHours,
+      selectedHours,
+      actualHours,
+      errorRate: Math.round(errorRate * 100),
+      direction: errorRate <= 0.2 ? 'accurate' : selectedHours < actualHours ? 'under' : 'over',
+      adoptionMode: mode,
+      factors: hourEstimateOutcomeFactors(row as unknown as DbTask, selectedHours, actualHours),
+      reviewedAt: row.updated_at,
+    }
+  })
+  const modePerformance = (Object.keys(modes) as Array<keyof typeof modes>).map((mode) => ({
+    mode,
+    count: modes[mode],
+    medianErrorRate: modeErrors[mode].length ? Math.round(medianValue(modeErrors[mode]) * 100) : 0,
+  }))
+  return ok({
+    month,
+    generatedAt: nowIso(),
+    summary: {
+      observedCount: items.length,
+      within20Rate: items.length ? Math.round((errors.filter((value) => value <= 0.2).length / items.length) * 100) : 0,
+      medianErrorRate: items.length ? Math.round(medianValue(errors) * 100) : 0,
+      averageErrorRate: items.length ? Math.round(average(errors) * 100) : 0,
+      selectionImprovement: items.length ? Math.round((medianValue(suggestionErrors) - medianValue(errors)) * 100) : 0,
+    },
+    adoption: {
+      total: items.length,
+      suggested: modes.suggested,
+      safe: modes.safe,
+      edited: modes.edited,
+      performance: modePerformance,
+    },
+    byType: summarizeHourEstimateMetricGroup(items, 'design_type').slice(0, 12),
+    byRequester: summarizeHourEstimateMetricGroup(items, 'requester').slice(0, 12),
+    recent,
+  })
 }
 
 async function getDesignTypeGroups(env: Env) {
@@ -11404,6 +11629,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path === '/api/ai/agent-metrics' ||
+      path === '/api/ai/hour-estimate/metrics' ||
       path.startsWith('/api/ai/conversations') ||
       path.startsWith('/api/ai/analysis-jobs') ||
       path === '/api/ai/chat' ||
@@ -11564,6 +11790,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/hour-estimate' && request.method === 'POST') {
     return suggestHourEstimateWithAi(env, request)
+  }
+  if (path === '/api/ai/hour-estimate/metrics' && request.method === 'GET') {
+    return getHourEstimateMetrics(env, request)
   }
   if (path === '/api/ai/progress-estimate' && request.method === 'POST') {
     return estimateTaskProgressWithAi(env, request)

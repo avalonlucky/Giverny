@@ -383,7 +383,72 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!result.matchedTasks?.some((task) => task.similarityReasons?.includes('近期已验收任务'))) {
     throw new Error('Recent historical sample was not identified')
   }
-  process.stdout.write('AI hour estimate recency, range, and learning adjustment checks passed.\n')
+
+  const createResponse = await fetch('http://127.0.0.1:8798/api/tasks', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      id: 0,
+      title: '工时自动复盘评测',
+      requirement: '复用现有剪辑工程，处理背景电流声，适配三个尺寸并完成一轮修改。',
+      type: '视频剪辑',
+      date: '2026-07-16T09:00',
+      estimatedDate: '2026-07-16T18:00',
+      settlementMonth: '2026-07',
+      estimatedHours: 5,
+      actualHours: 0,
+      requester: '陈义君',
+      contact: '陈义君',
+      reviewer: '黄媚',
+      stage: '计划中',
+      status: '计划中',
+      progress: 0,
+      billable: true,
+      files: [],
+      timeEntries: [],
+      waitingEntries: [],
+      hourEstimateSuggestionId: result.suggestionId,
+    }),
+  })
+  const created = await createResponse.json().catch(() => ({}))
+  if (!createResponse.ok || !created.id) {
+    throw new Error(`Hour estimate review task creation failed: ${JSON.stringify(created)}`)
+  }
+  const acceptResponse = await fetch(`http://127.0.0.1:8798/api/tasks/${created.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      status: '已验收',
+      stage: '已验收',
+      progress: 100,
+      actualDeliveryDate: '2026-07-16T15:00',
+      feedbackTags: ['沟通成本高'],
+      timeEntries: [{
+        id: 'hour-review-entry',
+        date: '2026-07-16',
+        start: '09:00',
+        end: '15:00',
+        note: '完成降噪、三个尺寸适配和一轮修改',
+        isRevision: true,
+        isAcceptanceProgress: true,
+      }],
+    }),
+  })
+  const accepted = await acceptResponse.json().catch(() => ({}))
+  if (!acceptResponse.ok || accepted.status !== '已验收') {
+    throw new Error(`Hour estimate review acceptance failed: ${JSON.stringify(accepted)}`)
+  }
+  const metricsResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/metrics?month=2026-07', {
+    headers: { cookie },
+  })
+  const metrics = await metricsResponse.json().catch(() => ({}))
+  if (!metricsResponse.ok || metrics.summary?.observedCount < 1 || !metrics.recent?.some((item) => item.taskId === created.id)) {
+    throw new Error(`Hour estimate metrics did not include accepted task: ${JSON.stringify(metrics)}`)
+  }
+  if (!metrics.byType?.some((item) => item.name === '视频剪辑') || !metrics.byRequester?.some((item) => item.name === '陈义君')) {
+    throw new Error(`Hour estimate calibration groups are missing: ${JSON.stringify(metrics)}`)
+  }
+  process.stdout.write('AI hour estimate recency, semantic retrieval, outcome review, metrics, and calibration checks passed.\n')
 }
 
 try {

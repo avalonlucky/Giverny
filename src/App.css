@@ -20466,7 +20466,252 @@ button.topbar-create-button kbd {
   line-height: 1.55;
 }
 
+.hour-learning-empty {
+  max-width: 760px;
+  margin: 28px 0 0;
+  padding: 22px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.hour-learning-report {
+  display: grid;
+  gap: 38px;
+}
+
+.hour-learning-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hour-learning-metrics div {
+  min-width: 0;
+  padding: 18px 18px 18px 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.hour-learning-metrics div:last-child {
+  border-right: 0;
+}
+
+.hour-learning-metrics dt,
+.hour-learning-metrics small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.hour-learning-metrics dd {
+  margin: 7px 0 4px;
+  color: var(--color-text);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.hour-learning-section {
+  display: grid;
+  gap: 16px;
+}
+
+.hour-learning-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 10px;
+}
+
+.hour-learning-head h3,
+.hour-calibration-table h4 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.hour-learning-head p,
+.hour-calibration-table > p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hour-adoption-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hour-adoption-grid div {
+  display: grid;
+  gap: 5px;
+  padding: 14px 18px 14px 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.hour-adoption-grid div:last-child {
+  border-right: 0;
+}
+
+.hour-adoption-grid span,
+.hour-adoption-grid small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.hour-adoption-grid strong {
+  color: var(--color-text);
+  font-size: 19px;
+}
+
+.hour-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 48px;
+}
+
+.hour-calibration-table {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.hour-calibration-rows {
+  border-top: 1px solid var(--color-border);
+}
+
+.hour-calibration-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 60px 62px;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.hour-calibration-row > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hour-calibration-row.header {
+  min-height: 30px;
+  color: var(--color-text-muted);
+}
+
+.hour-calibration-row.header > :first-child {
+  color: var(--color-text-muted);
+}
+
+.hour-calibration-row strong {
+  color: var(--color-primary);
+}
+
+.hour-calibration-row strong.muted {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.hour-review-list {
+  display: grid;
+}
+
+.hour-review-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 0.8fr) minmax(220px, 1fr);
+  gap: 24px;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hour-review-main,
+.hour-review-state {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.hour-review-main strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hour-review-main span,
+.hour-review-values span,
+.hour-review-state span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hour-review-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+
+.hour-review-values strong,
+.hour-review-state strong {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.hour-review-state.under strong,
+.hour-review-state.over strong {
+  color: var(--color-warning);
+}
+
+.hour-review-state.accurate strong {
+  color: var(--color-primary);
+}
+
 @media (max-width: 760px) {
+  .insight-reference-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+
+  .insight-tree {
+    display: flex;
+    gap: 24px;
+    padding-bottom: 10px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .insight-tree-group {
+    flex: 0 0 min(190px, 56vw);
+    max-height: 150px;
+    padding: 0;
+    overflow-y: auto;
+  }
+
+  .insight-tree-group + .insight-tree-group {
+    padding-top: 0;
+  }
+
+  .insight-document {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: visible;
+  }
+
   .summary-report-moments,
   .summary-report-metrics,
   .summary-report-grid,
@@ -20483,6 +20728,28 @@ button.topbar-create-button kbd {
   .summary-report-moments div:last-child,
   .summary-report-metrics div:last-child {
     border-bottom: 0;
+  }
+
+  .hour-learning-metrics,
+  .hour-adoption-grid,
+  .hour-calibration-grid,
+  .hour-review-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hour-learning-metrics div,
+  .hour-adoption-grid div {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .hour-learning-head {
+    display: grid;
+    gap: 6px;
+  }
+
+  .hour-review-row {
+    gap: 8px;
   }
 }
 

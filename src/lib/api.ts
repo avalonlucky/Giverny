@@ -56,6 +56,56 @@ export type AgentRunMetrics = {
   recentFailures: Array<{ createdAt: string; intent: string; status: number; durationMs: number }>
 }
 
+export type HourEstimateMetrics = {
+  month: string
+  generatedAt: string
+  summary: {
+    observedCount: number
+    within20Rate: number
+    medianErrorRate: number
+    averageErrorRate: number
+    selectionImprovement: number
+  }
+  adoption: {
+    total: number
+    suggested: number
+    safe: number
+    edited: number
+    performance: Array<{
+      mode: 'suggested' | 'safe' | 'edited'
+      count: number
+      medianErrorRate: number
+    }>
+  }
+  byType: HourEstimateCalibrationGroup[]
+  byRequester: HourEstimateCalibrationGroup[]
+  recent: Array<{
+    taskId: number
+    title: string
+    designType: string
+    requester: string
+    suggestedHours: number
+    safeHours: number
+    selectedHours: number
+    actualHours: number
+    errorRate: number
+    direction: 'accurate' | 'under' | 'over'
+    adoptionMode: 'suggested' | 'safe' | 'edited'
+    factors: string[]
+    reviewedAt: string
+  }>
+}
+
+export type HourEstimateCalibrationGroup = {
+  name: string
+  samples: number
+  within20Rate: number
+  medianErrorRate: number
+  calibrationRatio: number
+  averageRevisionRounds: number
+  completeRequirementRate: number
+}
+
 export type AccessToken = {
   id: string
   token: string
@@ -635,6 +685,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getInsightHistory: () => requestJson<InsightHistoryItem[]>('/api/insights/history'),
+  getHourEstimateMetrics: (month = '') =>
+    requestJson<HourEstimateMetrics>(`/api/ai/hour-estimate/metrics?month=${encodeURIComponent(month)}`),
   setHourlyRate: (hourlyRate: number) =>
     requestJson<{ hourlyRate: number }>('/api/settings/hourly-rate', {
       method: 'PATCH',
