@@ -1609,6 +1609,55 @@ ${JSON.stringify(payload)}`
   return null
 }
 
+async function callSelectedModelJson<T extends object>(
+  env: Env,
+  choice: ChatModelChoice,
+  systemPrompt: string,
+  payload: unknown,
+  outputShape: string,
+  maxOutputTokens = 1200,
+): Promise<T | null> {
+  if (choice === 'auto') {
+    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens)
+  }
+  const prompt = `${systemPrompt}
+
+请只返回一个 JSON 对象，不要解释，不要使用 Markdown 代码块。
+JSON 字段要求：${outputShape}
+
+输入数据：
+${JSON.stringify(payload)}`
+  const target = await resolveChatModelTarget(env, choice)
+  try {
+    if (target.kind === 'workers-ai') {
+      const output = await callWithAiTimeout(
+        () => callWorkersAiText(env, prompt, maxOutputTokens),
+        30_000,
+        `${target.label} 规划响应超时`,
+      )
+      const parsed = parseLooseJsonObject(output)
+      if (Object.keys(parsed).length > 0) return parsed as T
+      throw new Error('模型未返回可解析 JSON')
+    }
+    if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
+    const output = await callWithAiTimeout(
+      (signal) => callAiEndpointText(target.endpoint, prompt, maxOutputTokens, signal),
+      30_000,
+      `${target.label} 规划响应超时`,
+    )
+    const parsed = parseLooseJsonObject(output)
+    if (Object.keys(parsed).length > 0) return parsed as T
+    throw new Error('模型未返回可解析 JSON')
+  } catch (error) {
+    console.warn(JSON.stringify({
+      event: 'selected_chat_planner_fallback',
+      model: target.label,
+      error: describeAiCallError(error),
+    }))
+    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens)
+  }
+}
+
 type VisionFallbackOptions = {
   structuredJson?: boolean
   maxOutputTokens?: number
@@ -1831,6 +1880,7 @@ type ChatAgentToolResult = {
 
 async function planChatAgentTurn(
   env: Env,
+  modelChoice: ChatModelChoice,
   payload: {
     question: string
     currentMonth: string
@@ -1853,8 +1903,9 @@ async function planChatAgentTurn(
 - 用户问任务概览、最近做了什么、效率如何，可调用 query_recent_tasks。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
 - 只输出 JSON，不要回答正文。`
-  return callTextFallbackJson<ChatAgentPlanResponse>(
+  return callSelectedModelJson<ChatAgentPlanResponse>(
     env,
+    modelChoice,
     systemPrompt,
     payload,
     'intent:"finance"|"worklog"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"query_recent_tasks"|"none", args:object, reason:string}>, confidence:number, question?:string',
@@ -12591,7 +12642,7 @@ async function chatWithAi(env: Env, request: Request) {
     : ''
 
   if (imageAttachments.length === 0 && textAttachments.length === 0) {
-    const plan = await planChatAgentTurn(env, {
+    const plan = await planChatAgentTurn(env, modelChoice, {
       question: lastMsg,
       currentMonth: month,
       today,

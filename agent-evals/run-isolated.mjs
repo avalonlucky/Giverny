@@ -463,6 +463,24 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Explicit cloud model selection still entered the local CLI route: ${explicitModelText}`)
   }
 
+  const modelRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const doubaoPriorityResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'doubao-seed-2-1-pro',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请查询 2026 年 6 月的收入和计费工时' }],
+    }),
+  })
+  const doubaoPriorityText = await doubaoPriorityResponse.text()
+  const modelRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const newModelRequests = (modelRequestsAfter.requests || []).slice((modelRequestsBefore.requests || []).length)
+  if (!doubaoPriorityResponse.ok || newModelRequests[0]?.model !== 'doubao-seed-eval' || !doubaoPriorityText.includes('豆包 Seed 2.1 Pro')) {
+    throw new Error(`Explicit Doubao did not own the full chat turn before fallback: ${JSON.stringify({ newModelRequests, doubaoPriorityText })}`)
+  }
+
   const trendResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },

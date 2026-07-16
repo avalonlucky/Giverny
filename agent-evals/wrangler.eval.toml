@@ -10,6 +10,9 @@ LOCAL_DEV = "1"
 AGENT_TOOL_TOKEN = "eval-agent-tool-token"
 DEEPSEEK_API_KEY = "eval-model-key"
 DEEPSEEK_BASE_URL = "http://127.0.0.1:8898"
+DOUBAO_API_KEY = "eval-doubao-key"
+DOUBAO_BASE_URL = "http://127.0.0.1:8898"
+DOUBAO_MODEL = "doubao-seed-eval"
 GIVERNY_API_BASE_URL = "http://127.0.0.1:8798"
 
 [[durable_objects.bindings]]

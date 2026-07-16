@@ -1,6 +1,7 @@
 import http from 'node:http'
 
 const port = Number(process.env.MOCK_MODEL_PORT || 8898)
+const requestLog = []
 
 function completion(message, finishReason = 'stop') {
   return {
@@ -180,6 +181,11 @@ function chooseTool(messages) {
 }
 
 const server = http.createServer((request, response) => {
+  if (request.method === 'GET' && request.url === '/test/requests') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ requests: requestLog }))
+    return
+  }
   if (request.method === 'GET' && request.url?.endsWith('/models')) {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({
@@ -196,6 +202,10 @@ const server = http.createServer((request, response) => {
   request.on('end', () => {
     try {
       const payload = JSON.parse(body || '{}')
+      requestLog.push({
+        model: String(payload.model || ''),
+        text: userText(Array.isArray(payload.messages) ? payload.messages : []).slice(0, 500),
+      })
       const result = chooseTool(Array.isArray(payload.messages) ? payload.messages : [])
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify(result))

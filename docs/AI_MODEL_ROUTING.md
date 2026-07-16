@@ -80,6 +80,8 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 
 ## 当前 AI 功能映射
 
+工作助手中的手动模型选择属于单轮最高优先级覆盖：规划工具与组织最终答案均先使用所选模型；调用失败后才进入文字主模型、文字备用模型和 Workers AI 的全站回退链路。「自动」模式才按照本机 CLI、站内 Agent 与模型设置自动分流。图片仍使用视觉模型链路，站内写入仍由 Worker 做权限校验和确认。
+
 | 功能 | BAML 函数 | 当前生产适配器 |
 |------|-----------|----------------|
 | 新建任务需求优化 | `SuggestTaskAssistant` | BAML Runtime 优先，失败回退 DeepSeek direct，再失败回退文字备用模型 |
