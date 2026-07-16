@@ -43,6 +43,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  Maximize2,
   Pencil,
   Plus,
   RotateCcw,
@@ -62,6 +63,8 @@ import {
   SlidersHorizontal,
   Heart,
   Star,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import {
   appReleaseDate,
@@ -3548,7 +3551,7 @@ function PendingAttachmentPreview({
       </header>
       <div className="file-preview-body">
         {isImage ? (
-          <img src={sourceUrl} alt={attachment.name} />
+          <ImagePreviewReader src={sourceUrl} alt={attachment.name} />
         ) : isPdf ? (
           <iframe className="file-preview-frame" src={sourceUrl} title={attachment.name} />
         ) : isVideo ? (
@@ -4136,6 +4139,8 @@ type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  trace?: string[]
+  traceStatus?: 'running' | 'completed' | 'failed'
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
@@ -4202,19 +4207,6 @@ function renderRichChatLine(line: string) {
     }
     return <Fragment key={index}>{part}</Fragment>
   })
-}
-
-function renderPlainChatLines(lines: string[]) {
-  return (
-    <>
-      {lines.map((line, index) => (
-        <Fragment key={`${index}-${line}`}>
-          {index > 0 && <br />}
-          {renderRichChatLine(line)}
-        </Fragment>
-      ))}
-    </>
-  )
 }
 
 function ChatMarkdown({ content }: { content: string }) {
@@ -4287,20 +4279,6 @@ function splitChatThinkingLines(lines: string[]) {
   }
 }
 
-function renderChatThinkingBlock(lines: string[]) {
-  if (lines.length === 0) return null
-  return (
-    <details className="chat-agent-timeline chat-agent-thoughts">
-      <summary>
-        <span>思考过程</span>
-        <small>{lines.length} 行</small>
-        <ChevronDown size={13} />
-      </summary>
-      <div className="chat-thought-body">{renderPlainChatLines(lines)}</div>
-    </details>
-  )
-}
-
 function renderChatContent(content: string) {
   const lines = content.split('\n')
   const liveTraceMatch = lines[0]?.match(/^我正在这样处理：(\d+)$/)
@@ -4311,7 +4289,7 @@ function renderChatContent(content: string) {
       .slice(1, dividerIndex > 0 ? dividerIndex : lines.length)
       .map((line) => line.replace(/^- /, '').trim())
       .filter(Boolean)
-    const { thinkingLines, answerLines } = splitChatThinkingLines(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
+    const { answerLines } = splitChatThinkingLines(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
     const liveTotalSteps = liveTraceMatch ? Number(liveTraceMatch[1]) : traceLines.length
     return (
       <>
@@ -4327,19 +4305,49 @@ function renderChatContent(content: string) {
             ))}
           </ol>
         </details>
-        {renderChatThinkingBlock(thinkingLines)}
         {answerLines.length > 0 && (
           <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>
         )}
       </>
     )
   }
-  const { thinkingLines, answerLines } = splitChatThinkingLines(lines)
+  const { answerLines } = splitChatThinkingLines(lines)
   return (
     <>
-      {renderChatThinkingBlock(thinkingLines)}
       {answerLines.length > 0 && <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>}
     </>
+  )
+}
+
+function AgentExecutionTimeline({
+  trace,
+  status,
+}: {
+  trace: string[]
+  status: 'running' | 'completed' | 'failed'
+}) {
+  if (trace.length === 0) return null
+  const running = status === 'running'
+  const displayTraceLine = (line: string) => line.replace(/\s*\[tool:[^\]]+\]\s*/g, ' ').trim()
+  return (
+    <details className={`chat-agent-timeline status-${status}`} open={running}>
+      <summary>
+        <span>{running ? '正在执行' : status === 'failed' ? '执行中断' : '执行记录'}</span>
+        <small>{running ? displayTraceLine(trace.at(-1) ?? '') : '已完成，可展开查看'}</small>
+        <ChevronDown size={13} />
+      </summary>
+      <ol>
+        {trace.map((line, index) => {
+          const active = running && index === trace.length - 1
+          const completed = !running || index < trace.length - 1
+          return (
+            <li key={`${index}-${line}`} className={`${active ? 'active' : ''} ${completed ? 'complete' : ''}`} aria-current={active ? 'step' : undefined}>
+              {renderRichChatLine(displayTraceLine(line))}
+            </li>
+          )
+        })}
+      </ol>
+    </details>
   )
 }
 
@@ -4350,54 +4358,6 @@ type ChatPanelProps = {
   onClose: () => void
   onOpenTask: (taskId: number) => void
   onNotify: (message: string, tone?: ToastTone) => void
-}
-
-function formatAgentTraceContent(content: string, trace?: string[]) {
-  if (!trace || trace.length === 0) {
-    return content
-  }
-  return [
-    '我按这个过程处理：',
-    ...trace.map((item) => `- ${item}`),
-    '',
-    content,
-  ].join('\n')
-}
-
-const AGENT_LIVE_TRACE_STEPS = [
-  '理解问题：识别你的目标、月份和要核对的工作口径。',
-  '判断路径：确认是否需要读取 Giverny 的任务、工时、收入或验收数据。',
-  '选择工具：准备调用任务搜索、语义召回或结构化统计工具。',
-  '读取数据：等待 Worker 与 Agent Runtime 返回可核对的任务结果。',
-  '核对口径：检查月份范围、未完成、逾期、状态和任务数量是否一致。',
-  '生成答复：整理结论、任务明细和下一步建议。',
-]
-
-function buildAgentLiveTraceSteps(text: string, hasAttachments: boolean, useWebSearch: boolean) {
-  const firstStep = hasAttachments
-    ? '理解问题：识别你的目标、附件内容和要核对的工作口径。'
-    : AGENT_LIVE_TRACE_STEPS[0]
-  const toolStep = useWebSearch
-    ? '选择工具：准备调用站内任务工具，必要时补充联网搜索。'
-    : AGENT_LIVE_TRACE_STEPS[2]
-  const answerStep = text.length > 0
-    ? AGENT_LIVE_TRACE_STEPS[5]
-    : '生成答复：整理附件分析结论和下一步建议。'
-  return [
-    firstStep,
-    AGENT_LIVE_TRACE_STEPS[1],
-    toolStep,
-    AGENT_LIVE_TRACE_STEPS[3],
-    AGENT_LIVE_TRACE_STEPS[4],
-    answerStep,
-  ]
-}
-
-function formatAgentLiveTraceContent(trace: string[], totalSteps: number) {
-  return [
-    `我正在这样处理：${totalSteps}`,
-    ...trace.map((item) => `- ${item}`),
-  ].join('\n')
 }
 
 const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
@@ -4683,38 +4643,6 @@ function agentAnalysisStatusLabel(status: AgentBackgroundTask['status']) {
   return '已排队'
 }
 
-function renderAgentAnalysisResult(result: string) {
-  const lines = result.split('\n')
-  const nodes: ReactNode[] = []
-  let bullets: string[] = []
-  const flushBullets = () => {
-    if (bullets.length === 0) return
-    nodes.push(
-      <ul key={`list-${nodes.length}`}>
-        {bullets.map((item, index) => <li key={`${index}-${item}`}>{renderRichChatLine(item)}</li>)}
-      </ul>,
-    )
-    bullets = []
-  }
-  lines.forEach((line) => {
-    const trimmed = line.trim()
-    const heading = trimmed.match(/^#{1,3}\s+(.+)$/)
-    const bullet = trimmed.match(/^[-*]\s+(.+)$/)
-    if (bullet) {
-      bullets.push(bullet[1])
-      return
-    }
-    flushBullets()
-    if (heading) {
-      nodes.push(<h4 key={`heading-${nodes.length}`}>{renderRichChatLine(heading[1])}</h4>)
-    } else if (trimmed) {
-      nodes.push(<p key={`paragraph-${nodes.length}`}>{renderRichChatLine(trimmed)}</p>)
-    }
-  })
-  flushBullets()
-  return nodes
-}
-
 function AgentAnalysisTaskCard({
   task,
   busy,
@@ -4750,7 +4678,11 @@ function AgentAnalysisTaskCard({
           return <li key={item.phase} className={`${completed ? 'complete' : ''} ${active ? 'active' : ''}`}>{item.label}</li>
         })}
       </ol>
-      {task.result && <div className="agent-analysis-result">{renderAgentAnalysisResult(task.result)}</div>}
+      {task.result && (
+        <div className="agent-analysis-result chat-final-answer">
+          <ChatMarkdown content={task.result} />
+        </div>
+      )}
       {task.error && <p className="agent-analysis-error">{task.error}</p>}
       {(task.status === 'queued' || task.status === 'running' || task.status === 'failed' || task.status === 'cancelled') && (
         <footer className="agent-analysis-actions">
@@ -5028,6 +4960,8 @@ function ChatPanel({
         id: message.id,
         role: message.role,
         content: message.content,
+        trace: message.trace,
+        traceStatus: message.trace?.length ? 'completed' : undefined,
         approval: message.approval,
         selection: message.selection,
         backgroundTask: message.backgroundTask,
@@ -5156,40 +5090,23 @@ function ChatPanel({
     if (overrideText === undefined) setInput('')
     const sentAttachments = [...attachments]
     setAttachments([])
-    const liveTraceSteps = buildAgentLiveTraceSteps(text, sentAttachments.length > 0, useWebSearch)
-    let liveTraceStepCount = 1
-    let liveTraceTimer: number | undefined
-    const stopLiveTrace = () => {
-      if (liveTraceTimer !== undefined) {
-        window.clearInterval(liveTraceTimer)
-        liveTraceTimer = undefined
-      }
-    }
-    const updateLiveTrace = (count: number) => {
-      setMessages((prev) => prev.map((m) => (
-        m.id === assistantId
-          ? { ...m, content: formatAgentLiveTraceContent(liveTraceSteps.slice(0, count), liveTraceSteps.length) }
-          : m
-      )))
-    }
 
     setMessages([...baseMessages, userMsg, {
       id: assistantId,
       role: 'assistant',
-      content: formatAgentLiveTraceContent(liveTraceSteps.slice(0, liveTraceStepCount), liveTraceSteps.length),
+      content: '',
+      trace: ['理解你的问题'],
+      traceStatus: 'running',
     }])
     setLoading(true)
     try {
-      const minimumVisibleDelay = new Promise((resolve) => setTimeout(resolve, 650))
-      liveTraceTimer = window.setInterval(() => {
-        liveTraceStepCount = Math.min(liveTraceStepCount + 1, liveTraceSteps.length)
-        updateLiveTrace(liveTraceStepCount)
-        if (liveTraceStepCount >= liveTraceSteps.length) stopLiveTrace()
-      }, 520)
       const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: authHeaders(),
+        headers: {
+          ...authHeaders(),
+          Accept: 'text/event-stream',
+        },
         body: JSON.stringify({
           messages: allMessages,
           month: currentMonthValue,
@@ -5200,29 +5117,28 @@ function ChatPanel({
           agentRuntimeConversationId: agentConversationId,
         }),
       })
-      await minimumVisibleDelay
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null
         throw new Error(err?.error ?? `请求失败：${res.status}`)
       }
-      const ct = res.headers.get('content-type') ?? ''
-      if (!ct.includes('text/event-stream')) {
-        const data = (await res.json()) as {
-          content?: string
-          trace?: string[]
-          agentRuntimeConversationId?: string
-          approval?: AgentApproval
-          selection?: AgentTaskSelection
-          backgroundTask?: AgentBackgroundTask
-          attachments?: AgentResultAttachment[]
-        }
+      type AgentChatResult = {
+        content?: string
+        trace?: string[]
+        agentRuntimeConversationId?: string
+        approval?: AgentApproval
+        selection?: AgentTaskSelection
+        backgroundTask?: AgentBackgroundTask
+        attachments?: AgentResultAttachment[]
+      }
+      const applyAgentResult = (data: AgentChatResult) => {
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
-        stopLiveTrace()
         setMessages((prev) => prev.map((m) => {
           if (m.id === assistantId) {
             return {
               ...m,
-              content: formatAgentTraceContent(data.content ?? '（无回复）', data.trace),
+              content: data.content ?? '（无回复）',
+              trace: data.trace?.length ? data.trace : m.trace,
+              traceStatus: 'completed',
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
               ...(data.selection ? { selection: data.selection } : {}),
               ...(data.backgroundTask ? { backgroundTask: data.backgroundTask } : {}),
@@ -5233,17 +5149,28 @@ function ChatPanel({
             return { ...m, approval: data.approval }
           }
           if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
-            return { ...m, approval: data.approval ?? { ...m.approval, status: 'failed', error: 'Agent 没有返回操作结果，请重新生成预览。' } }
+            return {
+              ...m,
+              approval: data.approval ?? {
+                ...m.approval,
+                status: 'failed',
+                error: 'Agent 没有返回操作结果，请重新生成预览。',
+              },
+            }
           }
           return m
         }))
+      }
+      const ct = res.headers.get('content-type') ?? ''
+      if (!ct.includes('text/event-stream')) {
+        applyAgentResult((await res.json()) as AgentChatResult)
         return
       }
-      stopLiveTrace()
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: '' } : m))
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buf = ''
+      let streamError = ''
+      let receivedResult = false
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -5256,23 +5183,54 @@ function ChatPanel({
           const payload = trimmed.slice(5).trim()
           if (payload === '[DONE]') break
           try {
-            const { t } = JSON.parse(payload) as { t?: string }
-            if (t) setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: m.content + t } : m))
+            const event = JSON.parse(payload) as AgentChatResult & {
+              type?: 'trace' | 'result' | 'error' | 'done'
+              status?: 'running' | 'completed'
+              error?: string
+              t?: string
+            }
+            if (event.type === 'trace' && event.trace?.length) {
+              setMessages((prev) => prev.map((m) => (
+                m.id === assistantId
+                  ? { ...m, trace: event.trace, traceStatus: 'running' }
+                  : m
+              )))
+            } else if (event.type === 'result') {
+              receivedResult = true
+              applyAgentResult(event)
+            } else if (event.type === 'error') {
+              streamError = event.error || 'Agent 请求失败'
+            } else if (event.t) {
+              setMessages((prev) => prev.map((m) => (
+                m.id === assistantId ? { ...m, content: m.content + event.t } : m
+              )))
+            }
           } catch { /* skip */ }
         }
       }
+      if (streamError) throw new Error(streamError)
+      if (!receivedResult) {
+        setMessages((prev) => prev.map((m) => (
+          m.id === assistantId ? { ...m, traceStatus: 'completed' } : m
+        )))
+      }
     } catch (e) {
-      stopLiveTrace()
       const msg = e instanceof Error ? e.message : '请求失败，请重试'
       setMessages((prev) => prev.map((m) => {
-        if (m.id === assistantId) return { ...m, content: `⚠️ ${msg}` }
+        if (m.id === assistantId) {
+          return {
+            ...m,
+            content: `⚠️ ${msg}`,
+            trace: [...(m.trace ?? []), '执行失败：请检查服务状态后重试'],
+            traceStatus: 'failed',
+          }
+        }
         if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
           return { ...m, approval: { ...m.approval, status: 'failed', error: msg } }
         }
         return m
       }))
     } finally {
-      stopLiveTrace()
       setLoading(false)
     }
   }
@@ -5331,6 +5289,9 @@ function ChatPanel({
           <>
             {messages.map((msg) => (
               <div key={msg.id} className={`chat-bubble ${msg.role}`}>
+                {msg.role === 'assistant' && msg.trace?.length ? (
+                  <AgentExecutionTimeline trace={msg.trace} status={msg.traceStatus ?? 'completed'} />
+                ) : null}
                 {msg.content ? renderChatContent(msg.content) : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
                 {msg.role === 'assistant' && msg.approval && (
                   <AgentApprovalCard
@@ -17393,7 +17354,7 @@ function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => v
         </header>
         <div className="file-preview-body">
           {(isImage || isRasterPreview) && previewUrl ? (
-            <img src={previewUrl} alt={file.name} loading="lazy" />
+            <ImagePreviewReader src={previewUrl} alt={file.name} />
           ) : isVideo && sourceUrl ? (
             <video className="file-preview-video" src={sourceUrl} controls preload="metadata" />
           ) : isPdfLike && sourceUrl ? (
@@ -17415,6 +17376,96 @@ function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => v
           )}
         </div>
     </ModalShell>
+  )
+}
+
+const IMAGE_PREVIEW_MIN_SCALE = 0.25
+const IMAGE_PREVIEW_MAX_SCALE = 3
+const IMAGE_PREVIEW_SCALE_STEP = 0.25
+
+function ImagePreviewReader({ src, alt }: { src: string; alt: string }) {
+  const [mode, setMode] = useState<'fit' | 'zoom'>('fit')
+  const [scale, setScale] = useState(1)
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 })
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+
+  const resetViewport = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const viewport = viewportRef.current
+      if (!viewport) return
+      viewport.scrollTo({ top: 0, left: 0 })
+    })
+  }, [])
+
+  const showFit = () => {
+    setMode('fit')
+    resetViewport()
+  }
+
+  const showActualSize = () => {
+    setMode('zoom')
+    setScale(1)
+    resetViewport()
+  }
+
+  const changeScale = (delta: number) => {
+    setMode('zoom')
+    setScale((current) => Math.min(IMAGE_PREVIEW_MAX_SCALE, Math.max(IMAGE_PREVIEW_MIN_SCALE, current + delta)))
+  }
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.metaKey && !event.ctrlKey) return
+    event.preventDefault()
+    changeScale(event.deltaY < 0 ? IMAGE_PREVIEW_SCALE_STEP : -IMAGE_PREVIEW_SCALE_STEP)
+  }
+
+  const imageStyle = mode === 'fit'
+    ? undefined
+    : {
+        width: naturalSize.width ? `${naturalSize.width * scale}px` : `${scale * 100}%`,
+        height: naturalSize.height ? `${naturalSize.height * scale}px` : 'auto',
+      }
+
+  return (
+    <div className="image-preview-reader">
+      <div className="image-preview-toolbar" aria-label="图片缩放工具">
+        <button type="button" className="icon-button" onClick={() => changeScale(-IMAGE_PREVIEW_SCALE_STEP)} disabled={mode === 'zoom' && scale <= IMAGE_PREVIEW_MIN_SCALE} aria-label="缩小" title="缩小">
+          <ZoomOut size={16} />
+        </button>
+        <button type="button" className="image-preview-scale" onClick={showActualSize} aria-label="按原始尺寸查看" title="按原始尺寸查看">
+          {mode === 'fit' ? '适合窗口' : `${Math.round(scale * 100)}%`}
+        </button>
+        <button type="button" className="icon-button" onClick={() => changeScale(IMAGE_PREVIEW_SCALE_STEP)} disabled={mode === 'zoom' && scale >= IMAGE_PREVIEW_MAX_SCALE} aria-label="放大" title="放大">
+          <ZoomIn size={16} />
+        </button>
+        <span className="image-preview-toolbar-divider" />
+        <button type="button" className={`ghost-button compact-button ${mode === 'fit' ? 'is-active' : ''}`} onClick={showFit}>
+          <Maximize2 size={14} />
+          适合窗口
+        </button>
+        <button type="button" className={`ghost-button compact-button ${mode === 'zoom' && scale === 1 ? 'is-active' : ''}`} onClick={showActualSize}>
+          1:1
+        </button>
+      </div>
+      <div
+        ref={viewportRef}
+        className={`image-preview-viewport mode-${mode}`}
+        onWheel={handleWheel}
+        title="按住 Command 或 Ctrl 滚动可缩放"
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          draggable={false}
+          style={imageStyle}
+          onLoad={(event) => setNaturalSize({
+            width: event.currentTarget.naturalWidth,
+            height: event.currentTarget.naturalHeight,
+          })}
+        />
+      </div>
+    </div>
   )
 }
 

@@ -3709,7 +3709,9 @@ async function agentAnalysisJobGenerateTool(env: Env, request: Request) {
 3. 明确区分已验收、未完成、逾期和不计费任务。
 4. 从进展、改稿、等待、反馈和附件分析中提炼真实模式；没有数据时明确说明。
 5. 不输出思维链、<think> 或模型自我介绍。
-6. 使用 Markdown。${analysisInstructions[row.job_type]}
+6. 使用规范 GFM Markdown；标题必须写成“## 标题”，列表使用“- ”。
+7. 需要展示多条任务对比时使用标准 Markdown 表格，表头下一行必须包含 \`| --- | --- |\` 分隔行；不要把表格语法包进代码块，也不要在表格单元格里写多段长文。
+8. 单项说明超过 80 字时不要塞进表格，改为表格后的分项说明。${analysisInstructions[row.job_type]}
 
 数据：
 ${snapshotText}`
@@ -9782,11 +9784,7 @@ async function chatWithAi(env: Env, request: Request) {
         return ok({
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,
-          trace: [
-            `理解问题：Agent Runtime 分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
-            ...formatAgentRuntimeTrace(runtimeResult.trace),
-            `生成答复：使用 ${runtimeResult.model || 'Agent Runtime'} 组织最终回答。`,
-          ],
+          trace: formatAgentRuntimeTrace(runtimeResult.trace),
           approval: runtimeResult.approval,
           selection: runtimeResult.selection,
           backgroundTask: runtimeResult.backgroundTask,
@@ -10101,6 +10099,9 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
 }
 
 async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  if ((request.headers.get('accept') || '').includes('text/event-stream')) {
+    return streamChatWithAiInstrumented(env, request, ctx)
+  }
   const startedAt = performance.now()
   const response = await chatWithAi(env, request)
   const metricResponse = response.clone()
@@ -10113,6 +10114,81 @@ async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
   if (ctx) ctx.waitUntil(metricWrite)
   else await metricWrite
   return response
+}
+
+function agentSseEvent(payload: Record<string, unknown>) {
+  return `data: ${JSON.stringify(payload)}\n\n`
+}
+
+async function waitForAgentTimeline(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function uniqueAgentTrace(trace: unknown) {
+  if (!Array.isArray(trace)) return []
+  return [...new Set(trace.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 10)
+}
+
+function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const encoder = new TextEncoder()
+  const startedAt = performance.now()
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
+      try {
+        send({ type: 'trace', status: 'running', trace: ['理解你的问题'] })
+        await waitForAgentTimeline(140)
+        send({
+          type: 'trace',
+          status: 'running',
+          trace: ['理解你的问题', '规划执行路径：判断需要读取哪些任务、工时、附件或分析数据'],
+        })
+
+        const response = await chatWithAi(env, request)
+        const metricResponse = response.clone()
+        const metricWrite = recordAgentRunMetric(
+          env,
+          metricResponse,
+          performance.now() - startedAt,
+          request.headers.get('x-giverny-agent-eval') === '1',
+        )
+        if (ctx) ctx.waitUntil(metricWrite)
+        else await metricWrite
+
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null
+        if (!response.ok || !payload) {
+          send({ type: 'error', error: String(payload?.error || `请求失败：${response.status}`) })
+          send({ type: 'done' })
+          return
+        }
+
+        const trace = uniqueAgentTrace(payload.trace)
+        const visibleTrace = uniqueAgentTrace([
+          '理解你的问题',
+          '规划执行路径：判断需要读取哪些任务、工时、附件或分析数据',
+          ...(trace.length > 0 ? trace : ['整理回答']),
+        ])
+        for (let index = 0; index < visibleTrace.length; index += 1) {
+          send({ type: 'trace', status: 'running', trace: visibleTrace.slice(0, index + 1) })
+          if (index < visibleTrace.length - 1) await waitForAgentTimeline(120)
+        }
+        send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace })
+        send({ type: 'done' })
+      } catch (error) {
+        send({ type: 'error', error: error instanceof Error ? error.message : 'Agent 请求失败' })
+        send({ type: 'done' })
+      } finally {
+        controller.close()
+      }
+    },
+  })
+  return new Response(stream, {
+    headers: {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+    },
+  })
 }
 
 function parseAgentMetricTools(value: string) {

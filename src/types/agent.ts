@@ -81,6 +81,7 @@ export type AgentConversationMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  trace?: string[]
   approval?: AgentApproval
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask

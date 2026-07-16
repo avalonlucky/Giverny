@@ -100,6 +100,27 @@ const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint
   append_progress_preview: { previewEndpoint: 'append-progress-preview', executeEndpoint: 'append-progress', label: '追加任务进展' },
 }
 
+const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: string }> = {
+  query_month_finance: { running: '核对月份工时与收入', completed: '月份统计已返回' },
+  search_tasks: { running: '检索相关任务', completed: '任务检索已完成' },
+  search_attachments: { running: '查找相关附件', completed: '附件检索已完成' },
+  get_task_detail: { running: '读取任务详情', completed: '任务详情已返回' },
+  get_giverny_context: { running: '确认平台能力边界', completed: '能力范围已确认' },
+  create_task_preview: { running: '整理新任务草稿', completed: '任务草稿已生成' },
+  record_feedback_preview: { running: '整理反馈记录', completed: '反馈草稿已生成' },
+  update_task_status_preview: { running: '核对状态变更', completed: '状态变更草稿已生成' },
+  update_task_fields_preview: { running: '核对任务字段', completed: '字段修改草稿已生成' },
+  append_progress_preview: { running: '整理进展记录', completed: '进展草稿已生成' },
+  start_monthly_review: { running: '创建月度复盘任务', completed: '月度复盘已进入后台执行' },
+  start_deep_analysis: { running: '创建深度分析任务', completed: '深度分析已进入后台执行' },
+}
+
+function agentToolTraceLabel(toolName: string, phase: 'running' | 'completed') {
+  const label = AGENT_TOOL_TRACE_LABELS[toolName]?.[phase]
+    || (phase === 'running' ? '调用业务工具' : '业务工具已返回')
+  return `${label} [tool:${toolName}]`
+}
+
 const CONFIRM_RE = /^(?:好的?|没问题)?(?:确认(?:执行|创建|记录|修改)?|执行吧|可以(?:执行|创建|记录|修改)|同意(?:执行|创建|记录|修改)|就这样(?:执行|创建|记录)?)$/
 const REJECT_RE = /^(?:好的?)?(?:取消|不要(?:执行|创建|记录|修改)?|撤销|拒绝|先不(?:执行|创建|记录|修改)?)$/
 
@@ -214,6 +235,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           ...(metadata.selection ? { selection: metadata.selection as AgentTaskSelection } : {}),
           ...(metadata.backgroundTask ? { backgroundTask: metadata.backgroundTask as AgentBackgroundTask } : {}),
           ...(Array.isArray(metadata.attachments) ? { attachments: metadata.attachments as AgentResultAttachment[] } : {}),
+          ...(Array.isArray(metadata.trace) ? { trace: metadata.trace.map(String).filter(Boolean) } : {}),
           createdAt: row.created_at,
         }
       }),
@@ -235,6 +257,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           selection: item.selection,
           backgroundTask: item.backgroundTask,
           attachments: item.attachments,
+          trace: item.trace,
         })}, ${createdAt})
       `
       imported += 1
@@ -810,10 +833,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const attachmentsById = new Map<number, AgentResultAttachment>()
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
-        trace.push({ type: 'tool', label: `调用工具：${call.toolName}` })
+        trace.push({ type: 'tool', label: agentToolTraceLabel(call.toolName, 'running') })
       }
       for (const toolResult of step.toolResults) {
-        trace.push({ type: 'result', label: `工具已返回：${toolResult.toolName}` })
+        trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
         selection = this.taskSelection(toolResult.output) || selection
         const output = toJsonObject(toolResult.output)
         if (toolResult.toolName === 'search_attachments' || wantsAttachmentResults(message)) {
@@ -831,14 +854,20 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       : undefined
     const response: AliceAgentChatResult = {
       answer,
-      trace: trace.slice(0, 10),
+      trace: [...trace, { type: 'result' as const, label: '整理回答', detail: '将工具结果组织为可核对的结论。' }].slice(0, 10),
       model: `deepseek:${modelName}`,
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),
       ...(attachmentsById.size ? { attachments: [...attachmentsById.values()].slice(0, 30) } : {}),
     }
-    this.saveMessage('assistant', answer, { approval, selection, backgroundTask, attachments: response.attachments })
+    this.saveMessage('assistant', answer, {
+      approval,
+      selection,
+      backgroundTask,
+      attachments: response.attachments,
+      trace: response.trace.map((item) => item.detail ? `${item.label}：${item.detail}` : item.label),
+    })
     return response
   }
 }
