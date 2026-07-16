@@ -110,7 +110,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskPlan, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4894,6 +4894,13 @@ function ChatPanel({
   const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
   const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
   const [agentPlans, setAgentPlans] = useState<AgentTaskPlan[]>([])
+  const [taskMemories, setTaskMemories] = useState<AgentTaskMemory[]>([])
+  const [taskCenterTab, setTaskCenterTab] = useState<'plans' | 'memories'>('plans')
+  const [expandedPlanId, setExpandedPlanId] = useState('')
+  const [expandedMemoryId, setExpandedMemoryId] = useState(0)
+  const [memoryNoteDrafts, setMemoryNoteDrafts] = useState<Record<number, string>>({})
+  const [memoryForgetConfirmId, setMemoryForgetConfirmId] = useState(0)
+  const [taskCenterBusy, setTaskCenterBusy] = useState('')
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
@@ -4924,14 +4931,17 @@ function ChatPanel({
   }, [])
 
   const refreshAnalysisJobs = useCallback(async () => {
-    const [jobsResponse, plansResponse] = await Promise.all([
+    const [jobsResponse, plansResponse, memoriesResponse] = await Promise.all([
       fetch('/api/ai/analysis-jobs?limit=50'),
       fetch('/api/ai/agent-plans?limit=50'),
+      fetch('/api/ai/task-memories?limit=50'),
     ])
     const data = await jobsResponse.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
     const planData = await plansResponse.json().catch(() => null) as { plans?: AgentTaskPlan[] } | null
+    const memoryData = await memoriesResponse.json().catch(() => null) as { memories?: AgentTaskMemory[] } | null
     if (jobsResponse.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
     if (plansResponse.ok && Array.isArray(planData?.plans)) setAgentPlans(planData.plans)
+    if (memoriesResponse.ok && Array.isArray(memoryData?.memories)) setTaskMemories(memoryData.memories)
   }, [])
 
   useEffect(() => {
@@ -5109,7 +5119,7 @@ function ChatPanel({
   const openAgentPlan = async (plan: AgentTaskPlan) => {
     setAgentPlans((current) => current.map((item) => item.id === plan.id ? { ...item, unread: false } : item))
     await fetch(`/api/ai/agent-plans/${encodeURIComponent(plan.id)}/read`, { method: 'POST' }).catch(() => undefined)
-    if (plan.taskId) onOpenTask(plan.taskId)
+    setExpandedPlanId((current) => current === plan.id ? '' : plan.id)
   }
 
   const authHeaders = (): Record<string, string> => {
@@ -5381,6 +5391,50 @@ function ChatPanel({
       setLoading(false)
       void refreshAnalysisJobs()
     }
+  }
+
+  const updatePlan = async (plan: AgentTaskPlan, action: 'pause' | 'resume' | 'cancel' | 'complete_step' | 'reopen_step', stepId?: string) => {
+    const busyKey = `${plan.id}:${action}:${stepId || ''}`
+    setTaskCenterBusy(busyKey)
+    try {
+      const result = await api.updateAgentPlan(plan.id, action, stepId)
+      setAgentPlans((current) => action === 'cancel'
+        ? current.filter((item) => item.id !== plan.id)
+        : current.map((item) => item.id === plan.id ? result.plan : item))
+      onNotify(action === 'pause' ? '计划已暂停' : action === 'resume' ? '计划已继续' : action === 'cancel' ? '计划已取消' : '计划步骤已更新', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '计划更新失败', 'error')
+    } finally {
+      setTaskCenterBusy('')
+    }
+  }
+
+  const updateMemory = async (memory: AgentTaskMemory, payload: Parameters<typeof api.updateTaskMemory>[1]) => {
+    setTaskCenterBusy(`memory:${memory.taskId}:${payload.action}`)
+    try {
+      const result = await api.updateTaskMemory(memory.taskId, payload)
+      setTaskMemories((current) => current.map((item) => item.taskId === memory.taskId ? result.memory : item))
+      if (payload.action === 'add_note') setMemoryNoteDrafts((current) => ({ ...current, [memory.taskId]: '' }))
+      onNotify(payload.action === 'set_enabled' && payload.enabled === false ? '已清除并停止该任务记忆' : '任务记忆已更新', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '任务记忆更新失败', 'error')
+    } finally {
+      setTaskCenterBusy('')
+    }
+  }
+
+  const reminderPrompt = (plan: AgentTaskPlan) => {
+    const prefix = plan.taskId ? `任务 #${plan.taskId}` : '这个任务'
+    if (plan.goal.includes('验收') || plan.goal.includes('100%')) return `请检查${prefix}当前资料，并生成完整验收草稿；执行前让我确认。`
+    if (plan.goal.includes('等待')) return `请检查${prefix}的等待记录和后续进展，判断阻塞是否解除，并给出下一步可确认操作。`
+    if (plan.goal.includes('工时')) return `请分析${prefix}实际工时超出预估的原因，并给出可执行的范围调整建议。`
+    if (plan.goal.includes('逾期')) return `请检查${prefix}的逾期原因和最新进展，并生成更新进展或调整交付日期的确认草稿。`
+    return `请继续处理${prefix}的提醒：${plan.goal}。先核对数据，再生成需要我确认的下一步。`
+  }
+
+  const executeReminder = (plan: AgentTaskPlan) => {
+    setShowTaskCenter(false)
+    void send(reminderPrompt(plan))
   }
 
   const scopeActive = useKnowledge || useWebSearch
@@ -5665,17 +5719,55 @@ function ChatPanel({
             <span>Agent 任务中心</span>
             <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭任务中心"><X size={15} /></button>
           </div>
+          <div className="chat-task-center-tabs" role="tablist" aria-label="任务中心内容">
+            <button type="button" role="tab" aria-selected={taskCenterTab === 'plans'} className={taskCenterTab === 'plans' ? 'active' : ''} onClick={() => setTaskCenterTab('plans')}>计划与提醒</button>
+            <button type="button" role="tab" aria-selected={taskCenterTab === 'memories'} className={taskCenterTab === 'memories' ? 'active' : ''} onClick={() => setTaskCenterTab('memories')}>任务记忆</button>
+          </div>
           <div className="chat-history-list">
-            {agentPlans.map((plan) => (
-              <button key={plan.id} type="button" className={`chat-task-item ${plan.unread ? 'unread' : ''}`} onClick={() => void openAgentPlan(plan)}>
-                <span className="chat-task-item-main">
-                  <strong>{plan.goal}</strong>
-                  <small>{plan.kind === 'reminder' ? '主动提醒' : '持续计划'} · {plan.status === 'completed' ? '已完成' : `${plan.steps.filter((step) => step.status === 'completed').length}/${plan.steps.length} 步`}</small>
-                </span>
-                <span className="chat-task-item-meta">{new Date(plan.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
-              </button>
-            ))}
-            {analysisJobs.length === 0 && agentPlans.length === 0 ? <p className="chat-history-empty">暂无持续计划、提醒或后台分析</p> : analysisJobs.map((job) => (
+            {taskCenterTab === 'plans' && agentPlans.map((plan) => {
+              const expanded = expandedPlanId === plan.id
+              const completedSteps = plan.steps.filter((step) => step.status === 'completed').length
+              return (
+                <article key={plan.id} className={`chat-task-plan ${plan.unread ? 'unread' : ''}`}>
+                  <button type="button" className="chat-task-item" onClick={() => void openAgentPlan(plan)} aria-expanded={expanded}>
+                    <span className="chat-task-item-main">
+                      <strong>{plan.goal}</strong>
+                      <small>{plan.kind === 'reminder' ? '主动提醒' : '持续计划'} · {plan.status === 'completed' ? '已完成' : plan.status === 'paused' ? '已暂停' : `${completedSteps}/${plan.steps.length} 步`}</small>
+                    </span>
+                    <span className="chat-task-item-meta">{new Date(plan.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                  {expanded && (
+                    <div className="chat-task-plan-detail">
+                      <ol className="chat-task-plan-steps">
+                        {plan.steps.map((step) => (
+                          <li key={step.id} className={step.status}>
+                            <button
+                              type="button"
+                              className="chat-plan-step-toggle"
+                              disabled={taskCenterBusy !== '' || plan.status === 'cancelled'}
+                              onClick={() => void updatePlan(plan, step.status === 'completed' ? 'reopen_step' : 'complete_step', step.id)}
+                              aria-label={step.status === 'completed' ? `重新打开：${step.label}` : `标记完成：${step.label}`}
+                            >
+                              <CheckCircle2 size={14} />
+                            </button>
+                            <span>{step.label}</span>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="chat-task-plan-actions">
+                        {plan.taskId && <button type="button" className="ghost-button compact-button" onClick={() => onOpenTask(plan.taskId!)}><Eye size={13} />查看任务</button>}
+                        {plan.kind === 'reminder' && plan.status === 'active' && <button type="button" className="primary-button compact-button" disabled={loading} onClick={() => executeReminder(plan)}>执行建议</button>}
+                        {plan.kind === 'goal' && plan.status === 'active' && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'pause')}>暂停</button>}
+                        {plan.kind === 'goal' && (plan.status === 'paused' || plan.status === 'completed') && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'resume')}><RotateCcw size={13} />继续</button>}
+                        <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'cancel')}>取消计划</button>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              )
+            })}
+            {taskCenterTab === 'plans' && analysisJobs.map((job) => (
               <button key={job.id} type="button" className={`chat-task-item ${job.unread ? 'unread' : ''}`} onClick={() => void openAnalysisJob(job)}>
                 <span className="chat-task-item-main">
                   <strong>{job.title}</strong>
@@ -5684,6 +5776,44 @@ function ChatPanel({
                 <span className="chat-task-item-meta">{new Date(job.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
               </button>
             ))}
+            {taskCenterTab === 'plans' && analysisJobs.length === 0 && agentPlans.length === 0 && <p className="chat-history-empty">暂无持续计划、提醒或后台分析</p>}
+            {taskCenterTab === 'memories' && taskMemories.map((memory) => {
+              const expanded = expandedMemoryId === memory.taskId
+              return (
+                <article key={memory.taskId} className={`chat-task-memory ${memory.disabled ? 'disabled' : ''}`}>
+                  <button type="button" className="chat-task-item" onClick={() => setExpandedMemoryId((current) => current === memory.taskId ? 0 : memory.taskId)} aria-expanded={expanded}>
+                    <span className="chat-task-item-main">
+                      <strong>{memory.taskTitle || `任务 #${memory.taskId}`}</strong>
+                      <small>{memory.disabled ? '已停止记忆' : `${memory.openItems.length} 项待办 · ${memory.userNotes.length} 条人工纠正`}</small>
+                    </span>
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                  {expanded && (
+                    <div className="chat-task-memory-detail">
+                      {memory.disabled ? (
+                        <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateMemory(memory, { action: 'set_enabled', enabled: true })}>重新启用记忆</button>
+                      ) : (
+                        <>
+                          <p className="chat-memory-summary">{memory.summary || '等待下一次任务活动后生成摘要。'}</p>
+                          {memory.openItems.length > 0 && <div className="chat-memory-section"><strong>待处理</strong>{memory.openItems.map((item) => <div key={item}><span>{item}</span><button type="button" className="ghost-button compact-button" onClick={() => void updateMemory(memory, { action: 'ignore_item', item })}>忽略</button></div>)}</div>}
+                          {memory.userNotes.length > 0 && <div className="chat-memory-section"><strong>人工纠正</strong>{memory.userNotes.map((note) => <div key={note}><span>{note}</span><button type="button" className="chat-history-del" title="删除纠正" aria-label={`删除纠正：${note}`} onClick={() => void updateMemory(memory, { action: 'delete_note', note })}><Trash2 size={12} /></button></div>)}</div>}
+                          <div className="chat-memory-note-form">
+                            <textarea rows={2} value={memoryNoteDrafts[memory.taskId] || ''} placeholder="补充偏好或纠正 Agent 的理解" onChange={(event) => setMemoryNoteDrafts((current) => ({ ...current, [memory.taskId]: event.target.value }))} />
+                            <button type="button" className="primary-button compact-button" disabled={!memoryNoteDrafts[memory.taskId]?.trim() || taskCenterBusy !== ''} onClick={() => void updateMemory(memory, { action: 'add_note', note: memoryNoteDrafts[memory.taskId] })}>保存纠正</button>
+                          </div>
+                          <div className="chat-task-plan-actions">
+                            <button type="button" className="ghost-button compact-button" onClick={() => onOpenTask(memory.taskId)}><Eye size={13} />查看任务</button>
+                            {memory.ignoredItems.length > 0 && <button type="button" className="ghost-button compact-button" onClick={() => void updateMemory(memory, { action: 'restore_items' })}>恢复已忽略待办</button>}
+                            {memoryForgetConfirmId === memory.taskId ? <><button type="button" className="ghost-button compact-button" onClick={() => setMemoryForgetConfirmId(0)}>保留</button><button type="button" className="danger-button compact-button" onClick={() => { setMemoryForgetConfirmId(0); void updateMemory(memory, { action: 'set_enabled', enabled: false }) }}>确认清空</button></> : <button type="button" className="danger-text-button compact-button" onClick={() => setMemoryForgetConfirmId(memory.taskId)}>停止并清空记忆</button>}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </article>
+              )
+            })}
+            {taskCenterTab === 'memories' && taskMemories.length === 0 && <p className="chat-history-empty">暂无任务记忆；Agent 在读取或更新任务后会自动建立。</p>}
           </div>
         </div>
       )}
@@ -16418,6 +16548,9 @@ function SettingsView({
   const [agentMetricsDays, setAgentMetricsDays] = useState<7 | 30>(7)
   const [agentMetricsLoading, setAgentMetricsLoading] = useState(false)
   const [agentMetricsError, setAgentMetricsError] = useState('')
+  const [agentFailures, setAgentFailures] = useState<AgentFailureCase[]>([])
+  const [agentFailurePolicy, setAgentFailurePolicy] = useState('')
+  const [agentFailureBusy, setAgentFailureBusy] = useState('')
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'design' | 'security' | 'system'>('settlement')
   const [securityTab, setSecurityTab] = useState<'tokens' | 'account'>('tokens')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
@@ -16624,13 +16757,29 @@ function SettingsView({
     setAgentMetricsLoading(true)
     setAgentMetricsError('')
     try {
-      setAgentMetrics(await api.getAgentRunMetrics(days))
+      const [metrics, failures] = await Promise.all([api.getAgentRunMetrics(days), api.getAgentFailures()])
+      setAgentMetrics(metrics)
+      setAgentFailures(failures.cases)
+      setAgentFailurePolicy(failures.policy)
     } catch (error) {
       setAgentMetricsError(error instanceof Error ? error.message : 'Agent 运行指标读取失败')
     } finally {
       setAgentMetricsLoading(false)
     }
   }, [agentMetricsDays])
+
+  const updateAgentFailure = async (failure: AgentFailureCase, status: AgentFailureCase['regressionStatus']) => {
+    setAgentFailureBusy(failure.fingerprint)
+    try {
+      const result = await api.updateAgentFailure(failure.fingerprint, status, status === 'covered' ? '已纳入自动化回归或人工验证。' : '')
+      setAgentFailures(result.cases)
+      setAgentFailurePolicy(result.policy)
+    } catch (error) {
+      setAgentMetricsError(error instanceof Error ? error.message : '失败案例更新失败')
+    } finally {
+      setAgentFailureBusy('')
+    }
+  }
 
   useEffect(() => {
     if (settingsTab === 'ai' && role === 'admin') void loadAgentMetrics()
@@ -16970,6 +17119,16 @@ function SettingsView({
                       <strong>{agentMetrics.summary.totalRuns ? `${agentMetrics.summary.toolUseRate}%` : '—'}</strong>
                       <small>{agentMetrics.summary.approvalRuns} 次审批 · {agentMetrics.summary.selectionRuns} 次消歧</small>
                     </article>
+                    <article>
+                      <span>估算 Token</span>
+                      <strong>{(agentMetrics.summary.promptTokens + agentMetrics.summary.completionTokens).toLocaleString('zh-CN')}</strong>
+                      <small>输入 {agentMetrics.summary.promptTokens.toLocaleString('zh-CN')} · 输出 {agentMetrics.summary.completionTokens.toLocaleString('zh-CN')}</small>
+                    </article>
+                    <article>
+                      <span>参考成本</span>
+                      <strong>¥ {agentMetrics.summary.estimatedCostCny.toFixed(4)}</strong>
+                      <small>按模型内置参考单价估算，不代替供应商账单</small>
+                    </article>
                   </div>
                   <div className="agent-quality-details">
                     <div>
@@ -17001,6 +17160,41 @@ function SettingsView({
                       </div>
                     </div>
                   </div>
+                  <div className={`agent-tuning-advice ${agentMetrics.tuning.eligible ? 'ready' : ''}`}>
+                    <div>
+                      <h3>模型调优建议</h3>
+                      <p>{agentMetrics.tuning.reason}</p>
+                    </div>
+                    {agentMetrics.tuning.suggestions.length > 0 ? <ul>{agentMetrics.tuning.suggestions.map((item) => <li key={item}>{item}</li>)}</ul> : <small>继续积累真实使用数据，达到门槛后再给出建议。</small>}
+                  </div>
+                  {agentMetrics.models.length > 0 && (
+                    <div className="agent-model-performance">
+                      <h3>模型表现</h3>
+                      <div className="agent-model-performance-head"><span>模型</span><span>运行</span><span>成功率</span><span>平均响应</span><span>Token</span><span>参考成本</span></div>
+                      {agentMetrics.models.map((model) => <div key={model.name}><strong>{model.name}</strong><span>{model.runs}</span><span>{model.successRate}%</span><span>{formatAgentMetricDuration(model.avgDurationMs)}</span><span>{model.tokens.toLocaleString('zh-CN')}</span><span>¥{model.estimatedCostCny.toFixed(4)}</span></div>)}
+                    </div>
+                  )}
+                  <details className="agent-failure-learning" open={agentFailures.some((item) => item.regressionStatus === 'required')}>
+                    <summary>失败学习与回归 <span>{agentFailures.filter((item) => item.regressionStatus === 'required').length} 项待覆盖</span></summary>
+                    <p>{agentFailurePolicy || '仅保存匿名失败类型、工具和状态，不保存用户业务内容。'}</p>
+                    {agentFailures.length === 0 ? <p className="calendar-empty-hint">当前没有记录到失败案例。</p> : <div className="agent-failure-case-list">
+                      {agentFailures.slice(0, 20).map((failure) => (
+                        <article key={failure.fingerprint}>
+                          <div className="agent-failure-case-main">
+                            <strong>{agentMetricIntentLabels[failure.intent] || failure.intent}</strong>
+                            <span>{failure.category} · {failure.toolName || '无工具'} · HTTP {failure.httpStatus}</span>
+                            <small>{failure.occurrences} 次 · 最近 {failure.lastSeenAt.replace('T', ' ').slice(0, 16)}</small>
+                          </div>
+                          <div className="agent-failure-case-actions">
+                            <span className={`status-${failure.regressionStatus}`}>{failure.regressionStatus === 'required' ? '待回归' : failure.regressionStatus === 'covered' ? '已覆盖' : failure.regressionStatus === 'ignored' ? '已忽略' : '候选'}</span>
+                            <button type="button" className="ghost-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'required')}>加入回归</button>
+                            <button type="button" className="primary-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'covered')}>标记覆盖</button>
+                            <button type="button" className="ghost-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'ignored')}>忽略</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>}
+                  </details>
                   {agentMetrics.recentFailures.length > 0 && (
                     <details className="agent-quality-failures">
                       <summary>最近失败记录 <span>{agentMetrics.recentFailures.length}</span></summary>

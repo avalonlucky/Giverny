@@ -281,6 +281,55 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!listResponse.ok || plan?.steps?.[0]?.status !== 'completed' || plan.currentStep !== 1) {
     throw new Error(`Agent task center plan is inconsistent: ${JSON.stringify(plan)}`)
   }
+  const updatePlan = async (action, stepId) => {
+    const response = await fetch(`http://127.0.0.1:8798/api/ai/agent-plans/${created.plan.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ action, stepId }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data.plan) throw new Error(`Plan ${action} failed: ${JSON.stringify(data)}`)
+    return data.plan
+  }
+  const paused = await updatePlan('pause')
+  if (paused.status !== 'paused' || !paused.pausedAt) throw new Error('Agent plan pause was not persisted')
+  const resumed = await updatePlan('resume')
+  if (resumed.status !== 'active' || resumed.pausedAt) throw new Error('Agent plan resume was not persisted')
+  const manuallyCompleted = await updatePlan('complete_step', resumed.steps[1].id)
+  if (manuallyCompleted.steps[1].status !== 'completed') throw new Error('Agent plan manual step completion failed')
+  const reopened = await updatePlan('reopen_step', resumed.steps[1].id)
+  if (reopened.steps[1].status !== 'pending') throw new Error('Agent plan step reopening failed')
+
+  const updateMemory = async (payload) => {
+    const response = await fetch('http://127.0.0.1:8798/api/ai/task-memories/1', {
+      method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(payload),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data.memory) throw new Error(`Memory update failed: ${JSON.stringify(data)}`)
+    return data.memory
+  }
+  const corrected = await updateMemory({ action: 'add_note', note: '甲方更偏好简洁排版' })
+  if (!corrected.userNotes.includes('甲方更偏好简洁排版')) throw new Error('Task memory correction was not persisted')
+  const disabled = await updateMemory({ action: 'set_enabled', enabled: false })
+  if (!disabled.disabled || disabled.summary) throw new Error('Task memory forget operation failed')
+  const enabled = await updateMemory({ action: 'set_enabled', enabled: true })
+  if (enabled.disabled || !enabled.summary) throw new Error('Task memory re-enable failed')
+
+  const failuresResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-failures', { headers: { cookie } })
+  const failures = await failuresResponse.json().catch(() => ({}))
+  const failure = failures.cases?.find((item) => item.regressionStatus === 'required')
+  if (!failuresResponse.ok || !failure) throw new Error('Failure learning dashboard did not expose required case')
+  const coveredResponse = await fetch(`http://127.0.0.1:8798/api/ai/agent-failures/${encodeURIComponent(failure.fingerprint)}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ status: 'covered', note: 'isolated regression' }),
+  })
+  const covered = await coveredResponse.json().catch(() => ({}))
+  if (!coveredResponse.ok || !covered.cases?.some((item) => item.fingerprint === failure.fingerprint && item.regressionStatus === 'covered')) {
+    throw new Error('Failure regression status update failed')
+  }
+
+  const metricsResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-metrics?days=7', { headers: { cookie } })
+  const metrics = await metricsResponse.json().catch(() => ({}))
+  if (!metricsResponse.ok || typeof metrics.summary?.promptTokens !== 'number' || typeof metrics.summary?.completionTokens !== 'number' || !Array.isArray(metrics.models) || !metrics.tuning) {
+    throw new Error(`Agent cost and tuning metrics are incomplete: ${JSON.stringify(metrics)}`)
+  }
   process.stdout.write('Persistent Agent plan, step progression, and task memory checks passed.\n')
 }
 

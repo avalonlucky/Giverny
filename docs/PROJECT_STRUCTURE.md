@@ -40,6 +40,7 @@
 │   ├── AI_MODEL_ROUTING.md
 │   ├── AI_LEARNING.md
 │   ├── AI_HOUR_ESTIMATE.md
+│   ├── AGENT_PRODUCTION_OPERATIONS.md
 │   ├── MCP_SERVER.md
 │   ├── OPERATION_POLICIES.md
 │   ├── PROJECT_STRUCTURE.md
@@ -108,6 +109,7 @@
 - Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
+- Agent production controls and user operations: `docs/AGENT_PRODUCTION_OPERATIONS.md`
 - Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`
 - Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`

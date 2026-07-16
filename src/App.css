@@ -15842,7 +15842,7 @@ textarea:focus-visible {
 
 .agent-quality-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
@@ -15857,6 +15857,14 @@ textarea:focus-visible {
 
 .agent-quality-metrics article:last-child {
   border-right: 0;
+}
+
+.agent-quality-metrics article:nth-child(3) {
+  border-right: 0;
+}
+
+.agent-quality-metrics article:nth-child(-n + 3) {
+  border-bottom: 1px solid var(--color-border);
 }
 
 .agent-quality-metrics span,
@@ -15963,6 +15971,148 @@ textarea:focus-visible {
 .agent-quality-failures em {
   color: var(--color-status-danger);
   font-style: normal;
+}
+
+.agent-tuning-advice {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.6fr);
+  gap: 24px;
+  margin-top: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.agent-tuning-advice h3,
+.agent-model-performance h3 {
+  margin: 0 0 6px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.agent-tuning-advice p,
+.agent-tuning-advice small,
+.agent-tuning-advice li {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agent-tuning-advice p {
+  margin: 0;
+}
+
+.agent-tuning-advice ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.agent-tuning-advice.ready {
+  border-left: 2px solid var(--color-primary);
+  padding-left: 14px;
+}
+
+.agent-model-performance {
+  margin-top: 18px;
+}
+
+.agent-model-performance > div {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.5fr) repeat(5, minmax(70px, 0.7fr));
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  border-bottom: 1px solid var(--color-border-soft);
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+}
+
+.agent-model-performance > div strong {
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-model-performance .agent-model-performance-head {
+  min-height: 30px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.agent-failure-learning {
+  margin-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.agent-failure-learning > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.agent-failure-learning > summary span,
+.agent-failure-learning > p {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.agent-failure-learning > p {
+  margin: 0 0 10px;
+}
+
+.agent-failure-case-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.agent-failure-case-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-failure-case-main strong {
+  color: var(--color-text);
+  font-size: 12.5px;
+}
+
+.agent-failure-case-main span,
+.agent-failure-case-main small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.agent-failure-case-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-failure-case-actions > span {
+  min-width: 52px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.agent-failure-case-actions .status-required {
+  color: var(--color-status-danger);
+  font-weight: 700;
+}
+
+.agent-failure-case-actions .status-covered {
+  color: var(--color-primary);
+  font-weight: 700;
 }
 
 .settings-ai-tabs {
@@ -23063,6 +23213,191 @@ button.topbar-create-button kbd {
 
 .chat-task-item-meta {
   flex: 0 0 auto;
+}
+
+.chat-task-center-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat-task-center-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.chat-task-center-tabs button.active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.chat-task-plan,
+.chat-task-memory {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat-task-plan > .chat-task-item,
+.chat-task-memory > .chat-task-item {
+  border-bottom: 0;
+}
+
+.chat-task-plan.unread {
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+.chat-task-plan-detail,
+.chat-task-memory-detail {
+  padding: 0 16px 14px 28px;
+  background: var(--color-surface-alt);
+  border-top: 1px solid var(--color-border);
+}
+
+.chat-task-plan-steps {
+  margin: 0;
+  padding: 12px 0 8px;
+  list-style: none;
+}
+
+.chat-task-plan-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.chat-task-plan-steps li.completed span {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.chat-plan-step-toggle {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chat-task-plan-steps li.completed .chat-plan-step-toggle {
+  color: var(--color-primary);
+}
+
+.chat-task-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-memory-summary {
+  margin: 12px 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.chat-memory-section {
+  margin: 10px 0;
+  border-top: 1px solid var(--color-border);
+  padding-top: 9px;
+}
+
+.chat-memory-section > strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.chat-memory-section > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+}
+
+.chat-memory-note-form {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.chat-memory-note-form textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+}
+
+.chat-memory-note-form .primary-button {
+  justify-self: start;
+}
+
+@media (max-width: 960px) {
+  .agent-quality-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-quality-metrics article:nth-child(3) {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .agent-quality-metrics article:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .agent-quality-metrics article:nth-child(-n + 4) {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .agent-tuning-advice,
+  .agent-failure-case-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-model-performance {
+    overflow-x: auto;
+  }
+
+  .agent-model-performance > div {
+    min-width: 720px;
+  }
+
+  .agent-failure-case-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 680px) {
+  .agent-quality-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-quality-metrics article,
+  .agent-quality-metrics article:nth-child(3) {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
 }
 
 /* ---------- UI audit cleanup: insight surfaces and Alice assistant ---------- */

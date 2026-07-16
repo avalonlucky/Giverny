@@ -233,7 +233,8 @@ CREATE TABLE IF NOT EXISTS agent_task_plans (
   read_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
+  completed_at TEXT,
+  paused_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_task_plans_status
@@ -251,6 +252,10 @@ CREATE TABLE IF NOT EXISTS agent_task_memories (
   summary TEXT NOT NULL DEFAULT '',
   open_items_json TEXT NOT NULL DEFAULT '[]',
   preferences_json TEXT NOT NULL DEFAULT '[]',
+  user_notes_json TEXT NOT NULL DEFAULT '[]',
+  ignored_items_json TEXT NOT NULL DEFAULT '[]',
+  disabled INTEGER NOT NULL DEFAULT 0,
+  reviewed_at TEXT,
   last_event_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
@@ -264,8 +269,10 @@ CREATE TABLE IF NOT EXISTS agent_failure_cases (
   http_status INTEGER NOT NULL DEFAULT 0,
   occurrences INTEGER NOT NULL DEFAULT 1,
   regression_status TEXT NOT NULL DEFAULT 'candidate',
+  resolution_note TEXT NOT NULL DEFAULT '',
   first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_failure_cases_priority
@@ -284,6 +291,9 @@ CREATE TABLE IF NOT EXISTS agent_run_metrics (
   fallback_used INTEGER NOT NULL DEFAULT 0,
   http_status INTEGER NOT NULL DEFAULT 200,
   is_eval INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  estimated_cost_cny REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

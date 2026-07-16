@@ -112,7 +112,7 @@ export type AgentTaskPlan = {
   taskId?: number
   kind: 'goal' | 'reminder'
   goal: string
-  status: 'active' | 'completed' | 'cancelled'
+  status: 'active' | 'paused' | 'completed' | 'cancelled'
   steps: AgentPlanStep[]
   currentStep: number
   nextActionAt?: string
@@ -120,4 +120,32 @@ export type AgentTaskPlan = {
   createdAt: string
   updatedAt: string
   completedAt?: string
+  pausedAt?: string
+}
+
+export type AgentTaskMemory = {
+  taskId: number
+  taskTitle: string
+  summary: string
+  openItems: string[]
+  preferences: string[]
+  userNotes: string[]
+  ignoredItems: string[]
+  disabled: boolean
+  reviewedAt?: string
+  updatedAt: string
+}
+
+export type AgentFailureCase = {
+  fingerprint: string
+  category: string
+  intent: string
+  toolName?: string
+  httpStatus: number
+  occurrences: number
+  regressionStatus: 'candidate' | 'required' | 'covered' | 'ignored'
+  resolutionNote: string
+  firstSeenAt: string
+  lastSeenAt: string
+  updatedAt: string
 }

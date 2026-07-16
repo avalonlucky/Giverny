@@ -1,5 +1,6 @@
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
+import type { AgentFailureCase, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
 
 export type ReportRecord = {
   id: string
@@ -49,10 +50,15 @@ export type AgentRunMetrics = {
     selectionRuns: number
     fallbackRuns: number
     errorRuns: number
+    promptTokens: number
+    completionTokens: number
+    estimatedCostCny: number
   }
   intents: Array<{ name: string; count: number }>
   tools: Array<{ name: string; count: number }>
   daily: Array<{ date: string; total: number; errors: number; approvals: number; selections: number }>
+  models: Array<{ name: string; runs: number; successRate: number; avgDurationMs: number; tokens: number; estimatedCostCny: number }>
+  tuning: { eligible: boolean; observationDays: number; minimumRuns: number; suggestions: string[]; reason: string }
   recentFailures: Array<{ createdAt: string; intent: string; status: number; durationMs: number }>
 }
 
@@ -926,6 +932,30 @@ export const api = {
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models/scan', { method: 'POST' }),
   getAgentRunMetrics: (days = 7) =>
     requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
+  getAgentFailures: () =>
+    requestJson<{ cases: AgentFailureCase[]; policy: string }>('/api/ai/agent-failures'),
+  updateAgentFailure: (fingerprint: string, status: AgentFailureCase['regressionStatus'], note = '') =>
+    requestJson<{ cases: AgentFailureCase[]; policy: string }>(`/api/ai/agent-failures/${encodeURIComponent(fingerprint)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status, note }),
+    }),
+  getAgentPlans: (limit = 50) =>
+    requestJson<{ plans: AgentTaskPlan[] }>(`/api/ai/agent-plans?limit=${limit}`),
+  updateAgentPlan: (id: string, action: 'pause' | 'resume' | 'cancel' | 'complete_step' | 'reopen_step', stepId?: string) =>
+    requestJson<{ plan: AgentTaskPlan }>(`/api/ai/agent-plans/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, stepId }),
+    }),
+  getTaskMemories: (limit = 50) =>
+    requestJson<{ memories: AgentTaskMemory[] }>(`/api/ai/task-memories?limit=${limit}`),
+  updateTaskMemory: (taskId: number, payload: { action: 'add_note' | 'delete_note' | 'ignore_item' | 'restore_items' | 'set_enabled'; note?: string; item?: string; enabled?: boolean }) =>
+    requestJson<{ memory: AgentTaskMemory }>(`/api/ai/task-memories/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
     requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
       method: 'POST',

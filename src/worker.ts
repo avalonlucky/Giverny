@@ -8,7 +8,7 @@ import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskPlan, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -2076,7 +2076,7 @@ type DbAgentTaskPlan = {
   task_id: string | null
   kind: 'goal' | 'reminder'
   goal: string
-  status: 'active' | 'completed' | 'cancelled'
+  status: 'active' | 'paused' | 'completed' | 'cancelled'
   steps_json: string
   current_step: number
   next_action_at: string | null
@@ -2084,6 +2084,7 @@ type DbAgentTaskPlan = {
   created_at: string
   updated_at: string
   completed_at: string | null
+  paused_at: string | null
 }
 
 function parseAgentPlanSteps(value: string): AgentPlanStep[] {
@@ -2110,6 +2111,44 @@ function toAgentTaskPlan(row: DbAgentTaskPlan): AgentTaskPlan {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at || undefined,
+    pausedAt: row.paused_at || undefined,
+  }
+}
+
+type DbAgentTaskMemory = {
+  task_id: string
+  task_title: string
+  summary: string
+  open_items_json: string
+  preferences_json: string
+  user_notes_json: string
+  ignored_items_json: string
+  disabled: number
+  reviewed_at: string | null
+  updated_at: string
+}
+
+function parseAgentStringList(value: string | null | undefined) {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed.map((item) => agentString(item, 500)).filter(Boolean).slice(0, 30) : []
+  } catch {
+    return []
+  }
+}
+
+function toAgentTaskMemory(row: DbAgentTaskMemory): AgentTaskMemory {
+  return {
+    taskId: Number(row.task_id),
+    taskTitle: row.task_title,
+    summary: row.summary,
+    openItems: parseAgentStringList(row.open_items_json),
+    preferences: parseAgentStringList(row.preferences_json),
+    userNotes: parseAgentStringList(row.user_notes_json),
+    ignoredItems: parseAgentStringList(row.ignored_items_json),
+    disabled: Boolean(row.disabled),
+    reviewedAt: row.reviewed_at || undefined,
+    updatedAt: row.updated_at,
   }
 }
 
@@ -2162,8 +2201,11 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
 async function refreshAgentTaskMemory(env: Env, taskId: number) {
   const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
   if (!row) return null
+  const existing = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(String(taskId)).first<DbAgentTaskMemory>()
+  if (existing?.disabled) return toAgentTaskMemory(existing)
   const progress = parseTimeEntries(row.time_entries_json)
   const waiting = parseWaitingEntries(row.waiting_entries_json)
+  const ignoredItems = parseAgentStringList(existing?.ignored_items_json)
   const openItems: string[] = []
   if (row.status !== '已验收' && row.estimated_delivery_date && row.estimated_delivery_date < nowIso()) openItems.push('任务已经超过预计交付时间')
   if (row.progress >= 100 && row.status !== '已验收') openItems.push('进度已到 100%，尚未完成验收')
@@ -2175,14 +2217,16 @@ async function refreshAgentTaskMemory(env: Env, taskId: number) {
     row.requirement ? `需求：${row.requirement.slice(0, 1000)}` : '',
     recent.length ? `近期记录：${recent.join('；')}` : '',
   ].filter(Boolean).join('\n')
+  const visibleOpenItems = openItems.filter((item) => !ignoredItems.includes(item))
   await env.DB.prepare(
     `INSERT INTO agent_task_memories (task_id, task_title, summary, open_items_json, preferences_json, last_event_at)
      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(task_id) DO UPDATE SET task_title = excluded.task_title, summary = excluded.summary,
        open_items_json = excluded.open_items_json, preferences_json = excluded.preferences_json,
        last_event_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`,
-  ).bind(String(taskId), row.title, summary, JSON.stringify(openItems), JSON.stringify(feedback)).run()
-  return { taskId, taskTitle: row.title, summary, openItems, preferences: feedback, updatedAt: nowIso() }
+  ).bind(String(taskId), row.title, summary, JSON.stringify(visibleOpenItems), JSON.stringify(feedback)).run()
+  const updated = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(String(taskId)).first<DbAgentTaskMemory>()
+  return updated ? toAgentTaskMemory(updated) : null
 }
 
 async function agentGetTaskMemoryTool(env: Env, request: Request) {
@@ -2222,15 +2266,90 @@ async function agentProgressTaskPlanTool(env: Env, request: Request) {
 
 async function listAgentTaskPlans(env: Env, request: Request) {
   const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit')) || 50, 1), 100)
-  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE status != 'cancelled' ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC LIMIT ?").bind(limit).all<DbAgentTaskPlan>()
+  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE status != 'cancelled' ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, updated_at DESC LIMIT ?").bind(limit).all<DbAgentTaskPlan>()
   return ok({ plans: (rows.results ?? []).map(toAgentTaskPlan) })
 }
 
-async function updateAgentTaskPlan(env: Env, id: string, action: 'read' | 'cancel') {
-  if (action === 'read') await env.DB.prepare('UPDATE agent_task_plans SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
-  else await env.DB.prepare("UPDATE agent_task_plans SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run()
+async function updateAgentTaskPlan(env: Env, id: string, request: Request, legacyAction?: 'read' | 'cancel') {
+  const body = legacyAction ? {} : await request.json().catch(() => ({})) as { action?: string; stepId?: string }
+  const action = legacyAction || agentString(body.action, 40)
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
-  return row ? ok({ plan: toAgentTaskPlan(row) }) : fail('任务计划不存在', 404)
+  if (!row) return fail('任务计划不存在', 404)
+  if (action === 'read') {
+    await env.DB.prepare('UPDATE agent_task_plans SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
+  } else if (action === 'cancel') {
+    await env.DB.prepare("UPDATE agent_task_plans SET status = 'cancelled', paused_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run()
+  } else if (action === 'pause') {
+    await env.DB.prepare("UPDATE agent_task_plans SET status = 'paused', paused_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'").bind(id).run()
+  } else if (action === 'resume') {
+    await env.DB.prepare("UPDATE agent_task_plans SET status = 'active', paused_at = NULL, completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('paused', 'completed')").bind(id).run()
+  } else if (action === 'complete_step' || action === 'reopen_step') {
+    const steps = parseAgentPlanSteps(row.steps_json)
+    const index = steps.findIndex((step) => step.id === body.stepId)
+    if (index < 0) return fail('计划步骤不存在', 404)
+    steps[index] = action === 'complete_step'
+      ? { ...steps[index], status: 'completed', completedAt: nowIso() }
+      : { ...steps[index], status: 'pending', completedAt: undefined }
+    const nextIndex = steps.findIndex((step) => step.status === 'pending')
+    const completed = nextIndex < 0
+    await env.DB.prepare(
+      `UPDATE agent_task_plans SET steps_json = ?, current_step = ?, status = ?, paused_at = NULL,
+       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(JSON.stringify(steps), completed ? steps.length : nextIndex, completed ? 'completed' : 'active', completed ? 1 : 0, id).run()
+  } else {
+    return fail('不支持的计划操作', 400)
+  }
+  const updated = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
+  return updated ? ok({ plan: toAgentTaskPlan(updated) }) : fail('任务计划不存在', 404)
+}
+
+async function listAgentTaskMemories(env: Env, request: Request) {
+  const url = new URL(request.url)
+  const taskId = Number(url.searchParams.get('taskId'))
+  if (Number.isFinite(taskId) && taskId > 0) await refreshAgentTaskMemory(env, taskId)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 50, 1), 100)
+  const rows = Number.isFinite(taskId) && taskId > 0
+    ? await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ? LIMIT 1').bind(String(taskId)).all<DbAgentTaskMemory>()
+    : await env.DB.prepare('SELECT * FROM agent_task_memories ORDER BY updated_at DESC LIMIT ?').bind(limit).all<DbAgentTaskMemory>()
+  return ok({ memories: (rows.results ?? []).map(toAgentTaskMemory) })
+}
+
+async function updateAgentTaskMemory(env: Env, taskId: string, request: Request) {
+  const body = await request.json().catch(() => ({})) as { action?: string; note?: string; item?: string; enabled?: boolean }
+  const numericTaskId = Number(taskId)
+  if (!Number.isFinite(numericTaskId) || numericTaskId <= 0) return fail('taskId 无效', 400)
+  await refreshAgentTaskMemory(env, numericTaskId)
+  const row = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(taskId).first<DbAgentTaskMemory>()
+  if (!row) return fail('任务记忆不存在', 404)
+  const action = agentString(body.action, 40)
+  if (action === 'add_note') {
+    const note = agentString(body.note, 500)
+    if (!note) return fail('纠正内容不能为空', 400)
+    const notes = [...new Set([...parseAgentStringList(row.user_notes_json), note])].slice(-20)
+    await env.DB.prepare('UPDATE agent_task_memories SET user_notes_json = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(JSON.stringify(notes), taskId).run()
+  } else if (action === 'delete_note') {
+    const notes = parseAgentStringList(row.user_notes_json).filter((item) => item !== body.note)
+    await env.DB.prepare('UPDATE agent_task_memories SET user_notes_json = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(JSON.stringify(notes), taskId).run()
+  } else if (action === 'ignore_item') {
+    const item = agentString(body.item, 500)
+    const ignored = [...new Set([...parseAgentStringList(row.ignored_items_json), item])].filter(Boolean).slice(-30)
+    const openItems = parseAgentStringList(row.open_items_json).filter((value) => value !== item)
+    await env.DB.prepare('UPDATE agent_task_memories SET ignored_items_json = ?, open_items_json = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(JSON.stringify(ignored), JSON.stringify(openItems), taskId).run()
+  } else if (action === 'restore_items') {
+    await env.DB.prepare("UPDATE agent_task_memories SET ignored_items_json = '[]', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?").bind(taskId).run()
+    await refreshAgentTaskMemory(env, numericTaskId)
+  } else if (action === 'set_enabled') {
+    if (body.enabled) {
+      await env.DB.prepare('UPDATE agent_task_memories SET disabled = 0, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(taskId).run()
+      await refreshAgentTaskMemory(env, numericTaskId)
+    } else {
+      await env.DB.prepare("UPDATE agent_task_memories SET disabled = 1, summary = '', open_items_json = '[]', preferences_json = '[]', user_notes_json = '[]', ignored_items_json = '[]', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?").bind(taskId).run()
+    }
+  } else {
+    return fail('不支持的记忆操作', 400)
+  }
+  const updated = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(taskId).first<DbAgentTaskMemory>()
+  return updated ? ok({ memory: toAgentTaskMemory(updated) }) : fail('任务记忆不存在', 404)
 }
 
 const agentToolCorsHeaders = {
@@ -12250,6 +12369,9 @@ type AgentRunMetricRow = {
   selection_count: number
   fallback_used: number
   http_status: number
+  prompt_tokens: number
+  completion_tokens: number
+  estimated_cost_cny: number
   created_at: string
 }
 
@@ -12270,6 +12392,9 @@ async function ensureAgentRunMetricsTable(env: Env) {
       fallback_used INTEGER NOT NULL DEFAULT 0,
       http_status INTEGER NOT NULL DEFAULT 200,
       is_eval INTEGER NOT NULL DEFAULT 0,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      estimated_cost_cny REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
   ).run()
@@ -12319,7 +12444,25 @@ async function learnAgentFailure(env: Env, input: { intent: string; outcome: str
   ).bind(fingerprint, category, input.intent, toolName || null, input.status).run()
 }
 
-async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean) {
+function estimateAgentTokens(value: string) {
+  return Math.max(0, Math.ceil(value.length / 3.5))
+}
+
+function estimateAgentCostCny(model: string, promptTokens: number, completionTokens: number) {
+  const normalized = model.toLowerCase()
+  const rates = normalized.includes('deepseek') ? { input: 2, output: 8 }
+    : normalized.includes('doubao') ? { input: 0.8, output: 2 }
+      : normalized.includes('gemini') ? { input: 7, output: 28 }
+        : { input: 4, output: 12 }
+  return Number(((promptTokens * rates.input + completionTokens * rates.output) / 1_000_000).toFixed(6))
+}
+
+async function estimateAgentRequestTokens(request: Request) {
+  const text = await request.clone().text().catch(() => '')
+  return estimateAgentTokens(text)
+}
+
+async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean, promptTokens: number) {
   try {
     await ensureAgentRunMetricsTable(env)
     const contentType = response.headers.get('content-type') || ''
@@ -12335,14 +12478,17 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
     const approvalStatus = String(approval.status || '')
     const modelTrace = [...trace].reverse().find((line) => line.includes('生成答复：使用 ')) || ''
     const model = modelTrace.match(/生成答复：使用 (.+?)(?:组织最终回答|。|（|$)/)?.[1]?.trim() || ''
+    const completionTokens = estimateAgentTokens(JSON.stringify(payload))
+    const estimatedCostCny = estimateAgentCostCny(model, promptTokens, completionTokens)
     const fallbackUsed = trace.some((line) => /回落|fallback/i.test(line))
     const outcome = agentMetricOutcome(response.status, approvalStatus, candidates.length > 0)
     const intent = agentMetricIntent(tools, approvalAction, candidates.length > 0)
     await env.DB.prepare(
       `INSERT INTO agent_run_metrics (
         id, intent, outcome, model, tools_json, tool_count, duration_ms,
-        approval_action, selection_count, fallback_used, http_status, is_eval
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        approval_action, selection_count, fallback_used, http_status, is_eval,
+        prompt_tokens, completion_tokens, estimated_cost_cny
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       intent,
@@ -12356,6 +12502,9 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       fallbackUsed ? 1 : 0,
       response.status,
       isEval ? 1 : 0,
+      promptTokens,
+      completionTokens,
+      estimatedCostCny,
     ).run()
     if (!isEval && (outcome === 'error' || outcome === 'approval_failed')) {
       await learnAgentFailure(env, { intent, outcome, status: response.status, durationMs, tools, approvalAction })
@@ -12373,6 +12522,7 @@ async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     return streamChatWithAiInstrumented(env, request, ctx)
   }
   const startedAt = performance.now()
+  const promptTokens = await estimateAgentRequestTokens(request)
   const response = await chatWithAi(env, request)
   const metricResponse = response.clone()
   const metricWrite = recordAgentRunMetric(
@@ -12380,6 +12530,7 @@ async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     metricResponse,
     performance.now() - startedAt,
     request.headers.get('x-giverny-agent-eval') === '1',
+    promptTokens,
   )
   if (ctx) ctx.waitUntil(metricWrite)
   else await metricWrite
@@ -12406,6 +12557,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     async start(controller) {
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
+        const promptTokens = await estimateAgentRequestTokens(request)
         send({ type: 'trace', status: 'running', trace: ['理解你的问题'] })
         await waitForAgentTimeline(140)
         send({
@@ -12421,6 +12573,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           metricResponse,
           performance.now() - startedAt,
           request.headers.get('x-giverny-agent-eval') === '1',
+          promptTokens,
         )
         if (ctx) ctx.waitUntil(metricWrite)
         else await metricWrite
@@ -12476,7 +12629,8 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
   const rows = await env.DB.prepare(
     `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
-            selection_count, fallback_used, http_status, created_at
+            selection_count, fallback_used, http_status, prompt_tokens, completion_tokens,
+            estimated_cost_cny, created_at
      FROM agent_run_metrics
      WHERE is_eval = 0 AND created_at >= datetime('now', ?)
      ORDER BY created_at DESC
@@ -12489,12 +12643,16 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   const approvalRuns = items.filter((item) => item.outcome.startsWith('approval_')).length
   const selectionRuns = items.filter((item) => item.outcome === 'selection').length
   const fallbackRuns = items.filter((item) => Number(item.fallback_used) > 0).length
+  const promptTokens = items.reduce((sum, item) => sum + Math.max(0, Number(item.prompt_tokens) || 0), 0)
+  const completionTokens = items.reduce((sum, item) => sum + Math.max(0, Number(item.completion_tokens) || 0), 0)
+  const estimatedCostCny = Number(items.reduce((sum, item) => sum + Math.max(0, Number(item.estimated_cost_cny) || 0), 0).toFixed(4))
   const durations = items.map((item) => Math.max(0, Number(item.duration_ms) || 0)).sort((a, b) => a - b)
   const avgDurationMs = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0
   const p95DurationMs = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0
   const toolCounts = new Map<string, number>()
   const intentCounts = new Map<string, number>()
   const dailyCounts = new Map<string, { date: string; total: number; errors: number; approvals: number; selections: number }>()
+  const modelCounts = new Map<string, { name: string; runs: number; errors: number; durationMs: number; tokens: number; costCny: number }>()
   items.forEach((item) => {
     parseAgentMetricTools(item.tools_json).forEach((toolName) => toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1))
     intentCounts.set(item.intent, (intentCounts.get(item.intent) || 0) + 1)
@@ -12505,7 +12663,26 @@ async function getAgentRunMetrics(env: Env, request: Request) {
     if (item.outcome.startsWith('approval_')) daily.approvals += 1
     if (item.outcome === 'selection') daily.selections += 1
     dailyCounts.set(date, daily)
+    const modelName = item.model || '未识别模型'
+    const model = modelCounts.get(modelName) || { name: modelName, runs: 0, errors: 0, durationMs: 0, tokens: 0, costCny: 0 }
+    model.runs += 1
+    if (item.outcome === 'error' || item.outcome === 'approval_failed') model.errors += 1
+    model.durationMs += Math.max(0, Number(item.duration_ms) || 0)
+    model.tokens += Math.max(0, Number(item.prompt_tokens) || 0) + Math.max(0, Number(item.completion_tokens) || 0)
+    model.costCny += Math.max(0, Number(item.estimated_cost_cny) || 0)
+    modelCounts.set(modelName, model)
   })
+  const oldestAt = items.at(-1)?.created_at || ''
+  const observationDays = oldestAt ? Math.max(1, Math.ceil((Date.now() - new Date(`${oldestAt.replace(' ', 'T')}Z`).getTime()) / 86_400_000)) : 0
+  const tuningEligible = totalRuns >= 30 && observationDays >= 7
+  const tuningSuggestions: string[] = []
+  if (tuningEligible) {
+    if (totalRuns && fallbackRuns / totalRuns >= 0.1) tuningSuggestions.push('模型回落率超过 10%，建议检查主模型稳定性或缩短上下文。')
+    if (p95DurationMs >= 15_000) tuningSuggestions.push('P95 响应超过 15 秒，建议压缩历史消息或把长分析继续交给后台任务。')
+    if (totalRuns && errorRuns / totalRuns >= 0.05) tuningSuggestions.push('失败率超过 5%，应先补齐高频失败回归，再考虑更换模型。')
+    if (totalRuns && selectionRuns / totalRuns >= 0.2) tuningSuggestions.push('消歧比例较高，建议在提问或任务选择器中更早携带任务 ID。')
+    if (tuningSuggestions.length === 0) tuningSuggestions.push('当前质量、延迟与回落指标稳定，暂不建议切换模型。')
+  }
   return ok({
     periodDays,
     generatedAt: nowIso(),
@@ -12519,10 +12696,28 @@ async function getAgentRunMetrics(env: Env, request: Request) {
       selectionRuns,
       fallbackRuns,
       errorRuns,
+      promptTokens,
+      completionTokens,
+      estimatedCostCny,
     },
     intents: [...intentCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     tools: [...toolCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     daily: [...dailyCounts.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    models: [...modelCounts.values()].map((item) => ({
+      name: item.name,
+      runs: item.runs,
+      successRate: Number((((item.runs - item.errors) / item.runs) * 100).toFixed(1)),
+      avgDurationMs: Math.round(item.durationMs / item.runs),
+      tokens: item.tokens,
+      estimatedCostCny: Number(item.costCny.toFixed(4)),
+    })).sort((a, b) => b.runs - a.runs),
+    tuning: {
+      eligible: tuningEligible,
+      observationDays,
+      minimumRuns: 30,
+      suggestions: tuningSuggestions,
+      reason: tuningEligible ? '已达到至少 7 天、30 次真实请求的调优门槛。' : `需要至少 7 天、30 次真实请求；当前 ${observationDays} 天、${totalRuns} 次。`,
+    },
     recentFailures: items
       .filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed')
       .slice(0, 8)
@@ -12532,16 +12727,41 @@ async function getAgentRunMetrics(env: Env, request: Request) {
 
 async function getAgentFailureCases(env: Env) {
   const rows = await env.DB.prepare(
-    `SELECT fingerprint, category, intent, tool_name, http_status, occurrences, regression_status, first_seen_at, last_seen_at
+    `SELECT fingerprint, category, intent, tool_name, http_status, occurrences, regression_status,
+            resolution_note, first_seen_at, last_seen_at, updated_at
      FROM agent_failure_cases ORDER BY CASE regression_status WHEN 'required' THEN 0 ELSE 1 END, occurrences DESC, last_seen_at DESC LIMIT 100`,
   ).all<{
     fingerprint: string; category: string; intent: string; tool_name: string | null; http_status: number
-    occurrences: number; regression_status: string; first_seen_at: string; last_seen_at: string
+    occurrences: number; regression_status: AgentFailureCase['regressionStatus']; resolution_note: string
+    first_seen_at: string; last_seen_at: string; updated_at: string
   }>()
   return ok({
-    cases: rows.results ?? [],
+    cases: (rows.results ?? []).map((row): AgentFailureCase => ({
+      fingerprint: row.fingerprint,
+      category: row.category,
+      intent: row.intent,
+      toolName: row.tool_name || undefined,
+      httpStatus: Number(row.http_status),
+      occurrences: Number(row.occurrences),
+      regressionStatus: row.regression_status,
+      resolutionNote: row.resolution_note,
+      firstSeenAt: row.first_seen_at,
+      lastSeenAt: row.last_seen_at,
+      updatedAt: row.updated_at,
+    })),
     policy: '同一匿名失败指纹出现两次后自动进入 required，下一次评测扩充必须覆盖该类别；不保存用户问题或业务内容。',
   })
+}
+
+async function updateAgentFailureCase(env: Env, fingerprint: string, request: Request) {
+  const body = await request.json().catch(() => ({})) as { status?: AgentFailureCase['regressionStatus']; note?: string }
+  const statuses: AgentFailureCase['regressionStatus'][] = ['candidate', 'required', 'covered', 'ignored']
+  const status = body.status || 'candidate'
+  if (!statuses.includes(status)) return fail('失败案例状态无效', 400)
+  await env.DB.prepare(
+    'UPDATE agent_failure_cases SET regression_status = ?, resolution_note = ?, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?',
+  ).bind(status, agentString(body.note, 500), fingerprint).run()
+  return getAgentFailureCases(env)
 }
 
 type AgentPlanResponse = {
@@ -13072,7 +13292,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path.startsWith('/api/ai/agent-plans') ||
-      path === '/api/ai/agent-failures' ||
+      path.startsWith('/api/ai/agent-failures') ||
+      path.startsWith('/api/ai/task-memories') ||
       path === '/api/ai/agent-metrics' ||
       path === '/api/ai/hour-estimate/metrics' ||
       path.startsWith('/api/ai/conversations') ||
@@ -13299,14 +13520,26 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/agent-failures' && request.method === 'GET') {
     return getAgentFailureCases(env)
   }
+  if (path.startsWith('/api/ai/agent-failures/') && request.method === 'PATCH') {
+    return updateAgentFailureCase(env, decodeURIComponent(path.slice('/api/ai/agent-failures/'.length)), request)
+  }
   if (path === '/api/ai/agent-plans' && request.method === 'GET') {
     return listAgentTaskPlans(env, request)
   }
   if (path.startsWith('/api/ai/agent-plans/') && path.endsWith('/read') && request.method === 'POST') {
-    return updateAgentTaskPlan(env, path.split('/')[4] || '', 'read')
+    return updateAgentTaskPlan(env, path.split('/')[4] || '', request, 'read')
   }
   if (path.startsWith('/api/ai/agent-plans/') && path.endsWith('/cancel') && request.method === 'POST') {
-    return updateAgentTaskPlan(env, path.split('/')[4] || '', 'cancel')
+    return updateAgentTaskPlan(env, path.split('/')[4] || '', request, 'cancel')
+  }
+  if (path.startsWith('/api/ai/agent-plans/') && request.method === 'PATCH') {
+    return updateAgentTaskPlan(env, path.split('/')[4] || '', request)
+  }
+  if (path === '/api/ai/task-memories' && request.method === 'GET') {
+    return listAgentTaskMemories(env, request)
+  }
+  if (path.startsWith('/api/ai/task-memories/') && request.method === 'PATCH') {
+    return updateAgentTaskMemory(env, path.split('/')[4] || '', request)
   }
   if (path === '/api/ai/approval' && request.method === 'POST') {
     return reviseAgentApproval(env, request)

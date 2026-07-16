@@ -33,3 +33,9 @@ INSERT INTO attachments (
   ('102', '13', 'acceptance', '直播封面V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-cover.jpg', 445440, '435 KB', 1, 1, '验收文件', '2026-06-29T18:05:00'),
   ('103', '11', 'acceptance', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 1, 1, '验收文件', '2026-06-30T18:00:00'),
   ('104', '1', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00');
+
+INSERT INTO agent_failure_cases (
+  fingerprint, category, intent, tool_name, http_status, occurrences, regression_status
+) VALUES (
+  'tool_execution:task_detail:get_task_detail:500', 'tool_execution', 'task_detail', 'get_task_detail', 500, 2, 'required'
+);
