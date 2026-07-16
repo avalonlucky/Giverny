@@ -96,6 +96,38 @@ export type HourEstimateMetrics = {
     medianErrorRate: number
     current: boolean
   }>
+  releaseGate: {
+    status: 'pass' | 'fail' | 'insufficient'
+    samples: number
+    candidateMedianErrorRate: number
+    baselineMedianErrorRate: number
+    toleranceRate: number
+    summary: string
+  }
+  quoteSummary: {
+    recordedCount: number
+    acceptedRate: number
+    settlementMedianErrorRate: number
+  }
+  sampleQuality: Array<{
+    taskId: number
+    title: string
+    designType: string
+    selectedHours: number
+    actualHours: number
+    issues: string[]
+    excluded: boolean
+    reason: string
+  }>
+  efficiencyProfiles: Array<{
+    name: string
+    samples: number
+    priorAverageHours: number
+    recentAverageHours: number
+    changeRate: number
+    direction: 'stable' | 'faster' | 'slower'
+    reuseRate: number
+  }>
   recent: Array<{
     taskId: number
     title: string
@@ -121,6 +153,18 @@ export type HourEstimateMetrics = {
       factors: string[]
       summary: string
     }
+    requirementTimeline: Array<{
+      stage: 'analysis' | 'changed' | 'accepted'
+      label: string
+      requirement: string
+    }>
+    quoteOutcome: {
+      quotedAmount: number
+      settledAmount: number
+      status: string
+      note: string
+      updatedAt: string
+    } | null
     reviewedAt: string
   }>
 }
@@ -345,6 +389,18 @@ export type HourEstimateSuggestion = {
     algorithm: string
     prompt: string
     provider: string
+  }
+  requirementQuality: {
+    score: number
+    grade: '待补充' | '可分析' | '完整'
+    strengths: string[]
+    missing: string[]
+    summary: string
+  }
+  decision: {
+    mode: 'estimate' | 'range_only' | 'needs_info'
+    canApply: boolean
+    reason: string
   }
   matchedTasks: Array<{
     id: number
@@ -738,6 +794,18 @@ export const api = {
     }),
   recordHourEstimateSampleFeedback: (payload: { suggestionId: string; sampleTaskId: number; relevant: boolean; reason?: string }) =>
     requestJson<{ suggestionId: string; sampleTaskId: number; relevant: boolean; reason: string }>('/api/ai/hour-estimate/sample-feedback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  setHourEstimateSampleQuality: (payload: { taskId: number; excluded: boolean; reason?: string }) =>
+    requestJson<{ taskId: number; excluded: boolean; reason: string; updatedAt: string }>('/api/ai/hour-estimate/sample-quality', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  recordHourEstimateQuoteOutcome: (payload: { taskId: number; quotedAmount: number; settledAmount: number; status: string; note: string }) =>
+    requestJson<{ taskId: number; quotedAmount: number; settledAmount: number; status: string; note: string; updatedAt: string }>('/api/ai/hour-estimate/quote-outcome', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

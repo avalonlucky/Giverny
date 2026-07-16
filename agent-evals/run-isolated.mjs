@@ -351,7 +351,7 @@ async function runHourEstimateLearningCheck(cookie) {
     headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({
       title: '发布会产品视频降噪',
-      requirement: '复用现有剪辑工程，处理产品视频的背景电流声，适配三个尺寸并导出。',
+      requirement: '复用现有剪辑工程，完成 1 条产品视频背景电流声降噪；甲方已提供完整视频与文案，适配三个尺寸，包含一轮修改，由陈义君确认并导出。',
       selectedType: '视频剪辑',
       requester: '陈义君',
       startDate: '2026-07-16T09:00',
@@ -372,10 +372,13 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!Array.isArray(result.riskFactors) || !result.accuracy?.summary) {
     throw new Error('Hour estimate reliability details are missing')
   }
+  if (!(result.requirementQuality?.score >= 50) || !result.requirementQuality?.grade || !result.decision?.mode) {
+    throw new Error(`Hour estimate requirement quality or decision is missing: ${JSON.stringify({ requirementQuality: result.requirementQuality, decision: result.decision })}`)
+  }
   if (!(result.pricing?.regularAmount > 0) || !(result.pricing.safeAmount >= result.pricing.regularAmount)) {
     throw new Error(`Hour estimate pricing is invalid: ${JSON.stringify(result.pricing)}`)
   }
-  if (result.modelVersion?.algorithm !== '2.0.0' || !result.modelVersion?.prompt || !result.modelVersion?.provider) {
+  if (result.modelVersion?.algorithm !== '3.0.0' || !result.modelVersion?.prompt || !result.modelVersion?.provider) {
     throw new Error(`Hour estimate version metadata is missing: ${JSON.stringify(result.modelVersion)}`)
   }
   const adaptation = result.complexity?.dimensions?.find((item) => item.key === 'adaptation')
@@ -461,6 +464,89 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!acceptResponse.ok || accepted.status !== '已验收') {
     throw new Error(`Hour estimate review acceptance failed: ${JSON.stringify(accepted)}`)
   }
+
+  for (let index = 0; index < 5; index += 1) {
+    const replaySuggestionResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        title: `工时回放评测 ${index + 1}`,
+        requirement: '复用现有剪辑工程，完成 1 条产品视频降噪；甲方已提供完整视频与文案，适配三个尺寸，包含一轮修改，由陈义君确认并导出。',
+        selectedType: '视频剪辑',
+        requester: '陈义君',
+        startDate: `2026-07-${String(17 + index).padStart(2, '0')}T09:00`,
+        estimatedDate: `2026-07-${String(17 + index).padStart(2, '0')}T18:00`,
+        currentEstimatedHours: 5,
+      }),
+    })
+    const replaySuggestion = await replaySuggestionResponse.json().catch(() => ({}))
+    if (!replaySuggestionResponse.ok || !replaySuggestion.suggestionId) {
+      throw new Error(`Hour estimate replay suggestion failed: ${JSON.stringify(replaySuggestion)}`)
+    }
+    const day = String(17 + index).padStart(2, '0')
+    const replayCreateResponse = await fetch('http://127.0.0.1:8798/api/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        id: 0,
+        title: `工时回放评测 ${index + 1}`,
+        requirement: '复用现有剪辑工程，完成 1 条产品视频降噪；甲方已提供完整视频与文案，适配三个尺寸，包含一轮修改，由陈义君确认并导出。',
+        type: '视频剪辑',
+        date: `2026-07-${day}T09:00`,
+        estimatedDate: `2026-07-${day}T18:00`,
+        settlementMonth: '2026-07',
+        estimatedHours: 5,
+        actualHours: 0,
+        requester: '陈义君',
+        contact: '陈义君',
+        reviewer: '黄媚',
+        stage: '计划中',
+        status: '计划中',
+        progress: 0,
+        billable: true,
+        files: [],
+        timeEntries: [],
+        waitingEntries: [],
+        hourEstimateSuggestionId: replaySuggestion.suggestionId,
+      }),
+    })
+    const replayTask = await replayCreateResponse.json().catch(() => ({}))
+    if (!replayCreateResponse.ok || !replayTask.id) {
+      throw new Error(`Hour estimate replay task creation failed: ${JSON.stringify(replayTask)}`)
+    }
+    const replayAcceptResponse = await fetch(`http://127.0.0.1:8798/api/tasks/${replayTask.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        status: '已验收',
+        stage: '已验收',
+        progress: 100,
+        actualDeliveryDate: `2026-07-${day}T14:00`,
+        timeEntries: [{
+          id: `hour-replay-entry-${index + 1}`,
+          date: `2026-07-${day}`,
+          start: '09:00',
+          end: '14:00',
+          note: '完成降噪、三个尺寸适配和一轮修改',
+          isAcceptanceProgress: true,
+        }],
+      }),
+    })
+    const replayAccepted = await replayAcceptResponse.json().catch(() => ({}))
+    if (!replayAcceptResponse.ok || replayAccepted.status !== '已验收') {
+      throw new Error(`Hour estimate replay acceptance failed: ${JSON.stringify(replayAccepted)}`)
+    }
+  }
+
+  const quoteResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/quote-outcome', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ taskId: created.id, quotedAmount: 1800, settledAmount: 1700, status: 'adjusted', note: '隔离评测报价调整' }),
+  })
+  const quote = await quoteResponse.json().catch(() => ({}))
+  if (!quoteResponse.ok || quote.status !== 'adjusted') {
+    throw new Error(`Hour estimate quote outcome failed: ${JSON.stringify(quote)}`)
+  }
   const metricsResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/metrics?month=2026-07', {
     headers: { cookie },
   })
@@ -475,8 +561,27 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!review?.requirementChange?.changed || !metrics.trends?.some((item) => item.month === '2026-07')) {
     throw new Error(`Requirement change or cross-month trend is missing: ${JSON.stringify(review)}`)
   }
-  if (!metrics.versions?.some((item) => item.current && item.algorithm === '2.0.0')) {
+  if (!metrics.versions?.some((item) => item.current && item.algorithm === '3.0.0')) {
     throw new Error(`Hour estimate version comparison is missing: ${JSON.stringify(metrics.versions)}`)
+  }
+  if (metrics.releaseGate?.status !== 'pass' || metrics.releaseGate?.sampleCount < 3) {
+    throw new Error(`Hour estimate chronological replay gate did not pass: ${JSON.stringify(metrics.releaseGate)}`)
+  }
+  if (metrics.quoteSummary?.recordedCount < 1 || review?.quoteOutcome?.status !== 'adjusted') {
+    throw new Error(`Hour estimate quote feedback loop is missing: ${JSON.stringify({ quoteSummary: metrics.quoteSummary, quoteOutcome: review?.quoteOutcome })}`)
+  }
+  if (!metrics.efficiencyProfiles?.some((item) => item.name === '视频剪辑') || !Array.isArray(review?.requirementTimeline)) {
+    throw new Error(`Hour estimate efficiency profile or requirement timeline is missing: ${JSON.stringify({ efficiencyProfiles: metrics.efficiencyProfiles, timeline: review?.requirementTimeline })}`)
+  }
+
+  const qualityResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/sample-quality', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ taskId: created.id, excluded: true, reason: '需求中途变更，不纳入标准样本' }),
+  })
+  const quality = await qualityResponse.json().catch(() => ({}))
+  if (!qualityResponse.ok || quality.excluded !== true) {
+    throw new Error(`Hour estimate sample quality update failed: ${JSON.stringify(quality)}`)
   }
   const correctionResponse = await fetch('http://127.0.0.1:8798/api/ai/hour-estimate/outcome-correction', {
     method: 'POST',
@@ -493,7 +598,10 @@ async function runHourEstimateLearningCheck(cookie) {
   if (!correctedMetricsResponse.ok || correctedReview?.correction?.note !== '隔离评测人工校正') {
     throw new Error(`Hour estimate corrected review is missing: ${JSON.stringify(correctedReview)}`)
   }
-  process.stdout.write('AI hour estimate pricing, semantic feedback, requirement change, version comparison, correction, trends, and calibration checks passed.\n')
+  if (!correctedMetrics.sampleQuality?.some((item) => item.taskId === created.id && item.excluded === true)) {
+    throw new Error(`Hour estimate excluded sample is missing: ${JSON.stringify(correctedMetrics.sampleQuality)}`)
+  }
+  process.stdout.write('AI hour estimate quality scoring, refusal, pricing, chronological replay gate, quote feedback, sample quality, requirement timeline, efficiency profile, correction, trends, and calibration checks passed.\n')
 }
 
 try {

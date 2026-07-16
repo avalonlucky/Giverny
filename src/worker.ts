@@ -6408,8 +6408,22 @@ type HourEstimateRequirementChange = {
   summary: string
 }
 
-const HOUR_ESTIMATE_ALGORITHM_VERSION = '2.0.0'
-const HOUR_ESTIMATE_PROMPT_VERSION = '2026-07-16.2'
+type HourEstimateRequirementQuality = {
+  score: number
+  grade: '待补充' | '可分析' | '完整'
+  strengths: string[]
+  missing: string[]
+  summary: string
+}
+
+type HourEstimateDecision = {
+  mode: 'estimate' | 'range_only' | 'needs_info'
+  canApply: boolean
+  reason: string
+}
+
+const HOUR_ESTIMATE_ALGORITHM_VERSION = '3.0.0'
+const HOUR_ESTIMATE_PROMPT_VERSION = '2026-07-16.3'
 
 type HourEstimateResult = {
   suggestedHours: number
@@ -6441,6 +6455,8 @@ type HourEstimateResult = {
   accuracy: HourEstimateAccuracy
   pricing: HourEstimatePricing
   modelVersion: HourEstimateModelVersion
+  requirementQuality: HourEstimateRequirementQuality
+  decision: HourEstimateDecision
   matchedTasks: Array<{
     id: number
     title: string
@@ -6837,6 +6853,22 @@ async function loadHourEstimateOutcomeCorrections(env: Env, taskIds: string[]) {
   return result
 }
 
+async function loadHourEstimateSampleQuality(env: Env) {
+  await ensureTaskLearningTables(env)
+  const rows = await env.DB.prepare(
+    `SELECT task_id, action, metadata_json FROM ai_learning_events
+     WHERE context = 'hour_estimate_sample_quality' ORDER BY id DESC LIMIT 1000`,
+  ).all<{ task_id: number | null; action: string; metadata_json: string }>()
+  const result = new Map<string, { excluded: boolean; reason: string }>()
+  for (const row of rows.results ?? []) {
+    const taskId = String(row.task_id ?? '')
+    if (!taskId || result.has(taskId)) continue
+    const metadata = parseJsonRecord(row.metadata_json)
+    result.set(taskId, { excluded: row.action === 'rejected', reason: String(metadata.reason ?? '') })
+  }
+  return result
+}
+
 function applyHourEstimateSampleFeedback(
   sample: WeightedHourEstimateSample,
   profile: HourEstimateComplexityProfile,
@@ -6850,6 +6882,19 @@ function applyHourEstimateSampleFeedback(
     ...sample,
     relevance: Math.max(0.08, sample.relevance * 0.25),
     similarityReasons: [...sample.similarityReasons.filter((item) => !item.includes('用户校正')), '用户曾校正为不相似'].slice(0, 4),
+  }
+}
+
+function applyHourEstimateSampleQuality(
+  sample: WeightedHourEstimateSample,
+  quality: Map<string, { excluded: boolean; reason: string }>,
+) {
+  const rule = quality.get(sample.id)
+  if (!rule?.excluded) return sample
+  return {
+    ...sample,
+    relevance: 0.01,
+    similarityReasons: ['样本已由管理员排除', rule.reason].filter(Boolean).slice(0, 2),
   }
 }
 
@@ -6904,6 +6949,57 @@ function hourEstimateClarificationQuestions(profile: HourEstimateComplexityProfi
   if (profile.signals.adaptationCount === 0) questions.push('是否还需要横竖版、多尺寸或多个平台的适配版本？')
   if (!profile.signals.revisionRisk) questions.push('预计由几方确认，通常需要预留几轮修改？')
   return questions.slice(0, 4)
+}
+
+function hourEstimateRequirementQuality(profile: HourEstimateComplexityProfile, request: HourEstimateRequest): HourEstimateRequirementQuality {
+  const requirement = String(request.requirement ?? '').trim()
+  const strengths = [
+    profile.signals.basis !== 'unknown' ? '设计基础明确' : '',
+    profile.signals.deliverableCount > 0 || profile.signals.pageCount > 0 ? '交付规模明确' : '',
+    profile.signals.contentReadiness !== 'unknown' ? '素材状态明确' : '',
+    profile.signals.adaptationCount > 0 ? '适配范围明确' : '',
+    profile.signals.specialtyCount > 0 ? '专项处理明确' : '',
+    /确认|对接|验收|修改|改稿|反馈/.test(requirement) ? '协作边界明确' : '',
+    String(request.estimatedDate ?? '').trim() ? '交付时间明确' : '',
+  ].filter(Boolean)
+  const missing = [
+    profile.signals.basis === 'unknown' ? '从零设计还是复用已有方案' : '',
+    profile.signals.deliverableCount <= 0 && profile.signals.pageCount <= 0 ? '交付数量或页数' : '',
+    profile.signals.contentReadiness === 'unknown' ? '文案与素材准备情况' : '',
+    profile.signals.adaptationCount <= 0 && !/单尺寸|无需适配|仅.{0,4}(一个|1个)尺寸/.test(requirement) ? '尺寸或平台适配范围' : '',
+    !/确认|对接|验收|修改|改稿|反馈/.test(requirement) ? '确认方与修改轮次' : '',
+  ].filter(Boolean)
+  const detailScore = Math.min(20, Math.round(requirement.length / 8))
+  const evidenceScore = strengths.length * 12
+  const penalty = missing.length * 5
+  const score = Math.round(clampNumber(20 + detailScore + evidenceScore - penalty, 0, 100))
+  const grade: HourEstimateRequirementQuality['grade'] = score >= 75 ? '完整' : score >= 50 ? '可分析' : '待补充'
+  return {
+    score,
+    grade,
+    strengths: strengths.slice(0, 5),
+    missing: missing.slice(0, 5),
+    summary: missing.length
+      ? `需求质量 ${score} 分，建议先补充${missing.slice(0, 3).join('、')}。`
+      : `需求质量 ${score} 分，关键工作量边界已经明确。`,
+  }
+}
+
+function hourEstimateDecision(
+  confidence: HourEstimateConfidence,
+  quality: HourEstimateRequirementQuality,
+  sampleCount: number,
+  riskFactors: string[],
+  expectedRange: { low: number; high: number },
+): HourEstimateDecision {
+  if (quality.score < 50 || quality.missing.length >= 4) {
+    return { mode: 'needs_info', canApply: false, reason: '当前需求缺少多个决定工作量的边界，补充信息后再生成可采用建议。' }
+  }
+  const spread = expectedRange.low > 0 ? expectedRange.high / expectedRange.low : 9
+  if (confidence === '低' || sampleCount < 3 || riskFactors.length >= 3 || spread >= 1.8) {
+    return { mode: 'range_only', canApply: false, reason: '证据不足以支持单点工时，当前只提供排期区间，不建议直接采用。' }
+  }
+  return { mode: 'estimate', canApply: true, reason: '需求边界和历史证据达到可采用门槛。' }
 }
 
 function hourEstimateBreakdown(hours: number, profile: HourEstimateComplexityProfile): HourEstimateBreakdownItem[] {
@@ -7392,6 +7488,8 @@ async function persistHourEstimateSuggestion(
       accuracy: result.accuracy,
       pricing: result.pricing,
       modelVersion,
+      requirementQuality: result.requirementQuality,
+      decision: result.decision,
       matchedTasks: result.matchedTasks,
     }),
   ).run()
@@ -7410,6 +7508,8 @@ async function persistHourEstimateSuggestion(
     learningAdjustmentApplied: result.learningAdjustment.applied,
     expectedRange: result.expectedRange,
     accuracySampleCount: result.accuracy.sampleCount,
+    requirementQualityScore: result.requirementQuality.score,
+    decisionMode: result.decision.mode,
     provider,
     modelVersion,
   })
@@ -7609,6 +7709,78 @@ async function saveHourEstimateSampleFeedback(env: Env, request: Request) {
   return ok({ suggestionId, sampleTaskId, relevant, reason })
 }
 
+async function saveHourEstimateSampleQuality(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { taskId?: number; excluded?: boolean; reason?: string }
+  const taskId = Number(body.taskId)
+  const excluded = body.excluded !== false
+  const reason = String(body.reason ?? '').trim().slice(0, 240)
+  if (!Number.isFinite(taskId)) return fail('样本任务参数不完整')
+  const task = await env.DB.prepare(
+    `SELECT title, design_type, actual_hours, status FROM tasks
+     WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL`,
+  ).bind(String(taskId)).first<Pick<DbTask, 'title' | 'design_type' | 'actual_hours' | 'status'>>()
+  if (!task || task.status !== '已验收' || Number(task.actual_hours) <= 0) return fail('只有已验收且有真实工时的任务可以治理', 404)
+  await ensureTaskLearningTables(env)
+  await env.DB.prepare(
+    `INSERT INTO ai_learning_events
+     (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
+     VALUES ('hour_estimate_sample_quality', ?, '', '', ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    excluded ? 'rejected' : 'adopted',
+    reason,
+    task.design_type ?? '',
+    taskId,
+    task.title,
+    JSON.stringify({ excluded, reason }),
+    Date.now(),
+  ).run()
+  return ok({ taskId, excluded, reason, updatedAt: nowIso() })
+}
+
+async function saveHourEstimateQuoteOutcome(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    taskId?: number
+    quotedAmount?: number
+    settledAmount?: number
+    status?: string
+    note?: string
+  }
+  const taskId = Number(body.taskId)
+  const quotedAmount = Math.max(0, Number(body.quotedAmount) || 0)
+  const settledAmount = Math.max(0, Number(body.settledAmount) || 0)
+  const status = ['pending', 'accepted', 'adjusted', 'rejected'].includes(String(body.status)) ? String(body.status) : 'pending'
+  const note = String(body.note ?? '').trim().slice(0, 500)
+  if (!Number.isFinite(taskId) || quotedAmount <= 0) return fail('请填写有效的最终对外报价')
+  const suggestion = await env.DB.prepare(
+    `SELECT hs.id, hs.design_type, hs.basis_json, t.title
+     FROM hour_estimate_suggestions hs JOIN tasks t ON CAST(t.id AS TEXT) = hs.task_id
+     WHERE hs.task_id = ? ORDER BY hs.requested_at DESC LIMIT 1`,
+  ).bind(String(taskId)).first<{ id: string; design_type: string | null; basis_json: string | null; title: string }>()
+  if (!suggestion) return fail('该任务没有可关联的 AI 工时建议', 404)
+  const basis = parseJsonRecord(suggestion.basis_json)
+  const pricing = typeof basis.pricing === 'object' && basis.pricing ? basis.pricing as Record<string, unknown> : {}
+  await ensureTaskLearningTables(env)
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_quote_outcome' AND task_id = ?").bind(taskId),
+    env.DB.prepare(
+      `INSERT INTO ai_learning_events
+       (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
+       VALUES ('hour_estimate_quote_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      status,
+      String(pricing.regularAmount ?? ''),
+      String(quotedAmount),
+      String(settledAmount || ''),
+      suggestion.design_type ?? '',
+      taskId,
+      suggestion.title,
+      JSON.stringify({ suggestionId: suggestion.id, quotedAmount, settledAmount, status, note, suggestedPricing: pricing }),
+      Date.now(),
+    ),
+  ])
+  return ok({ taskId, quotedAmount, settledAmount, status, note, updatedAt: nowIso() })
+}
+
 type HourEstimateMetricRow = {
   suggestion_id: string
   task_id: string
@@ -7620,7 +7792,7 @@ type HourEstimateMetricRow = {
   selected_hours: number | null
   actual_hours: number
   start_date: string | null
-  settlement_month: string
+  settlement_month: string | null
   time_entries_json: string | null
   waiting_entries_json: string | null
   initial_requirement: string | null
@@ -7665,7 +7837,7 @@ function summarizeHourEstimateMetricGroup(rows: HourEstimateMetricRow[], key: 'd
 
 async function getHourEstimateMetrics(env: Env, request: Request) {
   const month = new URL(request.url).searchParams.get('month')?.trim() ?? ''
-  const [rows, correctionRows] = await Promise.all([
+  const [rows, correctionRows, qualityRows, quoteRows] = await Promise.all([
     env.DB.prepare(
     `SELECT hs.id AS suggestion_id, hs.task_id, t.title, t.design_type, t.requester,
             hs.suggested_hours, hs.safe_hours, hs.selected_hours, hs.actual_hours,
@@ -7682,6 +7854,14 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
       `SELECT task_id, metadata_json, created_at FROM ai_learning_events
        WHERE context = 'hour_estimate_outcome_correction' ORDER BY id DESC LIMIT 500`,
     ).all<{ task_id: number | null; metadata_json: string; created_at: number }>(),
+    env.DB.prepare(
+      `SELECT task_id, action, metadata_json, created_at FROM ai_learning_events
+       WHERE context = 'hour_estimate_sample_quality' ORDER BY id DESC LIMIT 1000`,
+    ).all<{ task_id: number | null; action: string; metadata_json: string; created_at: number }>(),
+    env.DB.prepare(
+      `SELECT task_id, action, metadata_json, created_at FROM ai_learning_events
+       WHERE context = 'hour_estimate_quote_outcome' ORDER BY id DESC LIMIT 500`,
+    ).all<{ task_id: number | null; action: string; metadata_json: string; created_at: number }>(),
   ])
   const allItems = rows.results ?? []
   const items = month ? allItems.filter((row) => row.settlement_month === month) : allItems
@@ -7699,6 +7879,30 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
     } catch {
       corrections.set(taskId, { factors: [], note: '', correctedAt: new Date(row.created_at).toISOString() })
     }
+  }
+  const sampleQualityRules = new Map<number, { excluded: boolean; reason: string; updatedAt: string }>()
+  for (const row of qualityRows.results ?? []) {
+    const taskId = Number(row.task_id)
+    if (!Number.isFinite(taskId) || sampleQualityRules.has(taskId)) continue
+    const metadata = parseJsonRecord(row.metadata_json)
+    sampleQualityRules.set(taskId, {
+      excluded: row.action === 'rejected',
+      reason: String(metadata.reason ?? ''),
+      updatedAt: new Date(row.created_at).toISOString(),
+    })
+  }
+  const quoteOutcomes = new Map<number, { quotedAmount: number; settledAmount: number; status: string; note: string; updatedAt: string }>()
+  for (const row of quoteRows.results ?? []) {
+    const taskId = Number(row.task_id)
+    if (!Number.isFinite(taskId) || quoteOutcomes.has(taskId)) continue
+    const metadata = parseJsonRecord(row.metadata_json)
+    quoteOutcomes.set(taskId, {
+      quotedAmount: Number(metadata.quotedAmount) || 0,
+      settledAmount: Number(metadata.settledAmount) || 0,
+      status: row.action,
+      note: String(metadata.note ?? ''),
+      updatedAt: new Date(row.created_at).toISOString(),
+    })
   }
   const errors = items.map((row) => hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
   const suggestionErrors = items.map((row) => hourEstimateMetricError(Number(row.suggested_hours), Number(row.actual_hours)))
@@ -7744,6 +7948,12 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
       factors: correction?.factors.length ? correction.factors : hourEstimateOutcomeFactors(taskForFactors, selectedHours, actualHours),
       correction,
       requirementChange,
+      requirementTimeline: [
+        { stage: 'analysis', label: 'AI 分析时', requirement: row.initial_requirement ?? '' },
+        ...(requirementChange.changed ? [{ stage: 'changed', label: '执行中发生变化', requirement: requirementChange.summary }] : []),
+        { stage: 'accepted', label: '验收时', requirement: row.final_requirement ?? '' },
+      ],
+      quoteOutcome: quoteOutcomes.get(taskId) ?? null,
       reviewedAt: row.updated_at,
     }
   })
@@ -7752,7 +7962,7 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
     count: modes[mode],
     medianErrorRate: modeErrors[mode].length ? Math.round(medianValue(modeErrors[mode]) * 100) : 0,
   }))
-  const trends = [...new Set(allItems.map((row) => row.settlement_month).filter((value) => /^\d{4}-\d{2}$/.test(value)))]
+  const trends = [...new Set(allItems.map((row) => row.settlement_month).filter((value): value is string => Boolean(value && /^\d{4}-\d{2}$/.test(value))))]
     .sort().slice(-12).map((trendMonth) => {
       const trendItems = allItems.filter((row) => row.settlement_month === trendMonth)
       const trendErrors = trendItems.map((row) => hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
@@ -7797,6 +8007,85 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
       current: group.algorithm === HOUR_ESTIMATE_ALGORITHM_VERSION && group.prompt === HOUR_ESTIMATE_PROMPT_VERSION,
     }
   }).sort((left, right) => Number(right.current) - Number(left.current) || right.samples - left.samples)
+  const replayRows = [...allItems].sort((left, right) => left.updated_at.localeCompare(right.updated_at))
+  const replayCandidateErrors: number[] = []
+  const replayBaselineErrors: number[] = []
+  replayRows.forEach((row, index) => {
+    const taskId = Number(row.task_id)
+    if (sampleQualityRules.get(taskId)?.excluded) return
+    const prior = replayRows.slice(0, index).filter((candidate) => (
+      candidate.design_type === row.design_type
+      && !sampleQualityRules.get(Number(candidate.task_id))?.excluded
+      && !hourEstimateRequirementChange(candidate.initial_requirement ?? '', candidate.final_requirement ?? '', candidate.title).changed
+    )).slice(-8)
+    if (prior.length < 2) return
+    const candidateHours = medianValue(prior.map((candidate) => Number(candidate.actual_hours)).filter((value) => value > 0))
+    replayCandidateErrors.push(hourEstimateMetricError(candidateHours, Number(row.actual_hours)))
+    replayBaselineErrors.push(hourEstimateMetricError(Number(row.selected_hours) || Number(row.suggested_hours), Number(row.actual_hours)))
+  })
+  const replayCandidateMedian = replayCandidateErrors.length ? Math.round(medianValue(replayCandidateErrors) * 100) : 0
+  const replayBaselineMedian = replayBaselineErrors.length ? Math.round(medianValue(replayBaselineErrors) * 100) : 0
+  const releaseGateStatus = replayCandidateErrors.length < 3
+    ? 'insufficient'
+    : replayCandidateMedian <= replayBaselineMedian + 2 ? 'pass' : 'fail'
+  const sampleQuality = allItems.slice(0, 80).map((row) => {
+    const taskId = Number(row.task_id)
+    const selectedHours = Number(row.selected_hours) || Number(row.suggested_hours)
+    const actualHours = Number(row.actual_hours)
+    const requirementChange = hourEstimateRequirementChange(row.initial_requirement ?? '', row.final_requirement ?? '', row.title)
+    const rule = sampleQualityRules.get(taskId)
+    const issues = [
+      !String(row.design_type ?? '').trim() ? '缺少设计类型' : '',
+      String(row.final_requirement ?? '').trim().length < 20 ? '需求信息过短' : '',
+      selectedHours > 0 && actualHours >= selectedHours * 2.5 ? '真实工时异常偏高' : '',
+      selectedHours > 0 && actualHours <= selectedHours * 0.3 ? '真实工时异常偏低' : '',
+      requirementChange.changed ? '分析后需求发生变化' : '',
+    ].filter(Boolean)
+    return {
+      taskId,
+      title: row.title,
+      designType: row.design_type,
+      selectedHours,
+      actualHours,
+      issues,
+      excluded: rule?.excluded ?? false,
+      reason: rule?.reason ?? '',
+    }
+  }).filter((item) => item.issues.length > 0 || item.excluded).slice(0, 30)
+  const quoteItems = [...quoteOutcomes.values()]
+  const quoteAccepted = quoteItems.filter((item) => item.status === 'accepted' || item.status === 'adjusted')
+  const quoteSettlementErrors = quoteItems
+    .filter((item) => item.quotedAmount > 0 && item.settledAmount > 0)
+    .map((item) => Math.abs(item.quotedAmount - item.settledAmount) / item.settledAmount)
+  const efficiencyGroups = new Map<string, HourEstimateMetricRow[]>()
+  allItems.forEach((row) => {
+    const key = String(row.design_type ?? '').trim() || '未分类'
+    efficiencyGroups.set(key, [...(efficiencyGroups.get(key) ?? []), row])
+  })
+  const efficiencyProfiles = [...efficiencyGroups.entries()].map(([name, group]) => {
+    const chronological = [...group].sort((left, right) => left.updated_at.localeCompare(right.updated_at))
+    const pivot = Math.max(1, Math.floor(chronological.length / 2))
+    const prior = chronological.slice(0, pivot)
+    const recentRows = chronological.slice(pivot)
+    const priorAverage = average(prior.map((row) => Number(row.actual_hours)))
+    const recentAverage = average(recentRows.map((row) => Number(row.actual_hours)))
+    const changeRate = priorAverage > 0 ? Math.round(((recentAverage - priorAverage) / priorAverage) * 100) : 0
+    const reuseCount = group.filter((row) => {
+      const basis = parseJsonRecord(row.basis_json)
+      const complexity = typeof basis.complexity === 'object' && basis.complexity ? basis.complexity as Record<string, unknown> : {}
+      const dimensions = Array.isArray(complexity.dimensions) ? complexity.dimensions as Array<Record<string, unknown>> : []
+      return dimensions.some((item) => item.key === 'basis' && String(item.value).includes('复用'))
+    }).length
+    return {
+      name,
+      samples: group.length,
+      priorAverageHours: Math.round(priorAverage * 10) / 10,
+      recentAverageHours: Math.round(recentAverage * 10) / 10,
+      changeRate,
+      direction: Math.abs(changeRate) < 8 ? 'stable' : changeRate < 0 ? 'faster' : 'slower',
+      reuseRate: Math.round((reuseCount / group.length) * 100),
+    }
+  }).sort((left, right) => right.samples - left.samples).slice(0, 12)
   return ok({
     month,
     generatedAt: nowIso(),
@@ -7818,6 +8107,25 @@ async function getHourEstimateMetrics(env: Env, request: Request) {
     byRequester: summarizeHourEstimateMetricGroup(items, 'requester').slice(0, 12),
     trends,
     versions,
+    releaseGate: {
+      status: releaseGateStatus,
+      samples: replayCandidateErrors.length,
+      candidateMedianErrorRate: replayCandidateMedian,
+      baselineMedianErrorRate: replayBaselineMedian,
+      toleranceRate: 2,
+      summary: releaseGateStatus === 'pass'
+        ? '候选历史基线在无未来数据回放中未劣于线上基线，可以继续发布验证。'
+        : releaseGateStatus === 'fail'
+          ? '候选历史基线回放误差高于允许阈值，应阻止预测算法发布。'
+          : '可回放样本不足 3 条，暂不宣称算法提升；继续保守发布并观察。',
+    },
+    quoteSummary: {
+      recordedCount: quoteItems.length,
+      acceptedRate: quoteItems.length ? Math.round((quoteAccepted.length / quoteItems.length) * 100) : 0,
+      settlementMedianErrorRate: quoteSettlementErrors.length ? Math.round(medianValue(quoteSettlementErrors) * 100) : 0,
+    },
+    sampleQuality,
+    efficiencyProfiles,
     recent,
   })
 }
@@ -11608,11 +11916,13 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     return fail('请先选择设计类型，并填写任务名称或任务具体需求')
   }
   const currentProfile = hourEstimateComplexityProfile({ title, requirement, attachmentText, attachmentNames })
-  const [requesterAdjustment, learningAdjustment, hourlyRate, sampleFeedbackRules] = await Promise.all([
+  const requirementQuality = hourEstimateRequirementQuality(currentProfile, { ...body, title, requirement })
+  const [requesterAdjustment, learningAdjustment, hourlyRate, sampleFeedbackRules, sampleQualityRules] = await Promise.all([
     hourEstimateRequesterAdjustment(env, requester, selectedType),
     hourEstimateLearningAdjustment(env, selectedType),
     getHourlyRate(env),
     loadHourEstimateSampleFeedback(env, selectedType),
+    loadHourEstimateSampleQuality(env),
   ])
 
   const exactRows = selectedType
@@ -11677,6 +11987,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     }))
     .map((sample) => rerankHourEstimateSample(sample, currentProfile, requester))
     .map((sample) => applyHourEstimateSampleFeedback(sample, currentProfile, sampleFeedbackRules))
+    .map((sample) => applyHourEstimateSampleQuality(sample, sampleQualityRules))
     .sort((left, right) => right.relevance - left.relevance)
   const similarSamples = samples.filter((sample) => sample.relation !== 'exact')
   const exactSampleCount = exactSamples.length
@@ -11692,6 +12003,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     }
     const riskFactors = hourEstimateRiskFactors(currentProfile, 0, 0, 0, 0)
     const safeHours = roundToHalfHour(currentEstimatedHours + 0.5)
+    const decision = hourEstimateDecision('低', requirementQuality, 0, riskFactors, expectedRange)
     const result: HourEstimateResult = {
       suggestedHours: currentEstimatedHours,
       safeHours,
@@ -11723,6 +12035,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       accuracy: hourEstimateAccuracy([]),
       pricing: hourEstimatePricing(currentEstimatedHours, safeHours, expectedRange, hourlyRate, '低', riskFactors),
       modelVersion: { algorithm: HOUR_ESTIMATE_ALGORITHM_VERSION, prompt: HOUR_ESTIMATE_PROMPT_VERSION, provider: 'statistical-no-history' },
+      requirementQuality,
+      decision,
       matchedTasks: [],
     }
     return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history'))
@@ -11861,6 +12175,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   }
   const accuracy = hourEstimateAccuracy(stableCalibrationRows)
   const riskFactors = hourEstimateRiskFactors(currentProfile, sampleCount, p25Hours, medianHours, p80Hours)
+  const decision = hourEstimateDecision(confidence, requirementQuality, sampleCount, riskFactors, expectedRange)
   const basis = Array.isArray(parsed?.basis)
     ? parsed.basis.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 5)
     : []
@@ -11905,6 +12220,8 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     accuracy,
     pricing: hourEstimatePricing(suggestedHours, safeHours, expectedRange, hourlyRate, confidence, riskFactors),
     modelVersion: { algorithm: HOUR_ESTIMATE_ALGORITHM_VERSION, prompt: HOUR_ESTIMATE_PROMPT_VERSION, provider },
+    requirementQuality,
+    decision,
     matchedTasks,
   }
   return ok(await persistHourEstimateSuggestion(env, body, result, provider))
@@ -12185,6 +12502,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/hour-estimate/sample-feedback' && request.method === 'POST') {
     return saveHourEstimateSampleFeedback(env, request)
+  }
+  if (path === '/api/ai/hour-estimate/sample-quality' && request.method === 'POST') {
+    return saveHourEstimateSampleQuality(env, request)
+  }
+  if (path === '/api/ai/hour-estimate/quote-outcome' && request.method === 'POST') {
+    return saveHourEstimateQuoteOutcome(env, request)
   }
   if (path === '/api/ai/progress-estimate' && request.method === 'POST') {
     return estimateTaskProgressWithAi(env, request)
