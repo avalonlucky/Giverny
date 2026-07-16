@@ -12851,6 +12851,18 @@ type LocalCliChatRoute = {
 type LocalCliChatDecision = {
   route: LocalCliChatRoute | null
   cloudReason: string
+  immediate?: {
+    content: string
+    trace: string[]
+    cliName: string
+    deviceName: string
+  }
+}
+
+function isRuntimeIdentityQuestion(message: string) {
+  const normalized = message.replace(/\s+/g, '')
+  return /(?:你|爱丽丝|工作助手|当前|现在).{0,12}(?:用|使用|运行|基于|接入).{0,12}(?:哪个|什么|哪一个|谁的)?(?:大模型|模型|CLI|运行时)/i.test(normalized)
+    || /(?:你|爱丽丝|工作助手).{0,8}(?:是|属于).{0,8}(?:Claude|GPT|Codex|豆包|DeepSeek|Kimi|Gemini)/i.test(normalized)
 }
 
 function isLocalCliWriteIntent(message: string) {
@@ -12901,6 +12913,20 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   ).bind(device.id, device.selected_cli_id).first<DbLocalCliAdapter>()
   if (!adapter) return { route: null, cloudReason: '所选本机 CLI 当前不可用，已回退云端 Agent' }
 
+  if (isRuntimeIdentityQuestion(lastMessage)) {
+    const version = String(adapter.version || '').trim()
+    return {
+      route: null,
+      cloudReason: '',
+      immediate: {
+        content: `当前这次对话优先使用你这台电脑上的 **${adapter.name}**${version ? `（${version}）` : ''}。\n\nGiverny 能可靠确认的是运行入口为 ${adapter.name}；CLI 实际调用的具体底层模型由本机配置和账号动态决定，网页端无法可靠读取，所以不会猜测为某个 GPT 或 Claude 版本。只有本机 CLI 离线、任务需要云端识图或进入站内写入确认流程时，才会使用你设置的云端模型路线。`,
+        trace: ['确认当前运行路线', `当前使用：${adapter.name} · ${device.name}`],
+        cliName: adapter.name,
+        deviceName: device.name,
+      },
+    }
+  }
+
   await ensureAccessTokenScope(env)
   const commandId = crypto.randomUUID()
   const tokenBytes = crypto.getRandomValues(new Uint8Array(24))
@@ -12931,7 +12957,8 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     `2. 站内任务创建、状态修改、进展、反馈、验收等写入必须回到网页的确认流程；本轮不得绕过确认直接修改 Giverny 数据。\n` +
     `3. 如需在本机生成或下载文件，只能写入当前 Giverny 专用工作目录，并在回答中给出完整文件路径。\n` +
     `4. 不读取密钥、浏览器资料、SSH 配置或 Giverny 工作目录之外的私人文件，除非用户明确指定文件。\n` +
-    `5. 回答使用简洁自然的中文；可以展示执行结论，但不要暴露隐藏思维链。\n\n` +
+    `5. 回答使用简洁自然的中文；可以展示执行结论，但不要暴露隐藏思维链。\n` +
+    `6. 你的运行入口是 ${adapter.name}，不是 Claude、豆包或其他云端模型。若用户询问具体底层模型，只说明网页能确认 ${adapter.name}，但无法可靠读取 CLI 账号实际选用的精确模型，不得猜测型号。\n\n` +
     `当前结算月：${String(body.month || '').slice(0, 7) || '未指定'}\n` +
     `${textAttachments ? `\n用户上传的文档：\n${textAttachments}\n` : ''}` +
     `\n对话上下文：\n${history}`
@@ -13023,6 +13050,29 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
         send({ type: 'trace', status: 'running', trace: routingTrace })
 
         const localDecision = await queueLocalCliChat(env, localRouteRequest)
+        if (localDecision.immediate) {
+          const payload = {
+            content: localDecision.immediate.content,
+            trace: uniqueAgentTrace(localDecision.immediate.trace),
+            localCli: {
+              deviceName: localDecision.immediate.deviceName,
+              cliName: localDecision.immediate.cliName,
+            },
+          }
+          const metricWrite = recordAgentRunMetric(
+            env,
+            Response.json(payload),
+            performance.now() - startedAt,
+            request.headers.get('x-giverny-agent-eval') === '1',
+            promptTokens,
+          )
+          if (ctx) ctx.waitUntil(metricWrite)
+          else await metricWrite
+          send({ type: 'trace', status: 'running', trace: payload.trace })
+          send({ type: 'result', status: 'completed', ...payload })
+          send({ type: 'done' })
+          return
+        }
         if (localDecision.route) {
           send({
             type: 'route',

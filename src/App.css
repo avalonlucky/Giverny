@@ -23386,6 +23386,60 @@ button.topbar-create-button kbd {
   border-top: 1px solid var(--color-border);
 }
 
+.alice-runtime-current {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-strong));
+}
+
+.alice-runtime-current > span {
+  min-width: 0;
+}
+
+.alice-runtime-current strong,
+.alice-runtime-current small {
+  display: block;
+}
+
+.alice-runtime-current strong {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.alice-runtime-current small {
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alice-runtime-current em,
+.alice-runtime-local-tag {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.ai-brand-icon {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
 .alice-model-popup-title {
   font-size: 12px;
   font-weight: 700;
@@ -23448,6 +23502,10 @@ button.topbar-create-button kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.alice-model-btn .alice-runtime-local-tag {
+  padding: 3px 5px;
 }
 
 .alice-scope-popup-title {

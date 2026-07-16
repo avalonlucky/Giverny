@@ -389,6 +389,21 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Local CLI adapter selection failed: ${JSON.stringify(selected)}`)
   }
 
+  const identityResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      localCliConversationId: 'eval-local-identity',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '请问你现在用的哪个大模型？' }],
+    }),
+  })
+  const identityText = await identityResponse.text()
+  if (!identityResponse.ok || !identityText.includes('Codex CLI') || identityText.includes('Claude 4') || identityText.includes('"commandId"')) {
+    throw new Error(`Local CLI runtime identity answer was inaccurate or unnecessarily queued: ${identityText}`)
+  }
+
   const waitForBridgeRun = async () => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const response = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
@@ -405,7 +420,7 @@ async function runLocalCliBridgeCheck(cookie) {
       browserDeviceKey,
       localCliConversationId: 'eval-local-conversation',
       month: '2026-07',
-      messages: [{ role: 'user', content: '请说明当前本机 CLI 的连接情况' }],
+      messages: [{ role: 'user', content: '请查询本月任务概况' }],
     }),
   })
   if (!chatResponse.ok || !String(chatResponse.headers.get('content-type')).includes('text/event-stream')) {
@@ -461,7 +476,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (bridgeState.status !== 'cancelled') throw new Error(`Bridge did not observe cancellation: ${JSON.stringify(bridgeState)}`)
   const cancelText = await cancelTextPromise
   if (!cancelText.includes('已停止本机 CLI 执行')) throw new Error(`Cancelled local CLI chat did not close cleanly: ${cancelText}`)
-  process.stdout.write('Local CLI pairing, tenant isolation, streaming chat routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
+  process.stdout.write('Local CLI identity, pairing, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
 }
 
 async function runAgentOrchestrationCheck(cookie) {

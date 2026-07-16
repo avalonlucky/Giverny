@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -114,6 +114,16 @@ import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import antigravityBrandIcon from '@lobehub/icons-static-svg/icons/antigravity-color.svg?url'
+import claudeBrandIcon from '@lobehub/icons-static-svg/icons/claude-color.svg?url'
+import cloudflareBrandIcon from '@lobehub/icons-static-svg/icons/cloudflare-color.svg?url'
+import codexBrandIcon from '@lobehub/icons-static-svg/icons/codex-color.svg?url'
+import deepseekBrandIcon from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
+import doubaoBrandIcon from '@lobehub/icons-static-svg/icons/doubao-color.svg?url'
+import geminiBrandIcon from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
+import grokBrandIcon from '@lobehub/icons-static-svg/icons/grok.svg?url'
+import kimiBrandIcon from '@lobehub/icons-static-svg/icons/kimi-color.svg?url'
+import openrouterBrandIcon from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
 import './App.css'
 
 // 吉维尼模式：可选的莫奈花园整套色系（默认关，用户在设置里手动开启）。开启后主题随季节走，
@@ -4221,9 +4231,47 @@ type ChatMessage = {
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
+type AiBrandKey = 'antigravity' | 'claude' | 'cloudflare' | 'codex' | 'deepseek' | 'doubao' | 'gemini' | 'grok' | 'kimi' | 'openrouter' | 'auto'
+type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
 const CHAT_MODEL_CHOICE_KEY = 'alice_chat_model_choice'
+
+const AI_BRAND_ICONS: Partial<Record<AiBrandKey, string>> = {
+  antigravity: antigravityBrandIcon,
+  claude: claudeBrandIcon,
+  cloudflare: cloudflareBrandIcon,
+  codex: codexBrandIcon,
+  deepseek: deepseekBrandIcon,
+  doubao: doubaoBrandIcon,
+  gemini: geminiBrandIcon,
+  grok: grokBrandIcon,
+  kimi: kimiBrandIcon,
+  openrouter: openrouterBrandIcon,
+}
+
+function AiBrandIcon({ brand, size = 18 }: { brand: AiBrandKey; size?: number }) {
+  if (brand === 'auto') return <Sparkles className="ai-brand-icon" size={size} aria-hidden="true" />
+  const src = AI_BRAND_ICONS[brand]
+  return src
+    ? <img className="ai-brand-icon" src={src} width={size} height={size} alt="" aria-hidden="true" />
+    : <Bot className="ai-brand-icon" size={size} aria-hidden="true" />
+}
+
+function aiBrandForValue(value: string): AiBrandKey {
+  const normalized = value.toLowerCase()
+  if (normalized.includes('antigravity')) return 'antigravity'
+  if (normalized.includes('claude')) return 'claude'
+  if (normalized.includes('cloudflare') || normalized.includes('workers-ai')) return 'cloudflare'
+  if (normalized.includes('codex') || normalized.includes('openai')) return 'codex'
+  if (normalized.includes('deepseek')) return 'deepseek'
+  if (normalized.includes('doubao') || normalized.includes('豆包')) return 'doubao'
+  if (normalized.includes('gemini')) return 'gemini'
+  if (normalized.includes('grok')) return 'grok'
+  if (normalized.includes('kimi') || normalized.includes('moonshot')) return 'kimi'
+  if (normalized.includes('openrouter')) return 'openrouter'
+  return 'auto'
+}
 
 function loadChatHistory(): ConversationRecord[] {
   try { return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) ?? '[]') as ConversationRecord[] }
@@ -4945,6 +4993,7 @@ function ChatPanel({
   const [taskCenterBusy, setTaskCenterBusy] = useState('')
   const [activeLocalCommandId, setActiveLocalCommandId] = useState('')
   const [isCancellingLocalCommand, setIsCancellingLocalCommand] = useState(false)
+  const [activeLocalCliRoute, setActiveLocalCliRoute] = useState<ActiveLocalCliRoute | null>(null)
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
@@ -4956,6 +5005,29 @@ function ChatPanel({
 
   useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
   useEffect(() => { inputRef.current?.focus() }, [])
+  useEffect(() => {
+    let cancelled = false
+    const refreshLocalRoute = async () => {
+      try {
+        const result = await api.getLocalCliDevices(localCliBrowserDeviceKey())
+        const device = result.devices.find((item) => item.online && item.selectedCliId && localCliRuntimeReady(item.bridgeVersion))
+        const cli = device?.clis.find((item) => item.id === device.selectedCliId && item.status === 'available')
+        if (!cancelled) {
+          setActiveLocalCliRoute(device && cli
+            ? { adapterId: cli.id, name: cli.name, version: cli.version, deviceName: device.name }
+            : null)
+        }
+      } catch {
+        if (!cancelled) setActiveLocalCliRoute(null)
+      }
+    }
+    void refreshLocalRoute()
+    const timer = window.setInterval(() => void refreshLocalRoute(), 8_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
   useEffect(() => {
     if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
   }, [agentConversationId, conversationRecordId, isWelcome, messages])
@@ -5170,7 +5242,7 @@ function ChatPanel({
     return { 'content-type': 'application/json' }
   }
 
-  const handleFiles = async (files: FileList | null) => {
+  const handleFiles = async (files: FileList | File[] | null) => {
     if (!files) return
     const added: ChatAttachment[] = []
     for (const file of Array.from(files).slice(0, 4)) {
@@ -5197,6 +5269,16 @@ function ChatPanel({
       })
     }
     setAttachments((prev) => [...prev, ...added].slice(0, 4))
+  }
+
+  const handleInputPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedImages = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+    if (pastedImages.length === 0) return
+    event.preventDefault()
+    void handleFiles(pastedImages)
   }
 
   const openModelPicker = () => {
@@ -5503,14 +5585,16 @@ function ChatPanel({
   }
 
   const scopeActive = useKnowledge || useWebSearch
-  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; disabled?: boolean }> = [
-    { value: 'auto', label: '自动', meta: '由 Agent 按任务选择当前可用路线' },
-    { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '火山方舟 · doubao-seed-2-1-pro-260628' },
-    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: `${chatRouteLabel('textPrimary')} · ${aiModelConfig?.textPrimary.provider || 'DeepSeek'}` },
-    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || '文字备用', meta: `${chatRouteLabel('textFallback')} · ${aiModelConfig?.textFallback.provider || 'Kimi'}` },
-    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: `${chatRouteLabel('visionPrimary')} · 可处理图片问题` },
-    { value: 'workers-ai', label: 'Workers AI', meta: 'Cloudflare 边缘兜底模型' },
+  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey; disabled?: boolean }> = [
+    { value: 'auto', label: '云端自动路由', meta: '本机 CLI 不可用或任务需要识图时自动选择', brand: 'auto' },
+    { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '火山方舟 · doubao-seed-2-1-pro-260628', brand: 'doubao' },
+    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: `${chatRouteLabel('textPrimary')} · ${aiModelConfig?.textPrimary.provider || 'DeepSeek'}`, brand: aiBrandForValue(`${aiModelConfig?.textPrimary.provider || 'deepseek'} ${aiModelConfig?.textPrimary.model || ''}`) },
+    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || '文字备用', meta: `${chatRouteLabel('textFallback')} · ${aiModelConfig?.textFallback.provider || 'Kimi'}`, brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
+    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: `${chatRouteLabel('visionPrimary')} · 可处理图片问题`, brand: aiBrandForValue(`${aiModelConfig?.visionPrimary.provider || 'gemini'} ${aiModelConfig?.visionPrimary.model || ''}`) },
+    { value: 'workers-ai', label: 'Workers AI', meta: 'Cloudflare 边缘兜底模型', brand: 'cloudflare' },
   ]
+  const activeRuntimeLabel = activeLocalCliRoute?.name || chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
+  const activeRuntimeBrand = activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
 
   return (
     <div className="chat-panel" role="dialog" aria-label="爱丽丝">
@@ -5633,8 +5717,18 @@ function ChatPanel({
         )}
         {showModelPopup && (
           <div className="alice-model-popup">
+            {activeLocalCliRoute && (
+              <div className="alice-runtime-current">
+                <AiBrandIcon brand={aiBrandForValue(activeLocalCliRoute.adapterId)} size={22} />
+                <span>
+                  <strong>{activeLocalCliRoute.name}</strong>
+                  <small>当前回答路线 · {activeLocalCliRoute.deviceName}</small>
+                </span>
+                <em>本机</em>
+              </div>
+            )}
             <div className="alice-model-popup-section">
-              <div className="alice-model-popup-title">模型</div>
+              <div className="alice-model-popup-title">{activeLocalCliRoute ? '云端回退与识图模型' : '当前模型'}</div>
               {modelOptions.map((option) => (
                 <button
                   key={option.value}
@@ -5645,7 +5739,7 @@ function ChatPanel({
                     setShowModelPopup(false)
                   }}
                 >
-                  <Bot size={15} />
+                  <AiBrandIcon brand={option.brand} size={18} />
                   <span>
                     <strong>{option.label}</strong>
                     <small>{option.meta}</small>
@@ -5669,7 +5763,7 @@ function ChatPanel({
                     setShowModelPopup(false)
                   }}
                 >
-                  <Sparkles size={15} />
+                  <AiBrandIcon brand="openrouter" size={18} />
                   <span>
                     <strong>{model.id}</strong>
                     <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
@@ -5699,6 +5793,7 @@ function ChatPanel({
               e.target.style.height = 'auto'
               e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
             }}
+            onPaste={handleInputPaste}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
           />
           <div className="alice-input-toolbar">
@@ -5722,13 +5817,14 @@ function ChatPanel({
             <div style={{ flex: 1 }} />
             <button
               type="button"
-              className={`alice-tool-btn alice-model-btn ${selectedModelChoice !== 'auto' ? 'active' : ''}`}
+              className={`alice-tool-btn alice-model-btn ${activeLocalCliRoute || selectedModelChoice !== 'auto' ? 'active' : ''}`}
               onClick={openModelPicker}
-              title="选择模型"
-              aria-label="选择模型"
+              title={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}；点击查看云端回退模型` : '选择模型'}
+              aria-label={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}` : '选择模型'}
             >
-              <Bot size={15} />
-              <span className="alice-model-label">{chatModelChoiceLabel(selectedModelChoice, aiModelConfig)}</span>
+              <AiBrandIcon brand={activeRuntimeBrand} size={17} />
+              <span className="alice-model-label">{activeRuntimeLabel}</span>
+              {activeLocalCliRoute && <span className="alice-runtime-local-tag">本机</span>}
             </button>
             <button
               type="button"
@@ -16938,7 +17034,7 @@ function LocalCliConnectionPanel() {
                 const selectable = device.online && runtimeReady && cli.status === 'available'
                 return (
                   <div className={`local-cli-row ${connected ? 'connected' : ''}`} key={cli.id}>
-                    <div className="local-cli-row-icon"><Bot size={18} /></div>
+                    <div className="local-cli-row-icon"><AiBrandIcon brand={aiBrandForValue(cli.id)} size={20} /></div>
                     <div className="local-cli-row-main">
                       <strong>{cli.name}</strong>
                       <span>{cli.version || cli.detail}</span>
