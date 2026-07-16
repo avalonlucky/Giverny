@@ -1570,7 +1570,10 @@ type PendingProgressAttachment = {
   uploadStatus?: 'uploading' | 'done' | 'error'
   uploadProgress?: number // 0..1
   uploadedFile?: FileAsset
+  uploadPromise?: Promise<FileAsset | undefined>
   uploadError?: string
+  uploadScope?: 'acceptance' | 'progress'
+  discarded?: boolean
   isAcceptanceFile?: boolean
 }
 
@@ -2097,6 +2100,19 @@ function formatDuration(minutes: number) {
     return `${hours} h`
   }
   return `${hours} h ${restMinutes} min`
+}
+
+function formatDurationZh(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(safeMinutes / 60)
+  const restMinutes = safeMinutes % 60
+  if (hours === 0) {
+    return `${restMinutes} 分钟`
+  }
+  if (restMinutes === 0) {
+    return `${hours} 小时`
+  }
+  return `${hours} 小时 ${restMinutes} 分钟`
 }
 
 function formatSignedHours(minutes: number) {
@@ -6956,12 +6972,12 @@ function App() {
     setEditTaskId(0)
   }
 
-  const handleConfirmTaskAcceptance = (
+  const handleConfirmTaskAcceptance = async (
     task: Task,
     payload: AcceptancePayload,
   ) => {
     if (isAdmin) {
-      void handleUpdateTask(task.id, {
+      const saved = await handleUpdateTask(task.id, {
         ...payload.taskChanges,
         status: '已验收',
         reviewer: payload.taskChanges?.reviewer || task.reviewer || payload.taskChanges?.requester || task.requester || '待确认',
@@ -6978,8 +6994,12 @@ function App() {
         // 非补录任务：结算月份自动跟随验收时间（当前年月）
         settlementMonth: isSupplementalTask(task) ? taskSettlementMonth(task) : monthPart(isoDate()),
       })
+      if (!saved) {
+        throw new Error('任务状态未能写入，请稍后重试')
+      }
     } else {
       requireAdmin()
+      throw new Error('需要管理员权限')
     }
   }
 
@@ -8533,6 +8553,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
             onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+            onNotify={notify}
             onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
@@ -8805,6 +8826,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
             onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
             onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
+            onNotify={notify}
             initialAcceptanceMode={progressModalTarget.initialAcceptanceMode}
             hourlyRate={hourlyRate}
           />
@@ -10104,6 +10126,7 @@ function TasksView({
   onUpdateFile,
   onDeleteFile,
   onConfirmAcceptance,
+  onNotify,
   onCreateTaskUpdate,
   onCreateTask,
   rowThemeOn,
@@ -10149,7 +10172,8 @@ function TasksView({
   onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
   onDeleteFile: (fileId: number) => void
-  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
+  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => Promise<void>
+  onNotify: (message: string, tone?: ToastTone) => void
   onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
   onCreateTask: () => void
   onAutoEstimateProgress?: (task: Task) => void
@@ -10533,6 +10557,7 @@ return (
           onDeleteFile={onDeleteFile}
           onConfirmAcceptance={onConfirmAcceptance}
           onUploadAcceptanceFile={onUploadAcceptanceFile}
+          onNotify={onNotify}
           initialAcceptanceMode={progressTarget.initialAcceptanceMode}
           hourlyRate={hourlyRate}
         />
@@ -10556,6 +10581,7 @@ function TaskProgressModal({
   onDeleteFile,
   onConfirmAcceptance,
   onUploadAcceptanceFile,
+  onNotify,
   initialAcceptanceMode = false,
   hourlyRate = 0,
 }: {
@@ -10571,8 +10597,9 @@ function TaskProgressModal({
   onPreviewFile: (file: FileAsset) => void
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) => Promise<FileAsset>
   onDeleteFile: (fileId: number) => void
-  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => void
+  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => Promise<void>
   onUploadAcceptanceFile?: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<FileAsset>
+  onNotify: (message: string, tone?: ToastTone) => void
   initialAcceptanceMode?: boolean
   hourlyRate?: number
 }) {
@@ -10938,10 +10965,13 @@ function TaskProgressModal({
     attachment: PendingProgressAttachment,
     onProgress: (ratio: number) => void,
   ): Promise<FileAsset> => {
-    const acceptance = isAcceptanceMode
+    const acceptance = (attachment.uploadScope ?? (isAcceptanceMode ? 'acceptance' : 'progress')) === 'acceptance'
     const uploadFile = acceptance
       ? renamedFile(attachment.file, attachment.name)
       : await compressProgressImageFile(renamedFile(attachment.file, attachment.name))
+    if (acceptance && onUploadAcceptanceFile) {
+      return onUploadAcceptanceFile(task.id, uploadFile, onProgress, stagedEntryIdRef.current)
+    }
     const extension = fileTypeForFile(uploadFile).type
     const preview = await createOptionalPreviewFile(uploadFile)
     return api.uploadFile(
@@ -10962,6 +10992,49 @@ function TaskProgressModal({
     )
   }
 
+  const startStagedUpload = (attachment: PendingProgressAttachment) => {
+    attachment.uploadStatus = 'uploading'
+    attachment.uploadProgress = 0
+    attachment.uploadError = undefined
+    const uploadPromise = stageUploadAttachment(attachment, (ratio) => {
+      attachment.uploadProgress = ratio
+      setPendingAttachments((current) => current.map((item) =>
+        item.id === attachment.id ? { ...item, uploadProgress: ratio } : item,
+      ))
+    })
+      .then((saved) => {
+        if (attachment.discarded) {
+          void api.deleteFile(saved.id).catch(() => {})
+          return undefined
+        }
+        attachment.uploadedFile = saved
+        attachment.uploadStatus = 'done'
+        attachment.uploadProgress = 1
+        setPendingAttachments((current) => current.map((item) =>
+          item.id === attachment.id
+            ? { ...item, uploadStatus: 'done', uploadProgress: 1, uploadedFile: saved, uploadError: undefined }
+            : item,
+        ))
+        return saved
+      })
+      .catch((error) => {
+        attachment.uploadStatus = 'error'
+        attachment.uploadError = error instanceof Error ? error.message : '上传失败'
+        setPendingAttachments((current) => current.map((item) =>
+          item.id === attachment.id
+            ? { ...item, uploadStatus: 'error', uploadError: attachment.uploadError }
+            : item,
+        ))
+        return undefined
+      })
+    attachment.uploadPromise = uploadPromise
+    setPendingAttachments((current) => current.map((item) =>
+      item.id === attachment.id
+        ? { ...item, uploadStatus: 'uploading', uploadProgress: 0, uploadPromise, uploadError: undefined }
+        : item,
+    ))
+  }
+
   // 移除某个待上传附件：若已传到后台则顺手删除，避免产生孤儿文件。
   const discardStagedFile = (fileId?: number) => {
     if (typeof fileId === 'number') {
@@ -10969,12 +11042,25 @@ function TaskProgressModal({
     }
   }
 
+  const discardStagedAttachment = (attachment: PendingProgressAttachment) => {
+    attachment.discarded = true
+    if (attachment.uploadedFile) {
+      discardStagedFile(attachment.uploadedFile.id)
+      return
+    }
+    void attachment.uploadPromise?.then((saved) => {
+      if (saved) {
+        discardStagedFile(saved.id)
+      }
+    })
+  }
+
   // 保存时才上传，避免用户关闭弹窗后在 R2/D1 留下未关联的暂存文件。
   const finalizeStagedAttachments = async (): Promise<{ names: string[]; failures: string[] }> => {
     const names: string[] = []
     const failures: string[] = []
     for (const attachment of pendingAttachments) {
-      let saved = attachment.uploadedFile
+      let saved = attachment.uploadedFile ?? await attachment.uploadPromise
       if (!saved) {
         setPendingAttachments((current) => current.map((item) =>
           item.id === attachment.id ? { ...item, uploadStatus: 'uploading', uploadProgress: 0, uploadError: undefined } : item,
@@ -10986,6 +11072,7 @@ function TaskProgressModal({
             ))
           })
           attachment.uploadedFile = saved
+          attachment.uploadPromise = Promise.resolve(saved)
           setPendingAttachments((current) => current.map((item) =>
             item.id === attachment.id ? { ...item, uploadStatus: 'done', uploadProgress: 1, uploadedFile: saved, uploadError: undefined } : item,
           ))
@@ -11031,6 +11118,7 @@ function TaskProgressModal({
           file,
           name: displayName,
           originalName: file.name,
+          uploadScope: isAcceptanceMode ? 'acceptance' : 'progress',
         })
       } catch (error) {
         nextErrors.push(error instanceof Error ? error.message : `${file.name}：文件无法添加`)
@@ -11039,6 +11127,9 @@ function TaskProgressModal({
     if (nextAttachments.length > 0) {
       setPendingAttachments((current) => [...current, ...nextAttachments])
       nextAttachments.forEach((attachment) => {
+        if (attachment.uploadScope === 'acceptance') {
+          startStagedUpload(attachment)
+        }
         if (looksLikeUntidyFileName(attachment.name)) {
           window.setTimeout(() => void requestAttachmentNameSuggestion(attachment.id, attachment), 0)
         }
@@ -11066,10 +11157,14 @@ function TaskProgressModal({
         file,
         name: file.name,
         originalName: file.name,
+        uploadScope: previous?.uploadScope ?? (isAcceptanceMode ? 'acceptance' : 'progress'),
       }
       setPendingAttachments((current) => current.map((attachment) =>
         attachment.id === replacementAttachmentId ? replaced : attachment,
       ))
+      if (replaced.uploadScope === 'acceptance') {
+        startStagedUpload(replaced)
+      }
       setUploadErrors([])
     } catch (error) {
       setUploadErrors([error instanceof Error ? error.message : `${file.name}：文件无法替换`])
@@ -11462,68 +11557,72 @@ function TaskProgressModal({
     if (isSaving || !onConfirmAcceptance) {
       return
     }
-    setIsSaving(true)
     setTimeEntryError('')
-    try {
-      const nextEntry = isConvertingEntryToAcceptance
-        ? buildDraftTimeEntry({ isAcceptanceProgress: true })
-        : shouldIncludeAcceptanceDraftEntry ? buildDraftTimeEntry({ isAcceptanceProgress: true }) : null
-      if (nextEntry) {
-        const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
-        if (conflict) {
-          setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
-          return
-        }
-      }
-      await saveDirtyExistingAttachmentNames()
-      // 验收附件在保存时上传（scope=acceptance，自动带「验收文件」标签）。
-      const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
-      if (uploadFailures.length > 0) {
-        setUploadErrors(uploadFailures)
+    const nextEntry = isConvertingEntryToAcceptance
+      ? buildDraftTimeEntry({ isAcceptanceProgress: true })
+      : shouldIncludeAcceptanceDraftEntry ? buildDraftTimeEntry({ isAcceptanceProgress: true }) : null
+    if (nextEntry) {
+      const conflict = comparableEntries.find((entry) => timeEntriesOverlap(nextEntry, entry))
+      if (conflict) {
+        setTimeEntryError(`这个时间段和 ${formatEntryDateTimeRange(task, conflict)} 已有记录重叠，请改到前后相邻的空档。`)
         return
       }
-      recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
-      recordAppliedAttachmentNameLearning()
-      // 累计工时
-      const nextTimeEntries = isConvertingEntryToAcceptance && nextEntry
-        ? acceptanceTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
-        : nextEntry ? [...acceptanceTimeEntries, nextEntry] : acceptanceTimeEntries
-      const nextActualHours = nextTimeEntries.length > 0
-        ? Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
-        : task.actualHours
-      const planScheduleChanges = buildPlanScheduleChanges()
-      const taskForAcceptance = Object.keys(planScheduleChanges).length > 0
-        ? { ...task, ...planScheduleChanges }
-        : task
-      // 记录本次进展动态
-      const body = note.trim() || nextEntry?.note?.trim() || ''
-      if (body || finalizedUploadedNames.length > 0) {
-        await onCreateTaskUpdate(task.id, {
-          title: '验收进展',
-          body: body || `上传验收附件：${finalizedUploadedNames.join('、')}`,
-          hours: 0,
-          visible: false,
-        })
-      }
-      // 触发验收确认（复用现有 handleConfirmTaskAcceptance 逻辑）
-      onConfirmAcceptance(taskForAcceptance, {
-        actualHours: nextActualHours,
-        acceptanceNote: note.trim() || task.acceptanceNote || '',
-        feedbackRating,
-        feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
-        feedbackNote: feedbackNote.trim(),
-        timeEntries: nextTimeEntries,
-        waitingEntries: acceptanceWaitingEntries,
-        acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...existingEntryAttachments.map((file) => file.name), ...finalizedUploadedNames])),
-        taskChanges: planScheduleChanges,
-      })
-      clearDraftCache(progressDraftKey)
-      progressAttachmentDraftCache.delete(progressDraftKey)
-      stagedEntryIdCache.delete(progressDraftKey)
-      onClose()
-    } finally {
-      setIsSaving(false)
     }
+
+    // 验收附件在选择后已开始上传。提交时把剩余工作交给后台，立即释放弹窗。
+    setIsSaving(true)
+    onClose()
+    onNotify(pendingAttachments.some((attachment) => attachment.uploadStatus !== 'done')
+      ? '验收已提交，附件将在后台继续上传'
+      : '验收已提交，正在后台完成同步', 'info')
+
+    void (async () => {
+      try {
+        await saveDirtyExistingAttachmentNames()
+        const { names: finalizedUploadedNames, failures: uploadFailures } = await finalizeStagedAttachments()
+        if (uploadFailures.length > 0) {
+          throw new Error(uploadFailures.join('；'))
+        }
+        recordAppliedTextLearning(note.trim() || nextEntry?.note?.trim() || '')
+        recordAppliedAttachmentNameLearning()
+        const nextTimeEntries = isConvertingEntryToAcceptance && nextEntry
+          ? acceptanceTimeEntries.map((entry) => entry.id === editEntryId ? nextEntry : entry)
+          : nextEntry ? [...acceptanceTimeEntries, nextEntry] : acceptanceTimeEntries
+        const nextActualHours = nextTimeEntries.length > 0
+          ? Math.round((sumTimeEntries(nextTimeEntries) / 60) * 100) / 100
+          : task.actualHours
+        const planScheduleChanges = buildPlanScheduleChanges()
+        const taskForAcceptance = Object.keys(planScheduleChanges).length > 0
+          ? { ...task, ...planScheduleChanges }
+          : task
+        const body = note.trim() || nextEntry?.note?.trim() || ''
+        if (body || finalizedUploadedNames.length > 0) {
+          await onCreateTaskUpdate(task.id, {
+            title: '验收进展',
+            body: body || `上传验收附件：${finalizedUploadedNames.join('、')}`,
+            hours: 0,
+            visible: false,
+          })
+        }
+        await onConfirmAcceptance(taskForAcceptance, {
+          actualHours: nextActualHours,
+          acceptanceNote: note.trim() || task.acceptanceNote || '',
+          feedbackRating,
+          feedbackTags: feedbackRating && feedbackRating !== '顺利' ? feedbackTags : [],
+          feedbackNote: feedbackNote.trim(),
+          timeEntries: nextTimeEntries,
+          waitingEntries: acceptanceWaitingEntries,
+          acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...existingEntryAttachments.map((file) => file.name), ...finalizedUploadedNames])),
+          taskChanges: planScheduleChanges,
+        })
+        clearDraftCache(progressDraftKey)
+        progressAttachmentDraftCache.delete(progressDraftKey)
+        stagedEntryIdCache.delete(progressDraftKey)
+        onNotify('验收已完成，附件与任务状态均已同步', 'success')
+      } catch (error) {
+        onNotify(error instanceof Error ? `后台验收失败：${error.message}` : '后台验收失败，请重新打开任务重试', 'error')
+      }
+    })()
   }
 
   const requestProgressAiSuggestion = async () => {
@@ -12067,7 +12166,7 @@ function TaskProgressModal({
             <div className="new-task-hours-row progress-lite-hours-row">
               {scheduleDerivedField === 'hours' ? (
                 <output className="new-task-hours-input new-task-hours-output" aria-label="本段工时">
-                  {formatDuration(segmentMinutes)}
+                  {isAcceptanceMode ? formatDurationZh(segmentMinutes) : formatDuration(segmentMinutes)}
                 </output>
               ) : (
                 <input
@@ -12114,16 +12213,24 @@ function TaskProgressModal({
                 预计工时
               </span>
               <div className="new-task-hours-row progress-lite-hours-row">
-                <input
-                  className="new-task-hours-input"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={formatExactHoursInputValue(planReferenceMinutes)}
-                  onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
-                  aria-label="预计工时"
-                />
-                <span className="progress-lite-hours-unit">小时</span>
+                {planReferenceDerivedField === 'hours' ? (
+                  <output className="new-task-hours-input new-task-hours-output" aria-label="预计工时">
+                    {formatDurationZh(planReferenceMinutes)}
+                  </output>
+                ) : (
+                  <>
+                    <input
+                      className="new-task-hours-input"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={formatExactHoursInputValue(planReferenceMinutes)}
+                      onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
+                      aria-label="预计工时"
+                    />
+                    <span className="progress-lite-hours-unit">小时</span>
+                  </>
+                )}
               </div>
             </div>
             <PlanDateTimeField
@@ -12561,7 +12668,8 @@ function TaskProgressModal({
                           />
                           <div className="progress-attachment-main">
                             <div className="progress-attachment-name-field full-name">
-                              <input
+                              <textarea
+                                rows={2}
                                 aria-label={`重命名已有附件 ${file.name}`}
                                 title={draftName}
                                 value={draftName}
@@ -12677,7 +12785,8 @@ function TaskProgressModal({
                           onOpen={() => setPreviewAttachment(attachment)}
                         />
                         <div className="progress-attachment-name-field">
-                          <input
+                          <textarea
+                            rows={2}
                             aria-label={`重命名 ${attachment.originalName}，扩展名不可修改`}
                             value={splitFileName(attachment.name).base}
                             onChange={(event) => {
@@ -12695,6 +12804,12 @@ function TaskProgressModal({
                                   ? { ...item, name: sanitizeAttachmentName(item.name, item.originalName) }
                                   : item,
                               ))
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault()
+                                event.currentTarget.blur()
+                              }
                             }}
                           />
                           <span title="文件扩展名由系统保护，不可修改">
@@ -12788,7 +12903,7 @@ function TaskProgressModal({
                             title="删除附件"
                             className="danger"
                             onClick={() => {
-                              discardStagedFile(attachment.uploadedFile?.id)
+                              discardStagedAttachment(attachment)
                               setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))
                             }}
                           >
@@ -19016,6 +19131,9 @@ function NewTaskModal({
       return
     }
     setEstimatedHoursInput(normalizedValue)
+    if (scheduleDerivedField === 'hours') {
+      setScheduleDerivedField('end')
+    }
     if (!normalizedValue.trim()) {
       return
     }
@@ -19750,22 +19868,21 @@ function NewTaskModal({
                 预估工时
               </span>
               <div className="new-task-hours-row">
-                {scheduleDerivedField === 'hours' ? (
-                  <output className="new-task-hours-input new-task-hours-output" aria-label="预估工时">
-                    {formatDuration(estimatedMinutes)}
-                  </output>
-                ) : (
-                  <input
-                    className="new-task-hours-input"
-                    type="text"
-                    inputMode="decimal"
-                    pattern="[0-9]*[.]?[0-9]*"
-                    value={estimatedHoursInput}
-                    onChange={(event) => updateEstimatedHoursInput(event.target.value)}
-                    onBlur={commitEstimatedHoursInput}
-                    aria-label="预估工时"
-                  />
-                )}
+                <input
+                  className="new-task-hours-input"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
+                  value={estimatedHoursInput}
+                  onFocus={() => {
+                    if (scheduleDerivedField === 'hours') {
+                      setScheduleDerivedField('end')
+                    }
+                  }}
+                  onChange={(event) => updateEstimatedHoursInput(event.target.value)}
+                  onBlur={commitEstimatedHoursInput}
+                  aria-label="预估工时，可手动输入小数"
+                />
                 <button
                   type="button"
                   className="new-task-ai-pill"
