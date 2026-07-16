@@ -1,75 +1,84 @@
 :root {
-  /* 编辑式平面分区调色板（对齐 giverny-redesign 设计规范）：
-     深度靠色调，分隔靠留白，浮起靠反白。绿色全站只有一支 sage。 */
-  --color-text: #1f2a27;
-  --color-text-secondary: #586460;
-  --color-text-muted: #66716d;
-  --color-surface: #fbfbf8;
-  --color-surface-strong: #fbfbf8;
-  --color-surface-alt: #f4f4ee;
-  --color-sidebar: #fbfbf8;
-  /* ===== 品牌季节主色 =====
-     莫奈的睡莲池在四季捕捉不同的光。品牌主色随真实当前季节在「青绿带」内冷暖微移，
-     幅度刻意很小：用户说不出哪变了，但能感觉到网站在跟着季节呼吸。默认=夏。
-     语义状态色（已验收绿/进行中蓝/待验收琥珀/临期橙/逾期红）不在此列，永远钉死、不漂移。 */
-  --brand-primary: #3c6b61;
-  --brand-primary-strong: #2f564e;
-  --brand-glow: rgba(60, 107, 97, 0.10);
-  --brand-glow-soft: rgba(60, 107, 97, 0.05);
-  /* 全站 --color-primary 统一引用品牌主色 → 一处定义，全站跟着季节呼吸 */
+  /* ===== Geist Design System · Light（Vercel）=====
+     高对比、克制用色：留白分区、色阶表意（100 底/400 边框/700 实色/900 次要文字/1000 主文字）。
+     颜色只用来表达状态与层级，不做装饰。Dark 主题见下方 [data-theme="dark"] 块。 */
+  color-scheme: light;
+  --font-sans: "Geist Sans", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-serif: var(--font-sans);
+  --font-editorial: var(--font-sans);
+  --color-text: #171717;             /* gray-1000 */
+  --color-text-secondary: #4d4d4d;   /* gray-900 */
+  --color-text-muted: #7d7d7d;       /* gray-800 */
+  --color-surface: #ffffff;          /* background-100 */
+  --color-surface-strong: #ffffff;
+  --color-surface-alt: #fafafa;      /* background-200，仅做轻分隔 */
+  --color-sidebar: #fafafa;
+  --color-card: #ffffff;
+  /* 品牌主色 → Geist blue（链接/焦点/选中态）。实心主按钮另走 --button-primary-*（gray-1000 反白）。 */
+  --brand-primary: #006bff;          /* blue-700 */
+  --brand-primary-strong: #0059ec;   /* blue-800 */
+  --brand-glow: #dfefff;             /* blue-300 */
+  --brand-glow-soft: #f0f7ff;        /* blue-100 */
   --color-primary: var(--brand-primary);
   --color-primary-strong: var(--brand-primary-strong);
   --color-primary-hover: var(--brand-primary-strong);
-  --color-admin-only: #94652f;
-  --color-supplement: #3c6b61;
-  --color-supplement-bg: rgba(60, 107, 97, 0.1);
-  --color-status-danger: #97474a;
-  --color-status-warning: #94652f;
-  /* 状态点配色（方案B）：色相明确拉开，低饱和 */
-  --color-status-planning: #7a8590;
-  --color-status-active: #3a7bb5;
-  /* 待验收：哑琥珀（平静的「待办」信号，区别于绿/蓝/灰，不偏粉） */
-  --color-status-pending: #b08438;
-  --color-status-accepted: #3c6b61;
-  --color-status-hold: #7a6e94;
-  --color-status-stopped: #97474a;
-  --color-status-disabled: #949c96;
-  /* 暖色递进：临期=哑橙（提醒），逾期=干净红（紧迫）。用于角标，行填充另用更浅的 --row-fill */
-  --color-due-soon: #cf8b3e;
-  --color-due-overdue: #c25450;
-  --color-alert-surface: #f2ebdf;
-  /* 任务行状态填充（方案B）：每状态独立低饱和底色，底色即可区分状态 */
-  --row-fill-plan: #e3fdfd;
-  --row-fill-active: #eaf0f4;
-  --row-fill-pending: #f5f0e6;
-  --color-alert-accent: #94652f;
-  --color-editorial-surface: #fbfbf8;
-  --color-editorial-surface-alt: #f4f4ee;
-  --color-editorial-text: #1f2a27;
-  --color-editorial-text-secondary: #586460;
-  --color-editorial-text-muted: #66716d;
-  --color-editorial-primary: #3c6b61;
-  --color-editorial-primary-hover: #2f564e;
-  --color-editorial-menu: #20302c;
-  --color-editorial-backdrop: rgba(20, 28, 26, 0.34);
-  --color-surface-deep: #ecede5;
-  --color-border: rgba(31, 42, 39, 0.08);
-  --color-border-soft: rgba(31, 42, 39, 0.045);
-  --color-border-strong: rgba(31, 42, 39, 0.14);
-  /* 深墨反白浮层（右键菜单 / 命令面板 / Toast）：靠明暗对比浮起，无阴影无描边 */
-  --color-menu: #20302c;
-  --color-menu-2: #2a3b36;
-  --color-menu-ink: #ecefe9;
-  --color-menu-ink-2: #8a968f;
-  --color-menu-accent: #8fbcaf;
-  --color-menu-danger: #d98c8c;
-  --radius-control: 4px;
-  --radius-panel: 0;
-  --radius-menu: 8px;
-  --radius-pill: 999px;
-  --shadow-popover: none;
-  /* 浮层柔和投影：无描边时靠它做图底分离（比硬边框更干净） */
-  --shadow-float: 0 8px 26px rgba(20, 28, 26, 0.14), 0 2px 6px rgba(20, 28, 26, 0.08);
+  --button-primary-bg: #171717;      /* Geist 主按钮：gray-1000 实心 */
+  --button-primary-bg-hover: #383838;
+  --button-primary-ink: #ffffff;
+  --focus-ring-color: #006bff;       /* 焦点环：2px 表面色间隙 + 2px blue */
+  --color-admin-only: #aa4d00;       /* amber-900 */
+  --color-supplement: #0059ec;
+  --color-supplement-bg: #e9f4ff;    /* blue-200 */
+  --color-status-danger: #d8001b;    /* red-900 */
+  --color-status-warning: #aa4d00;   /* amber-900 */
+  --danger-soft-bg: #ffeeef;         /* red-100 */
+  --danger-soft-border: #ffd7d6;     /* red-400 */
+  --danger-solid: #ea001d;           /* red-800，Geist error button */
+  /* 状态色 → Geist accent 色阶（900 档保证文字对比度） */
+  --color-status-planning: #8f8f8f;  /* gray-700 */
+  --color-status-active: #005ff2;    /* blue-900 */
+  --color-status-pending: #aa4d00;   /* amber-900 */
+  --color-status-accepted: #107d32;  /* green-900 */
+  --color-status-hold: #7d00cc;      /* purple-900 */
+  --color-status-stopped: #d8001b;   /* red-900 */
+  --color-status-disabled: #a8a8a8;  /* gray-600 */
+  --color-due-soon: #ff9300;         /* amber-800 */
+  --color-due-overdue: #ea001d;      /* red-800 */
+  --color-alert-surface: #fff6de;    /* amber-100 */
+  --color-alert-accent: #aa4d00;
+  /* 任务行状态填充 → 各 accent 的 100 档 */
+  --row-fill-plan: #fafafa;
+  --row-fill-active: #f0f7ff;        /* blue-100 */
+  --row-fill-pending: #fff6de;       /* amber-100 */
+  --color-editorial-surface: #ffffff;
+  --color-editorial-surface-alt: #fafafa;
+  --color-editorial-text: #171717;
+  --color-editorial-text-secondary: #4d4d4d;
+  --color-editorial-text-muted: #7d7d7d;
+  --color-editorial-primary: #006bff;
+  --color-editorial-primary-hover: #0059ec;
+  --color-editorial-menu: #ffffff;
+  --color-editorial-backdrop: rgba(0, 0, 0, 0.4);
+  --color-surface-deep: #f2f2f2;     /* gray-100 */
+  --color-border: #00000014;         /* gray-alpha-400 */
+  --color-border-soft: #0000000d;    /* gray-alpha-100 */
+  --color-border-strong: #0000003d;  /* gray-alpha-600 */
+  /* 浮层（右键菜单 / 命令面板 / Toast）：Geist 亮色浮层 = 白底 + alpha 描边 + 柔和投影 */
+  --color-menu: #ffffff;
+  --color-menu-2: #fafafa;
+  --color-menu-ink: #171717;
+  --color-menu-ink-2: #7d7d7d;
+  --color-menu-accent: #006bff;
+  --color-menu-danger: #ea001d;
+  --color-menu-border: #00000014;
+  --radius-control: 6px;             /* Geist：控件/卡片 6px */
+  --radius-panel: 6px;
+  --radius-menu: 12px;               /* 菜单/弹窗 12px */
+  --radius-pill: 9999px;
+  --shadow-card: 0 2px 2px rgba(0, 0, 0, 0.04);
+  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.02), 0 4px 8px -4px rgba(0, 0, 0, 0.04), 0 16px 24px -8px rgba(0, 0, 0, 0.06);
+  --shadow-float: 0 1px 1px rgba(0, 0, 0, 0.02), 0 8px 16px -4px rgba(0, 0, 0, 0.04), 0 24px 32px -8px rgba(0, 0, 0, 0.06);
   --z-base: 1;
   --z-sticky: 20;
   --z-floating: 40;
@@ -79,77 +88,78 @@
   accent-color: var(--color-primary);
 }
 
-/* 工具模式（默认）主色固定为 #3c6b61，不随季节漂移——季节只在「吉维尼模式」里生效。 */
-
-/* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
-   默认是冷静的工具模式；开启后只做低饱和、高明度的季节偏色。
-   纸面仍保持干净，季节感来自主色和极浅水面底色，不让整站变脏。 */
-:root[data-giverny="on"] {
-  --color-text: #28302c;
-  --color-text-secondary: #5d6863;
-  --color-text-muted: #66716d;
-  /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
-     基底是近白，季节色只按很低比例渗入：看得出季节，但仍像干净白纸。 */
-  --color-surface: color-mix(in srgb, var(--brand-primary) 5%, #fbfbf9);
-  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 2.5%, #fdfdfc);
-  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 8%, #f7f8f5);
-  --color-sidebar: color-mix(in srgb, var(--brand-primary) 6%, #fbfbf8);
-  --color-border: color-mix(in srgb, var(--brand-primary) 13%, transparent);
-  --color-border-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
-  /* 主色随季节走（见下方花园四季块）。默认夏。 */
-  --brand-primary: #3c6b61;
-  --brand-primary-strong: #2f564e;
-  --brand-glow: rgba(60, 107, 97, 0.12);
-  --brand-glow-soft: rgba(60, 107, 97, 0.06);
-  --color-primary: var(--brand-primary);
-  --color-primary-strong: var(--brand-primary-strong);
-  --color-primary-hover: var(--brand-primary-strong);
-  /* 状态色融入花园：饱和度再降、色相偏自然 */
-  --color-status-planning: #8b928c;
-  --color-status-active: #668699;
-  --color-status-pending: #ae9661;
-  --color-status-accepted: var(--brand-primary);
-  --row-fill-plan: color-mix(in srgb, var(--brand-primary) 7%, #f8f8f4);
-  --row-fill-active: color-mix(in srgb, var(--color-status-active) 8%, #f8f8f4);
-  --row-fill-pending: color-mix(in srgb, var(--color-status-pending) 10%, #f8f8f4);
+/* ===== Geist Design System · Dark =====
+   纯黑基底 + gray-alpha 描边分层；accent 换用 Dark 色阶（900 档文字 / 100 档底色）。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-text: #ededed;             /* gray-1000 */
+  --color-text-secondary: #a0a0a0;   /* gray-900 */
+  --color-text-muted: #878787;       /* gray-600 */
+  --color-surface: #000000;          /* background-100 */
+  --color-surface-strong: #0a0a0a;
+  --color-surface-alt: #141414;
+  --color-sidebar: #0a0a0a;
+  --color-card: #0a0a0a;
+  --brand-primary: #47a8ff;          /* blue-900：暗底上的链接/强调 */
+  --brand-primary-strong: #0090ff;   /* blue-600 */
+  --brand-glow: #002f62;             /* blue-300 */
+  --brand-glow-soft: #06193a;        /* blue-100 */
+  --button-primary-bg: #ededed;      /* 暗色主按钮：亮色实心反白 */
+  --button-primary-bg-hover: #cccccc;
+  --button-primary-ink: #0a0a0a;
+  --focus-ring-color: #47a8ff;
+  --color-admin-only: #ff9300;       /* amber-900 */
+  --color-supplement: #47a8ff;
+  --color-supplement-bg: #022248;    /* blue-200 */
+  --color-status-danger: #ff565f;    /* red-900 */
+  --color-status-warning: #ffae00;   /* amber-700 */
+  --danger-soft-bg: #330a11;         /* red-100 */
+  --danger-soft-border: #6f101b;     /* red-400 */
+  --danger-solid: #e2162a;           /* red-800 */
+  --color-status-planning: #878787;
+  --color-status-active: #47a8ff;    /* blue-900 */
+  --color-status-pending: #ffae00;   /* amber-700 */
+  --color-status-accepted: #00ca50;  /* green-900 */
+  --color-status-hold: #c472fb;      /* purple-900 */
+  --color-status-stopped: #ff565f;   /* red-900 */
+  --color-status-disabled: #666666;
+  --color-due-soon: #ff9300;
+  --color-due-overdue: #ff565f;
+  --color-alert-surface: #2a1700;    /* amber-100 */
+  --color-alert-accent: #ffae00;
+  --row-fill-plan: #111111;
+  --row-fill-active: #06193a;        /* blue-100 */
+  --row-fill-pending: #2a1700;       /* amber-100 */
+  --color-editorial-surface: #0a0a0a;
+  --color-editorial-surface-alt: #141414;
+  --color-editorial-text: #ededed;
+  --color-editorial-text-secondary: #a0a0a0;
+  --color-editorial-text-muted: #878787;
+  --color-editorial-primary: #47a8ff;
+  --color-editorial-primary-hover: #0090ff;
+  --color-editorial-menu: #1f1f1f;
+  --color-editorial-backdrop: rgba(0, 0, 0, 0.6);
+  --color-surface-deep: #1a1a1a;     /* gray-100 */
+  --color-border: #ffffff24;         /* gray-alpha-400 */
+  --color-border-soft: #ffffff12;    /* gray-alpha-100 */
+  --color-border-strong: #ffffff3d;  /* gray-alpha-500 */
+  --color-menu: #1f1f1f;             /* gray-200 浮层 */
+  --color-menu-2: #292929;
+  --color-menu-ink: #ededed;
+  --color-menu-ink-2: #a0a0a0;
+  --color-menu-accent: #47a8ff;
+  --color-menu-danger: #ff565f;
+  --color-menu-border: #ffffff21;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.02), 0 4px 8px -4px rgba(0, 0, 0, 0.04), 0 16px 24px -8px rgba(0, 0, 0, 0.06);
+  --shadow-float: 0 1px 1px rgba(0, 0, 0, 0.02), 0 8px 16px -4px rgba(0, 0, 0, 0.04), 0 24px 32px -8px rgba(0, 0, 0, 0.06);
 }
 
-/* 吉维尼模式四季：低饱和、高明度，避免脏绿、土黄和冷灰压住内容。 */
-:root[data-giverny="on"][data-season="spring"] {
-  --brand-primary: #82a08b;        /* 春 · 淡芽绿 */
-  --brand-primary-strong: #617b69;
-  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
-  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
-}
-:root[data-giverny="on"][data-season="summer"] {
-  --brand-primary: #78a09a;        /* 夏 · 清水青 */
-  --brand-primary-strong: #5b7b76;
-  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
-  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
-}
-:root[data-giverny="on"][data-season="autumn"] {
-  --brand-primary: #a96f56;        /* 秋 · 暖陶土：参考 Claude 官网的暖白 + 陶土橙棕 */
-  --brand-primary-strong: #75503f;
-  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
-  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
-  --color-text: #2f2923;
-  --color-text-secondary: #6c6258;
-  --color-text-muted: #756b61;
-  --color-surface: color-mix(in srgb, var(--brand-primary) 4%, #fcfaf6);
-  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 1.8%, #fffdf8);
-  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 7%, #f8f4ed);
-  --color-sidebar: color-mix(in srgb, var(--brand-primary) 5%, #faf6ef);
-  --color-border: color-mix(in srgb, var(--brand-primary) 12%, transparent);
-  --color-border-soft: color-mix(in srgb, var(--brand-primary) 6%, transparent);
-  --color-status-pending: #a98258;
-  --row-fill-pending: color-mix(in srgb, var(--brand-primary) 9%, #fbf8f2);
-}
-:root[data-giverny="on"][data-season="winter"] {
-  --brand-primary: #8aa1ad;        /* 冬 · 雾蓝灰 */
-  --brand-primary-strong: #667b86;
-  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
-  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
-}
+/* 工具模式（默认）主色固定为 var(--color-primary)，不随季节漂移——季节只在「吉维尼模式」里生效。 */
+
+/* ===== 吉维尼模式（Geist 预览分支已停用）=====
+   本分支主视觉切换为 Geist Design System；季节 token 覆盖与 Geist 色板互斥，暂时下线。
+   如需恢复，见 main 分支同位置的 [data-giverny] 覆盖块。 */
 
 /* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
 :root[data-giverny="on"] .app-shell::after {
@@ -227,8 +237,8 @@
 }
 
 .brand-mark {
-  background: #dde4da;
-  color: #255856;
+  background: var(--brand-glow);
+  color: var(--color-primary-strong);
 }
 
 .brand-logo {
@@ -250,7 +260,7 @@
 
 .brand span {
   margin-top: 3px;
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -264,7 +274,7 @@
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: #9ca7a8;
+  background: var(--color-status-disabled);
 }
 
 .brand-status.ok i {
@@ -272,7 +282,7 @@
 }
 
 .brand-status.pending i {
-  background: #b8a45d;
+  background: var(--color-status-pending);
 }
 
 .brand-status.error {
@@ -280,7 +290,7 @@
 }
 
 .brand-status.error i {
-  background: #c2484b;
+  background: var(--danger-solid);
 }
 
 .nav-list {
@@ -296,10 +306,10 @@ button {
 
 .nav-item {
   width: 100%;
-  height: 42px;
+  height: 40px;
   border: 0;
   border-radius: var(--radius-control);
-  color: #687579;
+  color: var(--color-text-muted);
   background: transparent;
   display: flex;
   align-items: center;
@@ -311,7 +321,7 @@ button {
 
 .nav-item:hover {
   color: var(--color-text);
-  background: #f4f6f0;
+  background: var(--color-surface-alt);
 }
 
 .nav-item.active {
@@ -332,10 +342,10 @@ button {
 
 .sidebar-account-trigger {
   width: 100%;
-  height: 42px;
+  height: 40px;
   border: 0;
   border-radius: var(--radius-control);
-  color: #243840;
+  color: var(--color-text);
   background: transparent;
   display: flex;
   align-items: center;
@@ -357,16 +367,16 @@ button {
   z-index: var(--z-popover);
   width: 248px;
   padding: 10px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 12px;
-  background: rgba(253, 253, 251, 0.98);
+  background: var(--color-menu);
 }
 
 .account-menu-identity,
 .account-menu-item,
 .account-menu-storage {
   width: 100%;
-  min-height: 42px;
+  min-height: 40px;
   border: 0;
   border-radius: var(--radius-control);
   display: flex;
@@ -379,7 +389,7 @@ button {
 }
 
 .account-menu-identity {
-  color: #667478;
+  color: var(--color-text-muted);
 }
 
 .account-menu-identity strong,
@@ -422,7 +432,7 @@ button {
 
 .account-menu-storage {
   margin: 4px 0;
-  background: #f4f6f0;
+  background: var(--color-surface-alt);
 }
 
 .account-menu-version {
@@ -439,7 +449,7 @@ button {
 .large-meter {
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(23, 49, 58, 0.1);
+  background: var(--color-border);
 }
 
 .storage-meter {
@@ -474,7 +484,7 @@ button {
 }
 
 .backend-notice {
-  min-height: 42px;
+  min-height: 40px;
   margin: -8px 0 22px;
   padding: 9px 12px;
   border-top: 1px solid var(--color-border);
@@ -652,7 +662,7 @@ button {
 }
 
 .topbar-shortcut {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 4px;
   border: 0;
   color: var(--color-text-secondary);
@@ -1036,7 +1046,7 @@ button.topbar-create-button:hover {
 .shortcut-help h2 {
   margin: 0;
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 20px;
   font-weight: 600;
 }
@@ -1166,59 +1176,59 @@ button.topbar-create-button:hover {
 }
 
 .primary-button {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 16px;
-  color: #fff;
-  background: var(--color-primary-strong);
+  color: var(--button-primary-ink);
+  background: var(--button-primary-bg);
   box-shadow: none;
 }
 
 .primary-button:hover {
-  background: var(--color-primary-hover);
+  background: var(--button-primary-bg-hover);
   box-shadow: none;
 }
 
 .ghost-button,
 .select-button,
 .icon-button {
-  min-height: 42px;
-  color: #243840;
-  background: #f7f8f4;
-  border-color: rgba(39, 54, 58, 0.08);
+  min-height: 40px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 
 .ghost-button:hover,
 .select-button:hover,
 .icon-button:hover {
-  border-color: rgba(47, 111, 109, 0.3);
-  background: var(--color-surface-strong);
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
   box-shadow: none;
 }
 
 .danger-button {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 14px;
-  color: #a4393c;
-  background: rgba(242, 95, 92, 0.08);
-  border-color: rgba(242, 95, 92, 0.24);
+  color: var(--color-status-danger);
+  background: var(--danger-soft-bg);
+  border-color: var(--danger-soft-border);
 }
 
 .danger-button:hover {
   color: #fff;
-  background: #c2484b;
-  border-color: #c2484b;
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
   box-shadow: none;
 }
 
 .solid-danger-button {
   color: #fff;
-  background: #b9484b;
-  border-color: #b9484b;
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
 }
 
 .solid-danger-button:hover {
-  background: #a83d40;
-  border-color: #a83d40;
+  background: var(--color-status-danger);
+  border-color: var(--color-status-danger);
 }
 
 .select-button {
@@ -1234,7 +1244,7 @@ button.topbar-create-button:hover {
 }
 
 .icon-button {
-  width: 42px;
+  width: 40px;
 }
 
 .modal-close-button {
@@ -1243,11 +1253,11 @@ button.topbar-create-button:hover {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #536267;
+  color: var(--color-text-secondary);
 }
 
 .modal-close-button:hover {
-  background: rgba(39, 54, 58, 0.06);
+  background: var(--color-border);
   color: var(--color-text);
 }
 
@@ -1299,7 +1309,7 @@ button.topbar-create-button:hover {
 /* 指标大数字用衬线——整套设计「高级感」的来源（giverny-redesign §2） */
 .dashboard-metric strong {
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: clamp(31px, 3vw, 44px);
   font-weight: 600;
   letter-spacing: 0;
@@ -1309,7 +1319,7 @@ button.topbar-create-button:hover {
 .dashboard-metric small {
   margin-left: 3px;
   color: var(--color-text-secondary);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 0.42em;
   font-weight: 500;
 }
@@ -1362,7 +1372,7 @@ button.topbar-create-button:hover {
   position: relative;
   margin-bottom: 14px;
   padding: 13px 18px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1494,7 +1504,7 @@ button.topbar-create-button:hover {
 .daily-knowledge-modal-header h2 {
   margin: 0;
   color: var(--color-text);
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: var(--font-editorial);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: 0;
@@ -1606,10 +1616,10 @@ button.topbar-create-button:hover {
   transition: color 0.15s ease;
 }
 .daily-knowledge-favorite-btn:hover:not(:disabled) {
-  color: #f59e0b;
+  color: var(--color-due-soon);
 }
 .daily-knowledge-favorite-btn.favorited {
-  color: #f59e0b;
+  color: var(--color-due-soon);
 }
 .daily-knowledge-favorite-btn:disabled:not(.favorited) {
   opacity: 0.5;
@@ -1635,7 +1645,7 @@ button.topbar-create-button:hover {
 
 .stat-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(47, 111, 109, 0.18);
+  border-color: var(--color-border-strong);
   box-shadow: none;
 }
 
@@ -1657,8 +1667,8 @@ button.topbar-create-button:hover {
 }
 
 .stat-icon {
-  color: #255856;
-  background: rgba(47, 111, 109, 0.12);
+  color: var(--color-primary-strong);
+  background: var(--color-border-strong);
   margin-bottom: 16px;
 }
 
@@ -2590,7 +2600,7 @@ button.topbar-create-button:hover {
 }
 
 .progress-entry-tag.acceptance-file {
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  background: color-mix(in srgb, var(--color-due-soon) 12%, transparent);
   color: #b45309;
 }
 
@@ -2726,8 +2736,8 @@ button.topbar-create-button:hover {
 
 .progress-group-sibling-del:hover {
   opacity: 1;
-  background: color-mix(in srgb, var(--color-danger, #e53e3e) 12%, transparent);
-  color: var(--color-danger, #e53e3e);
+  background: color-mix(in srgb, var(--color-danger, var(--danger-solid)) 12%, transparent);
+  color: var(--color-danger, var(--danger-solid));
 }
 
 .dashboard-side-entry-files {
@@ -2928,7 +2938,7 @@ button.topbar-create-button:hover {
 
 .task-date b {
   color: var(--color-text-secondary);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 0;
@@ -3122,18 +3132,18 @@ button.topbar-create-button:hover {
 }
 
 .task-meta b {
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
 .task-meta span {
-  color: #778284;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .task-meta strong {
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 16px;
   font-weight: 600;
 }
@@ -3154,7 +3164,7 @@ button.topbar-create-button:hover {
   align-items: flex-end;
   gap: 7px;
   padding-left: 16px;
-  border-left: 1px dashed rgba(47, 111, 109, 0.16);
+  border-left: 1px dashed var(--color-border-strong);
   transition: opacity 0.14s ease;
 }
 
@@ -3618,7 +3628,7 @@ button.topbar-create-button:hover {
 
 .rv-data b {
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-weight: 600;
   text-align: right;
 }
@@ -3784,7 +3794,7 @@ button.topbar-create-button:hover {
 
 .pd-gap-h b {
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 16px;
   font-weight: 600;
 }
@@ -3874,7 +3884,7 @@ button.topbar-create-button:hover {
   display: block;
   margin-top: 2px;
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 18px;
   font-weight: 600;
 }
@@ -3931,7 +3941,7 @@ button.topbar-create-button:hover {
 }
 
 .cp-mini-stats b {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 14px;
   color: var(--color-text);
 }
@@ -4482,7 +4492,7 @@ button.topbar-create-button:hover {
 .insights-score-card {
   padding: 16px;
   border-radius: var(--radius-control);
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: grid;
   gap: 3px;
 }
@@ -4863,7 +4873,7 @@ button.topbar-create-button:hover {
   grid-template-columns: 12px minmax(80px, 1fr) auto;
   align-items: center;
   gap: 10px;
-  color: #667174;
+  color: var(--color-text-muted);
   font-size: 14px;
 }
 
@@ -4874,14 +4884,14 @@ button.topbar-create-button:hover {
 }
 
 .legend-row strong {
-  color: #4c5a5f;
+  color: var(--color-text-secondary);
   font-weight: 800;
   white-space: nowrap;
 }
 
 .trend-panel h2 span {
   margin-left: 6px;
-  color: #778284;
+  color: var(--color-text-muted);
   font-weight: 600;
 }
 
@@ -4899,7 +4909,7 @@ button.topbar-create-button:hover {
 }
 
 .grid-line {
-  stroke: rgba(39, 54, 58, 0.08);
+  stroke: var(--color-border);
   stroke-width: 1;
 }
 
@@ -4922,7 +4932,7 @@ button.topbar-create-button:hover {
 }
 
 .axis-label {
-  fill: #778284;
+  fill: var(--color-text-muted);
   font-size: 13px;
   font-weight: 700;
 }
@@ -4956,7 +4966,7 @@ button.topbar-create-button:hover {
 
 .detail-title p {
   margin: 0 0 4px;
-  color: #748083;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4976,10 +4986,10 @@ button.topbar-create-button:hover {
   position: relative;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px dashed rgba(47, 111, 109, 0.3);
+  border: 1px dashed var(--color-border-strong);
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #4c5a5f;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -4988,8 +4998,8 @@ button.topbar-create-button:hover {
 }
 
 .detail-upload:hover {
-  border-color: rgba(47, 111, 109, 0.5);
-  background: #e9f5ea;
+  border-color: var(--color-border-strong);
+  background: var(--color-supplement-bg);
 }
 
 .detail-upload em {
@@ -5006,7 +5016,7 @@ button.topbar-create-button:hover {
 
 .detail-activity {
   padding-top: 12px;
-  border-top: 1px dashed rgba(39, 54, 58, 0.14);
+  border-top: 1px dashed var(--color-border-strong);
 }
 
 .detail-activity .timeline {
@@ -5015,7 +5025,7 @@ button.topbar-create-button:hover {
 
 .detail-activity .timeline-item p {
   margin-top: 2px;
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
@@ -5077,8 +5087,8 @@ button.topbar-create-button:hover {
 .progress-block {
   padding: 14px;
   border-radius: 8px;
-  background: #f2f4ee;
-  border: 1px solid rgba(39, 54, 58, 0.045);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
 }
 
 .progress-block > div:first-child {
@@ -5122,8 +5132,8 @@ button.topbar-create-button:hover {
   min-height: 32px;
   padding: 0 10px;
   border-radius: 8px;
-  color: #314349;
-  background: #e9f5ea;
+  color: var(--color-text);
+  background: var(--color-supplement-bg);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -5147,7 +5157,7 @@ button.topbar-create-button:hover {
   top: 20px;
   bottom: -16px;
   width: 1px;
-  background: #dfe4dc;
+  background: var(--color-surface-deep);
 }
 
 .timeline-item:last-child::before {
@@ -5178,7 +5188,7 @@ button.topbar-create-button:hover {
 
 .timeline-item p {
   margin: 5px 0 0;
-  color: #667174;
+  color: var(--color-text-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -5320,7 +5330,7 @@ button.topbar-create-button:hover {
   text-align: right;
 }
 
-/* .management-row 复用 .task-row 的全部视觉（背景 #f2f4ee / hover #e9f5ea /
+/* .management-row 复用 .task-row 的全部视觉（背景 var(--color-surface-alt) / hover var(--color-supplement-bg) /
    selected 边框 / 过渡 / 4 列 grid）。只保留任务导航特有的作废状态。 */
 .management-row.voided {
   color: var(--color-text-muted);
@@ -5795,7 +5805,7 @@ button.topbar-create-button:hover {
 }
 
 .progress-lite-time-formula .date-input-wrap > button {
-  width: 42px;
+  width: 40px;
   height: 44px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
@@ -6072,7 +6082,7 @@ button.topbar-create-button:hover {
 .brief-upload-box.drag-over {
   color: var(--color-primary);
   border-color: var(--color-primary);
-  background: rgba(60, 107, 97, 0.04);
+  background: var(--brand-glow-soft);
 }
 
 .brief-upload-box:disabled {
@@ -6515,7 +6525,7 @@ button.topbar-create-button:hover {
 
 .attachment-hover-thumb-ext {
   color: var(--color-text-secondary);
-  font-family: Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -7403,7 +7413,7 @@ button.file-chip:focus-visible {
   top: 8px;
   bottom: 10px;
   width: 1px;
-  background: #dfe4dc;
+  background: var(--color-surface-deep);
 }
 
 .progress-note-card {
@@ -7486,7 +7496,7 @@ button.file-chip:focus-visible {
   margin: 0 0 0 18px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: rgba(47, 111, 109, 0.06);
+  background: var(--color-border-strong);
   color: var(--color-text-muted);
   font-size: 12px;
 }
@@ -7597,7 +7607,7 @@ button.file-chip:focus-visible {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  background: rgba(47, 111, 109, 0.12);
+  background: var(--color-border-strong);
   color: var(--color-primary);
   display: inline-flex;
   align-items: center;
@@ -7695,7 +7705,7 @@ button.file-chip:focus-visible {
   min-width: 0;
   min-height: 70px;
   padding: 10px;
-  border: 1px solid rgba(39, 54, 58, 0.06);
+  border: 1px solid var(--color-border);
   border-radius: 7px;
   background: var(--color-surface-alt);
   display: grid;
@@ -7729,7 +7739,7 @@ button.file-chip:focus-visible {
   width: 100%;
   min-width: 0;
   height: 28px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-surface-strong);
   color: var(--color-text);
@@ -7749,7 +7759,7 @@ button.file-chip:focus-visible {
   min-height: 24px;
   padding: 0 8px;
   border-radius: 6px;
-  background: rgba(47, 111, 109, 0.08);
+  background: var(--color-border-strong);
   color: var(--color-primary-strong);
   display: inline-flex;
   align-items: center;
@@ -7761,7 +7771,7 @@ button.file-chip:focus-visible {
   margin: 8px 0 10px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: rgba(47, 111, 109, 0.06);
+  background: var(--color-border-strong);
   color: var(--color-text-secondary);
   font-size: 11px;
   line-height: 1.55;
@@ -7858,7 +7868,7 @@ button.file-chip:focus-visible {
 .progress-status-panel {
   padding: 10px;
   border-radius: 8px;
-  background: rgba(47, 111, 109, 0.04);
+  background: var(--color-border-strong);
 }
 
 .progress-status-panel .editor-fields {
@@ -7965,7 +7975,7 @@ button.file-chip:focus-visible {
 
 .task-progress-timeline {
   padding: 14px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-surface);
   display: grid;
@@ -7978,7 +7988,7 @@ button.file-chip:focus-visible {
 
 .task-progress-timeline .timeline-item p {
   margin-top: 2px;
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
@@ -8006,7 +8016,7 @@ button.file-chip:focus-visible {
 
 .update-date span,
 .update-meta span {
-  color: #778284;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -8031,7 +8041,7 @@ button.file-chip:focus-visible {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: inline-flex;
   align-items: center;
 }
@@ -8083,7 +8093,7 @@ button.file-chip:focus-visible {
   width: 100%;
   height: 40px;
   padding: 0 10px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -8098,7 +8108,7 @@ button.file-chip:focus-visible {
   border: 1px solid transparent;
   border-radius: 8px;
   color: #3a4c51;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8109,8 +8119,8 @@ button.file-chip:focus-visible {
 
 .file-project-row.active,
 .file-project-row:hover {
-  border-color: rgba(47, 111, 109, 0.28);
-  background: #e9f5ea;
+  border-color: var(--color-border-strong);
+  background: var(--color-supplement-bg);
 }
 
 .file-project-row strong,
@@ -8125,7 +8135,7 @@ button.file-chip:focus-visible {
 
 .file-project-row span {
   margin-top: 4px;
-  color: #748083;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -8154,22 +8164,22 @@ button.file-chip:focus-visible {
 }
 
 .file-thumb-card:focus-visible {
-  outline: 2px solid rgba(47, 111, 109, 0.45);
+  outline: 2px solid var(--color-border-strong);
   outline-offset: 4px;
 }
 
 .file-thumb-card.selected .file-thumb-preview,
 .file-thumb-card:hover .file-thumb-preview,
 .file-thumb-card:focus-visible .file-thumb-preview {
-  border-color: rgba(47, 111, 109, 0.36);
-  background: #f2f4ee;
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
 }
 
 .file-thumb-preview {
   position: relative;
   width: 100%;
   min-height: 154px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-strong);
   display: grid;
@@ -8271,7 +8281,7 @@ button.file-chip:focus-visible {
 }
 
 .file-thumb-placeholder {
-  color: #255856;
+  color: var(--color-primary-strong);
   display: grid;
   gap: 8px;
   justify-items: center;
@@ -8295,7 +8305,7 @@ button.file-chip:focus-visible {
 
 .file-thumb-info p {
   margin: 4px 0 9px;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -8334,9 +8344,9 @@ button.file-chip:focus-visible {
   position: relative;
   width: 100%;
   min-height: 180px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -8362,7 +8372,7 @@ button.file-chip:focus-visible {
   width: 17px;
   height: 17px;
   border-radius: 999px;
-  border: 1px solid rgba(39, 54, 58, 0.12);
+  border: 1px solid var(--color-border-strong);
 }
 
 .inspector-field {
@@ -8372,7 +8382,7 @@ button.file-chip:focus-visible {
 
 .inspector-field span,
 .inspector-tags strong {
-  color: #667174;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
 }
@@ -8381,7 +8391,7 @@ button.file-chip:focus-visible {
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -8389,7 +8399,7 @@ button.file-chip:focus-visible {
 }
 
 .inspector-field input:focus {
-  border-color: rgba(47, 111, 109, 0.42);
+  border-color: var(--color-border-strong);
 }
 
 .inspector-tags {
@@ -8397,7 +8407,7 @@ button.file-chip:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
   padding-top: 4px;
-  border-top: 1px solid rgba(39, 54, 58, 0.08);
+  border-top: 1px solid var(--color-border);
 }
 
 .inspector-tags strong {
@@ -8417,7 +8427,7 @@ button.file-chip:focus-visible {
   padding: 0 10px;
   border-radius: 8px;
   color: #6b5a16;
-  background: rgba(230, 164, 58, 0.18);
+  background: var(--color-alert-surface);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -8443,7 +8453,7 @@ button.file-chip:focus-visible {
   display: grid;
   gap: 9px;
   padding-top: 4px;
-  border-top: 1px solid rgba(39, 54, 58, 0.08);
+  border-top: 1px solid var(--color-border);
 }
 
 .inspector-meta div {
@@ -8453,13 +8463,13 @@ button.file-chip:focus-visible {
 }
 
 .inspector-meta dt {
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .inspector-meta dd {
   margin: 0;
-  color: #243840;
+  color: var(--color-text);
   font-size: 12px;
   word-break: break-word;
 }
@@ -8474,9 +8484,9 @@ button.file-chip:focus-visible {
   width: 100%;
   aspect-ratio: 1;
   min-height: 44px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  color: #243840;
+  color: var(--color-text);
   background: var(--color-surface);
   display: inline-grid;
   place-items: center;
@@ -8485,9 +8495,9 @@ button.file-chip:focus-visible {
 
 .inspector-action-button:hover,
 .inspector-action-button:focus-visible {
-  border-color: rgba(47, 111, 109, 0.3);
-  background: #e9f5ea;
-  color: #255856;
+  border-color: var(--color-border-strong);
+  background: var(--color-supplement-bg);
+  color: var(--color-primary-strong);
   outline: 0;
 }
 
@@ -8514,7 +8524,7 @@ button.file-chip:focus-visible {
   width: 360px;
   min-height: 176px;
   cursor: pointer;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 14px;
   background: var(--color-surface-strong);
@@ -8523,8 +8533,8 @@ button.file-chip:focus-visible {
 
 .clickable-file-card:hover,
 .clickable-file-card:focus-visible {
-  border-color: rgba(47, 111, 109, 0.28);
-  background: #f2f4ee;
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
   outline: 0;
 }
 
@@ -8532,8 +8542,8 @@ button.file-chip:focus-visible {
   width: 44px;
   height: 44px;
   border-radius: 8px;
-  background: #dde4da;
-  color: #255856;
+  background: var(--brand-glow);
+  color: var(--color-primary-strong);
   display: grid;
   place-items: center;
 }
@@ -8843,7 +8853,7 @@ button.file-chip:focus-visible {
 
 .file-card-main p {
   margin: 4px 0 10px;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
@@ -8862,8 +8872,8 @@ button.file-chip:focus-visible {
   min-height: 26px;
   padding: 0 9px;
   border-radius: 999px;
-  background: #e9f5ea;
-  color: #667174;
+  background: var(--color-supplement-bg);
+  color: var(--color-text-muted);
   display: inline-flex;
   align-items: center;
   font-size: 12px;
@@ -8876,18 +8886,18 @@ button.file-chip:focus-visible {
 }
 
 .visibility-chip.visible {
-  color: #255856;
-  background: rgba(47, 111, 109, 0.12);
+  color: var(--color-primary-strong);
+  background: var(--color-border-strong);
 }
 
 .final-chip {
   color: #955f12;
-  background: rgba(230, 164, 58, 0.18);
+  background: var(--color-alert-surface);
 }
 
 .file-tag-chip {
   color: #1f5f62;
-  background: rgba(47, 111, 109, 0.12);
+  background: var(--color-border-strong);
 }
 
 .report-workspace {
@@ -8917,7 +8927,7 @@ button.file-chip:focus-visible {
 
 .report-summary-chips span {
   display: block;
-  color: #778284;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
 }
@@ -8933,8 +8943,8 @@ button.file-chip:focus-visible {
   margin: 0;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px dashed rgba(47, 111, 109, 0.3);
-  background: rgba(47, 111, 109, 0.05);
+  border: 1px dashed var(--color-border-strong);
+  background: var(--color-border-strong);
   color: #3f5a5c;
   font-size: 13px;
 }
@@ -8952,10 +8962,10 @@ button.file-chip:focus-visible {
 }
 
 .share-box {
-  min-height: 42px;
+  min-height: 40px;
   padding-left: 12px;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8964,7 +8974,7 @@ button.file-chip:focus-visible {
 
 .share-box span {
   min-width: 0;
-  color: #667174;
+  color: var(--color-text-muted);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8975,7 +8985,7 @@ button.file-chip:focus-visible {
   position: relative;
   width: min(860px, 100%);
   padding: 38px 42px 28px;
-  border: 1px solid rgba(39, 54, 58, 0.12);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   background: #fffefb;
   box-shadow: none;
@@ -9089,7 +9099,7 @@ button.file-chip:focus-visible {
   display: block;
   margin-bottom: 10px;
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 18px;
   font-weight: 600;
 }
@@ -9119,7 +9129,7 @@ button.file-chip:focus-visible {
   top: 46%;
   left: 50%;
   transform: translate(-50%, -50%) rotate(-24deg);
-  color: rgba(47, 111, 109, 0.05);
+  color: var(--color-border-strong);
   font-size: 64px;
   font-weight: 800;
   letter-spacing: 8px;
@@ -9213,7 +9223,7 @@ button.file-chip:focus-visible {
 .receipt-info dd {
   margin: 5px 0 0;
   padding-bottom: 6px;
-  border-bottom: 1px dotted rgba(39, 54, 58, 0.3);
+  border-bottom: 1px dotted var(--color-border-strong);
   color: var(--color-text);
   font-weight: 700;
   font-size: 14px;
@@ -9228,14 +9238,14 @@ button.file-chip:focus-visible {
 .receipt-table th,
 .receipt-table td {
   padding: 9px 10px;
-  border: 1px solid rgba(39, 54, 58, 0.18);
+  border: 1px solid var(--color-border-strong);
   color: #2b3c41;
   text-align: left;
 }
 
 .receipt-table th {
   background: #f3f5ef;
-  color: #51605f;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -9254,7 +9264,7 @@ button.file-chip:focus-visible {
 }
 
 .receipt-table tfoot td {
-  background: #f8f9f3;
+  background: var(--color-surface-alt);
   color: var(--color-text);
   font-weight: 800;
 }
@@ -9283,7 +9293,7 @@ button.file-chip:focus-visible {
 }
 
 .receipt-detail-title span {
-  color: #7a8587;
+  color: var(--color-text-muted);
   text-align: right;
   font-size: 11px;
 }
@@ -9336,8 +9346,8 @@ button.file-chip:focus-visible {
   gap: 12px;
   margin-top: 14px;
   padding: 12px 14px;
-  border: 1px solid rgba(39, 54, 58, 0.18);
-  background: #f8f9f3;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-alt);
 }
 
 .receipt-amount span {
@@ -9362,7 +9372,7 @@ button.file-chip:focus-visible {
 
 .receipt-remarks p {
   margin: 0 0 7px;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -9412,7 +9422,7 @@ button.file-chip:focus-visible {
 .receipt-cutline::after {
   content: '';
   flex: 1;
-  border-top: 1.5px dashed rgba(39, 54, 58, 0.25);
+  border-top: 1.5px dashed var(--color-border-strong);
 }
 
 .cloudflare-list {
@@ -9425,8 +9435,8 @@ button.file-chip:focus-visible {
   min-height: 40px;
   padding: 0 12px;
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #4c5a5f;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
 }
@@ -9449,7 +9459,7 @@ button.file-chip:focus-visible {
   min-height: 30px;
   padding: 0 10px;
   border-radius: 8px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   color: #506064;
   display: inline-flex;
   align-items: center;
@@ -9460,7 +9470,7 @@ button.file-chip:focus-visible {
 
 .cloudflare-details[open] .cloudflare-summary > span {
   color: var(--color-primary);
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
 }
 
 .modal-backdrop {
@@ -9574,7 +9584,7 @@ button.file-chip:focus-visible {
 .new-task-modal .modal-header h2 {
   margin: 0;
   color: var(--color-editorial-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 22px;
   font-weight: 600;
   line-height: 1.25;
@@ -9602,7 +9612,7 @@ button.file-chip:focus-visible {
 
 .new-task-modal .modal-footer .ghost-button,
 .new-task-modal .modal-footer .primary-button {
-  min-height: 42px;
+  min-height: 40px;
   border-radius: var(--radius-control);
 }
 
@@ -9656,7 +9666,7 @@ button.file-chip:focus-visible {
   width: 54px;
   height: 54px;
   border-radius: 12px;
-  color: #a83d40;
+  color: var(--color-status-danger);
   background: #f8e9e7;
   display: grid;
   place-items: center;
@@ -9681,12 +9691,12 @@ button.file-chip:focus-visible {
   margin: 20px 0 24px;
   padding: 12px;
   border-radius: 10px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  color: #536267;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -9730,7 +9740,7 @@ button.file-chip:focus-visible {
 }
 
 .void-reason-field span {
-  color: #4c5a5f;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -9738,7 +9748,7 @@ button.file-chip:focus-visible {
 .void-reason-field textarea {
   min-height: 96px;
   resize: vertical;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 10px 12px;
   color: var(--color-text);
@@ -10716,7 +10726,7 @@ button.file-chip:focus-visible {
 }
 
 .field span {
-  color: #4c5a5f;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 800;
 }
@@ -10769,14 +10779,14 @@ button.file-chip:focus-visible {
 }
 
 .ai-assist-button:hover {
-  background: rgba(47, 111, 109, 0.08);
+  background: var(--color-border-strong);
   border-color: transparent;
 }
 
 .ai-suggestion-panel {
   grid-column: 1 / -1;
-  background: #f2f4ee;
-  border: 1px solid rgba(47, 111, 109, 0.16);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   padding: 12px;
   display: grid;
@@ -10797,7 +10807,7 @@ button.file-chip:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #4c5a5f;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 800;
 }
@@ -10839,7 +10849,7 @@ button.file-chip:focus-visible {
   color: var(--color-primary);
   font-size: 12px;
   font-style: normal;
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
   border-radius: 999px;
   padding: 4px 8px;
 }
@@ -10878,7 +10888,7 @@ button.file-chip:focus-visible {
 
 .ai-suggestion-panel p {
   margin: 0;
-  color: #243840;
+  color: var(--color-text);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -10888,7 +10898,7 @@ button.file-chip:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  background: rgba(47, 111, 109, 0.07);
+  background: var(--color-border-strong);
   border-radius: 6px;
   font-size: 13px;
 }
@@ -10912,7 +10922,7 @@ button.file-chip:focus-visible {
 }
 
 .ai-suggestion-title-text {
-  color: #243840;
+  color: var(--color-text);
   flex: 1;
   min-width: 0;
 }
@@ -10921,7 +10931,7 @@ button.file-chip:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #243840;
+  color: var(--color-text);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -10947,12 +10957,12 @@ button.file-chip:focus-visible {
 }
 
 .ai-suggestion-panel small {
-  color: #748083;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .ai-suggestion-error {
-  color: #a83d40 !important;
+  color: var(--color-status-danger) !important;
 }
 
 .ai-suggestion-actions {
@@ -10981,7 +10991,7 @@ button.file-chip:focus-visible {
 .field select {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-strong);
   color: var(--color-text);
@@ -11038,7 +11048,7 @@ button.file-chip:focus-visible {
 
 .field input,
 .field select {
-  height: 42px;
+  height: 40px;
   padding: 0 12px;
 }
 
@@ -11130,7 +11140,7 @@ textarea::placeholder {
 }
 
 .field-locked-value {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 14px;
   display: flex;
   align-items: center;
@@ -11172,7 +11182,7 @@ input::file-selector-button {
 
 .field-hint {
   margin-top: 6px;
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -11189,9 +11199,9 @@ input::file-selector-button {
 }
 
 .date-input-wrap button {
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-border);
   border-radius: 0 8px 8px 0;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -11542,7 +11552,7 @@ input::file-selector-button {
 }
 
 .supplemental-label {
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 13px;
   font-weight: 800;
   line-height: 1;
@@ -11586,7 +11596,7 @@ input::file-selector-button {
 
 .switch-control.active {
   background: transparent;
-  color: #255856;
+  color: var(--color-primary-strong);
 }
 
 .switch-control.active i {
@@ -11600,7 +11610,7 @@ input::file-selector-button {
 .supplemental-month-select {
   height: 34px;
   padding: 0 8px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-strong);
   display: inline-flex;
@@ -11609,7 +11619,7 @@ input::file-selector-button {
 }
 
 .supplemental-month-select span {
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
@@ -11639,10 +11649,10 @@ input::file-selector-button {
 
 .cascade-trigger {
   width: 100%;
-  height: 42px;
+  height: 40px;
   box-sizing: border-box;
   padding: 0 12px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -11677,9 +11687,9 @@ input::file-selector-button {
   width: min(560px, calc(100vw - 48px));
   min-height: 220px;
   padding: 8px;
-  border: 1px solid rgba(39, 54, 58, 0.1);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: #f7f8f4;
+  background: var(--color-surface-alt);
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 8px;
@@ -11697,7 +11707,7 @@ input::file-selector-button {
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
-  color: #405056;
+  color: var(--color-text-secondary);
   background: transparent;
   display: flex;
   align-items: center;
@@ -11711,12 +11721,12 @@ input::file-selector-button {
 .cascade-column button:hover,
 .cascade-column button.active {
   color: var(--color-text);
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
 }
 
 .child-column {
   padding-left: 8px;
-  border-left: 1px solid rgba(39, 54, 58, 0.08);
+  border-left: 1px solid var(--color-border);
 }
 
 .child-column button.selected {
@@ -11730,7 +11740,7 @@ input::file-selector-button {
 .field select:disabled {
   opacity: 1;
   color: var(--color-text);
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
 }
 
 .visibility-field {
@@ -11747,10 +11757,10 @@ input::file-selector-button {
   position: relative;
   min-height: 132px;
   padding: 18px;
-  border: 1px dashed rgba(47, 111, 109, 0.28);
+  border: 1px dashed var(--color-border-strong);
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #4c5a5f;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: grid;
   place-items: center;
   align-content: center;
@@ -11768,7 +11778,7 @@ input::file-selector-button {
 }
 
 .upload-dropzone span {
-  color: #778284;
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
@@ -11854,7 +11864,7 @@ input::file-selector-button {
 .acceptance-section-title {
   min-height: 32px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(39, 54, 58, 0.08);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -11893,7 +11903,7 @@ input::file-selector-button {
   padding: 0 10px;
   border: 0;
   border-radius: 5px;
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
   color: var(--color-primary);
   display: inline-flex;
   align-items: center;
@@ -11905,7 +11915,7 @@ input::file-selector-button {
 }
 
 .acceptance-edit-button:hover {
-  background: rgba(47, 111, 109, 0.18);
+  background: var(--color-border-strong);
 }
 
 .acceptance-basic-grid {
@@ -12165,7 +12175,7 @@ input::file-selector-button {
   min-height: 34px;
   padding: 0 10px;
   border-radius: 6px;
-  background: rgba(47, 111, 109, 0.08);
+  background: var(--color-border-strong);
   color: var(--color-primary-strong);
   display: flex;
   align-items: center;
@@ -12642,7 +12652,7 @@ input::file-selector-button {
   position: relative;
   z-index: 1;
   min-width: 0;
-  min-height: 42px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12733,9 +12743,9 @@ input::file-selector-button {
   width: 100%;
   height: 100%;
   min-height: 0;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
 }
 
 .file-preview-video {
@@ -12750,14 +12760,14 @@ input::file-selector-button {
   min-height: 0;
   height: 100%;
   overflow: auto;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
 }
 
 .office-preview-status {
   min-height: 240px;
-  color: #667174;
+  color: var(--color-text-muted);
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -12796,7 +12806,7 @@ input::file-selector-button {
 .spreadsheet-table-wrap {
   max-width: 100%;
   overflow: auto;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-strong);
 }
@@ -12812,8 +12822,8 @@ input::file-selector-button {
   min-width: 96px;
   max-width: 260px;
   padding: 9px 10px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
-  color: #243840;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
   vertical-align: top;
   word-break: break-word;
 }
@@ -12821,8 +12831,8 @@ input::file-selector-button {
 .file-preview-placeholder {
   min-height: 240px;
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #667174;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
   display: grid;
   place-items: center;
   align-content: center;
@@ -12849,11 +12859,11 @@ input::file-selector-button {
 .preview-meta div {
   padding: 12px;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
 }
 
 .preview-meta dt {
-  color: #778284;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -12876,7 +12886,7 @@ input::file-selector-button {
 }
 
 .toast {
-  min-height: 42px;
+  min-height: 40px;
   padding: 10px 14px;
   border-radius: var(--radius-control);
   color: var(--color-text);
@@ -14075,19 +14085,19 @@ input::file-selector-button {
 
 .toast-success {
   color: var(--color-primary-strong);
-  background: #e9f5ea;
-  border-color: rgba(60, 107, 97, 0.22);
+  background: var(--color-supplement-bg);
+  border-color: var(--brand-glow);
 }
 
 .toast-info {
-  color: #31464c;
-  background: #f3f5f0;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-alt);
 }
 
 .toast-error {
-  color: #7f2f32;
-  background: #fbf1ef;
-  border-color: rgba(151, 71, 74, 0.24);
+  color: var(--color-status-danger);
+  background: var(--danger-soft-bg);
+  border-color: var(--danger-soft-border);
 }
 
 @keyframes toast-in {
@@ -14105,7 +14115,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(47, 111, 109, 0.55);
+  outline: 2px solid var(--color-border-strong);
   outline-offset: 2px;
 }
 
@@ -14116,7 +14126,7 @@ textarea:focus-visible {
 
 .file-card:hover,
 .update-card:hover {
-  border-color: rgba(47, 111, 109, 0.18);
+  border-color: var(--color-border-strong);
   box-shadow: none;
   transform: translateY(-1px);
 }
@@ -14147,7 +14157,7 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: 18px;
   background:
-    linear-gradient(90deg, rgba(47, 111, 109, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-border-strong) 1px, transparent 1px),
     var(--color-surface);
   background-size: 30px 30px;
 }
@@ -14183,7 +14193,7 @@ textarea:focus-visible {
 .client-task-row {
   min-height: 64px;
   padding: 12px 0;
-  border-top: 1px solid rgba(39, 54, 58, 0.07);
+  border-top: 1px solid var(--color-border);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px 82px;
   align-items: center;
@@ -14201,7 +14211,7 @@ textarea:focus-visible {
 
 .client-task-row span {
   margin-top: 4px;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -14223,8 +14233,8 @@ textarea:focus-visible {
   min-height: 36px;
   padding: 0 10px;
   border-radius: 8px;
-  background: #e9f5ea;
-  color: #314349;
+  background: var(--color-supplement-bg);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -14249,7 +14259,7 @@ textarea:focus-visible {
   padding: 0 12px;
   border: 0;
   border-radius: 7px;
-  color: #748083;
+  color: var(--color-text-muted);
   background: transparent;
   display: flex;
   align-items: center;
@@ -14261,12 +14271,12 @@ textarea:focus-visible {
 
 .sub-nav button:hover {
   color: var(--color-text);
-  background: #f4f6f0;
+  background: var(--color-surface-alt);
 }
 
 .sub-nav button.active {
   color: #1d4a48;
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
   font-weight: 700;
 }
 
@@ -14327,7 +14337,7 @@ textarea:focus-visible {
 }
 
 .month-trigger.active {
-  border-color: rgba(47, 111, 109, 0.34);
+  border-color: var(--color-border-strong);
   background: var(--color-surface-strong);
 }
 
@@ -14705,8 +14715,8 @@ textarea:focus-visible {
 }
 
 .calendar-schedule-day strong {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   color: var(--color-text);
@@ -14828,8 +14838,8 @@ textarea:focus-visible {
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: #e9f5ea;
-  color: #314349;
+  background: var(--color-supplement-bg);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -14841,7 +14851,7 @@ textarea:focus-visible {
 
 .client-file-row:hover {
   background: #e4e9df;
-  border-color: rgba(47, 111, 109, 0.25);
+  border-color: var(--color-border-strong);
 }
 
 .client-file-row span {
@@ -14866,10 +14876,10 @@ textarea:focus-visible {
   position: relative;
   min-height: 64px;
   padding: 10px 12px;
-  border: 1px dashed rgba(47, 111, 109, 0.28);
+  border: 1px dashed var(--color-border-strong);
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #4c5a5f;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -14902,7 +14912,7 @@ textarea:focus-visible {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at 20% 10%, rgba(47, 111, 109, 0.08), transparent 50%),
+    radial-gradient(circle at 20% 10%, var(--color-border-strong), transparent 50%),
     var(--color-surface-alt);
 }
 
@@ -14916,7 +14926,7 @@ textarea:focus-visible {
 .boot-card {
   width: min(360px, 100%);
   padding: 28px;
-  border: 1px solid rgba(39, 54, 58, 0.06);
+  border: 1px solid var(--color-border);
   border-radius: 14px;
   background: var(--color-surface);
   display: grid;
@@ -14932,7 +14942,7 @@ textarea:focus-visible {
 
 .boot-card p {
   margin: 0;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
@@ -14959,7 +14969,7 @@ textarea:focus-visible {
 .lock-card {
   width: min(380px, 100%);
   padding: 32px 28px;
-  border: 1px solid rgba(39, 54, 58, 0.06);
+  border: 1px solid var(--color-border);
   border-radius: 14px;
   background: var(--color-surface);
   box-shadow: none;
@@ -14977,7 +14987,7 @@ textarea:focus-visible {
 
 .lock-card > p {
   margin: 0;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -14987,7 +14997,7 @@ textarea:focus-visible {
   height: 44px;
   margin-top: 6px;
   padding: 0 12px;
-  border: 1px solid rgba(39, 54, 58, 0.12);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   background: var(--color-surface-strong);
   color: #899294;
@@ -15008,7 +15018,7 @@ textarea:focus-visible {
 
 .lock-input.muted {
   color: #9aa4a4;
-  background: #f3f5f0;
+  background: var(--color-surface-alt);
 }
 
 .lock-input input:disabled {
@@ -15023,17 +15033,17 @@ textarea:focus-visible {
 
 .lock-error {
   margin: 0;
-  color: #c2484b;
+  color: var(--danger-solid);
   font-size: 13px;
 }
 
 .upload-inline-error {
   margin: -4px 0 4px;
   padding: 8px 10px;
-  border: 1px solid rgba(194, 72, 75, 0.16);
+  border: 1px solid var(--danger-soft-border);
   border-radius: 8px;
   color: #8f383b;
-  background: #fbf1ef;
+  background: var(--danger-soft-bg);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -15139,7 +15149,7 @@ textarea:focus-visible {
 }
 
 .login-wordmark strong {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -15377,13 +15387,13 @@ textarea:focus-visible {
 }
 
 .danger-icon {
-  color: #a4393c;
+  color: var(--color-status-danger);
 }
 
 .danger-icon:hover {
   color: #fff;
-  background: #c2484b;
-  border-color: #c2484b;
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
 }
 
 .report-history {
@@ -15401,7 +15411,7 @@ textarea:focus-visible {
 
 .report-history h3 {
   margin: 4px 0 0;
-  color: #51605f;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 1px;
@@ -15427,7 +15437,7 @@ textarea:focus-visible {
   min-height: 52px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr) auto auto;
   align-items: center;
@@ -15440,7 +15450,7 @@ textarea:focus-visible {
 }
 
 .report-history-row span {
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 700;
 }
@@ -15479,7 +15489,7 @@ textarea:focus-visible {
   margin-top: 12vh;
   padding: 28px;
   text-align: center;
-  color: #6d797c;
+  color: var(--color-text-muted);
   height: fit-content;
 }
 
@@ -15589,7 +15599,7 @@ textarea:focus-visible {
 
 .settings-inline-error {
   margin: 0;
-  color: #c2484b;
+  color: var(--danger-solid);
   font-size: 12px;
 }
 
@@ -15932,7 +15942,7 @@ textarea:focus-visible {
   margin-top: 14px;
   border: 0;
   border-radius: var(--radius-control);
-  background: rgba(47, 111, 109, 0.06);
+  background: var(--color-border-strong);
   overflow: hidden;
 }
 
@@ -16052,14 +16062,14 @@ textarea:focus-visible {
 }
 
 .or-free-status.status-limited {
-  color: #b08438;
+  color: var(--color-status-pending);
   background: rgba(176, 132, 56, 0.12);
 }
 
 .or-free-status.status-unavailable,
 .or-free-status.status-error {
-  color: #a4393c;
-  background: rgba(242, 95, 92, 0.1);
+  color: var(--color-status-danger);
+  background: var(--danger-soft-border);
 }
 
 .or-free-vision {
@@ -16242,7 +16252,7 @@ textarea:focus-visible {
 }
 
 .settings-tool-summary svg:last-child {
-  color: #7d898b;
+  color: var(--color-text-muted);
   transition: transform 0.16s ease;
 }
 
@@ -16308,12 +16318,12 @@ textarea:focus-visible {
 }
 
 .design-type-create input {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 12px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text);
-  background: #f7f8f4;
+  background: var(--color-surface-alt);
   font: inherit;
   outline: 0;
 }
@@ -16361,7 +16371,7 @@ textarea:focus-visible {
   font-size: 11px;
   font-weight: 700;
   color: #9aa4a6;
-  background: rgba(39, 54, 58, 0.06);
+  background: var(--color-border);
   border-radius: 999px;
   padding: 1px 6px;
 }
@@ -16415,7 +16425,7 @@ textarea:focus-visible {
   width: 160px;
   height: 36px;
   padding: 0 10px;
-  border: 1px solid rgba(47, 111, 109, 0.32);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -16432,7 +16442,7 @@ textarea:focus-visible {
 }
 
 .design-type-active-head small {
-  color: #7d898b;
+  color: var(--color-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -16448,7 +16458,7 @@ textarea:focus-visible {
 }
 
 .design-type-active-head .icon-button:hover:not(:disabled) {
-  background: rgba(242, 95, 92, 0.1);
+  background: var(--danger-soft-border);
   border-color: transparent;
 }
 
@@ -16482,7 +16492,7 @@ textarea:focus-visible {
   margin-top: 8px;
   border: 0;
   border-radius: 8px;
-  color: #778284;
+  color: var(--color-text-muted);
   background: transparent;
   display: grid;
   place-items: center;
@@ -16492,7 +16502,7 @@ textarea:focus-visible {
 .design-type-drag-handle:hover,
 .design-type-drag-handle:focus {
   color: var(--color-primary-strong);
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   outline: none;
 }
 
@@ -16502,9 +16512,9 @@ textarea:focus-visible {
 
 .design-type-group {
   padding: 12px;
-  border: 1px solid rgba(39, 54, 58, 0.07);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f7f8f4;
+  background: var(--color-surface-alt);
 }
 
 .design-type-chip.dragging {
@@ -16542,7 +16552,7 @@ textarea:focus-visible {
 .design-type-collapse-trigger:hover,
 .design-type-collapse-trigger:focus {
   color: var(--color-primary);
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   outline: none;
 }
 
@@ -16561,7 +16571,7 @@ textarea:focus-visible {
 
 .design-type-group-name-input:hover,
 .design-type-group-name-input:focus {
-  border-color: rgba(47, 111, 109, 0.28);
+  border-color: var(--color-border-strong);
   background: var(--color-surface-strong);
 }
 
@@ -16608,7 +16618,7 @@ textarea:focus-visible {
 }
 
 .design-type-group-title small {
-  color: #7d898b;
+  color: var(--color-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -16630,7 +16640,7 @@ textarea:focus-visible {
 }
 
 .design-type-group-actions .icon-button:hover {
-  background: rgba(242, 95, 92, 0.1);
+  background: var(--danger-soft-border);
   border-color: transparent;
 }
 
@@ -16656,7 +16666,7 @@ textarea:focus-visible {
   padding: 0 7px 0 11px;
   border-radius: 8px;
   color: #244347;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -16670,7 +16680,7 @@ textarea:focus-visible {
   height: 24px;
   border: 0;
   border-radius: 7px;
-  color: #687579;
+  color: var(--color-text-muted);
   background: transparent;
   display: inline-grid;
   place-items: center;
@@ -16678,8 +16688,8 @@ textarea:focus-visible {
 }
 
 .design-type-chip button:hover {
-  color: #c2484b;
-  background: rgba(194, 72, 75, 0.08);
+  color: var(--danger-solid);
+  background: var(--danger-soft-bg);
 }
 
 .design-type-chip button:disabled {
@@ -16727,8 +16737,8 @@ textarea:focus-visible {
 }
 
 .design-type-item button:hover {
-  color: #c2484b;
-  background: rgba(194, 72, 75, 0.1);
+  color: var(--danger-solid);
+  background: var(--danger-soft-border);
 }
 
 /* 行尾「+」：点一下即可内联添加子类，无需独立的输入框和「添加」文字。 */
@@ -16754,7 +16764,7 @@ textarea:focus-visible {
   width: 130px;
   min-height: 28px;
   padding: 0 8px;
-  border: 1px solid rgba(47, 111, 109, 0.32);
+  border: 1px solid var(--color-border-strong);
   border-radius: 7px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -16767,7 +16777,7 @@ textarea:focus-visible {
   width: 110px;
   min-height: 26px;
   padding: 0 6px;
-  border: 1px solid rgba(47, 111, 109, 0.4);
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   color: var(--color-text);
   background: var(--color-surface-strong);
@@ -16780,7 +16790,7 @@ textarea:focus-visible {
   padding: 12px;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
@@ -16789,7 +16799,7 @@ textarea:focus-visible {
 }
 
 .token-row.fresh {
-  border-color: rgba(47, 111, 109, 0.4);
+  border-color: var(--color-border-strong);
   box-shadow: none;
 }
 
@@ -16807,7 +16817,7 @@ textarea:focus-visible {
 .token-row-main code {
   color: var(--color-primary);
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -16839,7 +16849,7 @@ textarea:focus-visible {
   min-height: 36px;
   padding: 0 10px;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -16847,7 +16857,7 @@ textarea:focus-visible {
 }
 
 .version-meta dt {
-  color: #7a8587;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -16907,7 +16917,7 @@ textarea:focus-visible {
   .child-column {
     padding-left: 0;
     border-left: 0;
-    border-top: 1px solid rgba(39, 54, 58, 0.08);
+    border-top: 1px solid var(--color-border);
     padding-top: 8px;
   }
 
@@ -17008,7 +17018,7 @@ textarea:focus-visible {
 .annual-totals {
   display: flex;
   gap: 16px;
-  color: #6d797c;
+  color: var(--color-text-muted);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -17035,7 +17045,7 @@ textarea:focus-visible {
 }
 
 .annual-bar-amount {
-  color: #51605f;
+  color: var(--color-text-secondary);
   font-size: 11px;
   font-weight: 700;
   min-height: 14px;
@@ -17045,7 +17055,7 @@ textarea:focus-visible {
   width: min(34px, 100%);
   height: 96px;
   border-radius: 6px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -17055,7 +17065,7 @@ textarea:focus-visible {
   display: block;
   width: 100%;
   border-radius: 6px 6px 0 0;
-  background: linear-gradient(180deg, #3a8a86, var(--color-primary));
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary));
   transition: height 0.4s ease;
 }
 
@@ -17099,7 +17109,7 @@ textarea:focus-visible {
 }
 
 .income-view .stat-card strong {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-weight: 600;
 }
 
@@ -17115,7 +17125,7 @@ textarea:focus-visible {
   padding: 0 10px;
   border-radius: 8px;
   color: var(--color-primary);
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
   display: inline-flex;
   align-items: center;
   font-size: 12px;
@@ -17155,7 +17165,7 @@ textarea:focus-visible {
   width: min(38px, 100%);
   height: 132px;
   border-radius: 8px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -17171,16 +17181,16 @@ textarea:focus-visible {
 }
 
 .income-bar-track i.gross {
-  background: #dfe5dc;
+  background: var(--color-surface-deep);
 }
 
 .income-bar-track i.net {
   width: 58%;
-  background: linear-gradient(180deg, #3a8a86, var(--color-primary));
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary));
 }
 
 .income-bar.current .income-bar-track {
-  outline: 2px solid rgba(47, 111, 109, 0.35);
+  outline: 2px solid var(--color-border-strong);
   outline-offset: 3px;
 }
 
@@ -17211,7 +17221,7 @@ textarea:focus-visible {
 }
 
 .income-legend i.gross {
-  background: #dfe5dc;
+  background: var(--color-surface-deep);
 }
 
 .income-legend i.net {
@@ -17251,7 +17261,7 @@ textarea:focus-visible {
   min-height: 30px;
   padding: 0 10px;
   border-radius: 8px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   color: #506064;
   display: inline-flex;
   align-items: center;
@@ -17273,7 +17283,7 @@ textarea:focus-visible {
 
 .income-tax-panel[open] .income-tax-summary > span {
   color: var(--color-primary);
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
 }
 
 .income-form {
@@ -17285,7 +17295,7 @@ textarea:focus-visible {
   margin-top: 14px;
   padding: 12px;
   border-radius: 8px;
-  background: #e9f5ea;
+  background: var(--color-supplement-bg);
   color: #59686b;
 }
 
@@ -17314,14 +17324,14 @@ textarea:focus-visible {
 .income-table th,
 .income-table td {
   padding: 12px 10px;
-  border-bottom: 1px solid rgba(39, 54, 58, 0.07);
+  border-bottom: 1px solid var(--color-border);
   color: #3a4c51;
   text-align: left;
   font-size: 13px;
 }
 
 .income-table th {
-  color: #748083;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
 }
@@ -17331,7 +17341,7 @@ textarea:focus-visible {
 }
 
 .income-table tr.current td {
-  background: rgba(47, 111, 109, 0.06);
+  background: var(--color-border-strong);
   color: var(--color-text);
   font-weight: 800;
 }
@@ -17557,7 +17567,7 @@ textarea:focus-visible {
 }
 
 .hours-dev-badge.over {
-  background: color-mix(in srgb, #e53e3e 12%, transparent);
+  background: color-mix(in srgb, var(--danger-solid) 12%, transparent);
   color: #c53030;
 }
 
@@ -17702,8 +17712,8 @@ textarea:focus-visible {
     to right,
     var(--color-primary) 0%,
     var(--color-primary) var(--progress-value, 0%),
-    rgba(39, 54, 58, 0.1) var(--progress-value, 0%),
-    rgba(39, 54, 58, 0.1) 100%
+    var(--color-border-strong) var(--progress-value, 0%),
+    var(--color-border-strong) 100%
   );
 }
 
@@ -17724,14 +17734,14 @@ textarea:focus-visible {
 }
 
 .progress-slider-row input[type='range']:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px rgba(47, 111, 109, 0.12);
+  box-shadow: 0 0 0 4px var(--color-border-strong);
 }
 
 .progress-slider-row input[type='range']::-moz-range-track {
   height: 6px;
   border: 0;
   border-radius: var(--radius-pill);
-  background: rgba(39, 54, 58, 0.1);
+  background: var(--color-border-strong);
 }
 
 .progress-slider-row input[type='range']::-moz-range-progress {
@@ -17782,7 +17792,7 @@ textarea:focus-visible {
 .progress-quick-options button.active {
   border-color: var(--color-primary);
   color: var(--color-primary-strong);
-  background: rgba(47, 111, 109, 0.1);
+  background: var(--color-border-strong);
 }
 
 .progress-draft-actions {
@@ -17809,9 +17819,9 @@ textarea:focus-visible {
 .acceptance-panel {
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid rgba(47, 111, 109, 0.16);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: grid;
   gap: 10px;
 }
@@ -17849,7 +17859,7 @@ textarea:focus-visible {
   height: 36px;
   box-sizing: border-box;
   padding: 0 8px;
-  border: 1px solid rgba(39, 54, 58, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-strong);
   color: var(--color-text);
@@ -17902,10 +17912,10 @@ textarea:focus-visible {
   position: relative;
   min-height: 54px;
   padding: 10px 14px;
-  border: 1px dashed rgba(47, 111, 109, 0.3);
+  border: 1px dashed var(--color-border-strong);
   border-radius: 8px;
-  background: #f2f4ee;
-  color: #4c5a5f;
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -17944,7 +17954,7 @@ textarea:focus-visible {
 }
 
 .activity-timeline .timeline-item p {
-  color: #405056;
+  color: var(--color-text-secondary);
 }
 
 .update-card {
@@ -17966,7 +17976,7 @@ textarea:focus-visible {
   margin: 0 22px;
   padding: 12px 14px;
   border-radius: 8px;
-  background: #f2f4ee;
+  background: var(--color-surface-alt);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -17984,12 +17994,12 @@ textarea:focus-visible {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #3a8a86, var(--color-primary));
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary));
   transition: width 0.2s ease;
 }
 
 .upload-progress strong {
-  min-width: 42px;
+  min-width: 40px;
   color: var(--color-text);
   text-align: right;
   font-size: 13px;
@@ -19586,7 +19596,7 @@ textarea:focus-visible {
   display: block;
   margin-top: 5px;
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 24px;
   font-weight: 600;
 }
@@ -19673,7 +19683,7 @@ textarea:focus-visible {
 /* 分隔线一律改虚线 */
 .receipt-template-min .receipt-rule {
   border: 0;
-  border-top: 1.5px dashed rgba(39, 54, 58, 0.32);
+  border-top: 1.5px dashed var(--color-border-strong);
   background: transparent;
   height: 0;
   margin: 14px 0;
@@ -19688,15 +19698,15 @@ textarea:focus-visible {
 }
 
 .receipt-template-min .receipt-table thead th {
-  border-bottom: 1.5px dashed rgba(39, 54, 58, 0.32);
+  border-bottom: 1.5px dashed var(--color-border-strong);
 }
 
 .receipt-template-min .receipt-table tbody tr td {
-  border-bottom: 1px dashed rgba(39, 54, 58, 0.14);
+  border-bottom: 1px dashed var(--color-border-strong);
 }
 
 .receipt-template-min .receipt-table tfoot td {
-  border-top: 1.5px dashed rgba(39, 54, 58, 0.32);
+  border-top: 1.5px dashed var(--color-border-strong);
   font-weight: 800;
 }
 
@@ -19709,7 +19719,7 @@ textarea:focus-visible {
 /* 编辑式 Excel：全宽充分利用横向空间，去掉卡片外框与圆角阴影，扁平干净。 */
 .receipt-template-detail {
   width: 100%;
-  background: #fff;
+  background: var(--color-card);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -19764,7 +19774,7 @@ textarea:focus-visible {
 .receipt-uncounted {
   margin-top: 18px;
   padding-top: 14px;
-  border-top: 1px dashed rgba(39, 54, 58, 0.18);
+  border-top: 1px dashed var(--color-border-strong);
 }
 
 .receipt-uncounted-head {
@@ -20055,7 +20065,7 @@ textarea:focus-visible {
 }
 
 .brand strong {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 22px;
   font-weight: 600;
 }
@@ -20285,7 +20295,7 @@ button.topbar-create-button kbd {
 
 .summary-report-weekly strong {
   display: inline-block;
-  min-width: 42px;
+  min-width: 40px;
   color: var(--color-text);
   font-weight: 800;
 }
@@ -20656,7 +20666,7 @@ button.topbar-create-button kbd {
 }
 
 .light-confirm-modal .delete-confirm-copy h2 {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 30px;
   font-weight: 600;
 }
@@ -20781,7 +20791,7 @@ button.topbar-create-button kbd {
 .shared-receipt-toolbar h1 {
   margin: 0;
   color: var(--color-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+  font-family: var(--font-editorial);
   font-size: 32px;
   font-weight: 600;
 }
@@ -20933,7 +20943,7 @@ button.topbar-create-button kbd {
 
   .app-shell {
     display: block;
-    background: #fff;
+    background: var(--color-card);
   }
 
   .workspace {
@@ -20942,7 +20952,7 @@ button.topbar-create-button kbd {
 
   .panel {
     border: 0;
-    background: #fff;
+    background: var(--color-card);
     box-shadow: none;
   }
 
@@ -21575,8 +21585,8 @@ button.topbar-create-button kbd {
 }
 
 .knowledge-item-ai-tip {
-  border-color: color-mix(in srgb, #e05a7a 25%, var(--color-border));
-  background: color-mix(in srgb, #e05a7a 4%, var(--color-surface));
+  border-color: color-mix(in srgb, #f22782 25%, var(--color-border));
+  background: color-mix(in srgb, #f22782 4%, var(--color-surface));
 }
 
 .knowledge-source-tabs {
@@ -22104,7 +22114,7 @@ button.topbar-create-button kbd {
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-card);
   top: 2px;
   left: 2px;
   transition: transform 0.2s;
@@ -22333,4 +22343,82 @@ button.topbar-create-button kbd {
 .alice-toggle::after {
   background: var(--color-surface-strong);
   box-shadow: none;
+}
+
+
+/* ============================================================
+   Geist 精修层（预览分支追加）
+   焦点环 / 浮层描边 / 卡片投影 / 等宽数字 / 主题切换按钮
+   ============================================================ */
+
+/* 卡片：白底 + alpha 描边 + 极轻投影（Geist Raised Card） */
+.panel {
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-card);
+}
+
+/* 浮层统一补 Geist 描边：原深墨浮层靠明暗对比浮起，
+   换成 Geist 亮/暗浮层后需要 alpha 描边 + 分层投影做图底分离 */
+.task-context-menu,
+.toast,
+.sidebar-account-menu {
+  border: 1px solid var(--color-menu-border);
+  background: var(--color-menu);
+  box-shadow: var(--shadow-popover);
+}
+
+.command-palette,
+.shortcut-help,
+.semantic-search {
+  border: 1px solid var(--color-menu-border);
+  background: var(--color-menu);
+  border-radius: var(--radius-menu);
+  box-shadow: var(--shadow-float);
+}
+
+.task-context-menu,
+.sidebar-account-menu {
+  border-radius: var(--radius-menu);
+}
+
+/* 焦点环：2px 表面色间隙 + 2px 焦点蓝，仅键盘聚焦显示 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--focus-ring-color);
+}
+
+/* 代码 / 快捷键 / 对齐数字走 Geist Mono */
+kbd,
+code,
+pre {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 主题切换悬浮按钮（React 树外，见 index.html） */
+#geist-theme-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 120;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-menu);
+  color: var(--color-text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-popover);
+}
+
+#geist-theme-toggle:hover {
+  background: var(--color-surface-alt);
+  border-color: var(--color-border-strong);
 }

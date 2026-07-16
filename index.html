@@ -12,9 +12,30 @@
     <meta property="og:image" content="/giverny-logo.png" />
     <meta name="twitter:card" content="summary" />
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <!-- Geist 预览分支：Geist Sans / Geist Mono 字体 + 明暗主题初始化 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist-sans@latest/index.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist-mono@latest/index.css" />
+    <script>
+      (function () {
+        var saved = localStorage.getItem('geist-theme')
+        var theme = saved === 'dark' || saved === 'light'
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Geist 预览分支：悬浮主题切换（位于 React 树外，不侵入业务代码） -->
+    <button id="geist-theme-toggle" type="button" aria-label="Toggle Theme">◐</button>
+    <script>
+      document.getElementById('geist-theme-toggle').addEventListener('click', function () {
+        var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
+        document.documentElement.dataset.theme = next
+        localStorage.setItem('geist-theme', next)
+      })
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
