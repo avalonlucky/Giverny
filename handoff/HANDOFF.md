@@ -1,19 +1,19 @@
 # Giverny Handoff
 
-## 最新状态（2026-07-16 · v0.28.46）
+## 最新状态（2026-07-16 · v0.28.47）
 
-Agent 命令式任务链已补齐等待记录、单条进展 / 反馈 / 等待记录编辑删除、已有附件标记验收文件及原子化完整验收。所有写入继续经过预览、人工确认和 `AgentWriteWorkflow` 幂等执行，无新增 migration。
+Agent 2.0 已加入跨会话持续计划、任务级长期记忆、主动任务提醒、全部确认卡编辑、聊天附件真实上传和匿名失败学习；旧 Python/FastAPI Container Runtime 已移除。新增 migration `0020_agent_orchestration.sql`。
 
-本地验证覆盖 build、Lint、77/77 隔离 Agent 门禁及真实生命周期写入检查；生命周期检查覆盖创建任务、进展、等待、记录编辑删除、验收文件与完整验收。
+本地验证覆盖 build、Lint、79/79 隔离 Agent 门禁，以及计划创建、步骤推进、任务记忆和原生命周期真实写入检查。
 
 最后整理时间：2026-07-16
-当前代码版本：v0.28.46
+当前代码版本：v0.28.47
 当前分支：main
 GitHub：https://github.com/avalonlucky/Giverny
 正式站：https://mayeai.com
-正式站 Worker Version ID：9dc1ce5d-7249-44e2-acc1-7ce46d8270df
-最新已知 tag：v0.28.46
-本次交接性质：补齐 Agent 从创建到验收的核心任务生命周期工具及安全确认链。
+正式站 Worker Version ID：e9929088-5475-4979-870a-f252f0b74f2c
+最新已知 tag：v0.28.47
+本次交接性质：Agent 2.0 持续执行、主动提醒、任务记忆与单一 Cloudflare Runtime。
 
 ## 1. 新窗口先读
 

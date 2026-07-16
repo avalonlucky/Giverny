@@ -97,3 +97,27 @@ export type AgentConversationSummary = {
   createdAt: string
   updatedAt: string
 }
+
+export type AgentPlanStep = {
+  id: string
+  label: string
+  action: string
+  status: 'pending' | 'completed' | 'skipped'
+  completedAt?: string
+}
+
+export type AgentTaskPlan = {
+  id: string
+  conversationId?: string
+  taskId?: number
+  kind: 'goal' | 'reminder'
+  goal: string
+  status: 'active' | 'completed' | 'cancelled'
+  steps: AgentPlanStep[]
+  currentStep: number
+  nextActionAt?: string
+  unread: boolean
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+}

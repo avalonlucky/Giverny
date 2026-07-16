@@ -1,5 +1,4 @@
 import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
-import { Container } from '@cloudflare/containers'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { getAgentByName } from 'agents'
 import { createMcpHandler } from 'agents/mcp'
@@ -9,7 +8,7 @@ import { agentReadToolRegistry } from './agentToolRegistry'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -67,10 +66,7 @@ type Env = {
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
   AI_SETTINGS_SECRET?: string
-  AGENT_RUNTIME_URL?: string
-  AGENT_RUNTIME_KEY?: string
   AGENT_TOOL_TOKEN?: string
-  AGENT_RUNTIME_CONTAINER?: ContainerNamespace
   ALICE_AGENT?: unknown
   AGENT_ANALYSIS_WORKFLOW?: WorkflowBinding<AgentAnalysisWorkflowParams>
   AGENT_MODEL_PROVIDER?: string
@@ -110,18 +106,6 @@ type VectorizeBinding = {
   deleteByIds: (ids: string[]) => Promise<unknown>
 }
 
-type ContainerStub = {
-  fetch: (request: Request) => Promise<Response>
-  startAndWaitForPorts: (args: {
-    startOptions?: { envVars?: Record<string, string>; enableInternet?: boolean }
-    ports?: number | number[]
-    cancellationOptions?: { portReadyTimeoutMS?: number; waitInterval?: number }
-  }) => Promise<void>
-}
-type ContainerNamespace = {
-  getByName: (name: string) => ContainerStub
-}
-
 type WorkerExecutionContext = {
   waitUntil: (promise: Promise<unknown>) => void
 }
@@ -134,11 +118,6 @@ type WorkflowInstanceHandle = {
 type WorkflowBinding<Params> = {
   create: (options: { id: string; params: Params }) => Promise<WorkflowInstanceHandle>
   get: (id: string) => Promise<WorkflowInstanceHandle>
-}
-
-export class AgentRuntimeContainer extends Container<Env> {
-  defaultPort = 8789
-  sleepAfter = '10m'
 }
 
 const roundCents = (value: number) => Math.round(value * 100) / 100
@@ -1913,10 +1892,6 @@ type OpenAiAgentRuntimeResult = {
   attachments?: AgentResultAttachment[]
 }
 
-function normalizeAgentRuntimeBaseUrl(env: Env) {
-  return String(env.AGENT_RUNTIME_URL || '').trim().replace(/\/+$/, '')
-}
-
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
   if (!Array.isArray(trace) || trace.length === 0) return []
   return trace
@@ -1934,7 +1909,6 @@ async function callAgentRuntime(
   args: {
     query: string
     context?: string
-    legacyQuery?: string
     currentMonth?: string
     conversationId?: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -1956,56 +1930,10 @@ async function callAgentRuntime(
       return { ...result, conversationId }
     } catch (error) {
       console.warn(JSON.stringify({ event: 'cloudflare_alice_agent_failed', error: describeAiCallError(error) }))
+      throw error
     }
   }
-  const headers: Record<string, string> = { 'content-type': 'application/json' }
-  const runtimeKey = String(env.AGENT_RUNTIME_KEY || '').trim()
-  if (runtimeKey) headers['x-agent-runtime-key'] = runtimeKey
-  const requestInit = {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      message: String(args.legacyQuery || cleanQuery).trim(),
-      currentMonth: args.currentMonth || undefined,
-      conversationId,
-      debug: false,
-    }),
-  }
-  const container = env.AGENT_RUNTIME_CONTAINER?.getByName('primary')
-  const baseUrl = normalizeAgentRuntimeBaseUrl(env)
-  if (!container && !baseUrl) return null
-  if (container) {
-    await container.startAndWaitForPorts({
-      ports: 8789,
-      startOptions: {
-        enableInternet: true,
-        envVars: {
-          AGENT_MODEL_PROVIDER: String(env.AGENT_MODEL_PROVIDER || 'deepseek'),
-          DEEPSEEK_API_KEY: String(env.DEEPSEEK_API_KEY || ''),
-          DEEPSEEK_BASE_URL: String(env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'),
-          DEEPSEEK_MODEL: String(env.DEEPSEEK_MODEL || 'deepseek-v4-flash'),
-          OPENAI_API_KEY: String(env.OPENAI_API_KEY || ''),
-          OPENAI_BASE_URL: String(env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
-          OPENAI_AGENT_MODEL: String(env.OPENAI_AGENT_MODEL || 'gpt-4.1-mini'),
-          GIVERNY_API_BASE_URL: 'https://mayeai.com',
-          GIVERNY_AGENT_TOOL_TOKEN: String(env.AGENT_TOOL_TOKEN || ''),
-          AGENT_RUNTIME_KEY: runtimeKey,
-          AGENT_RUNTIME_CORS_ORIGINS: 'https://mayeai.com',
-        },
-      },
-      cancellationOptions: { portReadyTimeoutMS: 30000, waitInterval: 500 },
-    })
-  }
-  const res = container
-    ? await container.fetch(new Request('https://agent-runtime.internal/v1/chat', requestInit))
-    : await fetch(`${baseUrl}/v1/chat`, requestInit)
-  if (!res.ok) {
-    const raw = await res.text().catch(() => '')
-    throw new Error(`Agent Runtime 请求失败：HTTP ${res.status} ${raw.slice(0, 200)}`)
-  }
-  const payload = (await res.json().catch(() => null)) as OpenAiAgentRuntimeResult | null
-  if (!payload || !String(payload.answer || '').trim()) return null
-  return payload
+  throw new Error('Cloudflare Agent Runtime 未启用')
 }
 
 async function reviseAgentApproval(env: Env, request: Request) {
@@ -2142,6 +2070,169 @@ async function deleteAgentConversation(env: Env, id: string) {
   return ok({ deleted: true })
 }
 
+type DbAgentTaskPlan = {
+  id: string
+  conversation_id: string | null
+  task_id: string | null
+  kind: 'goal' | 'reminder'
+  goal: string
+  status: 'active' | 'completed' | 'cancelled'
+  steps_json: string
+  current_step: number
+  next_action_at: string | null
+  read_at: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+function parseAgentPlanSteps(value: string): AgentPlanStep[] {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function toAgentTaskPlan(row: DbAgentTaskPlan): AgentTaskPlan {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id || undefined,
+    taskId: row.task_id ? Number(row.task_id) : undefined,
+    kind: row.kind,
+    goal: row.goal,
+    status: row.status,
+    steps: parseAgentPlanSteps(row.steps_json),
+    currentStep: Number(row.current_step) || 0,
+    nextActionAt: row.next_action_at || undefined,
+    unread: !row.read_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at || undefined,
+  }
+}
+
+async function createAgentTaskPlan(env: Env, input: {
+  conversationId?: string
+  taskId?: number
+  kind?: 'goal' | 'reminder'
+  goal: string
+  steps: Array<{ label: string; action: string }>
+  nextActionAt?: string
+}) {
+  const id = crypto.randomUUID()
+  const steps = input.steps.slice(0, 10).map((step, index): AgentPlanStep => ({
+    id: `${id}:${index + 1}`,
+    label: agentString(step.label, 120),
+    action: agentString(step.action, 60) || 'follow_up',
+    status: 'pending',
+  })).filter((step) => step.label)
+  if (!input.goal || steps.length === 0) throw new Error('目标和执行步骤不能为空')
+  await env.DB.prepare(
+    `INSERT INTO agent_task_plans (id, conversation_id, task_id, kind, goal, steps_json, next_action_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, input.conversationId || null, input.taskId ? String(input.taskId) : null, input.kind || 'goal', input.goal.slice(0, 500), JSON.stringify(steps), input.nextActionAt || null).run()
+  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
+  if (!row) throw new Error('任务计划创建失败')
+  return toAgentTaskPlan(row)
+}
+
+async function agentCreateTaskPlanTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const rawSteps = Array.isArray(body.steps) ? body.steps : []
+  try {
+    const plan = await createAgentTaskPlan(env, {
+      conversationId: agentString(body.conversationId, 160),
+      taskId: Number(body.taskId) || undefined,
+      goal: agentString(body.goal, 500),
+      steps: rawSteps.map((item) => {
+        const step = typeof item === 'object' && item ? item as Record<string, unknown> : {}
+        return { label: agentString(step.label, 120), action: agentString(step.action, 60) }
+      }),
+      nextActionAt: agentString(body.nextActionAt, 40),
+    })
+    return agentOk({ tool: 'create_task_plan', mode: 'execute', plan })
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '任务计划创建失败', 400)
+  }
+}
+
+async function refreshAgentTaskMemory(env: Env, taskId: number) {
+  const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
+  if (!row) return null
+  const progress = parseTimeEntries(row.time_entries_json)
+  const waiting = parseWaitingEntries(row.waiting_entries_json)
+  const openItems: string[] = []
+  if (row.status !== '已验收' && row.estimated_delivery_date && row.estimated_delivery_date < nowIso()) openItems.push('任务已经超过预计交付时间')
+  if (row.progress >= 100 && row.status !== '已验收') openItems.push('进度已到 100%，尚未完成验收')
+  if (waiting.length > 0 && row.status !== '已验收') openItems.push(`存在 ${waiting.length} 条等待记录，需要确认是否已经恢复推进`)
+  const recent = progress.slice(-5).map((entry) => entry.note).filter(Boolean)
+  const feedback = progress.filter((entry) => entry.isClientFeedback).slice(-3).map((entry) => entry.note).filter(Boolean)
+  const summary = [
+    `${row.title}；${row.design_type || '未分类'}；状态 ${row.status}；进度 ${row.progress}%`,
+    row.requirement ? `需求：${row.requirement.slice(0, 1000)}` : '',
+    recent.length ? `近期记录：${recent.join('；')}` : '',
+  ].filter(Boolean).join('\n')
+  await env.DB.prepare(
+    `INSERT INTO agent_task_memories (task_id, task_title, summary, open_items_json, preferences_json, last_event_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(task_id) DO UPDATE SET task_title = excluded.task_title, summary = excluded.summary,
+       open_items_json = excluded.open_items_json, preferences_json = excluded.preferences_json,
+       last_event_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`,
+  ).bind(String(taskId), row.title, summary, JSON.stringify(openItems), JSON.stringify(feedback)).run()
+  return { taskId, taskTitle: row.title, summary, openItems, preferences: feedback, updatedAt: nowIso() }
+}
+
+async function agentGetTaskMemoryTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const url = new URL(request.url)
+  const taskId = Number(url.searchParams.get('taskId'))
+  if (!Number.isFinite(taskId) || taskId <= 0) return agentFail('taskId 无效', 400)
+  const memory = await refreshAgentTaskMemory(env, taskId)
+  return memory ? agentOk({ tool: 'get_task_memory', memory }) : agentFail('任务不存在', 404)
+}
+
+async function agentProgressTaskPlanTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const conversationId = agentString(body.conversationId, 160)
+  const action = agentString(body.action, 60)
+  const taskId = Number(body.taskId) || 0
+  if (taskId) await refreshAgentTaskMemory(env, taskId)
+  if (!conversationId || !action) return agentOk({ updated: 0 })
+  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE conversation_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5").bind(conversationId).all<DbAgentTaskPlan>()
+  let updated = 0
+  for (const row of rows.results ?? []) {
+    const steps = parseAgentPlanSteps(row.steps_json)
+    const index = steps.findIndex((step) => step.status === 'pending' && (step.action === action || step.action === 'follow_up'))
+    if (index < 0) continue
+    steps[index] = { ...steps[index], status: 'completed', completedAt: nowIso() }
+    const nextIndex = steps.findIndex((step) => step.status === 'pending')
+    const complete = nextIndex < 0
+    await env.DB.prepare(
+      `UPDATE agent_task_plans SET task_id = COALESCE(task_id, ?), steps_json = ?, current_step = ?, status = ?,
+       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(taskId ? String(taskId) : null, JSON.stringify(steps), complete ? steps.length : nextIndex, complete ? 'completed' : 'active', complete ? 1 : 0, row.id).run()
+    updated += 1
+  }
+  return agentOk({ tool: 'progress_task_plan', updated })
+}
+
+async function listAgentTaskPlans(env: Env, request: Request) {
+  const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit')) || 50, 1), 100)
+  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE status != 'cancelled' ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC LIMIT ?").bind(limit).all<DbAgentTaskPlan>()
+  return ok({ plans: (rows.results ?? []).map(toAgentTaskPlan) })
+}
+
+async function updateAgentTaskPlan(env: Env, id: string, action: 'read' | 'cancel') {
+  if (action === 'read') await env.DB.prepare('UPDATE agent_task_plans SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
+  else await env.DB.prepare("UPDATE agent_task_plans SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run()
+  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
+  return row ? ok({ plan: toAgentTaskPlan(row) }) : fail('任务计划不存在', 404)
+}
+
 const agentToolCorsHeaders = {
   ...jsonHeaders,
   'access-control-allow-origin': '*',
@@ -2242,7 +2333,7 @@ function agentBase64UrlToString(value: string) {
 }
 
 async function agentSigningKey(env: Env) {
-  const secret = env.AGENT_RUNTIME_KEY || env.AGENT_TOOL_TOKEN || env.ADMIN_TOKEN || (env.LOCAL_DEV === '1' ? 'giverny-agent-local' : '')
+  const secret = env.AGENT_TOOL_TOKEN || env.ADMIN_TOKEN || (env.LOCAL_DEV === '1' ? 'giverny-agent-local' : '')
   if (!secret) {
     throw new Error('Agent confirmation signing secret is not configured')
   }
@@ -3206,6 +3297,8 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
+      '/api/agent/tools/create-task-plan': writeToolPath('create_task_plan', 'Create a persistent multi-step Agent plan'),
+      '/api/agent/tools/get-task-memory': writeToolPath('get_task_memory', 'Read and refresh durable task memory'),
       '/api/agent/tools/create-task-preview': writeToolPath('create_task_preview', 'Preview a new task'),
       '/api/agent/tools/create-task': writeToolPath('create_task', 'Create a task after confirmation'),
       '/api/agent/tools/record-feedback-preview': writeToolPath('record_feedback_preview', 'Preview recording client feedback'),
@@ -3648,6 +3741,8 @@ async function agentContextTool(env: Env, request: Request) {
       '在后台汇总整月任务、工时、进展、改稿、等待和反馈，生成可核对的月度复盘',
       '在用户确认后创建任务、记录反馈、修改状态、修改任务字段、追加进展、记录等待和维护已有记录',
       '把已有附件标记为验收文件，并通过完整验收包一次写入验收备注、最终进展、工时、附件与验收状态',
+      '保存跨会话持续任务计划，并在每次写入后自动推进计划步骤和刷新任务级长期记忆',
+      '主动识别逾期、持续等待、工时超估、100% 未验收和验收材料缺口',
       '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
       '闲聊、解释概念、头脑风暴、写作润色和效率规划',
     ],
@@ -4140,7 +4235,7 @@ async function maybeScheduleProactiveAgentAnalyses(env: Env, now = new Date()) {
     `SELECT COUNT(*) AS count FROM tasks
      WHERE deleted_at IS NULL AND voided_at IS NULL
        AND status NOT IN ('已验收', '终止', '不计费')
-       AND estimated_date IS NOT NULL AND substr(estimated_date, 1, 10) < ?`,
+       AND estimated_delivery_date IS NOT NULL AND substr(estimated_delivery_date, 1, 10) < ?`,
   ).bind(clock.date).first<{ count: number }>()
   if (Number(riskRow?.count || 0) > 0) {
     await createAgentAnalysisJob(env, {
@@ -4150,6 +4245,32 @@ async function maybeScheduleProactiveAgentAnalyses(env: Env, now = new Date()) {
       dedupeKey: `risk:${clock.date}`,
       title: `${clock.date} 任务风险提示`,
     })
+  }
+}
+
+async function maybeScheduleAgentTaskReminders(env: Env, now = new Date()) {
+  const clock = beijingClock(now)
+  if (clock.hour !== 9) return
+  const rows = await env.DB.prepare(
+    `SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL
+     AND status NOT IN ('已验收', '终止', '不计费') ORDER BY updated_at DESC LIMIT 200`,
+  ).all<DbTask>()
+  for (const task of rows.results ?? []) {
+    const reminders: string[] = []
+    if (task.estimated_delivery_date && task.estimated_delivery_date.slice(0, 10) < clock.date) reminders.push('任务已逾期，需要更新进展或调整交付时间')
+    if (Number(task.progress) >= 100) reminders.push('进度已到 100%，可以准备验收')
+    if (Number(task.estimated_hours) > 0 && Number(task.actual_hours) > Number(task.estimated_hours) * 1.25) reminders.push('实际工时已超过预估 25%，建议复核范围变化')
+    const waiting = parseWaitingEntries(task.waiting_entries_json)
+    if (waiting.length > 0) reminders.push('存在等待记录，请确认阻塞是否已经解除')
+    const acceptanceFile = await env.DB.prepare("SELECT id FROM attachments WHERE task_id = ? AND attachment_scope = 'acceptance' AND deleted_at IS NULL LIMIT 1").bind(task.id).first<{ id: string }>()
+    if (acceptanceFile && !task.acceptance_note) reminders.push('已有验收文件但尚未填写验收备注')
+    for (const goal of reminders) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO agent_task_plans (id, task_id, kind, goal, steps_json, next_action_at)
+         VALUES (?, ?, 'reminder', ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), task.id, `${task.title}：${goal}`, JSON.stringify([{ id: crypto.randomUUID(), label: goal, action: 'follow_up', status: 'pending' }]), `${clock.date}T09:00:00+08:00`).run()
+    }
+    if (reminders.length > 0) await refreshAgentTaskMemory(env, Number(task.id))
   }
 }
 
@@ -4253,6 +4374,15 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {
+    return agentCreateTaskPlanTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/get-task-memory' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentGetTaskMemoryTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/progress-task-plan' && request.method === 'POST') {
+    return agentProgressTaskPlanTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/monthly-review-start' && request.method === 'POST') {
     return agentMonthlyReviewStartTool(env, request)
@@ -11870,17 +12000,14 @@ async function chatWithAi(env: Env, request: Request) {
     const textAttachmentQuerySection = textAttachments.length
       ? `\n\n[用户上传的文档]\n${textAttachments.map((a) => `【${a.name}】\n${a.data.slice(0, 3000)}`).join('\n\n')}`
       : ''
-    const recentConversation = messages.slice(-6).map((message) => `${message.role === 'assistant' ? '爱丽丝' : '用户'}：${message.content}`).join('\n')
     const agentContext = `${textAttachmentQuerySection}${knowledgeSection}`.trim()
     const agentQuery = lastMsg
-    const legacyAgentQuery = `[最近对话]\n${recentConversation}\n\n[当前用户输入]\n${agentQuery}${agentContext ? `\n\n${agentContext}` : ''}`
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         context: agentContext,
-        legacyQuery: legacyAgentQuery,
         currentMonth: month,
         conversationId: String(body.agentRuntimeConversationId ?? '').trim(),
         history: messages.slice(-13, -1).map((message) => ({
@@ -12170,6 +12297,28 @@ function agentMetricOutcome(status: number, approvalStatus: string, hasSelection
   return 'success'
 }
 
+function agentFailureCategory(status: number, outcome: string, durationMs: number, tools: string[]) {
+  if (status === 401 || status === 403) return 'authorization'
+  if (status === 409) return 'conflict_or_expired_confirmation'
+  if (durationMs >= 30_000) return 'timeout_or_slow'
+  if (outcome === 'approval_failed') return 'workflow_write'
+  if (tools.length > 0) return 'tool_execution'
+  if (status >= 500) return 'runtime_or_model'
+  return 'intent_or_validation'
+}
+
+async function learnAgentFailure(env: Env, input: { intent: string; outcome: string; status: number; durationMs: number; tools: string[]; approvalAction: string }) {
+  const category = agentFailureCategory(input.status, input.outcome, input.durationMs, input.tools)
+  const toolName = input.tools[0] || input.approvalAction || ''
+  const fingerprint = [category, input.intent, toolName, input.status].join(':').slice(0, 300)
+  await env.DB.prepare(
+    `INSERT INTO agent_failure_cases (fingerprint, category, intent, tool_name, http_status)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(fingerprint) DO UPDATE SET occurrences = occurrences + 1, last_seen_at = CURRENT_TIMESTAMP,
+       regression_status = CASE WHEN occurrences + 1 >= 2 THEN 'required' ELSE regression_status END`,
+  ).bind(fingerprint, category, input.intent, toolName || null, input.status).run()
+}
+
 async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean) {
   try {
     await ensureAgentRunMetricsTable(env)
@@ -12208,6 +12357,9 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       response.status,
       isEval ? 1 : 0,
     ).run()
+    if (!isEval && (outcome === 'error' || outcome === 'approval_failed')) {
+      await learnAgentFailure(env, { intent, outcome, status: response.status, durationMs, tools, approvalAction })
+    }
     if (Math.random() < 0.02) {
       await env.DB.prepare("DELETE FROM agent_run_metrics WHERE created_at < datetime('now', '-90 days')").run()
     }
@@ -12375,6 +12527,20 @@ async function getAgentRunMetrics(env: Env, request: Request) {
       .filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed')
       .slice(0, 8)
       .map((item) => ({ createdAt: item.created_at, intent: item.intent, status: item.http_status, durationMs: item.duration_ms })),
+  })
+}
+
+async function getAgentFailureCases(env: Env) {
+  const rows = await env.DB.prepare(
+    `SELECT fingerprint, category, intent, tool_name, http_status, occurrences, regression_status, first_seen_at, last_seen_at
+     FROM agent_failure_cases ORDER BY CASE regression_status WHEN 'required' THEN 0 ELSE 1 END, occurrences DESC, last_seen_at DESC LIMIT 100`,
+  ).all<{
+    fingerprint: string; category: string; intent: string; tool_name: string | null; http_status: number
+    occurrences: number; regression_status: string; first_seen_at: string; last_seen_at: string
+  }>()
+  return ok({
+    cases: rows.results ?? [],
+    policy: '同一匿名失败指纹出现两次后自动进入 required，下一次评测扩充必须覆盖该类别；不保存用户问题或业务内容。',
   })
 }
 
@@ -12905,6 +13071,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models' ||
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
+      path.startsWith('/api/ai/agent-plans') ||
+      path === '/api/ai/agent-failures' ||
       path === '/api/ai/agent-metrics' ||
       path === '/api/ai/hour-estimate/metrics' ||
       path.startsWith('/api/ai/conversations') ||
@@ -13128,6 +13296,18 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
     return getAgentRunMetrics(env, request)
   }
+  if (path === '/api/ai/agent-failures' && request.method === 'GET') {
+    return getAgentFailureCases(env)
+  }
+  if (path === '/api/ai/agent-plans' && request.method === 'GET') {
+    return listAgentTaskPlans(env, request)
+  }
+  if (path.startsWith('/api/ai/agent-plans/') && path.endsWith('/read') && request.method === 'POST') {
+    return updateAgentTaskPlan(env, path.split('/')[4] || '', 'read')
+  }
+  if (path.startsWith('/api/ai/agent-plans/') && path.endsWith('/cancel') && request.method === 'POST') {
+    return updateAgentTaskPlan(env, path.split('/')[4] || '', 'cancel')
+  }
   if (path === '/api/ai/approval' && request.method === 'POST') {
     return reviseAgentApproval(env, request)
   }
@@ -13272,6 +13452,9 @@ export default {
     })
     await maybeScheduleProactiveAgentAnalyses(env).catch((error) => {
       console.error('proactive agent analysis scheduling failed', error)
+    })
+    await maybeScheduleAgentTaskReminders(env).catch((error) => {
+      console.error('proactive agent task reminder scheduling failed', error)
     })
   },
   // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。

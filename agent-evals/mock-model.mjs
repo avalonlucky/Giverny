@@ -86,6 +86,19 @@ function chooseTool(messages) {
   if (/跨任务|对比.*任务/.test(text)) return toolCall('start_deep_analysis', { type: 'cross_task_analysis', month: '2026-07', query: text })
   if (/批量附件|附件.*汇总/.test(text)) return toolCall('start_deep_analysis', { type: 'batch_attachment_analysis', month: '2026-07', query: text })
   if (/趋势分析|几个月.*趋势/.test(text)) return toolCall('start_deep_analysis', { type: 'trend_analysis', month: '2026-07' })
+  if (/持续推进|从新建.*验收|全流程跟进|制定.*计划/.test(text)) {
+    return toolCall('create_task_plan', {
+      goal: '持续推进任务从创建到验收',
+      taskId: 1,
+      steps: [
+        { label: '核对任务需求', action: 'update_task_fields' },
+        { label: '记录制作进展', action: 'append_progress' },
+        { label: '整理验收材料', action: 'mark_acceptance_files' },
+        { label: '完成最终验收', action: 'complete_acceptance' },
+      ],
+    })
+  }
+  if (/长期记忆|未解决问题|历史脉络|甲方偏好/.test(text)) return toolCall('get_task_memory', { taskId: 1 })
   if (!/暂停|改成.*状态|状态改成/.test(text) && /记录等待|等待记录|等甲方|等待甲方|等待资料/.test(text)) {
     return toolCall('append_waiting_preview', { taskId: 1, note: '等待甲方补充资料', reason: '等待补充资料', startDateTime: '2026-07-16T10:00', endDateTime: '2026-07-16T12:00' })
   }

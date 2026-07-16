@@ -64,6 +64,9 @@
     { "id": "acceptance-file-01", "category": "write_preview", "prompt": "把任务#1的附件104标记为验收文件", "expect": { "tools": ["mark_acceptance_files_preview"], "approval": "mark_acceptance_files" } },
     { "id": "acceptance-01", "category": "write_preview", "prompt": "完整验收任务#1：已完成全部修改并交付最终文件", "expect": { "tools": ["complete_acceptance_preview"], "approval": "complete_acceptance" } },
 
+    { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
+    { "id": "orchestration-02", "category": "orchestration", "prompt": "根据长期记忆告诉我任务#1还有哪些未解决问题", "expect": { "tools": ["get_task_memory"] } },
+
     { "id": "analysis-01", "category": "background_analysis", "prompt": "帮我做一份7月工作复盘", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
     { "id": "analysis-02", "category": "background_analysis", "prompt": "后台分析一下2026年6月整月的任务、工时和风险", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
     { "id": "analysis-03", "category": "background_analysis", "prompt": "生成本周工作摘要", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "weekly_digest" } },

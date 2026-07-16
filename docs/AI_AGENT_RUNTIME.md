@@ -67,7 +67,7 @@ D1 / R2 / app data
 - 前端确认卡：Tool Calling 生成的写入草稿通过结构化 `approval` 协议展示，用户可直接核对并确认或取消；签名 token 始终只保存在 Agent SQLite，不下发浏览器。
 - 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
-- `agent-evals/`：77 条固定回归用例覆盖查询、附件搜索、完整任务生命周期写入、同名消歧、六类后台分析和安全边界。
+- `agent-evals/`：79 条固定回归用例覆盖查询、附件搜索、完整任务生命周期写入、持续计划、任务记忆、同名消歧、六类后台分析和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
 - AI 反馈学习：任务需求、名称、分类、进展、修改意见、验收备注和附件命名会记录“原始输入 → AI 建议 → 最终人工结果”及采用动作；工时继续以验收后的真实投入做偏差校准。详见 `docs/AI_LEARNING.md`。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
@@ -76,22 +76,25 @@ D1 / R2 / app data
 - 命令式任务链：当前可在同一会话内连续完成创建任务、修改字段 / 状态、记录甲方反馈、追加进展 / 工时、记录等待、编辑或删除单条既有记录、把已有附件标记为验收文件，以及通过原子化验收包完成最终验收。每次写入都必须独立预览和确认。用户电脑中的新文件仍需先通过网站上传；整任务删除 / 作废 / 恢复、结算锁定、付款和部署不开放为 Agent 工具，因此不是无确认、全权限的无人值守自动化。
 - 后台分析：月度复盘、周报、风险提示、跨任务专题、批量附件和趋势分析由 `AgentAnalysisWorkflow` 独立收集 D1 权威数据并生成报告；对话卡与任务中心展示真实进度，支持取消、失败重试和持久未读通知。原始快照在成功后清除，只保留最终报告。
 - 主动 Agent：Cron 按周期创建周报、上月复盘和逾期风险提示，D1 去重键保证同一周期只生成一次。
-- `agent-runtime/`：原 Python/FastAPI Runtime 暂时作为故障回退保留，不再是默认主链路。
+- 持续计划：`agent_task_plans` 保存跨会话目标和步骤；确认写入完成后按 action 自动推进对应步骤，计划与提醒统一进入 Agent 任务中心。
+- 任务记忆：`agent_task_memories` 按任务压缩需求、近期进展、反馈偏好和未解决事项；每次相关写入后刷新，回答前仍以任务详情为权威数据。
+- 主动提醒：每天 9 点检查逾期、100% 未验收、实际工时超预估 25%、存在等待及已有验收文件但缺少备注等信号。
+- 失败学习：匿名失败按权限、冲突 / 过期确认、超时、Workflow、工具、Runtime / 模型和意图校验分类；同一指纹出现两次后自动升级为必补回归类别，不保存用户问题或业务内容。
+- 单一 Runtime：旧 Python/FastAPI Container、`AGENT_RUNTIME_CONTAINER`、`AGENT_RUNTIME_URL` 和 `AGENT_RUNTIME_KEY` 已移除，生产只保留 Cloudflare `AliceAgent` Durable Object 主链路。
 
-当前 Worker 已接入路径：纯文本工作助手请求优先调用 `ALICE_AGENT` Durable Object；新 Agent 发生运行时错误时，才尝试现有 Cloudflare Container 或 `AGENT_RUNTIME_URL`。涉及工作数据或写入意图且全部 Runtime 均不可用时，会显式报错，避免旧模板伪装成智能体。
+当前 Worker 已接入路径：纯文本工作助手请求调用 `ALICE_AGENT` Durable Object；涉及工作数据或写入意图且 Runtime 不可用时显式报错，避免旧模板伪装成智能体。
 
-正式站主链路使用 `DEEPSEEK_API_KEY` 与 `AGENT_TOOL_TOKEN`。`AGENT_RUNTIME_KEY` 仅服务旧 Container 回退；`AI_RUNTIME_URL` 仍保留给 BAML runtime。
+正式站主链路使用 `DEEPSEEK_API_KEY` 与 `AGENT_TOOL_TOKEN`；`AI_RUNTIME_URL` 仍只用于 BAML runtime，与 Agent 无关。
 
 ## 下一步
 
 1. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。
 2. 根据匿名运行指标补充失败场景，并在真实模型或提示词升级时额外执行受控在线评测。
-3. 新 Agent 稳定运行后移除 `agent-runtime/` Container、相关 binding 与旧 Runtime 密钥。
+3. 依据匿名失败指纹持续扩充评测集，并观察计划完成率、主动提醒处理率和确认卡修改率。
 
 ## 安全边界
 
 - 不把任何模型密钥或工具 token 写入代码。
-- `agent-runtime/.env` 必须保持未跟踪。
 - 前端不可绕过 `/api/ai/chat` 直接调用 Agent 或业务工具。
 - 写入工具必须先 preview，再 execute；execute 的 `confirmationToken` 由 Worker 使用服务端密钥签名，默认 10 分钟有效。
 - 模型只拥有 preview 工具；confirmation token 保存在 Agent SQLite 中，不进入模型输出和前端响应。

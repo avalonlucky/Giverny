@@ -110,7 +110,7 @@ import {
 import { formatFileSize, toChineseAmount } from './lib/format'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
-import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
@@ -4176,7 +4176,7 @@ type ChatMessage = {
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
 }
-type ChatAttachment = { id: string; type: 'image' | 'text'; name: string; data: string; mimeType: string; preview?: string }
+type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'workers-ai' | `openrouter:${string}`
 
@@ -4495,8 +4495,22 @@ function AgentApprovalCard({
   const [activePickerId, setActivePickerId] = useState<string | null>(null)
   const rows = agentApprovalRows(approval)
   const canDecide = approval.status === 'pending' || approval.status === 'failed'
-  const canEdit = canDecide && approval.action === 'create_task'
+  const canEdit = canDecide
   const setDraftField = (key: string, value: unknown) => setEditDraft((current) => ({ ...current, [key]: value }))
+  const nestedKey = editDraft.fields && typeof editDraft.fields === 'object' ? 'fields' : editDraft.changes && typeof editDraft.changes === 'object' ? 'changes' : ''
+  const editableSource = nestedKey
+    ? editDraft[nestedKey] as Record<string, unknown>
+    : editDraft
+  const setEditableField = (key: string, value: unknown) => {
+    if (!nestedKey) return setDraftField(key, value)
+    setEditDraft((current) => ({
+      ...current,
+      [nestedKey]: { ...((current[nestedKey] as Record<string, unknown>) || {}), [key]: value },
+    }))
+  }
+  const genericEditableEntries = Object.entries(editableSource).filter(([key, value]) => (
+    !['taskId', 'taskTitle', 'before', 'files'].includes(key) && value !== undefined && value !== null && typeof value !== 'object'
+  ))
   const saveDraft = async () => {
     setSaving(true)
     setEditError('')
@@ -4525,7 +4539,7 @@ function AgentApprovalCard({
             ? '操作已交给持久化 Workflow，页面关闭后仍会继续执行。'
             : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
       </p>
-      {editing ? (
+      {editing && approval.action === 'create_task' ? (
         <div className="agent-approval-editor">
           <label className="agent-approval-editor-field agent-approval-editor-wide">
             <span>任务名称</span>
@@ -4590,6 +4604,50 @@ function AgentApprovalCard({
               </button>
             ))}
           </div>
+        </div>
+      ) : editing ? (
+        <div className="agent-approval-editor">
+          {genericEditableEntries.map(([key, value]) => {
+            const label = AGENT_APPROVAL_FIELD_LABELS[key] || key
+            if (typeof value === 'boolean') {
+              return (
+                <div key={key} className="agent-approval-editor-field">
+                  <span>{label}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={value}
+                    className={`agent-approval-editor-toggle ${value ? 'active' : ''}`}
+                    onClick={() => setEditableField(key, !value)}
+                  >
+                    <span aria-hidden="true" />{value ? '是' : '否'}
+                  </button>
+                </div>
+              )
+            }
+            const multiline = ['note', 'requirement', 'reason', 'acceptanceNote', 'progressNote'].includes(key)
+            return (
+              <label key={key} className={`agent-approval-editor-field ${multiline ? 'agent-approval-editor-wide' : ''}`}>
+                <span>{label}</span>
+                {multiline
+                  ? <textarea rows={3} value={String(value ?? '')} onChange={(event) => setEditableField(key, event.target.value)} />
+                  : <input
+                      type={typeof value === 'number' ? 'number' : key.toLowerCase().includes('datetime') ? 'datetime-local' : 'text'}
+                      value={String(value ?? '')}
+                      onChange={(event) => setEditableField(key, typeof value === 'number' ? Number(event.target.value) : event.target.value)}
+                    />}
+              </label>
+            )
+          })}
+          {Array.isArray(editDraft.attachmentIds) && (
+            <label className="agent-approval-editor-field agent-approval-editor-wide">
+              <span>附件 ID（逗号分隔）</span>
+              <input
+                value={(editDraft.attachmentIds as unknown[]).join(', ')}
+                onChange={(event) => setDraftField('attachmentIds', event.target.value.split(/[,，]/).map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0))}
+              />
+            </label>
+          )}
         </div>
       ) : (
         <dl className="agent-approval-fields">
@@ -4835,6 +4893,7 @@ function ChatPanel({
   const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false)
   const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
   const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
+  const [agentPlans, setAgentPlans] = useState<AgentTaskPlan[]>([])
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
@@ -4865,9 +4924,14 @@ function ChatPanel({
   }, [])
 
   const refreshAnalysisJobs = useCallback(async () => {
-    const response = await fetch('/api/ai/analysis-jobs?limit=50')
-    const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
-    if (response.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
+    const [jobsResponse, plansResponse] = await Promise.all([
+      fetch('/api/ai/analysis-jobs?limit=50'),
+      fetch('/api/ai/agent-plans?limit=50'),
+    ])
+    const data = await jobsResponse.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
+    const planData = await plansResponse.json().catch(() => null) as { plans?: AgentTaskPlan[] } | null
+    if (jobsResponse.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
+    if (plansResponse.ok && Array.isArray(planData?.plans)) setAgentPlans(planData.plans)
   }, [])
 
   useEffect(() => {
@@ -5042,6 +5106,12 @@ function ChatPanel({
     await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(job.id)}/read`, { method: 'POST' }).catch(() => undefined)
   }
 
+  const openAgentPlan = async (plan: AgentTaskPlan) => {
+    setAgentPlans((current) => current.map((item) => item.id === plan.id ? { ...item, unread: false } : item))
+    await fetch(`/api/ai/agent-plans/${encodeURIComponent(plan.id)}/read`, { method: 'POST' }).catch(() => undefined)
+    if (plan.taskId) onOpenTask(plan.taskId)
+  }
+
   const authHeaders = (): Record<string, string> => {
     return { 'content-type': 'application/json' }
   }
@@ -5052,24 +5122,24 @@ function ChatPanel({
     for (const file of Array.from(files).slice(0, 4)) {
       const isImage = file.type.startsWith('image/')
       const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name)
-      if (!isImage && !isText) continue
       const data = await new Promise<string>((resolve) => {
         const reader = new FileReader()
         if (isImage) {
           reader.onload = () => { resolve((reader.result as string).split(',')[1] ?? '') }
           reader.readAsDataURL(file)
-        } else {
+        } else if (isText) {
           reader.onload = () => resolve(reader.result as string)
           reader.readAsText(file)
-        }
+        } else resolve('')
       })
       added.push({
         id: crypto.randomUUID(),
-        type: isImage ? 'image' : 'text',
+        type: isImage ? 'image' : isText ? 'text' : 'file',
         name: file.name,
         data,
         mimeType: file.type || 'text/plain',
         preview: isImage ? `data:${file.type || 'image/jpeg'};base64,${data}` : undefined,
+        file,
       })
     }
     setAttachments((prev) => [...prev, ...added].slice(0, 4))
@@ -5122,8 +5192,41 @@ function ChatPanel({
   }
 
   const send = async (overrideText?: string, approvalDecision?: { messageId: string; approvalId: string }) => {
-    const text = (overrideText !== undefined ? overrideText : input).trim()
+    let text = (overrideText !== undefined ? overrideText : input).trim()
     if ((!text && attachments.length === 0) || loading) return
+    const sentAttachments = [...attachments]
+    const targetTaskId = Number(text.match(/(?:任务\s*)?#(\d+)/)?.[1] || 0)
+    if (sentAttachments.some((item) => item.file) && !targetTaskId && sentAttachments.some((item) => item.type === 'file')) {
+      onNotify('上传 PDF、Office 等文件时，请在问题中写明任务 #ID，文件才有明确归属。', 'info')
+      return
+    }
+    if (targetTaskId && sentAttachments.length > 0 && overrideText === undefined) {
+      setLoading(true)
+      try {
+        const uploaded: FileAsset[] = []
+        for (const item of sentAttachments) {
+          validateUploadFile(item.file)
+          const preview = await createOptionalPreviewFile(item.file)
+          uploaded.push(await api.uploadFile({
+            taskId: targetTaskId,
+            scope: 'progress',
+            file: item.file,
+            preview,
+            type: fileTypeForFile(item.file).type,
+            size: formatFileSize(item.file.size),
+            final: false,
+            visible: true,
+            tag: 'Agent 对话附件',
+            analyze: true,
+          }))
+        }
+        text = `${text}\n\n[已上传到任务 #${targetTaskId} 的真实附件：${uploaded.map((file) => `${file.name}（attachmentId=${file.id}）`).join('、')}]`
+      } catch (error) {
+        onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error')
+        setLoading(false)
+        return
+      }
+    }
     const displayText = text || `[附件：${attachments.map((a) => a.name).join('、')}]`
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
     const assistantId = crypto.randomUUID()
@@ -5133,7 +5236,6 @@ function ChatPanel({
         : message
     ))
     if (overrideText === undefined) setInput('')
-    const sentAttachments = [...attachments]
     setAttachments([])
 
     setMessages([...baseMessages, userMsg, {
@@ -5158,7 +5260,7 @@ function ChatPanel({
           useKnowledge,
           useWebSearch,
           modelChoice: selectedModelChoice,
-          attachments: sentAttachments.map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
+          attachments: sentAttachments.filter((item) => item.type !== 'file').map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
           agentRuntimeConversationId: agentConversationId,
         }),
       })
@@ -5277,6 +5379,7 @@ function ChatPanel({
       }))
     } finally {
       setLoading(false)
+      void refreshAnalysisJobs()
     }
   }
 
@@ -5305,9 +5408,9 @@ function ChatPanel({
           <button type="button" className="chat-panel-icon-btn" onClick={openHistory} title="历史记录" aria-label="历史记录">
             <History size={15} />
           </button>
-          <button type="button" className={`chat-panel-icon-btn ${analysisJobs.some((job) => job.unread) ? 'has-unread' : ''}`} onClick={openTaskCenter} title="Agent 任务中心" aria-label="Agent 任务中心">
+          <button type="button" className={`chat-panel-icon-btn ${analysisJobs.some((job) => job.unread) || agentPlans.some((plan) => plan.unread) ? 'has-unread' : ''}`} onClick={openTaskCenter} title="Agent 任务中心" aria-label="Agent 任务中心">
             <ListTodo size={15} />
-            {analysisJobs.filter((job) => job.unread).length > 0 && <span className="chat-task-unread">{Math.min(9, analysisJobs.filter((job) => job.unread).length)}</span>}
+            {analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length > 0 && <span className="chat-task-unread">{Math.min(9, analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length)}</span>}
           </button>
           <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭">
             <X size={15} />
@@ -5461,7 +5564,7 @@ function ChatPanel({
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,.txt,.md,.json,.csv"
+          accept="image/*,.txt,.md,.json,.csv,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov"
           style={{ display: 'none' }}
           onChange={(e) => void handleFiles(e.target.files)}
         />
@@ -5563,7 +5666,16 @@ function ChatPanel({
             <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭任务中心"><X size={15} /></button>
           </div>
           <div className="chat-history-list">
-            {analysisJobs.length === 0 ? <p className="chat-history-empty">暂无后台分析任务</p> : analysisJobs.map((job) => (
+            {agentPlans.map((plan) => (
+              <button key={plan.id} type="button" className={`chat-task-item ${plan.unread ? 'unread' : ''}`} onClick={() => void openAgentPlan(plan)}>
+                <span className="chat-task-item-main">
+                  <strong>{plan.goal}</strong>
+                  <small>{plan.kind === 'reminder' ? '主动提醒' : '持续计划'} · {plan.status === 'completed' ? '已完成' : `${plan.steps.filter((step) => step.status === 'completed').length}/${plan.steps.length} 步`}</small>
+                </span>
+                <span className="chat-task-item-meta">{new Date(plan.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
+              </button>
+            ))}
+            {analysisJobs.length === 0 && agentPlans.length === 0 ? <p className="chat-history-empty">暂无持续计划、提醒或后台分析</p> : analysisJobs.map((job) => (
               <button key={job.id} type="button" className={`chat-task-item ${job.unread ? 'unread' : ''}`} onClick={() => void openAnalysisJob(job)}>
                 <span className="chat-task-item-main">
                   <strong>{job.title}</strong>

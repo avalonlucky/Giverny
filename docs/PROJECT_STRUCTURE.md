@@ -15,7 +15,6 @@
 │   ├── README.md
 │   ├── package.json
 │   └── package-lock.json
-├── agent-runtime/
 │   ├── app/
 │   │   ├── giverny_tools.py
 │   │   ├── main.py
@@ -108,7 +107,6 @@
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`
 - Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
-- Legacy Python Agent runtime fallback: `agent-runtime/`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`
 - Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`
@@ -143,7 +141,7 @@
 - `AGENT_ANALYSIS_WORKFLOW` runs long read-only analysis independently from chat requests. `agent_analysis_jobs` stores status and final reports; temporary source snapshots are cleared after completion.
 - `agent_conversations` indexes cloud conversation Durable Objects; message bodies and structured approval/task cards remain in each Alice Agent SQLite database.
 - The Agent task center uses persisted unread state. Cron creates deduplicated weekly digests, prior-month reviews, and overdue-risk reports; deep analysis also supports cross-task, batch-attachment, and trend workflows.
-- `agent-runtime/` and `AGENT_RUNTIME_CONTAINER` remain temporarily as a legacy fallback while the Cloudflare-native path is validated in production.
+- Agent Runtime is Cloudflare-native only: `AliceAgent` Durable Object + Workflow + D1/R2 tools. The legacy Python Container fallback has been retired.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 
 ## Auth Notes

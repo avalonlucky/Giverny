@@ -243,6 +243,47 @@ async function runAgentLifecycleWriteCheck() {
   process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
 }
 
+async function runAgentOrchestrationCheck(cookie) {
+  const toolHeaders = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const conversationId = `plan-${crypto.randomUUID()}`
+  const planResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/create-task-plan', {
+    method: 'POST',
+    headers: toolHeaders,
+    body: JSON.stringify({
+      conversationId,
+      taskId: 1,
+      goal: '持续推进公司产品封套修改直到验收',
+      steps: [
+        { label: '记录制作进展', action: 'append_progress' },
+        { label: '整理验收文件', action: 'mark_acceptance_files' },
+        { label: '完成验收', action: 'complete_acceptance' },
+      ],
+    }),
+  })
+  const created = await planResponse.json().catch(() => ({}))
+  if (!planResponse.ok || created.plan?.steps?.length !== 3) throw new Error(`Agent plan creation failed: ${JSON.stringify(created)}`)
+
+  const memoryResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/get-task-memory?taskId=1', { headers: toolHeaders })
+  const memory = await memoryResponse.json().catch(() => ({}))
+  if (!memoryResponse.ok || memory.memory?.taskId !== 1 || !memory.memory?.summary) throw new Error(`Task memory refresh failed: ${JSON.stringify(memory)}`)
+
+  const progressResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/progress-task-plan', {
+    method: 'POST',
+    headers: toolHeaders,
+    body: JSON.stringify({ conversationId, taskId: 1, action: 'append_progress' }),
+  })
+  const progressed = await progressResponse.json().catch(() => ({}))
+  if (!progressResponse.ok || progressed.updated !== 1) throw new Error(`Agent plan progression failed: ${JSON.stringify(progressed)}`)
+
+  const listResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })
+  const listed = await listResponse.json().catch(() => ({}))
+  const plan = listed.plans?.find((item) => item.id === created.plan.id)
+  if (!listResponse.ok || plan?.steps?.[0]?.status !== 'completed' || plan.currentStep !== 1) {
+    throw new Error(`Agent task center plan is inconsistent: ${JSON.stringify(plan)}`)
+  }
+  process.stdout.write('Persistent Agent plan, step progression, and task memory checks passed.\n')
+}
+
 async function runBackgroundAnalysisCheck(cookie) {
   const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
   const startResponse = await fetch('http://127.0.0.1:8798/api/ai/chat', {
@@ -708,6 +749,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
+  await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
   await runAiLearningCheck(cookie)

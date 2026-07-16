@@ -86,6 +86,8 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
 - 创建任务、记录反馈、修改字段、修改状态、追加进展、记录等待、维护已有记录、标记验收文件和完整验收只能调用对应的 preview 工具。
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
+- 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；不要只在正文里写一次性清单。
+- 讨论某个任务的历史脉络、未解决问题、甲方偏好或下一步前，优先调用 get_task_memory；任务记忆只压缩事实，不替代任务详情权威数据。
 - 附件工具只能选择网站里已经存在的 attachmentId；用户电脑上的新文件必须先上传，不能伪造文件或文件地址。
 - 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
 - preview 返回后，清楚展示草稿、缺失项和风险；不要声称已经执行。
@@ -162,6 +164,7 @@ function parseJsonObject(value: string) {
 }
 
 export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
+  private activeConversationId = ''
   private readonly aliceEnv: AliceAgentEnv
 
   constructor(ctx: AgentContext, env: AliceAgentEnv) {
@@ -534,6 +537,21 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         inputSchema: readTools.get_giverny_context.inputSchema,
         execute: () => this.callTool('context', {}, 'GET'),
       }),
+      create_task_plan: tool({
+        description: '保存一个可跨会话持续推进的任务计划。适用于“从新建跟到验收”“持续提醒我完成这个项目”等目标。',
+        inputSchema: z.object({
+          goal: z.string().min(2).max(500),
+          taskId: z.number().int().positive().optional(),
+          nextActionAt: z.string().optional(),
+          steps: z.array(z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) })).min(2).max(8),
+        }),
+        execute: (input) => this.callTool('create-task-plan', { ...input, conversationId }),
+      }),
+      get_task_memory: tool({
+        description: '读取并刷新某个任务的长期记忆，包括需求摘要、近期记录、甲方反馈偏好和未解决事项。',
+        inputSchema: z.object({ taskId: z.number().int().positive() }),
+        execute: (input) => this.callTool('get-task-memory', input, 'GET'),
+      }),
       start_monthly_review: tool({
         description: '启动指定月份的持久化后台工作复盘。用于“复盘本月”、“整体分析 7 月工作”等耗时请求，不要用于单个数字查询。',
         inputSchema: z.object({
@@ -676,9 +694,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
-  private completedActionResult(pending: StoredPendingAction, result: AgentToolResponse): AliceAgentChatResult {
+  private async completedActionResult(pending: StoredPendingAction, result: AgentToolResponse): Promise<AliceAgentChatResult> {
     const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
     const task = toJsonObject(result.task)
+    await this.callTool('progress-task-plan', {
+      conversationId: this.activeConversationId,
+      action: pending.action,
+      taskId: Number(task.id) || Number(pending.draft.taskId) || undefined,
+    }).catch(() => undefined)
     return {
       answer,
       model: pending.workflowId ? 'cloudflare-workflow:durable-write' : 'cloudflare-agent:deterministic-write',
@@ -705,7 +728,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     try {
       const result = await this.callTool(pending.endpoint, { confirmationToken: pending.confirmationToken })
       this.clearPendingAction()
-      return this.completedActionResult(pending, result)
+      return await this.completedActionResult(pending, result)
     } catch (error) {
       const message = error instanceof Error ? error.message : '写入失败'
       const expired = /过期|校验失败|已失效|已使用/.test(message)
@@ -729,7 +752,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       let status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
       if (status.status === 'complete') {
         this.clearPendingAction()
-        return this.completedActionResult(pending, toJsonObject(status.output))
+        return await this.completedActionResult(pending, toJsonObject(status.output))
       }
       if (status.status === 'errored' || status.status === 'terminated') {
         throw new Error(status.error?.message || '持久化写入流程未能完成')
@@ -747,7 +770,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
         if (status.status === 'complete') {
           this.clearPendingAction()
-          return this.completedActionResult(pending, toJsonObject(status.output))
+          return await this.completedActionResult(pending, toJsonObject(status.output))
         }
         if (status.status === 'errored' || status.status === 'terminated') {
           throw new Error(status.error?.message || '持久化写入流程未能完成')
@@ -787,9 +810,6 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     if (!pending || `${pending.action}:${pending.createdAt}` !== String(request.approvalId || '')) {
       throw new Error('待确认草稿已变化或不存在，请重新生成。')
     }
-    if (pending.action !== 'create_task') {
-      throw new Error('当前仅支持在确认前编辑新建任务草稿。')
-    }
     const previewName = `${pending.action}_preview`
     const config = PREVIEW_ACTIONS[previewName]
     if (!config) throw new Error('找不到对应的草稿校验工具。')
@@ -805,11 +825,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const nextPending = this.getPendingAction()
     if (!nextPending) throw new Error('草稿更新后未生成确认状态。')
     return {
-      answer: '任务草稿已更新，请再次核对后确认。',
+      answer: '操作草稿已更新，请再次核对后确认。',
       model: 'cloudflare-agent:approval-revision',
       approval: this.approvalResult(nextPending, 'pending'),
       trace: [
-        { type: 'tool', label: '重新校验创建任务草稿' },
+        { type: 'tool', label: `重新校验${pending.label}草稿` },
         { type: 'result', label: '草稿与确认凭证已更新' },
       ],
     }
@@ -818,6 +838,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   async chat(request: AliceAgentChatRequest): Promise<AliceAgentChatResult> {
     const message = String(request.message || '').trim()
     if (!message) throw new Error('消息不能为空。')
+    this.activeConversationId = String(request.conversationId || '')
 
     if (this.state.messageCount === 0 && Array.isArray(request.history)) {
       request.history.slice(-12).forEach((item) => {

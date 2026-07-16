@@ -20,8 +20,6 @@ output/playwright/
 handoff/.env.local
 
 # Agent runtime local secrets and caches
-agent-runtime/.env
-agent-runtime/.venv/
 __pycache__/
 .pytest_cache/
 handoff/.admin-token.txt
