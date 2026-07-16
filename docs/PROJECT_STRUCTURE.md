@@ -40,6 +40,7 @@
 │   ├── AI_MODEL_ROUTING.md
 │   ├── AI_LEARNING.md
 │   ├── AI_HOUR_ESTIMATE.md
+│   ├── AI_PROGRESS_ASSESSMENT.md
 │   ├── AGENT_PRODUCTION_OPERATIONS.md
 │   ├── MCP_SERVER.md
 │   ├── LOCAL_CLI_BRIDGE.md
@@ -119,6 +120,7 @@
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
 - AI feedback learning, style distillation and hour calibration: `docs/AI_LEARNING.md`
 - AI hour-estimate complexity profile, retrieval, breakdown and calibration: `docs/AI_HOUR_ESTIMATE.md`
+- AI milestone progress evidence, guardrails and correction calibration: `docs/AI_PROGRESS_ASSESSMENT.md`
 - Domain types: `src/types/domain.ts`
 - App version and defaults: `src/config/appConfig.ts`
 - D1 full schema: `db/schema.sql`

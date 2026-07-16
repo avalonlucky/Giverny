@@ -24,6 +24,43 @@ export type ActivityItem = {
   createdAt: string
 }
 
+export type TaskProgressAssessment = {
+  progress: number
+  stage: 'not_started' | 'preparation' | 'production' | 'first_version' | 'finalizing' | 'accepted'
+  confidence: 'low' | 'medium' | 'high'
+  reason: string
+  evidence: string[]
+  missingInfo: string[]
+  reworkDetected: boolean
+  source: 'ai' | 'rules'
+  assessedAt: string
+}
+
+export type TaskProgressEstimatePayload = {
+  taskId: number
+  title: string
+  type: string
+  requirement: string
+  status: string
+  currentProgress: number
+  estimatedHours: number
+  actualHours: number
+  entries: Array<{
+    id: string
+    date: string
+    endDate: string
+    note: string
+    isAcceptance: boolean
+    isRevision: boolean
+    isClientFeedback: boolean
+    isUncounted: boolean
+    feedbackVersion: string
+    attachments: string[]
+  }>
+  waitingEntries: Array<{ date: string; note: string; reason: string; active: boolean }>
+  files: Array<{ name: string; scope: 'progress' | 'acceptance'; final: boolean; tag: string }>
+}
+
 export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
 
 export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read'
@@ -352,7 +389,7 @@ export type TaskAssistantSuggestion = {
 
 export type TextAssistantMode = 'acceptance' | 'progress' | 'feedback'
 export type TextLearningContext = TextAssistantMode | 'attachment_name'
-export type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | TextLearningContext
+export type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | 'task_progress' | TextLearningContext
 export type AiLearningAction = 'adopted' | 'edited' | 'rejected'
 
 export type TextAssistantSuggestion = {
@@ -1014,8 +1051,8 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  estimateTaskProgress: (payload: { title: string; requirement: string; status: string; entries: Array<{ date: string; note: string; isAcceptance: boolean }> }) =>
-    requestJson<{ progress: number; reason: string }>('/api/ai/progress-estimate', {
+  estimateTaskProgress: (payload: TaskProgressEstimatePayload) =>
+    requestJson<TaskProgressAssessment>('/api/ai/progress-estimate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

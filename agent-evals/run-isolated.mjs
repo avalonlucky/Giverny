@@ -289,7 +289,7 @@ async function runPlannedProgressTransitionCheck(cookie) {
     }),
   })
   const progressed = await progressResponse.json().catch(() => ({}))
-  if (!progressResponse.ok || progressed.status !== '进行中' || progressed.stage !== '进行中' || progressed.progress < 10 || progressed.estimatedHours !== 1.2) {
+  if (!progressResponse.ok || progressed.status !== '进行中' || progressed.stage !== '进行中' || progressed.progress < 20 || progressed.progress % 20 !== 0 || progressed.estimatedHours !== 1.2) {
     throw new Error(`Planned task did not start from its first progress entry: ${JSON.stringify(progressed)}`)
   }
   process.stdout.write('Planned task first-progress transition and decimal estimate checks passed.\n')
@@ -616,6 +616,75 @@ async function runAiLearningCheck(cookie) {
     throw new Error(`AI learning event was not persisted: ${JSON.stringify(result)}`)
   }
   process.stdout.write('AI feedback learning endpoint check passed.\n')
+}
+
+async function runProgressAssessmentCheck(cookie) {
+  const endpoint = 'http://127.0.0.1:8798/api/ai/progress-estimate'
+  const headers = { 'content-type': 'application/json', cookie }
+  const assess = async (overrides = {}) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        taskId: 90001,
+        title: '进度里程碑隔离评测',
+        type: '评测类 / 进度校准',
+        requirement: '完成一份可供甲方审阅并最终交付的完整设计稿。',
+        status: '进行中',
+        currentProgress: 0,
+        estimatedHours: 4,
+        actualHours: 2,
+        entries: [],
+        waitingEntries: [],
+        files: [],
+        ...overrides,
+      }),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(`Progress assessment HTTP ${response.status}: ${JSON.stringify(result)}`)
+    if (![0, 20, 40, 60, 80, 100].includes(result.progress)) {
+      throw new Error(`Progress assessment escaped 20% milestones: ${JSON.stringify(result)}`)
+    }
+    return result
+  }
+
+  const firstVersion = await assess({
+    entries: [{ id: 'first', date: '2026-07-17', endDate: '2026-07-17', note: '完成第一版完整排版并提交甲方审阅', attachments: ['方案B01.pdf'] }],
+  })
+  if (firstVersion.progress !== 60 || firstVersion.stage !== 'first_version') {
+    throw new Error(`First-version milestone is incorrect: ${JSON.stringify(firstVersion)}`)
+  }
+  const finalizing = await assess({
+    currentProgress: 60,
+    entries: [{ id: 'final', date: '2026-07-17', endDate: '2026-07-17', note: '完成全部反馈修改，整理终稿等待验收', isRevision: true }],
+    files: [{ name: '项目最终版.pdf', scope: 'acceptance', final: true, tag: '验收文件' }],
+  })
+  if (finalizing.progress !== 80 || finalizing.stage !== 'finalizing') {
+    throw new Error(`Finalizing milestone is incorrect: ${JSON.stringify(finalizing)}`)
+  }
+  const accepted = await assess({ status: '已验收', currentProgress: 80, entries: [{ id: 'accept', note: '验收通过', isAcceptance: true }] })
+  if (accepted.progress !== 100 || accepted.stage !== 'accepted') {
+    throw new Error(`Accepted milestone is incorrect: ${JSON.stringify(accepted)}`)
+  }
+
+  for (let index = 0; index < 3; index += 1) {
+    const response = await fetch('http://127.0.0.1:8798/api/ai/learning-events', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        context: 'task_progress', action: 'edited', aiOutput: '60', userFinal: '40',
+        designType: '评测类 / 进度校准', taskId: 91000 + index, taskTitle: `进度校准样本 ${index + 1}`,
+      }),
+    })
+    if (!response.ok) throw new Error('Progress correction learning event failed')
+  }
+  const calibrated = await assess({
+    taskId: 90002,
+    entries: [{ id: 'calibrated', date: '2026-07-17', endDate: '2026-07-17', note: '完成第一版完整排版并提交甲方审阅', attachments: ['方案B01.pdf'] }],
+  })
+  if (calibrated.progress !== 40 || !calibrated.evidence?.some((item) => item.includes('人工修正'))) {
+    throw new Error(`Progress calibration was not applied safely: ${JSON.stringify(calibrated)}`)
+  }
+  process.stdout.write('AI progress milestone, guardrail, and correction-learning checks passed.\n')
 }
 
 async function runHourEstimateLearningCheck(cookie) {
@@ -953,6 +1022,7 @@ try {
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
   await runAiLearningCheck(cookie)
+  await runProgressAssessmentCheck(cookie)
   await runHourEstimateLearningCheck(cookie)
 
   await run('node', ['agent-evals/run.mjs'], {

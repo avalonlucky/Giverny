@@ -103,6 +103,7 @@ import {
   type ReportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
+  type TaskProgressAssessment,
   type TextLearningContext,
   type TextAssistantSuggestion,
   type TokenScope,
@@ -3631,6 +3632,21 @@ function snapProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value / 20) * 20))
 }
 
+const progressStageLabels: Record<TaskProgressAssessment['stage'], string> = {
+  not_started: '尚未开始',
+  preparation: '准备与启动',
+  production: '核心制作',
+  first_version: '首版完成',
+  finalizing: '修改与定稿',
+  accepted: '验收闭环',
+}
+
+const progressConfidenceLabels: Record<TaskProgressAssessment['confidence'], string> = {
+  low: '低置信度',
+  medium: '中置信度',
+  high: '高置信度',
+}
+
 type ConfirmDialogState = {
   eyebrow?: string
   title: string
@@ -5881,6 +5897,7 @@ function App() {
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
   const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
+  const [progressAssessments, setProgressAssessments] = useState<Record<number, TaskProgressAssessment>>({})
   const taskActivityRequestRef = useRef(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
@@ -7114,8 +7131,9 @@ function App() {
     return savedFile
   }
 
-  // AI 自动估算整体进度：依据进展记录文字。按「条目签名」去重，避免重复调用/死循环。
+  // AI 自动估算整体进度：读取完整生命周期证据，并按语义签名去重。
   const autoEstimateSigRef = useRef<Map<number, string>>(new Map())
+  const aiProgressWriteRef = useRef<Set<number>>(new Set())
   const handleAutoEstimateProgress = async (task: Task) => {
     if (!isAdmin) {
       return
@@ -7123,37 +7141,77 @@ function App() {
     if (['已验收', '终止', '挂起', '不计费'].includes(task.status)) {
       return
     }
-    const entries = (task.timeEntries ?? []).filter((entry) => (entry.note ?? '').trim())
-    if (entries.length === 0) {
+    const taskFiles = fileItems.filter((file) => file.taskId === task.id && !file.deletedAt)
+    const attachmentsByEntry = new Map<string, string[]>()
+    taskFiles.forEach((file) => {
+      if (!file.entryId) return
+      attachmentsByEntry.set(file.entryId, [...(attachmentsByEntry.get(file.entryId) ?? []), file.name])
+    })
+    const entries = [...(task.timeEntries ?? [])]
+      .sort((left, right) => `${left.date ?? ''}T${left.start}`.localeCompare(`${right.date ?? ''}T${right.start}`))
+      .filter((entry) => (entry.note ?? '').trim() || (attachmentsByEntry.get(entry.id)?.length ?? 0) > 0)
+    if (entries.length === 0 && taskFiles.length === 0) {
       return
     }
-    const signature = `${entries.length}:` + entries.map((entry) => `${entry.id}.${(entry.note ?? '').length}`).join('|')
+    const payload = {
+      taskId: task.id,
+      title: task.title,
+      type: task.type,
+      requirement: task.requirement,
+      status: task.status,
+      currentProgress: snapProgress(task.progress),
+      estimatedHours: task.estimatedHours,
+      actualHours: task.actualHours,
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        date: entry.date ?? '',
+        endDate: entry.endDate ?? entry.date ?? '',
+        note: entry.note ?? '',
+        isAcceptance: Boolean(entry.isAcceptanceProgress),
+        isRevision: Boolean(entry.isRevision),
+        isClientFeedback: Boolean(entry.isClientFeedback),
+        isUncounted: Boolean(entry.isUncounted),
+        feedbackVersion: entry.feedbackVersion ?? '',
+        attachments: attachmentsByEntry.get(entry.id) ?? [],
+      })),
+      waitingEntries: (task.waitingEntries ?? []).map((entry) => ({
+        date: entry.date ?? '',
+        note: entry.note ?? '',
+        reason: entry.reason ?? '',
+        active: (entry.endDate ?? entry.date ?? '') === (entry.date ?? '') && entry.end === entry.start,
+      })),
+      files: taskFiles.map((file) => ({
+        name: file.name,
+        scope: file.scope,
+        final: file.final,
+        tag: file.tag ?? '',
+      })),
+    }
+    const signature = JSON.stringify(payload)
     if (autoEstimateSigRef.current.get(task.id) === signature) {
       return
     }
     autoEstimateSigRef.current.set(task.id, signature)
     try {
-      const result = await api.estimateTaskProgress({
-        title: task.title,
-        requirement: task.requirement,
-        status: task.status,
-        entries: entries.map((entry) => ({
-          date: entry.date ?? '',
-          note: entry.note ?? '',
-          isAcceptance: Boolean(entry.isAcceptanceProgress),
-        })),
-      })
+      const result = await api.estimateTaskProgress(payload)
+      if (autoEstimateSigRef.current.get(task.id) !== signature) {
+        return
+      }
+      setProgressAssessments((current) => ({ ...current, [task.id]: result }))
       const next = snapProgress(result.progress)
       const current = taskItemsRef.current.find((item) => item.id === task.id)
       if (!current || ['已验收', '终止', '挂起', '不计费'].includes(current.status)) {
         return
       }
       if (snapProgress(current.progress) !== next) {
+        aiProgressWriteRef.current.add(task.id)
         await handleUpdateTask(task.id, { progress: next })
       }
     } catch {
       // 失败则清掉签名，下次再试
-      autoEstimateSigRef.current.delete(task.id)
+      if (autoEstimateSigRef.current.get(task.id) === signature) {
+        autoEstimateSigRef.current.delete(task.id)
+      }
     }
   }
 
@@ -7179,6 +7237,8 @@ function App() {
       }
     }
     const normalizedChanges = { ...changes }
+    const isAiProgressWrite = Object.hasOwn(changes, 'progress') && aiProgressWriteRef.current.has(taskId)
+    const isManualProgressCorrection = Object.hasOwn(changes, 'progress') && !isAiProgressWrite
     if (normalizedChanges.progress !== undefined) {
       normalizedChanges.progress = snapProgress(Number(normalizedChanges.progress))
     }
@@ -7219,11 +7279,45 @@ function App() {
         notify('任务已同步到 D1')
       }
       savedSuccessfully = true
+      if (isManualProgressCorrection) {
+        const assessment = progressAssessments[taskId]
+        if (assessment && snapProgress(Number(normalizedChanges.progress)) !== assessment.progress) {
+          void api.recordAiLearningEvent({
+            context: 'task_progress',
+            sourceInput: assessment.reason,
+            aiOutput: String(assessment.progress),
+            userFinal: String(snapProgress(Number(normalizedChanges.progress))),
+            action: 'edited',
+            designType: currentTask.type,
+            taskId,
+            taskTitle: currentTask.title,
+            metadata: {
+              stage: assessment.stage,
+              confidence: assessment.confidence,
+              evidence: assessment.evidence,
+              algorithmVersion: '2.0.0',
+            },
+          })
+        }
+      }
+      const shouldReassessProgress = !Object.hasOwn(changes, 'progress') && (
+        Object.hasOwn(changes, 'timeEntries')
+        || Object.hasOwn(changes, 'waitingEntries')
+        || Object.hasOwn(changes, 'requirement')
+        || Object.hasOwn(changes, 'type')
+        || Object.hasOwn(changes, 'status')
+      )
+      if (shouldReassessProgress && !['已验收', '终止', '挂起', '不计费'].includes(savedTask.status)) {
+        window.setTimeout(() => void handleAutoEstimateProgress(savedTask), 0)
+      }
     } catch (error) {
       setBackendStatus('后端异常')
       notify(error instanceof Error ? `任务更新失败：${error.message}` : '任务更新失败')
     } finally {
       updatingTaskIdsRef.current.delete(taskId)
+      if (isAiProgressWrite) {
+        aiProgressWriteRef.current.delete(taskId)
+      }
       const pendingChanges = pendingTaskChangesRef.current.get(taskId)
       if (pendingChanges) {
         pendingTaskChangesRef.current.delete(taskId)
@@ -8499,6 +8593,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           {!isTaskDetailCollapsed && <DashboardTaskSidebar
             task={selectedTask}
             files={fileItems}
+            progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
             onPreviewFile={setPreviewFile}
             onUpdateTask={handleUpdateTask}
             onOpenProgress={handleOpenTaskProgress}
@@ -8546,6 +8641,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             onOpenTask={handleOpenTaskDetail}
             onOpenEditTask={handleOpenTaskEdit}
             files={fileItems}
+            progressAssessments={progressAssessments}
             onPreviewFile={setPreviewFile}
             activity={taskActivity}
             hourlyRate={hourlyRate}
@@ -9582,6 +9678,7 @@ function FileContextMenu({
 function DashboardTaskSidebar({
   task,
   files,
+  progressAssessment,
   onPreviewFile,
   onUpdateTask,
   onOpenProgress,
@@ -9595,6 +9692,7 @@ function DashboardTaskSidebar({
 }: {
   task: Task | undefined
   files: FileAsset[]
+  progressAssessment?: TaskProgressAssessment
   onPreviewFile: (file: FileAsset) => void
   onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
   onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
@@ -9616,19 +9714,22 @@ function DashboardTaskSidebar({
     expandedWaiting: false,
   })
 
-  // 查看「进展」且有带文字的进展记录时，自动让 AI 估算整体进度（内部按签名去重，不会重复调用）
+  // 查看「进展」时按完整生命周期证据重算；语义签名去重，避免重复调用。
   const taskId = task?.id
-  const entriesSignature = (task?.timeEntries ?? [])
-    .filter((entry) => (entry.note ?? '').trim())
-    .map((entry) => `${entry.id}.${(entry.note ?? '').trim()}`)
-    .join('|')
+  const evidenceSignature = task ? JSON.stringify({
+    status: task.status,
+    requirement: task.requirement,
+    timeEntries: task.timeEntries ?? [],
+    waitingEntries: task.waitingEntries ?? [],
+    files: files.filter((file) => file.taskId === task.id && !file.deletedAt).map((file) => [file.id, file.name, file.scope, file.final, file.tag, file.entryId]),
+  }) : ''
   useEffect(() => {
-    if (!task || activeTab !== 'progress' || !onAutoEstimateProgress || !entriesSignature) {
+    if (!task || activeTab !== 'progress' || !onAutoEstimateProgress || !evidenceSignature) {
       return
     }
     onAutoEstimateProgress(task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, activeTab, entriesSignature])
+  }, [taskId, activeTab, evidenceSignature])
 
   if (!task) {
     return (
@@ -9821,6 +9922,23 @@ function DashboardTaskSidebar({
                 </button>
               ))}
             </div>
+            {progressAssessment && (
+              <details className="dashboard-side-progress-assessment">
+                <summary>
+                  <span><Sparkles size={13} />AI 判断 · {progressStageLabels[progressAssessment.stage]}</span>
+                  <em>{progressConfidenceLabels[progressAssessment.confidence]}</em>
+                </summary>
+                <p>{progressAssessment.reason}</p>
+                {progressAssessment.evidence.length > 0 && (
+                  <ul>
+                    {progressAssessment.evidence.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
+                {progressAssessment.missingInfo.length > 0 && (
+                  <small>待补证据：{progressAssessment.missingInfo.join('；')}</small>
+                )}
+              </details>
+            )}
             {task.status === '计划中' && (
               <p className="dashboard-side-muted dashboard-side-planned-note">
                 首次保存「记录进展」后，任务会自动进入进行中，无需手动改状态。
@@ -10119,6 +10237,7 @@ function TasksView({
   onOpenTask,
   onOpenEditTask,
   files,
+  progressAssessments,
   onPreviewFile,
   activity,
   hourlyRate,
@@ -10166,6 +10285,7 @@ function TasksView({
   onOpenTask: (taskId: number) => void
   onOpenEditTask: (taskId: number) => void
   files: FileAsset[]
+  progressAssessments: Record<number, TaskProgressAssessment>
   onPreviewFile: (file: FileAsset) => void
   activity: ActivityItem[]
   hourlyRate: number
@@ -10519,6 +10639,7 @@ return (
         {!detailCollapsed && <DashboardTaskSidebar
           task={selectedTask}
           files={files}
+          progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
           onPreviewFile={onPreviewFile}
           onUpdateTask={onUpdateTask}
           onOpenProgress={(taskId, mode, editEntryId, initialAcceptanceMode) => {

@@ -2493,6 +2493,58 @@ button.topbar-create-button:hover {
   opacity: 0.72;
 }
 
+.dashboard-side-progress-assessment {
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.dashboard-side-progress-assessment summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.dashboard-side-progress-assessment summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-side-progress-assessment summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.dashboard-side-progress-assessment summary em {
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+.dashboard-side-progress-assessment p {
+  margin: 10px 0 0;
+  line-height: 1.65;
+}
+
+.dashboard-side-progress-assessment ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.dashboard-side-progress-assessment small {
+  display: block;
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
 .dashboard-side-planned-note {
   margin-top: -4px;
 }

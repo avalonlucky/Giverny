@@ -2772,7 +2772,11 @@ async function agentUpdateTaskStatusPreviewTool(env: Env, request: Request) {
       taskTitle: task.title,
       fromStatus: task.status,
       status,
-      progress: status === '已验收' ? 100 : status === '待验收' ? Math.max(Number(task.progress) || 0, 90) : Math.min(Math.max(agentNumber(body.progress, Number(task.progress) || 0), 0), 100),
+      progress: status === '已验收'
+        ? 100
+        : status === '待验收'
+          ? Math.max(normalizeProgressStep(task.progress), 80)
+          : normalizeProgressStep(agentNumber(body.progress, Number(task.progress) || 0)),
       reason: agentString(body.reason, 500),
     }
     const missing = [!agentTaskStatuses.includes(status) && 'status'].filter(Boolean) as string[]
@@ -2799,7 +2803,11 @@ async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: Worke
   const status = agentString(draft.status, 20) as TaskStatus
   if (!agentTaskStatuses.includes(status)) return agentFail('状态不合法', 400)
   if (task.status === '已验收' && status !== '已验收') return agentFail('已验收任务状态已锁定，不能通过 Agent 回退', 409)
-  const progress = status === '已验收' ? 100 : Math.min(Math.max(agentNumber(draft.progress, Number(task.progress) || 0), 0), 100)
+  const progress = status === '已验收'
+    ? 100
+    : status === '待验收'
+      ? Math.max(normalizeProgressStep(task.progress), 80)
+      : normalizeProgressStep(agentNumber(draft.progress, Number(task.progress) || 0))
   const actualDeliveryDate = status === '已验收' && task.status !== '已验收' ? nowIso() : task.actual_delivery_date ?? ''
   await env.DB.prepare('UPDATE tasks SET status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(status, status, progress, actualDeliveryDate, task.id)
@@ -2943,7 +2951,9 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   const entries = [...parseTimeEntries(task.time_entries_json), entry]
   const actualHours = agentEntryHours(entries)
   const nextStatus: TaskStatus = entry.isAcceptanceProgress ? '已验收' : task.status === '计划中' ? '进行中' : task.status
-  const nextProgress = entry.isAcceptanceProgress ? 100 : Math.max(Number(task.progress) || 0, nextStatus === '进行中' ? 10 : Number(task.progress) || 0)
+  const nextProgress = entry.isAcceptanceProgress
+    ? 100
+    : Math.max(normalizeProgressStep(task.progress), nextStatus === '进行中' ? 20 : normalizeProgressStep(task.progress))
   const actualDeliveryDate = entry.isAcceptanceProgress ? endDateTime : task.actual_delivery_date ?? ''
   await env.DB.prepare('UPDATE tasks SET time_entries_json = ?, actual_hours = ?, status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(JSON.stringify(entries), actualHours, nextStatus, nextStatus, nextProgress, actualDeliveryDate, task.id)
@@ -6570,6 +6580,11 @@ function acceptanceProgressEndDateTime(entries: TimeEntry[], fallbackDate: strin
   return latest?.value ?? ''
 }
 
+function normalizeProgressStep(value: unknown) {
+  const progress = Number(value)
+  return Math.max(0, Math.min(100, Math.round((Number.isFinite(progress) ? progress : 0) / 20) * 20))
+}
+
 function normalizeTaskClosure<T extends { status: TaskStatus; stage?: string; progress?: number; actualDeliveryDate?: string; timeEntries: TimeEntry[]; date?: string | null }>(task: T): T {
   if (!task.timeEntries.some((entry) => entry.isAcceptanceProgress)) {
     return task
@@ -9633,7 +9648,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
     reviewer: changes.reviewer ?? current.reviewer ?? '',
     stage: startFromProgress ? '进行中' : changes.stage ?? current.stage ?? '',
     status: startFromProgress ? '进行中' : changes.status ?? current.status,
-    progress: startFromProgress ? Math.max(10, Number(current.progress) || 0) : changes.progress ?? current.progress,
+    progress: startFromProgress ? Math.max(20, normalizeProgressStep(current.progress)) : normalizeProgressStep(changes.progress ?? current.progress),
     suspendReason: changes.suspendReason ?? current.suspend_reason ?? '',
     terminateReason: changes.terminateReason ?? current.terminate_reason ?? '',
     supplementalNote: changes.supplementalNote ?? current.supplemental_note ?? '',
@@ -10563,42 +10578,214 @@ async function callBamlRuntime<T>(env: Env, endpoint: 'suggest-task' | 'optimize
   return (await response.json().catch(() => null)) as T | null
 }
 
-// AI 估算任务整体进度：只依据进展记录文字，弱化预计时间权重。返回 10 的倍数(0-100)。
+type ProgressStage = 'not_started' | 'preparation' | 'production' | 'first_version' | 'finalizing' | 'accepted'
+
+const progressStageValues: Record<ProgressStage, number> = {
+  not_started: 0,
+  preparation: 20,
+  production: 40,
+  first_version: 60,
+  finalizing: 80,
+  accepted: 100,
+}
+
+function progressStageForValue(value: number): ProgressStage {
+  const progress = Math.max(0, Math.min(100, Math.round(value / 20) * 20))
+  if (progress >= 100) return 'accepted'
+  if (progress >= 80) return 'finalizing'
+  if (progress >= 60) return 'first_version'
+  if (progress >= 40) return 'production'
+  if (progress >= 20) return 'preparation'
+  return 'not_started'
+}
+
+function deterministicProgressAssessment(args: {
+  status: string
+  currentProgress: number
+  entries: Array<{ note: string; isAcceptance: boolean; isRevision: boolean; isClientFeedback: boolean; feedbackVersion: string; attachments: string[] }>
+  files: Array<{ name: string; scope: string; final: boolean; tag: string }>
+}) {
+  if (args.status === '已验收' || args.entries.some((entry) => entry.isAcceptance)) {
+    return { stage: 'accepted' as ProgressStage, confidence: 'high' as const, reason: '任务已有验收闭环记录', evidence: ['验收进展已保存'], missingInfo: [], reworkDetected: false }
+  }
+  const text = [...args.entries.map((entry) => entry.note), ...args.files.map((file) => `${file.name} ${file.tag}`)].join(' ')
+  const hasFinalEvidence = /定稿|终稿|最终版|最终稿|交付文件|准备验收|待验收|已提交验收|final/i.test(text)
+    || args.files.some((file) => file.final || file.scope === 'acceptance' || file.tag.includes('验收'))
+  const hasFirstVersion = /初稿|第一版|首版|一稿|完整版本|已出稿|已完成设计|已提交.*版|B0?1/i.test(text)
+  const hasProduction = /设计中|制作中|排版|绘制|剪辑|建模|优化|修改|调整|已完成.*(?:页|张|个|套)|进度/i.test(text)
+  const hasRework = /推翻|重做|返工|方向重置|重新设计|大改|需求变更/i.test(text)
+  let stage: ProgressStage = args.entries.length > 0 || args.files.length > 0 ? 'preparation' : 'not_started'
+  if (hasProduction) stage = 'production'
+  if (hasFirstVersion) stage = 'first_version'
+  if (hasFinalEvidence || args.status === '待验收') stage = 'finalizing'
+  const proposed = progressStageValues[stage]
+  if (proposed < args.currentProgress && !hasRework) {
+    stage = progressStageForValue(args.currentProgress)
+  }
+  const evidence = [
+    hasFinalEvidence ? '检测到终稿、交付或验收附件证据' : '',
+    !hasFinalEvidence && hasFirstVersion ? '检测到首个完整版本证据' : '',
+    !hasFinalEvidence && !hasFirstVersion && hasProduction ? '检测到实质制作或修改记录' : '',
+    args.entries.some((entry) => entry.isClientFeedback || entry.isRevision) ? '已结合反馈与改稿记录' : '',
+  ].filter(Boolean)
+  return {
+    stage,
+    confidence: hasFinalEvidence || hasFirstVersion ? 'medium' as const : 'low' as const,
+    reason: evidence[0] || (stage === 'preparation' ? '已有记录，但缺少可核验的阶段性交付描述' : '暂无实质进展证据'),
+    evidence,
+    missingInfo: stage === 'not_started' ? ['尚未记录工作进展'] : hasFirstVersion || hasFinalEvidence ? [] : ['未说明是否已形成可审阅版本'],
+    reworkDetected: hasRework,
+  }
+}
+
+async function recentProgressReferences(env: Env, taskId: number, designType: string) {
+  if (!designType) return []
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT title, time_entries_json
+       FROM tasks
+       WHERE id != ? AND design_type = ? AND status = '已验收' AND deleted_at IS NULL AND voided_at IS NULL
+       ORDER BY COALESCE(actual_delivery_date, estimated_delivery_date, start_date) DESC
+       LIMIT 4`,
+    ).bind(String(taskId || 0), designType).all<Pick<DbTask, 'title' | 'time_entries_json'>>()
+    return (rows.results ?? []).map((row) => ({
+      title: String(row.title ?? '').slice(0, 80),
+      trajectory: parseTimeEntries(row.time_entries_json)
+        .filter((entry) => !entry.isAcceptanceProgress && String(entry.note ?? '').trim())
+        .slice(-6)
+        .map((entry) => ({
+          note: String(entry.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
+          kind: entry.isClientFeedback ? 'client_feedback' : entry.isRevision ? 'revision' : 'progress',
+          version: String(entry.feedbackVersion ?? '').slice(0, 20),
+        })),
+    })).filter((item) => item.trajectory.length > 0)
+  } catch {
+    return []
+  }
+}
+
+async function progressCalibrationForType(env: Env, designType: string) {
+  if (!designType) return { sampleCount: 0, adjustment: 0 }
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT ai_output, user_final
+       FROM ai_learning_events
+       WHERE context = 'task_progress' AND design_type = ? AND action = 'edited'
+       ORDER BY created_at DESC
+       LIMIT 30`,
+    ).bind(designType).all<{ ai_output: string; user_final: string }>()
+    const differences = (rows.results ?? [])
+      .map((row) => Number(row.user_final) - Number(row.ai_output))
+      .filter((value) => Number.isFinite(value) && Math.abs(value) <= 40)
+    if (differences.length < 3) return { sampleCount: differences.length, adjustment: 0 }
+    const medianDifference = medianValue(differences)
+    return {
+      sampleCount: differences.length,
+      adjustment: Math.max(-20, Math.min(20, Math.round(medianDifference / 20) * 20)),
+    }
+  } catch {
+    return { sampleCount: 0, adjustment: 0 }
+  }
+}
+
+// AI 只识别五阶段里程碑，最终百分比由确定性规则映射为 0/20/40/60/80/100。
 async function estimateTaskProgressWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
+    taskId?: number
     title?: string
+    type?: string
     requirement?: string
     status?: string
-    entries?: Array<{ date?: string; note?: string; isAcceptance?: boolean }>
+    currentProgress?: number
+    estimatedHours?: number
+    actualHours?: number
+    entries?: Array<{
+      id?: string
+      date?: string
+      endDate?: string
+      note?: string
+      isAcceptance?: boolean
+      isRevision?: boolean
+      isClientFeedback?: boolean
+      isUncounted?: boolean
+      feedbackVersion?: string
+      attachments?: string[]
+    }>
+    waitingEntries?: Array<{ date?: string; note?: string; reason?: string; active?: boolean }>
+    files?: Array<{ name?: string; scope?: string; final?: boolean; tag?: string }>
   }
   const entries = (Array.isArray(body.entries) ? body.entries : [])
     .map((entry) => ({
+      id: String(entry?.id ?? '').slice(0, 80),
       date: String(entry?.date ?? '').slice(0, 40),
+      endDate: String(entry?.endDate ?? '').slice(0, 40),
       note: String(entry?.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 400),
       isAcceptance: Boolean(entry?.isAcceptance),
+      isRevision: Boolean(entry?.isRevision),
+      isClientFeedback: Boolean(entry?.isClientFeedback),
+      isUncounted: Boolean(entry?.isUncounted),
+      feedbackVersion: String(entry?.feedbackVersion ?? '').slice(0, 30),
+      attachments: (Array.isArray(entry?.attachments) ? entry.attachments : []).map((name) => String(name).slice(0, 160)).slice(0, 8),
     }))
-    .filter((entry) => entry.note)
+    .filter((entry) => entry.note || entry.attachments.length > 0)
     .slice(0, 40)
-  if (entries.length === 0) {
-    return ok({ progress: 0, reason: '暂无进展记录' })
-  }
+  const waitingEntries = (Array.isArray(body.waitingEntries) ? body.waitingEntries : []).map((entry) => ({
+    date: String(entry?.date ?? '').slice(0, 40),
+    note: String(entry?.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 240),
+    reason: String(entry?.reason ?? '').slice(0, 80),
+    active: Boolean(entry?.active),
+  })).slice(0, 20)
+  const files = (Array.isArray(body.files) ? body.files : []).map((file) => ({
+    name: String(file?.name ?? '').slice(0, 180),
+    scope: String(file?.scope ?? '').slice(0, 30),
+    final: Boolean(file?.final),
+    tag: String(file?.tag ?? '').slice(0, 60),
+  })).slice(0, 40)
   const status = String(body.status ?? '').trim()
-  if (status === '已验收') {
-    return ok({ progress: 100, reason: '任务已验收' })
+  const currentProgress = Math.max(0, Math.min(100, Math.round(Number(body.currentProgress) || 0)))
+  const rules = deterministicProgressAssessment({ status, currentProgress, entries, files })
+  const assessedAt = nowIso()
+  if (rules.stage === 'accepted' || (entries.length === 0 && files.length === 0)) {
+    return ok({ ...rules, progress: progressStageValues[rules.stage], source: 'rules', assessedAt })
   }
+  const designType = String(body.type ?? '').trim().slice(0, 120)
+  const [historyReferences, progressCalibration] = await Promise.all([
+    recentProgressReferences(env, Number(body.taskId) || 0, designType),
+    progressCalibrationForType(env, designType),
+  ])
   const payload = {
+    taskId: Number(body.taskId) || 0,
     taskTitle: String(body.title ?? '').slice(0, 120),
+    designType,
     requirement: String(body.requirement ?? '').slice(0, 1000),
     status,
+    currentProgress,
+    effort: {
+      estimatedHours: Math.max(0, Number(body.estimatedHours) || 0),
+      actualHours: Math.max(0, Number(body.actualHours) || 0),
+      instruction: '工时投入只能作为弱证据，不能单独证明交付完成度。',
+    },
     progressEntries: entries,
+    waitingEntries,
+    files,
+    sameTypeCompletedReferences: historyReferences,
+    progressCalibration,
   }
   const systemPrompt =
-    '你是设计任务进度评估助手。请只依据「进展记录」(progressEntries，按时间从新到旧或从旧到新均可，每条是一段工作记录文字) 估算这条任务的整体完成度，输出 0-100 的整数且必须是 10 的倍数。\n\n判断依据(按权重从高到低)：\n1. 进展记录的语义：出现「初稿完成/第一版完成/已完成第一版」约 50-60；之后每完成一轮甲方反馈修改再加 10-20；出现「定稿/终稿/最终版/已上传最终文件/准备验收/待验收」约 85-95；出现「验收通过/已验收」为 100。\n2. 任务状态 status：计划中通常 0，但若已有实质进展记录则按记录推断（不要因为状态是计划中就判 0）；进行中按记录推断；待验收≥85。\n3. 修改轮次越多、且最近的记录越接近定稿，完成度越高；只有零星几条早期记录则给中低值。\n\n不要参考预计开始/预计工时/预计交付等计划时间——它们权重极低、常不准，本输入也不提供。\n请给出一个 progress 整数和一句简短中文理由。'
-  let parsed: { progress?: number; reason?: string } | null = null
+    '你是设计项目里程碑识别器，不直接猜任意百分比。请结合任务需求、按时间排列的进展、反馈/改稿标记、版本号、过程与验收附件、等待记录，以及少量同类型已验收轨迹，识别当前所处阶段。\n\n阶段定义：\n- not_started：没有实质工作证据。\n- preparation：已确认范围、整理素材、调研或刚开始，但尚无明确的核心制作成果。\n- production：核心设计/排版/剪辑/制作正在进行，已有部分成果，但没有可供完整审阅的版本。\n- first_version：已经形成并提交首个完整、可审阅版本；“做了几页/几张”不等于完整首版。\n- finalizing：已完成关键反馈修改并接近定稿，或已有终稿、最终交付、验收附件、待验收等强证据。\n- accepted：只有明确验收通过或已验收状态才允许。\n\n约束：等待不增加进度；反馈轮次不自动加分；返工、推翻、方向重置可以导致阶段回退，但必须 reworkDetected=true；工时只作弱证据；多交付物任务要看整体覆盖，不能因单个文件完成就判定整个任务接近完成。同类型历史只用于理解该类型常见交付语言，不得照搬其进度。输出简短、可核验的证据，不暴露内部思维过程。'
+  type ProgressModelResult = {
+    stage?: ProgressStage
+    confidence?: 'low' | 'medium' | 'high'
+    reason?: string
+    evidence?: string[]
+    missingInfo?: string[]
+    reworkDetected?: boolean
+  }
+  let parsed: ProgressModelResult | null = null
   if (env.DEEPSEEK_API_KEY) {
     const model = env.DEEPSEEK_MODEL || 'deepseek-chat'
     const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
-    const toolName = 'report_task_progress'
+    const toolName = 'report_task_milestone'
     let response: Response | null = null
     try {
       response = await fetch(`${baseUrl}/chat/completions`, {
@@ -10616,14 +10803,18 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
               type: 'function',
               function: {
                 name: toolName,
-                description: '返回任务整体完成度',
+                description: '返回任务当前里程碑及可核验证据',
                 parameters: {
                   type: 'object',
                   properties: {
-                    progress: { type: 'integer', description: '整体完成度 0-100，必须是 10 的倍数' },
+                    stage: { type: 'string', enum: Object.keys(progressStageValues) },
+                    confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
                     reason: { type: 'string', description: '一句简短中文理由' },
+                    evidence: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+                    missingInfo: { type: 'array', items: { type: 'string' }, maxItems: 3 },
+                    reworkDetected: { type: 'boolean' },
                   },
-                  required: ['progress', 'reason'],
+                  required: ['stage', 'confidence', 'reason', 'evidence', 'missingInfo', 'reworkDetected'],
                 },
               },
             },
@@ -10649,14 +10840,77 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
     }
   }
   if (!parsed) {
-    parsed = await callTextFallbackJson<{ progress?: number; reason?: string }>(env, systemPrompt, payload, 'progress:number(0-100,10的倍数), reason:string')
+    parsed = await callTextFallbackJson<ProgressModelResult>(env, systemPrompt, payload, 'stage:not_started|preparation|production|first_version|finalizing|accepted, confidence:low|medium|high, reason:string, evidence:string[], missingInfo:string[], reworkDetected:boolean')
   }
-  if (!parsed || typeof parsed.progress !== 'number' || Number.isNaN(parsed.progress)) {
-    return fail('AI 进度评估暂时不可用', 503)
+  if (!parsed || !Object.hasOwn(progressStageValues, String(parsed.stage ?? ''))) {
+    let fallbackProgress = progressStageValues[rules.stage]
+    if (progressCalibration.adjustment !== 0 && status !== '待验收' && fallbackProgress < 100) {
+      fallbackProgress = Math.max(0, Math.min(80, fallbackProgress + progressCalibration.adjustment))
+    }
+    return ok({
+      ...rules,
+      progress: fallbackProgress,
+      stage: progressStageForValue(fallbackProgress),
+      evidence: [
+        ...rules.evidence,
+        ...(progressCalibration.adjustment !== 0 ? [`同类型 ${progressCalibration.sampleCount} 次人工修正已参与校准`] : []),
+      ].slice(0, 4),
+      source: 'rules',
+      assessedAt,
+    })
   }
-  const progress = Math.max(0, Math.min(100, Math.round(parsed.progress / 10) * 10))
-  await audit(env, 'suggest', 'ai_progress_estimate', payload.taskTitle || 'untitled', { progress, entryCount: entries.length })
-  return ok({ progress, reason: String(parsed.reason ?? '').slice(0, 200) })
+  let stage = parsed.stage as ProgressStage
+  let progress = progressStageValues[stage]
+  const confidence = parsed.confidence === 'high' || parsed.confidence === 'medium' ? parsed.confidence : 'low'
+  const reworkDetected = Boolean(parsed.reworkDetected)
+  if (stage === 'accepted' && status !== '已验收' && !entries.some((entry) => entry.isAcceptance)) {
+    stage = 'finalizing'
+    progress = 80
+  }
+  if (status === '待验收' && progress < 80) {
+    stage = 'finalizing'
+    progress = 80
+  }
+  if (progress < currentProgress && !reworkDetected) {
+    stage = progressStageForValue(currentProgress)
+    progress = progressStageValues[stage]
+  }
+  if (progress > currentProgress + 20 && confidence === 'low') {
+    progress = Math.min(80, currentProgress + 20)
+    stage = progressStageForValue(progress)
+  }
+  if (progressCalibration.adjustment !== 0 && confidence !== 'high' && status !== '待验收' && progress < 100) {
+    progress = Math.max(0, Math.min(80, progress + progressCalibration.adjustment))
+    stage = progressStageForValue(progress)
+  }
+  const calibratedEvidence = progressCalibration.adjustment !== 0
+    ? [`同类型 ${progressCalibration.sampleCount} 次人工修正形成 ${progressCalibration.adjustment > 0 ? '上调' : '下调'}一档校准`]
+    : []
+  const result = {
+    progress,
+    stage,
+    confidence,
+    reason: String(parsed.reason || rules.reason).slice(0, 240),
+    evidence: [...(Array.isArray(parsed.evidence) ? parsed.evidence : rules.evidence), ...calibratedEvidence].map((item) => String(item).slice(0, 180)).filter(Boolean).slice(0, 4),
+    missingInfo: (Array.isArray(parsed.missingInfo) ? parsed.missingInfo : rules.missingInfo).map((item) => String(item).slice(0, 180)).filter(Boolean).slice(0, 3),
+    reworkDetected,
+    source: 'ai' as const,
+    assessedAt,
+  }
+  await audit(env, 'suggest', 'ai_progress_estimate', payload.taskTitle || 'untitled', {
+    progress,
+    stage,
+    confidence,
+    reason: result.reason,
+    evidence: result.evidence,
+    entryCount: entries.length,
+    fileCount: files.length,
+    historyReferenceCount: historyReferences.length,
+    calibrationSampleCount: progressCalibration.sampleCount,
+    calibrationAdjustment: progressCalibration.adjustment,
+    algorithmVersion: '2.0.0',
+  })
+  return ok(result)
 }
 
 async function suggestTaskWithAi(env: Env, request: Request) {
@@ -11581,7 +11835,7 @@ async function saveTaskTypeChoice(env: Env, request: Request) {
 }
 
 type TextLearningContext = 'progress' | 'feedback' | 'acceptance' | 'attachment_name'
-type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | TextLearningContext
+type AiLearningContext = 'task_requirement' | 'task_title' | 'task_type' | 'hour_estimate' | 'task_progress' | TextLearningContext
 type AiLearningAction = 'adopted' | 'edited' | 'rejected'
 
 function normalizeTextLearningContext(value: unknown): TextLearningContext {
@@ -11597,6 +11851,7 @@ function normalizeAiLearningContext(value: unknown): AiLearningContext {
     || value === 'task_title'
     || value === 'task_type'
     || value === 'hour_estimate'
+    || value === 'task_progress'
     || value === 'feedback'
     || value === 'acceptance'
     || value === 'attachment_name'
