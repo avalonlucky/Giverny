@@ -2540,6 +2540,55 @@ type GivernySelectOption = {
   icon?: ReactNode
 }
 
+type AiModelCategory = 'text' | 'vision' | 'image' | 'video' | 'audio' | 'omni' | 'embedding'
+
+const aiModelCategoryLabels: Record<AiModelCategory, string> = {
+  text: '文字',
+  vision: '视觉',
+  image: '图片',
+  video: '视频',
+  audio: '语音',
+  omni: '全模态',
+  embedding: '向量',
+}
+
+const aiModelCategoryOrder: AiModelCategory[] = ['text', 'vision', 'image', 'video', 'audio', 'omni', 'embedding']
+
+// 按模型命名规则推断模态分类和特点描述；对所有服务商通用。
+function classifyAiModel(model: string): { category: AiModelCategory; note: string } {
+  const m = model.toLowerCase()
+  const has = (re: RegExp) => re.test(m)
+  let category: AiModelCategory = 'text'
+  if (has(/embedding|embed(?![a-z])|rerank/)) category = 'embedding'
+  else if (has(/omni/)) category = 'omni'
+  else if (has(/tts|asr|audio|s2s|-vc-|-vd-|livetranslate|realtime|speech|voice/)) category = 'audio'
+  else if (has(/video|seedance|veo|keling|kling/)) category = 'video'
+  else if (has(/image|seedream|dall|wanx|flux/)) category = 'image'
+  else if (has(/-vl|vision|ocr/)) category = 'vision'
+  const notes: string[] = []
+  if (category === 'text') {
+    if (has(/max/)) notes.push('旗舰，能力最强')
+    else if (has(/plus|pro(?![a-z])/)) notes.push('均衡，性能成本兼顾')
+    else if (has(/turbo|flash|lite|mini|nano/)) notes.push('轻快，响应快成本低')
+    if (has(/coder|-code(?![a-z])/)) notes.push('代码专长')
+    if (has(/thinking|reason|qwq|deep-research|deep-search|-r\d/)) notes.push('深度推理')
+    if (has(/long/)) notes.push('超长上下文')
+    if (has(/(^|-)mt-|translate/)) notes.push('翻译')
+    if (has(/math/)) notes.push('数学专长')
+    if (has(/character/)) notes.push('角色扮演')
+  }
+  if (category === 'vision') notes.push(has(/ocr/) ? '图片文字识别' : '图片理解')
+  if (category === 'image') notes.push(has(/edit/) ? '图片编辑' : '图片生成')
+  if (category === 'audio') notes.push(has(/tts/) ? '语音合成' : has(/asr/) ? '语音识别' : has(/livetranslate/) ? '同声传译' : '实时语音')
+  if (category === 'video') notes.push('视频生成')
+  if (category === 'omni') notes.push('全模态，文字语音图像通吃')
+  if (category === 'embedding') notes.push('向量检索，不用于对话')
+  if (has(/-(20\d{2}-\d{2}-\d{2}|\d{3,6})$/)) notes.push('历史快照')
+  else if (has(/preview/)) notes.push('预览版')
+  if (notes.length === 0) notes.push('通用对话')
+  return { category, note: notes.slice(0, 2).join(' · ') }
+}
+
 function GivernySelect({
   value,
   options,
@@ -17424,7 +17473,7 @@ function SettingsView({
   const [providerBusy, setProviderBusy] = useState<'load' | 'save' | ''>('')
   const [providerNotice, setProviderNotice] = useState('')
   const [providerModelFilter, setProviderModelFilter] = useState('')
-  const [providerModelView, setProviderModelView] = useState<'recommended' | 'all'>('recommended')
+  const [providerModelView, setProviderModelView] = useState<'recommended' | 'all' | AiModelCategory>('recommended')
   const [providerError, setProviderError] = useState('')
 
   const tokenStatus = (token: AccessToken) => {
@@ -17650,19 +17699,42 @@ function SettingsView({
     setProviderModelView('recommended')
   }
 
-  // 「推荐」视图：剔除老旧代际、日期快照版和非文字对话模型，按代际新旧排序。
+  // 「推荐」视图：只看文字对话模型，折叠有主版本的日期快照/预览版，剔除老旧代际，按代际新旧排序。
+  // 规则随每次「加载模型」返回的最新列表即时计算：新代际自动排最前，其快照自动折叠。
   const providerRecommendedModels = useMemo(() => {
-    const nonChat = /(tts|asr|audio|realtime|livetranslate|image|embedding|ocr|omni|s2s|-vc-|-vd-|math|(^|-)mt-|character|deep-research|deep-search|longcontext)/i
-    const datedSnapshot = /-(20\d{2}-\d{2}-\d{2}|\d{3,6})$/
-    const preview = /-preview$/i
+    const modelSet = new Set(providerModelsDraft)
+    const stripSuffix = (model: string) => model
+      .replace(/-(20\d{2}-\d{2}-\d{2}|\d{3,6})$/, '')
+      .replace(/-(preview|latest)$/i, '')
     const legacySeries = /^(qwen-(?:1\.8b|7b|14b|72b)-chat$|qwen1\.5-|qwen2-|qwen2\.5-|qwen3-\d|qwen3-next-|qwq-32b)/i
-    const filtered = providerModelsDraft.filter((model) =>
-      !nonChat.test(model) && !datedSnapshot.test(model) && !preview.test(model) && !legacySeries.test(model))
+    const nicheText = /math|(^|-)mt-|translate|character|deep-research|deep-search/i
+    const filtered = providerModelsDraft.filter((model) => {
+      if (classifyAiModel(model).category !== 'text') return false
+      if (legacySeries.test(model) || nicheText.test(model)) return false
+      const base = stripSuffix(model)
+      if (base !== model && modelSet.has(base)) return false
+      return true
+    })
+    // 版本号从去掉日期/预览后缀的名字里提取，跳过 27b 这类参数规模和 2025 这类年份。
     const seriesVersion = (model: string) => {
-      const match = model.match(/\d+(?:\.\d+)?/)
-      return match ? parseFloat(match[0]) : 0
+      for (const token of stripSuffix(model).match(/\d+(?:\.\d+)?b?/gi) || []) {
+        if (!/b$/i.test(token)) {
+          const value = parseFloat(token)
+          if (value < 100) return value
+        }
+      }
+      return 0
     }
     return [...filtered].sort((a, b) => seriesVersion(b) - seriesVersion(a) || a.localeCompare(b))
+  }, [providerModelsDraft])
+
+  const providerModelCategoryCounts = useMemo(() => {
+    const counts = new Map<AiModelCategory, number>()
+    providerModelsDraft.forEach((model) => {
+      const { category } = classifyAiModel(model)
+      counts.set(category, (counts.get(category) || 0) + 1)
+    })
+    return counts
   }, [providerModelsDraft])
 
   const providerModelTabsVisible = providerModelsDraft.length > 12
@@ -17670,7 +17742,11 @@ function SettingsView({
     && providerRecommendedModels.length < providerModelsDraft.length
 
   const providerFilteredModels = useMemo(() => {
-    const base = providerModelTabsVisible && providerModelView === 'recommended' ? providerRecommendedModels : providerModelsDraft
+    const base = !providerModelTabsVisible || providerModelView === 'all'
+      ? providerModelsDraft
+      : providerModelView === 'recommended'
+        ? providerRecommendedModels
+        : providerModelsDraft.filter((model) => classifyAiModel(model).category === providerModelView)
     const keyword = providerModelFilter.trim().toLowerCase()
     if (!keyword) return base
     return base.filter((model) => model.toLowerCase().includes(keyword))
@@ -19020,6 +19096,16 @@ function SettingsView({
                         className={providerModelView === 'recommended' ? 'active' : ''}
                         onClick={() => setProviderModelView('recommended')}
                       >推荐 {providerRecommendedModels.length}</button>
+                      {aiModelCategoryOrder.filter((category) => (providerModelCategoryCounts.get(category) || 0) > 0).map((category) => (
+                        <button
+                          type="button"
+                          role="tab"
+                          key={category}
+                          aria-selected={providerModelView === category}
+                          className={providerModelView === category ? 'active' : ''}
+                          onClick={() => setProviderModelView(category)}
+                        >{aiModelCategoryLabels[category]} {providerModelCategoryCounts.get(category)}</button>
+                      ))}
                       <button
                         type="button"
                         role="tab"
@@ -19053,6 +19139,7 @@ function SettingsView({
                             : <Sparkles className="giverny-select-brand-icon" size={18} />}
                           <span>{model}</span>
                         </span>
+                        <span className="provider-model-note" title={classifyAiModel(model).note}>{classifyAiModel(model).note}</span>
                         {model === providerDefaultModelDraft && <CheckCircle2 size={15} />}
                       </button>
                     )) : (
