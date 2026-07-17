@@ -6773,7 +6773,13 @@ async function fetchAiProviderModels(provider: AiModelProvider, rawBaseUrl: stri
         return probe?.ok ? model : ''
       }))
       const accessibleCurrentModels = checks.filter(Boolean)
-      if (accessibleCurrentModels.length > 0) models = accessibleCurrentModels
+      if (accessibleCurrentModels.length > 0) {
+        models = accessibleCurrentModels
+      } else {
+        throw new Error(
+          '当前 API Host 与百炼业务空间 Key 不匹配，只返回了旧版模型。请将 Base URL 替换为创建 API Key 时显示的专属 API Host（例如 https://{业务空间ID}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1），再重新加载。',
+        )
+      }
     }
   }
   return Array.from(new Set(models)).sort()

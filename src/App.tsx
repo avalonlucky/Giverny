@@ -18935,6 +18935,9 @@ function SettingsView({
             <label className="field wide">
               <span>Base URL</span>
               <input value={providerBaseUrlDraft} onChange={(event) => setProviderBaseUrlDraft(event.target.value)} placeholder={directBaseUrlForProvider(providerModal)} />
+              {providerModal === 'qwen' && providerBaseUrlDraft.includes('dashscope.aliyuncs.com') && (
+                <small className="settings-ai-model-hint">新版业务空间 Key 请使用创建密钥时显示的专属 API Host；旧公共地址无法读取该空间授权的模型。</small>
+              )}
             </label>
             <label className="field wide">
               <span className="settings-ai-baseurl-label">
@@ -18960,6 +18963,7 @@ function SettingsView({
                 {providerBusy === 'load' ? '加载中…' : '加载模型'}
               </button>
             </div>
+            {providerError && <p className="settings-inline-error">{providerError}</p>}
             <div className="provider-model-list">
               {providerModelsDraft.length > 0 ? (
                 <label className="provider-default-model-field">
@@ -18981,7 +18985,6 @@ function SettingsView({
                 </label>
               ) : <p>还没有模型。请填写密钥后点击“加载模型”。</p>}
             </div>
-            {providerError && <p className="settings-inline-error">{providerError}</p>}
           </div>
           <div className="model-provider-modal-actions">
             <button type="button" className="text-button model-provider-cancel" onClick={() => setProviderModal(null)}>取消</button>

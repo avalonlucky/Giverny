@@ -191,6 +191,16 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ data: [{ id: 'qwen-1.8b-chat' }] }))
     return
   }
+  if (request.method === 'GET' && request.url === '/legacy-qwen-denied/models') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ data: [{ id: 'qwen-1.8b-chat' }] }))
+    return
+  }
+  if (request.method === 'POST' && request.url === '/legacy-qwen-denied/chat/completions') {
+    response.writeHead(403, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ error: { message: 'workspace API host mismatch' } }))
+    return
+  }
   if (request.method === 'GET' && request.url?.endsWith('/models')) {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({
