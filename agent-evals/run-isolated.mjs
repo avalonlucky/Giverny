@@ -342,6 +342,67 @@ async function runAiModelDraftListCheck(cookie) {
   process.stdout.write('Draft provider model discovery and provider filtering checks passed.\n')
 }
 
+async function runSiteWideModelPriorityCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { 'content-type': 'application/json', cookie }
+  const setChoice = async (choice) => {
+    const response = await fetch(`${base}/api/ai/active-model`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ choice }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || data.choice !== choice) {
+      throw new Error(`Active model choice update failed: ${response.status} ${JSON.stringify(data)}`)
+    }
+  }
+
+  await setChoice('doubao-seed-2-1-pro')
+  const textRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  await fetch(`${base}/api/ai/progress-estimate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      taskId: 92001,
+      title: '全站文字模型优先级评测',
+      type: '评测类 / 模型路由',
+      requirement: '完成一份可审阅的设计稿。',
+      status: '进行中',
+      currentProgress: 0,
+      entries: [{ id: 'route-text', date: '2026-07-17', note: '开始整理内容结构并制作版式' }],
+      files: [],
+    }),
+  })
+  const textRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const textRequests = (textRequestsAfter.requests || []).slice((textRequestsBefore.requests || []).length)
+  if (textRequests[0]?.model !== 'doubao-seed-eval') {
+    throw new Error(`Site-wide text route ignored selected model: ${JSON.stringify(textRequests.slice(0, 3))}`)
+  }
+
+  const visionRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  await fetch(`${base}/api/ai/attachment-name`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      fileName: 'route-check.png',
+      mimeType: 'image/png',
+      imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      note: '模型优先级识图测试',
+      task: { id: 92001, title: '全站识图模型优先级评测', type: '评测类 / 模型路由' },
+    }),
+  })
+  const visionRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const visionRequests = (visionRequestsAfter.requests || []).slice((visionRequestsBefore.requests || []).length)
+  if (visionRequests[0]?.model !== 'doubao-seed-eval') {
+    throw new Error(`Site-wide vision route ignored selected multimodal model: ${JSON.stringify(visionRequests.slice(0, 3))}`)
+  }
+
+  await setChoice('auto')
+  const current = await fetch(`${base}/api/ai/active-model`, { headers: { cookie } }).then((response) => response.json())
+  if (current.choice !== 'auto') throw new Error(`Automatic model route was not restored: ${JSON.stringify(current)}`)
+  process.stdout.write('Site-wide selected text and vision model priority checks passed.\n')
+}
+
 async function runLocalCliBridgeCheck(cookie) {
   const base = 'http://127.0.0.1:8798'
   const browserDeviceKey = `eval-browser-${crypto.randomUUID()}`
@@ -1217,6 +1278,7 @@ try {
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
   await runAiModelDraftListCheck(cookie)
+  await runSiteWideModelPriorityCheck(cookie)
   await runLocalCliBridgeCheck(cookie)
   await runAgentOrchestrationCheck(cookie)
   await runBackgroundAnalysisCheck(cookie)

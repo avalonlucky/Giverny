@@ -132,6 +132,7 @@ const ADMIN_RESET_SETTING = 'adminPasswordReset'
 const AUTH_SESSION_COOKIE = 'giverny_session'
 const AUTH_SESSION_TTL_SECONDS = 24 * 60 * 60
 const AI_MODEL_SETTING = 'aiModelConfig'
+const AI_ACTIVE_MODEL_SETTING = 'aiActiveModelChoice'
 const PASSWORD_ITERATIONS = 100000
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
@@ -788,9 +789,15 @@ async function decryptSettingSecret(env: Env, value: string | undefined) {
   }
 }
 
-async function resolveAiEndpoint(env: Env, route: AiModelRouteKey) {
+async function resolveAiEndpoint(env: Env, route: AiModelRouteKey, useActiveOverride = true) {
   const config = await getStoredAiModelConfig(env)
-  const endpoint = normalizeAiEndpoint(route, config.routes?.[route], env)
+  const activeChoice = useActiveOverride ? await getActiveChatModelChoice(env) : 'auto'
+  const activeEndpoint = route === 'textPrimary' || route === 'visionPrimary'
+    ? activeEndpointForChoice(activeChoice, config, env)
+    : null
+  const endpoint = activeEndpoint && (route === 'textPrimary' || endpointSupportsVision(activeEndpoint))
+    ? activeEndpoint
+    : normalizeAiEndpoint(route, config.routes?.[route], env)
   const settingKey = await decryptSettingSecret(env, endpoint.apiKeyEncrypted)
   const apiKey = settingKey || providerEnvironmentKey(env, endpoint.provider)
   return { ...endpoint, apiKey, keySource: settingKey ? 'setting' : apiKey ? 'environment' : 'missing' as const }
@@ -1386,10 +1393,23 @@ async function maybeRefreshOpenRouterFreeModels(env: Env): Promise<void> {
 }
 
 // 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
-async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal): Promise<string> {
+async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal, skipActiveOverride = false): Promise<string> {
+  if (!skipActiveOverride && await getActiveChatModelChoice(env) === 'workers-ai' && env.AI) {
+    try {
+      const output = await callWithAiTimeout(
+        () => callWorkersAiText(env, prompt, maxOutputTokens),
+        30_000,
+        'Workers AI 响应超时',
+        signal,
+      )
+      if (output) return output
+    } catch {
+      // 继续使用设置中的文字主 / 备用路线。
+    }
+  }
   try {
     return await callWithAiTimeout(
-      async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary'), prompt, maxOutputTokens, requestSignal),
+      async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary', !skipActiveOverride), prompt, maxOutputTokens, requestSignal),
       30_000,
       '文字主模型响应超时',
       signal,
@@ -1400,7 +1420,7 @@ async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 
     }
     try {
       return await callWithAiTimeout(
-        async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textFallback'), prompt, maxOutputTokens, requestSignal),
+        async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textFallback', !skipActiveOverride), prompt, maxOutputTokens, requestSignal),
         30_000,
         '文字备用模型响应超时',
         signal,
@@ -1463,6 +1483,71 @@ function normalizeChatModelChoice(value: unknown): ChatModelChoice {
     return raw as ChatModelChoice
   }
   return 'auto'
+}
+
+async function getActiveChatModelChoice(env: Env): Promise<ChatModelChoice> {
+  return normalizeChatModelChoice(await getSettingValue(env, AI_ACTIVE_MODEL_SETTING))
+}
+
+function configuredEndpointForProvider(
+  config: StoredAiModelConfig,
+  provider: AiModelProvider,
+  env: Env,
+) {
+  const routes = {
+    ...defaultAiModelRoutes(env),
+    ...(config.routes ?? {}),
+  }
+  for (const route of ['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback'] as AiModelRouteKey[]) {
+    const endpoint = normalizeAiEndpoint(route, routes[route], env)
+    if (endpoint.provider === provider) return endpoint
+  }
+  return null
+}
+
+function activeEndpointForChoice(
+  choice: ChatModelChoice,
+  config: StoredAiModelConfig,
+  env: Env,
+): StoredAiModelEndpointConfig | null {
+  if (choice === 'auto' || choice === 'workers-ai') return null
+  if (choice.startsWith('route:')) {
+    const route = choice.replace(/^route:/, '') as AiModelRouteKey
+    return normalizeAiEndpoint(route, config.routes?.[route], env)
+  }
+  if (choice === 'doubao-seed-2-1-pro') {
+    const configured = configuredEndpointForProvider(config, 'doubao', env)
+    return {
+      ...(configured ?? { provider: 'doubao' as const, baseUrl: env.DOUBAO_BASE_URL || DOUBAO_BASE_URL, model: DOUBAO_SEED_PRO_MODEL }),
+      provider: 'doubao',
+      baseUrl: (configured?.baseUrl || env.DOUBAO_BASE_URL || DOUBAO_BASE_URL).replace(/\/$/, ''),
+      model: env.DOUBAO_MODEL || DOUBAO_SEED_PRO_MODEL,
+    }
+  }
+  if (choice === 'deepseek-v4-flash' || choice === 'deepseek-v4-pro') {
+    const configured = configuredEndpointForProvider(config, 'deepseek', env)
+    return {
+      ...(configured ?? { provider: 'deepseek' as const, baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com', model: choice }),
+      provider: 'deepseek',
+      baseUrl: (configured?.baseUrl || env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+      model: choice,
+    }
+  }
+  if (choice.startsWith('openrouter:')) {
+    const configured = configuredEndpointForProvider(config, 'openrouter', env)
+    return {
+      ...(configured ?? { provider: 'openrouter' as const, baseUrl: 'https://openrouter.ai/api/v1', model: '' }),
+      provider: 'openrouter',
+      baseUrl: (configured?.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
+      model: choice.replace(/^openrouter:/, '').trim(),
+    }
+  }
+  return null
+}
+
+function endpointSupportsVision(endpoint: Pick<StoredAiModelEndpointConfig, 'provider' | 'model'>) {
+  if (endpoint.provider === 'deepseek' || endpoint.provider === 'anthropic') return false
+  return ['gemini', 'doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai'].includes(endpoint.provider)
 }
 
 async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promise<ChatModelTarget> {
@@ -1549,7 +1634,7 @@ async function callTextWithSelectedModel(
     throw new Error('模型未返回内容')
   } catch (error) {
     notes.push(`${target.label} 调用失败：${describeAiCallError(error)}；已回落到默认模型链路。`)
-    const text = await callTextWithFallback(env, prompt, maxOutputTokens)
+    const text = await callTextWithFallback(env, prompt, maxOutputTokens, undefined, true)
     return { text, modelLabel: '默认模型链路', fallbackUsed: true, notes }
   }
 }
@@ -1564,6 +1649,7 @@ async function callTextFallbackJson<T extends object>(
   payload: unknown,
   outputShape: string,
   maxOutputTokens = 1200,
+  skipActiveOverride = false,
 ): Promise<T | null> {
   const prompt = `${systemPrompt}
 
@@ -1573,8 +1659,22 @@ JSON 字段要求：${outputShape}
 输入数据：
 ${JSON.stringify(payload)}`
   const errors: string[] = []
+  if (!skipActiveOverride && await getActiveChatModelChoice(env) === 'workers-ai' && env.AI) {
+    try {
+      const output = await callWithAiTimeout(
+        () => callWorkersAiText(env, prompt, maxOutputTokens),
+        30_000,
+        'Workers AI 规划响应超时',
+      )
+      const parsed = parseLooseJsonObject(output)
+      if (Object.keys(parsed).length > 0) return parsed as T
+      errors.push('Workers AI 未返回可解析 JSON')
+    } catch (error) {
+      errors.push(`Workers AI: ${describeAiCallError(error)}`)
+    }
+  }
   for (const route of ['textPrimary', 'textFallback'] as AiModelRouteKey[]) {
-    const endpoint = await resolveAiEndpoint(env, route)
+    const endpoint = await resolveAiEndpoint(env, route, !skipActiveOverride)
     if (!endpoint.apiKey) {
       errors.push(`${route} 未配置 API Key`)
       continue
@@ -1654,7 +1754,7 @@ ${JSON.stringify(payload)}`
       model: target.label,
       error: describeAiCallError(error),
     }))
-    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens)
+    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens, true)
   }
 }
 
@@ -1673,9 +1773,8 @@ type VisionFallbackResult = {
 
 function selectedChatModelCanTryVision(choice: ChatModelChoice, target: ChatModelTarget) {
   if (choice === 'auto' || target.kind !== 'endpoint') return false
-  if (choice === 'deepseek-v4-flash' || choice === 'deepseek-v4-pro') return false
   if (choice === 'route:visionPrimary' || choice === 'route:visionFallback') return true
-  return ['gemini', 'doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai'].includes(target.endpoint.provider)
+  return endpointSupportsVision(target.endpoint)
 }
 
 async function callMultimodalWithSelectedModel(
@@ -6435,6 +6534,26 @@ async function getAiModelConfig(env: Env) {
   return ok(publicAiModelConfig(env, await getStoredAiModelConfig(env)))
 }
 
+async function getActiveAiModelChoice(env: Env) {
+  return ok({ choice: await getActiveChatModelChoice(env) })
+}
+
+async function setActiveAiModelChoice(env: Env, request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { choice?: unknown }
+  const requested = String(body.choice ?? '').trim()
+  const choice = normalizeChatModelChoice(requested)
+  if (requested && choice === 'auto' && requested !== 'auto') {
+    return fail('未知的工作助手模型')
+  }
+  if (choice === 'auto') {
+    await deleteSettingValue(env, AI_ACTIVE_MODEL_SETTING)
+  } else {
+    await setSettingValue(env, AI_ACTIVE_MODEL_SETTING, choice)
+  }
+  await audit(env, 'update', 'setting', AI_ACTIVE_MODEL_SETTING, { choice })
+  return ok({ choice })
+}
+
 async function testAiModelRoute(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as { route?: string; capability?: string }
   const route = parseAiRouteKey(body.route)
@@ -6448,7 +6567,7 @@ async function testAiModelRoute(env: Env, request: Request) {
   if (capability === 'text' && route !== 'textPrimary' && route !== 'textFallback') {
     return fail('请选择文字模型路由')
   }
-  const endpoint = await resolveAiEndpoint(env, route)
+  const endpoint = await resolveAiEndpoint(env, route, false)
   try {
     const output =
       capability === 'vision'
@@ -6482,7 +6601,7 @@ async function listAiModelsForRoute(env: Env, request: Request) {
   if (!route) {
     return fail('未知的模型路由')
   }
-  const savedEndpoint = await resolveAiEndpoint(env, route)
+  const savedEndpoint = await resolveAiEndpoint(env, route, false)
   const provider = body.provider ? normalizeAiProvider(body.provider) : savedEndpoint.provider
   const draftApiKey = String(body.apiKey || '').trim()
   const endpoint = {
@@ -10954,7 +11073,7 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
     reworkDetected?: boolean
   }
   let parsed: ProgressModelResult | null = null
-  if (env.DEEPSEEK_API_KEY) {
+  if (await getActiveChatModelChoice(env) === 'auto' && env.DEEPSEEK_API_KEY) {
     const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
     const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
     const toolName = 'report_task_milestone'
@@ -11168,7 +11287,10 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   }
   const taskAssistantContext = [title, requirement, attachmentName, attachmentText].filter(Boolean).join('\n')
 
-  const runtimeSuggestion = await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
+  const activeModelChoice = await getActiveChatModelChoice(env)
+  const runtimeSuggestion = activeModelChoice === 'auto'
+    ? await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
+    : null
   if (runtimeSuggestion) {
     const suggestion = toTaskAssistantSuggestion(runtimeSuggestion, designTypeGroups, taskAssistantContext)
     if (suggestion.optimizedRequirement) {
@@ -11202,9 +11324,9 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     return ok(suggestion)
   }
 
-  if (!env.DEEPSEEK_API_KEY) {
+  if (activeModelChoice !== 'auto' || !env.DEEPSEEK_API_KEY) {
     const fallback = await callFallback()
-    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
+    return fallback ?? fail('当前首选文字模型与备用模型均不可用。', 503)
   }
 
   const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
@@ -11413,7 +11535,10 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     styleGuide: textStyleGuide,
   }
 
-  const runtimeSuggestion = await callBamlRuntime<TextAssistantToolArgs>(env, 'optimize-text', aiPayload)
+  const activeModelChoice = await getActiveChatModelChoice(env)
+  const runtimeSuggestion = activeModelChoice === 'auto'
+    ? await callBamlRuntime<TextAssistantToolArgs>(env, 'optimize-text', aiPayload)
+    : null
   if (runtimeSuggestion?.optimizedText) {
     await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
       mode,
@@ -11453,9 +11578,9 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     return ok({ optimizedText, summary: String(fallbackParsed?.summary ?? '').trim() })
   }
 
-  if (!env.DEEPSEEK_API_KEY) {
+  if (activeModelChoice !== 'auto' || !env.DEEPSEEK_API_KEY) {
     const fallback = await callFallback()
-    return fallback ?? fail('DeepSeek API Key 尚未配置，备用文字模型也不可用。', 503)
+    return fallback ?? fail('当前首选文字模型与备用模型均不可用。', 503)
   }
 
   const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
@@ -13889,8 +14014,11 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     historicalSamples: samples.slice(0, 12),
   }
 
-  let provider = 'baml-runtime'
-  let parsed = await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
+  const activeModelChoice = await getActiveChatModelChoice(env)
+  let provider = activeModelChoice === 'auto' ? 'baml-runtime' : 'active-model'
+  let parsed = activeModelChoice === 'auto'
+    ? await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
+    : null
   if (!parsed) {
     provider = 'text-model-chain'
     parsed = await callTextFallbackJson<HourEstimateToolArgs>(
@@ -14506,6 +14634,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/ai-model' ||
       path === '/api/ai/model-test' ||
       path === '/api/ai/models' ||
+      path === '/api/ai/active-model' ||
       path === '/api/ai/openrouter/free-models' ||
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
@@ -14833,6 +14962,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/models' && (request.method === 'GET' || request.method === 'POST')) {
     return listAiModelsForRoute(env, request)
+  }
+  if (path === '/api/ai/active-model' && request.method === 'GET') {
+    return getActiveAiModelChoice(env)
+  }
+  if (path === '/api/ai/active-model' && request.method === 'PUT') {
+    return setActiveAiModelChoice(env, request)
   }
   if (path === '/api/insights/attachment-analyses/backfill' && request.method === 'POST') {
     return backfillAttachmentAnalyses(env, ctx)

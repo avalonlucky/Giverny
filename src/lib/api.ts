@@ -1008,6 +1008,14 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ route, ...draft }),
     }),
+  getActiveAiModelChoice: () =>
+    requestJson<{ choice: string }>('/api/ai/active-model'),
+  setActiveAiModelChoice: (choice: string) =>
+    requestJson<{ choice: string }>('/api/ai/active-model', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ choice }),
+    }),
   getOpenRouterFreeModels: () =>
     requestJson<OpenRouterFreeModelsResult>('/api/ai/openrouter/free-models'),
   scanOpenRouterFreeModels: () =>

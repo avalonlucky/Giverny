@@ -4290,16 +4290,20 @@ function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversat
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
 
-function readChatModelChoice(): ChatModelChoice {
-  try {
-    const raw = window.localStorage.getItem(CHAT_MODEL_CHOICE_KEY) ?? ''
-    if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
-      return raw as ChatModelChoice
-    }
-  } catch {
-    // ignore
+function normalizeChatModelChoice(value: unknown): ChatModelChoice {
+  const raw = String(value ?? '').trim()
+  if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
+    return raw as ChatModelChoice
   }
   return 'auto'
+}
+
+function readChatModelChoice(): ChatModelChoice {
+  try {
+    return normalizeChatModelChoice(window.localStorage.getItem(CHAT_MODEL_CHOICE_KEY))
+  } catch {
+    return 'auto'
+  }
 }
 
 function chatRouteLabel(route: AiModelRouteKey) {
@@ -5164,6 +5168,20 @@ function ChatPanel({
     }
   }, [selectedModelChoice])
 
+  useEffect(() => {
+    let cancelled = false
+    void api.getActiveAiModelChoice()
+      .then(({ choice }) => {
+        if (!cancelled) setSelectedModelChoice(normalizeChatModelChoice(choice))
+      })
+      .catch(() => {
+        // 离线时保留当前浏览器上一次选择，发送请求仍由服务端安全回退。
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const newConversation = () => {
     if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
     setHistoryList(loadChatHistory())
@@ -5600,6 +5618,19 @@ function ChatPanel({
   const usesLocalCli = selectedModelChoice === 'auto' && Boolean(activeLocalCliRoute)
   const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
   const activeRuntimeBrand = usesLocalCli ? aiBrandForValue(activeLocalCliRoute!.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
+  const chooseModel = async (choice: ChatModelChoice) => {
+    const previous = selectedModelChoice
+    setSelectedModelChoice(choice)
+    setShowModelPopup(false)
+    try {
+      const saved = await api.setActiveAiModelChoice(choice)
+      setSelectedModelChoice(normalizeChatModelChoice(saved.choice))
+      onNotify(choice === 'auto' ? '已恢复自动模型路由' : `已将 ${chatModelChoiceLabel(choice, aiModelConfig)} 设为全站 AI 首选`, 'success')
+    } catch (error) {
+      setSelectedModelChoice(previous)
+      onNotify(error instanceof Error ? error.message : '模型优先级保存失败', 'error')
+    }
+  }
 
   return (
     <div className="chat-panel" role="dialog" aria-label="爱丽丝">
@@ -5740,8 +5771,7 @@ function ChatPanel({
                   type="button"
                   className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`}
                   onClick={() => {
-                    setSelectedModelChoice(option.value)
-                    setShowModelPopup(false)
+                    void chooseModel(option.value)
                   }}
                 >
                   <AiBrandIcon brand={option.brand} size={18} />
@@ -5764,8 +5794,7 @@ function ChatPanel({
                   type="button"
                   className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`}
                   onClick={() => {
-                    setSelectedModelChoice(`openrouter:${model.id}` as ChatModelChoice)
-                    setShowModelPopup(false)
+                    void chooseModel(`openrouter:${model.id}` as ChatModelChoice)
                   }}
                 >
                   <AiBrandIcon brand="openrouter" size={18} />
