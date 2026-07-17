@@ -38,7 +38,6 @@ import {
   KeyRound,
   LayoutDashboard,
   List,
-  ListTodo,
   LoaderCircle,
   Lock,
   LogOut,
@@ -56,7 +55,6 @@ import {
   UserCircle,
   X,
   BookOpen,
-  Paperclip,
   FileText as FileTextIcon,
   History,
   Globe,
@@ -65,6 +63,7 @@ import {
   Star,
   ZoomIn,
   ZoomOut,
+  Zap,
 } from 'lucide-react'
 import {
   appReleaseDate,
@@ -91,7 +90,9 @@ import {
   type AiLearningAction,
   type AiModelConfig,
   type AiModelEndpointConfig,
+  type AiModelProvider,
   type AiModelRouteKey,
+  type AiProviderConfig,
   type AgentRunMetrics,
   type AttachmentNameSuggestion,
   type AuthRole,
@@ -123,7 +124,10 @@ import doubaoBrandIcon from '@lobehub/icons-static-svg/icons/doubao-color.svg?ur
 import geminiBrandIcon from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
 import grokBrandIcon from '@lobehub/icons-static-svg/icons/grok.svg?url'
 import kimiBrandIcon from '@lobehub/icons-static-svg/icons/kimi.svg?url'
+import openaiBrandIcon from '@lobehub/icons-static-svg/icons/openai.svg?url'
 import openrouterBrandIcon from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
+import qwenBrandIcon from '@lobehub/icons-static-svg/icons/qwen-color.svg?url'
+import anthropicBrandIcon from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
 import './App.css'
 
 // 吉维尼模式：可选的莫奈花园整套色系（默认关，用户在设置里手动开启）。开启后主题随季节走，
@@ -2527,6 +2531,84 @@ function designTypeGroupForTaskType(type: string, groups: DesignTypeGroup[]) {
 function designTypeColorForTask(type: string, groups: DesignTypeGroup[]) {
   const group = designTypeGroupForTaskType(type, groups)
   return validDesignTypeColor(group?.color) || designTypeColorForIndex(0)
+}
+
+type GivernySelectOption = {
+  value: string
+  label: string
+  group?: string
+  icon?: ReactNode
+}
+
+function GivernySelect({
+  value,
+  options,
+  placeholder,
+  ariaLabel,
+  onChange,
+}: {
+  value: string
+  options: GivernySelectOption[]
+  placeholder: string
+  ariaLabel: string
+  onChange: (value: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const selected = options.find((option) => option.value === value)
+  const groups = Array.from(new Set(options.map((option) => option.group || '')))
+
+  return (
+    <div
+      className="giverny-select"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setIsOpen(false)
+      }}
+    >
+      <button
+        type="button"
+        className={`giverny-select-trigger ${isOpen ? 'active' : ''}`}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        disabled={options.length === 0}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className={`giverny-select-value ${selected ? '' : 'placeholder'}`}>
+          {selected?.icon}
+          <span>{selected?.label || placeholder}</span>
+        </span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div className="giverny-select-menu" role="listbox" aria-label={ariaLabel}>
+          {groups.map((group) => (
+            <div className="giverny-select-group" key={group || 'default'}>
+              {group && <span className="giverny-select-group-label">{group}</span>}
+              {options.filter((option) => (option.group || '') === group).map((option) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === value}
+                  className={option.value === value ? 'active' : ''}
+                  key={option.value}
+                  onClick={() => {
+                    onChange(option.value)
+                    setIsOpen(false)
+                  }}
+                >
+                  <span className="giverny-select-option-main">
+                    {option.icon}
+                    <span>{option.label}</span>
+                  </span>
+                  {option.value === value && <CheckCircle2 size={15} />}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function MonthPicker({
@@ -5605,19 +5687,38 @@ function ChatPanel({
   }
 
   const scopeActive = useKnowledge || useWebSearch
-  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey; disabled?: boolean }> = [
+  const configuredModelOptions = (() => {
+    const seen = new Set<string>()
+    return (['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback'] as AiModelRouteKey[]).flatMap((route) => {
+      const endpoint = aiModelConfig?.[route] ?? aiRouteDefaults[route]
+      const identity = `${endpoint.provider}:${endpoint.model}`.toLowerCase()
+      if (seen.has(identity)) return []
+      seen.add(identity)
+      return [{
+        value: `route:${route}` as ChatModelChoice,
+        label: endpoint.model,
+        meta: `${chatRouteLabel(route)} · 设置中当前选择`,
+        brand: aiBrandForValue(`${endpoint.provider} ${endpoint.model}`),
+      }]
+    })
+  })()
+  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey }> = [
     { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析、写入和识图自动使用站内 Agent' : '本机 CLI 不可用时由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
-    { value: 'route:textPrimary', label: aiModelConfig?.textPrimary.model || '文字主模型', meta: '手动最高优先级；模型支持识图时图片也优先使用', brand: aiBrandForValue(`${aiModelConfig?.textPrimary.provider || 'deepseek'} ${aiModelConfig?.textPrimary.model || ''}`) },
-    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', meta: '直接调用云端模型 · 快速/经济，不经过本机 CLI', brand: 'deepseek' },
-    { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', meta: '直接调用云端模型 · 深度推理，不经过本机 CLI', brand: 'deepseek' },
-    { value: 'doubao-seed-2-1-pro', label: '豆包 Seed 2.1 Pro', meta: '直接调用火山方舟，不经过本机 CLI', brand: 'doubao' },
-    { value: 'route:textFallback', label: aiModelConfig?.textFallback.model || 'Kimi 文字备用', meta: '手动最高优先级；模型支持识图时图片也优先使用', brand: aiBrandForValue(`${aiModelConfig?.textFallback.provider || 'kimi'} ${aiModelConfig?.textFallback.model || ''}`) },
-    { value: 'route:visionPrimary', label: aiModelConfig?.visionPrimary.model || '识图主模型', meta: '直接调用识图模型，不经过本机 CLI', brand: aiBrandForValue(`${aiModelConfig?.visionPrimary.provider || 'gemini'} ${aiModelConfig?.visionPrimary.model || ''}`) },
-    { value: 'workers-ai', label: 'Workers AI', meta: '直接调用 Cloudflare 边缘兜底模型', brand: 'cloudflare' },
+    ...configuredModelOptions,
   ]
   const usesLocalCli = selectedModelChoice === 'auto' && Boolean(activeLocalCliRoute)
   const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
   const activeRuntimeBrand = usesLocalCli ? aiBrandForValue(activeLocalCliRoute!.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
+  const isModelOptionSelected = (option: (typeof modelOptions)[number]) => {
+    if (selectedModelChoice === option.value) return true
+    if (selectedModelChoice === 'doubao-seed-2-1-pro') return option.brand === 'doubao'
+    if (selectedModelChoice === 'deepseek-v4-flash' || selectedModelChoice === 'deepseek-v4-pro') {
+      const normalizeModelId = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
+      return option.brand === 'deepseek' && normalizeModelId(option.label) === normalizeModelId(selectedModelChoice)
+    }
+    return false
+  }
+  const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length
   const chooseModel = async (choice: ChatModelChoice) => {
     const previous = selectedModelChoice
     setSelectedModelChoice(choice)
@@ -5636,20 +5737,35 @@ function ChatPanel({
     <div className="chat-panel" role="dialog" aria-label="爱丽丝">
       {/* header */}
       <div className="chat-panel-header">
-        <div className="chat-panel-title">
-          <span>爱丽丝</span>
-          <small>Giverny Agent</small>
+        <div className="chat-panel-identity">
+          <span className="chat-panel-brand-mark" aria-hidden="true">
+            <Sparkles size={16} />
+          </span>
+          <div className="chat-panel-title">
+            <div>
+              <span>爱丽丝</span>
+              <small>Giverny Agent</small>
+            </div>
+            <p className="chat-panel-runtime">
+              <span aria-hidden="true" />
+              {activeRuntimeLabel}
+              <em>{usesLocalCli ? '本机' : selectedModelChoice === 'auto' ? '自动路由' : '全站首选'}</em>
+            </p>
+          </div>
         </div>
         <div className="chat-panel-header-actions">
           <button type="button" className="chat-panel-icon-btn" onClick={newConversation} title="新建对话" aria-label="新建对话">
             <Plus size={15} />
           </button>
-          <button type="button" className="chat-panel-icon-btn" onClick={openHistory} title="历史记录" aria-label="历史记录">
+          <button
+            type="button"
+            className={`chat-panel-icon-btn ${taskCenterUnreadCount > 0 ? 'has-unread' : ''}`}
+            onClick={openHistory}
+            title="对话记录与后台任务"
+            aria-label="记录与任务"
+          >
             <History size={15} />
-          </button>
-          <button type="button" className={`chat-panel-icon-btn ${analysisJobs.some((job) => job.unread) || agentPlans.some((plan) => plan.unread) ? 'has-unread' : ''}`} onClick={openTaskCenter} title="Agent 任务中心" aria-label="Agent 任务中心">
-            <ListTodo size={15} />
-            {analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length > 0 && <span className="chat-task-unread">{Math.min(9, analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length)}</span>}
+            {taskCenterUnreadCount > 0 && <span className="chat-task-unread">{Math.min(9, taskCenterUnreadCount)}</span>}
           </button>
           <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭">
             <X size={15} />
@@ -5665,9 +5781,11 @@ function ChatPanel({
             <h2 className="alice-welcome-title">嗨，来和爱丽丝聊一聊</h2>
             <p className="alice-welcome-sub">查工作数据、分析收入，或者聊聊设计行业问题</p>
             <div className="alice-suggested">
-              {ALICE_SUGGESTED.map((s) => (
+              {ALICE_SUGGESTED.map((s, index) => (
                 <button key={s} type="button" className="alice-suggested-btn" onClick={() => void send(s)}>
-                  {s}
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{s}</strong>
+                  <ChevronRight size={15} aria-hidden="true" />
                 </button>
               ))}
             </div>
@@ -5769,7 +5887,7 @@ function ChatPanel({
                 <button
                   key={option.value}
                   type="button"
-                  className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`}
+                  className={`alice-model-row ${isModelOptionSelected(option) ? 'active' : ''}`}
                   onClick={() => {
                     void chooseModel(option.value)
                   }}
@@ -5779,6 +5897,7 @@ function ChatPanel({
                     <strong>{option.label}</strong>
                     <small>{option.meta}</small>
                   </span>
+                  {isModelOptionSelected(option) && <CheckCircle2 className="alice-model-selected" size={16} aria-hidden="true" />}
                 </button>
               ))}
             </div>
@@ -5802,6 +5921,7 @@ function ChatPanel({
                     <strong>{model.id}</strong>
                     <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
                   </span>
+                  {selectedModelChoice === `openrouter:${model.id}` && <CheckCircle2 className="alice-model-selected" size={16} aria-hidden="true" />}
                 </button>
               ))}
             </div>
@@ -5832,7 +5952,7 @@ function ChatPanel({
           />
           <div className="alice-input-toolbar">
             <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件（图片、txt、md…）" aria-label="添加附件">
-              <Paperclip size={15} />
+              <Plus size={17} />
             </button>
             <button
               type="button"
@@ -5881,8 +6001,14 @@ function ChatPanel({
       {showHistory && (
         <div className="chat-history-panel">
           <div className="chat-history-header">
-            <span>历史对话</span>
-            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowHistory(false)} aria-label="关闭历史">
+            <div className="chat-record-tabs" role="tablist" aria-label="记录与任务">
+              <button type="button" role="tab" aria-selected="true" className="active">对话记录</button>
+              <button type="button" role="tab" aria-selected="false" onClick={openTaskCenter}>
+                后台任务
+                {taskCenterUnreadCount > 0 && <span>{Math.min(9, taskCenterUnreadCount)}</span>}
+              </button>
+            </div>
+            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowHistory(false)} aria-label="关闭记录">
               <X size={15} />
             </button>
           </div>
@@ -5912,8 +6038,11 @@ function ChatPanel({
       {showTaskCenter && (
         <div className="chat-history-panel chat-task-center">
           <div className="chat-history-header">
-            <span>Agent 任务中心</span>
-            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭任务中心"><X size={15} /></button>
+            <div className="chat-record-tabs" role="tablist" aria-label="记录与任务">
+              <button type="button" role="tab" aria-selected="false" onClick={openHistory}>对话记录</button>
+              <button type="button" role="tab" aria-selected="true" className="active">后台任务</button>
+            </div>
+            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭记录"><X size={15} /></button>
           </div>
           <div className="chat-task-center-tabs" role="tablist" aria-label="任务中心内容">
             <button type="button" role="tab" aria-selected={taskCenterTab === 'plans'} className={taskCenterTab === 'plans' ? 'active' : ''} onClick={() => setTaskCenterTab('plans')}>计划与提醒</button>
@@ -6045,6 +6174,7 @@ function App() {
   const [taxMode, setTaxMode] = useState<TaxMode>(bootCache?.settings?.taxMode ?? 'salary')
   const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
   const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
+  const [settingsEntry, setSettingsEntry] = useState<{ tab: SettingsTab; nonce: number }>({ tab: 'ai', nonce: 0 })
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [isTaskDetailCollapsed, setIsTaskDetailCollapsed] = useState(() => window.localStorage.getItem('giverny-task-detail-collapsed') === '1')
   const [detailTaskId, setDetailTaskId] = useState(0)
@@ -8315,7 +8445,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               </div>
               {isAdmin ? (
                 <>
-                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => navigateView('设置')}>
+                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => { setSettingsEntry({ tab: 'settlement', nonce: Date.now() }); navigateView('设置') }}>
                     <Settings size={17} />
                     <span>全站设置</span>
                   </button>
@@ -8354,7 +8484,15 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             type="button"
             title="设置（,）"
             aria-keyshortcuts=","
-            onClick={() => setIsAccountMenuOpen((value) => !value)}
+            onClick={() => {
+              if (activeView === '设置') {
+                setIsAccountMenuOpen((value) => !value)
+                return
+              }
+              setIsAccountMenuOpen(false)
+              setSettingsEntry({ tab: 'ai', nonce: Date.now() })
+              navigateView('设置')
+            }}
           >
             <span>设置</span>
           </button>
@@ -8897,6 +9035,8 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
         {activeView === '设置' && (
           isAdmin ? (
             <SettingsView
+              key={settingsEntry.nonce}
+              initialTab={settingsEntry.tab}
               hourlyRate={hourlyRate}
               pdfTitle={pdfTitle}
               serviceCompanyName={serviceCompanyName}
@@ -9535,6 +9675,10 @@ function GivernyModeSettings() {
 // Cloudflare Turnstile 站点密钥（公开，可放前端）；密钥(secret)只在 Worker 后端环境变量里。
 const TURNSTILE_SITE_KEY = '0x4AAAAAADq6J7chw6N3buxI'
 
+function isLocalPreviewHost() {
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
 function AdminLoginModal({
   error,
   onClose,
@@ -9550,9 +9694,13 @@ function AdminLoginModal({
   const [turnstileToken, setTurnstileToken] = useState('')
   const turnstileRef = useRef<HTMLDivElement | null>(null)
   const turnstileWidgetId = useRef<string | null>(null)
+  const isLocalPreview = isLocalPreviewHost()
 
   // 渲染 Cloudflare Turnstile 人机验证小组件，拿到 token 后才允许登录
   useEffect(() => {
+    if (isLocalPreview) {
+      return
+    }
     let cancelled = false
     let timer: number | undefined
     const renderWidget = () => {
@@ -9578,7 +9726,7 @@ function AdminLoginModal({
       }, 200)
     }
     return () => { cancelled = true; if (timer) window.clearInterval(timer) }
-  }, [])
+  }, [isLocalPreview])
 
   const submit = async () => {
     if (!key.trim() || isSubmitting) {
@@ -9636,12 +9784,21 @@ function AdminLoginModal({
             }}
           />
         </label>
-        <div ref={turnstileRef} className="login-turnstile" />
+        {isLocalPreview ? (
+          <p className="login-local-preview">本地预览模式，无需人机验证</p>
+        ) : (
+          <div ref={turnstileRef} className="login-turnstile" />
+        )}
         {error && <p className="lock-error">{error}</p>}
       </div>
       <footer className="modal-footer">
         <button className="ghost-button" onClick={onClose}>取消</button>
-        <button className="primary-button" onClick={() => void submit()} disabled={!key.trim() || !turnstileToken || isSubmitting} title={!turnstileToken ? '请先完成人机验证' : undefined}>
+        <button
+          className="primary-button"
+          onClick={() => void submit()}
+          disabled={!key.trim() || (!isLocalPreview && !turnstileToken) || isSubmitting}
+          title={!isLocalPreview && !turnstileToken ? '请先完成人机验证' : undefined}
+        >
           {isSubmitting ? '正在进入…' : '进入工作台'}
         </button>
       </footer>
@@ -16758,6 +16915,21 @@ const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string
   { value: 'custom-openai', label: 'OpenAI 兼容网关' },
 ]
 
+const aiProviderIconMap: Partial<Record<AiModelProvider, string>> = {
+  deepseek: deepseekBrandIcon,
+  gemini: geminiBrandIcon,
+  kimi: kimiBrandIcon,
+  doubao: doubaoBrandIcon,
+  qwen: qwenBrandIcon,
+  openai: openaiBrandIcon,
+  openrouter: openrouterBrandIcon,
+  anthropic: anthropicBrandIcon,
+}
+
+function providerSupportsVision(provider: AiModelProvider) {
+  return provider === 'gemini' || provider === 'kimi' || provider === 'doubao' || provider === 'qwen' || provider === 'openai' || provider === 'openrouter' || provider === 'custom-openai'
+}
+
 // 该供应商在 Cloudflare AI Gateway 上的命名路径；网关不支持的供应商返回 ''（只能直连）。
 function gatewayBaseUrlForProvider(provider: AiModelConfig['provider']): string {
   switch (provider) {
@@ -17131,7 +17303,10 @@ function LocalCliConnectionPanel() {
   )
 }
 
+type SettingsTab = 'appearance' | 'settlement' | 'ai' | 'local-cli' | 'design' | 'security' | 'system'
+
 function SettingsView({
+  initialTab,
   hourlyRate,
   pdfTitle,
   serviceCompanyName,
@@ -17155,6 +17330,7 @@ function SettingsView({
   onDeleteToken,
   onCopyToken,
 }: {
+  initialTab: SettingsTab
   hourlyRate: number
   pdfTitle: string
   serviceCompanyName: string
@@ -17221,7 +17397,7 @@ function SettingsView({
   const [agentFailures, setAgentFailures] = useState<AgentFailureCase[]>([])
   const [agentFailurePolicy, setAgentFailurePolicy] = useState('')
   const [agentFailureBusy, setAgentFailureBusy] = useState('')
-  const [settingsTab, setSettingsTab] = useState<'appearance' | 'settlement' | 'ai' | 'local-cli' | 'design' | 'security' | 'system'>('settlement')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialTab)
   const [securityTab, setSecurityTab] = useState<'tokens' | 'account'>('tokens')
   const [aiRouteModelOptions, setAiRouteModelOptions] = useState<Partial<Record<AiModelRouteKey, string[]>>>({})
   const [fetchingModelsRoute, setFetchingModelsRoute] = useState<AiModelRouteKey | null>(null)
@@ -17236,6 +17412,17 @@ function SettingsView({
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [isPasswordSaving, setIsPasswordSaving] = useState(false)
+  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>([])
+  const [aiProvidersLoading, setAiProvidersLoading] = useState(false)
+  const [providerModal, setProviderModal] = useState<AiModelProvider | null>(null)
+  const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState('')
+  const [providerApiKeyDraft, setProviderApiKeyDraft] = useState('')
+  const [providerKeyVisible, setProviderKeyVisible] = useState(false)
+  const [providerModelsDraft, setProviderModelsDraft] = useState<string[]>([])
+  const [providerDefaultModelDraft, setProviderDefaultModelDraft] = useState('')
+  const [providerEnabledDraft, setProviderEnabledDraft] = useState(false)
+  const [providerBusy, setProviderBusy] = useState<'load' | 'save' | ''>('')
+  const [providerError, setProviderError] = useState('')
 
   const tokenStatus = (token: AccessToken) => {
     if (token.disabled) {
@@ -17422,6 +17609,108 @@ function SettingsView({
     setAiRouteDrafts(aiRoutesFromConfig(aiModelConfig))
     setAiRouteKeyDrafts({})
   }, [aiModelConfig])
+
+  const loadAiProviderConfigs = useCallback(async () => {
+    setAiProvidersLoading(true)
+    try {
+      const result = await api.getAiProviderConfigs()
+      setAiProviderConfigs(result.providers)
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '服务商配置读取失败')
+    } finally {
+      setAiProvidersLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (settingsTab === 'ai' && role === 'admin') void loadAiProviderConfigs()
+  }, [loadAiProviderConfigs, role, settingsTab])
+
+  const providerConfigMap = useMemo(() => new Map(aiProviderConfigs.map((config) => [config.provider, config])), [aiProviderConfigs])
+  const activeProviderConfigs = useMemo(
+    () => aiProviderConfigs.filter((config) => config.enabled && config.hasApiKey && config.models.includes(config.defaultModel)),
+    [aiProviderConfigs],
+  )
+
+  const openProviderConfig = (provider: AiModelProvider) => {
+    const config = providerConfigMap.get(provider)
+    setProviderModal(provider)
+    setProviderBaseUrlDraft(config?.baseUrl || directBaseUrlForProvider(provider))
+    setProviderApiKeyDraft('')
+    setProviderKeyVisible(false)
+    setProviderModelsDraft(config?.models || [])
+    setProviderDefaultModelDraft(config?.defaultModel || config?.models[0] || '')
+    setProviderEnabledDraft(config?.enabled ?? false)
+    setProviderError('')
+  }
+
+  const loadProviderModels = async () => {
+    if (!providerModal || providerBusy) return
+    setProviderBusy('load')
+    setProviderError('')
+    try {
+      const result = await api.listAiProviderModels({
+        provider: providerModal,
+        baseUrl: providerBaseUrlDraft.trim(),
+        apiKey: providerApiKeyDraft.trim() || undefined,
+      })
+      setProviderBaseUrlDraft(result.baseUrl)
+      setProviderModelsDraft(result.models)
+      setProviderDefaultModelDraft((current) => result.models.includes(current) ? current : result.models[0] || '')
+      setProviderEnabledDraft(result.models.length > 0)
+      if (!result.models.length) setProviderError('该服务商没有返回可用模型')
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '模型列表加载失败')
+    } finally {
+      setProviderBusy('')
+    }
+  }
+
+  const saveProviderConfig = async () => {
+    if (!providerModal || providerBusy) return
+    setProviderBusy('save')
+    setProviderError('')
+    try {
+      const saved = await api.setAiProviderConfig(providerModal, {
+        baseUrl: providerBaseUrlDraft.trim(),
+        apiKey: providerApiKeyDraft.trim() || undefined,
+        models: providerModelsDraft,
+        defaultModel: providerDefaultModelDraft,
+        enabled: providerEnabledDraft,
+      })
+      setAiProviderConfigs((current) => [...current.filter((item) => item.provider !== saved.provider), saved])
+      if (saved.defaultModel) {
+        const nextRoutes = Object.fromEntries(Object.entries(aiRouteDrafts).map(([route, endpoint]) => [
+          route,
+          endpoint.provider === saved.provider ? { ...endpoint, baseUrl: saved.baseUrl, model: saved.defaultModel } : endpoint,
+        ])) as Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>
+        const routeChanged = Object.keys(nextRoutes).some((route) => nextRoutes[route as AiModelRouteKey].model !== aiRouteDrafts[route as AiModelRouteKey].model)
+        if (routeChanged) {
+          setAiRouteDrafts(nextRoutes)
+          await onAiModelConfigChange({ routes: nextRoutes })
+        }
+      }
+      setProviderModal(null)
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '服务商配置保存失败')
+    } finally {
+      setProviderBusy('')
+    }
+  }
+
+  const selectDefaultProviderModel = async (route: 'textPrimary' | 'visionPrimary', value: string) => {
+    const [providerRaw, ...modelParts] = value.split('::')
+    const provider = providerRaw as AiModelProvider
+    const model = modelParts.join('::')
+    const config = providerConfigMap.get(provider)
+    if (!config || !model) return
+    const nextRoutes = {
+      ...aiRouteDrafts,
+      [route]: { provider, baseUrl: config.baseUrl, model },
+    }
+    setAiRouteDrafts(nextRoutes)
+    await onAiModelConfigChange({ routes: nextRoutes })
+  }
 
   const loadAgentMetrics = useCallback(async (days: 7 | 30 = agentMetricsDays) => {
     setAgentMetricsLoading(true)
@@ -17659,8 +17948,8 @@ function SettingsView({
         </button>
         {role === 'admin' && (
           <button type="button" className={settingsTab === 'ai' ? 'active' : ''} onClick={() => setSettingsTab('ai')}>
-            <Sparkles size={16} />
-            AI 模型设置
+            <Zap size={16} />
+            模型
           </button>
         )}
         <button type="button" className={settingsTab === 'local-cli' ? 'active' : ''} onClick={() => setSettingsTab('local-cli')}>
@@ -17747,6 +18036,79 @@ function SettingsView({
       {settingsTab === 'local-cli' && <LocalCliConnectionPanel />}
       {settingsTab === 'ai' && role === 'admin' && (
         <div className="settings-group-body settings-tab-body">
+            <section className="panel model-provider-dashboard">
+              <div className="model-defaults-head">
+                <div>
+                  <span className="model-section-kicker"><Zap size={15} /> 全站生效</span>
+                  <h2>默认模型</h2>
+                  <p>只展示已启用且成功加载模型的服务商。</p>
+                </div>
+                {aiProvidersLoading && <span className="model-provider-loading"><LoaderCircle size={14} /> 读取中</span>}
+              </div>
+              <div className="model-default-grid">
+                {([
+                  { route: 'textPrimary' as const, label: '文字模型', description: '任务文案、进展、验收、工时与工作助手默认使用' },
+                  { route: 'visionPrimary' as const, label: '图片模型', description: '截图、PDF 页面、PPT 和交付件图片分析默认使用' },
+                ]).map((item) => {
+                  const selectableConfigs = activeProviderConfigs
+                    .filter((config) => item.route === 'textPrimary' || providerSupportsVision(config.provider))
+                  const selectedRoute = aiRouteDrafts[item.route]
+                  const selectedValue = selectableConfigs.some((config) => (
+                    config.provider === selectedRoute.provider && config.defaultModel === selectedRoute.model
+                  )) ? `${selectedRoute.provider}::${selectedRoute.model}` : ''
+                  return (
+                    <label className="model-default-field" key={item.route}>
+                      <span>{item.label}</span>
+                      <GivernySelect
+                        value={selectedValue}
+                        placeholder="请先配置并启用服务商"
+                        ariaLabel={`${item.label} ${item.description}`}
+                        options={selectableConfigs.map((config) => ({
+                          value: `${config.provider}::${config.defaultModel}`,
+                          label: config.defaultModel,
+                          group: aiProviderOptions.find((option) => option.value === config.provider)?.label || config.provider,
+                          icon: aiProviderIconMap[config.provider]
+                            ? <img className="giverny-select-brand-icon" src={aiProviderIconMap[config.provider]} alt="" />
+                            : <Sparkles className="giverny-select-brand-icon" size={18} />,
+                        }))}
+                        onChange={(value) => void selectDefaultProviderModel(item.route, value)}
+                      />
+                      <small>{item.description}</small>
+                    </label>
+                  )
+                })}
+              </div>
+
+              {([
+                { title: '文字模型服务商', providers: aiProviderOptions },
+                { title: '图片识别服务商', providers: aiProviderOptions.filter((option) => providerSupportsVision(option.value)) },
+              ]).map((section) => (
+                <div className="model-provider-section" key={section.title}>
+                  <div className="model-provider-section-head">
+                    <h3>{section.title}</h3>
+                    <span>{section.providers.filter((option) => providerConfigMap.get(option.value)?.enabled).length} 家已启用</span>
+                  </div>
+                  <div className="model-provider-grid">
+                    {section.providers.map((option) => {
+                      const config = providerConfigMap.get(option.value)
+                      const active = Boolean(config?.enabled && config.hasApiKey && config.models.length)
+                      const icon = aiProviderIconMap[option.value]
+                      return (
+                        <button type="button" className="model-provider-card" key={`${section.title}-${option.value}`} onClick={() => openProviderConfig(option.value)}>
+                          <span className="model-provider-card-main">
+                            <span className="model-provider-icon">{icon ? <img src={icon} alt="" /> : <Sparkles size={19} />}</span>
+                            <span><strong>{option.label}</strong><small>{config?.models.length ? `${config.models.length} 个模型` : '尚未加载模型'}</small></span>
+                          </span>
+                          <i className={active ? 'active' : ''} title={active ? '已激活' : '未激活'} />
+                          <span className="model-provider-configure">{active ? '已配置' : '点击配置'} <ChevronRight size={14} /></span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              {providerError && !providerModal && <p className="settings-inline-error">{providerError}</p>}
+            </section>
             <section className="panel settings-ai-panel agent-quality-panel">
               <div className="panel-header compact agent-quality-header">
                 <div>
@@ -17891,7 +18253,7 @@ function SettingsView({
                 </>
               )}
             </section>
-            <section className="panel settings-ai-panel">
+            <section className="panel settings-ai-panel settings-ai-legacy-panel">
               <div className="panel-header compact">
                 <div>
                   <h2>AI 模型设置</h2>
@@ -18544,6 +18906,90 @@ function SettingsView({
             </div>
           </section>
         </div>
+      )}
+      {providerModal && (
+        <ModalShell className="model-provider-modal" labelledBy="model-provider-modal-title" onClose={() => setProviderModal(null)}>
+          <div className="model-provider-modal-head">
+            <div className="model-provider-modal-title">
+              <span className="model-provider-icon large">
+                {aiProviderIconMap[providerModal] ? <img src={aiProviderIconMap[providerModal]} alt="" /> : <Sparkles size={22} />}
+              </span>
+              <div>
+                <h2 id="model-provider-modal-title">{aiProviderOptions.find((option) => option.value === providerModal)?.label} 设置</h2>
+                <p>模型服务商</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={providerEnabledDraft}
+              className={`giverny-toggle model-provider-enable ${providerEnabledDraft ? 'on' : ''}`}
+              title={providerEnabledDraft ? '关闭该模型服务商' : '打开该模型服务商'}
+              onClick={() => setProviderEnabledDraft((enabled) => !enabled)}
+            >
+              <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
+              <span className="model-provider-enable-state">{providerEnabledDraft ? '打开' : '关闭'}</span>
+            </button>
+          </div>
+          <div className="model-provider-modal-body">
+            <label className="field wide">
+              <span>Base URL</span>
+              <input value={providerBaseUrlDraft} onChange={(event) => setProviderBaseUrlDraft(event.target.value)} placeholder={directBaseUrlForProvider(providerModal)} />
+            </label>
+            <label className="field wide">
+              <span className="settings-ai-baseurl-label">
+                API Key
+                {officialApiKeyUrlForProvider(providerModal) && <a href={officialApiKeyUrlForProvider(providerModal)} target="_blank" rel="noreferrer">获取官方密钥 <ExternalLink size={12} /></a>}
+              </span>
+              <div className="provider-key-input">
+                <input
+                  type={providerKeyVisible ? 'text' : 'password'}
+                  value={providerApiKeyDraft}
+                  onChange={(event) => setProviderApiKeyDraft(event.target.value)}
+                  placeholder={providerConfigMap.get(providerModal)?.hasApiKey ? `已保存：${providerConfigMap.get(providerModal)?.apiKeyPreview || '已配置'}` : '输入 API Key'}
+                />
+                <button type="button" aria-label={providerKeyVisible ? '隐藏密钥' : '显示密钥'} onClick={() => setProviderKeyVisible((visible) => !visible)}>
+                  {providerKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
+            </label>
+            <div className="provider-model-load-row">
+              <div><strong>模型列表</strong><span>验证密钥后，加载该服务商实际可用的模型</span></div>
+              <button type="button" className="soft-primary-button" onClick={() => void loadProviderModels()} disabled={Boolean(providerBusy)}>
+                {providerBusy === 'load' ? <LoaderCircle size={15} /> : <RotateCcw size={15} />}
+                {providerBusy === 'load' ? '加载中…' : '加载模型'}
+              </button>
+            </div>
+            <div className="provider-model-list">
+              {providerModelsDraft.length > 0 ? (
+                <label className="provider-default-model-field">
+                  <span>默认模型</span>
+                  <GivernySelect
+                    value={providerDefaultModelDraft}
+                    placeholder="选择该服务商的默认模型"
+                    ariaLabel="选择服务商默认模型"
+                    options={providerModelsDraft.map((model) => ({
+                      value: model,
+                      label: model,
+                      icon: aiProviderIconMap[providerModal]
+                        ? <img className="giverny-select-brand-icon" src={aiProviderIconMap[providerModal]} alt="" />
+                        : <Sparkles className="giverny-select-brand-icon" size={18} />,
+                    }))}
+                    onChange={setProviderDefaultModelDraft}
+                  />
+                  <small>全站模型选择器只展示该模型；更换后会同步更新正在使用该服务商的路线。</small>
+                </label>
+              ) : <p>还没有模型。请填写密钥后点击“加载模型”。</p>}
+            </div>
+            {providerError && <p className="settings-inline-error">{providerError}</p>}
+          </div>
+          <div className="model-provider-modal-actions">
+            <button type="button" className="text-button model-provider-cancel" onClick={() => setProviderModal(null)}>取消</button>
+            <button type="button" className="soft-primary-button" disabled={Boolean(providerBusy) || (providerEnabledDraft && (!providerModelsDraft.length || !providerDefaultModelDraft))} onClick={() => void saveProviderConfig()}>
+              {providerBusy === 'save' ? '保存中…' : '保存配置'}
+            </button>
+          </div>
+        </ModalShell>
       )}
       {settingsConfirmDialog && (
         <ConfirmDialogModal

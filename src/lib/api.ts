@@ -326,6 +326,18 @@ export type AiModelEndpointConfig = {
   keySource: 'environment' | 'setting' | 'missing'
 }
 
+export type AiProviderConfig = {
+  provider: AiModelProvider
+  baseUrl: string
+  enabled: boolean
+  models: string[]
+  defaultModel: string
+  apiKeyPreview?: string
+  hasApiKey: boolean
+  keySource: 'environment' | 'setting' | 'missing'
+  updatedAt?: string
+}
+
 export type AiModelConfig = {
   mode: AiModelMode
   provider: AiModelProvider
@@ -1007,6 +1019,23 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ route, ...draft }),
+    }),
+  getAiProviderConfigs: () =>
+    requestJson<{ providers: AiProviderConfig[] }>('/api/settings/ai-providers'),
+  listAiProviderModels: (payload: { provider: AiModelProvider; baseUrl?: string; apiKey?: string }) =>
+    requestJson<{ provider: AiModelProvider; baseUrl: string; models: string[] }>('/api/ai/provider-models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  setAiProviderConfig: (
+    provider: AiModelProvider,
+    payload: { baseUrl?: string; enabled?: boolean; models?: string[]; defaultModel?: string; apiKey?: string; clearApiKey?: boolean },
+  ) =>
+    requestJson<AiProviderConfig>(`/api/settings/ai-providers/${encodeURIComponent(provider)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   getActiveAiModelChoice: () =>
     requestJson<{ choice: string }>('/api/ai/active-model'),
