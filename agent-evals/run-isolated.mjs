@@ -339,6 +339,21 @@ async function runAiModelDraftListCheck(cookie) {
   if (qwen.provider !== 'qwen' || JSON.stringify(qwen.models) !== JSON.stringify(['qwen3.7-plus'])) {
     throw new Error(`Qwen draft model list leaked another provider: ${JSON.stringify(qwen)}`)
   }
+  const legacyResponse = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      route: 'textPrimary',
+      provider: 'qwen',
+      baseUrl: 'http://127.0.0.1:8898/legacy-qwen',
+      model: 'qwen3.7-plus',
+      apiKey: 'eval-model-key',
+    }),
+  })
+  const legacyQwen = await legacyResponse.json().catch(() => ({}))
+  if (!legacyResponse.ok || JSON.stringify(legacyQwen.models) !== JSON.stringify(['qwen3.6-plus', 'qwen3.7-max', 'qwen3.7-plus'])) {
+    throw new Error(`Qwen legacy discovery recovery failed: ${JSON.stringify(legacyQwen)}`)
+  }
   process.stdout.write('Draft provider model discovery and provider filtering checks passed.\n')
 }
 

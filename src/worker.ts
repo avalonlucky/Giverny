@@ -6754,7 +6754,28 @@ async function fetchAiProviderModels(provider: AiModelProvider, rawBaseUrl: stri
   if (!response.ok) throw new Error(data?.error?.message || `获取模型失败（${response.status}）`)
   let models = (data?.data || []).map((item) => item.id || '').filter(Boolean)
   if (provider === 'doubao') models = models.filter((model) => /^doubao-/i.test(model))
-  if (provider === 'qwen') models = models.filter((model) => /^(?:qwen|qwq)/i.test(model))
+  if (provider === 'qwen') {
+    models = models.filter((model) => /^(?:qwen|qwq)/i.test(model))
+    const onlyLegacyDiscovery = models.length === 0 || models.every((model) => /^qwen-(?:1\.8b|7b|14b|72b)-chat$/i.test(model))
+    if (onlyLegacyDiscovery) {
+      const currentTextModels = ['qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus']
+      const checks = await Promise.all(currentTextModels.map(async (model) => {
+        const probe = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: '1' }],
+            max_tokens: 1,
+            temperature: 0,
+          }),
+        }).catch(() => null)
+        return probe?.ok ? model : ''
+      }))
+      const accessibleCurrentModels = checks.filter(Boolean)
+      if (accessibleCurrentModels.length > 0) models = accessibleCurrentModels
+    }
+  }
   return Array.from(new Set(models)).sort()
 }
 

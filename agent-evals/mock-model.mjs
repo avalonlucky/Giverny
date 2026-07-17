@@ -186,6 +186,11 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ requests: requestLog }))
     return
   }
+  if (request.method === 'GET' && request.url === '/legacy-qwen/models') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ data: [{ id: 'qwen-1.8b-chat' }] }))
+    return
+  }
   if (request.method === 'GET' && request.url?.endsWith('/models')) {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({
