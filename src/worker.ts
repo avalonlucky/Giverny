@@ -645,6 +645,34 @@ function defaultProviderBaseUrl(provider: AiModelProvider, env: Env) {
   return (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')
 }
 
+function normalizeProviderBaseUrl(provider: AiModelProvider, rawBaseUrl: string) {
+  const raw = String(rawBaseUrl || '').trim()
+  if (!raw) throw new Error('请先填写 Base URL')
+
+  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
+    ? raw
+    : /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)
+      ? `http://${raw}`
+      : `https://${raw}`
+
+  let url: URL
+  try {
+    url = new URL(withProtocol)
+  } catch {
+    throw new Error('Base URL 格式不正确，请填写供应商提供的 API Host 或完整兼容地址')
+  }
+  url.search = ''
+  url.hash = ''
+
+  const path = url.pathname.replace(/\/+$/, '')
+  if (provider === 'qwen') {
+    if (!path || path === '/api/v1') url.pathname = '/compatible-mode/v1'
+  } else if (provider === 'doubao' && !path) {
+    url.pathname = '/api/v3'
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
 function normalizeDeepSeekModel(value: unknown) {
   const model = String(value || '').trim()
   return !model || model === 'deepseek-chat' || model === 'deepseek-reasoner'
@@ -6705,11 +6733,17 @@ async function listAiModelsForRoute(env: Env, request: Request) {
   }
   const savedEndpoint = await resolveAiEndpoint(env, route, false)
   const provider = body.provider ? normalizeAiProvider(body.provider) : savedEndpoint.provider
+  let normalizedBaseUrl: string
+  try {
+    normalizedBaseUrl = normalizeProviderBaseUrl(provider, String(body.baseUrl || savedEndpoint.baseUrl))
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : 'Base URL 格式不正确')
+  }
   const draftApiKey = String(body.apiKey || '').trim()
   const endpoint = {
     ...savedEndpoint,
     provider,
-    baseUrl: String(body.baseUrl || savedEndpoint.baseUrl).trim().replace(/\/$/, ''),
+    baseUrl: normalizedBaseUrl,
     model: String(body.model || savedEndpoint.model).trim(),
     apiKey: draftApiKey || (savedEndpoint.provider === provider ? savedEndpoint.apiKey : providerEnvironmentKey(env, provider)),
     keySource: draftApiKey
@@ -6724,17 +6758,14 @@ async function listAiModelsForRoute(env: Env, request: Request) {
     return fail('当前供应商还没有可用的 API Key，请填写 Key，或先在部署环境中配置')
   }
   try {
-    return ok({ provider: endpoint.provider, models: await fetchAiProviderModels(endpoint.provider, endpoint.baseUrl, endpoint.apiKey || '') })
+    return ok({ provider: endpoint.provider, baseUrl: endpoint.baseUrl, models: await fetchAiProviderModels(endpoint.provider, endpoint.baseUrl, endpoint.apiKey || '') })
   } catch (error) {
     return fail(error instanceof Error ? error.message : '获取模型失败', 502)
   }
 }
 
 async function fetchAiProviderModels(provider: AiModelProvider, rawBaseUrl: string, apiKey: string) {
-  const baseUrl = rawBaseUrl.replace(/\/$/, '')
-  if (!baseUrl) {
-    throw new Error('请先填写 Base URL')
-  }
+  const baseUrl = normalizeProviderBaseUrl(provider, rawBaseUrl)
   if (provider === 'gemini') {
     const response = await fetch(`${baseUrl}/models?key=${encodeURIComponent(apiKey)}&pageSize=200`, {
       headers: { 'x-goog-api-key': apiKey },
@@ -6797,8 +6828,8 @@ async function listAiModelsForProvider(env: Env, request: Request) {
   const saved = await resolveAiProviderKey(env, provider)
   const apiKey = String(body.apiKey || '').trim() || saved.apiKey
   if (!apiKey) return fail('请先填写 API Key')
-  const baseUrl = String(body.baseUrl || saved.config.baseUrl || defaultProviderBaseUrl(provider, env)).trim().replace(/\/$/, '')
   try {
+    const baseUrl = normalizeProviderBaseUrl(provider, String(body.baseUrl || saved.config.baseUrl || defaultProviderBaseUrl(provider, env)))
     return ok({ provider, baseUrl, models: await fetchAiProviderModels(provider, baseUrl, apiKey) })
   } catch (error) {
     return fail(error instanceof Error ? error.message : '获取模型失败', 502)
@@ -6820,10 +6851,16 @@ async function setAiProviderConfig(env: Env, request: Request, providerRaw: stri
   }
   const models = Array.from(new Set((body.models ?? existing.models).map((model) => String(model || '').trim()).filter(Boolean)))
   const requestedDefaultModel = String(body.defaultModel ?? existing.defaultModel ?? '').trim()
+  let normalizedBaseUrl: string
+  try {
+    normalizedBaseUrl = normalizeProviderBaseUrl(provider, String(body.baseUrl ?? existing.baseUrl ?? defaultProviderBaseUrl(provider, env)))
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : 'Base URL 格式不正确')
+  }
   const next: StoredAiProviderConfig = {
     ...existing,
     provider,
-    baseUrl: String(body.baseUrl ?? existing.baseUrl ?? defaultProviderBaseUrl(provider, env)).trim().replace(/\/$/, ''),
+    baseUrl: normalizedBaseUrl,
     enabled: body.enabled ?? existing.enabled,
     models,
     defaultModel: models.includes(requestedDefaultModel) ? requestedDefaultModel : models[0] || '',

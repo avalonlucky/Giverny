@@ -18935,6 +18935,9 @@ function SettingsView({
             <label className="field wide">
               <span>Base URL</span>
               <input value={providerBaseUrlDraft} onChange={(event) => setProviderBaseUrlDraft(event.target.value)} placeholder={directBaseUrlForProvider(providerModal)} />
+              {(providerModal === 'qwen' || providerModal === 'doubao') && (
+                <small className="settings-ai-model-hint">可直接粘贴供应商显示的 API Host，系统会自动补全协议和兼容接口路径。</small>
+              )}
               {providerModal === 'qwen' && providerBaseUrlDraft.includes('dashscope.aliyuncs.com') && (
                 <small className="settings-ai-model-hint">新版业务空间 Key 请使用创建密钥时显示的专属 API Host；旧公共地址无法读取该空间授权的模型。</small>
               )}

@@ -315,6 +315,7 @@ async function runUploadLimitCheck(cookie) {
 
 async function runAiModelDraftListCheck(cookie) {
   const endpoint = 'http://127.0.0.1:8798/api/ai/models'
+  const providerEndpoint = 'http://127.0.0.1:8798/api/ai/provider-models'
   const requestModels = async (provider) => {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -368,6 +369,24 @@ async function runAiModelDraftListCheck(cookie) {
   const mismatchedHost = await mismatchedHostResponse.json().catch(() => ({}))
   if (mismatchedHostResponse.ok || !String(mismatchedHost.error || '').includes('专属 API Host')) {
     throw new Error(`Qwen workspace host mismatch was not explained: ${JSON.stringify(mismatchedHost)}`)
+  }
+  const requestProviderModels = async (provider, baseUrl) => {
+    const response = await fetch(providerEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ provider, baseUrl, apiKey: 'eval-model-key' }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Provider model list returned HTTP ${response.status}`)
+    return data
+  }
+  const normalizedQwen = await requestProviderModels('qwen', '127.0.0.1:8898')
+  if (normalizedQwen.baseUrl !== 'http://127.0.0.1:8898/compatible-mode/v1' || !normalizedQwen.models.includes('qwen3.7-plus')) {
+    throw new Error(`Qwen API Host normalization failed: ${JSON.stringify(normalizedQwen)}`)
+  }
+  const normalizedDoubao = await requestProviderModels('doubao', '127.0.0.1:8898')
+  if (normalizedDoubao.baseUrl !== 'http://127.0.0.1:8898/api/v3' || !normalizedDoubao.models.includes('doubao-seed-eval')) {
+    throw new Error(`Doubao API Host normalization failed: ${JSON.stringify(normalizedDoubao)}`)
   }
   process.stdout.write('Draft provider model discovery and provider filtering checks passed.\n')
 }
