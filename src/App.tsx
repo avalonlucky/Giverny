@@ -17424,6 +17424,7 @@ function SettingsView({
   const [providerBusy, setProviderBusy] = useState<'load' | 'save' | ''>('')
   const [providerNotice, setProviderNotice] = useState('')
   const [providerModelFilter, setProviderModelFilter] = useState('')
+  const [providerModelView, setProviderModelView] = useState<'recommended' | 'all'>('recommended')
   const [providerError, setProviderError] = useState('')
 
   const tokenStatus = (token: AccessToken) => {
@@ -17646,13 +17647,34 @@ function SettingsView({
     setProviderError('')
     setProviderNotice(config?.models.length ? `当前已保存 ${config.models.length} 个模型` : '')
     setProviderModelFilter('')
+    setProviderModelView('recommended')
   }
 
+  // 「推荐」视图：剔除老旧代际、日期快照版和非文字对话模型，按代际新旧排序。
+  const providerRecommendedModels = useMemo(() => {
+    const nonChat = /(tts|asr|audio|realtime|livetranslate|image|embedding|ocr|omni|s2s|-vc-|-vd-|math|(^|-)mt-|character|deep-research|deep-search|longcontext)/i
+    const datedSnapshot = /-(20\d{2}-\d{2}-\d{2}|\d{3,6})$/
+    const preview = /-preview$/i
+    const legacySeries = /^(qwen-(?:1\.8b|7b|14b|72b)-chat$|qwen1\.5-|qwen2-|qwen2\.5-|qwen3-\d|qwen3-next-|qwq-32b)/i
+    const filtered = providerModelsDraft.filter((model) =>
+      !nonChat.test(model) && !datedSnapshot.test(model) && !preview.test(model) && !legacySeries.test(model))
+    const seriesVersion = (model: string) => {
+      const match = model.match(/\d+(?:\.\d+)?/)
+      return match ? parseFloat(match[0]) : 0
+    }
+    return [...filtered].sort((a, b) => seriesVersion(b) - seriesVersion(a) || a.localeCompare(b))
+  }, [providerModelsDraft])
+
+  const providerModelTabsVisible = providerModelsDraft.length > 12
+    && providerRecommendedModels.length > 0
+    && providerRecommendedModels.length < providerModelsDraft.length
+
   const providerFilteredModels = useMemo(() => {
+    const base = providerModelTabsVisible && providerModelView === 'recommended' ? providerRecommendedModels : providerModelsDraft
     const keyword = providerModelFilter.trim().toLowerCase()
-    if (!keyword) return providerModelsDraft
-    return providerModelsDraft.filter((model) => model.toLowerCase().includes(keyword))
-  }, [providerModelFilter, providerModelsDraft])
+    if (!keyword) return base
+    return base.filter((model) => model.toLowerCase().includes(keyword))
+  }, [providerModelFilter, providerModelsDraft, providerModelTabsVisible, providerModelView, providerRecommendedModels])
 
   const loadProviderModels = async () => {
     if (!providerModal || providerBusy) return
@@ -17672,6 +17694,7 @@ function SettingsView({
       if (!result.models.length) setProviderError('该服务商没有返回可用模型')
       else setProviderNotice(`加载成功，共 ${result.models.length} 个模型，请在下方选择默认模型后保存`)
       setProviderModelFilter('')
+      setProviderModelView('recommended')
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : '模型列表加载失败')
     } finally {
@@ -18988,12 +19011,30 @@ function SettingsView({
                     默认模型
                     <em>{providerDefaultModelDraft ? `当前：${providerDefaultModelDraft}` : '尚未选择'}</em>
                   </span>
+                  {providerModelTabsVisible && (
+                    <div className="provider-model-tabs" role="tablist" aria-label="模型筛选">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={providerModelView === 'recommended'}
+                        className={providerModelView === 'recommended' ? 'active' : ''}
+                        onClick={() => setProviderModelView('recommended')}
+                      >推荐 {providerRecommendedModels.length}</button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={providerModelView === 'all'}
+                        className={providerModelView === 'all' ? 'active' : ''}
+                        onClick={() => setProviderModelView('all')}
+                      >全部 {providerModelsDraft.length}</button>
+                    </div>
+                  )}
                   {providerModelsDraft.length > 8 && (
                     <input
                       className="provider-model-search"
                       value={providerModelFilter}
                       onChange={(event) => setProviderModelFilter(event.target.value)}
-                      placeholder={`搜索 ${providerModelsDraft.length} 个模型…`}
+                      placeholder={`搜索模型…`}
                     />
                   )}
                   <div className="provider-model-options" role="listbox" aria-label="选择服务商默认模型">
@@ -19014,7 +19055,12 @@ function SettingsView({
                         </span>
                         {model === providerDefaultModelDraft && <CheckCircle2 size={15} />}
                       </button>
-                    )) : <p className="provider-model-empty">没有匹配“{providerModelFilter}”的模型</p>}
+                    )) : (
+                      <p className="provider-model-empty">
+                        没有匹配“{providerModelFilter}”的模型
+                        {providerModelTabsVisible && providerModelView === 'recommended' ? '，可切换到「全部」再找找' : ''}
+                      </p>
+                    )}
                   </div>
                   <small>共 {providerModelsDraft.length} 个模型，列表可滚动。全站模型选择器只展示默认模型；更换后会同步更新正在使用该服务商的路线。</small>
                 </label>

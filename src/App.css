@@ -24553,6 +24553,33 @@ button.topbar-create-button kbd {
   white-space: nowrap;
 }
 
+.provider-model-tabs {
+  display: inline-flex;
+  gap: 4px;
+  width: fit-content;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--color-surface-alt);
+}
+
+.provider-model-tabs button {
+  border: 0;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.provider-model-tabs button.active {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  box-shadow: 0 1px 3px rgba(39, 54, 58, 0.1);
+}
+
 .provider-model-search {
   width: 100%;
   box-sizing: border-box;
