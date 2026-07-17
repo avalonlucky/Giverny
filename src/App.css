@@ -24535,6 +24535,88 @@ button.topbar-create-button kbd {
   font-weight: 700;
 }
 
+.provider-default-model-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-default-model-head em {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-model-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.provider-model-search:focus-visible {
+  border-color: var(--color-primary);
+}
+
+.provider-model-options {
+  display: grid;
+  gap: 2px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+}
+
+.provider-model-options button {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-model-options button:hover,
+.provider-model-options button.active {
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface-strong));
+}
+
+.provider-model-options button svg {
+  color: var(--color-primary);
+}
+
+.provider-model-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
 .provider-default-model-field small {
   color: var(--color-text-secondary);
   font-size: 12px;

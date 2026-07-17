@@ -17423,6 +17423,7 @@ function SettingsView({
   const [providerEnabledDraft, setProviderEnabledDraft] = useState(false)
   const [providerBusy, setProviderBusy] = useState<'load' | 'save' | ''>('')
   const [providerNotice, setProviderNotice] = useState('')
+  const [providerModelFilter, setProviderModelFilter] = useState('')
   const [providerError, setProviderError] = useState('')
 
   const tokenStatus = (token: AccessToken) => {
@@ -17644,7 +17645,14 @@ function SettingsView({
     setProviderEnabledDraft(config?.enabled ?? false)
     setProviderError('')
     setProviderNotice(config?.models.length ? `当前已保存 ${config.models.length} 个模型` : '')
+    setProviderModelFilter('')
   }
+
+  const providerFilteredModels = useMemo(() => {
+    const keyword = providerModelFilter.trim().toLowerCase()
+    if (!keyword) return providerModelsDraft
+    return providerModelsDraft.filter((model) => model.toLowerCase().includes(keyword))
+  }, [providerModelFilter, providerModelsDraft])
 
   const loadProviderModels = async () => {
     if (!providerModal || providerBusy) return
@@ -17663,6 +17671,7 @@ function SettingsView({
       setProviderEnabledDraft(result.models.length > 0)
       if (!result.models.length) setProviderError('该服务商没有返回可用模型')
       else setProviderNotice(`加载成功，共 ${result.models.length} 个模型，请在下方选择默认模型后保存`)
+      setProviderModelFilter('')
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : '模型列表加载失败')
     } finally {
@@ -18975,21 +18984,39 @@ function SettingsView({
             <div className="provider-model-list">
               {providerModelsDraft.length > 0 ? (
                 <label className="provider-default-model-field">
-                  <span>默认模型</span>
-                  <GivernySelect
-                    value={providerDefaultModelDraft}
-                    placeholder="选择该服务商的默认模型"
-                    ariaLabel="选择服务商默认模型"
-                    options={providerModelsDraft.map((model) => ({
-                      value: model,
-                      label: model,
-                      icon: aiProviderIconMap[providerModal]
-                        ? <img className="giverny-select-brand-icon" src={aiProviderIconMap[providerModal]} alt="" />
-                        : <Sparkles className="giverny-select-brand-icon" size={18} />,
-                    }))}
-                    onChange={setProviderDefaultModelDraft}
-                  />
-                  <small>全站模型选择器只展示该模型；更换后会同步更新正在使用该服务商的路线。</small>
+                  <span className="provider-default-model-head">
+                    默认模型
+                    <em>{providerDefaultModelDraft ? `当前：${providerDefaultModelDraft}` : '尚未选择'}</em>
+                  </span>
+                  {providerModelsDraft.length > 8 && (
+                    <input
+                      className="provider-model-search"
+                      value={providerModelFilter}
+                      onChange={(event) => setProviderModelFilter(event.target.value)}
+                      placeholder={`搜索 ${providerModelsDraft.length} 个模型…`}
+                    />
+                  )}
+                  <div className="provider-model-options" role="listbox" aria-label="选择服务商默认模型">
+                    {providerFilteredModels.length > 0 ? providerFilteredModels.map((model) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={model === providerDefaultModelDraft}
+                        className={model === providerDefaultModelDraft ? 'active' : ''}
+                        key={model}
+                        onClick={() => setProviderDefaultModelDraft(model)}
+                      >
+                        <span className="giverny-select-option-main">
+                          {aiProviderIconMap[providerModal]
+                            ? <img className="giverny-select-brand-icon" src={aiProviderIconMap[providerModal]} alt="" />
+                            : <Sparkles className="giverny-select-brand-icon" size={18} />}
+                          <span>{model}</span>
+                        </span>
+                        {model === providerDefaultModelDraft && <CheckCircle2 size={15} />}
+                      </button>
+                    )) : <p className="provider-model-empty">没有匹配“{providerModelFilter}”的模型</p>}
+                  </div>
+                  <small>共 {providerModelsDraft.length} 个模型，列表可滚动。全站模型选择器只展示默认模型；更换后会同步更新正在使用该服务商的路线。</small>
                 </label>
               ) : <p>还没有模型。请填写密钥后点击“加载模型”。</p>}
             </div>
