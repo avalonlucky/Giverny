@@ -17422,6 +17422,7 @@ function SettingsView({
   const [providerDefaultModelDraft, setProviderDefaultModelDraft] = useState('')
   const [providerEnabledDraft, setProviderEnabledDraft] = useState(false)
   const [providerBusy, setProviderBusy] = useState<'load' | 'save' | ''>('')
+  const [providerNotice, setProviderNotice] = useState('')
   const [providerError, setProviderError] = useState('')
 
   const tokenStatus = (token: AccessToken) => {
@@ -17642,12 +17643,14 @@ function SettingsView({
     setProviderDefaultModelDraft(config?.defaultModel || config?.models[0] || '')
     setProviderEnabledDraft(config?.enabled ?? false)
     setProviderError('')
+    setProviderNotice(config?.models.length ? `当前已保存 ${config.models.length} 个模型` : '')
   }
 
   const loadProviderModels = async () => {
     if (!providerModal || providerBusy) return
     setProviderBusy('load')
     setProviderError('')
+    setProviderNotice('')
     try {
       const result = await api.listAiProviderModels({
         provider: providerModal,
@@ -17659,6 +17662,7 @@ function SettingsView({
       setProviderDefaultModelDraft((current) => result.models.includes(current) ? current : result.models[0] || '')
       setProviderEnabledDraft(result.models.length > 0)
       if (!result.models.length) setProviderError('该服务商没有返回可用模型')
+      else setProviderNotice(`加载成功，共 ${result.models.length} 个模型，请在下方选择默认模型后保存`)
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : '模型列表加载失败')
     } finally {
@@ -18967,6 +18971,7 @@ function SettingsView({
               </button>
             </div>
             {providerError && <p className="settings-inline-error">{providerError}</p>}
+            {!providerError && providerNotice && <p className="settings-test-ok">{providerNotice}</p>}
             <div className="provider-model-list">
               {providerModelsDraft.length > 0 ? (
                 <label className="provider-default-model-field">
