@@ -142,12 +142,32 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   last_used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS workspace_memberships (
+  workspace_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (workspace_id, principal_id),
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+);
+
+INSERT OR IGNORE INTO workspaces (id, name) VALUES ('default', 'Giverny 默认工作区');
+
 CREATE TABLE IF NOT EXISTS auth_sessions (
   id TEXT PRIMARY KEY,
   token_hash TEXT NOT NULL UNIQUE,
   email TEXT,
   role TEXT NOT NULL,
   principal_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -176,6 +196,8 @@ CREATE TABLE IF NOT EXISTS agent_analysis_jobs (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL UNIQUE,
   conversation_id TEXT,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'system',
   job_type TEXT NOT NULL DEFAULT 'monthly_review',
   title TEXT NOT NULL,
   month TEXT NOT NULL,
@@ -283,6 +305,8 @@ CREATE TABLE IF NOT EXISTS agent_run_metrics (
   intent TEXT NOT NULL,
   outcome TEXT NOT NULL,
   model TEXT,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'system',
   tools_json TEXT NOT NULL DEFAULT '[]',
   tool_count INTEGER NOT NULL DEFAULT 0,
   duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -407,6 +431,8 @@ CREATE TABLE IF NOT EXISTS ai_text_edits (
 CREATE TABLE IF NOT EXISTS ai_learning_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   context TEXT NOT NULL,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'system',
   action TEXT NOT NULL,
   source_input TEXT NOT NULL DEFAULT '',
   ai_output TEXT NOT NULL,

@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.72",
+  "version": "0.29.0",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",

@@ -57,10 +57,42 @@ test('模型中心展示默认模型和服务商配置入口', async ({ page }) 
   await expect(page.getByRole('heading', { name: '默认模型' })).toBeVisible()
   await expect(page.getByText('文字模型服务商', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: /DeepSeek/ }).first().click()
+  await page.locator('button.model-provider-card').filter({ hasText: 'DeepSeek' }).first().click()
   await expect(page.getByRole('heading', { name: 'DeepSeek 设置' })).toBeVisible()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: '加载模型', exact: true })).toBeVisible()
   await expect(dialog.getByRole('switch')).toBeVisible()
   await dialog.getByRole('button', { name: '取消' }).click()
+})
+
+test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({ page }) => {
+  await page.goto('/settings')
+  const result = await page.evaluate(async () => {
+    const response = await fetch('/api/ai/operations-center?days=7')
+    return {
+      status: response.status,
+      payload: await response.json(),
+    }
+  }) as {
+    status: number
+    payload: {
+    workspace: { id: string; foundationReady: boolean }
+    routing: { totalRuns: number; recent: Array<{ route: string }> }
+    background: { failedCount: number; jobs: Array<{ id: string }> }
+    learning: { totalSamples: number }
+    }
+  }
+  expect(result.status, JSON.stringify(result.payload)).toBe(200)
+  const { payload } = result
+  expect(payload.workspace).toMatchObject({ id: 'default', foundationReady: true })
+  expect(payload.routing.totalRuns).toBe(0)
+  expect(payload.routing.recent).toHaveLength(0)
+  expect(payload.background.failedCount).toBeGreaterThan(0)
+  expect(payload.background.jobs.some((job) => job.id === 'browser-job-failed')).toBeTruthy()
+  expect(payload.learning.totalSamples).toBeGreaterThan(0)
+
+  await expect(page.getByRole('heading', { name: 'AI 运行中心' })).toBeVisible()
+  await expect(page.getByText('Giverny 默认工作区', { exact: true })).toBeVisible()
+  await expect(page.getByText('浏览器回归后台任务', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
 })

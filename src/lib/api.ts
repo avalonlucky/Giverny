@@ -137,6 +137,60 @@ export type AgentRunMetrics = {
   recentFailures: Array<{ createdAt: string; intent: string; status: number; durationMs: number }>
 }
 
+export type AiOperationsCenter = {
+  periodDays: number
+  generatedAt: string
+  workspace: {
+    id: string
+    name: string
+    role: string
+    principalId: string
+    foundationReady: boolean
+  }
+  routing: {
+    totalRuns: number
+    successRate: number
+    fallbackRate: number
+    localCliRuns: number
+    cloudRuns: number
+    recent: Array<{
+      createdAt: string
+      route: 'local-cli' | 'cloud' | 'cloud-fallback'
+      model: string
+      intent: string
+      outcome: string
+      durationMs: number
+      fallback: boolean
+    }>
+  }
+  background: {
+    activeCount: number
+    failedCount: number
+    completedCount: number
+    attachmentActiveCount: number
+    jobs: Array<{
+      id: string
+      type: string
+      title: string
+      status: string
+      phase: string
+      progress: number
+      error: string
+      createdAt: string
+      updatedAt: string
+    }>
+  }
+  learning: {
+    totalSamples: number
+    adoptionRate: number
+    editedRate: number
+    rejectionRate: number
+    hourEstimateObserved: number
+    hourEstimateWithin20Rate: number
+    contexts: Array<{ context: string; total: number; adopted: number; edited: number; rejected: number }>
+  }
+}
+
 export type HourEstimateMetrics = {
   month: string
   generatedAt: string
@@ -1073,6 +1127,8 @@ export const api = {
     requestJson<{ ok: boolean }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
   getAgentRunMetrics: (days = 7) =>
     requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
+  getAiOperationsCenter: (days = 7) =>
+    requestJson<AiOperationsCenter>(`/api/ai/operations-center?days=${encodeURIComponent(String(days))}`),
   getAgentFailures: () =>
     requestJson<{ cases: AgentFailureCase[]; policy: string }>('/api/ai/agent-failures'),
   updateAgentFailure: (fingerprint: string, status: AgentFailureCase['regressionStatus'], note = '') =>

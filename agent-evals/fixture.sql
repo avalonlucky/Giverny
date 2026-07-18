@@ -39,3 +39,24 @@ INSERT INTO agent_failure_cases (
 ) VALUES (
   'tool_execution:task_detail:get_task_detail:500', 'tool_execution', 'task_detail', 'get_task_detail', 500, 2, 'required'
 );
+INSERT INTO agent_run_metrics (
+  id, intent, outcome, model, tools_json, tool_count, duration_ms, fallback_used, http_status,
+  is_eval, prompt_tokens, completion_tokens, estimated_cost_cny, created_at
+) VALUES (
+  'browser-route-cloud', 'data-query', 'success', 'deepseek-v4-flash', '["search_tasks"]', 1, 820, 0, 200,
+  1, 180, 96, 0.0012, CURRENT_TIMESTAMP
+);
+
+INSERT INTO agent_analysis_jobs (
+  id, workflow_id, job_type, title, month, query, status, phase, progress, error_message
+) VALUES (
+  'browser-job-failed', 'browser-job-failed-workflow', 'monthly_review', '浏览器回归后台任务', '2026-07',
+  '回归测试', 'failed', 'failed', 35, '模拟失败，用于验证统一任务中心'
+);
+
+INSERT INTO ai_learning_events (
+  context, action, source_input, ai_output, user_final, design_type, metadata_json, created_at
+) VALUES (
+  'hour-estimate', 'adopted', '浏览器回归样本', '2.5 小时', '2.5 小时', '画册', '{}',
+  CAST(strftime('%s', 'now') AS INTEGER) * 1000
+);

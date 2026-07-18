@@ -13892,6 +13892,122 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   })
 }
 
+type AiOperationsMetricRow = AgentRunMetricRow & { is_eval: number }
+
+function agentRouteFromMetric(item: Pick<AgentRunMetricRow, 'model' | 'fallback_used'>) {
+  if (/本机|codex cli|claude code|grok build|antigravity/i.test(item.model || '')) return 'local-cli' as const
+  if (Number(item.fallback_used) > 0) return 'cloud-fallback' as const
+  return 'cloud' as const
+}
+
+async function getAiOperationsCenter(env: Env, request: Request) {
+  await Promise.all([ensureAgentRunMetricsTable(env), ensureTaskLearningTables(env)])
+  const requestedDays = Number(new URL(request.url).searchParams.get('days'))
+  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
+  const principal = await resolveRequestPrincipal(env, request)
+  const [metricRows, jobRows, learningRows, attachmentStatusRows, hourRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
+              selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
+              estimated_cost_cny, created_at
+       FROM agent_run_metrics
+       WHERE is_eval = 0 AND created_at >= datetime('now', ?)
+       ORDER BY created_at DESC LIMIT 500`,
+    ).bind(`-${periodDays} days`).all<AiOperationsMetricRow>(),
+    env.DB.prepare('SELECT * FROM agent_analysis_jobs ORDER BY created_at DESC LIMIT 30').all<DbAgentAnalysisJob>(),
+    env.DB.prepare(
+      `SELECT context,
+              COUNT(*) AS total,
+              SUM(CASE WHEN action = 'adopted' THEN 1 ELSE 0 END) AS adopted,
+              SUM(CASE WHEN action = 'edited' THEN 1 ELSE 0 END) AS edited,
+              SUM(CASE WHEN action = 'rejected' THEN 1 ELSE 0 END) AS rejected
+       FROM ai_learning_events
+       WHERE created_at >= ?
+       GROUP BY context ORDER BY total DESC`,
+    ).bind(Date.now() - periodDays * 86_400_000).all<{ context: string; total: number; adopted: number; edited: number; rejected: number }>(),
+    env.DB.prepare(
+      `SELECT status, COUNT(*) AS count FROM attachment_analyses
+       WHERE updated_at >= datetime('now', ?) GROUP BY status`,
+    ).bind(`-${periodDays} days`).all<{ status: string; count: number }>(),
+    env.DB.prepare(
+      `SELECT suggested_hours, actual_hours FROM hour_estimate_suggestions
+       WHERE actual_hours IS NOT NULL AND actual_hours > 0 AND requested_at >= datetime('now', ?)`,
+    ).bind(`-${Math.max(periodDays, 30)} days`).all<{ suggested_hours: number; actual_hours: number }>(),
+  ])
+  const metrics = metricRows.results ?? []
+  const errorRuns = metrics.filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed').length
+  const fallbackRuns = metrics.filter((item) => Number(item.fallback_used) > 0).length
+  const localCliRuns = metrics.filter((item) => agentRouteFromMetric(item) === 'local-cli').length
+  const jobs = jobRows.results ?? []
+  const contexts = (learningRows.results ?? []).map((row) => ({
+    context: row.context,
+    total: Number(row.total) || 0,
+    adopted: Number(row.adopted) || 0,
+    edited: Number(row.edited) || 0,
+    rejected: Number(row.rejected) || 0,
+  }))
+  const totalSamples = contexts.reduce((sum, item) => sum + item.total, 0)
+  const adoptedSamples = contexts.reduce((sum, item) => sum + item.adopted, 0)
+  const editedSamples = contexts.reduce((sum, item) => sum + item.edited, 0)
+  const rejectedSamples = contexts.reduce((sum, item) => sum + item.rejected, 0)
+  const hourItems = hourRows.results ?? []
+  const hourWithin20 = hourItems.filter((item) => Math.abs(Number(item.suggested_hours) - Number(item.actual_hours)) / Number(item.actual_hours) <= 0.2).length
+  const attachmentStatus = new Map((attachmentStatusRows.results ?? []).map((row) => [row.status, Number(row.count) || 0]))
+  return ok({
+    periodDays,
+    generatedAt: nowIso(),
+    workspace: {
+      id: 'default',
+      name: 'Giverny 默认工作区',
+      role: principal?.role || 'guest',
+      principalId: principal?.principalId || 'guest',
+      foundationReady: true,
+    },
+    routing: {
+      totalRuns: metrics.length,
+      successRate: metrics.length ? Number((((metrics.length - errorRuns) / metrics.length) * 100).toFixed(1)) : 0,
+      fallbackRate: metrics.length ? Number(((fallbackRuns / metrics.length) * 100).toFixed(1)) : 0,
+      localCliRuns,
+      cloudRuns: Math.max(0, metrics.length - localCliRuns),
+      recent: metrics.slice(0, 20).map((item) => ({
+        createdAt: item.created_at,
+        route: agentRouteFromMetric(item),
+        model: item.model || '未识别模型',
+        intent: item.intent,
+        outcome: item.outcome,
+        durationMs: Number(item.duration_ms) || 0,
+        fallback: Number(item.fallback_used) > 0,
+      })),
+    },
+    background: {
+      activeCount: jobs.filter((item) => item.status === 'queued' || item.status === 'running').length,
+      failedCount: jobs.filter((item) => item.status === 'failed').length,
+      completedCount: jobs.filter((item) => item.status === 'completed').length,
+      attachmentActiveCount: (attachmentStatus.get('pending') || 0) + (attachmentStatus.get('processing') || 0),
+      jobs: jobs.map((item) => ({
+        id: item.id,
+        type: item.job_type,
+        title: item.title,
+        status: item.status,
+        phase: item.phase,
+        progress: Number(item.progress) || 0,
+        error: item.error_message || '',
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      })),
+    },
+    learning: {
+      totalSamples,
+      adoptionRate: totalSamples ? Number(((adoptedSamples / totalSamples) * 100).toFixed(1)) : 0,
+      editedRate: totalSamples ? Number(((editedSamples / totalSamples) * 100).toFixed(1)) : 0,
+      rejectionRate: totalSamples ? Number(((rejectedSamples / totalSamples) * 100).toFixed(1)) : 0,
+      hourEstimateObserved: hourItems.length,
+      hourEstimateWithin20Rate: hourItems.length ? Number(((hourWithin20 / hourItems.length) * 100).toFixed(1)) : 0,
+      contexts,
+    },
+  })
+}
+
 async function getAgentFailureCases(env: Env) {
   const rows = await env.DB.prepare(
     `SELECT fingerprint, category, intent, tool_name, http_status, occurrences, regression_status,
@@ -14888,6 +15004,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path.startsWith('/api/ai/agent-failures') ||
       path.startsWith('/api/ai/task-memories') ||
       path === '/api/ai/agent-metrics' ||
+      path === '/api/ai/operations-center' ||
       path === '/api/ai/hour-estimate/metrics' ||
       path.startsWith('/api/ai/conversations') ||
       path.startsWith('/api/ai/analysis-jobs') ||
@@ -15149,6 +15266,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
     return getAgentRunMetrics(env, request)
+  }
+  if (path === '/api/ai/operations-center' && request.method === 'GET') {
+    return getAiOperationsCenter(env, request)
   }
   if (path === '/api/ai/agent-failures' && request.method === 'GET') {
     return getAgentFailureCases(env)

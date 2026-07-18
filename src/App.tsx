@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   AlarmClock,
+  Activity,
   AlertTriangle,
   Archive,
   ArrowUp,
@@ -93,6 +94,7 @@ import {
   type AiModelProvider,
   type AiModelRouteKey,
   type AiProviderConfig,
+  type AiOperationsCenter,
   type AgentRunMetrics,
   type AttachmentNameSuggestion,
   type AuthRole,
@@ -17441,6 +17443,8 @@ function SettingsView({
   const [orScanning, setOrScanning] = useState(false)
   const [orError, setOrError] = useState('')
   const [agentMetrics, setAgentMetrics] = useState<AgentRunMetrics | null>(null)
+  const [aiOperations, setAiOperations] = useState<AiOperationsCenter | null>(null)
+  const [aiOperationsBusy, setAiOperationsBusy] = useState('')
   const [agentMetricsDays, setAgentMetricsDays] = useState<7 | 30>(7)
   const [agentMetricsLoading, setAgentMetricsLoading] = useState(false)
   const [agentMetricsError, setAgentMetricsError] = useState('')
@@ -17829,8 +17833,13 @@ function SettingsView({
     setAgentMetricsLoading(true)
     setAgentMetricsError('')
     try {
-      const [metrics, failures] = await Promise.all([api.getAgentRunMetrics(days), api.getAgentFailures()])
+      const [metrics, failures, operations] = await Promise.all([
+        api.getAgentRunMetrics(days),
+        api.getAgentFailures(),
+        api.getAiOperationsCenter(days),
+      ])
       setAgentMetrics(metrics)
+      setAiOperations(operations)
       setAgentFailures(failures.cases)
       setAgentFailurePolicy(failures.policy)
     } catch (error) {
@@ -17839,6 +17848,21 @@ function SettingsView({
       setAgentMetricsLoading(false)
     }
   }, [agentMetricsDays])
+
+  const updateOperationsJob = async (jobId: string, action: 'retry' | 'cancel') => {
+    setAiOperationsBusy(jobId)
+    setAgentMetricsError('')
+    try {
+      const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(jobId)}/${action}`, { method: 'POST' })
+      const payload = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) throw new Error(payload.error || '后台任务操作失败')
+      await loadAgentMetrics()
+    } catch (error) {
+      setAgentMetricsError(error instanceof Error ? error.message : '后台任务操作失败')
+    } finally {
+      setAiOperationsBusy('')
+    }
+  }
 
   const updateAgentFailure = async (failure: AgentFailureCase, status: AgentFailureCase['regressionStatus']) => {
     setAgentFailureBusy(failure.fingerprint)
@@ -18221,6 +18245,95 @@ function SettingsView({
                 </div>
               ))}
               {providerError && !providerModal && <p className="settings-inline-error">{providerError}</p>}
+            </section>
+            <section className="panel settings-ai-panel ai-operations-panel">
+              <div className="panel-header compact agent-quality-header">
+                <div>
+                  <span className="model-section-kicker"><Activity size={15} /> 可观测与治理</span>
+                  <h2>AI 运行中心</h2>
+                  <p>统一查看模型路由、后台任务、学习效果与当前工作区，不保存用户问题或回答正文</p>
+                </div>
+                <button type="button" className="ghost-button compact-button" disabled={agentMetricsLoading} onClick={() => void loadAgentMetrics()}>
+                  <RotateCcw size={14} />
+                  {agentMetricsLoading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
+              {!aiOperations && agentMetricsLoading && <p className="calendar-empty-hint">正在汇总 AI 运行状态…</p>}
+              {aiOperations && (
+                <>
+                  <div className="ai-operations-summary">
+                    <article>
+                      <span>当前工作区</span>
+                      <strong>{aiOperations.workspace.name}</strong>
+                      <small>{aiOperations.workspace.role} · {aiOperations.workspace.foundationReady ? '租户上下文已就绪' : '待初始化'}</small>
+                    </article>
+                    <article>
+                      <span>路由成功率</span>
+                      <strong>{aiOperations.routing.totalRuns ? `${aiOperations.routing.successRate}%` : '—'}</strong>
+                      <small>本机 {aiOperations.routing.localCliRuns} · 云端 {aiOperations.routing.cloudRuns} · 回退 {aiOperations.routing.fallbackRate}%</small>
+                    </article>
+                    <article>
+                      <span>后台任务</span>
+                      <strong>{aiOperations.background.activeCount}</strong>
+                      <small>运行中 · {aiOperations.background.failedCount} 失败 · 附件分析 {aiOperations.background.attachmentActiveCount}</small>
+                    </article>
+                    <article>
+                      <span>持续学习</span>
+                      <strong>{aiOperations.learning.totalSamples}</strong>
+                      <small>直接采用 {aiOperations.learning.adoptionRate}% · 修改后采用 {aiOperations.learning.editedRate}%</small>
+                    </article>
+                  </div>
+                  <div className="ai-operations-columns">
+                    <section>
+                      <h3>最近路由</h3>
+                      {aiOperations.routing.recent.length ? (
+                        <div className="ai-operations-list">
+                          {aiOperations.routing.recent.slice(0, 8).map((item) => (
+                            <article key={`${item.createdAt}-${item.intent}-${item.durationMs}`}>
+                              <div>
+                                <strong>{item.model}</strong>
+                                <small>{agentMetricIntentLabels[item.intent] || item.intent} · {formatAgentMetricDuration(item.durationMs)}</small>
+                              </div>
+                              <span className={`ai-route-${item.route}`}>{item.route === 'local-cli' ? '本机 CLI' : item.route === 'cloud-fallback' ? '云端回退' : '云端'}</span>
+                            </article>
+                          ))}
+                        </div>
+                      ) : <p className="calendar-empty-hint">当前周期还没有路由记录。</p>}
+                    </section>
+                    <section>
+                      <h3>后台任务中心</h3>
+                      {aiOperations.background.jobs.length ? (
+                        <div className="ai-operations-list">
+                          {aiOperations.background.jobs.slice(0, 8).map((job) => (
+                            <article key={job.id}>
+                              <div>
+                                <strong>{job.title}</strong>
+                                <small>{job.status === 'completed' ? '已完成' : job.status === 'failed' ? job.error || '执行失败' : `${job.phase} · ${job.progress}%`}</small>
+                              </div>
+                              <div className="ai-operations-job-actions">
+                                <span className={`status-${job.status}`}>{job.status === 'queued' ? '排队中' : job.status === 'running' ? '运行中' : job.status === 'completed' ? '已完成' : job.status === 'cancelled' ? '已取消' : '失败'}</span>
+                                {(job.status === 'failed' || job.status === 'cancelled') && <button type="button" disabled={aiOperationsBusy === job.id} onClick={() => void updateOperationsJob(job.id, 'retry')}>重试</button>}
+                                {(job.status === 'queued' || job.status === 'running') && <button type="button" disabled={aiOperationsBusy === job.id} onClick={() => void updateOperationsJob(job.id, 'cancel')}>取消</button>}
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : <p className="calendar-empty-hint">当前没有后台分析任务。</p>}
+                    </section>
+                    <section>
+                      <h3>学习效果</h3>
+                      <div className="ai-learning-overview">
+                        <p><span>工时建议可核对样本</span><strong>{aiOperations.learning.hourEstimateObserved}</strong></p>
+                        <p><span>误差 20% 内</span><strong>{aiOperations.learning.hourEstimateObserved ? `${aiOperations.learning.hourEstimateWithin20Rate}%` : '—'}</strong></p>
+                        <p><span>明确拒绝</span><strong>{aiOperations.learning.rejectionRate}%</strong></p>
+                      </div>
+                      {aiOperations.learning.contexts.length ? <div className="agent-quality-list">
+                        {aiOperations.learning.contexts.slice(0, 6).map((item) => <div key={item.context}><span>{item.context}</span><strong>{item.total}</strong></div>)}
+                      </div> : <p className="calendar-empty-hint">继续使用 AI 建议后，这里会按场景统计采用和修改情况。</p>}
+                    </section>
+                  </div>
+                </>
+              )}
             </section>
             <section className="panel settings-ai-panel agent-quality-panel">
               <div className="panel-header compact agent-quality-header">
