@@ -29,8 +29,13 @@
 │   ├── quality-gates.json
 │   ├── run.mjs
 │   ├── run-isolated.mjs
+│   ├── start-browser-eval.mjs
 │   ├── wrangler.eval.toml
 │   └── README.md
+├── tests/
+│   └── browser/
+│       └── critical-flows.spec.ts
+├── playwright.config.ts
 ├── .github/workflows/
 │   ├── agent-quality-gate.yml
 │   └── record-production-deployment.yml
@@ -111,6 +116,8 @@
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`
 - Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
+- Desktop/mobile browser critical-flow gate: `tests/browser/critical-flows.spec.ts`
+- Browser regression environment and projects: `playwright.config.ts`, `agent-evals/start-browser-eval.mjs`
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - Agent production controls and user operations: `docs/AGENT_PRODUCTION_OPERATIONS.md`
 - Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`

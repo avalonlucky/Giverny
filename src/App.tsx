@@ -8598,12 +8598,13 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             {isAdmin && (
               <button
                 type="button"
-                className={`topbar-shortcut ${isChatOpen ? 'active' : ''}`}
+                className={`topbar-shortcut topbar-assistant-button ${isChatOpen ? 'active' : ''}`}
                 title="工作助手 AI 对话"
                 aria-label="打开工作助手"
                 onClick={toggleChat}
               >
                 <Bot size={16} />
+                <span>工作助手</span>
               </button>
             )}
             <button

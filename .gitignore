@@ -13,6 +13,8 @@ dist-ssr
 .wrangler/
 .playwright-cli/
 output/playwright/
+playwright-report/
+test-results/
 .learnings/
 *.local
 .admin-token.txt

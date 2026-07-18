@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.28.71",
+  "version": "0.28.72",
   "type": "module",
   "scripts": {
     "baml:generate": "baml-cli generate",
@@ -11,7 +11,8 @@
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
-    "agent:quality:gate": "npm run build && npm run lint && npm run agent:eval:isolated",
+    "browser:eval": "playwright test",
+    "agent:quality:gate": "npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:pages": "npm run build && npx wrangler pages deploy dist --project-name designer-worklog",
     "deploy:worker": "npm run build && npx wrangler deploy"
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

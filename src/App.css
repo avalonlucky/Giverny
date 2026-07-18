@@ -661,6 +661,10 @@ button {
   cursor: pointer;
 }
 
+.topbar-assistant-button span {
+  display: none;
+}
+
 .topbar-shortcut kbd {
   font: inherit;
   font-size: 16px;
@@ -19379,6 +19383,17 @@ textarea:focus-visible {
 
   .topbar-shortcut {
     display: none;
+  }
+
+  .topbar-actions .topbar-assistant-button {
+    display: inline-flex;
+    width: 100%;
+    min-height: 42px;
+    gap: 8px;
+  }
+
+  .topbar-assistant-button span {
+    display: inline;
   }
 
   .dashboard-task-heading-row {

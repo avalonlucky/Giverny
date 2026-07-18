@@ -35,3 +35,13 @@ npm run agent:quality:gate
 ```
 
 GitHub Actions 的 `Agent quality gate` 会在 pull request 和 `main` 推送时执行同一命令。
+
+## 浏览器关键流程回归
+
+```bash
+npm run browser:eval
+```
+
+浏览器回归会复用隔离评测的临时 D1、匿名 fixture、模拟模型与本地 Worker，并使用独立端口避免和 Agent 工具链评测互相复用残留进程。在桌面 Chromium 和 Pixel 7 两种视口下验证：管理员登录与工作台加载、工作助手入口、任务详情、新建任务小数工时输入、计划任务记录进展与验收切换、模型设置与服务商弹窗。测试不会读取或修改正式 D1。
+
+失败时 Playwright 会保留截图、视频与 trace 到 `test-results/`，并生成 `playwright-report/`。GitHub Actions 会在门禁失败时上传这些产物，便于直接定位页面状态和操作步骤。
