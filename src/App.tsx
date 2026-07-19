@@ -17312,7 +17312,7 @@ function formatAgentMetricDuration(value: number) {
 }
 
 const LOCAL_CLI_BROWSER_KEY = 'giverny-local-cli-browser-device'
-const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
+const LOCAL_CLI_RUNTIME_VERSION = '0.4.0'
 
 function localCliRuntimeReady(version: string) {
   const current = String(version || '').split('.').map((item) => Number(item.replace(/\D.*$/, '')) || 0)

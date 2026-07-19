@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, hostname, platform, arch } from 'node:os'
-import { basename, delimiter, join } from 'node:path'
+import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 
-const VERSION = '0.3.1'
+const VERSION = '0.4.0'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
 const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
+const CODEX_RUNTIME_HOME = join(CONFIG_DIR, 'codex-runtime')
 const DEFAULT_SERVER = 'https://mayeai.com'
 
 function compact(value, max = 240) {
@@ -32,6 +33,101 @@ function executableCandidates(names) {
 
 function findExecutable(names) {
   return executableCandidates(names).find((candidate) => existsSync(candidate)) || ''
+}
+
+function proxyAwareEnv(baseEnv = process.env) {
+  const env = { ...baseEnv }
+  const existing = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
+    .find((key) => env[key])
+  if (existing) return { env, mode: 'environment' }
+  if (process.platform !== 'darwin') return { env, mode: 'direct' }
+
+  const result = spawnSync('/usr/sbin/scutil', ['--proxy'], { encoding: 'utf8', timeout: 3000 })
+  const values = {}
+  for (const line of String(result.stdout || '').split(/\r?\n/)) {
+    const match = line.match(/^\s*(HTTP|HTTPS|SOCKS)(Enable|Proxy|Port)\s*:\s*(.*?)\s*$/)
+    if (match) values[`${match[1]}${match[2]}`] = match[3]
+  }
+  const setProxy = (name, value) => {
+    if (!value) return
+    env[name] = value
+    env[name.toLowerCase()] = value
+  }
+  if (values.HTTPEnable === '1' && values.HTTPProxy && values.HTTPPort) {
+    setProxy('HTTP_PROXY', `http://${values.HTTPProxy}:${values.HTTPPort}`)
+  }
+  if (values.HTTPSEnable === '1' && values.HTTPSProxy && values.HTTPSPort) {
+    setProxy('HTTPS_PROXY', `http://${values.HTTPSProxy}:${values.HTTPSPort}`)
+  }
+  if (values.SOCKSEnable === '1' && values.SOCKSProxy && values.SOCKSPort) {
+    setProxy('ALL_PROXY', `socks5h://${values.SOCKSProxy}:${values.SOCKSPort}`)
+  }
+  if (!env.NO_PROXY && !env.no_proxy) setProxy('NO_PROXY', 'localhost,127.0.0.1,::1,*.local')
+  const detected = Boolean(env.HTTP_PROXY || env.HTTPS_PROXY || env.ALL_PROXY)
+  return { env, mode: detected ? 'system' : 'direct' }
+}
+
+function ensureSymlink(source, target) {
+  if (!existsSync(source)) return
+  try {
+    if (lstatSync(target).isSymbolicLink() && readlinkSync(target) === source) return
+    unlinkSync(target)
+  } catch {
+    // Target does not exist yet.
+  }
+  symlinkSync(source, target)
+}
+
+function codexRuntimeConfig(sourceHome) {
+  const sourcePath = join(sourceHome, 'config.toml')
+  if (!existsSync(sourcePath)) return ''
+  const rootKeys = new Set(['model', 'model_provider', 'model_reasoning_effort', 'service_tier', 'model_catalog_json'])
+  const lines = []
+  let section = ''
+  let keepSection = false
+  for (const rawLine of readFileSync(sourcePath, 'utf8').split(/\r?\n/)) {
+    const trimmed = rawLine.trim()
+    const sectionMatch = trimmed.match(/^\[([^\]]+)]$/)
+    if (sectionMatch) {
+      section = sectionMatch[1]
+      keepSection = section.startsWith('model_providers.')
+      if (keepSection) lines.push('', rawLine)
+      continue
+    }
+    if (keepSection) {
+      lines.push(rawLine)
+      continue
+    }
+    if (section || !trimmed || trimmed.startsWith('#')) continue
+    const keyValue = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/)
+    if (!keyValue || !rootKeys.has(keyValue[1])) continue
+    let value = keyValue[2]
+    if (keyValue[1] === 'model_catalog_json') {
+      try {
+        const parsed = JSON.parse(value)
+        if (!isAbsolute(parsed)) value = JSON.stringify(join(sourceHome, parsed))
+      } catch {
+        // Keep the original TOML value if it is not a JSON string.
+      }
+    }
+    lines.push(`${keyValue[1]} = ${value}`)
+  }
+  return `${lines.join('\n').trim()}\n`
+}
+
+function prepareCodexRuntime() {
+  const sourceHome = String(process.env.CODEX_HOME || join(homedir(), '.codex'))
+  mkdirSync(CODEX_RUNTIME_HOME, { recursive: true, mode: 0o700 })
+  const config = codexRuntimeConfig(sourceHome)
+  if (config.trim()) {
+    const runtimeConfigPath = join(CODEX_RUNTIME_HOME, 'config.toml')
+    writeFileSync(runtimeConfigPath, config, { mode: 0o600 })
+    chmodSync(runtimeConfigPath, 0o600)
+  }
+  for (const name of ['auth.json', '.cockpit_codex_auth.json']) {
+    ensureSymlink(join(sourceHome, name), join(CODEX_RUNTIME_HOME, name))
+  }
+  return CODEX_RUNTIME_HOME
 }
 
 function run(command, args, timeout = 5000) {
@@ -160,6 +256,62 @@ async function heartbeat(config, clis) {
   })
 }
 
+function versionParts(value) {
+  return String(value || '').split('.').map((part) => Number(part.replace(/\D.*$/, '')) || 0)
+}
+
+function versionIsNewer(candidate, current) {
+  const next = versionParts(candidate)
+  const active = versionParts(current)
+  for (let index = 0; index < Math.max(next.length, active.length); index += 1) {
+    if ((next[index] || 0) > (active[index] || 0)) return true
+    if ((next[index] || 0) < (active[index] || 0)) return false
+  }
+  return false
+}
+
+function restartUpdatedBridge(scriptPath) {
+  if (process.ppid === 1) {
+    process.stdout.write(`[Bridge] 已更新到新版本，正在由系统服务重启。\n`)
+    return
+  }
+  const child = spawn(process.execPath, [scriptPath, 'start'], {
+    detached: true,
+    stdio: 'ignore',
+    env: process.env,
+  })
+  child.unref()
+  process.stdout.write(`[Bridge] 已更新并重新启动。\n`)
+}
+
+async function maybeUpdateBridge(config, heartbeatResult) {
+  const targetVersion = compact(heartbeatResult?.bridgeRuntimeVersion, 40)
+  const updateUrl = compact(heartbeatResult?.bridgeDownloadUrl, 500)
+  if (!targetVersion || !updateUrl || !versionIsNewer(targetVersion, VERSION)) return false
+
+  const serverOrigin = new URL(config.server).origin
+  const sourceUrl = new URL(updateUrl, serverOrigin)
+  if (sourceUrl.origin !== serverOrigin || !['https:', 'http:'].includes(sourceUrl.protocol)) {
+    throw new Error('Bridge 更新地址未通过同源校验')
+  }
+  const response = await fetch(sourceUrl, { headers: { accept: 'text/javascript' } })
+  if (!response.ok) throw new Error(`Bridge 更新下载失败：${response.status}`)
+  const source = await response.text()
+  const expectedVersionLine = `const VERSION = '${targetVersion}'`
+  if (!source.startsWith('#!/usr/bin/env node') || !source.includes(expectedVersionLine) || source.length > 1_000_000) {
+    throw new Error('Bridge 更新文件校验失败')
+  }
+
+  const scriptPath = resolve(process.argv[1] || '')
+  if (!scriptPath || !existsSync(scriptPath)) throw new Error('无法定位当前 Bridge 文件')
+  const temporaryPath = `${scriptPath}.update-${process.pid}`
+  writeFileSync(temporaryPath, source, { mode: 0o700 })
+  chmodSync(temporaryPath, 0o700)
+  renameSync(temporaryPath, scriptPath)
+  restartUpdatedBridge(scriptPath)
+  return true
+}
+
 async function completeCommand(config, commandId, result, error = '') {
   await request(config.server, `/api/local-cli/bridge/commands/${encodeURIComponent(commandId)}/complete`, {
     method: 'POST',
@@ -192,6 +344,7 @@ function appendTrace(state, value) {
 function appendContent(state, value) {
   const text = String(value ?? '')
   if (!text) return
+  if (!state.timings.firstContentAt) state.timings.firstContentAt = Date.now()
   if (!state.content) state.content = text
   else if (!state.content.endsWith(text)) state.content += text
   state.content = state.content.slice(-40_000)
@@ -207,6 +360,7 @@ function parseCliEvent(adapterId, line, state) {
     state.plainOutput = `${state.plainOutput}${state.plainOutput ? '\n' : ''}${trimmed}`.slice(-20_000)
     return
   }
+  if (!state.timings.firstEventAt) state.timings.firstEventAt = Date.now()
   const type = String(event.type || '')
   if (event.thread_id || event.session_id) state.sessionId = String(event.thread_id || event.session_id).slice(0, 160)
   if (adapterId === 'codex') {
@@ -219,7 +373,11 @@ function parseCliEvent(adapterId, line, state) {
       const item = event.item || {}
       if (item.type === 'command_execution') appendTrace(state, `执行本机命令：${compact(item.command || '受控命令', 100)}`)
       else if (item.type === 'mcp_tool_call') appendTrace(state, `读取 Giverny 数据：${compact(item.tool || item.name || 'MCP 工具', 80)}`)
-      else if (item.type === 'agent_message' && type === 'item.completed') state.content = String(item.text || '').slice(0, 40_000)
+      else if (item.type === 'agent_message' && type === 'item.completed') {
+        if (!state.timings.firstContentAt) state.timings.firstContentAt = Date.now()
+        state.content = String(item.text || '').slice(0, 40_000)
+        state.contentFinal = Boolean(state.content)
+      }
       else if (item.type === 'reasoning') appendTrace(state, 'Codex CLI 正在核对信息')
     } else if (type === 'turn.completed') {
       appendTrace(state, 'Codex CLI 已完成本机执行')
@@ -239,6 +397,7 @@ function parseCliEvent(adapterId, line, state) {
   if (type === 'content_block_delta' && event.delta?.text) appendContent(state, event.delta.text)
   if (type === 'result') {
     if (event.result) state.content = String(event.result).slice(0, 40_000)
+    if (state.content) state.contentFinal = true
     if (event.is_error) state.error = compact(event.result || event.error || '本机 CLI 执行失败', 600)
     appendTrace(state, '本机 CLI 已完成执行')
   }
@@ -246,22 +405,30 @@ function parseCliEvent(adapterId, line, state) {
   if (type.includes('error') || type.includes('failed')) state.error = compact(event.error?.message || event.message || event.error || '本机 CLI 执行失败', 600)
 }
 
-function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '') {
+function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '', timeoutMs = 12_000) {
   if (adapterId === 'codex') {
+    const proxy = proxyAwareEnv(process.env)
+    const runtimeHome = prepareCodexRuntime()
     const sharedConfig = [
       '-c', 'approval_policy="never"',
       '-c', 'sandbox_mode="workspace-write"',
       '-c', 'sandbox_workspace_write.network_access=true',
       '-c', `mcp_servers.giverny.url=${JSON.stringify(mcpUrl)}`,
       '-c', 'mcp_servers.giverny.bearer_token_env_var="GIVERNY_MCP_TOKEN"',
+      '-c', 'mcp_servers.giverny.startup_timeout_sec=5',
+      '-c', 'mcp_servers.giverny.tool_timeout_sec=12',
     ]
+    if (timeoutMs <= 12_000) sharedConfig.push('-c', 'model_reasoning_effort="low"')
     return {
       args: [
-        'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check',
+        'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ephemeral', '--ignore-rules',
+        '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'apps', '--disable', 'in_app_browser', '--disable', 'plugin_sharing',
         '-C', WORKSPACE_DIR,
         ...sharedConfig,
         prompt,
       ],
+      env: { ...proxy.env, CODEX_HOME: runtimeHome },
+      diagnostics: { proxyMode: proxy.mode, configMode: 'isolated', bridgeVersion: VERSION },
     }
   }
   if (adapterId === 'claude') {
@@ -284,17 +451,27 @@ function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '') {
   throw new Error('当前 CLI 尚未开放安全执行适配')
 }
 
-async function executeRunCommand(config, command) {
+async function executeRunCommand(config, command, clis) {
   const payload = command.payload || {}
   const adapterId = String(payload.adapterId || '')
-  const adapter = scanLocalClis().find((item) => item.id === adapterId && item.status === 'available' && item.command)
+  const adapter = clis.find((item) => item.id === adapterId && item.status === 'available' && item.command)
   if (!adapter) {
     await completeCommand(config, command.id, {}, '所选 CLI 当前不可用，请重新扫描或登录')
     return
   }
   mkdirSync(WORKSPACE_DIR, { recursive: true, mode: 0o700 })
-  const state = { trace: [payload.resumeSessionId ? '继续上次对话' : '已进入本机执行环境'], content: '', plainOutput: '', sessionId: '', error: '' }
-  const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 75_000, 30_000), 120_000)
+  const startedAt = Date.now()
+  const state = {
+    trace: [payload.resumeSessionId ? '继续上次对话' : '已进入本机执行环境'],
+    content: '',
+    contentFinal: false,
+    plainOutput: '',
+    sessionId: '',
+    error: '',
+    diagnostics: {},
+    timings: { bridgeStartedAt: startedAt, cliSpawnedAt: 0, firstEventAt: 0, firstContentAt: 0, completedAt: 0, durationMs: 0 },
+  }
+  const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 12_000, 5_000), 50_000)
   let invocation
   try {
     invocation = cliInvocation(
@@ -302,21 +479,28 @@ async function executeRunCommand(config, command) {
       String(payload.prompt || '').slice(0, 40_000),
       String(payload.mcpUrl || ''),
       String(payload.resumeSessionId || ''),
+      timeoutMs,
     )
   } catch (error) {
     await completeCommand(config, command.id, state, compact(error?.message || error, 600))
     return
   }
+  state.diagnostics = invocation.diagnostics || { proxyMode: 'environment', configMode: 'default', bridgeVersion: VERSION }
+  if (state.diagnostics.configMode === 'isolated') appendTrace(state, '已启用 Giverny 专用 Codex 环境')
+  if (state.diagnostics.proxyMode === 'system') appendTrace(state, '已读取 macOS 系统代理')
+  else if (state.diagnostics.proxyMode === 'environment') appendTrace(state, '已继承代理环境')
+  else appendTrace(state, '当前使用直连网络')
   appendTrace(state, payload.resumeSessionId ? `继续 ${adapter.name} 会话` : `连接 ${adapter.name}`)
   await reportCommandProgress(config, command.id, state)
   await new Promise((resolve) => {
+    state.timings.cliSpawnedAt = Date.now()
     const child = spawn(adapter.command, invocation.args, {
       cwd: WORKSPACE_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       shell: false,
       env: {
-        ...process.env,
+        ...(invocation.env || process.env),
         NO_COLOR: '1',
         TERM: 'dumb',
         GIVERNY_MCP_TOKEN: String(payload.mcpToken || ''),
@@ -325,7 +509,18 @@ async function executeRunCommand(config, command) {
     let stdoutBuffer = ''
     let stderrOutput = ''
     let closed = false
+    let forceKillTimer
     let publishChain = Promise.resolve()
+    const stopChild = (message) => {
+      if (closed) return
+      state.error = message
+      child.kill('SIGTERM')
+      if (!forceKillTimer) {
+        forceKillTimer = setTimeout(() => {
+          if (!closed) child.kill('SIGKILL')
+        }, 2_000)
+      }
+    }
     const publish = () => {
       publishChain = publishChain
         .then(() => reportCommandProgress(config, command.id, state))
@@ -344,16 +539,14 @@ async function executeRunCommand(config, command) {
     const heartbeatTimer = setInterval(() => { void heartbeat(config, undefined).catch(() => undefined) }, 15_000)
     const cancelTimer = setInterval(() => {
       void commandState(config, command.id).then((result) => {
-        if (result.status === 'cancelled' && !closed) {
-          state.error = '用户已停止本机 CLI 执行'
-          child.kill('SIGTERM')
+        if (['cancelled', 'expired'].includes(result.status) && !closed) {
+          stopChild(result.status === 'cancelled' ? '用户已停止本机 CLI 执行' : '网站等待已结束，本机 CLI 已停止')
         }
       }).catch(() => undefined)
     }, 1_500)
     const timeoutTimer = setTimeout(() => {
       if (!closed) {
-        state.error = `本机 CLI 执行超过 ${Math.round(timeoutMs / 1000)} 秒，已停止`
-        child.kill('SIGTERM')
+        stopChild(`本机 CLI 执行超过 ${Math.round(timeoutMs / 1000)} 秒，已停止`)
       }
     }, timeoutMs)
     child.on('close', async (code) => {
@@ -361,23 +554,30 @@ async function executeRunCommand(config, command) {
       clearInterval(heartbeatTimer)
       clearInterval(cancelTimer)
       clearTimeout(timeoutTimer)
+      if (forceKillTimer) clearTimeout(forceKillTimer)
       if (stdoutBuffer.trim()) parseCliEvent(adapterId, stdoutBuffer, state)
       if (!state.content && state.plainOutput) state.content = state.plainOutput
+      if (state.content) state.contentFinal = true
       if (!state.error && code !== 0) state.error = compact(stderrOutput || `命令退出码 ${code}`, 600)
       if (!state.error && !state.content) state.error = '本机 CLI 没有返回可显示的回答'
+      state.timings.completedAt = Date.now()
+      state.timings.durationMs = state.timings.completedAt - startedAt
       await publishChain
       await completeCommand(config, command.id, {
         trace: state.trace,
         content: state.content,
+        contentFinal: state.contentFinal,
         sessionId: state.sessionId,
         workspace: WORKSPACE_DIR,
+        diagnostics: state.diagnostics,
+        timings: state.timings,
       }, state.error)
       resolve()
     })
   })
 }
 
-async function pollCommand(config) {
+async function pollCommand(config, clis) {
   const payload = await request(config.server, '/api/local-cli/bridge/commands', {
     method: 'GET',
     headers: { authorization: `Bearer ${config.token}` },
@@ -389,7 +589,7 @@ async function pollCommand(config) {
     return clis
   }
   if (payload.command.type === 'run') {
-    await executeRunCommand(config, payload.command)
+    await executeRunCommand(config, payload.command, clis)
     return null
   }
   await completeCommand(config, payload.command.id, {}, '当前 Bridge 不支持该命令')
@@ -404,16 +604,18 @@ async function start() {
   const config = readConfig()
   if (!config?.token || !config?.server) throw new Error('尚未配对，请先运行 pair 命令。')
   let clis = scanLocalClis()
-  await heartbeat(config, clis)
+  const initialHeartbeat = await heartbeat(config, clis)
+  if (await maybeUpdateBridge(config, initialHeartbeat)) return
   process.stdout.write(`Giverny Local Bridge ${VERSION} 已连接，设备：${config.deviceName || config.deviceId}\n`)
   process.stdout.write('按 Ctrl+C 停止。\n')
   let lastHeartbeat = Date.now()
   while (true) {
     try {
-      const scanned = await pollCommand(config)
+      const scanned = await pollCommand(config, clis)
       if (scanned) clis = scanned
       if (Date.now() - lastHeartbeat >= 15_000) {
-        await heartbeat(config, clis)
+        const heartbeatResult = await heartbeat(config, clis)
+        if (await maybeUpdateBridge(config, heartbeatResult)) return
         lastHeartbeat = Date.now()
       }
     } catch (error) {

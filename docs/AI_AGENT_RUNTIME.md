@@ -91,6 +91,12 @@ D1 / R2 / app data
 
 正式站主链路使用 `DEEPSEEK_API_KEY` 与 `AGENT_TOOL_TOKEN`；`AI_RUNTIME_URL` 仍只用于 BAML runtime，与 Agent 无关。
 
+## 本机 CLI Runtime
+
+「自动 · 本机 CLI」只把 CLI 用作受控推理 Runtime，身份、租户、D1/R2 数据权限和业务写入仍由 Worker 管理。Bridge 0.4.0 为 Codex 创建专用隔离环境，只保留模型服务商和认证，禁用与 Giverny 无关的 Plugins、Apps、Skills 和 MCP；在 macOS 常驻服务没有代理环境变量时自动读取系统代理。这样不会把开发者完整 Codex 工作台的初始化成本和 OAuth 故障带入网站问答。
+
+普通问答与轻量分析的 Codex 执行预算为 12 秒，并使用低推理等级降低首答延迟；Worker 再预留 3 秒 Bridge 领取与回传开销，端到端最多等待 15 秒。本机文件和复杂多步任务的执行预算为 45 秒，继续使用用户配置的推理等级，端到端最多 48 秒。Worker 超时后会把命令置为 `expired` 并撤销 MCP Token，Bridge 轮询到过期状态后终止 Codex；迟到完成不能覆盖云端回退结果。运行结果保存启动、首事件、首内容和完成耗时及不含地址的代理/隔离模式，用于区分排队、CLI 初始化、模型网络和生成耗时。
+
 ## 下一步
 
 1. 外部 MCP 使用者扩展到多人或第三方组织前，接入 OAuth 2.1 动态客户端注册、授权同意页与细粒度 scopes。

@@ -498,7 +498,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const bridgePairResponse = await fetch(`${base}/api/local-cli/bridge/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.3.0', clis: initialClis }),
+    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.4.0', clis: initialClis }),
   })
   const bridgePair = await bridgePairResponse.json().catch(() => ({}))
   if (!bridgePairResponse.ok || !bridgePair.deviceId || !bridgePair.token) throw new Error(`Local CLI bridge pairing failed: ${JSON.stringify(bridgePair)}`)
@@ -514,9 +514,16 @@ async function runLocalCliBridgeCheck(cookie) {
   const heartbeat = await fetch(`${base}/api/local-cli/bridge/heartbeat`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ bridgeVersion: '0.3.0', clis: initialClis }),
+    body: JSON.stringify({ bridgeVersion: '0.4.0', clis: initialClis }),
   })
-  if (!heartbeat.ok) throw new Error(`Local CLI heartbeat failed: ${heartbeat.status}`)
+  const heartbeatResult = await heartbeat.json().catch(() => ({}))
+  if (!heartbeat.ok || heartbeatResult.bridgeRuntimeVersion !== '0.4.0' || heartbeatResult.bridgeDownloadUrl !== `${base}/giverny-bridge.mjs`) {
+    throw new Error(`Local CLI heartbeat did not advertise the runtime update: ${JSON.stringify(heartbeatResult)}`)
+  }
+  const bridgeSource = await fetch(pairing.bridgeUrl).then((response) => response.text())
+  if (!bridgeSource.includes("const VERSION = '0.4.0'") || !bridgeSource.includes('proxyAwareEnv') || !bridgeSource.includes("--disable', 'plugins'") || !bridgeSource.includes('model_reasoning_effort="low"') || !bridgeSource.includes('executeRunCommand(config, payload.command, clis)')) {
+    throw new Error('Published Bridge is missing the isolated proxy-aware Codex runtime')
+  }
 
   const listedResponse = await fetch(`${base}/api/local-cli/devices?browserDeviceKey=${encodeURIComponent(browserDeviceKey)}`, { headers: { cookie } })
   const listed = await listedResponse.json().catch(() => ({}))
@@ -706,12 +713,26 @@ async function runLocalCliBridgeCheck(cookie) {
   const runComplete = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/complete`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ result: { trace: ['已连接 Codex CLI', '读取 Giverny 数据：search_tasks', '本机 CLI 已完成执行'], content: '这是本机 Codex CLI 的回答。', sessionId: 'eval-codex-session', workspace: '/tmp/giverny' } }),
+    body: JSON.stringify({
+      result: {
+        trace: ['已连接 Codex CLI', '读取 Giverny 数据：search_tasks', '本机 CLI 已完成执行'],
+        content: '这是本机 Codex CLI 的回答。',
+        sessionId: 'eval-codex-session',
+        workspace: '/tmp/giverny',
+        diagnostics: { proxyMode: 'system', configMode: 'isolated', bridgeVersion: '0.4.0', proxyUrl: 'must-not-persist' },
+        timings: { bridgeStartedAt: 1000, cliSpawnedAt: 1100, firstEventAt: 1200, firstContentAt: 2500, completedAt: 2800, durationMs: 1800, unsafe: 99 },
+      },
+    }),
   })
   if (!runComplete.ok) throw new Error(`Local CLI run completion failed: ${runComplete.status}`)
   const chatText = await chatTextPromise
   if (!chatText.includes('"runtime":"local-cli"') || !chatText.includes('这是本机 Codex CLI 的回答') || !chatText.includes('读取 Giverny 数据')) {
     throw new Error(`Local CLI SSE did not expose route, progress, and result: ${chatText}`)
+  }
+  const completedCommandResponse = await fetch(`${base}/api/local-cli/commands/${runCommand.id}`, { headers: { cookie } })
+  const completedCommand = await completedCommandResponse.json().catch(() => ({}))
+  if (completedCommand.result?.diagnostics?.proxyMode !== 'system' || completedCommand.result?.diagnostics?.configMode !== 'isolated' || completedCommand.result?.timings?.durationMs !== 1800 || completedCommand.result?.diagnostics?.proxyUrl || completedCommand.result?.timings?.unsafe) {
+    throw new Error(`Local CLI diagnostics were not safely normalized: ${JSON.stringify(completedCommand)}`)
   }
   const expiredMcpToken = await fetch(`${base}/mcp`, {
     method: 'POST',
@@ -719,6 +740,30 @@ async function runLocalCliBridgeCheck(cookie) {
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'eval', version: '1' } } }),
   })
   if (expiredMcpToken.status !== 401) throw new Error('Local CLI MCP token remained valid after command completion')
+
+  const overheadChatResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({ browserDeviceKey, localCliConversationId: 'eval-local-overhead', month: '2026-07', messages: [{ role: 'user', content: '请给我一个设计沟通建议' }] }),
+  })
+  const overheadTextPromise = overheadChatResponse.text()
+  const overheadCommand = await waitForBridgeRun()
+  await new Promise((resolve) => setTimeout(resolve, 12_500))
+  const overheadFinalEventResponse = await fetch(`${base}/api/local-cli/bridge/commands/${overheadCommand.id}/events`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { trace: ['本机 CLI 已生成完整回答'], content: '这是包含 Bridge 传输开销后的本机回答。', contentFinal: true } }),
+  })
+  const overheadText = await overheadTextPromise
+  const overheadLateCompleteResponse = await fetch(`${base}/api/local-cli/bridge/commands/${overheadCommand.id}/complete`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { content: '迟到的进程退出结果', contentFinal: true }, error: '迟到错误不应覆盖最终答案' }),
+  })
+  const overheadLateComplete = await overheadLateCompleteResponse.json().catch(() => ({}))
+  if (!overheadFinalEventResponse.ok || !overheadText.includes('这是包含 Bridge 传输开销后的本机回答') || overheadText.includes('已自动回退云端 Agent') || !overheadLateComplete.alreadyCompleted) {
+    throw new Error(`Local CLI transport overhead incorrectly consumed the 12-second execution budget: ${overheadText}`)
+  }
 
   const cancelChatResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
@@ -735,9 +780,19 @@ async function runLocalCliBridgeCheck(cookie) {
   const bridgeStateResponse = await fetch(`${base}/api/local-cli/bridge/commands/${cancellableCommand.id}`, { headers: bridgeHeaders })
   const bridgeState = await bridgeStateResponse.json().catch(() => ({}))
   if (bridgeState.status !== 'cancelled') throw new Error(`Bridge did not observe cancellation: ${JSON.stringify(bridgeState)}`)
+  const lateCompleteResponse = await fetch(`${base}/api/local-cli/bridge/commands/${cancellableCommand.id}/complete`, {
+    method: 'POST',
+    headers: bridgeHeaders,
+    body: JSON.stringify({ result: { content: '这个迟到结果不应覆盖取消状态' } }),
+  })
+  const lateComplete = await lateCompleteResponse.json().catch(() => ({}))
+  const cancelledCommand = await fetch(`${base}/api/local-cli/commands/${cancellableCommand.id}`, { headers: { cookie } }).then((response) => response.json())
+  if (!lateCompleteResponse.ok || !lateComplete.cancelled || cancelledCommand.status !== 'cancelled' || cancelledCommand.result?.content) {
+    throw new Error(`Late local CLI completion overwrote the terminal state: ${JSON.stringify({ lateComplete, cancelledCommand })}`)
+  }
   const cancelText = await cancelTextPromise
   if (!cancelText.includes('已停止本机 CLI 执行')) throw new Error(`Cancelled local CLI chat did not close cleanly: ${cancelText}`)
-  process.stdout.write('Local CLI identity, explicit cloud selection, background-analysis routing, deterministic site-tool routing, data prefetch, tenant isolation, streaming routing, MCP cleanup, cancellation, and adapter selection checks passed.\n')
+  process.stdout.write('Local CLI identity, runtime update, explicit cloud selection, background-analysis routing, deterministic site-tool routing, data prefetch, tenant isolation, streaming routing, execution/transport budget separation, safe diagnostics, MCP cleanup, cancellation, late-result protection, and adapter selection checks passed.\n')
 }
 
 async function runAgentOrchestrationCheck(cookie) {

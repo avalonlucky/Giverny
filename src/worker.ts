@@ -14203,7 +14203,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     promptLength: lastMessage.length,
   })
   return {
-    route: { commandId, deviceName: device.name, cliName: adapter.name, adapterId: adapter.adapter_id, timeoutMs: runTimeoutMs },
+    route: { commandId, deviceName: device.name, cliName: adapter.name, adapterId: adapter.adapter_id, timeoutMs: runTimeoutMs + LOCAL_CLI_BRIDGE_OVERHEAD_MS },
     cloudReason: '',
   }
 }
@@ -14241,6 +14241,13 @@ async function waitForLocalCliChat(
     if (command.status === 'cancelled') return { status: 'cancelled' as const, result, trace: routeTrace }
     if (command.status === 'failed' || command.status === 'expired') {
       return { status: 'failed' as const, error: command.error_message || '本机 CLI 执行失败', trace: routeTrace }
+    }
+    if (command.status === 'running' && result.contentFinal && result.content) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE local_cli_commands SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'").bind(route.commandId),
+        env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${route.commandId}`),
+      ])
+      return { status: 'completed' as const, result, trace: uniqueAgentTrace([...routeTrace, `${route.cliName} 已返回结果`]) }
     }
     await waitForAgentTimeline(900)
   }
@@ -15333,9 +15340,10 @@ const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
 const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
 const LOCAL_CLI_FAST_RUN_TTL_MS = 12 * 1000
 const LOCAL_CLI_COMPLEX_RUN_TTL_MS = 45 * 1000
+const LOCAL_CLI_BRIDGE_OVERHEAD_MS = 3 * 1000
 const LOCAL_CLI_RUN_TTL_MS = 50 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
-const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
+const LOCAL_CLI_RUNTIME_VERSION = '0.4.0'
 
 function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
   if (!value || typeof value !== 'object') return null
@@ -15528,7 +15536,13 @@ async function heartbeatLocalCliBridge(env: Env, request: Request) {
     .bind(String(body.bridgeVersion || device.bridge_version).slice(0, 40), device.id)
     .run()
   if (Array.isArray(body.clis)) await replaceLocalCliAdapters(env, device.id, normalizeLocalCliReports(body.clis))
-  return ok({ ok: true, deviceId: device.id, selectedCliId: device.selected_cli_id })
+  return ok({
+    ok: true,
+    deviceId: device.id,
+    selectedCliId: device.selected_cli_id,
+    bridgeRuntimeVersion: LOCAL_CLI_RUNTIME_VERSION,
+    bridgeDownloadUrl: `${new URL(request.url).origin}/giverny-bridge.mjs`,
+  })
 }
 
 async function pollLocalCliBridgeCommand(env: Env, request: Request) {
@@ -15553,13 +15567,35 @@ async function pollLocalCliBridgeCommand(env: Env, request: Request) {
 }
 
 function normalizeLocalCliCommandResult(value: unknown) {
-  if (!value || typeof value !== 'object') return { trace: [] as string[], content: '', sessionId: '', workspace: '' }
+  if (!value || typeof value !== 'object') return { trace: [] as string[], content: '', contentFinal: false, sessionId: '', workspace: '', diagnostics: {}, timings: {} }
   const item = value as Record<string, unknown>
+  const rawDiagnostics = item.diagnostics && typeof item.diagnostics === 'object' ? item.diagnostics as Record<string, unknown> : {}
+  const rawTimings = item.timings && typeof item.timings === 'object' ? item.timings as Record<string, unknown> : {}
+  const safeTiming = (key: string) => {
+    const value = Number(rawTimings[key])
+    return Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), Number.MAX_SAFE_INTEGER) : 0
+  }
+  const proxyMode = ['environment', 'system', 'direct'].includes(String(rawDiagnostics.proxyMode)) ? String(rawDiagnostics.proxyMode) : ''
+  const configMode = ['isolated', 'default'].includes(String(rawDiagnostics.configMode)) ? String(rawDiagnostics.configMode) : ''
   return {
     trace: (Array.isArray(item.trace) ? item.trace : []).map((line) => String(line).trim().slice(0, 180)).filter(Boolean).slice(-16),
     content: String(item.content || '').slice(0, 40_000),
+    contentFinal: item.contentFinal === true,
     sessionId: String(item.sessionId || '').slice(0, 160),
     workspace: String(item.workspace || '').slice(0, 500),
+    diagnostics: {
+      proxyMode,
+      configMode,
+      bridgeVersion: String(rawDiagnostics.bridgeVersion || '').slice(0, 40),
+    },
+    timings: {
+      bridgeStartedAt: safeTiming('bridgeStartedAt'),
+      cliSpawnedAt: safeTiming('cliSpawnedAt'),
+      firstEventAt: safeTiming('firstEventAt'),
+      firstContentAt: safeTiming('firstContentAt'),
+      completedAt: safeTiming('completedAt'),
+      durationMs: safeTiming('durationMs'),
+    },
   }
 }
 
@@ -15602,6 +15638,10 @@ async function completeLocalCliBridgeCommand(env: Env, commandId: string, reques
   if (command.status === 'expired') {
     await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
     return ok({ ok: true, expired: true })
+  }
+  if (command.status === 'completed') {
+    await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
+    return ok({ ok: true, alreadyCompleted: true })
   }
   const result = normalizeLocalCliCommandResult(body.result)
   await env.DB.prepare("UPDATE local_cli_commands SET status = ?, result_json = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?")

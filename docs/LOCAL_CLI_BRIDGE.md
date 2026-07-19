@@ -16,7 +16,7 @@
 6. 在状态为「可用」的 CLI 右侧点击「连接」。同一设备同一时间只选择一个 CLI。
 7. 打开工作助手并选择「自动 · 本机 CLI」后发出普通问题。时间线显示当前电脑与 CLI 名称，即表示该请求已由本机 CLI 执行。
 
-关闭运行连接器的终端后，设备会在短时间内显示离线。当前版本需手动保持连接器运行，后续再提供 macOS / Windows 开机自启安装器。
+macOS 安装命令会把连接器注册为开机常驻服务；关闭最初执行安装的终端后仍可保持在线。Bridge 0.4.0 起会通过心跳检查同源更新，校验目标版本、下载来源和脚本内容后原子替换，并由系统服务自动重启。0.3.x 不具备更新器，需要重新下载一次 0.4.0，后续版本即可自动升级。
 
 ## 状态含义
 
@@ -71,7 +71,7 @@ D1 migration：`db/migrations/0022_local_cli_bridge.sql`。数据表分别保存
 
 ## 工作助手路由
 
-当前 Bridge Runtime 版本为 `0.3.1`，并继续兼容 `0.3.0`。只有工作助手选择「自动 · 本机 CLI」时，Worker 才会用登录身份和 `browserDeviceKey` 精确匹配当前电脑，再按请求类型选择站内只读工具、本机 CLI 或云端 Agent。用户明确选择 DeepSeek、豆包、Kimi、Gemini 或 Workers AI 时会直接调用该云端模型，不创建本机命令。
+当前 Bridge Runtime 版本为 `0.4.0`。只有工作助手选择「自动 · 本机 CLI」时，Worker 才会用登录身份和 `browserDeviceKey` 精确匹配当前电脑，再按请求类型选择站内只读工具、本机 CLI 或云端 Agent。用户明确选择 DeepSeek、豆包、Kimi、Gemini 或 Workers AI 时会直接调用该云端模型，不创建本机命令。
 
 快捷键、功能入口、模型路由和权限边界由 Worker 查询共享产品能力注册表，不再为产品说明启动 CLI。基础金额、工时合计等确定性数据由 Worker 直接调用站内只读工具计算。任务概览等需要语言组织的只读请求，会先由 Worker 从 D1 预取受权限约束的数据摘要，再交给 CLI 分析；数据不足时 CLI 仍可调用短期 MCP 只读工具。月度趋势、跨月复盘等后台深度分析直接进入云端 Agent。Codex 每轮使用全新的受控执行，避免恢复旧会话时出现 `Reconnecting` 重试；最近对话由 Worker 作为文本上下文传入。
 
@@ -88,7 +88,7 @@ D1 migration：`db/migrations/0022_local_cli_bridge.sql`。数据表分别保存
 - 创建任务、修改任务、记录进展/反馈、验收、作废等写入，以保留网页预览确认；
 - 月度趋势、跨月复盘等需要后台聚合和持久化结果的深度分析；
 - 图片理解；
-- Bridge 离线或低于兼容版本 `0.3.0`、CLI 不可用、本机超时或执行失败时的自动回退。
+- Bridge 离线或低于兼容版本 `0.4.0`、CLI 不可用、本机超时或执行失败时的自动回退。
 
 ## 执行权限
 
@@ -98,8 +98,28 @@ D1 migration：`db/migrations/0022_local_cli_bridge.sql`。数据表分别保存
 - 本机工作目录固定为 `~/.giverny/workspace`。
 - Codex 使用 `workspace-write` 沙箱和 `never` 批准策略；Claude Code 使用限定工具和严格 MCP 配置；不使用跳过权限的危险参数。
 
+## Codex 启动与网络环境
+
+- macOS `launchd` 不会继承用户终端里的 `HTTP_PROXY`、`HTTPS_PROXY` 或 `ALL_PROXY`。Bridge 会先使用自身环境变量；没有时通过系统网络配置读取已启用的 HTTP、HTTPS 或 SOCKS 代理，并只注入 Codex 子进程。心跳和运行记录只上报 `environment`、`system` 或 `direct`，不会上报代理主机和端口。
+- Codex 在 `~/.giverny/codex-runtime` 使用专用运行目录。Bridge 从用户 Codex 配置中复制模型、模型服务商、推理等级和模型目录配置，并以权限 `0600` 保存；登录文件使用本机符号链接，不上传。Skills、Plugins、Apps 和无关 MCP 不会进入工作助手运行。
+- Bridge 启动时缓存已扫描的 CLI 路径、版本和登录态；运行问答直接复用该缓存，不再同步重跑所有 CLI 的版本与登录检查。只有 Bridge 启动或网页点击「测试并重新扫描」才执行完整扫描。
+- 不能直接使用 `--ignore-user-config`：部分桌面 Codex 使用自定义模型服务商，完全忽略配置会丢失服务商与认证并得到 401。隔离目录的目标是保留模型连接必需项，同时去掉开发环境扩展。
+- 普通问答的 Codex 子进程预算为 12 秒，并覆盖为 Codex 低推理等级；本机直接基准由默认推理等级的约 10.5 秒降至约 3.0 秒。网页端另预留 3 秒给 Bridge 的轮询领取和完成回传，因此端到端回退上限为 15 秒。本机文件或复杂多步任务的子进程预算为 45 秒并保留用户原有推理等级，网页上限为 48 秒。Bridge 允许的保护范围为 5–50 秒，不再把 12 秒错误抬高到 30 秒。Worker 将命令标记为过期后，Bridge 在轮询到状态时立即终止子进程。
+- Codex 的 `item.completed / agent_message` 和 Claude 的最终 `result` 会设置 `contentFinal`。Worker 收到最终内容即可原子完成命令并返回用户，不等待 CLI 进程退出；Bridge 随后的完成回调只得到 `alreadyCompleted`，不能把已交付结果改成失败。
+
+## 运行诊断
+
+`local_cli_commands.result_json` 保存安全诊断字段：`bridgeStartedAt`、`cliSpawnedAt`、`firstEventAt`、`firstContentAt`、`completedAt`、`durationMs`，以及 `proxyMode`、`configMode`、`bridgeVersion`。据此可区分：
+
+- `created_at → claimed_at` 高：Bridge 离线或轮询异常；
+- `cliSpawnedAt → firstEventAt` 高：CLI 启动、配置或插件初始化异常；
+- 已收到 `thread.started / turn.started`，但 `firstContentAt` 长时间为 0：模型网络或上游响应异常；
+- `firstContentAt → completedAt` 高：回答生成、MCP 工具或本机任务本身耗时。
+
+诊断不得保存 Prompt、代理地址、模型 Key、Bridge Token 或 MCP Token。命令完成、失败、取消或过期后，短期 MCP Token 都必须撤销；迟到结果不能覆盖终态。
+
 ## 后续运维项
 
-1. macOS / Windows 签名安装器、开机自启和 Bridge 自动升级。
+1. Windows 签名安装器与系统服务级自动升级。
 2. 租户级设备命名、远程撤销和更细的命令审计界面。
 3. 经过明确用户确认的本机文件读取白名单。
