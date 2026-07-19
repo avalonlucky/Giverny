@@ -40,6 +40,28 @@ test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
 })
 
+test('数字键可跳转到今年对应月份且输入时不会误触', async ({ page }) => {
+  await page.keyboard.press('3')
+  await expect(page.getByRole('heading', { name: '2026 年 3 月工作台' })).toBeVisible()
+
+  await page.keyboard.press('0')
+  await expect(page.getByRole('heading', { name: '2026 年 10 月工作台' })).toBeVisible()
+
+  await page.keyboard.press('-')
+  await expect(page.getByRole('heading', { name: '2026 年 11 月工作台' })).toBeVisible()
+
+  await page.keyboard.press('=')
+  await expect(page.getByRole('heading', { name: '2026 年 12 月工作台' })).toBeVisible()
+
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  const hours = page.getByRole('textbox', { name: '预估工时，可手动输入小数' })
+  await hours.fill('1.')
+  await hours.press('2')
+  await expect(hours).toHaveValue('1.2')
+  await page.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByRole('heading', { name: '2026 年 12 月工作台' })).toBeVisible()
+})
+
 test('计划中任务可直接进入记录进展并切换验收模式', async ({ page }) => {
   await page.getByText('公司产品封套延展', { exact: true }).click()
   const progressButton = page.getByRole('button', { name: /记录进展/ }).last()
