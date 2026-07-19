@@ -5,6 +5,7 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
+import { productCapabilities, resolveDirectProductHelp, searchProductHelp } from './productCapabilities'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
@@ -3927,6 +3928,24 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
+      '/api/agent/tools/product-help': {
+        get: {
+          operationId: 'search_product_help',
+          tags: ['Context'],
+          summary: 'Search Giverny product help',
+          description: 'Search the shared product capability registry for shortcuts, feature entry points, workflows, routing, and permission rules.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'query', in: 'query', required: true, schema: { type: 'string' } },
+            { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 10 } },
+          ],
+          responses: {
+            '200': jsonResponse('Product help matches', '#/components/schemas/ProductHelpResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+          },
+        },
+      },
       '/api/agent/tools/create-task-plan': writeToolPath('create_task_plan', 'Create a persistent multi-step Agent plan'),
       '/api/agent/tools/get-task-memory': writeToolPath('get_task_memory', 'Read and refresh durable task memory'),
       '/api/agent/tools/create-task-preview': writeToolPath('create_task_preview', 'Preview a new task'),
@@ -4086,6 +4105,17 @@ function agentOpenApiSpec(request: Request) {
               items: { type: 'string' },
             },
             generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        ProductHelpResponse: {
+          type: 'object',
+          required: ['tool', 'query', 'total', 'matches'],
+          properties: {
+            tool: { type: 'string' },
+            query: { type: 'string' },
+            total: { type: 'integer' },
+            matches: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            generatedAt: { type: 'string' },
           },
         },
       },
@@ -4376,12 +4406,32 @@ async function agentContextTool(env: Env, request: Request) {
       '基于知识库回答平台规范、设计规范、发布流程和个人资料问题',
       '闲聊、解释概念、头脑风暴、写作润色和效率规划',
     ],
+    productKnowledge: {
+      source: 'product-capability-registry',
+      capabilityCount: productCapabilities.length,
+      searchTool: 'search_product_help',
+    },
     constraints: [
       '涉及金额、工时、状态和验收时优先调用工具，不凭空编造。',
       '写入动作必须先调用 preview 工具生成草稿和 confirmationToken，并等待用户明确确认后再调用 execute 工具。',
       '允许删除单条进展、反馈或等待记录，但整任务删除、作废、结算锁定、付款和部署仍不开放给 Agent 工具。',
       '不要自称 DeepSeek、Gemini、GPT 或其他底层模型。',
     ],
+    generatedAt: nowIso(),
+  })
+}
+
+async function agentProductHelpTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const query = String(body.query || '').trim().slice(0, 500)
+  if (!query) return agentFail('query 不能为空', 400)
+  const result = searchProductHelp(query, Number(body.limit) || 5)
+  return agentOk({
+    tool: 'search_product_help',
+    ...result,
     generatedAt: nowIso(),
   })
 }
@@ -5047,6 +5097,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/product-help' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentProductHelpTool(env, request)
+  }
   if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {
     return agentCreateTaskPlanTool(env, request)
   }
@@ -5222,6 +5275,15 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     annotations,
   }, async (input) => {
     try { return mcpToolResult(await callMcpReadTool(env, context.endpoint, input)) } catch (error) { return mcpToolError(error) }
+  })
+  const productHelp = agentReadToolRegistry.search_product_help
+  server.registerTool('search_product_help', {
+    title: productHelp.title,
+    description: productHelp.description,
+    inputSchema: productHelp.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, productHelp.endpoint, input)) } catch (error) { return mcpToolError(error) }
   })
 }
 
@@ -13419,6 +13481,18 @@ async function chatWithAi(env: Env, request: Request) {
 
   // 判断是否需要联网搜索（用户在问自身数据则不搜）
   const lastMsg = messages.at(-1)?.content ?? ''
+  const directProductHelp = resolveDirectProductHelp(lastMsg)
+  if (directProductHelp) {
+    return ok({
+      content: directProductHelp.answer,
+      runtime: 'site-tools',
+      trace: [
+        '识别为 Giverny 产品使用问题',
+        '查询产品能力注册表 [tool:search_product_help]',
+        `已匹配：${directProductHelp.primary.title}`,
+      ],
+    })
+  }
   const DATA_KW = ['今天', '今日', '本月', '上月', '工时', '任务', '收入', '赚', '计时', '结算', '明细', '近期', '最近', '历史', '验收']
   const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && !DATA_KW.some((kw) => lastMsg.includes(kw))
 
@@ -13608,28 +13682,6 @@ async function chatWithAi(env: Env, request: Request) {
 如果问题涉及月份金额、收入、结算、工时合计，必须优先引用“确定性月份金额统计”，不能声称历史月份无法计算。
 回答简洁自然，像了解对方工作节奏的助理。
 
-=== Giverny 键盘快捷键（准确信息，回答快捷键问题时必须以此为准）===
-【任务操作 - 需先选中任务】
-  Enter    查看任务详情
-  E        编辑任务
-  P        记录进展（打开记录进展弹窗）
-  A        去验收（仅限待验收状态）
-【全局操作】
-  N        新建任务
-  Shift+N  补录已完成任务
-  ?        显示快捷键帮助面板
-【页面导航】
-  Command+Option+1        前往工作台
-  Command+Option+2        前往任务列表
-  Command+Option+3        前往文件库
-  Command+Option+4        前往洞察
-  Command+Option+5        前往结算
-  Command+Option+6        前往收入
-  Command+Shift+Option+K  前往知识库
-  Command+Shift+Option+,  前往设置
-  Ctrl 可替代 Command。
-注意：在输入框和编辑区域内，单键快捷键自动停用。
-
 今天：${today}
 当前月份：${month || '未指定'}
 时薪：¥${hourlyRate}/h
@@ -13752,6 +13804,7 @@ function agentMetricIntent(tools: string[], approvalAction: string, hasSelection
   if (tools.includes('get_task_detail')) return 'task_detail'
   if (tools.includes('search_tasks')) return 'task_search'
   if (tools.includes('get_giverny_context')) return 'workspace_context'
+  if (tools.includes('search_product_help')) return 'product_help'
   return 'general_chat'
 }
 
@@ -13898,6 +13951,7 @@ type LocalCliChatRoute = {
   deviceName: string
   cliName: string
   adapterId: string
+  timeoutMs: number
 }
 
 type LocalCliChatDecision = {
@@ -13926,6 +13980,10 @@ function isLocalCliWriteIntent(message: string) {
 }
 
 async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string, workspaceId: string) {
+  const productHelp = searchProductHelp(question, 5)
+  const productContext = productHelp.matches.length
+    ? `\n\n=== Giverny 产品能力检索结果 ===\n${JSON.stringify(productHelp)}\n=== 产品能力检索结束 ===\n`
+    : ''
   const requestedMonths = extractRequestedMonths(question, currentMonth)
   if (isFinanceQuestion(question) && requestedMonths.length > 0) {
     const hourlyRate = await getHourlyRate(env)
@@ -13937,11 +13995,17 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
         `只读工具已查询 ${requestedMonths.join('、')} 的结算数据`,
         '完成金额与计费工时核算',
       ],
-      context: '',
+      context: productContext,
     }
   }
 
-  if (!isWorkDataQuestion(question)) return { immediate: '', trace: [] as string[], context: '' }
+  if (!isWorkDataQuestion(question)) {
+    return {
+      immediate: '',
+      trace: productHelp.matches.length ? ['站内产品能力工具已预取相关说明'] : [] as string[],
+      context: productContext,
+    }
+  }
 
   const rows = await env.DB.prepare(
     `SELECT id, title, design_type, status, progress, actual_hours, estimated_hours,
@@ -13967,8 +14031,14 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
   return {
     immediate: '',
     trace: ['站内只读工具已预取任务数据', `已提供 ${tasks.length} 条任务摘要给本机 CLI`],
-    context: `\n\n=== Giverny 站内只读工具预取结果 ===\n${JSON.stringify({ tasks })}\n=== 预取结果结束 ===\n`,
+    context: `${productContext}\n\n=== Giverny 站内只读工具预取结果 ===\n${JSON.stringify({ tasks })}\n=== 预取结果结束 ===\n`,
   }
+}
+
+function localCliRunTimeoutForQuestion(question: string) {
+  const normalized = question.replace(/\s+/g, '')
+  const needsLongLocalRun = /(?:生成|创建|制作|整理|转换|下载|导出|写入|修改|读取).{0,20}(?:文件|文档|表格|代码|脚本|本机)|(?:本机|电脑).{0,20}(?:文件|目录|命令|代码)|(?:深度|详细|完整|多步).{0,12}(?:分析|总结|方案)/.test(normalized)
+  return needsLongLocalRun ? LOCAL_CLI_COMPLEX_RUN_TTL_MS : LOCAL_CLI_FAST_RUN_TTL_MS
 }
 
 async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliChatDecision> {
@@ -13990,6 +14060,24 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const lastMessage = messages.at(-1)?.content || ''
   if (!lastMessage) return { route: null, cloudReason: '' }
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
+  const directProductHelp = resolveDirectProductHelp(lastMessage)
+  if (directProductHelp) {
+    return {
+      route: null,
+      cloudReason: '',
+      immediate: {
+        content: directProductHelp.answer,
+        trace: [
+          '识别为 Giverny 产品使用问题',
+          '查询产品能力注册表 [tool:search_product_help]',
+          `已匹配：${directProductHelp.primary.title}`,
+        ],
+        cliName: 'Giverny 产品指南',
+        deviceName: '站内能力库',
+        runtime: 'site-tools',
+      },
+    }
+  }
   if (modelChoice !== 'auto') {
     return { route: null, cloudReason: `已按你的选择直接使用 ${selectedCloudModelLabel(modelChoice)}，不经过本机 CLI` }
   }
@@ -14069,6 +14157,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const mcpToken = `lc_${Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
   const expiresAt = new Date(Date.now() + LOCAL_CLI_RUN_TTL_MS).toISOString()
   const conversationId = String(body.localCliConversationId || body.agentRuntimeConversationId || '').trim().slice(0, 160)
+  const runTimeoutMs = localCliRunTimeoutForQuestion(lastMessage)
   const textAttachments = attachments
     .filter((item) => item?.type === 'text')
     .slice(0, 3)
@@ -14078,7 +14167,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const history = historyMessages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
   const prompt = `你是 Giverny 工作助手爱丽丝，现在运行在用户当前电脑上的 ${adapter.name}。\n\n` +
     `执行边界：\n` +
-    `1. 查询任务、工时、收入、附件和工作区数据时，优先使用下方由网站只读工具预取的结果；数据不足时再调用 giverny MCP 工具，不得凭空猜测。\n` +
+    `1. 查询任务、工时、收入、附件、产品功能、快捷键和工作区数据时，优先使用下方由网站工具预取的结果；数据不足时再调用 giverny MCP 工具，不得凭空猜测。\n` +
     `2. 站内任务创建、状态修改、进展、反馈、验收等写入必须回到网页的确认流程；本轮不得绕过确认直接修改 Giverny 数据。\n` +
     `3. 如需在本机生成或下载文件，只能写入当前 Giverny 专用工作目录，并在回答中给出完整文件路径。\n` +
     `4. 不读取密钥、浏览器资料、SSH 配置或 Giverny 工作目录之外的私人文件，除非用户明确指定文件。\n` +
@@ -14102,7 +14191,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
       prompt,
       mcpUrl: `${new URL(request.url).origin}/mcp`,
       mcpToken,
-      timeoutMs: 75_000,
+      timeoutMs: runTimeoutMs,
       conversationId,
       resumeSessionId: '',
     }), expiresAt),
@@ -14114,7 +14203,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     promptLength: lastMessage.length,
   })
   return {
-    route: { commandId, deviceName: device.name, cliName: adapter.name, adapterId: adapter.adapter_id },
+    route: { commandId, deviceName: device.name, cliName: adapter.name, adapterId: adapter.adapter_id, timeoutMs: runTimeoutMs },
     cloudReason: '',
   }
 }
@@ -14127,7 +14216,7 @@ async function waitForLocalCliChat(
   const startedAt = Date.now()
   let sentContent = ''
   let lastTraceSignature = ''
-  while (Date.now() - startedAt < LOCAL_CLI_RUN_TTL_MS) {
+  while (Date.now() - startedAt < route.timeoutMs) {
     const command = await env.DB.prepare('SELECT * FROM local_cli_commands WHERE id = ?').bind(route.commandId).first<DbLocalCliCommand>()
     if (!command) return { status: 'failed' as const, error: '本机命令记录不存在' }
     const result = normalizeLocalCliCommandResult(command.result_json ? JSON.parse(command.result_json) : null)
@@ -14155,9 +14244,11 @@ async function waitForLocalCliChat(
     }
     await waitForAgentTimeline(900)
   }
-  await env.DB.prepare("UPDATE local_cli_commands SET status = 'expired', error_message = '本机 CLI 执行超时', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('queued', 'running')")
-    .bind(route.commandId).run()
-  return { status: 'failed' as const, error: '本机 CLI 执行超时' }
+  await env.DB.batch([
+    env.DB.prepare("UPDATE local_cli_commands SET status = 'expired', error_message = '本机 CLI 首次响应超时', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('queued', 'running')").bind(route.commandId),
+    env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${route.commandId}`),
+  ])
+  return { status: 'failed' as const, error: `本机 CLI 在 ${Math.round(route.timeoutMs / 1000)} 秒内没有完成，已停止并快速回退` }
 }
 
 function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerExecutionContext) {
@@ -15240,7 +15331,9 @@ type DbLocalCliCommand = {
 
 const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
 const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
-const LOCAL_CLI_RUN_TTL_MS = 80 * 1000
+const LOCAL_CLI_FAST_RUN_TTL_MS = 12 * 1000
+const LOCAL_CLI_COMPLEX_RUN_TTL_MS = 45 * 1000
+const LOCAL_CLI_RUN_TTL_MS = 50 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
 const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
 
@@ -15505,6 +15598,10 @@ async function completeLocalCliBridgeCommand(env: Env, commandId: string, reques
   if (command.status === 'cancelled') {
     await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
     return ok({ ok: true, cancelled: true })
+  }
+  if (command.status === 'expired') {
+    await env.DB.prepare("DELETE FROM access_tokens WHERE label = ? AND scope = 'mcp-read'").bind(`local-cli:${command.id}`).run()
+    return ok({ ok: true, expired: true })
   }
   const result = normalizeLocalCliCommandResult(body.result)
   await env.DB.prepare("UPDATE local_cli_commands SET status = ?, result_json = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?")

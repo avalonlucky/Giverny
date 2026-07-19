@@ -96,7 +96,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_tasks']
+  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -106,6 +106,11 @@ async function runMcpChecks() {
   const structuredFiles = attachmentResult.structuredContent?.files
   if (attachmentResult.isError || !Array.isArray(structuredFiles) || structuredFiles.length === 0) {
     throw new Error('MCP attachment search did not return structured files')
+  }
+  const productHelpResult = await request(6, 'tools/call', { name: 'search_product_help', arguments: { query: '显示金额的快捷键', limit: 3 } })
+  const productMatches = productHelpResult.structuredContent?.matches
+  if (productHelpResult.isError || !Array.isArray(productMatches) || !productMatches.some((item) => String(item.answer || '').includes('Command + Shift + M'))) {
+    throw new Error('MCP product help did not return the authoritative shortcut')
   }
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }
@@ -578,6 +583,21 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Deterministic finance query did not use the direct read-only route: ${financeText}`)
   }
 
+  const productHelpResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'deepseek-v4-flash',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '显示金额和隐藏金额的快捷键是什么？' }],
+    }),
+  })
+  const productHelpText = await productHelpResponse.text()
+  if (!productHelpResponse.ok || !productHelpText.includes('Command + Shift + M') || !productHelpText.includes('search_product_help') || productHelpText.includes('"commandId"')) {
+    throw new Error(`Product help did not bypass model and local CLI routing: ${productHelpText}`)
+  }
+
   const explicitModelResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
@@ -674,7 +694,7 @@ async function runLocalCliBridgeCheck(cookie) {
   ])
   if (earlyChatResult) throw new Error(`Local CLI chat ended before Bridge pickup: ${earlyChatResult}`)
   const runCommand = await waitForBridgeRun()
-  if (runCommand.payload?.adapterId !== 'codex' || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP') || !String(runCommand.payload?.prompt || '').includes('站内只读工具预取结果')) {
+  if (runCommand.payload?.adapterId !== 'codex' || runCommand.payload?.timeoutMs !== 12_000 || !String(runCommand.payload?.mcpToken || '').startsWith('lc_') || !String(runCommand.payload?.prompt || '').includes('giverny MCP') || !String(runCommand.payload?.prompt || '').includes('站内只读工具预取结果')) {
     throw new Error(`Local CLI run payload is incomplete or unsafe: ${JSON.stringify(runCommand.payload)}`)
   }
   const progressResponse = await fetch(`${base}/api/local-cli/bridge/commands/${runCommand.id}/events`, {

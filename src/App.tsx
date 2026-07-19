@@ -78,6 +78,7 @@ import {
   importedMonthlyHours,
   type DesignTypeGroup,
 } from './config/appConfig'
+import { productShortcutHelpGroups } from './productCapabilities'
 import {
   api,
   ApiError,
@@ -8504,56 +8505,7 @@ function App() {
         run: () => handleOpenTaskDetail(task.id),
       })),
   ]
-  const shortcutHelpGroups: ShortcutHelpGroup[] = [
-    {
-      label: '全局',
-      items: [
-        { keys: '⌘ K / Ctrl K', action: '打开命令面板' },
-        { keys: '⌘ ⇧ M / Ctrl ⇧ M', action: '显示 / 隐藏金额' },
-        { keys: '⌥ ⌥', action: '查看快捷键' },
-        { keys: '⌥ A', action: '打开 / 关闭爱丽丝 AI 助手（管理员）' },
-        { keys: 'N', action: '新建任务' },
-        { keys: '⇧ N', action: '补录任务' },
-        { keys: 'P', action: '记录选中任务进展' },
-        { keys: 'F', action: '打开文件库' },
-        { keys: ',', action: '打开设置' },
-        { keys: '/', action: '聚焦任务搜索' },
-        { keys: 'Esc', action: '关闭当前浮层' },
-      ],
-    },
-    {
-      label: '导航',
-      items: [
-        { keys: '⌘ ⌥ 1', action: '工作台' },
-        { keys: '⌘ ⌥ 2', action: '任务' },
-        { keys: '⌘ ⌥ 3', action: '文件库' },
-        { keys: '⌘ ⌥ 4', action: '洞察' },
-        { keys: '⌘ ⌥ 5', action: '结算' },
-        { keys: '⌘ ⌥ 6', action: '收入' },
-        { keys: '⌘ ⇧ ⌥ ,', action: '设置' },
-        { keys: '⌘ ⇧ ⌥ K', action: '跳转到知识库（管理员）' },
-      ],
-    },
-    {
-      label: '任务列表',
-      items: [
-        { keys: 'J / K', action: '选择下一个 / 上一个任务' },
-        { keys: 'Enter', action: '查看选中任务详情' },
-        { keys: 'E', action: '编辑选中任务' },
-        { keys: 'P', action: '记录选中任务进展' },
-        { keys: 'A', action: '验收选中任务' },
-      ],
-    },
-    {
-      label: '月份',
-      items: [
-        { keys: '1–9 / 0', action: '跳到今年 1–10 月' },
-        { keys: '- / =', action: '跳到今年 11 / 12 月' },
-        { keys: '[', action: '切换到上个月' },
-        { keys: ']', action: '切换到下个月' },
-      ],
-    },
-  ]
+  const shortcutHelpGroups: ShortcutHelpGroup[] = productShortcutHelpGroups
   const hasBlockingModal = Boolean(
     isModalOpen
       || detailTaskId

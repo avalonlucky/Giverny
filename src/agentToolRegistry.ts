@@ -46,6 +46,15 @@ export const agentReadToolRegistry = {
     endpoint: 'context',
     inputSchema: z.object({}),
   },
+  search_product_help: {
+    title: '查询产品使用说明',
+    description: '查询 Giverny 的快捷键、功能入口、操作流程、模型路由、权限边界和产品规则。网站怎么用的问题必须优先调用。',
+    endpoint: 'product-help',
+    inputSchema: z.object({
+      query: z.string().min(1).max(500),
+      limit: z.number().int().min(1).max(10).default(5),
+    }),
+  },
 } as const
 
 export type AgentReadToolName = keyof typeof agentReadToolRegistry

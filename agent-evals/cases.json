@@ -75,6 +75,10 @@
     { "id": "analysis-06", "category": "background_analysis", "prompt": "把本月批量附件分析结果汇总一下", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "batch_attachment_analysis" } },
     { "id": "analysis-07", "category": "background_analysis", "prompt": "分析最近几个月的工作趋势", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "trend_analysis" } },
 
+    { "id": "product-help-01", "category": "product_help", "prompt": "显示金额和隐藏金额的快捷键是什么？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-02", "category": "product_help", "prompt": "11 月和 12 月怎么用键盘直接跳转？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-03", "category": "product_help", "prompt": "本机 CLI 能直接修改 Giverny 数据库吗？", "expect": { "tools": ["search_product_help"] } },
+
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-03", "category": "disambiguation", "prompt": "把视频任务的进度改成80%", "expect": { "tools": ["update_task_status_preview"], "selectionAllowed": true, "selectionRequired": true } },

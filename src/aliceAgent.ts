@@ -79,6 +79,7 @@ export type AliceAgentChatResult = {
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
 
 工作规则：
+- 用户询问 Giverny 的快捷键、入口、功能、设置、操作方法、模型路由或权限边界时，必须调用 search_product_help，以产品能力注册表为准。
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
 - 用户要查看、打开、预览或下载附件时，必须调用 search_attachments；答案只做简要概括，不要把内部文件 URL 写进正文，界面会另行显示可操作附件卡。
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
@@ -114,6 +115,7 @@ const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: stri
   search_attachments: { running: '查找相关附件', completed: '附件检索已完成' },
   get_task_detail: { running: '读取任务详情', completed: '任务详情已返回' },
   get_giverny_context: { running: '确认平台能力边界', completed: '能力范围已确认' },
+  search_product_help: { running: '查询产品使用说明', completed: '产品说明已返回' },
   create_task_preview: { running: '整理新任务草稿', completed: '任务草稿已生成' },
   record_feedback_preview: { running: '整理反馈记录', completed: '反馈草稿已生成' },
   update_task_status_preview: { running: '核对状态变更', completed: '状态变更草稿已生成' },
@@ -536,6 +538,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: readTools.get_giverny_context.description,
         inputSchema: readTools.get_giverny_context.inputSchema,
         execute: () => this.callTool('context', {}, 'GET'),
+      }),
+      search_product_help: tool({
+        description: readTools.search_product_help.description,
+        inputSchema: readTools.search_product_help.inputSchema,
+        execute: (input) => this.callTool('product-help', input, 'GET'),
       }),
       create_task_plan: tool({
         description: '保存一个可跨会话持续推进的任务计划。适用于“从新建跟到验收”“持续提醒我完成这个项目”等目标。',
