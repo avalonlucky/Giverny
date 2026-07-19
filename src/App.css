@@ -2312,6 +2312,7 @@ button.topbar-create-button:hover {
 }
 
 .dashboard-side-progress-section {
+  min-height: 0;
   overscroll-behavior: contain;
 }
 
@@ -2599,6 +2600,7 @@ button.topbar-create-button:hover {
 }
 
 .dashboard-side-record-pane {
+  min-height: 0;
   padding-top: 4px;
 }
 
@@ -2633,6 +2635,27 @@ button.topbar-create-button:hover {
 .dashboard-side-timeline {
   display: grid;
   gap: 28px;
+  max-height: min(46vh, 540px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-surface)) transparent;
+  scrollbar-width: thin;
+}
+
+.dashboard-side-timeline::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dashboard-side-timeline::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dashboard-side-timeline::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface));
+  background-clip: content-box;
 }
 
 .dashboard-side-time-item {
@@ -17822,54 +17845,34 @@ textarea:focus-visible {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  display: flex;
+  display: block;
 }
 
 .due-marquee-track {
-  min-width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  white-space: nowrap;
-}
-
-.due-marquee-track.rolling {
-  width: max-content;
-  animation: due-marquee 18s linear infinite;
-}
-
-.due-strip:hover .due-marquee-track.rolling {
-  animation-play-state: paused;
+  min-width: 0;
+  display: block;
 }
 
 .due-marquee-item {
-  min-width: max-content;
-  display: inline-flex;
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 10px;
   color: var(--color-text-secondary);
+  overflow: hidden;
 }
 
 .due-marquee-item em {
   font-style: normal;
   color: var(--color-text-secondary);
   font-weight: 500;
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .due-strip .due-arrow {
   color: var(--color-alert-accent);
-}
-
-@keyframes due-marquee {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
 }
 
 .due-tag {

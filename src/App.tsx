@@ -7133,7 +7133,7 @@ function App() {
   })()
 
   const topReminderItems = (() => {
-    const items: Array<{ key: string; title: string; body: string }> = []
+    const items: Array<{ key: string; title: string; body: string; jobId?: string }> = []
     if (dueTasks.reminderTasks.length > 0) {
       const bodyParts = dueTasks.reminderTasks.map((task) => task.title)
       if (dueTasks.soonHighlights.length > 0) {
@@ -7182,6 +7182,7 @@ function App() {
         key: `risk-job-${job.id}`,
         title: '今日任务风险提示已完成',
         body: job.title.replace(/^\d{4}-\d{2}-\d{2}\s*/, '') || '查看今日需要关注的任务风险。',
+        jobId: job.id,
       })
     })
     const monthlyReviewJobs = completedScheduledJobs
@@ -7195,10 +7196,30 @@ function App() {
         key: `review-job-${job.id}`,
         title: '工作复盘已完成',
         body: job.title || '可以查看本次复盘结果。',
+        jobId: job.id,
       })
     })
     return items
   })()
+  const [topReminderIndex, setTopReminderIndex] = useState(0)
+  useEffect(() => {
+    if (topReminderItems.length <= 1) return
+    const timer = window.setInterval(() => {
+      setTopReminderIndex((current) => (current + 1) % topReminderItems.length)
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [topReminderItems.length])
+  const activeTopReminderItem = topReminderItems.length > 0
+    ? topReminderItems[topReminderIndex % topReminderItems.length]
+    : undefined
+  const handleTopReminderClick = (item?: { key: string; jobId?: string }) => {
+    if (item?.jobId) {
+      setTopAnalysisJobs((current) => current.map((job) => job.id === item.jobId ? { ...job, unread: false } : job))
+      void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(item.jobId)}/read`, { method: 'POST' }).catch(() => undefined)
+      return
+    }
+    navigateView('任务')
+  }
 
   const annualData = useMemo(() => {
     const year = currentMonth.value.slice(0, 4)
@@ -8949,17 +8970,15 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </button>
         </section>
 
-        {topReminderItems.length > 0 && (
-          <button className="due-strip" onClick={() => navigateView('任务')}>
+        {activeTopReminderItem && (
+          <button className="due-strip" onClick={() => handleTopReminderClick(activeTopReminderItem)}>
             <AlarmClock size={17} />
             <span className="due-marquee" aria-label="任务提醒">
-              <span className={`due-marquee-track ${topReminderItems.length > 1 ? 'rolling' : ''}`}>
-                {[...topReminderItems, ...(topReminderItems.length > 1 ? topReminderItems : [])].map((item, index) => (
-                  <span className="due-marquee-item" key={`${item.key}-${index}`}>
-                    <strong className={item.key.startsWith('due') ? 'due-summary-overdue' : 'due-summary-nearest'}>{item.title}</strong>
-                    {item.body && <em>{item.body}</em>}
-                  </span>
-                ))}
+              <span className="due-marquee-track">
+                <span className="due-marquee-item" key={activeTopReminderItem.key}>
+                  <strong className={activeTopReminderItem.key.startsWith('due') ? 'due-summary-overdue' : 'due-summary-nearest'}>{activeTopReminderItem.title}</strong>
+                  {activeTopReminderItem.body && <em>{activeTopReminderItem.body}</em>}
+                </span>
               </span>
             </span>
             <ChevronRight size={15} className="due-arrow" />
@@ -10409,22 +10428,7 @@ function DashboardTaskSidebar({
   const acceptanceSummaryFiles = shouldShowAcceptanceSummary
     ? files.filter((file) => file.taskId === task.id && file.scope === 'acceptance' && !file.deletedAt).slice(0, 6)
     : []
-  const groupedTimeEntries = (() => {
-    const groups: Array<{ primary: TimeEntry; siblings: TimeEntry[]; totalMinutes: number }> = []
-    const seen = new Set<string>()
-    for (const entry of sortedTimeEntries) {
-      if (seen.has(entry.id)) continue
-      seen.add(entry.id)
-      if (entry.groupId) {
-        const siblings = sortedTimeEntries.filter((e) => e.groupId === entry.groupId && e.id !== entry.id)
-        siblings.forEach((s) => seen.add(s.id))
-        groups.push({ primary: entry, siblings, totalMinutes: [entry, ...siblings].reduce((sum, e) => sum + minutesForTimeEntry(e), 0) })
-      } else {
-        groups.push({ primary: entry, siblings: [], totalMinutes: minutesForTimeEntry(entry) })
-      }
-    }
-    return groups
-  })()
+  const groupedTimeEntries: Array<{ primary: TimeEntry; siblings: TimeEntry[]; totalMinutes: number }> = sortedTimeEntries.map((entry) => ({ primary: entry, siblings: [], totalMinutes: minutesForTimeEntry(entry) }))
   const shownGroups = expandedProgressEntries ? groupedTimeEntries : groupedTimeEntries.slice(0, 5)
   const shownFeedbackEntries = expandedFeedbackEntries ? sortedFeedbackEntries : sortedFeedbackEntries.slice(0, 5)
   const shownWaitingEntries = expandedWaitingEntries ? sortedWaitingEntries : sortedWaitingEntries.slice(0, 5)
