@@ -155,6 +155,16 @@ async function runFinanceAnchorCheck(cookie) {
   process.stdout.write('Saved task hours remain the finance anchor when entry-minute rounding differs.\n')
 }
 
+async function runSupplementalActivityDateCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/state', { headers: { cookie } })
+  const state = await response.json().catch(() => ({}))
+  const task = state.tasks?.find((item) => item.id === 11)
+  if (!response.ok || task?.actualDeliveryDate !== '2026-06-08T00:00') {
+    throw new Error(`Supplemental task used its later bookkeeping acceptance date: ${JSON.stringify(task)}`)
+  }
+  process.stdout.write('Supplemental task completion follows its recorded acceptance progress date.\n')
+}
+
 async function runWorkflowReplayCheck() {
   const headers = {
     authorization: 'Bearer eval-agent-tool-token',
@@ -1332,6 +1342,7 @@ try {
 
   await runMcpChecks()
   await runFinanceAnchorCheck(cookie)
+  await runSupplementalActivityDateCheck(cookie)
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()

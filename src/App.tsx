@@ -1904,12 +1904,13 @@ function normalizeTaskClosure(task: Task): Task {
   if (!hasAcceptanceProgress(task)) {
     return task
   }
+  const acceptanceDate = acceptanceProgressEndDateTime(task)
   return {
     ...task,
     status: '已验收',
     stage: task.stage && task.stage !== '待验收' && task.stage !== '进行中' ? task.stage : '已验收',
     progress: 100,
-    actualDeliveryDate: task.actualDeliveryDate || acceptanceProgressEndDateTime(task),
+    actualDeliveryDate: acceptanceDate || task.actualDeliveryDate,
   }
 }
 
@@ -2312,8 +2313,6 @@ function waitingEntryMonth(task: Task, entry: WaitingEntry) {
 function latestTaskActivityValue(task: Task) {
   const candidates = [
     task.actualDeliveryDate,
-    taskLifecycleDate(task),
-    task.estimatedDate,
     task.date,
     ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
     ...(task.waitingEntries ?? []).map((entry) => waitingEntryActivityValue(task, entry)),
@@ -2356,6 +2355,7 @@ function taskRelatedMonths(task: Task) {
   const settlement = taskSettlementMonth(task)
   if (isSupplementalTask(task) && /^\d{4}-\d{2}$/.test(settlement)) {
     months.add(settlement)
+    return months
   }
   ;(task.timeEntries ?? []).forEach((entry) => {
     const value = timeEntryMonth(entry, task)

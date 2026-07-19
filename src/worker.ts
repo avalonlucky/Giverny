@@ -7351,12 +7351,13 @@ function normalizeTaskClosure<T extends { status: TaskStatus; stage?: string; pr
   if (!task.timeEntries.some((entry) => entry.isAcceptanceProgress)) {
     return task
   }
+  const acceptanceDate = acceptanceProgressEndDateTime(task.timeEntries, task.date)
   return {
     ...task,
     status: '已验收',
     stage: task.stage && task.stage !== '待验收' && task.stage !== '进行中' ? task.stage : '已验收',
     progress: 100,
-    actualDeliveryDate: task.actualDeliveryDate || acceptanceProgressEndDateTime(task.timeEntries, task.date),
+    actualDeliveryDate: acceptanceDate || task.actualDeliveryDate,
   }
 }
 

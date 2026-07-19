@@ -62,6 +62,19 @@ test('数字键可跳转到今年对应月份且输入时不会误触', async ({
   await expect(page.getByRole('heading', { name: '2026 年 12 月工作台' })).toBeVisible()
 })
 
+test('补录任务显示真实验收动态日期而不是补录操作日期', async ({ page }) => {
+  await page.keyboard.press('6')
+  await expect(page.getByRole('heading', { name: '2026 年 6 月工作台' })).toBeVisible()
+
+  await page.getByRole('button', { name: /已验收 .*展开/ }).click()
+  const taskRow = page.locator('article.task-row').filter({ hasText: '年终冲刺动员令倒计时海报' })
+  await expect(taskRow).toHaveCount(1)
+  await expect(taskRow).toContainText('06/08')
+  await expect(taskRow).toContainText('06/07')
+  await expect(taskRow).not.toContainText('07/01')
+  await expect(taskRow).not.toContainText('06/30')
+})
+
 test('计划中任务可直接进入记录进展并切换验收模式', async ({ page }) => {
   await page.getByText('公司产品封套延展', { exact: true }).click()
   const progressButton = page.getByRole('button', { name: /记录进展/ }).last()

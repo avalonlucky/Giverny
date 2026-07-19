@@ -20,6 +20,13 @@ INSERT INTO tasks (
   ('12', '解决方案彩页更新与拆分', '解决方案彩页更新并拆分版本', '单页 / 折页', '2026-06-24T09:00', '2026-07-10T19:30', '2026-06', 0, 6, 4.8, 300, '陈义君', '陈义君', '黄媚', '进行中', '进行中', 80, '[]', '[]', 1),
   ('13', '直播设计', '直播封面和邀请图', '直播物料', '2026-06-29T09:00', '2026-06-29T18:00', '2026-06', 0, 5, 4.3, 300, '陈义君', '陈义君', '黄媚', '已验收', '已验收', 100, '[]', '[]', 1);
 
+UPDATE tasks
+SET start_date = '2026-06-07T23:00',
+    actual_delivery_date = '2026-07-01T15:21:38.853Z',
+    is_supplemental = 1,
+    time_entries_json = '[{"id":"supplemental-acceptance-entry","date":"2026-06-07","endDate":"2026-06-08","start":"23:00","end":"00:00","note":"完成 6 月 8 日至 6 月 30 日倒计时海报","isAcceptanceProgress":true}]'
+WHERE id = '11';
+
 INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_to_client) VALUES
   ('u1', '1', '2026-07-03T21:24', '项目进展', '完成封套第一版与产品矩阵图调整', 0, 1),
   ('u2', '12', '2026-07-09T23:58', '项目进展', '更新公司介绍、使命愿景和页面结构', 0, 1),
