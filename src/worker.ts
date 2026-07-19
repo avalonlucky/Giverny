@@ -936,19 +936,49 @@ async function decryptSettingSecret(env: Env, value: string | undefined) {
   }
 }
 
-async function resolveAiEndpoint(env: Env, route: AiModelRouteKey, useActiveOverride = true) {
-  const config = await getStoredAiModelConfig(env)
-  const activeChoice = useActiveOverride ? await getActiveChatModelChoice(env) : 'auto'
-  const activeEndpoint = route === 'textPrimary' || route === 'visionPrimary'
-    ? activeEndpointForChoice(activeChoice, config, env)
-    : null
-  const endpoint = activeEndpoint && (route === 'textPrimary' || endpointSupportsVision(activeEndpoint))
-    ? activeEndpoint
-    : normalizeAiEndpoint(route, config.routes?.[route], env)
+async function resolveEndpointCredentials(env: Env, endpoint: StoredAiModelEndpointConfig) {
   const settingKey = await decryptSettingSecret(env, endpoint.apiKeyEncrypted)
   const providerKey = settingKey ? null : await resolveAiProviderKey(env, endpoint.provider)
   const apiKey = settingKey || providerKey?.apiKey || providerEnvironmentKey(env, endpoint.provider)
   return { ...endpoint, apiKey, keySource: settingKey || providerKey?.keySource === 'setting' ? 'setting' : apiKey ? 'environment' : 'missing' as const }
+}
+
+async function configuredDefaultEndpointForProvider(env: Env, provider: AiModelProvider): Promise<StoredAiModelEndpointConfig | null> {
+  const providerConfig = (await getStoredAiProviderConfigs(env))[provider]
+  const model = String(providerConfig.defaultModel || providerConfig.models[0] || '').trim()
+  if (!providerConfig.enabled || !model) {
+    return null
+  }
+  const rawBaseUrl = providerConfig.baseUrl || defaultProviderBaseUrl(provider, env)
+  const baseUrl = (() => {
+    try {
+      return normalizeProviderBaseUrl(provider, rawBaseUrl)
+    } catch {
+      return String(rawBaseUrl || '').trim().replace(/\/$/, '')
+    }
+  })()
+  if (!baseUrl) {
+    return null
+  }
+  return {
+    provider,
+    baseUrl,
+    model: provider === 'deepseek' ? normalizeDeepSeekModel(model) : model,
+    apiKeyEncrypted: providerConfig.apiKeyEncrypted,
+    apiKeyPreview: providerConfig.apiKeyPreview,
+  }
+}
+
+async function resolveAiEndpoint(env: Env, route: AiModelRouteKey, useActiveOverride = true) {
+  const config = await getStoredAiModelConfig(env)
+  const activeChoice = useActiveOverride ? await getActiveChatModelChoice(env) : 'auto'
+  const activeEndpoint = route === 'textPrimary' || route === 'visionPrimary'
+    ? await activeEndpointForChoice(activeChoice, config, env)
+    : null
+  const endpoint = activeEndpoint && (route === 'textPrimary' || endpointSupportsVision(activeEndpoint))
+    ? activeEndpoint
+    : normalizeAiEndpoint(route, config.routes?.[route], env)
+  return resolveEndpointCredentials(env, endpoint)
 }
 
 function parseAiRouteKey(value: unknown): AiModelRouteKey | null {
@@ -1619,7 +1649,7 @@ async function callWithAiTimeout<T>(
   }
 }
 
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | `provider:${AiModelProvider}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
 type ChatModelTarget =
   | { kind: 'endpoint'; endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>; label: string; note?: string }
   | { kind: 'workers-ai'; label: string; note?: string }
@@ -1629,6 +1659,12 @@ function normalizeChatModelChoice(value: unknown): ChatModelChoice {
   if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('openrouter:')) return raw as ChatModelChoice
   if (raw === 'route:textPrimary' || raw === 'route:textFallback' || raw === 'route:visionPrimary' || raw === 'route:visionFallback') {
     return raw as ChatModelChoice
+  }
+  if (raw.startsWith('provider:')) {
+    const provider = raw.replace(/^provider:/, '')
+    if (aiModelProviders.includes(provider as AiModelProvider)) {
+      return `provider:${provider}` as ChatModelChoice
+    }
   }
   return 'auto'
 }
@@ -1653,12 +1689,22 @@ function configuredEndpointForProvider(
   return null
 }
 
-function activeEndpointForChoice(
+function parseProviderChoice(choice: ChatModelChoice): AiModelProvider | null {
+  if (!choice.startsWith('provider:')) return null
+  const provider = choice.replace(/^provider:/, '')
+  return aiModelProviders.includes(provider as AiModelProvider) ? provider as AiModelProvider : null
+}
+
+async function activeEndpointForChoice(
   choice: ChatModelChoice,
   config: StoredAiModelConfig,
   env: Env,
-): StoredAiModelEndpointConfig | null {
+): Promise<StoredAiModelEndpointConfig | null> {
   if (choice === 'auto' || choice === 'workers-ai') return null
+  const providerChoice = parseProviderChoice(choice)
+  if (providerChoice) {
+    return configuredDefaultEndpointForProvider(env, providerChoice)
+  }
   if (choice.startsWith('route:')) {
     const route = choice.replace(/^route:/, '') as AiModelRouteKey
     return normalizeAiEndpoint(route, config.routes?.[route], env)
@@ -1698,21 +1744,56 @@ function endpointSupportsVision(endpoint: Pick<StoredAiModelEndpointConfig, 'pro
   return ['gemini', 'doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai'].includes(endpoint.provider)
 }
 
+function aiProviderDisplayName(provider: AiModelProvider) {
+  if (provider === 'doubao') return '豆包 / Doubao'
+  if (provider === 'qwen') return '通义千问 / Qwen'
+  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'openrouter') return 'OpenRouter'
+  if (provider === 'anthropic') return 'Anthropic Claude'
+  if (provider === 'custom-openai') return 'OpenAI 兼容网关'
+  if (provider === 'deepseek') return 'DeepSeek'
+  if (provider === 'gemini') return 'Gemini'
+  if (provider === 'kimi') return 'Kimi'
+  return provider
+}
+
 async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promise<ChatModelTarget> {
   if (choice === 'workers-ai') {
     return { kind: 'workers-ai', label: env.WORKERS_AI_MODEL || WORKERS_AI_DEFAULT_MODEL }
   }
-  if (choice === 'doubao-seed-2-1-pro') {
-    const apiKey = env.DOUBAO_API_KEY || ''
+  const providerChoice = parseProviderChoice(choice)
+  if (providerChoice) {
+    const endpoint = await configuredDefaultEndpointForProvider(env, providerChoice)
+    if (endpoint) {
+      const resolved = await resolveEndpointCredentials(env, endpoint)
+      return {
+        kind: 'endpoint',
+        endpoint: resolved,
+        label: `${aiProviderDisplayName(providerChoice)} / ${resolved.model}`,
+        note: resolved.apiKey ? undefined : `${aiProviderDisplayName(providerChoice)} API Key 未配置，已回落到默认模型链路。`,
+      }
+    }
+    const fallback = await resolveAiEndpoint(env, 'textPrimary', false)
     return {
       kind: 'endpoint',
-      label: '豆包 Seed 2.1 Pro',
+      endpoint: fallback,
+      label: `${aiProviderDisplayName(fallback.provider)} / ${fallback.model}`,
+      note: `${aiProviderDisplayName(providerChoice)} 还没有启用默认模型，已回落到文字主模型。`,
+    }
+  }
+  if (choice === 'doubao-seed-2-1-pro') {
+    const configured = await configuredDefaultEndpointForProvider(env, 'doubao')
+    const resolved = configured ? await resolveEndpointCredentials(env, { ...configured, model: env.DOUBAO_MODEL || configured.model || DOUBAO_SEED_PRO_MODEL }) : null
+    const apiKey = resolved?.apiKey || env.DOUBAO_API_KEY || ''
+    return {
+      kind: 'endpoint',
+      label: `豆包 Seed 2.1 Pro`,
       endpoint: {
         provider: 'doubao',
-        baseUrl: (env.DOUBAO_BASE_URL || DOUBAO_BASE_URL).replace(/\/$/, ''),
+        baseUrl: resolved?.baseUrl || (env.DOUBAO_BASE_URL || DOUBAO_BASE_URL).replace(/\/$/, ''),
         model: env.DOUBAO_MODEL || DOUBAO_SEED_PRO_MODEL,
         apiKey,
-        keySource: apiKey ? 'environment' : 'missing',
+        keySource: resolved?.keySource || (apiKey ? 'environment' : 'missing'),
       },
       note: apiKey ? undefined : '豆包 API Key 未配置，已回落到默认模型链路。',
     }
@@ -2140,6 +2221,8 @@ function isBackgroundAnalysisQuestion(text: string) {
 }
 
 function selectedCloudModelLabel(choice: ChatModelChoice) {
+  const providerChoice = parseProviderChoice(choice)
+  if (providerChoice) return aiProviderDisplayName(providerChoice)
   if (choice === 'deepseek-v4-flash') return 'DeepSeek V4 Flash'
   if (choice === 'deepseek-v4-pro') return 'DeepSeek V4 Pro'
   if (choice === 'doubao-seed-2-1-pro') return '豆包 Seed 2.1 Pro'

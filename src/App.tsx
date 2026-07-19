@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -4365,8 +4365,8 @@ type ChatMessage = {
 }
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
-type AiBrandKey = 'antigravity' | 'claude' | 'cloudflare' | 'codex' | 'deepseek' | 'doubao' | 'gemini' | 'grok' | 'kimi' | 'openrouter' | 'auto'
+type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | `provider:${AiModelProvider}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
+type AiBrandKey = 'antigravity' | 'anthropic' | 'claude' | 'cloudflare' | 'codex' | 'custom' | 'deepseek' | 'doubao' | 'gemini' | 'grok' | 'kimi' | 'openai' | 'openrouter' | 'qwen' | 'auto'
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
@@ -4374,15 +4374,18 @@ const CHAT_MODEL_CHOICE_KEY = 'alice_chat_model_choice'
 
 const AI_BRAND_ICONS: Partial<Record<AiBrandKey, string>> = {
   antigravity: antigravityBrandIcon,
+  anthropic: anthropicBrandIcon,
   claude: claudeBrandIcon,
   cloudflare: cloudflareBrandIcon,
   codex: codexBrandIcon,
+  openai: openaiBrandIcon,
   deepseek: deepseekBrandIcon,
   doubao: doubaoBrandIcon,
   gemini: geminiBrandIcon,
   grok: grokBrandIcon,
   kimi: kimiBrandIcon,
   openrouter: openrouterBrandIcon,
+  qwen: qwenBrandIcon,
 }
 
 function AiBrandIcon({ brand, size = 18 }: { brand: AiBrandKey; size?: number }) {
@@ -4396,15 +4399,18 @@ function AiBrandIcon({ brand, size = 18 }: { brand: AiBrandKey; size?: number })
 function aiBrandForValue(value: string): AiBrandKey {
   const normalized = value.toLowerCase()
   if (normalized.includes('antigravity')) return 'antigravity'
+  if (normalized.includes('anthropic')) return 'anthropic'
   if (normalized.includes('claude')) return 'claude'
   if (normalized.includes('cloudflare') || normalized.includes('workers-ai')) return 'cloudflare'
-  if (normalized.includes('codex') || normalized.includes('openai')) return 'codex'
+  if (normalized.includes('codex')) return 'codex'
+  if (normalized.includes('openai') || normalized.includes('gpt-')) return 'openai'
   if (normalized.includes('deepseek')) return 'deepseek'
   if (normalized.includes('doubao') || normalized.includes('豆包')) return 'doubao'
   if (normalized.includes('gemini')) return 'gemini'
   if (normalized.includes('grok')) return 'grok'
   if (normalized.includes('kimi') || normalized.includes('moonshot')) return 'kimi'
   if (normalized.includes('openrouter')) return 'openrouter'
+  if (normalized.includes('qwen') || normalized.includes('通义') || normalized.includes('dashscope')) return 'qwen'
   return 'auto'
 }
 
@@ -4427,8 +4433,16 @@ const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作�
 
 function normalizeChatModelChoice(value: unknown): ChatModelChoice {
   const raw = String(value ?? '').trim()
+  if (raw === 'doubao-seed-2-1-pro') return 'provider:doubao'
+  if (raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro') return 'provider:deepseek'
   if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
     return raw as ChatModelChoice
+  }
+  if (raw.startsWith('provider:')) {
+    const provider = raw.replace(/^provider:/, '')
+    if (['deepseek', 'gemini', 'kimi', 'doubao', 'qwen', 'openai', 'openrouter', 'anthropic', 'custom-openai'].includes(provider)) {
+      return `provider:${provider}` as ChatModelChoice
+    }
   }
   return 'auto'
 }
@@ -4448,13 +4462,22 @@ function chatRouteLabel(route: AiModelRouteKey) {
   return '识图备用'
 }
 
-function chatModelChoiceLabel(choice: ChatModelChoice, aiModelConfig: AiModelConfig | null) {
+function aiProviderDisplayLabel(provider: AiModelProvider) {
+  return aiProviderOptions.find((option) => option.value === provider)?.label || provider
+}
+
+function chatModelChoiceLabel(choice: ChatModelChoice, aiModelConfig: AiModelConfig | null, aiProviderConfigs?: AiProviderConfig[]) {
   if (choice === 'auto') return '自动'
   if (choice === 'workers-ai') return 'Workers AI'
   if (choice === 'doubao-seed-2-1-pro') return '豆包 Seed 2.1 Pro'
   if (choice === 'deepseek-v4-flash') return 'DeepSeek V4 Flash'
   if (choice === 'deepseek-v4-pro') return 'DeepSeek V4 Pro'
   if (choice.startsWith('openrouter:')) return choice.replace(/^openrouter:/, '').replace(/:free$/, '').split('/').pop() || 'OpenRouter'
+  if (choice.startsWith('provider:')) {
+    const provider = choice.replace(/^provider:/, '') as AiModelProvider
+    const config = aiProviderConfigs?.find((item) => item.provider === provider)
+    return config?.defaultModel || aiProviderDisplayLabel(provider)
+  }
   const route = choice.replace(/^route:/, '') as AiModelRouteKey
   const model = aiModelConfig?.[route]?.model || aiRouteDefaults[route]?.model || chatRouteLabel(route)
   return model
@@ -4615,6 +4638,7 @@ function AgentExecutionTimeline({
 type ChatPanelProps = {
   currentMonthValue: string
   aiModelConfig: AiModelConfig | null
+  aiProviderConfigs: AiProviderConfig[]
   initialAnalysisJobId?: string
   onClose: () => void
   onOpenTask: (taskId: number) => void
@@ -5099,6 +5123,7 @@ function AgentAttachmentResults({
 function ChatPanel({
   currentMonthValue,
   aiModelConfig,
+  aiProviderConfigs,
   initialAnalysisJobId,
   onClose,
   onOpenTask,
@@ -5740,35 +5765,28 @@ function ChatPanel({
   }
 
   const scopeActive = useKnowledge || useWebSearch
-  const configuredModelOptions = (() => {
-    const seen = new Set<string>()
-    return (['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback'] as AiModelRouteKey[]).flatMap((route) => {
-      const endpoint = aiModelConfig?.[route] ?? aiRouteDefaults[route]
-      const identity = `${endpoint.provider}:${endpoint.model}`.toLowerCase()
-      if (seen.has(identity)) return []
-      seen.add(identity)
-      return [{
-        value: `route:${route}` as ChatModelChoice,
-        label: endpoint.model,
-        meta: `${chatRouteLabel(route)} · 设置中当前选择`,
-        brand: aiBrandForValue(`${endpoint.provider} ${endpoint.model}`),
-      }]
-    })
-  })()
+  const activeProviderConfigs = useMemo(
+    () => aiProviderConfigs.filter((config) => config.enabled && config.hasApiKey && config.models.includes(config.defaultModel)),
+    [aiProviderConfigs],
+  )
+  const providerModelOptions = activeProviderConfigs.map((config) => {
+    const providerLabel = aiProviderDisplayLabel(config.provider)
+    return {
+      value: `provider:${config.provider}` as ChatModelChoice,
+      label: config.defaultModel,
+      meta: `${providerLabel} · 手动最高优先级${providerSupportsVision(config.provider) ? ' · 支持识图时图片也优先使用' : ''}`,
+      brand: aiBrandForValue(`${config.provider} ${config.defaultModel}`),
+    }
+  })
   const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey }> = [
     { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析、写入和识图自动使用站内 Agent' : '本机 CLI 不可用时由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
-    ...configuredModelOptions,
+    ...providerModelOptions,
   ]
   const usesLocalCli = selectedModelChoice === 'auto' && Boolean(activeLocalCliRoute)
-  const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig)
+  const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig, aiProviderConfigs)
   const activeRuntimeBrand = usesLocalCli ? aiBrandForValue(activeLocalCliRoute!.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
   const isModelOptionSelected = (option: (typeof modelOptions)[number]) => {
     if (selectedModelChoice === option.value) return true
-    if (selectedModelChoice === 'doubao-seed-2-1-pro') return option.brand === 'doubao'
-    if (selectedModelChoice === 'deepseek-v4-flash' || selectedModelChoice === 'deepseek-v4-pro') {
-      const normalizeModelId = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
-      return option.brand === 'deepseek' && normalizeModelId(option.label) === normalizeModelId(selectedModelChoice)
-    }
     return false
   }
   const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length
@@ -5779,7 +5797,7 @@ function ChatPanel({
     try {
       const saved = await api.setActiveAiModelChoice(choice)
       setSelectedModelChoice(normalizeChatModelChoice(saved.choice))
-      onNotify(choice === 'auto' ? '已恢复自动模型路由' : `已将 ${chatModelChoiceLabel(choice, aiModelConfig)} 设为全站 AI 首选`, 'success')
+      onNotify(choice === 'auto' ? '已恢复自动模型路由' : `已将 ${chatModelChoiceLabel(choice, aiModelConfig, aiProviderConfigs)} 设为全站 AI 首选`, 'success')
     } catch (error) {
       setSelectedModelChoice(previous)
       onNotify(error instanceof Error ? error.message : '模型优先级保存失败', 'error')
@@ -6227,6 +6245,7 @@ function App() {
   const [taxMode, setTaxMode] = useState<TaxMode>(bootCache?.settings?.taxMode ?? 'salary')
   const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
   const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
+  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>([])
   const [settingsEntry, setSettingsEntry] = useState<{ tab: SettingsTab; nonce: number }>({ tab: 'ai', nonce: 0 })
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [isTaskDetailCollapsed, setIsTaskDetailCollapsed] = useState(() => window.localStorage.getItem('giverny-task-detail-collapsed') === '1')
@@ -6673,6 +6692,23 @@ function App() {
       notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
     })
   }, [auth, notify])
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return undefined
+    }
+    let cancelled = false
+    api.getAiProviderConfigs()
+      .then((result) => {
+        if (!cancelled) setAiProviderConfigs(result.providers)
+      })
+      .catch(() => {
+        if (!cancelled) setAiProviderConfigs([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin, aiModelConfig?.updatedAt])
 
   const analysisPollingRef = useRef({ signature: '', attempts: 0, inFlight: false })
   useEffect(() => {
@@ -9097,6 +9133,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               taxMode={taxMode}
               designTypeGroups={designTypeGroups}
               aiModelConfig={aiModelConfig}
+              aiProviderConfigs={aiProviderConfigs}
               role={role}
               accessTokens={accessTokens}
               newTokenId={newTokenId}
@@ -9106,6 +9143,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
               onTaxModeChange={handleTaxModeChange}
               onDesignTypeGroupsChange={handleDesignTypeGroupsChange}
               onAiModelConfigChange={handleAiModelConfigChange}
+              onAiProviderConfigsChange={setAiProviderConfigs}
               onExportBackup={handleExportBackup}
               onSignOut={handleSignOut}
               onChangePassword={handleChangeAdminPassword}
@@ -9174,6 +9212,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <ChatPanel
             currentMonthValue={currentMonth.value}
             aiModelConfig={aiModelConfig}
+            aiProviderConfigs={aiProviderConfigs}
             initialAnalysisJobId={chatAnalysisFocusId || undefined}
             onNotify={notify}
             onClose={() => {
@@ -17367,6 +17406,7 @@ function SettingsView({
   taxMode,
   designTypeGroups,
   aiModelConfig,
+  aiProviderConfigs: initialAiProviderConfigs,
   role,
   accessTokens,
   newTokenId,
@@ -17376,6 +17416,7 @@ function SettingsView({
   onTaxModeChange,
   onDesignTypeGroupsChange,
   onAiModelConfigChange,
+  onAiProviderConfigsChange,
   onExportBackup,
   onSignOut,
   onChangePassword,
@@ -17391,6 +17432,7 @@ function SettingsView({
   taxMode: TaxMode
   designTypeGroups: DesignTypeGroup[]
   aiModelConfig: AiModelConfig | null
+  aiProviderConfigs: AiProviderConfig[]
   role: AuthRole
   accessTokens: AccessToken[]
   newTokenId: string
@@ -17408,6 +17450,7 @@ function SettingsView({
       clearRouteApiKeys?: AiModelRouteKey[]
     },
   ) => void | Promise<void>
+  onAiProviderConfigsChange: Dispatch<SetStateAction<AiProviderConfig[]>>
   onExportBackup: () => void
   onSignOut: () => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -17472,7 +17515,7 @@ function SettingsView({
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [isPasswordSaving, setIsPasswordSaving] = useState(false)
-  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>([])
+  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>(initialAiProviderConfigs)
   const [aiProvidersLoading, setAiProvidersLoading] = useState(false)
   const [providerModal, setProviderModal] = useState<AiModelProvider | null>(null)
   const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState('')
@@ -17673,17 +17716,22 @@ function SettingsView({
     setAiRouteKeyDrafts({})
   }, [aiModelConfig])
 
+  useEffect(() => {
+    setAiProviderConfigs(initialAiProviderConfigs)
+  }, [initialAiProviderConfigs])
+
   const loadAiProviderConfigs = useCallback(async () => {
     setAiProvidersLoading(true)
     try {
       const result = await api.getAiProviderConfigs()
       setAiProviderConfigs(result.providers)
+      onAiProviderConfigsChange(result.providers)
     } catch (error) {
       setProviderError(error instanceof Error ? error.message : '服务商配置读取失败')
     } finally {
       setAiProvidersLoading(false)
     }
-  }, [])
+  }, [onAiProviderConfigsChange])
 
   useEffect(() => {
     if (settingsTab === 'ai' && role === 'admin') void loadAiProviderConfigs()
@@ -17802,6 +17850,7 @@ function SettingsView({
         enabled: providerEnabledDraft,
       })
       setAiProviderConfigs((current) => [...current.filter((item) => item.provider !== saved.provider), saved])
+      onAiProviderConfigsChange((current) => [...current.filter((item) => item.provider !== saved.provider), saved])
       if (saved.defaultModel) {
         const nextRoutes = Object.fromEntries(Object.entries(aiRouteDrafts).map(([route, endpoint]) => [
           route,
