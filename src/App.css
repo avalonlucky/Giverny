@@ -2299,8 +2299,9 @@ button.topbar-create-button:hover {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: auto;
   padding-right: 6px;
+  scrollbar-gutter: stable;
   scrollbar-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-surface)) transparent;
   scrollbar-width: thin;
 }
@@ -2313,7 +2314,8 @@ button.topbar-create-button:hover {
 
 .dashboard-side-progress-section {
   min-height: 0;
-  overscroll-behavior: contain;
+  align-content: start;
+  overscroll-behavior-y: auto;
 }
 
 .dashboard-side-section::-webkit-scrollbar {
@@ -2635,27 +2637,7 @@ button.topbar-create-button:hover {
 .dashboard-side-timeline {
   display: grid;
   gap: 28px;
-  max-height: min(46vh, 540px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 6px;
-  scrollbar-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-surface)) transparent;
-  scrollbar-width: thin;
-}
-
-.dashboard-side-timeline::-webkit-scrollbar {
-  width: 8px;
-}
-
-.dashboard-side-timeline::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.dashboard-side-timeline::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface));
-  background-clip: content-box;
+  overflow: visible;
 }
 
 .dashboard-side-time-item {
