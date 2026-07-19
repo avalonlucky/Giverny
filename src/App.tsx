@@ -1875,7 +1875,7 @@ function taskSettlementMonth(task: Task) {
 }
 
 function isSupplementalTask(task: Task) {
-  return Boolean(task.isSupplemental) || (Boolean(task.settlementMonth) && task.settlementMonth !== monthPart(task.date))
+  return Boolean(task.isSupplemental)
 }
 
 function isTaskStarted(task: Pick<Task, 'status'>) {
@@ -2180,9 +2180,11 @@ function dateTimeMinuteStamp(date: string, time: string) {
   return Math.round(value.getTime() / 60000)
 }
 
-function minutesForTimeEntry(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end' | 'isUncounted'>) {
+function minutesForTimeEntry(
+  entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'> & Partial<Pick<TimeEntry, 'isUncounted' | 'isClientFeedback'>>,
+) {
   // 不计工时的分段：时间仅用于记录与排序，工时恒为 0
-  if (entry.isUncounted) {
+  if (entry.isUncounted || entry.isClientFeedback) {
     return 0
   }
   const startDate = entry.date
@@ -2339,15 +2341,22 @@ function sortTasksByLatestActivity(tasks: Task[]) {
 }
 
 function billableTimeEntries(task: Pick<Task, 'timeEntries'>) {
-  return (task.timeEntries ?? []).filter((entry) => !entry.isClientFeedback && minutesForTimeEntry(entry) > 0)
+  return (task.timeEntries ?? []).filter((entry) => minutesForTimeEntry(entry) > 0)
 }
 
 function taskTimeEntriesInMonth(task: Task, month: string) {
+  if (isSupplementalTask(task) && taskSettlementMonth(task) === month) {
+    return billableTimeEntries(task)
+  }
   return billableTimeEntries(task).filter((entry) => timeEntryMonth(entry, task) === month)
 }
 
 function taskRelatedMonths(task: Task) {
   const months = new Set<string>()
+  const settlement = taskSettlementMonth(task)
+  if (isSupplementalTask(task) && /^\d{4}-\d{2}$/.test(settlement)) {
+    months.add(settlement)
+  }
   ;(task.timeEntries ?? []).forEach((entry) => {
     const value = timeEntryMonth(entry, task)
     if (value) months.add(value)
@@ -2359,7 +2368,6 @@ function taskRelatedMonths(task: Task) {
   const deliveryMonth = safeMonthPart(task.actualDeliveryDate)
   if (deliveryMonth) months.add(deliveryMonth)
   if (months.size === 0) {
-    const settlement = taskSettlementMonth(task)
     if (/^\d{4}-\d{2}$/.test(settlement)) months.add(settlement)
     const created = safeMonthPart(task.date)
     if (created) months.add(created)
@@ -2381,7 +2389,16 @@ function taskMinutesInMonth(task: Task, month: string) {
 }
 
 function taskHoursInMonth(task: Task, month: string) {
-  return Number((taskMinutesInMonth(task, month) / 60).toFixed(2))
+  const roundedEntryHours = Number((taskMinutesInMonth(task, month) / 60).toFixed(2))
+  const settlement = taskSettlementMonth(task)
+  const totalHours = roundCents(Number(task.actualHours) || 0)
+  if (!isSupplementalTask(task) && settlement === month && billableTimeEntries(task).length > 0 && totalHours > 0) {
+    const otherHours = Array.from(taskRelatedMonths(task))
+      .filter((relatedMonth) => relatedMonth !== month)
+      .reduce((sum, relatedMonth) => sum + Number((taskMinutesInMonth(task, relatedMonth) / 60).toFixed(2)), 0)
+    return Math.max(0, roundCents(totalHours - otherHours))
+  }
+  return roundedEntryHours
 }
 
 function taskBillableHoursInMonth(task: Task, month: string) {

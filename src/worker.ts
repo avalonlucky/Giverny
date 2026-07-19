@@ -1424,9 +1424,11 @@ async function exportReportPdf(env: Env, month: string): Promise<Response> {
     getHourlyRate(env),
     getPdfTitle(env),
     getServiceCompanyName(env),
-    env.DB.prepare('SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC').bind(month).all<DbTask>(),
+    env.DB.prepare('SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC').all<DbTask>(),
   ])
-  const tasks = (taskRows.results ?? []).map((row) => toTask(row))
+  const tasks = (taskRows.results ?? [])
+    .filter((row) => dbTaskBelongsToFinanceMonth(row, month))
+    .map((row) => ({ ...toTask(row), actualHours: financeHoursForDbTaskInMonth(row, month) }))
   const isBillable = (task: Task) => task.billable !== false && task.status !== '不计费'
   const billable = tasks.filter((task) => isBillable(task) && task.actualHours > 0)
   const rows = billable.map((task) => ({
@@ -2165,24 +2167,25 @@ async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: 
   const stats: MonthFinanceStats[] = []
   for (const month of months) {
     const rows = await env.DB.prepare(
-      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC',
+      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC',
     )
-      .bind(workspaceId, month)
+      .bind(workspaceId)
       .all<DbTask>()
-    const tasks = rows.results ?? []
+    const tasks = (rows.results ?? []).filter((task) => dbTaskBelongsToFinanceMonth(task, month))
     const billableTasks = tasks.filter(isBillableDbTask)
-    const billableHours = roundCents(billableTasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
-    const totalHours = roundCents(tasks.reduce((sum, task) => sum + (Number(task.actual_hours) || 0), 0))
-    const amount = roundCents(billableTasks.reduce((sum, task) => sum + roundCents((Number(task.actual_hours) || 0) * hourlyRate), 0))
+    const taskHours = (task: DbTask) => roundCents(financeHoursForDbTaskInMonth(task, month))
+    const billableHours = roundCents(billableTasks.reduce((sum, task) => sum + taskHours(task), 0))
+    const totalHours = roundCents(tasks.reduce((sum, task) => sum + taskHours(task), 0))
+    const amount = roundCents(billableTasks.reduce((sum, task) => sum + roundCents(taskHours(task) * hourlyRate), 0))
     const taskLines = billableTasks
-      .filter((task) => Number(task.actual_hours) > 0)
+      .filter((task) => taskHours(task) > 0)
       .map((task) => {
-        const hours = roundCents(Number(task.actual_hours) || 0)
+        const hours = taskHours(task)
         const taskAmount = roundCents(hours * hourlyRate)
         return `  - ${task.title || '未命名'}：${hours}h × ¥${hourlyRate}/h = ¥${taskAmount}`
       })
     const taskDetails = tasks.map((task) => {
-      const hours = roundCents(Number(task.actual_hours) || 0)
+      const hours = taskHours(task)
       const billable = isBillableDbTask(task)
       return {
         title: task.title || '未命名',
@@ -7215,19 +7218,110 @@ const parseWaitingEntries = (value: string | null): WaitingEntry[] => parseTimeE
 
 function actualHoursForTimeEntries(entries: TimeEntry[]) {
   const minutes = entries.reduce((total, entry) => {
-    if (entry.isUncounted) {
-      return total
-    }
-    const startDate = entry.date
-    const endDate = entry.endDate || startDate
-    const start = Date.parse(`${startDate}T${entry.start}:00+08:00`)
-    const end = Date.parse(`${endDate}T${entry.end}:00+08:00`)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-      return total
-    }
-    return total + Math.round((end - start) / 60000)
+    return total + billableMinutesForTimeEntry(entry)
   }, 0)
   return Math.round((minutes / 60) * 100) / 100
+}
+
+function rawMinutesForTimeEntry(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
+  const startDate = entry.date
+  const endDate = entry.endDate || startDate
+  const start = Date.parse(`${startDate}T${entry.start}:00+08:00`)
+  const end = Date.parse(`${endDate}T${entry.end}:00+08:00`)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0
+  }
+  return Math.round((end - start) / 60000)
+}
+
+function billableMinutesForTimeEntry(entry: TimeEntry) {
+  if (entry.isUncounted || entry.isClientFeedback) {
+    return 0
+  }
+  return rawMinutesForTimeEntry(entry)
+}
+
+function resolvedActualHours(rowActualHours: unknown, entries: TimeEntry[]) {
+  const entryHours = actualHoursForTimeEntries(entries)
+  return entryHours > 0 ? entryHours : Number(rowActualHours) || 0
+}
+
+function actualHoursForDbTask(task: Pick<DbTask, 'actual_hours' | 'time_entries_json'>) {
+  return resolvedActualHours(task.actual_hours, parseTimeEntries(task.time_entries_json))
+}
+
+function safeTaskMonth(value: string | null | undefined) {
+  const month = monthPart(value)
+  return /^\d{4}-\d{2}$/.test(month) ? month : ''
+}
+
+function isSupplementalDbTask(task: Pick<DbTask, 'is_supplemental' | 'settlement_month' | 'start_date'>) {
+  return Number(task.is_supplemental) === 1
+}
+
+function timeEntryFinanceMonth(entry: TimeEntry, task: Pick<DbTask, 'start_date'>) {
+  return safeTaskMonth(entry.endDate || entry.date || task.start_date)
+}
+
+function financeMinutesForDbTaskInMonth(
+  task: Pick<DbTask, 'actual_hours' | 'time_entries_json' | 'settlement_month' | 'start_date' | 'is_supplemental'>,
+  month: string,
+) {
+  const targetMonth = safeTaskMonth(month)
+  if (!targetMonth) return 0
+
+  const rowMinutes = Math.round(Math.max(0, Number(task.actual_hours) || 0) * 60)
+  const entries = parseTimeEntries(task.time_entries_json)
+  const billableEntries = entries.filter((entry) => billableMinutesForTimeEntry(entry) > 0)
+
+  if (isSupplementalDbTask(task)) {
+    if (safeTaskMonth(task.settlement_month) !== targetMonth) return 0
+    const entryMinutes = billableEntries.reduce((sum, entry) => sum + billableMinutesForTimeEntry(entry), 0)
+    return entryMinutes > 0 ? entryMinutes : rowMinutes
+  }
+
+  const splitMinutes = billableEntries
+    .filter((entry) => timeEntryFinanceMonth(entry, task) === targetMonth)
+    .reduce((sum, entry) => sum + billableMinutesForTimeEntry(entry), 0)
+
+  if (splitMinutes > 0) return splitMinutes
+  if (billableEntries.length === 0 && safeTaskMonth(task.settlement_month) === targetMonth) return rowMinutes
+  return 0
+}
+
+function financeHoursForDbTaskInMonth(
+  task: Pick<DbTask, 'actual_hours' | 'time_entries_json' | 'settlement_month' | 'start_date' | 'is_supplemental'>,
+  month: string,
+) {
+  const targetMonth = safeTaskMonth(month)
+  if (!targetMonth) return 0
+  const rowHours = roundCents(Math.max(0, Number(task.actual_hours) || 0))
+  const entries = parseTimeEntries(task.time_entries_json)
+  const billableEntries = entries.filter((entry) => billableMinutesForTimeEntry(entry) > 0)
+  if (isSupplementalDbTask(task) && safeTaskMonth(task.settlement_month) === targetMonth) {
+    return rowHours > 0 ? rowHours : roundCents(financeMinutesForDbTaskInMonth(task, targetMonth) / 60)
+  }
+  if (!isSupplementalDbTask(task) && safeTaskMonth(task.settlement_month) === targetMonth && billableEntries.length > 0 && rowHours > 0) {
+    const otherMonths = new Set(
+      billableEntries
+        .map((entry) => timeEntryFinanceMonth(entry, task))
+        .filter((entryMonth) => entryMonth && entryMonth !== targetMonth),
+    )
+    const otherHours = Array.from(otherMonths).reduce((sum, entryMonth) => {
+      return sum + roundCents(financeMinutesForDbTaskInMonth(task, entryMonth) / 60)
+    }, 0)
+    return Math.max(0, roundCents(rowHours - otherHours))
+  }
+  return roundCents(financeMinutesForDbTaskInMonth(task, targetMonth) / 60)
+}
+
+function dbTaskBelongsToFinanceMonth(
+  task: Pick<DbTask, 'actual_hours' | 'time_entries_json' | 'settlement_month' | 'start_date' | 'is_supplemental'>,
+  month: string,
+) {
+  const targetMonth = safeTaskMonth(month)
+  if (!targetMonth) return false
+  return financeMinutesForDbTaskInMonth(task, targetMonth) > 0 || safeTaskMonth(task.settlement_month) === targetMonth
 }
 
 function acceptanceProgressEndDateTime(entries: TimeEntry[], fallbackDate: string | null | undefined) {
@@ -7310,7 +7404,7 @@ const toTask = (row: DbTask, files: string[] = []): Task => {
     reviewer: row.reviewer ?? '',
     stage: row.stage ?? row.status,
     estimatedHours: Number(row.estimated_hours) || 0,
-    actualHours: Number(row.actual_hours) || 0,
+    actualHours: resolvedActualHours(row.actual_hours, timeEntries),
     status: row.status,
     progress: Number(row.progress) || 0,
     billable: Number(row.is_billable) !== 0,
@@ -10241,7 +10335,7 @@ async function getSharedReport(env: Env, token: string) {
     .run()
 
   const [taskRows, updateRows, fileRows, pdfTitle, serviceCompanyName] = await Promise.all([
-    env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND status != '不计费' AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC").bind(reportWorkspaceId, report.month).all<DbTask>(),
+    env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND status != '不计费' AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC").bind(reportWorkspaceId).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.* FROM task_updates
        INNER JOIN tasks ON tasks.id = task_updates.task_id
@@ -10271,7 +10365,9 @@ async function getSharedReport(env: Env, token: string) {
 
   return ok({
     report: toReport(report),
-    tasks: (taskRows.results ?? []).map((task) => toTask(task)),
+    tasks: (taskRows.results ?? [])
+      .filter((task) => dbTaskBelongsToFinanceMonth(task, report.month))
+      .map((task) => ({ ...toTask(task), actualHours: financeHoursForDbTaskInMonth(task, report.month) })),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
     files: (fileRows.results ?? []).map((file) => {
       const mapped = toFile(file)
@@ -13314,6 +13410,7 @@ async function chatWithAi(env: Env, request: Request) {
   const useWebSearch = body.useWebSearch !== false
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
   const today = nowIso().slice(0, 10)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
   const textAttachments = attachments.filter((a) => a.type === 'text').slice(0, 3)
@@ -13327,14 +13424,14 @@ async function chatWithAi(env: Env, request: Request) {
     getHourlyRate(env),
     month
       ? env.DB.prepare(
-          'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC',
+          'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC',
         )
-          .bind(month)
+          .bind(workspaceId)
           .all<DbTask>()
       : Promise.resolve({ results: [] as DbTask[] }),
     env.DB.prepare(
-      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT 50',
-    ).all<DbTask>(),
+      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT 50',
+    ).bind(workspaceId).all<DbTask>(),
     useKnowledge ? listKnowledgeNotes(env) : Promise.resolve([] as KnowledgeNoteRow[]),
     needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
   ])
@@ -13415,12 +13512,15 @@ async function chatWithAi(env: Env, request: Request) {
   let todayMinutes = 0
   const todayTasks: string[] = []
   const seenTaskIds = new Set<string>()
-  const allTasksForToday = [...(monthRows.results ?? []), ...(recentRows.results ?? [])]
+  const financeMonthRows = month
+    ? (monthRows.results ?? []).filter((task) => dbTaskBelongsToFinanceMonth(task, month))
+    : []
+  const allTasksForToday = [...financeMonthRows, ...(recentRows.results ?? [])]
   allTasksForToday.forEach((task) => {
     const taskKey = task.title + '|' + task.start_date
     if (seenTaskIds.has(taskKey)) return
     seenTaskIds.add(taskKey)
-    let entries: Array<{ date?: string; endDate?: string; start?: string; end?: string; isUncounted?: boolean }>
+    let entries: Array<{ date?: string; endDate?: string; start?: string; end?: string; isUncounted?: boolean; isClientFeedback?: boolean }>
     try {
       entries = JSON.parse(task.time_entries_json ?? '[]')
     } catch {
@@ -13428,7 +13528,7 @@ async function chatWithAi(env: Env, request: Request) {
     }
     let taskTodayMinutes = 0
     entries.forEach((e) => {
-      if (e.isUncounted) return
+      if (e.isUncounted || e.isClientFeedback) return
       const eDay = String(e.date ?? '').slice(0, 10)
       if (eDay !== today) return
       const endDay = String(e.endDate ?? e.date ?? '').slice(0, 10)
@@ -13445,22 +13545,23 @@ async function chatWithAi(env: Env, request: Request) {
   const todayIncome = Math.round(todayHours * hourlyRate)
 
   // 本月汇总
-  const billableTasks = (monthRows.results ?? []).filter((t) => t.is_billable !== 0 && t.status !== '不计费' && t.status !== '终止')
-  const monthHours = Number(billableTasks.reduce((s, t) => s + (Number(t.actual_hours) || 0), 0).toFixed(1))
+  const billableTasks = financeMonthRows.filter((t) => t.is_billable !== 0 && t.status !== '不计费' && t.status !== '终止')
+  const financeHours = (task: DbTask) => financeHoursForDbTaskInMonth(task, month)
+  const monthHours = Number(billableTasks.reduce((s, t) => s + financeHours(t), 0).toFixed(1))
   const monthIncome = Math.round(monthHours * hourlyRate)
 
   // 本月任务列表（最多 30 条，精简字段）
   const taskLines = billableTasks.slice(0, 30).map((t) => {
-    const h = Number(t.actual_hours || 0).toFixed(1)
-    const amt = Math.round(Number(t.actual_hours || 0) * hourlyRate)
+    const h = financeHours(t).toFixed(1)
+    const amt = Math.round(financeHours(t) * hourlyRate)
     return `- ${t.title || '未命名'}（${t.design_type || '未分类'}）${t.status} ${h}h ¥${amt}`
   }).join('\n')
 
   // 近期历史（非本月，最多 10 条有工时的）
   const historyLines = (recentRows.results ?? [])
-    .filter((t) => t.settlement_month !== month && (Number(t.actual_hours) || 0) > 0 && t.is_billable !== 0)
+    .filter((t) => t.settlement_month !== month && actualHoursForDbTask(t) > 0 && t.is_billable !== 0)
     .slice(0, 10)
-    .map((t) => `- ${t.settlement_month} ${t.title || '未命名'} ${Number(t.actual_hours).toFixed(1)}h`)
+    .map((t) => `- ${t.settlement_month} ${t.title || '未命名'} ${actualHoursForDbTask(t).toFixed(1)}h`)
     .join('\n')
 
   const textAttachmentSection = textAttachments.length
@@ -15008,20 +15109,22 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
 async function generateMonthlyReport(env: Env, request: Request) {
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const body = (await request.json()) as { month: string; hourlyRate: number; importedHours?: number }
-  const rows = await env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL")
-    .bind(workspaceId, body.month)
+  const rows = await env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL")
+    .bind(workspaceId)
     .all<DbTask>()
-  const tasks = rows.results ?? []
+  const tasks = (rows.results ?? []).filter((task) => dbTaskBelongsToFinanceMonth(task, body.month))
   const importedHours = Number(body.importedHours) || 0
   const hourlyRate = Number(body.hourlyRate) || defaultHourlyRate
   const roundCents = (value: number) => Math.round(value * 100) / 100
-  const totalHours = tasks.reduce((sum, task) => sum + Number(task.actual_hours), importedHours)
-  const billableHours = tasks.filter((task) => task.is_billable).reduce((sum, task) => sum + Number(task.actual_hours), importedHours)
+  const taskHours = (task: DbTask) => roundCents(financeHoursForDbTaskInMonth(task, body.month))
+  const billableTasks = tasks.filter(isBillableDbTask)
+  const totalHours = roundCents(tasks.reduce((sum, task) => sum + taskHours(task), importedHours))
+  const billableHours = roundCents(billableTasks.reduce((sum, task) => sum + taskHours(task), importedHours))
   // 每行取真实金额（精确到分，不取整到元），再求和，保证回单「明细金额之和 === 总额」（与前端 sumBillableAmount 一致）
   const totalAmount = roundCents(
-    tasks
-      .filter((task) => task.is_billable && Number(task.actual_hours) > 0)
-      .reduce((sum, task) => sum + roundCents(Number(task.actual_hours) * hourlyRate), 0)
+    billableTasks
+      .filter((task) => taskHours(task) > 0)
+      .reduce((sum, task) => sum + roundCents(taskHours(task) * hourlyRate), 0)
     + (importedHours > 0 ? roundCents(importedHours * hourlyRate) : 0),
   )
 
