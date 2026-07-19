@@ -226,7 +226,14 @@ type AuthPrincipal = {
   role: AuthRole
   email: string
   principalId: string
+  workspaceId?: string
   expiresAt?: string
+}
+
+const DEFAULT_WORKSPACE_ID = 'default'
+
+function principalWorkspaceId(principal: AuthPrincipal | null | undefined) {
+  return String(principal?.workspaceId || DEFAULT_WORKSPACE_ID).slice(0, 80)
 }
 
 function scopeToRole(scope: string | null | undefined): AuthRole {
@@ -284,6 +291,7 @@ type DbAccessToken = {
 
 type DbTask = {
   id: string
+  workspace_id?: string
   title: string
   requirement: string | null
   design_type: string | null
@@ -412,10 +420,18 @@ type DbAgentAnalysisJob = {
   created_at: string
   updated_at: string
   completed_at: string | null
+  workspace_id: string
+  principal_id: string
+  retry_count: number
+  max_attempts: number
+  last_heartbeat_at: string | null
+  timeout_at: string | null
+  next_retry_at: string | null
 }
 
 type DbReport = {
   id: string
+  workspace_id: string
   month: string
   total_hours: number
   billable_hours: number
@@ -498,6 +514,7 @@ async function ensureAuthSessionsTable(env: Env) {
       email TEXT,
       role TEXT NOT NULL,
       principal_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL DEFAULT 'default',
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -517,8 +534,8 @@ async function createAuthSession(env: Env, principal: AuthPrincipal) {
   const expiresAt = principalExpiry && Number.isFinite(principalExpiry.getTime()) && principalExpiry < ttlExpiry ? principalExpiry : ttlExpiry
   await env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').bind(nowIso()).run()
   await env.DB.prepare(
-    'INSERT INTO auth_sessions (id, token_hash, email, role, principal_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).bind(crypto.randomUUID(), tokenHash, principal.email, principal.role, principal.principalId, expiresAt.toISOString()).run()
+    'INSERT INTO auth_sessions (id, token_hash, email, role, principal_id, workspace_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).bind(crypto.randomUUID(), tokenHash, principal.email, principal.role, principal.principalId, principalWorkspaceId(principal), expiresAt.toISOString()).run()
   return { token, maxAge: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) }
 }
 
@@ -527,14 +544,15 @@ async function resolveSessionPrincipal(env: Env, request: Request): Promise<Auth
   if (!token) return null
   await ensureAuthSessionsTable(env)
   const tokenHash = await hashSessionToken(token)
-  const row = await env.DB.prepare('SELECT role, email, principal_id, expires_at FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
+  const row = await env.DB.prepare('SELECT role, email, principal_id, workspace_id, expires_at FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
     .bind(tokenHash, nowIso())
-    .first<{ role: string; email: string | null; principal_id: string; expires_at: string }>()
+    .first<{ role: string; email: string | null; principal_id: string; workspace_id: string | null; expires_at: string }>()
   if (!row || !['admin', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role)) return null
   return {
     role: row.role as AuthRole,
     email: row.email || '',
     principalId: row.principal_id,
+    workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
     expiresAt: row.expires_at,
   }
 }
@@ -2062,13 +2080,13 @@ type MonthFinanceStats = {
   }>
 }
 
-async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: number) {
+async function computeMonthFinanceStats(env: Env, months: string[], hourlyRate: number, workspaceId = DEFAULT_WORKSPACE_ID) {
   const stats: MonthFinanceStats[] = []
   for (const month of months) {
     const rows = await env.DB.prepare(
-      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC',
+      'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC',
     )
-      .bind(month)
+      .bind(workspaceId, month)
       .all<DbTask>()
     const tasks = rows.results ?? []
     const billableTasks = tasks.filter(isBillableDbTask)
@@ -3120,7 +3138,7 @@ async function agentRecordFeedbackTool(env: Env, request: Request, ctx?: WorkerE
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再写入反馈', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再写入反馈', 409)
   const entries = parseTimeEntries(task.time_entries_json)
   const dateTime = agentDateTime(draft.dateTime)
   const entry: TimeEntry = {
@@ -3184,7 +3202,7 @@ async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: Worke
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再修改状态', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再修改状态', 409)
   const status = agentString(draft.status, 20) as TaskStatus
   if (!agentTaskStatuses.includes(status)) return agentFail('状态不合法', 400)
   if (task.status === '已验收' && status !== '已验收') return agentFail('已验收任务状态已锁定，不能通过 Agent 回退', 409)
@@ -3255,7 +3273,7 @@ async function agentUpdateTaskFieldsTool(env: Env, request: Request, ctx?: Worke
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再修改任务字段', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再修改任务字段', 409)
   const fields = agentAllowedFieldChanges((draft.fields as Record<string, unknown>) ?? {})
   const next = {
     title: Object.hasOwn(fields, 'title') ? agentString(fields.title, 120) : task.title,
@@ -3318,7 +3336,7 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再写入进展', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再写入进展', 409)
   if (task.status === '已验收' && !agentBool(draft.isAcceptanceProgress, false)) return agentFail('已验收任务的工时已锁定，不能再追加普通进展', 409)
   const startDateTime = agentDateTime(draft.startDateTime)
   const endDateTime = agentDateTime(draft.endDateTime, startDateTime)
@@ -3400,7 +3418,7 @@ async function agentAppendWaitingTool(env: Env, request: Request, ctx?: WorkerEx
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能再记录等待', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再记录等待', 409)
   if (task.status === '已验收') return agentFail('已验收任务已闭环，不能再追加等待记录', 409)
   const startDateTime = agentDateTime(draft.startDateTime)
   const endDateTime = agentDateTime(draft.endDateTime, startDateTime)
@@ -3466,7 +3484,7 @@ async function agentManageRecordTool(env: Env, request: Request, ctx?: WorkerExe
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能维护记录', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能维护记录', 409)
   if (task.status === '已验收') return agentFail('已验收任务记录已锁定，不能通过 Agent 编辑或删除', 409)
   const recordType = agentString(draft.recordType, 20)
   const action = agentString(draft.action, 20)
@@ -3544,7 +3562,7 @@ async function agentMarkAcceptanceFilesTool(env: Env, request: Request, ctx?: Wo
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能调整验收文件', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能调整验收文件', 409)
   const attachmentIds = agentAttachmentIds(draft.attachmentIds)
   const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
   if (!attachmentIds.length || files.length !== attachmentIds.length) return agentFail('部分附件不存在或不属于该任务', 409)
@@ -3595,7 +3613,7 @@ async function agentCompleteAcceptanceTool(env: Env, request: Request, ctx?: Wor
   }
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
-  if (await isLockedReportMonth(env, task.settlement_month)) return agentFail('该任务所属月份已锁定结算，不能执行验收', 409)
+  if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能执行验收', 409)
   if (task.status === '已验收') return agentFail('任务已经验收，请勿重复执行完整验收', 409)
   const attachmentIds = agentAttachmentIds(draft.attachmentIds)
   const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
@@ -4335,6 +4353,8 @@ async function createAgentAnalysisJob(env: Env, input: {
   source?: 'manual' | 'scheduled'
   dedupeKey?: string
   title?: string
+  workspaceId?: string
+  principalId?: string
 }) {
   if (!/^\d{4}-\d{2}$/.test(input.month)) throw new Error('分析任务需要 YYYY-MM 格式的 month')
   if (input.dedupeKey) {
@@ -4347,8 +4367,8 @@ async function createAgentAnalysisJob(env: Env, input: {
   await env.DB.prepare(
     `INSERT INTO agent_analysis_jobs (
       id, workflow_id, conversation_id, job_type, title, month, query, scope_json, source,
-      dedupe_key, status, phase, progress
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 5)`,
+      dedupe_key, workspace_id, principal_id, status, phase, progress, last_heartbeat_at, timeout_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 5, CURRENT_TIMESTAMP, datetime('now', '+5 minutes'))`,
   ).bind(
     jobId,
     workflowId,
@@ -4360,6 +4380,8 @@ async function createAgentAnalysisJob(env: Env, input: {
     JSON.stringify({ taskIds: (input.taskIds || []).slice(0, 30) }),
     input.source || 'manual',
     input.dedupeKey || null,
+    input.workspaceId || DEFAULT_WORKSPACE_ID,
+    input.principalId || 'system',
   ).run()
   try {
     await startAgentAnalysisWorkflow(env, jobId, workflowId)
@@ -4445,33 +4467,37 @@ async function agentAnalysisJobPrepareTool(env: Env, request: Request) {
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
      SET status = 'running', phase = 'collecting', progress = 20, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+       , last_heartbeat_at = CURRENT_TIMESTAMP, timeout_at = datetime('now', '+5 minutes')
      WHERE id = ?`,
   ).bind(jobId).run()
 
   const isBroad = ['weekly_digest', 'risk_digest'].includes(row.job_type)
   const isTrend = row.job_type === 'trend_analysis'
   const taskQuery = isBroad
-    ? `SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC, created_at DESC LIMIT 120`
+    ? `SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC, created_at DESC LIMIT 120`
     : isTrend
-      ? `SELECT * FROM tasks WHERE settlement_month >= date(?, '-5 months') AND deleted_at IS NULL AND voided_at IS NULL ORDER BY settlement_month ASC, start_date ASC LIMIT 240`
-      : `SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC LIMIT 120`
+      ? `SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month >= date(?, '-5 months') AND deleted_at IS NULL AND voided_at IS NULL ORDER BY settlement_month ASC, start_date ASC LIMIT 240`
+      : `SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC LIMIT 120`
   const taskRowsPromise = isBroad
-    ? env.DB.prepare(taskQuery).all<DbTask>()
-    : env.DB.prepare(taskQuery).bind(isTrend ? `${month}-01` : month).all<DbTask>()
+    ? env.DB.prepare(taskQuery).bind(row.workspace_id).all<DbTask>()
+    : env.DB.prepare(taskQuery).bind(row.workspace_id, isTrend ? `${month}-01` : month).all<DbTask>()
   const [taskRows, updateRows, analysisRows, hourlyRate] = await Promise.all([
     taskRowsPromise,
     Promise.resolve({ results: [] as DbUpdate[], success: true }),
     env.DB.prepare(
       `SELECT attachment_analyses.* FROM attachment_analyses
        INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
-       WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+       WHERE tasks.workspace_id = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
          AND attachment_analyses.status = 'completed'
        ORDER BY attachment_analyses.completed_at DESC LIMIT 240`,
-    ).all<DbAttachmentAnalysis>(),
+    ).bind(row.workspace_id).all<DbAttachmentAnalysis>(),
     getHourlyRate(env),
   ])
   const taskIds = new Set((taskRows.results ?? []).map((task) => Number(task.id)))
-  const allUpdates = await env.DB.prepare('SELECT * FROM task_updates ORDER BY update_date ASC, created_at ASC LIMIT 1200').all<DbUpdate>()
+  const allUpdates = await env.DB.prepare(
+    `SELECT task_updates.* FROM task_updates INNER JOIN tasks ON tasks.id = task_updates.task_id
+     WHERE tasks.workspace_id = ? ORDER BY task_updates.update_date ASC, task_updates.created_at ASC LIMIT 1200`,
+  ).bind(row.workspace_id).all<DbUpdate>()
   const updatesByTask = new Map<string, DbUpdate[]>()
   for (const update of [...(updateRows.results ?? []), ...(allUpdates.results ?? [])]) {
     if (!taskIds.has(Number(update.task_id))) continue
@@ -4569,7 +4595,8 @@ async function agentAnalysisJobPrepareTool(env: Env, request: Request) {
   }
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
-     SET source_snapshot_json = ?, phase = 'analyzing', progress = 55, updated_at = CURRENT_TIMESTAMP
+     SET source_snapshot_json = ?, phase = 'analyzing', progress = 55, updated_at = CURRENT_TIMESTAMP,
+         last_heartbeat_at = CURRENT_TIMESTAMP, timeout_at = datetime('now', '+5 minutes')
      WHERE id = ? AND status != 'cancelled'`,
   ).bind(JSON.stringify(snapshot), jobId).run()
   return agentOk({ jobId, prepared: true, replayed: false, taskCount: tasks.length })
@@ -4598,7 +4625,8 @@ async function agentAnalysisJobGenerateTool(env: Env, request: Request) {
   if (!row.source_snapshot_json) return agentFail('分析数据尚未准备完成', 409)
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
-     SET status = 'running', phase = 'analyzing', progress = 72, updated_at = CURRENT_TIMESTAMP
+     SET status = 'running', phase = 'analyzing', progress = 72, updated_at = CURRENT_TIMESTAMP,
+         last_heartbeat_at = CURRENT_TIMESTAMP, timeout_at = datetime('now', '+5 minutes')
      WHERE id = ?`,
   ).bind(jobId).run()
   const snapshotText = row.source_snapshot_json.slice(0, 90_000)
@@ -4630,7 +4658,8 @@ ${snapshotText}`
     `UPDATE agent_analysis_jobs
      SET status = 'completed', phase = 'completed', progress = 100, result_markdown = ?,
        source_snapshot_json = NULL, error_message = NULL,
-       completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+       last_heartbeat_at = CURRENT_TIMESTAMP, timeout_at = NULL, next_retry_at = NULL
      WHERE id = ? AND status != 'cancelled'`,
   ).bind(output, jobId).run()
   const completed = await agentAnalysisJobById(env, jobId)
@@ -4645,7 +4674,8 @@ async function agentAnalysisJobFailTool(env: Env, request: Request) {
   const error = agentString(body.error, 1200) || '后台分析失败'
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
-     SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP
+     SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP,
+         next_retry_at = CASE WHEN retry_count < max_attempts THEN datetime('now', '+2 minutes') ELSE NULL END
      WHERE id = ? AND status NOT IN ('completed', 'cancelled')`,
   ).bind(error, jobId).run()
   return agentOk({ failed: true })
@@ -4654,9 +4684,10 @@ async function agentAnalysisJobFailTool(env: Env, request: Request) {
 async function listAgentAnalysisJobs(env: Env, request: Request) {
   const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit') || 20), 1), 50)
   const unreadOnly = new URL(request.url).searchParams.get('unread') === '1'
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const rows = await env.DB.prepare(
-    `SELECT * FROM agent_analysis_jobs ${unreadOnly ? 'WHERE read_at IS NULL' : ''} ORDER BY created_at DESC LIMIT ?`,
-  ).bind(limit).all<DbAgentAnalysisJob>()
+    `SELECT * FROM agent_analysis_jobs WHERE workspace_id = ? ${unreadOnly ? 'AND read_at IS NULL' : ''} ORDER BY created_at DESC LIMIT ?`,
+  ).bind(workspaceId, limit).all<DbAgentAnalysisJob>()
   return ok({ jobs: (rows.results ?? []).map(toAgentBackgroundTask) })
 }
 
@@ -4701,7 +4732,8 @@ async function retryAgentAnalysisJob(env: Env, jobId: string) {
     `UPDATE agent_analysis_jobs
      SET workflow_id = ?, status = 'queued', phase = 'queued', progress = 5,
        source_snapshot_json = NULL, result_markdown = NULL, error_message = NULL,
-       completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+       completed_at = NULL, updated_at = CURRENT_TIMESTAMP, retry_count = retry_count + 1,
+       last_heartbeat_at = CURRENT_TIMESTAMP, timeout_at = datetime('now', '+5 minutes'), next_retry_at = NULL
      WHERE id = ?`,
   ).bind(workflowId, jobId).run()
   try {
@@ -4716,6 +4748,34 @@ async function retryAgentAnalysisJob(env: Env, jobId: string) {
   }
   const retried = await agentAnalysisJobById(env, jobId)
   return ok({ job: retried ? toAgentBackgroundTask(retried) : null })
+}
+
+async function recoverAgentAnalysisJobs(env: Env, workspaceId?: string) {
+  const workspaceClause = workspaceId ? ' AND workspace_id = ?' : ''
+  const staleRows = await env.DB.prepare(
+    `SELECT * FROM agent_analysis_jobs
+     WHERE status IN ('queued', 'running') AND timeout_at IS NOT NULL AND timeout_at <= CURRENT_TIMESTAMP
+       ${workspaceClause}
+     ORDER BY updated_at ASC LIMIT 10`,
+  ).bind(...(workspaceId ? [workspaceId] : [])).all<DbAgentAnalysisJob>()
+  for (const row of staleRows.results ?? []) {
+    await env.DB.prepare(
+      `UPDATE agent_analysis_jobs SET status = 'failed', phase = 'failed', progress = 0,
+       error_message = '后台任务心跳超时，系统将自动恢复', next_retry_at = CURRENT_TIMESTAMP,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('queued', 'running')`,
+    ).bind(row.id).run()
+  }
+  const retryRows = await env.DB.prepare(
+    `SELECT * FROM agent_analysis_jobs
+     WHERE status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= CURRENT_TIMESTAMP
+       AND retry_count < max_attempts ${workspaceClause} ORDER BY next_retry_at ASC LIMIT 5`,
+  ).bind(...(workspaceId ? [workspaceId] : [])).all<DbAgentAnalysisJob>()
+  for (const row of retryRows.results ?? []) {
+    await retryAgentAnalysisJob(env, row.id).catch((error) => {
+      console.error('agent analysis automatic retry failed', row.id, error)
+    })
+  }
+  return { stale: staleRows.results?.length ?? 0, retried: retryRows.results?.length ?? 0 }
 }
 
 function beijingClock(now = new Date()) {
@@ -7341,11 +7401,13 @@ async function getServiceCompanyName(env: Env) {
   return value || defaultServiceCompanyName
 }
 
-async function isLockedReportMonth(env: Env, month: string | null | undefined) {
+async function isLockedReportMonth(env: Env, month: string | null | undefined, workspaceId = DEFAULT_WORKSPACE_ID) {
   if (!month) {
     return false
   }
-  const row = await env.DB.prepare("SELECT id FROM monthly_reports WHERE month = ? AND status = 'locked'").bind(month).first<{ id: string }>()
+  const row = await env.DB.prepare("SELECT id FROM monthly_reports WHERE month = ? AND workspace_id = ? AND status = 'locked'")
+    .bind(month, workspaceId)
+    .first<{ id: string }>()
   return Boolean(row)
 }
 
@@ -9584,6 +9646,91 @@ async function resolveRequestPrincipal(env: Env, request: Request): Promise<Auth
   )
 }
 
+async function listWorkspaces(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const rows = principal.role === 'admin'
+    ? await env.DB.prepare(
+      `SELECT w.id, w.name, w.status, COALESCE(m.role, 'owner') AS role
+       FROM workspaces w LEFT JOIN workspace_memberships m ON m.workspace_id = w.id AND m.principal_id = ?
+       WHERE w.status = 'active' ORDER BY w.created_at`,
+    ).bind(principal.principalId).all<{ id: string; name: string; status: string; role: string }>()
+    : await env.DB.prepare(
+      `SELECT w.id, w.name, w.status, m.role FROM workspaces w
+       JOIN workspace_memberships m ON m.workspace_id = w.id
+       WHERE m.principal_id = ? AND w.status = 'active' ORDER BY w.created_at`,
+    ).bind(principal.principalId).all<{ id: string; name: string; status: string; role: string }>()
+  return ok({ currentWorkspaceId: principalWorkspaceId(principal), workspaces: rows.results ?? [] })
+}
+
+async function createWorkspace(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || principal.role !== 'admin') return fail('需要管理员权限', 403)
+  const body = await request.json().catch(() => ({})) as { name?: string }
+  const name = String(body.name || '').trim().slice(0, 80)
+  if (!name) return fail('请输入工作区名称', 400)
+  const id = `ws_${crypto.randomUUID()}`
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO workspaces (id, name) VALUES (?, ?)').bind(id, name),
+    env.DB.prepare("INSERT INTO workspace_memberships (workspace_id, principal_id, role) VALUES (?, ?, 'owner')")
+      .bind(id, principal.principalId),
+  ])
+  return ok({ workspace: { id, name, role: 'owner', status: 'active' } })
+}
+
+async function switchWorkspace(env: Env, workspaceId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const workspace = await env.DB.prepare("SELECT id, name FROM workspaces WHERE id = ? AND status = 'active'")
+    .bind(workspaceId).first<{ id: string; name: string }>()
+  if (!workspace) return fail('工作区不存在', 404)
+  if (principal.role !== 'admin') {
+    const membership = await env.DB.prepare('SELECT role FROM workspace_memberships WHERE workspace_id = ? AND principal_id = ?')
+      .bind(workspaceId, principal.principalId).first<{ role: string }>()
+    if (!membership) return fail('你无权进入该工作区', 403)
+  }
+  const token = requestCookie(request, AUTH_SESSION_COOKIE)
+  if (!token) return fail('当前登录方式不支持切换工作区，请重新登录', 409)
+  await env.DB.prepare('UPDATE auth_sessions SET workspace_id = ? WHERE token_hash = ?')
+    .bind(workspaceId, await hashSessionToken(token)).run()
+  return ok({ currentWorkspaceId: workspaceId, workspace })
+}
+
+async function addWorkspaceMember(env: Env, workspaceId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || principal.role !== 'admin') return fail('需要管理员权限', 403)
+  const workspace = await env.DB.prepare("SELECT id FROM workspaces WHERE id = ? AND status = 'active'")
+    .bind(workspaceId)
+    .first<{ id: string }>()
+  if (!workspace) return fail('工作区不存在', 404)
+  const body = await request.json().catch(() => ({})) as { principalId?: string; email?: string; role?: string }
+  const principalId = String(body.principalId || '').trim().slice(0, 160)
+  const email = String(body.email || '').trim().toLowerCase().slice(0, 160)
+  const role = ['owner', 'admin', 'member', 'viewer'].includes(String(body.role)) ? String(body.role) : 'member'
+  let memberPrincipalId = principalId
+  if (!memberPrincipalId && email) {
+    const session = await env.DB.prepare('SELECT principal_id FROM auth_sessions WHERE LOWER(email) = ? ORDER BY created_at DESC LIMIT 1')
+      .bind(email)
+      .first<{ principal_id: string }>()
+    memberPrincipalId = session?.principal_id || ''
+  }
+  if (!memberPrincipalId && !email) return fail('请输入成员邮箱或登录标识', 400)
+  if (!memberPrincipalId && email) {
+    const inviteId = `invite_${crypto.randomUUID()}`
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    await env.DB.prepare(
+      `INSERT INTO workspace_invites (id, workspace_id, email, role, created_by, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(inviteId, workspaceId, email, role, principal.principalId, expiresAt).run()
+    return ok({ added: false, invited: true, inviteId, workspaceId, email, role })
+  }
+  await env.DB.prepare(
+    `INSERT INTO workspace_memberships (workspace_id, principal_id, role) VALUES (?, ?, ?)
+     ON CONFLICT(workspace_id, principal_id) DO UPDATE SET role = excluded.role`,
+  ).bind(workspaceId, memberPrincipalId, role).run()
+  return ok({ added: true, invited: false, workspaceId, principalId: memberPrincipalId, email, role })
+}
+
 // ===== 登录防爆破（撞库/暴力破解）限流 =====
 // 按来源 IP 统计失败次数：10 分钟内失败达 6 次即临时锁定 10 分钟，期间该 IP 一律拒绝登录。
 // 登录成功立即清零。纯 worker + D1 实现，不依赖任何后台配置。
@@ -9906,8 +10053,9 @@ async function ensureSeedData(env: Env) {
     .run()
 }
 
-async function getState(env: Env, role: AuthRole) {
+async function getState(env: Env, role: AuthRole, request: Request) {
   await ensureSeedData(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
 
   // 数据可见范围分级：
   const full = canSeeFullData(role) // admin/collaborator/viewer：看全量（含作废）
@@ -9923,19 +10071,19 @@ async function getState(env: Env, role: AuthRole) {
   const attachClientVisible = seeAllAttachments ? '' : 'AND attachments.visible_to_client = 1'
 
   const [taskRows, updateRows, fileRows, analysisRows, rateRow, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig, reportRows] = await Promise.all([
-    env.DB.prepare(`SELECT * FROM tasks WHERE deleted_at IS NULL ${taskWhereVoided} ${clientTaskMonth} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).all<DbTask>(),
+    env.DB.prepare(`SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL ${taskWhereVoided} ${clientTaskMonth} ORDER BY settlement_month DESC, start_date DESC, created_at DESC`).bind(workspaceId).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.*
        FROM task_updates
        INNER JOIN tasks ON tasks.id = task_updates.task_id
-       WHERE tasks.deleted_at IS NULL ${updateVoided} ${clientUpdateMonth}
+       WHERE tasks.workspace_id = ? AND tasks.deleted_at IS NULL ${updateVoided} ${clientUpdateMonth}
        ORDER BY task_updates.update_date DESC, task_updates.created_at DESC`,
-    ).all<DbUpdate>(),
+    ).bind(workspaceId).all<DbUpdate>(),
     env.DB.prepare(
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        LEFT JOIN tasks ON tasks.id = attachments.task_id
-       WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${attachVoided} ${attachClientVisible}
+       WHERE tasks.workspace_id = ? AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL ${attachVoided} ${attachClientVisible}
          AND (
            attachments.attachment_scope != 'progress'
            OR attachments.entry_id IS NULL
@@ -9950,16 +10098,16 @@ async function getState(env: Env, role: AuthRole) {
            )
          )
        ORDER BY uploaded_at DESC`,
-    ).all<DbAttachment>(),
+    ).bind(workspaceId).all<DbAttachment>(),
     seeAnalyses
       ? env.DB.prepare(
           `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
            FROM attachment_analyses
            INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
            INNER JOIN tasks ON tasks.id = attachment_analyses.task_id
-           WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL
+           WHERE tasks.workspace_id = ? AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL
            ORDER BY attachment_analyses.requested_at DESC`,
-        ).all<DbAttachmentAnalysis>()
+        ).bind(workspaceId).all<DbAttachmentAnalysis>()
       : Promise.resolve({ success: true, results: [] } as D1Result<DbAttachmentAnalysis>),
     env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('hourlyRate').first<{ value: string }>(),
     getPdfTitle(env),
@@ -9968,8 +10116,8 @@ async function getState(env: Env, role: AuthRole) {
     getDesignTypeGroups(env),
     getStoredAiModelConfig(env),
     role === 'client'
-      ? env.DB.prepare('SELECT * FROM monthly_reports WHERE month = ? ORDER BY month DESC').bind(currentMonth).all<DbReport>()
-      : env.DB.prepare('SELECT * FROM monthly_reports ORDER BY month DESC').all<DbReport>(),
+      ? env.DB.prepare('SELECT * FROM monthly_reports WHERE workspace_id = ? AND month = ? ORDER BY month DESC').bind(workspaceId, currentMonth).all<DbReport>()
+      : env.DB.prepare('SELECT * FROM monthly_reports WHERE workspace_id = ? ORDER BY month DESC').bind(workspaceId).all<DbReport>(),
   ])
 
   const filesByTask = new Map<string, string[]>()
@@ -10002,6 +10150,7 @@ async function getSharedReport(env: Env, token: string) {
   if (!report) {
     return fail('分享链接无效或已失效', 404)
   }
+  const reportWorkspaceId = report.workspace_id || DEFAULT_WORKSPACE_ID
 
   // 记录甲方查看回执（时间 + 次数），月报页结算历史里可见
   await env.DB.prepare('UPDATE monthly_reports SET viewed_at = CURRENT_TIMESTAMP, view_count = view_count + 1 WHERE id = ?')
@@ -10009,28 +10158,30 @@ async function getSharedReport(env: Env, token: string) {
     .run()
 
   const [taskRows, updateRows, fileRows, pdfTitle, serviceCompanyName] = await Promise.all([
-    env.DB.prepare("SELECT * FROM tasks WHERE settlement_month = ? AND status != '不计费' AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC").bind(report.month).all<DbTask>(),
+    env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND status != '不计费' AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC").bind(reportWorkspaceId, report.month).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.* FROM task_updates
        INNER JOIN tasks ON tasks.id = task_updates.task_id
        WHERE task_updates.visible_to_client = 1
+         AND tasks.workspace_id = ?
          AND (task_updates.update_date LIKE ? OR tasks.settlement_month = ?)
          AND tasks.deleted_at IS NULL
          AND tasks.voided_at IS NULL
        ORDER BY task_updates.update_date DESC`,
-    ).bind(`${report.month}%`, report.month).all<DbUpdate>(),
+    ).bind(reportWorkspaceId, `${report.month}%`, report.month).all<DbUpdate>(),
     env.DB.prepare(
       `SELECT attachments.*, tasks.title AS task_title
        FROM attachments
        INNER JOIN tasks ON tasks.id = attachments.task_id
        WHERE attachments.deleted_at IS NULL
+         AND tasks.workspace_id = ?
          AND attachments.visible_to_client = 1
          AND attachments.attachment_scope = 'acceptance'
          AND (attachments.uploaded_at LIKE ? OR tasks.settlement_month = ?)
          AND tasks.deleted_at IS NULL
          AND tasks.voided_at IS NULL
        ORDER BY uploaded_at DESC`,
-    ).bind(`${report.month}%`, report.month).all<DbAttachment>(),
+    ).bind(reportWorkspaceId, `${report.month}%`, report.month).all<DbAttachment>(),
     getPdfTitle(env),
     getServiceCompanyName(env),
   ])
@@ -10053,6 +10204,7 @@ async function getSharedReport(env: Env, token: string) {
 
 async function createTask(env: Env, request: Request, ctx?: WorkerExecutionContext) {
   const task = (await request.json()) as Task
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const id = nextNumericId()
   const hourlyRate = await getHourlyRate(env)
   // 所有任务都从「计划中」开始；是否计费由独立的 billable 标记决定（不随状态变化），
@@ -10061,13 +10213,14 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
   const initialBillable = task.billable === false ? 0 : initialStatus === '不计费' ? 0 : 1
   await env.DB.prepare(
     `INSERT INTO tasks (
-      id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
+      id, workspace_id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
       estimated_hours, actual_hours, hourly_rate, requester, contact_person, reviewer, stage, status, progress,
       suspend_reason, terminate_reason, supplemental_note, acceptance_note, feedback_rating, feedback_tags_json, feedback_note, time_entries_json, waiting_entries_json, is_billable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
+      workspaceId,
       task.title,
       task.requirement,
       task.type,
@@ -10121,7 +10274,10 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
 
 async function updateTask(env: Env, id: string, request: Request, role: AuthRole, ctx?: WorkerExecutionContext) {
   const changes = (await request.json()) as Partial<Task> & { startFromProgress?: boolean }
-  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(id, workspaceId)
+    .first<DbTask>()
   if (!current) {
     return fail('任务不存在', 404)
   }
@@ -10147,7 +10303,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
       return fail('实际工时必须由分段记录自动计算', 400)
     }
   }
-  if (await isLockedReportMonth(env, current.settlement_month)) {
+  if (await isLockedReportMonth(env, current.settlement_month, workspaceId)) {
     return fail('该任务所属月份已锁定结算，不能再修改任务明细', 409)
   }
   const allowAcceptedTimeEdit = Boolean((changes as { allowAcceptedTimeEdit?: boolean }).allowAcceptedTimeEdit)
@@ -10204,7 +10360,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
       title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, actual_delivery_date = ?, settlement_month = ?, is_supplemental = ?, estimated_hours = ?, actual_hours = ?,
       requester = ?, contact_person = ?, reviewer = ?, stage = ?, status = ?, progress = ?,
       suspend_reason = ?, terminate_reason = ?, supplemental_note = ?, acceptance_note = ?, feedback_rating = ?, feedback_tags_json = ?, feedback_note = ?, time_entries_json = ?, waiting_entries_json = ?, is_billable = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
+     WHERE id = ? AND workspace_id = ?`,
   )
     .bind(
       next.title,
@@ -10240,43 +10396,57 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
           ? 0
           : Number(current.is_billable),
       id,
+      workspaceId,
     )
     .run()
 
   await updateHourEstimateObservation(env, id, Number(next.actualHours) || 0, next.status === '已验收')
   await linkHourEstimateSuggestion(env, changes.hourEstimateSuggestionId ?? '', id, Number(next.estimatedHours) || 0)
   await audit(env, 'update', 'task', id, changes)
-  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(id).first<DbTask>()
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(id, workspaceId)
+    .first<DbTask>()
   ctx?.waitUntil(indexTaskSearch(env, id))
   return ok(saved ? toTask(saved) : toTask(current))
 }
 
 async function voidTask(env: Env, id: string, request: Request) {
   const body = (await request.json().catch(() => ({}))) as { reason?: string }
-  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(id).first<DbTask>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL')
+    .bind(id, workspaceId)
+    .first<DbTask>()
   if (!current) {
     return fail('任务不存在或已作废', 404)
   }
-  await env.DB.prepare('UPDATE tasks SET voided_at = CURRENT_TIMESTAMP, void_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .bind((body.reason ?? '').trim() || '管理员作废', id)
+  await env.DB.prepare('UPDATE tasks SET voided_at = CURRENT_TIMESTAMP, void_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?')
+    .bind((body.reason ?? '').trim() || '管理员作废', id, workspaceId)
     .run()
   await audit(env, 'void', 'task', id, { reason: body.reason ?? '' })
   return ok({ ok: true })
 }
 
-async function restoreTask(env: Env, id: string) {
-  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NOT NULL').bind(id).first<DbTask>()
+async function restoreTask(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NOT NULL')
+    .bind(id, workspaceId)
+    .first<DbTask>()
   if (!current) {
     return fail('任务不存在或未作废', 404)
   }
-  await env.DB.prepare('UPDATE tasks SET voided_at = NULL, void_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
+  await env.DB.prepare('UPDATE tasks SET voided_at = NULL, void_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId)
+    .run()
   await audit(env, 'restore', 'task', id, {})
   return ok({ ok: true })
 }
 
-async function deleteTask(env: Env, id: string) {
+async function deleteTask(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   // 真删除仅允许作用于已作废任务，避免误删正常任务。
-  const current = await env.DB.prepare('SELECT id, title, settlement_month FROM tasks WHERE id = ? AND voided_at IS NOT NULL').bind(id).first<{
+  const current = await env.DB.prepare('SELECT id, title, settlement_month FROM tasks WHERE id = ? AND workspace_id = ? AND voided_at IS NOT NULL')
+    .bind(id, workspaceId)
+    .first<{
     id: string
     title: string
     settlement_month: string | null
@@ -10284,10 +10454,12 @@ async function deleteTask(env: Env, id: string) {
   if (!current) {
     return fail('只有已作废的任务才能永久删除', 405)
   }
-  if (await isLockedReportMonth(env, current.settlement_month)) {
+  if (await isLockedReportMonth(env, current.settlement_month, workspaceId)) {
     return fail('该任务所属月份已锁定结算，不能永久删除', 409)
   }
-  await env.DB.prepare('UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
+  await env.DB.prepare('UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId)
+    .run()
   await audit(env, 'delete', 'task', id, { title: current.title })
   return ok({ ok: true })
 }
@@ -10295,7 +10467,10 @@ async function deleteTask(env: Env, id: string) {
 async function createUpdate(env: Env, request: Request) {
   const update = (await request.json()) as TaskUpdate
   const id = nextNumericId()
-  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(toId(update.taskId)).first<{ id: string }>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(toId(update.taskId), workspaceId)
+    .first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
@@ -10327,7 +10502,12 @@ async function createUpdate(env: Env, request: Request) {
 
 async function updateUpdate(env: Env, id: string, request: Request) {
   const changes = (await request.json()) as Partial<TaskUpdate>
-  const current = await env.DB.prepare('SELECT * FROM task_updates WHERE id = ?').bind(id).first<DbUpdate>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare(
+    `SELECT u.* FROM task_updates u
+     INNER JOIN tasks t ON t.id = u.task_id
+     WHERE u.id = ? AND t.workspace_id = ? AND t.deleted_at IS NULL`,
+  ).bind(id, workspaceId).first<DbUpdate>()
   if (!current) {
     return fail('进展记录不存在', 404)
   }
@@ -10365,8 +10545,13 @@ async function updateUpdate(env: Env, id: string, request: Request) {
   return ok(saved ? toUpdate(saved) : toUpdate(current))
 }
 
-async function deleteUpdate(env: Env, id: string) {
-  const current = await env.DB.prepare('SELECT * FROM task_updates WHERE id = ?').bind(id).first<DbUpdate>()
+async function deleteUpdate(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare(
+    `SELECT u.* FROM task_updates u
+     INNER JOIN tasks t ON t.id = u.task_id
+     WHERE u.id = ? AND t.workspace_id = ? AND t.deleted_at IS NULL`,
+  ).bind(id, workspaceId).first<DbUpdate>()
   if (!current) {
     return fail('进展记录不存在', 404)
   }
@@ -10384,7 +10569,14 @@ async function deleteUpdate(env: Env, id: string) {
   return ok({ ok: true })
 }
 
-async function getTaskActivity(env: Env, taskId: string) {
+async function getTaskActivity(env: Env, taskId: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(taskId, workspaceId)
+    .first<{ id: string }>()
+  if (!task) {
+    return fail('任务不存在', 404)
+  }
   const [rows, activeAttachmentRows] = await Promise.all([
     env.DB.prepare(
       `SELECT * FROM audit_log
@@ -10429,16 +10621,46 @@ async function getTaskActivity(env: Env, taskId: string) {
   return ok({ items })
 }
 
-async function deleteActivity(env: Env, id: string) {
-  const current = await env.DB.prepare('SELECT id FROM audit_log WHERE id = ?').bind(id).first<{ id: string }>()
+async function deleteActivity(env: Env, id: string, request: Request) {
+  const current = await env.DB.prepare('SELECT id, entity_type, entity_id, payload_json FROM audit_log WHERE id = ?').bind(id).first<{
+    id: string
+    entity_type: string
+    entity_id: string
+    payload_json: string | null
+  }>()
   if (!current) {
     return fail('动态不存在或已删除', 404)
+  }
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  let taskId = current.entity_type === 'task' ? current.entity_id : ''
+  if (!taskId && current.payload_json) {
+    try {
+      const payload = JSON.parse(current.payload_json) as { taskId?: number | string }
+      taskId = String(payload.taskId || '')
+    } catch {
+      taskId = ''
+    }
+  }
+  if (!taskId && current.entity_type === 'attachment') {
+    const attachment = await env.DB.prepare(
+      `SELECT tasks.id FROM attachments
+       INNER JOIN tasks ON tasks.id = attachments.task_id
+       WHERE attachments.id = ? AND tasks.workspace_id = ?`,
+    ).bind(current.entity_id, workspaceId).first<{ id: string }>()
+    taskId = attachment?.id || ''
+  }
+  if (taskId) {
+    const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ?')
+      .bind(taskId, workspaceId)
+      .first<{ id: string }>()
+    if (!task) return fail('没有权限删除该动态', 403)
   }
   await env.DB.prepare('DELETE FROM audit_log WHERE id = ?').bind(id).run()
   return ok({ ok: true })
 }
 
 async function createFile(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const form = await request.formData()
   const file = form.get('file')
   const preview = form.get('preview')
@@ -10454,7 +10676,9 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   const entryId = String(form.get('entryId') ?? '').trim()
   const scope = form.get('scope') === 'acceptance' ? 'acceptance' : 'progress'
   const type = inferAttachmentFileType(file.name, file.type || null, String(form.get('type') ?? ''))
-  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(taskId).first<{ id: string }>()
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(taskId, workspaceId)
+    .first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
@@ -10586,6 +10810,7 @@ async function insertAttachment(
 }
 
 async function initMultipartUpload(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const body = (await request.json()) as { taskId: number; entryId?: string; fileName: string; contentType?: string; fileSize?: number }
   if (!body.fileName || !body.taskId) {
     return fail('缺少文件名或关联任务')
@@ -10596,7 +10821,9 @@ async function initMultipartUpload(env: Env, request: Request) {
   if (Number(body.fileSize) > MAX_UPLOAD_FILE_SIZE) {
     return fail('单个文件不能超过 200MB，请压缩后再上传', 413)
   }
-  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(toId(body.taskId)).first<{ id: string }>()
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(toId(body.taskId), workspaceId)
+    .first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
@@ -10634,6 +10861,7 @@ async function abortMultipartUpload(env: Env, request: Request) {
 }
 
 async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const form = await request.formData()
   const key = String(form.get('key') ?? '')
   const uploadId = String(form.get('uploadId') ?? '')
@@ -10649,7 +10877,9 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
   if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_UPLOAD_FILE_SIZE) {
     return fail('文件大小无效或超过 200MB', 413)
   }
-  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL').bind(taskId).first<{ id: string }>()
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL')
+    .bind(taskId, workspaceId)
+    .first<{ id: string }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
@@ -10724,7 +10954,12 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
 
 // 为已上传但缺少预览图的文件（如早期上传的 PDF）补一张预览图。前端客户端渲染 PDF 首页后回传。
 async function setFilePreview(env: Env, id: string, request: Request) {
-  const row = await env.DB.prepare('SELECT id, task_id FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ id: string; task_id: string }>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare(
+    `SELECT a.id, a.task_id FROM attachments a
+     INNER JOIN tasks t ON t.id = a.task_id
+     WHERE a.id = ? AND t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL`,
+  ).bind(id, workspaceId).first<{ id: string; task_id: string }>()
   if (!row) {
     return fail('文件不存在或已删除', 404)
   }
@@ -10741,7 +10976,7 @@ async function setFilePreview(env: Env, id: string, request: Request) {
 
 async function getFilePreview(env: Env, id: string, request: Request) {
   const row = await env.DB.prepare(`
-    SELECT attachments.preview_r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month
+    SELECT attachments.preview_r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
     WHERE attachments.id = ? AND attachments.deleted_at IS NULL
@@ -10750,9 +10985,15 @@ async function getFilePreview(env: Env, id: string, request: Request) {
     mime_type: string | null
     visible_to_client: number
     settlement_month: string | null
+    workspace_id: string | null
   }>()
   if (!row?.preview_r2_key) {
     return fail('没有预览图', 404)
+  }
+  const principal = await resolveRequestPrincipal(env, request)
+  const shareToken = new URL(request.url).searchParams.get('token') ?? ''
+  if (principal && row.workspace_id && row.workspace_id !== principalWorkspaceId(principal) && !(await canReadSharedFile(env, id, shareToken))) {
+    return fail('没有权限查看该文件', 403)
   }
 
   // 登录用户可看全部；匿名访客可看对客可见文件，分享链接继续按 token 校验。
@@ -10788,7 +11029,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
   const url = new URL(request.url)
   const internalAnalysisRequest = await verifyAgentToolRequest(env, request)
   const row = await env.DB.prepare(`
-    SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month
+    SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
     WHERE attachments.id = ? AND attachments.deleted_at IS NULL
@@ -10798,9 +11039,21 @@ async function getFileSource(env: Env, id: string, request: Request) {
     mime_type: string | null
     visible_to_client: number
     settlement_month: string | null
+    workspace_id: string | null
   }>()
   if (!row?.r2_key) {
     return fail('文件不存在', 404)
+  }
+  const principal = await resolveRequestPrincipal(env, request)
+  const shareToken = url.searchParams.get('token') ?? ''
+  if (
+    !internalAnalysisRequest &&
+    principal &&
+    row.workspace_id &&
+    row.workspace_id !== principalWorkspaceId(principal) &&
+    !(await canReadSharedFile(env, id, shareToken))
+  ) {
+    return fail('没有权限查看该文件', 403)
   }
 
   if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
@@ -10836,7 +11089,12 @@ async function getFileSource(env: Env, id: string, request: Request) {
 
 async function updateFileMetadata(env: Env, id: string, request: Request) {
   const body = (await request.json()) as { name?: string; tag?: string; scope?: string }
-  const current = await env.DB.prepare('SELECT task_id, file_name, file_tag FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(id).first<{ task_id: string; file_name: string; file_tag: string | null }>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const current = await env.DB.prepare(
+    `SELECT a.task_id, a.file_name, a.file_tag FROM attachments a
+     INNER JOIN tasks t ON t.id = a.task_id
+     WHERE a.id = ? AND t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL`,
+  ).bind(id, workspaceId).first<{ task_id: string; file_name: string; file_tag: string | null }>()
   if (!current) {
     return fail('文件不存在', 404)
   }
@@ -10860,13 +11118,14 @@ async function updateFileMetadata(env: Env, id: string, request: Request) {
   return ok(row ? toFile(row) : { ok: true })
 }
 
-async function deleteFile(env: Env, id: string) {
+async function deleteFile(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const row = await env.DB.prepare(`
     SELECT attachments.task_id, attachments.file_name, attachments.r2_key, attachments.preview_r2_key, tasks.settlement_month
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
-    WHERE attachments.id = ? AND attachments.deleted_at IS NULL
-  `).bind(id).first<{
+    WHERE attachments.id = ? AND tasks.workspace_id = ? AND attachments.deleted_at IS NULL
+  `).bind(id, workspaceId).first<{
     task_id: string
     file_name: string
     r2_key: string
@@ -10876,7 +11135,7 @@ async function deleteFile(env: Env, id: string) {
   if (!row) {
     return fail('文件不存在', 404)
   }
-  if (await isLockedReportMonth(env, row.settlement_month)) {
+  if (await isLockedReportMonth(env, row.settlement_month, workspaceId)) {
     return fail('该文件所属月份已锁定结算，不能删除', 409)
   }
   await env.DB.batch([
@@ -10898,17 +11157,18 @@ async function deleteFile(env: Env, id: string) {
 
 async function setEntryAttachmentsArchived(env: Env, taskId: string, request: Request) {
   const body = (await request.json()) as { entryId?: string; archived?: boolean }
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const entryId = String(body.entryId ?? '').trim()
   if (!entryId) {
     return fail('缺少分段记录 ID')
   }
   const task = await env.DB.prepare(
-    'SELECT id, settlement_month FROM tasks WHERE id = ? AND deleted_at IS NULL',
-  ).bind(taskId).first<{ id: string; settlement_month: string | null }>()
+    'SELECT id, settlement_month FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL',
+  ).bind(taskId, workspaceId).first<{ id: string; settlement_month: string | null }>()
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
-  if (await isLockedReportMonth(env, task.settlement_month)) {
+  if (await isLockedReportMonth(env, task.settlement_month, workspaceId)) {
     return fail('该任务所属月份已锁定结算，不能调整关联附件', 409)
   }
   const result = body.archived
@@ -10930,8 +11190,13 @@ async function setEntryAttachmentsArchived(env: Env, taskId: string, request: Re
   return ok({ ok: true, affected })
 }
 
-async function retryAttachmentAnalysis(env: Env, attachmentId: string, ctx?: WorkerExecutionContext) {
-  const row = await env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL').bind(attachmentId).first<{ task_id: string }>()
+async function retryAttachmentAnalysis(env: Env, attachmentId: string, request: Request, ctx?: WorkerExecutionContext) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare(
+    `SELECT a.task_id FROM attachments a
+     INNER JOIN tasks t ON t.id = a.task_id
+     WHERE a.id = ? AND t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL`,
+  ).bind(attachmentId, workspaceId).first<{ task_id: string }>()
   if (!row) {
     return fail('附件不存在', 404)
   }
@@ -10941,6 +11206,7 @@ async function retryAttachmentAnalysis(env: Env, attachmentId: string, ctx?: Wor
 }
 
 async function getAttachmentAnalysisStatuses(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const ids = Array.from(new Set(
     (new URL(request.url).searchParams.get('ids') || '')
       .split(',')
@@ -10955,8 +11221,12 @@ async function getAttachmentAnalysisStatuses(env: Env, request: Request) {
     `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
      FROM attachment_analyses
      INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
-     WHERE attachment_analyses.attachment_id IN (${placeholders}) AND attachments.deleted_at IS NULL`,
-  ).bind(...ids).all<DbAttachmentAnalysis>()
+     INNER JOIN tasks ON tasks.id = attachments.task_id
+     WHERE attachment_analyses.attachment_id IN (${placeholders})
+       AND tasks.workspace_id = ?
+       AND attachments.deleted_at IS NULL
+       AND tasks.deleted_at IS NULL`,
+  ).bind(...ids, workspaceId).all<DbAttachmentAnalysis>()
   return ok((rows.results ?? []).map(toAttachmentAnalysis))
 }
 
@@ -12315,9 +12585,23 @@ async function ensureTaskLearningTables(env: Env) {
       task_id INTEGER,
       task_title TEXT NOT NULL DEFAULT '',
       metadata_json TEXT NOT NULL DEFAULT '{}',
+      workspace_id TEXT NOT NULL DEFAULT 'default',
+      principal_id TEXT,
+      feedback_reason TEXT NOT NULL DEFAULT '',
+      reason_category TEXT NOT NULL DEFAULT '',
+      confidence REAL,
       created_at INTEGER NOT NULL
     )`,
   ).run()
+  for (const statement of [
+    "ALTER TABLE ai_learning_events ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    'ALTER TABLE ai_learning_events ADD COLUMN principal_id TEXT',
+    "ALTER TABLE ai_learning_events ADD COLUMN feedback_reason TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE ai_learning_events ADD COLUMN reason_category TEXT NOT NULL DEFAULT ''",
+    'ALTER TABLE ai_learning_events ADD COLUMN confidence REAL',
+  ]) {
+    try { await env.DB.prepare(statement).run() } catch { /* 已由迁移或旧版本创建 */ }
+  }
 }
 
 async function saveTaskEditPair(env: Env, request: Request) {
@@ -12419,6 +12703,9 @@ async function saveAiLearningEvent(env: Env, request: Request) {
     taskId?: number
     taskTitle?: string
     metadata?: Record<string, unknown>
+    feedbackReason?: string
+    reasonCategory?: string
+    confidence?: number
   }
   const context = normalizeAiLearningContext(body.context)
   const sourceInput = String(body.sourceInput ?? '').trim().slice(0, 6000)
@@ -12431,11 +12718,23 @@ async function saveAiLearningEvent(env: Env, request: Request) {
     return ok({ saved: false })
   }
   const action = normalizeAiLearningAction(body.action, aiOutput, userFinal)
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
+  const feedbackReason = String(body.feedbackReason ?? '').trim().slice(0, 500)
+  const inferredCategory = action === 'adopted' ? 'accepted'
+    : /太长|啰嗦|精简/.test(feedbackReason) ? 'verbosity'
+      : /语气|口吻|生硬/.test(feedbackReason) ? 'tone'
+        : /错误|不准|事实|数据/.test(feedbackReason) ? 'accuracy'
+          : /格式|排版|表格/.test(feedbackReason) ? 'format'
+            : action === 'rejected' ? 'rejected' : 'manual-edit'
+  const reasonCategory = String(body.reasonCategory || inferredCategory).trim().slice(0, 80)
+  const confidence = Number.isFinite(Number(body.confidence)) ? Math.min(1, Math.max(0, Number(body.confidence))) : 0
   await ensureTaskLearningTables(env)
   await env.DB.prepare(
     `INSERT INTO ai_learning_events
-      (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json,
+       workspace_id, principal_id, feedback_reason, reason_category, confidence, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       context,
@@ -12447,9 +12746,30 @@ async function saveAiLearningEvent(env: Env, request: Request) {
       Number.isFinite(taskId) ? taskId : null,
       taskTitle,
       JSON.stringify(body.metadata ?? {}).slice(0, 4000),
+      workspaceId,
+      principal?.principalId || 'guest',
+      feedbackReason,
+      reasonCategory,
+      confidence,
       Date.now(),
     )
     .run()
+  await env.DB.prepare(
+    `INSERT INTO ai_learning_calibration_profiles
+      (workspace_id, context, design_type, principal_id, sample_count, adopted_count, edited_count, rejected_count, average_confidence, top_reason_category)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+     ON CONFLICT(workspace_id, context, design_type, principal_id) DO UPDATE SET
+       sample_count = sample_count + 1,
+       adopted_count = adopted_count + excluded.adopted_count,
+       edited_count = edited_count + excluded.edited_count,
+       rejected_count = rejected_count + excluded.rejected_count,
+       average_confidence = ((average_confidence * sample_count) + excluded.average_confidence) / (sample_count + 1),
+       top_reason_category = excluded.top_reason_category,
+       updated_at = CURRENT_TIMESTAMP`,
+  ).bind(
+    workspaceId, context, designType, principal?.principalId || 'guest',
+    action === 'adopted' ? 1 : 0, action === 'edited' ? 1 : 0, action === 'rejected' ? 1 : 0, confidence, reasonCategory,
+  ).run()
 
   // 可用于归纳写作偏好的样本继续写入现有增量蒸馏表，兼容既有历史数据。
   if (userFinal && aiOutput !== userFinal) {
@@ -13419,11 +13739,11 @@ function isLocalCliWriteIntent(message: string) {
     || /(?:任务|进展|反馈|状态|等待|附件|工时|验收|交付).{0,24}(?:新建|创建|新增|添加|记录|修改|更新|改成|改为|设置为|标记为|作废|删除|恢复|撤销)/.test(normalized)
 }
 
-async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string) {
+async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string, workspaceId: string) {
   const requestedMonths = extractRequestedMonths(question, currentMonth)
   if (isFinanceQuestion(question) && requestedMonths.length > 0) {
     const hourlyRate = await getHourlyRate(env)
-    const stats = await computeMonthFinanceStats(env, requestedMonths, hourlyRate)
+    const stats = await computeMonthFinanceStats(env, requestedMonths, hourlyRate, workspaceId)
     return {
       immediate: renderMonthFinanceAnswer(stats, hourlyRate),
       trace: [
@@ -13441,10 +13761,10 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
     `SELECT id, title, design_type, status, progress, actual_hours, estimated_hours,
             start_date, estimated_delivery_date, settlement_month, is_billable
        FROM tasks
-      WHERE deleted_at IS NULL AND voided_at IS NULL
+      WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
       ORDER BY start_date DESC, created_at DESC
       LIMIT 40`,
-  ).all<DbTask>()
+  ).bind(workspaceId).all<DbTask>()
   const tasks = (rows.results || []).map((task) => ({
     id: task.id,
     title: task.title || '未命名',
@@ -13514,6 +13834,15 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   ).bind(device.id, device.selected_cli_id).first<DbLocalCliAdapter>()
   if (!adapter) return { route: null, cloudReason: '所选本机 CLI 当前不可用，已回退云端 Agent' }
 
+  const recentFailures = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM local_cli_commands
+     WHERE device_id = ? AND status IN ('failed', 'expired', 'cancelled')
+       AND created_at >= datetime('now', '-10 minutes')`,
+  ).bind(device.id).first<{ count: number }>()
+  if (Number(recentFailures?.count) >= 2) {
+    return { route: null, cloudReason: '本机 CLI 近期连续失败，已临时熔断并直接使用云端 Agent' }
+  }
+
   if (isRuntimeIdentityQuestion(lastMessage)) {
     const version = String(adapter.version || '').trim()
     return {
@@ -13528,7 +13857,12 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     }
   }
 
-  const readContext = await prepareLocalCliReadContext(env, lastMessage, String(body.month || '').slice(0, 7))
+  const readContext = await prepareLocalCliReadContext(
+    env,
+    lastMessage,
+    String(body.month || '').slice(0, 7),
+    principalWorkspaceId(principal),
+  )
   if (readContext.immediate) {
     return {
       route: null,
@@ -13900,21 +14234,68 @@ function agentRouteFromMetric(item: Pick<AgentRunMetricRow, 'model' | 'fallback_
   return 'cloud' as const
 }
 
+type AiOperationAlertInput = {
+  fingerprint: string
+  type: string
+  severity: 'warning' | 'critical'
+  title: string
+  message: string
+}
+
+async function syncAiOperationAlerts(env: Env, workspaceId: string, alerts: AiOperationAlertInput[]) {
+  const active = new Set(alerts.map((alert) => alert.fingerprint))
+  for (const alert of alerts) {
+    await env.DB.prepare(
+      `INSERT INTO ai_operation_alerts
+       (id, workspace_id, fingerprint, alert_type, severity, title, message)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(workspace_id, fingerprint) DO UPDATE SET
+         severity = excluded.severity, title = excluded.title, message = excluded.message,
+         status = 'open', resolved_at = NULL, occurrence_count = occurrence_count + 1,
+         last_seen_at = CURRENT_TIMESTAMP`,
+    ).bind(crypto.randomUUID(), workspaceId, alert.fingerprint, alert.type, alert.severity, alert.title, alert.message).run()
+  }
+  const rows = await env.DB.prepare(
+    "SELECT id, fingerprint FROM ai_operation_alerts WHERE workspace_id = ? AND status = 'open'",
+  ).bind(workspaceId).all<{ id: string; fingerprint: string }>()
+  for (const row of rows.results ?? []) {
+    if (active.has(row.fingerprint)) continue
+    await env.DB.prepare("UPDATE ai_operation_alerts SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(row.id).run()
+  }
+}
+
+async function updateAiOperationAlert(env: Env, alertId: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
+  const body = await request.json().catch(() => ({})) as { status?: string }
+  const status = body.status === 'resolved' ? 'resolved' : 'acknowledged'
+  const result = await env.DB.prepare(
+    `UPDATE ai_operation_alerts SET status = ?, acknowledged_at = CURRENT_TIMESTAMP,
+     acknowledged_by = ?, resolved_at = CASE WHEN ? = 'resolved' THEN CURRENT_TIMESTAMP ELSE resolved_at END
+     WHERE id = ? AND workspace_id = ?`,
+  ).bind(status, principal?.principalId || 'admin', status, alertId, workspaceId).run()
+  return Number(result.meta?.changes) ? ok({ updated: true }) : fail('告警不存在', 404)
+}
+
 async function getAiOperationsCenter(env: Env, request: Request) {
   await Promise.all([ensureAgentRunMetricsTable(env), ensureTaskLearningTables(env)])
   const requestedDays = Number(new URL(request.url).searchParams.get('days'))
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
   const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
+  await recoverAgentAnalysisJobs(env, workspaceId)
   const [metricRows, jobRows, learningRows, attachmentStatusRows, hourRows] = await Promise.all([
     env.DB.prepare(
       `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
               selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
               estimated_cost_cny, created_at
        FROM agent_run_metrics
-       WHERE is_eval = 0 AND created_at >= datetime('now', ?)
+       WHERE is_eval = 0 AND workspace_id = ? AND created_at >= datetime('now', ?)
        ORDER BY created_at DESC LIMIT 500`,
-    ).bind(`-${periodDays} days`).all<AiOperationsMetricRow>(),
-    env.DB.prepare('SELECT * FROM agent_analysis_jobs ORDER BY created_at DESC LIMIT 30').all<DbAgentAnalysisJob>(),
+    ).bind(workspaceId, `-${periodDays} days`).all<AiOperationsMetricRow>(),
+    env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 30')
+      .bind(workspaceId).all<DbAgentAnalysisJob>(),
     env.DB.prepare(
       `SELECT context,
               COUNT(*) AS total,
@@ -13922,9 +14303,9 @@ async function getAiOperationsCenter(env: Env, request: Request) {
               SUM(CASE WHEN action = 'edited' THEN 1 ELSE 0 END) AS edited,
               SUM(CASE WHEN action = 'rejected' THEN 1 ELSE 0 END) AS rejected
        FROM ai_learning_events
-       WHERE created_at >= ?
+       WHERE workspace_id = ? AND created_at >= ?
        GROUP BY context ORDER BY total DESC`,
-    ).bind(Date.now() - periodDays * 86_400_000).all<{ context: string; total: number; adopted: number; edited: number; rejected: number }>(),
+    ).bind(workspaceId, Date.now() - periodDays * 86_400_000).all<{ context: string; total: number; adopted: number; edited: number; rejected: number }>(),
     env.DB.prepare(
       `SELECT status, COUNT(*) AS count FROM attachment_analyses
        WHERE updated_at >= datetime('now', ?) GROUP BY status`,
@@ -13953,12 +14334,57 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   const hourItems = hourRows.results ?? []
   const hourWithin20 = hourItems.filter((item) => Math.abs(Number(item.suggested_hours) - Number(item.actual_hours)) / Number(item.actual_hours) <= 0.2).length
   const attachmentStatus = new Map((attachmentStatusRows.results ?? []).map((row) => [row.status, Number(row.count) || 0]))
+  const [workspaceRow, calibrationRows] = await Promise.all([
+    env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>(),
+    env.DB.prepare(
+      `SELECT context, design_type, principal_id, sample_count, adopted_count, edited_count, rejected_count,
+              average_confidence, top_reason_category
+       FROM ai_learning_calibration_profiles WHERE workspace_id = ?
+       ORDER BY sample_count DESC, updated_at DESC LIMIT 20`,
+    ).bind(workspaceId).all<{
+      context: string; design_type: string; principal_id: string; sample_count: number; adopted_count: number
+      edited_count: number; rejected_count: number; average_confidence: number; top_reason_category: string
+    }>(),
+  ])
+  const durations = metrics.map((item) => Number(item.duration_ms) || 0).sort((a, b) => a - b)
+  const p95DurationMs = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0
+  const activeJobs = jobs.filter((item) => item.status === 'queued' || item.status === 'running')
+  const generatedAlerts: AiOperationAlertInput[] = []
+  if (metrics.length >= 5 && errorRuns / metrics.length >= 0.2) generatedAlerts.push({
+    fingerprint: 'routing-error-rate', type: 'routing', severity: 'critical', title: 'Agent 失败率偏高',
+    message: `最近 ${periodDays} 天失败率为 ${((errorRuns / metrics.length) * 100).toFixed(1)}%，建议检查模型与工具链。`,
+  })
+  if (metrics.length >= 5 && fallbackRuns / metrics.length >= 0.3) generatedAlerts.push({
+    fingerprint: 'routing-fallback-rate', type: 'routing', severity: 'warning', title: '云端回退频繁',
+    message: `最近 ${periodDays} 天有 ${fallbackRuns} 次回退，占全部请求的 ${((fallbackRuns / metrics.length) * 100).toFixed(1)}%。`,
+  })
+  if (p95DurationMs >= 45_000) generatedAlerts.push({
+    fingerprint: 'routing-p95-latency', type: 'latency', severity: p95DurationMs >= 75_000 ? 'critical' : 'warning', title: 'Agent 响应偏慢',
+    message: `P95 响应耗时为 ${(p95DurationMs / 1000).toFixed(1)} 秒。`,
+  })
+  if (jobs.some((item) => item.status === 'failed')) generatedAlerts.push({
+    fingerprint: 'background-job-failed', type: 'background', severity: 'warning', title: '后台任务需要关注',
+    message: `当前有 ${jobs.filter((item) => item.status === 'failed').length} 个失败任务，系统会按重试策略自动恢复。`,
+  })
+  if (activeJobs.some((item) => Date.now() - Date.parse(item.updated_at || item.created_at) > 10 * 60_000)) generatedAlerts.push({
+    fingerprint: 'background-job-stalled', type: 'background', severity: 'critical', title: '后台任务疑似停滞',
+    message: '存在超过 10 分钟没有心跳更新的后台任务。',
+  })
+  await syncAiOperationAlerts(env, workspaceId, generatedAlerts)
+  const alertRows = await env.DB.prepare(
+    `SELECT id, alert_type, severity, title, message, status, occurrence_count, first_seen_at, last_seen_at
+     FROM ai_operation_alerts WHERE workspace_id = ? AND status != 'resolved'
+     ORDER BY CASE severity WHEN 'critical' THEN 0 ELSE 1 END, last_seen_at DESC LIMIT 20`,
+  ).bind(workspaceId).all<{
+    id: string; alert_type: string; severity: string; title: string; message: string; status: string
+    occurrence_count: number; first_seen_at: string; last_seen_at: string
+  }>()
   return ok({
     periodDays,
     generatedAt: nowIso(),
     workspace: {
-      id: 'default',
-      name: 'Giverny 默认工作区',
+      id: workspaceId,
+      name: workspaceRow?.name || 'Giverny 工作区',
       role: principal?.role || 'guest',
       principalId: principal?.principalId || 'guest',
       foundationReady: true,
@@ -13969,6 +14395,7 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       fallbackRate: metrics.length ? Number(((fallbackRuns / metrics.length) * 100).toFixed(1)) : 0,
       localCliRuns,
       cloudRuns: Math.max(0, metrics.length - localCliRuns),
+      p95DurationMs,
       recent: metrics.slice(0, 20).map((item) => ({
         createdAt: item.created_at,
         route: agentRouteFromMetric(item),
@@ -14004,7 +14431,29 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       hourEstimateObserved: hourItems.length,
       hourEstimateWithin20Rate: hourItems.length ? Number(((hourWithin20 / hourItems.length) * 100).toFixed(1)) : 0,
       contexts,
+      calibrations: (calibrationRows.results ?? []).map((item) => ({
+        context: item.context,
+        designType: item.design_type,
+        principalId: item.principal_id,
+        sampleCount: Number(item.sample_count) || 0,
+        adoptedCount: Number(item.adopted_count) || 0,
+        editedCount: Number(item.edited_count) || 0,
+        rejectedCount: Number(item.rejected_count) || 0,
+        averageConfidence: Number(item.average_confidence) || 0,
+        topReasonCategory: item.top_reason_category,
+      })),
     },
+    alerts: (alertRows.results ?? []).map((item) => ({
+      id: item.id,
+      type: item.alert_type,
+      severity: item.severity,
+      title: item.title,
+      message: item.message,
+      status: item.status,
+      occurrences: Number(item.occurrence_count) || 1,
+      firstSeenAt: item.first_seen_at,
+      lastSeenAt: item.last_seen_at,
+    })),
   })
 }
 
@@ -14474,8 +14923,11 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
 }
 
 async function generateMonthlyReport(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const body = (await request.json()) as { month: string; hourlyRate: number; importedHours?: number }
-  const rows = await env.DB.prepare("SELECT * FROM tasks WHERE settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL").bind(body.month).all<DbTask>()
+  const rows = await env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND settlement_month = ? AND deleted_at IS NULL AND voided_at IS NULL")
+    .bind(workspaceId, body.month)
+    .all<DbTask>()
   const tasks = rows.results ?? []
   const importedHours = Number(body.importedHours) || 0
   const hourlyRate = Number(body.hourlyRate) || defaultHourlyRate
@@ -14491,47 +14943,52 @@ async function generateMonthlyReport(env: Env, request: Request) {
   )
 
   // 每月只保留一条结算记录：重复锁定时更新数据但保留原 token，已发给甲方的链接不会失效
-  const existing = await env.DB.prepare('SELECT id, public_token FROM monthly_reports WHERE month = ?').bind(body.month).first<{
+  const existing = await env.DB.prepare('SELECT id, public_token FROM monthly_reports WHERE workspace_id = ? AND month = ?').bind(workspaceId, body.month).first<{
     id: string
     public_token: string | null
   }>()
 
-  const id = existing?.id ?? `report-${body.month}-${Date.now()}`
+  const id = existing?.id ?? `report-${workspaceId}-${body.month}-${Date.now()}`
   const publicToken = existing?.public_token ?? crypto.randomUUID()
 
   if (existing) {
     await env.DB.prepare(
       `UPDATE monthly_reports SET total_hours = ?, billable_hours = ?, total_amount = ?, status = 'locked',
          public_token = ?, generated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? AND workspace_id = ?`,
     )
-      .bind(totalHours, billableHours, totalAmount, publicToken, id)
+      .bind(totalHours, billableHours, totalAmount, publicToken, id, workspaceId)
       .run()
   } else {
     await env.DB.prepare(
-      `INSERT INTO monthly_reports (id, month, total_hours, billable_hours, total_amount, status, public_token, generated_at)
-       VALUES (?, ?, ?, ?, ?, 'locked', ?, CURRENT_TIMESTAMP)`,
+      `INSERT INTO monthly_reports (id, workspace_id, month, total_hours, billable_hours, total_amount, status, public_token, generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'locked', ?, CURRENT_TIMESTAMP)`,
     )
-      .bind(id, body.month, totalHours, billableHours, totalAmount, publicToken)
+      .bind(id, workspaceId, body.month, totalHours, billableHours, totalAmount, publicToken)
       .run()
   }
 
-  await audit(env, 'lock', 'monthly_report', id, { month: body.month, totalHours, billableHours, totalAmount })
+  await audit(env, 'lock', 'monthly_report', id, { workspaceId, month: body.month, totalHours, billableHours, totalAmount })
   return ok({ id, month: body.month, totalHours, billableHours, totalAmount, publicToken })
 }
 
-async function rotateMonthlyReportToken(env: Env, reportId: string) {
-  const existing = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ?').bind(reportId).first<DbReport>()
+async function rotateMonthlyReportToken(env: Env, reportId: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const existing = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ? AND workspace_id = ?')
+    .bind(reportId, workspaceId)
+    .first<DbReport>()
   if (!existing) {
     return fail('结算记录不存在', 404)
   }
 
   const publicToken = crypto.randomUUID()
-  await env.DB.prepare('UPDATE monthly_reports SET public_token = ?, viewed_at = NULL, view_count = 0 WHERE id = ?')
-    .bind(publicToken, reportId)
+  await env.DB.prepare('UPDATE monthly_reports SET public_token = ?, viewed_at = NULL, view_count = 0 WHERE id = ? AND workspace_id = ?')
+    .bind(publicToken, reportId, workspaceId)
     .run()
-  const updated = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ?').bind(reportId).first<DbReport>()
-  await audit(env, 'rotate_share_token', 'monthly_report', reportId, { month: existing.month })
+  const updated = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ? AND workspace_id = ?')
+    .bind(reportId, workspaceId)
+    .first<DbReport>()
+  await audit(env, 'rotate_share_token', 'monthly_report', reportId, { workspaceId, month: existing.month })
   return ok({ report: toReport(updated ?? { ...existing, public_token: publicToken, viewed_at: null, view_count: 0 }) })
 }
 
@@ -14595,7 +15052,7 @@ type DbLocalCliCommand = {
 
 const LOCAL_CLI_PAIRING_TTL_MS = 10 * 60 * 1000
 const LOCAL_CLI_COMMAND_TTL_MS = 2 * 60 * 1000
-const LOCAL_CLI_RUN_TTL_MS = 5 * 60 * 1000
+const LOCAL_CLI_RUN_TTL_MS = 80 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
 const LOCAL_CLI_RUNTIME_VERSION = '0.3.0'
 
@@ -15005,6 +15462,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path.startsWith('/api/ai/task-memories') ||
       path === '/api/ai/agent-metrics' ||
       path === '/api/ai/operations-center' ||
+      path.startsWith('/api/ai/operation-alerts/') ||
+      path.startsWith('/api/workspaces') ||
       path === '/api/ai/hour-estimate/metrics' ||
       path.startsWith('/api/ai/conversations') ||
       path.startsWith('/api/ai/analysis-jobs') ||
@@ -15112,7 +15571,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return deleteAccessToken(env, path.split('/').pop() ?? '')
   }
   if (path === '/api/state' && request.method === 'GET') {
-    return getState(env, role)
+    return getState(env, role, request)
   }
   if (path === '/api/tasks' && request.method === 'POST') {
     return createTask(env, request, ctx)
@@ -15127,10 +15586,10 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return voidTask(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/tasks/') && path.endsWith('/restore') && request.method === 'POST') {
-    return restoreTask(env, path.split('/')[3])
+    return restoreTask(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/tasks/') && request.method === 'DELETE') {
-    return deleteTask(env, path.split('/').pop() ?? '')
+    return deleteTask(env, path.split('/').pop() ?? '', request)
   }
   if (path === '/api/updates' && request.method === 'POST') {
     return createUpdate(env, request)
@@ -15139,13 +15598,13 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return updateUpdate(env, path.split('/').pop() ?? '', request)
   }
   if (path.startsWith('/api/updates/') && request.method === 'DELETE') {
-    return deleteUpdate(env, path.split('/').pop() ?? '')
+    return deleteUpdate(env, path.split('/').pop() ?? '', request)
   }
   if (path.startsWith('/api/tasks/') && path.endsWith('/activity') && request.method === 'GET') {
-    return getTaskActivity(env, path.split('/')[3])
+    return getTaskActivity(env, path.split('/')[3], request)
   }
   if (path.startsWith('/api/activity/') && request.method === 'DELETE') {
-    return deleteActivity(env, path.split('/').pop() ?? '')
+    return deleteActivity(env, path.split('/').pop() ?? '', request)
   }
   if (path === '/api/files/multipart/init' && request.method === 'POST') {
     return initMultipartUpload(env, request)
@@ -15163,7 +15622,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return createFile(env, request, ctx)
   }
   if (path.startsWith('/api/files/') && path.endsWith('/analysis/retry') && request.method === 'POST') {
-    return retryAttachmentAnalysis(env, path.split('/')[3], ctx)
+    return retryAttachmentAnalysis(env, path.split('/')[3], request, ctx)
   }
   if (path.startsWith('/api/files/') && path.endsWith('/preview') && request.method === 'POST') {
     return setFilePreview(env, path.split('/')[3], request)
@@ -15178,7 +15637,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return updateFileMetadata(env, path.split('/').pop() ?? '', request)
   }
   if (path.startsWith('/api/files/') && request.method === 'DELETE') {
-    return deleteFile(env, path.split('/').pop() ?? '')
+    return deleteFile(env, path.split('/').pop() ?? '', request)
   }
   if (path === '/api/ai/task-assistant' && request.method === 'POST') {
     return suggestTaskWithAi(env, request)
@@ -15269,6 +15728,17 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/operations-center' && request.method === 'GET') {
     return getAiOperationsCenter(env, request)
+  }
+  if (path === '/api/workspaces' && request.method === 'GET') return listWorkspaces(env, request)
+  if (path === '/api/workspaces' && request.method === 'POST') return createWorkspace(env, request)
+  if (path.startsWith('/api/workspaces/') && path.endsWith('/switch') && request.method === 'POST') {
+    return switchWorkspace(env, decodeURIComponent(path.split('/')[3] || ''), request)
+  }
+  if (path.startsWith('/api/workspaces/') && path.endsWith('/members') && request.method === 'POST') {
+    return addWorkspaceMember(env, decodeURIComponent(path.split('/')[3] || ''), request)
+  }
+  if (path.startsWith('/api/ai/operation-alerts/') && request.method === 'PATCH') {
+    return updateAiOperationAlert(env, decodeURIComponent(path.slice('/api/ai/operation-alerts/'.length)), request)
   }
   if (path === '/api/ai/agent-failures' && request.method === 'GET') {
     return getAgentFailureCases(env)
@@ -15384,7 +15854,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return generateMonthlyReport(env, request)
   }
   if (path.startsWith('/api/reports/') && path.endsWith('/token') && request.method === 'POST') {
-    return rotateMonthlyReportToken(env, path.split('/')[3] ?? '')
+    return rotateMonthlyReportToken(env, path.split('/')[3] ?? '', request)
   }
 
   return fail('接口不存在', 404)
@@ -15438,6 +15908,9 @@ export default {
     return withSecurityHeaders(await env.ASSETS.fetch(request))
   },
   async scheduled(_controller: unknown, env: Env) {
+    await recoverAgentAnalysisJobs(env).catch((error) => {
+      console.error('agent analysis recovery failed', error)
+    })
     await purgeExpiredProgressAttachments(env).catch((error) => {
       console.error('progress attachment retention cleanup failed', error)
     })

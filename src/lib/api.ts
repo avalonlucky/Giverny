@@ -153,6 +153,7 @@ export type AiOperationsCenter = {
     fallbackRate: number
     localCliRuns: number
     cloudRuns: number
+    p95DurationMs: number
     recent: Array<{
       createdAt: string
       route: 'local-cli' | 'cloud' | 'cloud-fallback'
@@ -188,7 +189,36 @@ export type AiOperationsCenter = {
     hourEstimateObserved: number
     hourEstimateWithin20Rate: number
     contexts: Array<{ context: string; total: number; adopted: number; edited: number; rejected: number }>
+    calibrations: Array<{
+      context: string
+      designType: string
+      principalId: string
+      sampleCount: number
+      adoptedCount: number
+      editedCount: number
+      rejectedCount: number
+      averageConfidence: number
+      topReasonCategory: string
+    }>
   }
+  alerts: Array<{
+    id: string
+    type: string
+    severity: 'warning' | 'critical'
+    title: string
+    message: string
+    status: 'open' | 'acknowledged'
+    occurrences: number
+    firstSeenAt: string
+    lastSeenAt: string
+  }>
+}
+
+export type WorkspaceSummary = {
+  id: string
+  name: string
+  status: string
+  role: string
 }
 
 export type HourEstimateMetrics = {
@@ -1129,6 +1159,22 @@ export const api = {
     requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
   getAiOperationsCenter: (days = 7) =>
     requestJson<AiOperationsCenter>(`/api/ai/operations-center?days=${encodeURIComponent(String(days))}`),
+  getWorkspaces: () =>
+    requestJson<{ currentWorkspaceId: string; workspaces: WorkspaceSummary[] }>('/api/workspaces'),
+  createWorkspace: (name: string) =>
+    requestJson<{ workspace: WorkspaceSummary }>('/api/workspaces', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+  switchWorkspace: (workspaceId: string) =>
+    requestJson<{ currentWorkspaceId: string; workspace: WorkspaceSummary }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/switch`, { method: 'POST' }),
+  updateAiOperationAlert: (id: string, status: 'acknowledged' | 'resolved' | 'open') =>
+    requestJson<{ ok: boolean }>(`/api/ai/operation-alerts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
   getAgentFailures: () =>
     requestJson<{ cases: AgentFailureCase[]; policy: string }>('/api/ai/agent-failures'),
   updateAgentFailure: (fingerprint: string, status: AgentFailureCase['regressionStatus'], note = '') =>
@@ -1242,4 +1288,13 @@ export const api = {
     requestJson<{ report: ReportRecord }>(`/api/reports/${reportId}/token`, {
       method: 'POST',
     }),
+  addWorkspaceMember: (workspaceId: string, payload: { email?: string; principalId?: string; role?: string }) =>
+    requestJson<{ added: boolean; invited?: boolean; workspaceId: string; principalId?: string; email?: string; role: string }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/members`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    ),
 }

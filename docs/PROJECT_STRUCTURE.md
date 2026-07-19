@@ -118,13 +118,13 @@
 - Agent regression suite and isolated quality gate: `agent-evals/`
 - Desktop/mobile browser critical-flow gate: `tests/browser/critical-flows.spec.ts`
 - Browser regression environment and projects: `playwright.config.ts`, `agent-evals/start-browser-eval.mjs`
-- AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0023_ai_operations_workspace.sql`
+- AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation
 
-- `AI 运行中心`由 Worker 聚合 `agent_run_metrics`、`agent_analysis_jobs`、`ai_learning_events` 与工时评估结果，前端不再自行拼接多套统计口径。
+- `AI 运行中心`由 Worker 聚合 `agent_run_metrics`、`agent_analysis_jobs`、`ai_learning_events` 与工时评估结果，前端不再自行拼接多套统计口径，并提供工作区切换、创建与成员添加 / 邀请入口。
 - 自动化 Agent 评测继续使用 `is_eval = 1`，运行中心和正式质量指标只统计真实流量。
-- `workspaces` 与 `workspace_memberships` 是后续多租户的数据边界；现有记录默认归属 `default` 工作区。当前版本只建立结构与审计上下文，不开放工作区管理入口。
+- `workspaces` 与 `workspace_memberships` 是多租户的数据边界；现有记录默认归属 `default` 工作区。当前版本已开放第一阶段管理入口：AI 运行中心可创建 / 切换工作区、添加或邀请成员，默认工作区保持兼容。
 - 新增需要租户隔离的表时，应同时保存 `workspace_id` 和 `principal_id`，并在 Worker 查询层先解析当前 principal，再拼接工作区条件。
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
 - Agent production controls and user operations: `docs/AGENT_PRODUCTION_OPERATIONS.md`

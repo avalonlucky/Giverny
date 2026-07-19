@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   client_id TEXT,
   title TEXT NOT NULL,
   requirement TEXT,
@@ -214,7 +215,12 @@ CREATE TABLE IF NOT EXISTS agent_analysis_jobs (
   error_message TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
+  completed_at TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  last_heartbeat_at TEXT,
+  timeout_at TEXT,
+  next_retry_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_analysis_jobs_status
@@ -333,6 +339,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE TABLE IF NOT EXISTS monthly_reports (
   id TEXT PRIMARY KEY,
   client_id TEXT,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   month TEXT NOT NULL,
   total_hours REAL NOT NULL DEFAULT 0,
   billable_hours REAL NOT NULL DEFAULT 0,
@@ -441,7 +448,55 @@ CREATE TABLE IF NOT EXISTS ai_learning_events (
   task_id INTEGER,
   task_title TEXT NOT NULL DEFAULT '',
   metadata_json TEXT NOT NULL DEFAULT '{}',
+  feedback_reason TEXT NOT NULL DEFAULT '',
+  reason_category TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workspace_invites (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_by TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_operation_alerts (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  fingerprint TEXT NOT NULL,
+  alert_type TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'warning',
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  occurrence_count INTEGER NOT NULL DEFAULT 1,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at TEXT,
+  acknowledged_by TEXT,
+  resolved_at TEXT,
+  UNIQUE(workspace_id, fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS ai_learning_calibration_profiles (
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  context TEXT NOT NULL,
+  design_type TEXT NOT NULL DEFAULT '',
+  principal_id TEXT NOT NULL DEFAULT 'system',
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  adopted_count INTEGER NOT NULL DEFAULT 0,
+  edited_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  average_confidence REAL NOT NULL DEFAULT 0,
+  top_reason_category TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (workspace_id, context, design_type, principal_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_learning_context_created ON ai_learning_events(context, created_at);
