@@ -145,6 +145,16 @@ async function runWorkflowWriteCheck(cookie) {
   process.stdout.write('Workflow approval and durable write check passed.\n')
 }
 
+async function runFinanceAnchorCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/state', { headers: { cookie } })
+  const state = await response.json().catch(() => ({}))
+  const task = state.tasks?.find((item) => item.id === 1)
+  if (!response.ok || task?.actualHours !== 2.5) {
+    throw new Error(`Saved finance anchor was replaced by rounded entry hours: ${JSON.stringify(task)}`)
+  }
+  process.stdout.write('Saved task hours remain the finance anchor when entry-minute rounding differs.\n')
+}
+
 async function runWorkflowReplayCheck() {
   const headers = {
     authorization: 'Bearer eval-agent-tool-token',
@@ -1321,6 +1331,7 @@ try {
   if (!loginResponse.ok || !cookie) throw new Error('Isolated eval login failed')
 
   await runMcpChecks()
+  await runFinanceAnchorCheck(cookie)
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()

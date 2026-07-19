@@ -7242,8 +7242,9 @@ function billableMinutesForTimeEntry(entry: TimeEntry) {
 }
 
 function resolvedActualHours(rowActualHours: unknown, entries: TimeEntry[]) {
+  const savedHours = Math.max(0, Number(rowActualHours) || 0)
   const entryHours = actualHoursForTimeEntries(entries)
-  return entryHours > 0 ? entryHours : Number(rowActualHours) || 0
+  return savedHours > 0 ? savedHours : entryHours
 }
 
 function actualHoursForDbTask(task: Pick<DbTask, 'actual_hours' | 'time_entries_json'>) {
