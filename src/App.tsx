@@ -2277,17 +2277,123 @@ function formatYuan(value: number) {
   return roundCents(value).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
-// 单条计费任务的真实金额（不取整到元，仅规整到分）。
-function billableTaskAmount(task: Task, hourlyRate: number) {
-  return roundCents(task.actualHours * hourlyRate)
+function safeMonthPart(value?: string) {
+  const valueDate = value ? datePart(value) : ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(valueDate) ? valueDate.slice(0, 7) : ''
 }
 
-// 结算金额：每行取真实金额（精确到分），再求和。保证「明细金额之和 === 总额」，
-// 中间过程不做四舍五入到元；如需整元，只在最终展示层处理。
-function sumBillableAmount(tasks: Task[], hourlyRate: number, importedHours = 0) {
-  const taskAmount = tasks
-    .filter((task) => isTaskBillable(task) && task.actualHours > 0)
-    .reduce((sum, task) => sum + billableTaskAmount(task, hourlyRate), 0)
+function timeEntryActivityValue(entry: TimeEntry, task?: Pick<Task, 'date'>) {
+  const endDate = entry.endDate || entry.date || datePart(task?.date ?? '')
+  const end = normalizeClockInput(entry.end)
+  if (endDate && end) return `${endDate}T${end}`
+  const startDate = entry.date || datePart(task?.date ?? '')
+  const start = normalizeClockInput(entry.start)
+  return startDate && start ? `${startDate}T${start}` : startDate
+}
+
+function timeEntryMonth(entry: TimeEntry, task?: Pick<Task, 'date'>) {
+  return safeMonthPart(entry.endDate || entry.date || task?.date)
+}
+
+function waitingEntryActivityValue(task: Task, entry: WaitingEntry) {
+  const nextStart = nextWorkStartForWaiting(task, entry)
+  if (Number.isFinite(nextStart)) return planDateTimeFromMinuteStamp(nextStart)
+  const startDate = entry.date || datePart(task.date)
+  const start = normalizeClockInput(entry.start)
+  return startDate && start ? `${startDate}T${start}` : startDate
+}
+
+function waitingEntryMonth(task: Task, entry: WaitingEntry) {
+  return safeMonthPart(waitingEntryActivityValue(task, entry))
+}
+
+function latestTaskActivityValue(task: Task) {
+  const candidates = [
+    task.actualDeliveryDate,
+    taskLifecycleDate(task),
+    task.estimatedDate,
+    task.date,
+    ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
+    ...(task.waitingEntries ?? []).map((entry) => waitingEntryActivityValue(task, entry)),
+  ].filter(Boolean)
+  return candidates.sort().at(-1) ?? ''
+}
+
+function formatTaskActivityDateRange(task: Task) {
+  const start = datePart(task.date || '')
+  const latest = datePart(latestTaskActivityValue(task))
+  if (!latest || latest === start) return formatMonthDay(start || task.date)
+  return `${formatMonthDay(latest)}—${formatMonthDay(start)}`
+}
+
+function formatTaskActivityTime(task: Task) {
+  const latest = latestTaskActivityValue(task)
+  return formatTimePart(latest || task.date)
+}
+
+function sortTasksByLatestActivity(tasks: Task[]) {
+  return [...tasks].sort((a, b) => {
+    const byActivity = latestTaskActivityValue(b).localeCompare(latestTaskActivityValue(a))
+    return byActivity !== 0 ? byActivity : b.id - a.id
+  })
+}
+
+function billableTimeEntries(task: Pick<Task, 'timeEntries'>) {
+  return (task.timeEntries ?? []).filter((entry) => !entry.isClientFeedback && minutesForTimeEntry(entry) > 0)
+}
+
+function taskTimeEntriesInMonth(task: Task, month: string) {
+  return billableTimeEntries(task).filter((entry) => timeEntryMonth(entry, task) === month)
+}
+
+function taskRelatedMonths(task: Task) {
+  const months = new Set<string>()
+  ;(task.timeEntries ?? []).forEach((entry) => {
+    const value = timeEntryMonth(entry, task)
+    if (value) months.add(value)
+  })
+  ;(task.waitingEntries ?? []).forEach((entry) => {
+    const value = waitingEntryMonth(task, entry)
+    if (value) months.add(value)
+  })
+  const deliveryMonth = safeMonthPart(task.actualDeliveryDate)
+  if (deliveryMonth) months.add(deliveryMonth)
+  if (months.size === 0) {
+    const settlement = taskSettlementMonth(task)
+    if (/^\d{4}-\d{2}$/.test(settlement)) months.add(settlement)
+    const created = safeMonthPart(task.date)
+    if (created) months.add(created)
+  }
+  return months
+}
+
+function taskHasMonthActivity(task: Task, month: string) {
+  return taskRelatedMonths(task).has(month)
+}
+
+function taskMinutesInMonth(task: Task, month: string) {
+  const minutes = taskTimeEntriesInMonth(task, month).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+  if (minutes > 0) return minutes
+  if (billableTimeEntries(task).length === 0 && taskSettlementMonth(task) === month) {
+    return Math.round(task.actualHours * 60)
+  }
+  return 0
+}
+
+function taskHoursInMonth(task: Task, month: string) {
+  return Number((taskMinutesInMonth(task, month) / 60).toFixed(2))
+}
+
+function taskBillableHoursInMonth(task: Task, month: string) {
+  return isTaskBillable(task) ? taskHoursInMonth(task, month) : 0
+}
+
+function billableTaskAmountInMonth(task: Task, month: string, hourlyRate: number) {
+  return roundCents(taskBillableHoursInMonth(task, month) * hourlyRate)
+}
+
+function sumBillableAmountForMonth(tasks: Task[], month: string, hourlyRate: number, importedHours = 0) {
+  const taskAmount = tasks.reduce((sum, task) => sum + billableTaskAmountInMonth(task, month, hourlyRate), 0)
   const importedAmount = importedHours > 0 ? roundCents(importedHours * hourlyRate) : 0
   return roundCents(taskAmount + importedAmount)
 }
@@ -6281,6 +6387,7 @@ function App() {
   const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [showFireworks, setShowFireworks] = useState(false)
   const [toastQueue, setToastQueue] = useState<ToastState[]>([])
+  const [topAnalysisJobs, setTopAnalysisJobs] = useState<AgentBackgroundTask[]>([])
   const toastTimersRef = useRef<number[]>([])
   const analysisJobStatusesRef = useRef<Map<string, AgentBackgroundTask['status']>>(new Map())
   const analysisJobsInitializedRef = useRef(false)
@@ -6327,13 +6434,22 @@ function App() {
   const canToggleIncomeVisibility = canSeeFull || isClient
   const toggleIncomeVisibility = () => setIncomeVisible((value) => !value)
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
-  const taskMonthValues = useMemo(
-    () => new Set(taskItems.map(taskSettlementMonth).filter((value) => /^\d{4}-\d{2}$/.test(value))),
-    [taskItems],
+  const taskMonthValues = useMemo(() => {
+    const values = new Set<string>()
+    taskItems.forEach((task) => {
+      taskRelatedMonths(task).forEach((value) => values.add(value))
+    })
+    return values
+  }, [taskItems])
+  const monthTasks = useMemo(
+    () => sortTasksByLatestActivity(taskItems.filter((task) => taskHasMonthActivity(task, currentMonth.value))),
+    [currentMonth.value, taskItems],
   )
-  const monthTasks = useMemo(() => taskItems.filter((task) => taskSettlementMonth(task) === currentMonth.value), [currentMonth.value, taskItems])
   const activeMonthTasks = useMemo(() => monthTasks.filter((task) => !task.voidedAt), [monthTasks])
-  const taskPageSourceTasks = useMemo(() => (showVoidedTasks ? monthTasks : activeMonthTasks), [activeMonthTasks, monthTasks, showVoidedTasks])
+  const taskPageSourceTasks = useMemo(
+    () => sortTasksByLatestActivity(showVoidedTasks ? monthTasks : activeMonthTasks),
+    [activeMonthTasks, monthTasks, showVoidedTasks],
+  )
   const monthUpdates = useMemo(
     () =>
       updateItems.filter((update) => {
@@ -6341,7 +6457,7 @@ function App() {
         if (task?.voidedAt) {
           return false
         }
-        return update.date.startsWith(currentMonth.value) || (task ? taskSettlementMonth(task) === currentMonth.value : false)
+        return update.date.startsWith(currentMonth.value)
       }),
     [currentMonth.value, taskItems, updateItems],
   )
@@ -6383,12 +6499,26 @@ function App() {
       const response = await fetch('/api/ai/analysis-jobs?limit=20')
       const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
       if (!response.ok || cancelled || !Array.isArray(data?.jobs)) return
+      setTopAnalysisJobs(data.jobs)
       const next = new Map(data.jobs.map((job) => [job.id, job.status]))
+      if (!analysisJobsInitializedRef.current) {
+        data.jobs.forEach((job) => {
+          if (job.unread && (job.status === 'completed' || job.status === 'failed')) {
+            analysisJobsNotifiedRef.current.add(job.id)
+          }
+        })
+        analysisJobStatusesRef.current = next
+        analysisJobsInitializedRef.current = true
+        return
+      }
       for (const job of data.jobs) {
           const shouldNotify = job.unread && !analysisJobsNotifiedRef.current.has(job.id)
           const previous = analysisJobStatusesRef.current.get(job.id)
-          if (shouldNotify && job.status === 'completed' && (!analysisJobsInitializedRef.current || previous !== job.status || job.source === 'scheduled')) {
+          if (shouldNotify && job.status === 'completed' && previous && previous !== job.status) {
             analysisJobsNotifiedRef.current.add(job.id)
+            if (job.source === 'scheduled' && (job.type === 'risk_digest' || job.type === 'monthly_review')) {
+              continue
+            }
             notify(`${job.title}已完成`, 'success', {
               actionLabel: '查看结果',
               durationMs: 7200,
@@ -6398,7 +6528,7 @@ function App() {
               },
             })
           }
-          if (shouldNotify && job.status === 'failed' && (!analysisJobsInitializedRef.current || previous !== job.status)) {
+          if (shouldNotify && job.status === 'failed' && previous && previous !== job.status) {
             analysisJobsNotifiedRef.current.add(job.id)
             notify(`${job.title}失败，可在对话中重试`, 'error', {
               actionLabel: '打开爱丽丝',
@@ -6884,9 +7014,9 @@ function App() {
         onContextMenu={(event) => openDashboardContextMenu(event, task)}
       >
         <div className="task-date">
-          <b>{formatMonthDay(task.date)}</b>
+          <b>{formatTaskActivityDateRange(task)}</b>
           <span className="task-date-meta">
-            <span>{[formatTimePart(task.date), task.type].filter(Boolean).join(' · ')}</span>
+            <span>{[formatTaskActivityTime(task), task.type].filter(Boolean).join(' · ')}</span>
             {isSupplementalTask(task) && (
               <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
                 补录
@@ -6902,7 +7032,7 @@ function App() {
         <div className="task-meta">
           <b>{task.requester || task.contact || '待确认'}</b>
           <span>
-            实际 <strong>{task.actualHours.toFixed(1)}h</strong>
+            实际 <strong>{taskHoursInMonth(task, currentMonth.value).toFixed(1)}h</strong>
           </span>
         </div>
         <div className="task-row-end">
@@ -6949,27 +7079,27 @@ function App() {
   const taskContextInsights = buildTaskContextInsights(activeTaskItems, updateItems)
 
   const stats = useMemo(() => {
-    const totalHours = activeMonthTasks.reduce((sum, task) => sum + task.actualHours, importedHours)
+    const totalHours = activeMonthTasks.reduce((sum, task) => sum + taskHoursInMonth(task, currentMonth.value), importedHours)
     const billableHours = activeMonthTasks
       .filter(isTaskBillable)
-      .reduce((sum, task) => sum + task.actualHours, importedHours)
+      .reduce((sum, task) => sum + taskBillableHoursInMonth(task, currentMonth.value), importedHours)
     const accepted = activeMonthTasks.filter((task) => task.status === '已验收').length
     const pending = activeMonthTasks.filter((task) => task.status === '待验收').length
 
     return {
       totalHours,
       billableHours,
-      amount: sumBillableAmount(activeMonthTasks, hourlyRate, importedHours),
+      amount: sumBillableAmountForMonth(activeMonthTasks, currentMonth.value, hourlyRate, importedHours),
       accepted,
       pending,
     }
-  }, [activeMonthTasks, hourlyRate, importedHours])
+  }, [activeMonthTasks, currentMonth.value, hourlyRate, importedHours])
 
   const donutData = useMemo(() => {
     // 本月洞察只统计实际投入；预计工时只作为排期参考，不参与分析。
     const hoursByType = new Map<string, number>()
     activeMonthTasks.forEach((task) => {
-      const hours = task.actualHours
+      const hours = taskHoursInMonth(task, currentMonth.value)
       if (hours > 0) {
         hoursByType.set(task.type, Number(((hoursByType.get(task.type) ?? 0) + hours).toFixed(1)))
       }
@@ -6979,10 +7109,10 @@ function App() {
       .map(([label, value], index) => ({ label, value, color: donutPalette[index % donutPalette.length] }))
 
     return { items, total: Number(items.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
-  }, [activeMonthTasks])
+  }, [activeMonthTasks, currentMonth.value])
 
-  const [today] = useState(() => isoDate())
-  const [dueSoonDate] = useState(() => isoDate(3))
+  const today = isoDate()
+  const dueSoonDate = isoDate(3)
   const dueTasks = (() => {
     const actionableTasks = activeMonthTasks.filter((task) => !['已验收', '终止', '不计费'].includes(task.status))
     const byEstimateAsc = (a: Task, b: Task) => datePart(a.estimatedDate || a.date).localeCompare(datePart(b.estimatedDate || b.date))
@@ -7002,16 +7132,84 @@ function App() {
     return { overdue, soon, primary, soonHighlights, reminderTasks }
   })()
 
+  const topReminderItems = (() => {
+    const items: Array<{ key: string; title: string; body: string }> = []
+    if (dueTasks.reminderTasks.length > 0) {
+      const bodyParts = dueTasks.reminderTasks.map((task) => task.title)
+      if (dueTasks.soonHighlights.length > 0) {
+        bodyParts.push(`${dueTasks.soonHighlights.length} 个任务 3 天内交付`)
+      }
+      items.push({
+        key: 'due-current',
+        title: dueTasks.overdue.length > 0 ? `${dueTasks.overdue.length} 个任务已逾期` : '最近任务',
+        body: bodyParts.join(' · '),
+      })
+    }
+
+    const todayDate = localDateFromIsoDate(today)
+    const currentViewingMonth = today.slice(0, 7)
+    const [year, month] = currentMonth.value.split('-').map(Number)
+    const lastDay = `${currentMonth.value}-${pad(new Date(year, month, 0).getDate())}`
+    const previousDate = localDateFromIsoDate(today)
+    previousDate.setDate(1)
+    previousDate.setMonth(previousDate.getMonth() - 1)
+    const previousMonthValue = `${previousDate.getFullYear()}-${pad(previousDate.getMonth() + 1)}`
+    if (today === lastDay && currentMonth.value === currentViewingMonth) {
+      items.push({
+        key: 'review-current',
+        title: '本月工作复盘',
+        body: `${currentMonth.label}快结束了，可以整理本月任务、收入和交付问题。`,
+      })
+    }
+    if (todayDate.getDate() === 1 && currentMonth.value === previousMonthValue) {
+      items.push({
+        key: 'review-previous',
+        title: `上个月（${monthLabelOf(previousMonthValue)}）工作复盘`,
+        body: '可以回看上个月任务、收入和交付问题。',
+      })
+    }
+    const visibleAnalysisJobs = isAdmin ? topAnalysisJobs : []
+    const completedScheduledJobs = visibleAnalysisJobs.filter((job) => {
+      if (!job.unread || job.status !== 'completed' || job.source !== 'scheduled') return false
+      const finishedAt = datePart(job.completedAt || job.updatedAt || job.createdAt)
+      return finishedAt === today
+    })
+    const todayRiskJobs = completedScheduledJobs
+      .filter((job) => job.type === 'risk_digest')
+      .slice(0, 1)
+    todayRiskJobs.forEach((job) => {
+      items.push({
+        key: `risk-job-${job.id}`,
+        title: '今日任务风险提示已完成',
+        body: job.title.replace(/^\d{4}-\d{2}-\d{2}\s*/, '') || '查看今日需要关注的任务风险。',
+      })
+    })
+    const monthlyReviewJobs = completedScheduledJobs
+      .filter((job) => job.type === 'monthly_review' && (
+        today === lastDay ||
+        todayDate.getDate() === 1
+      ))
+      .slice(0, 1)
+    monthlyReviewJobs.forEach((job) => {
+      items.push({
+        key: `review-job-${job.id}`,
+        title: '工作复盘已完成',
+        body: job.title || '可以查看本次复盘结果。',
+      })
+    })
+    return items
+  })()
+
   const annualData = useMemo(() => {
     const year = currentMonth.value.slice(0, 4)
     const lockedByMonth = new Map(reports.filter((report) => report.month.startsWith(year)).map((report) => [report.month, report]))
     const months = Array.from({ length: 12 }, (_, index) => `${year}-${pad(index + 1)}`)
     const rows = months.map((month) => {
-      const tasks = activeTaskItems.filter((task) => taskSettlementMonth(task) === month && isTaskBillable(task))
+      const tasks = activeTaskItems.filter((task) => taskHasMonthActivity(task, month) && isTaskBillable(task))
       const imported = month === importedHoursMonth ? importedMonthlyHours : 0
-      const hours = Number(tasks.reduce((sum, task) => sum + task.actualHours, imported).toFixed(1))
+      const hours = Number(tasks.reduce((sum, task) => sum + taskBillableHoursInMonth(task, month), imported).toFixed(1))
       const locked = lockedByMonth.get(month)
-      const amount = locked ? locked.totalAmount : sumBillableAmount(tasks, hourlyRate, imported)
+      const amount = locked ? locked.totalAmount : sumBillableAmountForMonth(tasks, month, hourlyRate, imported)
       return { month, hours, amount, locked: Boolean(locked) }
     })
     return {
@@ -7020,7 +7218,7 @@ function App() {
       totalHours: Number(rows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)),
       totalAmount: rows.reduce((sum, row) => sum + row.amount, 0),
     }
-  }, [activeTaskItems, currentMonth.value, hourlyRate, reports])
+  }, [activeTaskItems, currentMonth.value, hourlyRate, importedHoursMonth, importedMonthlyHours, reports])
 
   const dailyTrendData = useMemo(() => {
     const [year, month] = currentMonth.value.split('-').map(Number)
@@ -7029,17 +7227,15 @@ function App() {
     const days = Array.from({ length: daysInMonth }, (_, index) => ({ label: `${month}/${index + 1}`, value: 0 }))
     // 工时来自分段计时（timeEntries），进展记录本身不带工时
     activeMonthTasks.forEach((task) => {
-      const belongsToCurrentMonth = taskSettlementMonth(task) === currentMonth.value
       ;(task.timeEntries ?? []).forEach((entry) => {
         const minutes = minutesForTimeEntry(entry)
         if (minutes <= 0) {
           return
         }
-        const entryDate = entry.date || ''
-        const inMonth = entryDate.startsWith(currentMonth.value) || belongsToCurrentMonth
-        if (!inMonth) {
+        if (timeEntryMonth(entry, task) !== currentMonth.value) {
           return
         }
+        const entryDate = entry.date || ''
         const day = Number(datePart(entryDate).slice(8, 10)) || 1
         const index = Math.min(Math.max(day - 1, 0), daysInMonth - 1)
         days[index].value += minutes / 60
@@ -8753,19 +8949,19 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           </button>
         </section>
 
-        {dueTasks.reminderTasks.length > 0 && (
+        {topReminderItems.length > 0 && (
           <button className="due-strip" onClick={() => navigateView('任务')}>
             <AlarmClock size={17} />
-            <span className="due-summary">
-              {dueTasks.overdue.length > 0 ? (
-                <strong className="due-summary-overdue">{dueTasks.overdue.length} 个任务已逾期</strong>
-              ) : (
-                <strong className="due-summary-nearest">最近任务</strong>
-              )}
-              {dueTasks.soonHighlights.length > 0 && ' · '}
-              {dueTasks.soonHighlights.length > 0 && <span className="due-summary-soon">{dueTasks.soonHighlights.length} 个任务 3 天内交付</span>}
+            <span className="due-marquee" aria-label="任务提醒">
+              <span className={`due-marquee-track ${topReminderItems.length > 1 ? 'rolling' : ''}`}>
+                {[...topReminderItems, ...(topReminderItems.length > 1 ? topReminderItems : [])].map((item, index) => (
+                  <span className="due-marquee-item" key={`${item.key}-${index}`}>
+                    <strong className={item.key.startsWith('due') ? 'due-summary-overdue' : 'due-summary-nearest'}>{item.title}</strong>
+                    {item.body && <em>{item.body}</em>}
+                  </span>
+                ))}
+              </span>
             </span>
-            <em>{dueTasks.reminderTasks.map((task) => task.title).join('、')}</em>
             <ChevronRight size={15} className="due-arrow" />
           </button>
         )}
@@ -8976,6 +9172,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
             task={selectedTask}
             files={fileItems}
             progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
+            hourlyRate={hourlyRate}
             onPreviewFile={setPreviewFile}
             onUpdateTask={handleUpdateTask}
             onOpenProgress={handleOpenTaskProgress}
@@ -9260,9 +9457,7 @@ if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditable
           <TaskDetailModal
             key={detailTask.id}
             task={detailTask}
-            files={fileItems}
             onClose={() => setDetailTaskId(0)}
-            onPreviewFile={setPreviewFile}
             onOpenAcceptance={handleOpenTaskAcceptance}
             canAccept={isAdmin}
             onOpenEdit={(taskId) => {
@@ -10083,6 +10278,7 @@ function DashboardTaskSidebar({
   task,
   files,
   progressAssessment,
+  hourlyRate,
   onPreviewFile,
   onUpdateTask,
   onOpenProgress,
@@ -10097,6 +10293,7 @@ function DashboardTaskSidebar({
   task: Task | undefined
   files: FileAsset[]
   progressAssessment?: TaskProgressAssessment
+  hourlyRate: number
   onPreviewFile: (file: FileAsset) => void
   onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
   onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
@@ -10148,8 +10345,10 @@ function DashboardTaskSidebar({
 
   const timeEntries = task.timeEntries ?? []
   const waitingEntries = task.waitingEntries ?? []
-  const actualMinutes = sumTimeEntries(timeEntries)
-  const billableHours = actualMinutes > 0 ? actualMinutes / 60 : task.actualHours
+  const progressBillableEntries = billableTimeEntries(task)
+  const billableMinutes = progressBillableEntries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+  const billableHours = billableMinutes > 0 ? billableMinutes / 60 : (isTaskBillable(task) ? task.actualHours : 0)
+  const billableAmount = roundCents(billableHours * hourlyRate)
   const waitingMinutes = sumWaitingEntries(task)
   const canAcceptTask = task.status === '待验收'
   const canRecordProgress = canRecordNewProgress(task)
@@ -10376,7 +10575,7 @@ function DashboardTaskSidebar({
                   记录进展
                 </button>}
               </div>
-              <p className="dashboard-side-subsection-meta">可结算 · {timeEntries.filter((entry) => !entry.isClientFeedback).length} 段 · {billableHours.toFixed(1)}h</p>
+              <p className="dashboard-side-subsection-meta">可结算 · {progressBillableEntries.length} 段 · {billableHours.toFixed(1)}h · ¥{formatYuan(billableAmount)}</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
                 <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
               ) : (
@@ -10920,9 +11119,9 @@ return (
               onContextMenu={(event) => openContextMenu(event, task)}
             >
               <div className="task-date">
-                <b>{formatMonthDay(task.date)}</b>
+                <b>{formatTaskActivityDateRange(task)}</b>
                 <span className="task-date-meta">
-                  {formatTimePart(task.date) && <span>{formatTimePart(task.date)}</span>}
+                  {formatTaskActivityTime(task) && <span>{formatTaskActivityTime(task)}</span>}
                   <em>{task.type || '未分类'}</em>
                   {isSupplementalTask(task) && (
                     <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
@@ -10952,7 +11151,7 @@ return (
               <div className="task-meta">
                 <b>{task.requester || task.contact || '待确认'}</b>
                 <span>
-                  实际 <strong>{task.actualHours.toFixed(1)}h</strong>
+                  实际 <strong>{taskHoursInMonth(task, monthValue).toFixed(1)}h</strong>
                 </span>
               </div>
               <div className="task-row-end">
@@ -11044,6 +11243,7 @@ return (
           task={selectedTask}
           files={files}
           progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
+          hourlyRate={hourlyRate}
           onPreviewFile={onPreviewFile}
           onUpdateTask={onUpdateTask}
           onOpenProgress={(taskId, mode, editEntryId, initialAcceptanceMode) => {
@@ -13609,18 +13809,14 @@ function TaskProgressModal({
 
 function TaskDetailModal({
   task,
-  files,
   onClose,
-  onPreviewFile,
   onOpenAcceptance,
   canAccept,
   onOpenEdit,
   onOpenProgress,
 }: {
   task: Task
-  files: FileAsset[]
   onClose: () => void
-  onPreviewFile: (file: FileAsset) => void
   onOpenAcceptance: (taskId: number) => void
   canAccept: boolean
   onOpenEdit: (taskId: number) => void
@@ -13634,9 +13830,6 @@ function TaskDetailModal({
   const estimatedH = task.estimatedHours
   const hoursDevPct = estimatedH > 0 && actualH > 0 ? Math.round(((actualH - estimatedH) / estimatedH) * 100) : null
   const waitingHoursText = `${(waitingMinutes / 60).toFixed(2)} h（共 ${(task.waitingEntries ?? []).length} 段）`
-  // 用「进展分段计时」（按真实工作日期）替代审计流水，避免补录任务显示成「确认验收=补录当天」的误导时间。
-  const detailTimeEntries = [...(task.timeEntries ?? [])].sort((a, b) => `${b.date ?? ''}${b.start ?? ''}`.localeCompare(`${a.date ?? ''}${a.start ?? ''}`))
-  const acceptanceFileNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
 
   return (
     <ModalShell className="task-detail-modal" labelledBy="task-detail-title" onClose={onClose}>
@@ -13771,65 +13964,6 @@ function TaskDetailModal({
           </div>
         </section>
 
-        <section className="task-detail-log">
-          <div className="section-heading">
-            <h3>进展与反馈时间线</h3>
-            <Clock3 size={15} />
-          </div>
-          {detailTimeEntries.length === 0 && <p className="calendar-empty-hint">暂无分段计时。</p>}
-          {detailTimeEntries.length > 0 && (
-            <div className="timeline activity-timeline">
-              {detailTimeEntries.map((entry) => {
-                const minutes = minutesForTimeEntry(entry)
-                const entryFiles = files.filter((file) => {
-                  if (file.taskId !== task.id || file.deletedAt) {
-                    return false
-                  }
-                  if (file.entryId === entry.id) {
-                    return true
-                  }
-                  return Boolean(entry.isAcceptanceProgress) && isAcceptanceFileAsset(file, acceptanceFileNames) && (!file.entryId || acceptanceFileNames.has(file.name.trim()))
-                })
-                const hasAcceptanceFiles = entryFiles.some((file) => isAcceptanceFileAsset(file, acceptanceFileNames))
-                return (
-                  <article className="timeline-item" key={entry.id}>
-                    <span className="dot" />
-                    <div className="task-detail-entry-time">
-	                      <time>{formatEntryDateTimeRange(task, entry)}</time>
-	                      {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
-	                      {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">甲方反馈</span>}
-	                      {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
-	                      {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
-	                      <em className={`progress-time-pill ${minutes > 0 ? '' : 'is-uncounted'}`}>{minutes > 0 ? `计时 ${formatSignedHours(minutes)}` : '不计工时'}</em>
-	                    </div>
-	                    {entry.note && <p>{entry.note}</p>}
-	                    {entry.isClientFeedback && <p className="dashboard-side-entry-meta">{entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>}
-                    {entryFiles.length > 0 && (
-                      <div className="dashboard-side-entry-files" aria-label="本段进展附件">
-                        {entryFiles.map((file) => {
-                          const fileType = fileTypeForAsset(file).type
-                          const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                          const documentSourceUrl = fileThumbnailSource(file)
-                          return (
-                            <AttachmentHoverThumbnail
-                              key={file.id}
-                              name={file.name}
-                              type={fileType}
-                              previewUrl={previewUrl}
-                              sourceUrl={documentSourceUrl}
-                              compact
-                              onOpen={() => onPreviewFile(file)}
-                            />
-                          )
-                        })}
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          )}
-        </section>
       </div>
 
       <footer className="modal-footer">
@@ -16455,7 +16589,7 @@ function ReportsView({
   const selectedReport = reports.find((report) => report.month === selectedMonth)
   const selectedTasks = selectedMonth === currentMonth.value
     ? tasks
-    : allTasks.filter((task) => taskSettlementMonth(task) === selectedMonth && !task.voidedAt)
+    : sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, selectedMonth) && !task.voidedAt))
   const selectedUpdates = selectedMonth === currentMonth.value
     ? updates
     : allUpdates.filter((update) => {
@@ -16463,28 +16597,32 @@ function ReportsView({
       if (task?.voidedAt) {
         return false
       }
-      return update.date.startsWith(selectedMonth) || (task ? taskSettlementMonth(task) === selectedMonth : false)
+      return update.date.startsWith(selectedMonth)
     })
   const selectedImportedHours = selectedMonth === currentMonth.value ? importedHours : 0
+  const getSelectedTaskHours = (task: Task) => taskHoursInMonth(task, selectedMonth)
+  const getSelectedTaskBillableHours = (task: Task) => taskBillableHoursInMonth(task, selectedMonth)
+  const getSelectedTaskAmount = (task: Task) => billableTaskAmountInMonth(task, selectedMonth, hourlyRate)
   const selectedStats = selectedMonth === currentMonth.value
     ? stats
     : {
-        totalHours: selectedTasks.reduce((sum, task) => sum + task.actualHours, selectedImportedHours),
+        totalHours: selectedTasks.reduce((sum, task) => sum + getSelectedTaskHours(task), selectedImportedHours),
         billableHours: selectedTasks
           .filter(isTaskBillable)
-          .reduce((sum, task) => sum + task.actualHours, selectedImportedHours),
-        amount: selectedReport?.totalAmount ?? sumBillableAmount(selectedTasks, hourlyRate, selectedImportedHours),
+          .reduce((sum, task) => sum + getSelectedTaskBillableHours(task), selectedImportedHours),
+        amount: selectedReport?.totalAmount ?? sumBillableAmountForMonth(selectedTasks, selectedMonth, hourlyRate, selectedImportedHours),
         accepted: selectedTasks.filter((task) => task.status === '已验收').length,
         pending: selectedTasks.filter((task) => task.status === '待验收').length,
       }
-  const billableTasks = selectedTasks.filter((task) => isTaskBillable(task) && task.actualHours > 0)
+  const billableTasks = selectedTasks.filter((task) => isTaskBillable(task) && getSelectedTaskBillableHours(task) > 0)
   const receiptDetailTasks = billableTasks
   // 只统计真正没进结算表的计划中任务：有实际工时的计划中任务会照常计费，不能在备注里说成未计费
-  const plannedCount = selectedTasks.filter((task) => task.status === '计划中' && isTaskBillable(task) && task.actualHours === 0).length
+  const plannedCount = selectedTasks.filter((task) => task.status === '计划中' && isTaskBillable(task) && getSelectedTaskHours(task) === 0).length
   const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
   // 不计时清单：① 整单不计费的任务；② 计费任务里「不计工时」的分段（如仅改名）。两者都要让甲方看到做了什么、为何不计时。
   const uncountedItems: Array<{ key: string; title: string; type: string; reason: string; formula: string }> = []
   freeTasks.forEach((task) => {
+    const hours = getSelectedTaskHours(task)
     uncountedItems.push({
       key: `task-${task.id}`,
       title: task.title,
@@ -16494,8 +16632,8 @@ function ReportsView({
         : task.status === '终止'
           ? task.terminateReason || '终止'
           : '整单不计费',
-      formula: task.actualHours > 0
-        ? `${task.actualHours.toFixed(1)}h × ¥${hourlyRate} = ¥0（不计费）`
+      formula: hours > 0
+        ? `${hours.toFixed(1)}h × ¥${hourlyRate} = ¥0（不计费）`
         : '不计费',
     })
   })
@@ -16504,6 +16642,9 @@ function ReportsView({
       return
     }
     ;(task.timeEntries ?? []).forEach((entry) => {
+      if (timeEntryMonth(entry, task) !== selectedMonth) {
+        return
+      }
       if (entry.isAcceptanceProgress || minutesForTimeEntry(entry) > 0) {
         return
       }
@@ -16606,12 +16747,12 @@ function ReportsView({
     const targetReport = reports.find((report) => report.month === month)
     const targetTasks = month === selectedMonth
       ? receiptDetailTasks
-      : allTasks.filter((task) => taskSettlementMonth(task) === month && !task.voidedAt && isTaskBillable(task) && task.actualHours > 0)
+      : sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, month) && !task.voidedAt && isTaskBillable(task) && taskBillableHoursInMonth(task, month) > 0))
     const targetUpdates = month === selectedMonth
       ? selectedUpdates
       : allUpdates.filter((update) => {
         const task = allTasks.find((item) => item.id === update.taskId)
-        return !task?.voidedAt && (update.date.startsWith(month) || (task ? taskSettlementMonth(task) === month : false))
+        return !task?.voidedAt && update.date.startsWith(month)
       })
     const updatesMap = new Map<number, TaskUpdate>()
     targetUpdates
@@ -16648,7 +16789,7 @@ function ReportsView({
         requirement: task.requirement || '',
         requester: task.requester || task.contact || '',
         estimatedHours: task.estimatedHours,
-        actualHours: task.actualHours,
+        actualHours: taskBillableHoursInMonth(task, month),
         estimatedDate: formatReceiptDate(task.estimatedDate),
         actualDeliveryDate: task.status === '已验收' ? formatReceiptDate(latestUpdate?.date ?? '') : '',
         status: task.status,
@@ -16659,8 +16800,8 @@ function ReportsView({
     sheet.addRow({})
     sheet.addRow({
       title: '合计',
-      actualHours: targetReport?.billableHours ?? targetTasks.reduce((sum, task) => sum + task.actualHours, 0),
-      progress: `金额：¥${(targetReport?.totalAmount ?? sumBillableAmount(targetTasks, hourlyRate)).toLocaleString()}`,
+      actualHours: targetReport?.billableHours ?? targetTasks.reduce((sum, task) => sum + taskBillableHoursInMonth(task, month), 0),
+      progress: `金额：¥${formatYuan(targetReport?.totalAmount ?? sumBillableAmountForMonth(targetTasks, month, hourlyRate))}`,
     })
     sheet.getRow(1).font = { bold: true }
     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
@@ -16861,9 +17002,9 @@ function ReportsView({
                   <td>{task.requester || task.contact || '—'}</td>
                   <td>{task.status}</td>
                   <td className="num">{task.estimatedHours.toFixed(1)}h</td>
-                  <td className="num">{task.actualHours.toFixed(1)}h</td>
+                  <td className="num">{getSelectedTaskBillableHours(task).toFixed(1)}h</td>
                   <td className="num">¥{hourlyRate}</td>
-                  <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
+                  <td className="num">{formatYuan(getSelectedTaskAmount(task))}</td>
                   <td>{task.acceptanceNote || '—'}</td>
                   <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
                 </tr>
@@ -16875,8 +17016,8 @@ function ReportsView({
                   <td>{task.status}</td>
                   <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
                   <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
-                  <td className="num">{task.actualHours.toFixed(1)}</td>
-                  <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
+                  <td className="num">{getSelectedTaskBillableHours(task).toFixed(1)}</td>
+                  <td className="num">{formatYuan(getSelectedTaskAmount(task))}</td>
                 </tr>
               )
             ))}

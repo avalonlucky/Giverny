@@ -57,7 +57,12 @@ test('模型中心展示默认模型和服务商配置入口', async ({ page }) 
   await expect(page.getByRole('heading', { name: '默认模型' })).toBeVisible()
   await expect(page.getByText('文字模型服务商', { exact: true })).toBeVisible()
 
-  await page.locator('button.model-provider-card').filter({ hasText: 'DeepSeek' }).first().click()
+  const deepseekCard = page.locator('button.model-provider-card').filter({ hasText: 'DeepSeek' }).first()
+  await expect(deepseekCard).toBeVisible()
+  await deepseekCard.click()
+  if (!await page.getByRole('heading', { name: 'DeepSeek 设置' }).isVisible().catch(() => false)) {
+    await deepseekCard.click()
+  }
   await expect(page.getByRole('heading', { name: 'DeepSeek 设置' })).toBeVisible()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: '加载模型', exact: true })).toBeVisible()
