@@ -62,6 +62,60 @@ test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
 })
 
+test('新建任务支持语音识别排期并确认后自动填写三项', async ({ page }) => {
+  await page.addInitScript({
+    content: `
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      });
+      class FakeMediaRecorder {
+        static isTypeSupported() { return true; }
+        constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; this.ondataavailable = null; this.onstop = null; }
+        start() { this.state = 'recording'; }
+        stop() {
+          this.state = 'inactive';
+          if (this.ondataavailable) this.ondataavailable({ data: new Blob(['voice-schedule'], { type: this.mimeType }) });
+          if (this.onstop) this.onstop();
+        }
+      }
+      window.MediaRecorder = FakeMediaRecorder;
+    `,
+  })
+  await page.route('**/api/ai/voice-schedule', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        transcript: '预计开始时间是 2026 年 7 月 20 日下午 4 点 10 分，预估工时两小时',
+        startAt: '2026-07-20T16:10',
+        durationMinutes: 120,
+        endAt: '2026-07-20T18:10',
+        suppliedFields: ['start', 'hours'],
+        derivedField: 'end',
+        confidence: 'high',
+        warnings: [],
+        source: 'browser-eval',
+      }),
+    })
+  })
+  await page.reload()
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  await page.getByRole('button', { name: '用语音填写时间与工时' }).click()
+  await expect(page.getByText('正在听…', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '停止语音录入' }).click()
+  await expect(page.getByText('识别结果', { exact: true })).toBeVisible()
+  await expect(page.getByText('交付 2026/07/20 18:10 · 自动', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '应用到时间与工时' }).click()
+
+  const modal = page.getByRole('dialog', { name: '新建任务' })
+  const dateInputs = modal.getByPlaceholder('YYYY/MM/DD HH:mm')
+  await expect(dateInputs).toHaveCount(2)
+  await expect(dateInputs.nth(0)).toHaveValue('2026/07/20 16:10')
+  await expect(modal.getByRole('textbox', { name: '预估工时，可手动输入小数' })).toHaveValue('2')
+  await expect(dateInputs.nth(1)).toHaveValue('2026/07/20 18:10')
+})
+
 test('新建任务预计开始日历超出弹窗时仍可选择日期', async ({ page }) => {
   await page.getByRole('button', { name: /新建任务/ }).first().click()
   const modal = page.getByRole('dialog', { name: '新建任务' })

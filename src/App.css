@@ -10053,6 +10053,154 @@ button.file-chip:focus-visible {
   line-height: 1.4;
 }
 
+.voice-schedule-control {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.voice-schedule-trigger {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.voice-schedule-trigger:hover,
+.voice-schedule-trigger:focus-visible {
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
+}
+
+.voice-schedule-trigger.recording {
+  color: var(--color-status-danger);
+  background: color-mix(in srgb, var(--color-status-danger) 10%, transparent);
+}
+
+.voice-schedule-trigger:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.voice-schedule-review {
+  position: fixed;
+  z-index: calc(var(--z-overlay-effect) + 30);
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  width: min(580px, calc(100vw - 32px));
+  max-height: calc(100vh - 56px);
+  padding: 15px 18px 16px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-float);
+  display: grid;
+  gap: 11px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.voice-schedule-review-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.voice-schedule-review-head strong {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.voice-schedule-state {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+}
+
+.voice-schedule-state.recording {
+  background: var(--color-status-danger);
+  animation: voice-schedule-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-schedule-state.processing {
+  background: var(--color-status-warning);
+}
+
+@keyframes voice-schedule-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.voice-schedule-review > p,
+.voice-schedule-review blockquote {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.voice-schedule-review blockquote {
+  padding: 9px 11px;
+  background: var(--color-surface-alt);
+  font-style: normal;
+}
+
+.voice-schedule-values {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.voice-schedule-values span {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.voice-schedule-review .voice-schedule-error {
+  color: var(--color-status-danger);
+}
+
+.voice-schedule-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 4px;
+  background: var(--color-surface-strong);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .voice-schedule-review {
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    padding: 13px 14px 14px;
+  }
+
+  .voice-schedule-values {
+    display: grid;
+    gap: 5px;
+  }
+
+  .voice-schedule-actions .primary-button {
+    min-width: 0;
+  }
+}
+
 .new-task-hours-row {
   min-width: 0;
   display: grid;
@@ -10302,6 +10450,15 @@ button.file-chip:focus-visible {
 .progress-lite-schedule-row-plan {
   color: var(--color-text-muted);
   opacity: 0.86;
+}
+
+.progress-lite-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .progress-lite-time-formula .progress-lite-schedule-row-plan .date-field > .field-label-row,
@@ -13977,6 +14134,14 @@ input::file-selector-button {
 
 .agent-approval-editor-wide {
   grid-column: 1 / -1;
+}
+
+.agent-approval-editor-schedule-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .agent-approval-editor-field {

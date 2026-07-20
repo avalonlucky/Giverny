@@ -382,6 +382,33 @@ async function runAcceptanceNoteGuardrailCheck(cookie) {
   process.stdout.write('Acceptance note authoritative-hours context, value structure, noise removal, and attachment deduplication checks passed.\n')
 }
 
+async function runVoiceScheduleCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      transcript: '预计开始时间是2026年7月20日下午4点10分，预估工时是两小时',
+      referenceTime: '2026-07-20T15:30',
+      context: '新建任务的预计排期',
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (
+    !response.ok ||
+    payload.startAt !== '2026-07-20T16:10' ||
+    payload.durationMinutes !== 120 ||
+    payload.endAt !== '2026-07-20T18:10' ||
+    payload.derivedField !== 'end' ||
+    !Array.isArray(payload.suppliedFields) ||
+    !payload.suppliedFields.includes('start') ||
+    !payload.suppliedFields.includes('hours') ||
+    payload.suppliedFields.includes('end')
+  ) {
+    throw new Error(`Voice schedule two-of-three derivation failed: ${response.status} ${JSON.stringify(payload)}`)
+  }
+  process.stdout.write('Voice schedule transcription parsing and two-of-three derivation checks passed.\n')
+}
+
 async function runAiModelDraftListCheck(cookie) {
   const endpoint = 'http://127.0.0.1:8798/api/ai/models'
   const providerEndpoint = 'http://127.0.0.1:8798/api/ai/provider-models'
@@ -1468,6 +1495,7 @@ try {
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
   await runAcceptanceNoteGuardrailCheck(cookie)
+  await runVoiceScheduleCheck(cookie)
   await runAiModelDraftListCheck(cookie)
   await runSiteWideModelPriorityCheck(cookie)
   await runLocalCliBridgeCheck(cookie)

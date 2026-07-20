@@ -97,8 +97,22 @@ type QueueBatch = { messages: QueueMessage[] }
 type WorkersAiBinding = {
   run: (
     model: string,
-    input: { messages?: Array<{ role: string; content: string }>; max_tokens?: number; text?: string | string[] },
-  ) => Promise<{ response?: string; data?: number[][] }>
+    input: {
+      messages?: Array<{ role: string; content: string }>
+      max_tokens?: number
+      text?: string | string[]
+      audio?: string
+      language?: string
+      task?: 'transcribe' | 'translate'
+      vad_filter?: boolean
+      initial_prompt?: string
+    },
+  ) => Promise<{
+    response?: string
+    data?: number[][]
+    text?: string
+    transcription_info?: { text?: string }
+  }>
 }
 
 // Vectorize 绑定的最小类型。
@@ -12192,6 +12206,269 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   return ok(suggestion)
 }
 
+const VOICE_SCHEDULE_MAX_AUDIO_SIZE = 4 * 1024 * 1024
+const VOICE_SCHEDULE_ASR_MODEL = '@cf/openai/whisper-large-v3-turbo'
+type VoiceScheduleField = 'start' | 'hours' | 'end'
+type VoiceScheduleModelResult = {
+  startAt?: string | null
+  durationMinutes?: number | null
+  endAt?: string | null
+  suppliedFields?: VoiceScheduleField[]
+  confidence?: string
+}
+
+function voiceNumber(value: string): number | null {
+  const normalized = value.trim().replace(/两/g, '二')
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) return Number(normalized)
+  const digitMap: Record<string, number> = { 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+  if (normalized.includes('点')) {
+    const [integerPart, decimalPart = ''] = normalized.split('点')
+    const integer = voiceNumber(integerPart)
+    const decimals = [...decimalPart].map((char) => digitMap[char]).filter((item) => item !== undefined).join('')
+    return integer === null || !decimals ? null : Number(`${integer}.${decimals}`)
+  }
+  if (normalized.includes('十')) {
+    const [tensPart, onesPart] = normalized.split('十')
+    const tens = tensPart ? digitMap[tensPart] : 1
+    const ones = onesPart ? digitMap[onesPart] : 0
+    return tens === undefined || ones === undefined ? null : tens * 10 + ones
+  }
+  if (normalized.length === 1 && digitMap[normalized] !== undefined) return digitMap[normalized]
+  return null
+}
+
+function parseVoiceDurationMinutes(text: string) {
+  const compact = text.replace(/\s+/g, '')
+  const numberToken = '[零一二两三四五六七八九十百点\\d.]+'
+  const hourMatch = compact.match(new RegExp(`(${numberToken})(?:个)?(半)?小时`))
+  const trailingHalf = Boolean(hourMatch && new RegExp(`${hourMatch[0]}半`).test(compact))
+  const minuteMatch = compact.match(new RegExp(`(${numberToken})分钟`))
+  const standaloneHalf = !hourMatch && /半(?:个)?小时/.test(compact)
+  const hours = hourMatch ? voiceNumber(hourMatch[1]) : standaloneHalf ? 0 : null
+  const minutes = minuteMatch ? voiceNumber(minuteMatch[1]) : 0
+  if (hours === null && !standaloneHalf && minutes === 0) return null
+  const halfMinutes = standaloneHalf || hourMatch?.[2] || trailingHalf ? 30 : 0
+  const total = Math.round((hours || 0) * 60 + (minutes || 0) + halfMinutes)
+  return total > 0 && total <= 31 * 24 * 60 ? total : null
+}
+
+function voiceReferenceParts(referenceTime: string) {
+  const match = referenceTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+  if (match) {
+    return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]) }
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date())
+  const read = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value || 0)
+  return { year: read('year'), month: read('month'), day: read('day'), hour: read('hour'), minute: read('minute') }
+}
+
+function offsetVoiceDate(parts: ReturnType<typeof voiceReferenceParts>, days: number) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days))
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() }
+}
+
+function parseVoiceDateTime(text: string, referenceTime: string) {
+  const compact = text.replace(/\s+/g, '')
+  const reference = voiceReferenceParts(referenceTime)
+  let { year, month, day } = reference
+  let hasDate = false
+  const absoluteDate = compact.match(/(?:(\d{4})年)?(\d{1,2})月(\d{1,2})(?:日|号)?/)
+  if (absoluteDate) {
+    year = Number(absoluteDate[1] || reference.year)
+    month = Number(absoluteDate[2])
+    day = Number(absoluteDate[3])
+    hasDate = true
+  } else if (/后天/.test(compact)) {
+    ;({ year, month, day } = offsetVoiceDate(reference, 2))
+    hasDate = true
+  } else if (/明天|明日/.test(compact)) {
+    ;({ year, month, day } = offsetVoiceDate(reference, 1))
+    hasDate = true
+  } else if (/今天|今日/.test(compact)) {
+    hasDate = true
+  }
+
+  const numberToken = '[零一二两三四五六七八九十\\d]+'
+  const timeMatch = compact.match(new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?(${numberToken})(?:点|时)(?:(${numberToken})分?)?`))
+  if (!timeMatch) return null
+  let hour = voiceNumber(timeMatch[2])
+  const minute = timeMatch[3] ? voiceNumber(timeMatch[3]) : 0
+  if (hour === null || minute === null || minute < 0 || minute > 59) return null
+  const period = timeMatch[1] || ''
+  if (/下午|傍晚|晚上/.test(period) && hour < 12) hour += 12
+  if (/凌晨/.test(period) && hour === 12) hour = 0
+  if (/中午/.test(period) && hour < 11) hour += 12
+  if (hour < 0 || hour > 23) return null
+  if (!hasDate) ({ year, month, day } = reference)
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute))
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`
+}
+
+function parseVoiceScheduleDeterministically(transcript: string, referenceTime: string) {
+  const result: VoiceScheduleModelResult = { suppliedFields: [], confidence: 'medium' }
+  const durationMinutes = parseVoiceDurationMinutes(transcript)
+  if (durationMinutes) {
+    result.durationMinutes = durationMinutes
+    result.suppliedFields?.push('hours')
+  }
+  const markerValue = (pattern: RegExp) => {
+    const match = pattern.exec(transcript)
+    if (!match) return null
+    const from = Math.max(0, match.index - 32)
+    const to = Math.min(transcript.length, match.index + match[0].length + 48)
+    return parseVoiceDateTime(transcript.slice(from, to), referenceTime)
+  }
+  const startAt = markerValue(/(?:预计)?(?:开始|开工|启动)(?:时间)?/)
+  const endAt = markerValue(/(?:预计)?(?:交付|结束|截止)(?:时间)?/)
+  if (startAt) {
+    result.startAt = startAt
+    result.suppliedFields?.push('start')
+  }
+  if (endAt) {
+    result.endAt = endAt
+    result.suppliedFields?.push('end')
+  }
+  return result
+}
+
+function normalizeVoiceDateTime(value: unknown) {
+  const normalized = String(value || '').trim().replace(' ', 'T').slice(0, 16)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) return null
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : normalized
+}
+
+function voiceAddMinutes(value: string, minutes: number) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  date.setMinutes(date.getMinutes() + minutes)
+  const pad = (item: number) => String(item).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function resolveVoiceScheduleResult(transcript: string, raw: VoiceScheduleModelResult, source: string) {
+  let startAt = normalizeVoiceDateTime(raw.startAt)
+  let endAt = normalizeVoiceDateTime(raw.endAt)
+  let durationMinutes = Math.round(Number(raw.durationMinutes) || 0) || null
+  if (durationMinutes !== null && (durationMinutes <= 0 || durationMinutes > 31 * 24 * 60)) durationMinutes = null
+  const suppliedFields = Array.from(new Set((raw.suppliedFields || []).filter((field): field is VoiceScheduleField => ['start', 'hours', 'end'].includes(field))))
+    .filter((field) => field === 'start' ? startAt : field === 'end' ? endAt : durationMinutes)
+  if (startAt && !suppliedFields.includes('start')) suppliedFields.push('start')
+  if (durationMinutes && !suppliedFields.includes('hours')) suppliedFields.push('hours')
+  if (endAt && !suppliedFields.includes('end')) suppliedFields.push('end')
+  let derivedField: VoiceScheduleField | null = null
+  const warnings: string[] = []
+
+  if (suppliedFields.length >= 3 && startAt && endAt && durationMinutes) {
+    const actualMinutes = Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000)
+    if (actualMinutes <= 0 || Math.abs(actualMinutes - durationMinutes) > 1) warnings.push('说出的开始时间、工时和交付时间互相不一致，请重新说其中两项。')
+  } else if (suppliedFields.includes('start') && suppliedFields.includes('hours') && startAt && durationMinutes) {
+    endAt = voiceAddMinutes(startAt, durationMinutes)
+    derivedField = 'end'
+  } else if (suppliedFields.includes('end') && suppliedFields.includes('hours') && endAt && durationMinutes) {
+    startAt = voiceAddMinutes(endAt, -durationMinutes)
+    derivedField = 'start'
+  } else if (suppliedFields.includes('start') && suppliedFields.includes('end') && startAt && endAt) {
+    const actualMinutes = Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000)
+    if (actualMinutes > 0) {
+      durationMinutes = actualMinutes
+      derivedField = 'hours'
+    } else {
+      warnings.push('结束时间需要晚于开始时间，请重新描述。')
+    }
+  }
+
+  return {
+    transcript,
+    startAt,
+    durationMinutes,
+    endAt,
+    suppliedFields,
+    derivedField,
+    confidence: raw.confidence === 'high' || raw.confidence === 'low' ? raw.confidence : 'medium',
+    warnings,
+    source,
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + 0x8000, bytes.length)))
+  }
+  return btoa(binary)
+}
+
+async function parseVoiceScheduleWithAi(env: Env, transcript: string, referenceTime: string, context: string) {
+  return callTextFallbackJson<VoiceScheduleModelResult>(
+    env,
+    `你是中文日期和工时解析器。当前时区固定为 Asia/Shanghai，参考时间是 ${referenceTime}。
+只提取用户明确说出的字段，不要推算缺失字段：startAt 为开始时间，durationMinutes 为工时分钟数，endAt 为结束或交付时间。
+正确理解今天、明天、后天、下周、上午、中午、下午、晚上、半小时、两个半小时、小数小时。
+日期时间统一输出 YYYY-MM-DDTHH:mm；没有明确说出的字段必须为 null。suppliedFields 只能包含 start、hours、end。`,
+    { transcript, context },
+    'startAt:string|null, durationMinutes:number|null, endAt:string|null, suppliedFields:(start|hours|end)[], confidence:low|medium|high',
+    320,
+  )
+}
+
+async function transcribeVoiceSchedule(env: Env, request: Request) {
+  const contentType = request.headers.get('content-type') || ''
+  let transcript: string
+  let referenceTime: string
+  let context: string
+  let source = 'text-test'
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({})) as { transcript?: string; referenceTime?: string; context?: string }
+    transcript = String(body.transcript || '').trim().slice(0, 1000)
+    referenceTime = String(body.referenceTime || '').trim()
+    context = String(body.context || '').trim().slice(0, 120)
+  } else {
+    const form = await request.formData()
+    const audio = form.get('audio')
+    if (!(audio instanceof File) || audio.size <= 0) return fail('没有收到有效录音')
+    if (audio.size > VOICE_SCHEDULE_MAX_AUDIO_SIZE) return fail('单次录音过长，请控制在 45 秒以内', 413)
+    if (!env.AI) return fail('语音识别服务暂不可用', 503)
+    referenceTime = String(form.get('referenceTime') || '').trim()
+    context = String(form.get('context') || '').trim().slice(0, 120)
+    const result = await env.AI.run(VOICE_SCHEDULE_ASR_MODEL, {
+      audio: arrayBufferToBase64(await audio.arrayBuffer()),
+      language: 'zh',
+      task: 'transcribe',
+      vad_filter: true,
+      initial_prompt: '设计任务排期，常见词包括预计开始、预估工时、预计交付、开始时间、结束时间。',
+    })
+    transcript = String(result.text || result.transcription_info?.text || result.response || '').trim().slice(0, 1000)
+    source = 'workers-ai-whisper-large-v3-turbo'
+  }
+  if (!transcript) return fail('没有识别到有效语音，请靠近麦克风后重试', 422)
+  const normalizedReference = normalizeVoiceDateTime(referenceTime) || (() => {
+    const parts = voiceReferenceParts('')
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`
+  })()
+  let parsed = parseVoiceScheduleDeterministically(transcript, normalizedReference)
+  const hasStartMarker = /开始|开工|启动/.test(transcript)
+  const hasEndMarker = /交付|结束|截止/.test(transcript)
+  const needsAi = parsed.suppliedFields?.length === 0
+    || (hasStartMarker && !parsed.startAt)
+    || (hasEndMarker && !parsed.endAt)
+    || Boolean(parsed.startAt && parsed.endAt && parsed.startAt === parsed.endAt)
+    || /下周|周[一二三四五六日天]|月底|月初/.test(transcript)
+  if (needsAi) {
+    const aiParsed = await parseVoiceScheduleWithAi(env, transcript, normalizedReference, context)
+    if (aiParsed) parsed = aiParsed
+  }
+  const resolved = resolveVoiceScheduleResult(transcript, parsed, source)
+  if (resolved.suppliedFields.length === 0) return fail('没有听出明确的开始时间、工时或交付时间，请换一种说法', 422)
+  return ok(resolved)
+}
+
 const acceptanceNoisePattern = /(?:实际|累计|本次|项目)?(?:投入|工时)[^；。\n]{0,24}(?:小时|\bh\b)|(?:小时|\bh\b)[^；。\n]{0,16}(?:投入|工时)|结算金额|小时单价|¥|人民币|改稿轮次|一次交付|未产生改稿|系统记录|isUncounted|未来时间|202\d\s*年|清理画布|待客户确认|待甲方确认|尚未调整|暂未调整|质量问题|风险项|建议在最终稿|建议修改|建议清理/i
 
 function acceptanceClauseText(value: string) {
@@ -16093,6 +16370,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/text-assistant' && request.method === 'POST') {
     return optimizeTaskTextWithAi(env, request)
   }
+  if (path === '/api/ai/voice-schedule' && request.method === 'POST') {
+    return transcribeVoiceSchedule(env, request)
+  }
   if (path === '/api/ai/attachment-name' && request.method === 'POST') {
     return suggestAttachmentNameWithAi(env, request)
   }
@@ -16309,7 +16589,7 @@ export default {
       headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains; preload')
       headers.set('x-content-type-options', 'nosniff')
       headers.set('referrer-policy', 'same-origin')
-      headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=()')
+      headers.set('permissions-policy', 'camera=(), microphone=(self), geolocation=()')
       headers.set(
         'content-security-policy',
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com; frame-src 'self' blob: https://challenges.cloudflare.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",

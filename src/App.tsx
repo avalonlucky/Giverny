@@ -43,6 +43,7 @@ import {
   LogOut,
   Mail,
   Maximize2,
+  Mic,
   Pencil,
   Plus,
   RotateCcw,
@@ -59,6 +60,7 @@ import {
   History,
   Globe,
   SlidersHorizontal,
+  Square,
   Heart,
   Star,
   ZoomIn,
@@ -110,6 +112,7 @@ import {
   type TextLearningContext,
   type TextAssistantSuggestion,
   type TokenScope,
+  type VoiceScheduleResult,
   type OpenRouterFreeModel,
   type WorkspaceSummary,
 } from './lib/api'
@@ -3323,6 +3326,176 @@ function ScheduleAnchorSwitch({
   )
 }
 
+function VoiceScheduleButton({
+  label = '用语音填写时间与工时',
+  context,
+  currentStart,
+  currentDurationMinutes,
+  currentEnd,
+  onApply,
+  disabled = false,
+}: {
+  label?: string
+  context: string
+  currentStart?: string
+  currentDurationMinutes?: number
+  currentEnd?: string
+  onApply: (result: VoiceScheduleResult) => void
+  disabled?: boolean
+}) {
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const timeoutRef = useRef<number | null>(null)
+  const [status, setStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
+  const [result, setResult] = useState<VoiceScheduleResult | null>(null)
+  const [error, setError] = useState('')
+
+  const releaseMedia = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    recorderRef.current = null
+  }, [])
+
+  useEffect(() => () => {
+    const recorder = recorderRef.current
+    if (recorder?.state === 'recording') recorder.stop()
+    releaseMedia()
+  }, [releaseMedia])
+
+  const processRecording = useCallback(async (audio: Blob) => {
+    if (audio.size <= 0) {
+      setStatus('idle')
+      setError('没有录到声音，请靠近麦克风后重试。')
+      return
+    }
+    setStatus('processing')
+    setError('')
+    try {
+      const nextResult = await api.transcribeVoiceSchedule(audio, {
+        referenceTime: isoDateTime(),
+        context,
+        currentStart,
+        currentDurationMinutes,
+        currentEnd,
+      })
+      setResult(nextResult)
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : '语音识别失败，请重试。')
+    } finally {
+      setStatus('idle')
+    }
+  }, [context, currentDurationMinutes, currentEnd, currentStart])
+
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state !== 'recording') return
+    recorder.stop()
+    setStatus('processing')
+  }, [])
+
+  const startRecording = useCallback(async () => {
+    setResult(null)
+    setError('')
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('当前浏览器不支持语音录入，请改用最新版 Chrome、Edge 或 Safari。')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+      streamRef.current = stream
+      const preferredType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+      const recorder = preferredType ? new MediaRecorder(stream, { mimeType: preferredType }) : new MediaRecorder(stream)
+      chunksRef.current = []
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        chunksRef.current = []
+        releaseMedia()
+        void processRecording(audio)
+      }
+      recorder.start(250)
+      setStatus('recording')
+      timeoutRef.current = window.setTimeout(stopRecording, 45_000)
+    } catch (caughtError) {
+      releaseMedia()
+      const denied = caughtError instanceof DOMException && (caughtError.name === 'NotAllowedError' || caughtError.name === 'SecurityError')
+      setError(denied ? '麦克风权限未开启，请允许本网站使用麦克风后重试。' : '无法启动麦克风，请检查设备后重试。')
+    }
+  }, [processRecording, releaseMedia, stopRecording])
+
+  const dismiss = () => {
+    setResult(null)
+    setError('')
+  }
+
+  const review = status !== 'idle' || result || error
+    ? createPortal(
+        <section className="voice-schedule-review" role="status" aria-live="polite">
+          <div className="voice-schedule-review-head">
+            <span className={`voice-schedule-state ${status}`} aria-hidden="true" />
+            <strong>{status === 'recording' ? '正在听…' : status === 'processing' ? '正在识别时间与工时…' : error ? '语音录入未完成' : '识别结果'}</strong>
+            <button type="button" className="icon-button" aria-label="关闭语音识别结果" title="关闭" onClick={dismiss} disabled={status === 'processing'}>
+              <X size={15} />
+            </button>
+          </div>
+          {status === 'recording' && <p>可以一次说出开始时间、工时和交付时间中的任意一项或两项。</p>}
+          {status === 'processing' && <p>录音只用于本次转写，不会保存为附件。</p>}
+          {error && <p className="voice-schedule-error">{error}</p>}
+          {result && (
+            <>
+              <blockquote>{result.transcript}</blockquote>
+              <div className="voice-schedule-values">
+                {result.startAt && <span>开始 {formatPlanDateTime(result.startAt)}{result.derivedField === 'start' ? ' · 自动' : ''}</span>}
+                {result.durationMinutes && <span>工时 {formatDurationZh(result.durationMinutes)}{result.derivedField === 'hours' ? ' · 自动' : ''}</span>}
+                {result.endAt && <span>交付 {formatPlanDateTime(result.endAt)}{result.derivedField === 'end' ? ' · 自动' : ''}</span>}
+              </div>
+              {result.warnings.map((warning) => <p className="voice-schedule-error" key={warning}>{warning}</p>)}
+              <div className="voice-schedule-actions">
+                <button type="button" className="text-button" onClick={() => void startRecording()}>重新说</button>
+                <button
+                  type="button"
+                  className="primary-button compact-button"
+                  disabled={result.warnings.length > 0}
+                  onClick={() => {
+                    onApply(result)
+                    dismiss()
+                  }}
+                >
+                  应用到时间与工时
+                </button>
+              </div>
+            </>
+          )}
+        </section>,
+        document.body,
+      )
+    : null
+
+  return (
+    <div className="voice-schedule-control">
+      <button
+        type="button"
+        className={`voice-schedule-trigger ${status === 'recording' ? 'recording' : ''}`}
+        aria-label={status === 'recording' ? '停止语音录入' : label}
+        title={status === 'recording' ? '停止录音' : label}
+        disabled={disabled || status === 'processing'}
+        onClick={() => status === 'recording' ? stopRecording() : void startRecording()}
+      >
+        {status === 'processing' ? <LoaderCircle size={16} className="spin" /> : status === 'recording' ? <Square size={14} /> : <Mic size={17} />}
+      </button>
+      {review}
+    </div>
+  )
+}
+
 function NewTaskDesignTypeSelector({
   groups,
   value,
@@ -4935,6 +5108,18 @@ function AgentApprovalCard({
   const genericEditableEntries = Object.entries(editableSource).filter(([key, value]) => (
     !['taskId', 'taskTitle', 'before', 'files'].includes(key) && value !== undefined && value !== null && typeof value !== 'object'
   ))
+  const applyVoiceApprovalSchedule = (result: VoiceScheduleResult) => {
+    if (result.startAt) {
+      setDraftField('date', result.startAt)
+    }
+    if (result.durationMinutes) {
+      setDraftField('estimatedHours', Math.round((result.durationMinutes / 60) * 100) / 100)
+    }
+    if (result.endAt) {
+      setDraftField('estimatedDate', result.endAt)
+    }
+    setActivePickerId(null)
+  }
   const saveDraft = async () => {
     setSaving(true)
     setEditError('')
@@ -4981,6 +5166,17 @@ function AgentApprovalCard({
             <span>结算月份</span>
             <input type="month" value={String(editDraft.settlementMonth ?? '')} onChange={(event) => setDraftField('settlementMonth', event.target.value)} />
           </label>
+          <div className="agent-approval-editor-schedule-head agent-approval-editor-wide">
+            <span>时间与工时</span>
+            <VoiceScheduleButton
+              label="用语音填写待确认任务的时间与工时"
+              context="工作助手待确认新建任务的预计排期"
+              currentStart={String(editDraft.date ?? '')}
+              currentDurationMinutes={Number(editDraft.estimatedHours || 0) > 0 ? Math.round(Number(editDraft.estimatedHours) * 60) : undefined}
+              currentEnd={String(editDraft.estimatedDate ?? '')}
+              onApply={applyVoiceApprovalSchedule}
+            />
+          </div>
           <div className="agent-approval-editor-field">
             <PlanDateTimeField
               label="开始时间"
@@ -12707,6 +12903,57 @@ function TaskProgressModal({
     }
   }
 
+  const applyVoiceProgressSchedule = (result: VoiceScheduleResult) => {
+    setHasTouchedSchedule(true)
+    if (result.startAt && result.durationMinutes && result.endAt) {
+      setSegmentMinutes(result.durationMinutes)
+      updateActiveDraft((current) => ({
+        ...current,
+        date: datePart(result.startAt || current.date),
+        start: result.startAt?.slice(11, 16) || current.start,
+        endDate: datePart(result.endAt || current.endDate || current.date),
+        end: result.endAt?.slice(11, 16) || current.end,
+      }))
+      if (result.derivedField) setScheduleDerivedField(result.derivedField)
+    } else {
+      if (result.suppliedFields.includes('start') && result.startAt) updateProgressStart(result.startAt)
+      if (result.suppliedFields.includes('hours') && result.durationMinutes) updateProgressMinutes(result.durationMinutes)
+      if (result.suppliedFields.includes('end') && result.endAt) updateProgressEnd(result.endAt)
+    }
+    setActiveDatePickerId(null)
+    setTimeEntryError('')
+  }
+
+  const applyVoicePlanReferenceSchedule = (result: VoiceScheduleResult) => {
+    if (result.startAt && result.durationMinutes && result.endAt) {
+      setPlanReferenceMinutes(result.durationMinutes)
+      setPlanReferenceDraft((current) => ({
+        ...current,
+        date: datePart(result.startAt || current.date),
+        start: result.startAt?.slice(11, 16) || current.start,
+        endDate: datePart(result.endAt || current.endDate || current.date),
+        end: result.endAt?.slice(11, 16) || current.end,
+      }))
+      if (result.derivedField) setPlanReferenceDerivedField(result.derivedField)
+    } else {
+      if (result.suppliedFields.includes('start') && result.startAt) updatePlanReferenceStart(result.startAt)
+      if (result.suppliedFields.includes('hours') && result.durationMinutes) updatePlanReferenceMinutes(result.durationMinutes)
+      if (result.suppliedFields.includes('end') && result.endAt) updatePlanReferenceEnd(result.endAt)
+    }
+    setActiveDatePickerId(null)
+    setTimeEntryError('')
+  }
+
+  const applyVoiceSingleProgressTime = (result: VoiceScheduleResult) => {
+    const value = result.startAt || result.endAt
+    if (!value) return
+    setHasTouchedSchedule(true)
+    writeProgressStart(value)
+    writeProgressEnd(value)
+    setActiveDatePickerId(null)
+    setTimeEntryError('')
+  }
+
   const applyProgressDerivedField = (field: ScheduleAnchor) => {
     if (field === 'start' && progressEndValue) {
       writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -segmentMinutes))
@@ -12811,6 +13058,11 @@ function TaskProgressModal({
           <span>等待开始时间</span>
           <small>截止时间取同一任务下一段工作进展的开始时间</small>
         </div>
+        <VoiceScheduleButton
+          context="等待记录的开始时间"
+          currentStart={progressStartValue}
+          onApply={applyVoiceSingleProgressTime}
+        />
       </div>
       <div className="progress-schedule-wrap">
         <div className="new-task-schedule-row progress-lite-schedule-row">
@@ -12856,6 +13108,11 @@ function TaskProgressModal({
           <span>反馈时间</span>
           <small>只用于生命周期追溯，不计入结算工时</small>
         </div>
+        <VoiceScheduleButton
+          context="甲方反馈发生时间"
+          currentStart={progressStartValue}
+          onApply={applyVoiceSingleProgressTime}
+        />
       </div>
       <div className="progress-schedule-wrap">
         <div className="new-task-schedule-row progress-lite-schedule-row">
@@ -12896,6 +13153,14 @@ function TaskProgressModal({
           <small>{timeCounts ? '三项同时只激活两项，第三项自动推算（灰色）' : isAcceptanceMode ? '本次验收不计入工时' : '本次不计工时，仅记录进展'}</small>
         </div>
         <div className="progress-lite-time-heading-actions">
+          <VoiceScheduleButton
+            context={isAcceptanceMode ? '验收进展的实际时间与工时' : '工作进展的实际时间与工时'}
+            currentStart={progressStartValue}
+            currentDurationMinutes={segmentMinutes}
+            currentEnd={progressEndValue}
+            onApply={applyVoiceProgressSchedule}
+            disabled={lockSchedule}
+          />
           {isAcceptanceMode && !isWaitingMode && (
             <button
               type="button"
@@ -12997,6 +13262,17 @@ function TaskProgressModal({
         </div>
         {isAcceptanceMode && !isWaitingMode && (
           <div className="new-task-schedule-row progress-lite-schedule-row progress-lite-schedule-row-plan">
+            <div className="progress-lite-plan-head">
+              <span>预计时间与工时</span>
+              <VoiceScheduleButton
+                label="用语音填写预计时间与工时"
+                context="验收时调整任务预计时间与工时"
+                currentStart={planReferenceStartValue}
+                currentDurationMinutes={planReferenceMinutes}
+                currentEnd={planReferenceEndValue}
+                onApply={applyVoicePlanReferenceSchedule}
+              />
+            </div>
             <PlanDateTimeField
               label="开始时间"
               value={planReferenceStartValue}
@@ -20671,6 +20947,22 @@ function NewTaskModal({
     updateEstimatedMinutes(Number.isFinite(hours) && hours > 0 ? hours * 60 : estimatedMinutes)
   }
 
+  const applyVoiceTaskSchedule = (result: VoiceScheduleResult) => {
+    if (result.startAt && result.durationMinutes && result.endAt) {
+      setStartDate(result.startAt)
+      setEstimatedMinutes(result.durationMinutes)
+      setEstimatedHoursInput(formatExactHoursInputValue(result.durationMinutes))
+      setEstimatedDate(result.endAt)
+      if (result.derivedField) setScheduleDerivedField(result.derivedField)
+      setActiveDatePickerId(null)
+      return
+    }
+    if (result.suppliedFields.includes('start') && result.startAt) updateStartDate(result.startAt)
+    if (result.suppliedFields.includes('hours') && result.durationMinutes) updateEstimatedMinutes(result.durationMinutes)
+    if (result.suppliedFields.includes('end') && result.endAt) updateEstimatedDate(result.endAt)
+    setActiveDatePickerId(null)
+  }
+
   const clearFieldError = (field: string) => {
     setFormErrors((current) => {
       if (!current[field]) {
@@ -21402,6 +21694,13 @@ function NewTaskModal({
           <div className="new-task-time-label">
             <span>时间与工时</span>
             <em>三项同时只激活两项，第三项自动推算（灰色）</em>
+            <VoiceScheduleButton
+              context="新建或编辑任务的预计排期"
+              currentStart={startDate}
+              currentDurationMinutes={estimatedMinutes}
+              currentEnd={estimatedDate}
+              onApply={applyVoiceTaskSchedule}
+            />
           </div>
           <div className="new-task-schedule-row">
             <PlanDateTimeField

@@ -63,6 +63,20 @@ export type TaskProgressEstimatePayload = {
 
 export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
 
+export type VoiceScheduleField = 'start' | 'hours' | 'end'
+
+export type VoiceScheduleResult = {
+  transcript: string
+  startAt: string | null
+  durationMinutes: number | null
+  endAt: string | null
+  suppliedFields: VoiceScheduleField[]
+  derivedField: VoiceScheduleField | null
+  confidence: 'low' | 'medium' | 'high'
+  warnings: string[]
+  source: string
+}
+
 export type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read'
 
 export type OpenRouterFreeModel = {
@@ -1269,6 +1283,19 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  transcribeVoiceSchedule: (
+    audio: Blob,
+    payload: { referenceTime: string; context: string; currentStart?: string; currentDurationMinutes?: number; currentEnd?: string },
+  ) => {
+    const body = new FormData()
+    body.append('audio', audio, `schedule-voice.${audio.type.includes('mp4') ? 'm4a' : 'webm'}`)
+    body.append('referenceTime', payload.referenceTime)
+    body.append('context', payload.context)
+    if (payload.currentStart) body.append('currentStart', payload.currentStart)
+    if (payload.currentDurationMinutes) body.append('currentDurationMinutes', String(payload.currentDurationMinutes))
+    if (payload.currentEnd) body.append('currentEnd', payload.currentEnd)
+    return requestJson<VoiceScheduleResult>('/api/ai/voice-schedule', { method: 'POST', body })
+  },
   suggestDailyKnowledge: (payload: DailyKnowledgePayload) =>
     requestJson<DailyKnowledgeSuggestion>('/api/ai/daily-knowledge', {
       method: 'POST',
