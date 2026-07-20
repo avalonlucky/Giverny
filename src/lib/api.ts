@@ -1286,6 +1286,7 @@ export const api = {
   transcribeVoiceSchedule: (
     audio: Blob,
     payload: { referenceTime: string; context: string; currentStart?: string; currentDurationMinutes?: number; currentEnd?: string },
+    options?: { signal?: AbortSignal },
   ) => {
     const body = new FormData()
     body.append('audio', audio, `schedule-voice.${audio.type.includes('mp4') ? 'm4a' : 'webm'}`)
@@ -1294,7 +1295,7 @@ export const api = {
     if (payload.currentStart) body.append('currentStart', payload.currentStart)
     if (payload.currentDurationMinutes) body.append('currentDurationMinutes', String(payload.currentDurationMinutes))
     if (payload.currentEnd) body.append('currentEnd', payload.currentEnd)
-    return requestJson<VoiceScheduleResult>('/api/ai/voice-schedule', { method: 'POST', body })
+    return requestJson<VoiceScheduleResult>('/api/ai/voice-schedule', { method: 'POST', body, signal: options?.signal })
   },
   suggestDailyKnowledge: (payload: DailyKnowledgePayload) =>
     requestJson<DailyKnowledgeSuggestion>('/api/ai/daily-knowledge', {

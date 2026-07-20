@@ -16597,6 +16597,9 @@ export default {
       if ((url.pathname.startsWith('/api/') || url.pathname === '/mcp') && !headers.has('cache-control')) {
         headers.set('cache-control', 'no-store')
       }
+      if (headers.get('content-type')?.includes('text/html')) {
+        headers.set('cache-control', 'no-store')
+      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
     }
 

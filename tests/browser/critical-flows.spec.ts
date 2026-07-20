@@ -116,6 +116,55 @@ test('新建任务支持语音识别排期并确认后自动填写三项', async
   await expect(dateInputs.nth(1)).toHaveValue('2026/07/20 18:10')
 })
 
+test('语音排期识别中可以立即关闭', async ({ page }) => {
+  await page.addInitScript({
+    content: `
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      });
+      class FakeMediaRecorder {
+        static isTypeSupported() { return true; }
+        constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; this.ondataavailable = null; this.onstop = null; }
+        start() { this.state = 'recording'; }
+        stop() {
+          this.state = 'inactive';
+          if (this.ondataavailable) this.ondataavailable({ data: new Blob(['voice-schedule'], { type: this.mimeType }) });
+          if (this.onstop) this.onstop();
+        }
+      }
+      window.MediaRecorder = FakeMediaRecorder;
+    `,
+  })
+  await page.route('**/api/ai/voice-schedule', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    try {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          transcript: '预估工时两小时',
+          durationMinutes: 120,
+          suppliedFields: ['hours'],
+          derivedField: null,
+          confidence: 'medium',
+          warnings: [],
+          source: 'browser-eval',
+        }),
+      })
+    } catch {
+      // 用户关闭弹窗后请求会被主动取消。
+    }
+  })
+  await page.reload()
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  await page.getByRole('button', { name: '用语音填写时间与工时' }).click()
+  await page.getByRole('button', { name: '停止语音录入' }).click()
+  await expect(page.getByText('正在整理时间与工时…', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭语音识别结果' }).click()
+  await expect(page.getByText('正在整理时间与工时…', { exact: true })).toBeHidden()
+})
+
 test('新建任务预计开始日历超出弹窗时仍可选择日期', async ({ page }) => {
   await page.getByRole('button', { name: /新建任务/ }).first().click()
   const modal = page.getByRole('dialog', { name: '新建任务' })

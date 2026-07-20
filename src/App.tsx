@@ -3363,34 +3363,57 @@ function VoiceScheduleButton({
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timeoutRef = useRef<number | null>(null)
+  const processingTimeoutRef = useRef<number | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const runIdRef = useRef(0)
   const [status, setStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
   const [result, setResult] = useState<VoiceScheduleResult | null>(null)
   const [error, setError] = useState('')
 
-  const releaseMedia = useCallback(() => {
+  const clearRecordingTimeout = useCallback(() => {
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
+  }, [])
+
+  const clearProcessingTimeout = useCallback(() => {
+    if (processingTimeoutRef.current !== null) {
+      window.clearTimeout(processingTimeoutRef.current)
+      processingTimeoutRef.current = null
+    }
+  }, [])
+
+  const releaseMedia = useCallback(() => {
+    clearRecordingTimeout()
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     recorderRef.current = null
-  }, [])
+  }, [clearRecordingTimeout])
 
   useEffect(() => () => {
     const recorder = recorderRef.current
     if (recorder?.state === 'recording') recorder.stop()
+    abortRef.current?.abort()
+    clearProcessingTimeout()
     releaseMedia()
-  }, [releaseMedia])
+  }, [clearProcessingTimeout, releaseMedia])
 
   const processRecording = useCallback(async (audio: Blob) => {
+    const runId = runIdRef.current
     if (audio.size <= 0) {
-      setStatus('idle')
+      if (runId !== runIdRef.current) return
       setError('没有录到声音，请靠近麦克风后重试。')
+      setStatus('idle')
       return
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     setStatus('processing')
     setError('')
+    processingTimeoutRef.current = window.setTimeout(() => {
+      controller.abort()
+    }, 5_000)
     try {
       const nextResult = await api.transcribeVoiceSchedule(audio, {
         referenceTime: isoDateTime(),
@@ -3398,14 +3421,21 @@ function VoiceScheduleButton({
         currentStart,
         currentDurationMinutes,
         currentEnd,
+      }, {
+        signal: controller.signal,
       })
+      if (runId !== runIdRef.current) return
       setResult(nextResult)
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : '语音识别失败，请重试。')
+      if (runId !== runIdRef.current) return
+      const aborted = caughtError instanceof DOMException && caughtError.name === 'AbortError'
+      setError(aborted ? '识别时间超过 5 秒，请重试或手动填写。' : caughtError instanceof Error ? caughtError.message : '语音识别失败，请重试。')
     } finally {
-      setStatus('idle')
+      if (abortRef.current === controller) abortRef.current = null
+      clearProcessingTimeout()
+      if (runId === runIdRef.current) setStatus('idle')
     }
-  }, [context, currentDurationMinutes, currentEnd, currentStart])
+  }, [clearProcessingTimeout, context, currentDurationMinutes, currentEnd, currentStart])
 
   const stopRecording = useCallback(() => {
     const recorder = recorderRef.current
@@ -3415,6 +3445,10 @@ function VoiceScheduleButton({
   }, [])
 
   const startRecording = useCallback(async () => {
+    runIdRef.current += 1
+    abortRef.current?.abort()
+    abortRef.current = null
+    clearProcessingTimeout()
     setResult(null)
     setError('')
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
@@ -3445,25 +3479,46 @@ function VoiceScheduleButton({
       const denied = caughtError instanceof DOMException && (caughtError.name === 'NotAllowedError' || caughtError.name === 'SecurityError')
       setError(denied ? '麦克风权限未开启，请允许本网站使用麦克风后重试。' : '无法启动麦克风，请检查设备后重试。')
     }
-  }, [processRecording, releaseMedia, stopRecording])
+  }, [clearProcessingTimeout, processRecording, releaseMedia, stopRecording])
 
-  const dismiss = () => {
+  const dismiss = useCallback(() => {
+    runIdRef.current += 1
+    abortRef.current?.abort()
+    abortRef.current = null
+    clearProcessingTimeout()
+    const recorder = recorderRef.current
+    if (recorder?.state === 'recording') {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+      recorder.stop()
+    }
+    releaseMedia()
+    setStatus('idle')
     setResult(null)
     setError('')
-  }
+  }, [clearProcessingTimeout, releaseMedia])
+
+  const statusText = status === 'recording' ? '正在听…' : status === 'processing' ? '正在整理时间与工时…' : error ? '语音录入未完成' : '识别结果'
 
   const review = status !== 'idle' || result || error
     ? createPortal(
         <section className="voice-schedule-review" role="status" aria-live="polite">
           <div className="voice-schedule-review-head">
             <span className={`voice-schedule-state ${status}`} aria-hidden="true" />
-            <strong>{status === 'recording' ? '正在听…' : status === 'processing' ? '正在识别时间与工时…' : error ? '语音录入未完成' : '识别结果'}</strong>
-            <button type="button" className="icon-button" aria-label="关闭语音识别结果" title="关闭" onClick={dismiss} disabled={status === 'processing'}>
+            <strong>
+              {statusText}
+              {(status === 'recording' || status === 'processing') && (
+                <span className="voice-schedule-wave" aria-hidden="true">
+                  <i /><i /><i /><i />
+                </span>
+              )}
+            </strong>
+            <button type="button" className="voice-schedule-close" aria-label="关闭语音识别结果" title="关闭" onClick={dismiss}>
               <X size={15} />
             </button>
           </div>
           {status === 'recording' && <p>可以一次说出开始时间、工时和交付时间中的任意一项或两项。</p>}
-          {status === 'processing' && <p>录音只用于本次转写，不会保存为附件。</p>}
+          {status === 'processing' && <p>正在把语音整理成时间字段，超过 5 秒会自动停止并提示重试。</p>}
           {error && <p className="voice-schedule-error">{error}</p>}
           {result && (
             <>
