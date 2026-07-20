@@ -91,6 +91,7 @@ export type FileAsset = {
   tag?: string
   deletedAt?: string
   previewUrl?: string
+  previewFallback?: boolean
   sourceUrl?: string
 }
 

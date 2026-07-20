@@ -39,6 +39,10 @@ database_name = "giverny-agent-eval"
 database_id = "00000000-0000-0000-0000-000000000015"
 migrations_dir = "../db/migrations"
 
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "giverny-agent-eval-uploads"
+
 [assets]
 directory = "../dist"
 binding = "ASSETS"

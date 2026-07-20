@@ -543,6 +543,7 @@ export type AttachmentNameSuggestion = {
   reason: string
   confidence: '低' | '中' | '高'
   fallbackUsed?: boolean
+  sourceLabel?: string
 }
 
 export type HourEstimateSuggestion = {
@@ -999,10 +1000,10 @@ export const api = {
       method: 'DELETE',
     }),
   // 为缺少预览图的文件补一张（前端渲染 PDF 首页后回传）
-  setFilePreview: (fileId: number, preview: File): Promise<{ previewUrl?: string }> => {
+  setFilePreview: (fileId: number, preview: File): Promise<{ previewUrl?: string; previewFallback?: boolean }> => {
     const form = new FormData()
     form.set('preview', preview)
-    return xhrJson<{ previewUrl?: string }>('POST', `/api/files/${fileId}/preview`, form)
+    return xhrJson<{ previewUrl?: string; previewFallback?: boolean }>('POST', `/api/files/${fileId}/preview`, form)
   },
   setEntryAttachmentsArchived: (taskId: number, entryId: string, archived: boolean) =>
     requestJson<{ ok: true; affected: number }>(`/api/tasks/${taskId}/entry-attachments`, {

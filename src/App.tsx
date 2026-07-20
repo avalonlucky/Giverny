@@ -7369,7 +7369,7 @@ function App() {
     const targets = fileItems.filter(
       (file) =>
         !file.deletedAt &&
-        !file.previewUrl &&
+        (!file.previewUrl || file.previewFallback) &&
         file.sourceUrl &&
         canBackfill(file) &&
         (previewBackfillAttemptsRef.current.get(file.id) ?? 0) < 3,
@@ -7404,7 +7404,7 @@ function App() {
           const result = await api.setFilePreview(file.id, preview)
           if (!cancelled && result?.previewUrl) {
             repaired = true
-            setFileItems((current) => current.map((item) => (item.id === file.id ? { ...item, previewUrl: result.previewUrl } : item)))
+            setFileItems((current) => current.map((item) => (item.id === file.id ? { ...item, previewUrl: result.previewUrl, previewFallback: Boolean(result.previewFallback) } : item)))
           }
         } catch (error) {
           console.warn('缩略图补全失败', file.name, error)
@@ -8212,7 +8212,7 @@ function App() {
             if (result.previewUrl) {
               savedFile.previewUrl = result.previewUrl
               setFileItems((currentFiles) => currentFiles.map((item) => (
-                item.id === savedFile.id ? { ...item, previewUrl: result.previewUrl } : item
+                item.id === savedFile.id ? { ...item, previewUrl: result.previewUrl, previewFallback: Boolean(result.previewFallback) } : item
               )))
               return
             }
@@ -13997,6 +13997,7 @@ function TaskProgressModal({
                               <div className="attachment-ai-suggestion">
                                 <span>
                                   建议：{aiState.suggestion.suggestedName}
+                                  {aiState.suggestion.sourceLabel ? ` · 当前使用：${aiState.suggestion.sourceLabel}` : ''}
                                   {aiState.suggestion.reason ? ` · ${aiState.suggestion.reason}` : ''}
                                 </span>
                                 <button
@@ -14121,6 +14122,7 @@ function TaskProgressModal({
                           <div className="attachment-ai-suggestion">
                             <span>
                               建议：{attachment.aiSuggestion.suggestedName}
+                              {attachment.aiSuggestion.sourceLabel ? ` · 当前使用：${attachment.aiSuggestion.sourceLabel}` : ''}
                               {attachment.aiSuggestion.reason ? ` · ${attachment.aiSuggestion.reason}` : ''}
                             </span>
                             <button

@@ -338,6 +338,44 @@ async function runUploadLimitCheck(cookie) {
   process.stdout.write('Multipart upload 200MB server limit check passed.\n')
 }
 
+async function runAttachmentPreviewResilienceCheck(cookie) {
+  const form = new FormData()
+  form.set('taskId', '1')
+  form.set('scope', 'acceptance')
+  form.set('type', 'PDF')
+  form.set('size', '128 B')
+  form.set('final', 'true')
+  form.set('visible', 'true')
+  form.set('analyze', 'false')
+  form.set('file', new Blob(['%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF'], { type: 'application/pdf' }), 'preview-resilience.pdf')
+  const uploadResponse = await fetch('http://127.0.0.1:8798/api/files', {
+    method: 'POST',
+    headers: { cookie, 'x-giverny-agent-eval': '1' },
+    body: form,
+  })
+  const uploaded = await uploadResponse.json().catch(() => ({}))
+  if (!uploadResponse.ok || !uploaded.id || !uploaded.previewUrl || uploaded.previewFallback !== true) {
+    throw new Error(`Stable document preview cover was not created: ${uploadResponse.status} ${JSON.stringify(uploaded)}`)
+  }
+  const previewResponse = await fetch(`http://127.0.0.1:8798${uploaded.previewUrl}`, { headers: { cookie } })
+  const previewText = await previewResponse.text()
+  if (!previewResponse.ok || !previewResponse.headers.get('content-type')?.includes('image/svg+xml') || !previewText.includes('<svg')) {
+    throw new Error(`Stable document preview cover cannot be read: ${previewResponse.status} ${previewResponse.headers.get('content-type')}`)
+  }
+  const sourceResponse = await fetch(`http://127.0.0.1:8798${uploaded.sourceUrl}`, {
+    headers: { cookie, range: 'bytes=0-11' },
+  })
+  if (
+    sourceResponse.status !== 206
+    || sourceResponse.headers.get('accept-ranges') !== 'bytes'
+    || !/^bytes 0-11\/\d+$/.test(sourceResponse.headers.get('content-range') || '')
+    || (await sourceResponse.arrayBuffer()).byteLength !== 12
+  ) {
+    throw new Error(`PDF byte-range source response failed: ${sourceResponse.status} ${sourceResponse.headers.get('content-range')}`)
+  }
+  process.stdout.write('Stable document cover and byte-range PDF source checks passed.\n')
+}
+
 async function runAcceptanceNoteGuardrailCheck(cookie) {
   const response = await fetch('http://127.0.0.1:8798/api/ai/text-assistant', {
     method: 'POST',
@@ -598,6 +636,7 @@ async function runSiteWideModelPriorityCheck(cookie) {
     !fallbackNameResponse.ok
     || fallbackNamePayload.suggestedName !== '附件命名降级评测.png'
     || fallbackNamePayload.fallbackUsed !== true
+    || fallbackNamePayload.sourceLabel !== '规则候选（无可用模型）'
   ) {
     throw new Error(`Attachment name deterministic fallback failed: ${fallbackNameResponse.status} ${JSON.stringify(fallbackNamePayload)}`)
   }
@@ -1563,6 +1602,7 @@ try {
   await runAgentLifecycleWriteCheck()
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
+  await runAttachmentPreviewResilienceCheck(cookie)
   await runAcceptanceNoteGuardrailCheck(cookie)
   await runVoiceScheduleCheck(cookie)
   await runAiModelDraftListCheck(cookie)

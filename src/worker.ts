@@ -25,7 +25,13 @@ type D1Database = {
   prepare: (query: string) => D1PreparedStatement
   batch: (statements: D1PreparedStatement[]) => Promise<D1Result[]>
 }
-type R2ObjectBody = { body: ReadableStream; httpMetadata?: { contentType?: string } }
+type R2Range = { offset?: number; length?: number; suffix?: number }
+type R2ObjectBody = {
+  body: ReadableStream
+  size?: number
+  range?: { offset?: number; length?: number }
+  httpMetadata?: { contentType?: string }
+}
 type R2UploadedPart = { partNumber: number; etag: string }
 type R2MultipartUpload = {
   key: string
@@ -35,7 +41,7 @@ type R2MultipartUpload = {
   abort: () => Promise<void>
 }
 type R2Bucket = {
-  get: (key: string) => Promise<R2ObjectBody | null>
+  get: (key: string, options?: { range?: R2Range }) => Promise<R2ObjectBody | null>
   put: (key: string, value: ReadableStream | ArrayBuffer | string, options?: { httpMetadata?: { contentType?: string } }) => Promise<unknown>
   delete: (key: string) => Promise<void>
   createMultipartUpload: (key: string, options?: { httpMetadata?: { contentType?: string } }) => Promise<R2MultipartUpload>
@@ -1759,6 +1765,36 @@ async function activeEndpointForChoice(
 function endpointSupportsVision(endpoint: Pick<StoredAiModelEndpointConfig, 'provider' | 'model'>) {
   if (endpoint.provider === 'deepseek' || endpoint.provider === 'anthropic') return false
   return ['gemini', 'doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai'].includes(endpoint.provider)
+}
+
+type AttachmentNamingVisionCandidate = {
+  endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>
+  label: string
+  fallbackUsed: boolean
+}
+
+async function resolveAttachmentNamingVisionCandidates(env: Env): Promise<AttachmentNamingVisionCandidate[]> {
+  const candidates: AttachmentNamingVisionCandidate[] = []
+  const seen = new Set<string>()
+  const add = (endpoint: Awaited<ReturnType<typeof resolveAiEndpoint>>, label: string, fallbackUsed: boolean) => {
+    if (!endpointSupportsVision(endpoint) || !endpoint.apiKey) return
+    const key = `${endpoint.provider}|${endpoint.baseUrl}|${endpoint.model}`
+    if (seen.has(key)) return
+    seen.add(key)
+    candidates.push({ endpoint, label, fallbackUsed })
+  }
+
+  add(await resolveAiEndpoint(env, 'visionPrimary'), '识图主模型', false)
+  add(await resolveAiEndpoint(env, 'visionFallback'), '识图备用模型', true)
+
+  // 服务商卡片已启用并设置默认模型时，同样纳入命名容错链路；避免 Gemini 单点故障。
+  for (const provider of ['doubao', 'qwen', 'kimi', 'openai', 'openrouter', 'custom-openai', 'gemini'] as AiModelProvider[]) {
+    const endpoint = await configuredDefaultEndpointForProvider(env, provider)
+    if (!endpoint) continue
+    const resolved = await resolveEndpointCredentials(env, endpoint)
+    add(resolved, `备用：${aiProviderDisplayName(provider)}`, true)
+  }
+  return candidates
 }
 
 function aiProviderDisplayName(provider: AiModelProvider) {
@@ -7607,24 +7643,29 @@ function inferAttachmentFileType(name: string | null | undefined, mimeType: stri
   return fromMime || fromCurrent || trustedExtensionFromName(name) || 'FILE'
 }
 
-const toFile = (row: DbAttachment): FileAsset => ({
-  id: Number(row.id),
-  taskId: Number(row.task_id),
-  entryId: row.entry_id ?? '',
-  scope: row.attachment_scope === 'acceptance' ? 'acceptance' : 'progress',
-  name: row.file_name,
-  task: row.task_title ?? '未关联任务',
-  type: inferAttachmentFileType(row.file_name, row.mime_type, row.file_type),
-  mimeType: row.mime_type ?? '',
-  size: row.display_size ?? `${row.file_size ?? 0} B`,
-  uploadedAt: formatBeijing(row.uploaded_at),
-  final: Boolean(row.is_final),
-  visible: Boolean(row.visible_to_client),
-  tag: row.file_tag ?? '',
-  deletedAt: row.deleted_at ?? '',
-  previewUrl: row.preview_r2_key ? `/api/files/${row.id}/preview` : undefined,
-  sourceUrl: `/api/files/${row.id}/source`,
-})
+const toFile = (row: DbAttachment): FileAsset => {
+  const type = inferAttachmentFileType(row.file_name, row.mime_type, row.file_type)
+  const hasStableCover = isDocumentPreviewCoverType(type)
+  return {
+    id: Number(row.id),
+    taskId: Number(row.task_id),
+    entryId: row.entry_id ?? '',
+    scope: row.attachment_scope === 'acceptance' ? 'acceptance' : 'progress',
+    name: row.file_name,
+    task: row.task_title ?? '未关联任务',
+    type,
+    mimeType: row.mime_type ?? '',
+    size: row.display_size ?? `${row.file_size ?? 0} B`,
+    uploadedAt: formatBeijing(row.uploaded_at),
+    final: Boolean(row.is_final),
+    visible: Boolean(row.visible_to_client),
+    tag: row.file_tag ?? '',
+    deletedAt: row.deleted_at ?? '',
+    previewUrl: row.preview_r2_key || hasStableCover ? `/api/files/${row.id}/preview` : undefined,
+    previewFallback: !row.preview_r2_key || isFallbackPreviewKey(row.preview_r2_key),
+    sourceUrl: `/api/files/${row.id}/source`,
+  }
+}
 
 const toReport = (row: DbReport) => ({
   id: row.id,
@@ -10949,6 +10990,8 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
       await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
     } else if (type === 'PNG' || type === 'JPG' || type === 'WEBP' || type === 'GIF' || type === 'SVG' || type === 'BMP') {
       previewKey = r2Key
+    } else if (isDocumentPreviewCoverType(type)) {
+      previewKey = await createDocumentPreviewCover(env, taskId, id, file.name, type)
     }
 
     const saved = await insertAttachment(env, {
@@ -10983,6 +11026,25 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
 }
 
 const sanitizeFileName = (name: string) => name.replace(/[^\w.\-一-龥]/g, '_')
+
+const documentPreviewCoverTypes = new Set(['PDF', 'AI', 'PSD', 'DOC', 'DOCX', 'PPT', 'PPTX', 'XLS', 'XLSX', 'TXT', 'CSV', 'ZIP'])
+const isDocumentPreviewCoverType = (fileType: string) => documentPreviewCoverTypes.has(fileType.toUpperCase())
+const isFallbackPreviewKey = (key: string | null | undefined) => Boolean(key?.endsWith('.fallback.svg'))
+const escapeSvgText = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character] || character)
+
+function documentPreviewCoverSvg(fileName: string, fileType: string) {
+  const title = escapeSvgText(fileName.replace(/\.[^.]+$/, '').slice(0, 34) || '未命名文件')
+  const type = escapeSvgText(fileType.toUpperCase() || 'FILE')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480" role="img" aria-label="${type} 文档封面"><rect width="720" height="480" fill="white"/><rect x="40" y="36" width="640" height="408" fill="none" stroke="black" stroke-width="2"/><path d="M250 116h145l75 75v174H250z" fill="none" stroke="black" stroke-width="8"/><path d="M395 116v82h75" fill="none" stroke="black" stroke-width="8"/><path d="M292 258h136M292 294h136M292 330h98" stroke="black" stroke-width="8" stroke-linecap="round"/><text x="360" y="395" text-anchor="middle" font-family="sans-serif" font-size="22">${type}</text><text x="360" y="425" text-anchor="middle" font-family="sans-serif" font-size="16">${title}</text></svg>`
+}
+
+async function createDocumentPreviewCover(env: Env, taskId: string, attachmentId: string, fileName: string, fileType: string) {
+  const previewKey = `previews/${taskId}/${attachmentId}/${sanitizeFileName(fileName)}.fallback.svg`
+  await env.UPLOADS.put(previewKey, documentPreviewCoverSvg(fileName, fileType), {
+    httpMetadata: { contentType: 'image/svg+xml' },
+  })
+  return previewKey
+}
 
 async function insertAttachment(
   env: Env,
@@ -11061,7 +11123,10 @@ async function insertAttachment(
     final: payload.final,
     visible: payload.visible,
     tag: payload.tag ?? '',
-    previewUrl: payload.previewKey ? `/api/files/${payload.id}/preview` : undefined,
+    previewUrl: payload.previewKey || isDocumentPreviewCoverType(inferAttachmentFileType(payload.fileName, payload.mimeType, payload.fileType))
+      ? `/api/files/${payload.id}/preview`
+      : undefined,
+    previewFallback: isFallbackPreviewKey(payload.previewKey),
     sourceUrl: `/api/files/${payload.id}/source`,
   }
 }
@@ -11155,6 +11220,8 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
       await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
     } else if (['PNG', 'JPG', 'WEBP', 'GIF', 'SVG', 'BMP'].includes(fileType)) {
       previewKey = key
+    } else if (isDocumentPreviewCoverType(fileType)) {
+      previewKey = await createDocumentPreviewCover(env, taskId, fileId, fileName, fileType)
     }
 
     const saved = await insertAttachment(env, {
@@ -11217,10 +11284,10 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
 async function setFilePreview(env: Env, id: string, request: Request) {
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const row = await env.DB.prepare(
-    `SELECT a.id, a.task_id FROM attachments a
+    `SELECT a.id, a.task_id, a.preview_r2_key FROM attachments a
      INNER JOIN tasks t ON t.id = a.task_id
      WHERE a.id = ? AND t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL`,
-  ).bind(id, workspaceId).first<{ id: string; task_id: string }>()
+  ).bind(id, workspaceId).first<{ id: string; task_id: string; preview_r2_key: string | null }>()
   if (!row) {
     return fail('文件不存在或已删除', 404)
   }
@@ -11232,23 +11299,31 @@ async function setFilePreview(env: Env, id: string, request: Request) {
   const previewKey = `previews/${row.task_id}/${id}/${sanitizeFileName(preview.name || 'preview.png')}`
   await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'image/png' } })
   await env.DB.prepare('UPDATE attachments SET preview_r2_key = ? WHERE id = ?').bind(previewKey, id).run()
-  return ok({ previewUrl: `/api/files/${id}/preview` })
+  if (row.preview_r2_key && row.preview_r2_key !== previewKey) {
+    await env.UPLOADS.delete(row.preview_r2_key).catch(() => undefined)
+  }
+  return ok({ previewUrl: `/api/files/${id}/preview`, previewFallback: false })
 }
 
 async function getFilePreview(env: Env, id: string, request: Request) {
   const row = await env.DB.prepare(`
-    SELECT attachments.preview_r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
+    SELECT attachments.preview_r2_key, attachments.file_name, attachments.file_type, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
     WHERE attachments.id = ? AND attachments.deleted_at IS NULL
   `).bind(id).first<{
     preview_r2_key: string | null
+    file_name: string
+    file_type: string | null
     mime_type: string | null
     visible_to_client: number
     settlement_month: string | null
     workspace_id: string | null
   }>()
-  if (!row?.preview_r2_key) {
+  if (!row) {
+    return fail('文件不存在或已删除', 404)
+  }
+  if (!row.preview_r2_key && !isDocumentPreviewCoverType(inferAttachmentFileType(row.file_name, row.mime_type, row.file_type))) {
     return fail('没有预览图', 404)
   }
   const principal = await resolveRequestPrincipal(env, request)
@@ -11274,6 +11349,14 @@ async function getFilePreview(env: Env, id: string, request: Request) {
     }
   }
 
+  if (!row.preview_r2_key) {
+    return new Response(documentPreviewCoverSvg(row.file_name, inferAttachmentFileType(row.file_name, row.mime_type, row.file_type)), {
+      headers: {
+        'content-type': 'image/svg+xml',
+        'cache-control': 'private, max-age=3600',
+      },
+    })
+  }
   const object = await env.UPLOADS.get(row.preview_r2_key)
   if (!object) {
     return fail('预览文件不存在', 404)
@@ -11286,11 +11369,32 @@ async function getFilePreview(env: Env, id: string, request: Request) {
   })
 }
 
+function parseSingleByteRange(value: string | null, size: number) {
+  if (!value || !Number.isFinite(size) || size <= 0) return null
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim())
+  if (!match) return 'invalid' as const
+  const [, startRaw, endRaw] = match
+  if (!startRaw && !endRaw) return 'invalid' as const
+  let start: number
+  let end: number
+  if (!startRaw) {
+    const suffixLength = Number(endRaw)
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return 'invalid' as const
+    start = Math.max(0, size - suffixLength)
+    end = size - 1
+  } else {
+    start = Number(startRaw)
+    end = endRaw ? Number(endRaw) : size - 1
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) return 'invalid' as const
+  return { start, end: Math.min(end, size - 1), length: Math.min(end, size - 1) - start + 1 }
+}
+
 async function getFileSource(env: Env, id: string, request: Request) {
   const url = new URL(request.url)
   const internalAnalysisRequest = await verifyAgentToolRequest(env, request)
   const row = await env.DB.prepare(`
-    SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
+    SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.file_size, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
     FROM attachments
     LEFT JOIN tasks ON tasks.id = attachments.task_id
     WHERE attachments.id = ? AND attachments.deleted_at IS NULL
@@ -11298,6 +11402,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
     file_name: string
     r2_key: string
     mime_type: string | null
+    file_size: number | null
     visible_to_client: number
     settlement_month: string | null
     workspace_id: string | null
@@ -11332,19 +11437,36 @@ async function getFileSource(env: Env, id: string, request: Request) {
     }
   }
 
-  const object = await env.UPLOADS.get(row.r2_key)
+  const fileSize = Number(row.file_size) || 0
+  const requestedRange = parseSingleByteRange(request.headers.get('range'), fileSize)
+  if (requestedRange === 'invalid') {
+    return new Response(null, {
+      status: 416,
+      headers: { 'content-range': `bytes */${fileSize}`, 'accept-ranges': 'bytes' },
+    })
+  }
+  const object = await env.UPLOADS.get(row.r2_key, requestedRange ? { range: { offset: requestedRange.start, length: requestedRange.length } } : undefined)
   if (!object) {
     return fail('源文件不存在', 404)
   }
 
   const encodedName = encodeURIComponent(row.file_name)
   const forcedContentType = url.searchParams.get('as') === 'pdf' ? 'application/pdf' : null
+  const headers: Record<string, string> = {
+    'content-type': forcedContentType ?? object.httpMetadata?.contentType ?? row.mime_type ?? 'application/octet-stream',
+    'content-disposition': `inline; filename*=UTF-8''${encodedName}`,
+    'cache-control': 'private, max-age=3600',
+    'accept-ranges': 'bytes',
+  }
+  if (requestedRange) {
+    headers['content-range'] = `bytes ${requestedRange.start}-${requestedRange.end}/${fileSize}`
+    headers['content-length'] = String(requestedRange.length)
+  } else if (fileSize > 0) {
+    headers['content-length'] = String(fileSize)
+  }
   return new Response(object.body, {
-    headers: {
-      'content-type': forcedContentType ?? object.httpMetadata?.contentType ?? row.mime_type ?? 'application/octet-stream',
-      'content-disposition': `inline; filename*=UTF-8''${encodedName}`,
-      'cache-control': 'private, max-age=3600',
-    },
+    status: requestedRange ? 206 : 200,
+    headers,
   })
 }
 
@@ -13005,26 +13127,23 @@ ${JSON.stringify(payload)}`
       reason: '已按任务信息和原文件名生成保守候选',
       confidence: '低' as const,
       fallbackUsed: true,
+      sourceLabel: '规则候选（无可用模型）',
     }
   }
 
-  const routes: AiModelRouteKey[] = ['visionPrimary', 'visionFallback']
-  const attachmentNameTimeoutMs = 30_000
+  const visionCandidates = await resolveAttachmentNamingVisionCandidates(env)
+  const attachmentNameTimeoutMs = 12_000
   const modelErrors: string[] = []
-  let configuredRouteCount = 0
-  for (let index = 0; index < routes.length; index += 1) {
+  const configuredRouteCount = visionCandidates.length
+  for (const candidate of visionCandidates) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort('AI 命名请求超时'), attachmentNameTimeoutMs)
     try {
-      const endpoint = await resolveAiEndpoint(env, routes[index])
-      if (!endpoint.apiKey) {
-        continue
-      }
-      configuredRouteCount += 1
+      const endpoint = candidate.endpoint
       const output = imageBase64
         ? await callAiEndpointVision(endpoint, prompt, imageBase64, mimeType, 1024, controller.signal, true)
         : await callAiEndpointText(endpoint, prompt, 1024, controller.signal)
-      const suggestion = normalizeSuggestion(output, index > 0)
+      const suggestion = normalizeSuggestion(output, candidate.fallbackUsed)
       if (!suggestion) {
         modelErrors.push(`${endpoint.model} 返回内容无法解析`)
         console.warn(JSON.stringify({
@@ -13041,14 +13160,17 @@ ${JSON.stringify(payload)}`
         suggestedName: suggestion.suggestedName,
         provider: endpoint.provider,
         model: endpoint.model,
-        fallbackUsed: index > 0,
+        fallbackUsed: candidate.fallbackUsed,
         usedImage: Boolean(imageBase64),
       })
-      return ok(suggestion)
+      return ok({
+        ...suggestion,
+        sourceLabel: `${candidate.label} · ${aiProviderDisplayName(endpoint.provider)} / ${endpoint.model}`,
+      })
     } catch (error) {
       modelErrors.push(controller.signal.aborted
-        ? `${routes[index] === 'visionPrimary' ? '主视觉模型' : '备用视觉模型'}响应超时`
-        : error instanceof Error ? error.message : '模型请求失败')
+        ? `${candidate.label}响应超时`
+        : `${candidate.label}：${describeAiCallError(error)}`)
     } finally {
       clearTimeout(timeout)
     }
@@ -13088,6 +13210,7 @@ ${JSON.stringify(payload)}`
       return ok({
         ...suggestion,
         reason: suggestion.reason || '视觉模型不可用，已按任务上下文整理',
+        sourceLabel: '文字模型回退链路',
       })
     }
     modelErrors.push('文字兜底模型未返回可用短文件名')
