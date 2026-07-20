@@ -12480,6 +12480,15 @@ function parseVoiceScheduleDeterministically(transcript: string, referenceTime: 
     result.endAt = endAt
     result.suppliedFields?.push('end')
   }
+  // 口语里常省略“开始时间”，例如“6月10号下午3点，预估工时5小时”。
+  // 在没有明确交付语义且没有其他时间字段时，把这一项视为开始时间。
+  if (!result.startAt && !result.endAt) {
+    const standaloneDateTime = parseVoiceDateTime(transcript, referenceTime)
+    if (standaloneDateTime) {
+      result.startAt = standaloneDateTime
+      result.suppliedFields?.push('start')
+    }
+  }
   return result
 }
 

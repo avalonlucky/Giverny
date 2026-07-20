@@ -10111,7 +10111,7 @@ button.file-chip:focus-visible {
 
 .voice-schedule-review-head {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 9px;
 }
@@ -10143,6 +10143,23 @@ button.file-chip:focus-visible {
 .voice-schedule-close:hover,
 .voice-schedule-close:focus-visible {
   color: var(--color-text);
+  background: transparent;
+}
+
+.voice-schedule-complete {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.voice-schedule-complete:hover,
+.voice-schedule-complete:focus-visible {
+  color: var(--color-primary-strong);
   background: transparent;
 }
 

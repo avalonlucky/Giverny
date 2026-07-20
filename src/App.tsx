@@ -60,7 +60,6 @@ import {
   History,
   Globe,
   SlidersHorizontal,
-  Square,
   Heart,
   Star,
   ZoomIn,
@@ -3653,6 +3652,15 @@ function VoiceScheduleButton({
                 </span>
               )}
             </strong>
+            {status === 'recording' && (
+              <button
+                type="button"
+                className="voice-schedule-complete"
+                onClick={stopRecording}
+              >
+                采集完成
+              </button>
+            )}
             <button type="button" className="voice-schedule-close" aria-label="关闭语音识别结果" title="关闭" onClick={dismiss}>
               <X size={15} />
             </button>
@@ -3694,13 +3702,13 @@ function VoiceScheduleButton({
     <div className="voice-schedule-control">
       <button
         type="button"
-        className={`voice-schedule-trigger ${status === 'recording' ? 'recording' : ''}`}
-        aria-label={status === 'recording' ? '停止语音录入' : label}
-        title={status === 'recording' ? '停止录音' : label}
-        disabled={disabled || status === 'processing'}
-        onClick={() => status === 'recording' ? stopRecording() : void startRecording()}
+        className="voice-schedule-trigger"
+        aria-label={label}
+        title={label}
+        disabled={disabled || status !== 'idle'}
+        onClick={() => void startRecording()}
       >
-        {status === 'processing' ? <LoaderCircle size={16} className="spin" /> : status === 'recording' ? <Square size={14} /> : <Mic size={17} />}
+        {status === 'processing' ? <LoaderCircle size={16} className="spin" /> : <Mic size={17} />}
       </button>
       {review}
     </div>
