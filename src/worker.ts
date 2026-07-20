@@ -12474,8 +12474,31 @@ const acceptanceNoisePattern = /(?:实际|累计|本次|项目)?(?:投入|工时
 function acceptanceClauseText(value: string) {
   return value
     .replace(/^\s*\d+[、.．]\s*/, '')
-    .replace(/^(?:需求达成|完成与交付概况|完成与交付|主要更新和修改|额外价值|反馈响应与版本迭代|反馈响应|版本迭代|最终文件|验收文件|项目价值|正面影响)\s*[：:]\s*/, '')
+    .replace(/^(?:需求达成|完成与交付概况|完成与交付|主要更新和修改|额外价值|额外完成|补充完成|补充交付|完成与完善|完善与调整|反馈响应与版本迭代|反馈响应|版本迭代|最终文件|验收文件|项目价值|项目影响|正面影响)\s*[：:]\s*/, '')
     .trim()
+}
+
+type AcceptanceSuggestionSection = 'requirement' | 'extra' | 'changes' | 'impact' | 'other'
+
+function acceptanceSuggestionSection(value: string): AcceptanceSuggestionSection {
+  const title = value.replace(/^\s*\d+[、.．]\s*/, '').split(/[：:]/, 1)[0].trim()
+  if (/^(?:需求达成|完成与交付概况|完成与交付|最终文件|验收文件)$/.test(title)) return 'requirement'
+  if (/^(?:额外价值|额外完成|补充完成|补充交付)$/.test(title)) return 'extra'
+  if (/^(?:主要更新和修改|完成与完善|完善与调整|反馈响应与版本迭代|反馈响应|版本迭代)$/.test(title)) return 'changes'
+  if (/^(?:项目价值|项目影响|正面影响)$/.test(title)) return 'impact'
+  return 'other'
+}
+
+function hasAcceptanceImpactEvidence(value: string) {
+  return /(?:模板|复用|沿用|规范|标准|组件|可编辑|通用资产|后续.{0,8}(?:使用|更新|扩展)|统一.{0,8}(?:规范|标准))/i.test(value)
+}
+
+function hasAcceptanceExtraEvidence(value: string) {
+  return /(?:额外|补充|新增|附加|另行)/i.test(value)
+}
+
+function hasAcceptanceChangeEvidence(value: string) {
+  return /(?:调整|修改|优化|重构|反馈|迭代|完善|更新|补充|新增)/i.test(value)
 }
 
 function sanitizeAcceptanceSuggestion(
@@ -12484,18 +12507,19 @@ function sanitizeAcceptanceSuggestion(
     taskTitle: string
     taskType: string
     attachmentNames: string[]
+    sourceEvidence?: string
   },
 ) {
   const seenAttachmentNames = new Set<string>()
   let hasDeliveryFileMention = false
   const sourceLines = value
     .split(/\n+/)
-    .map(acceptanceClauseText)
-    .filter(Boolean)
-  const contents: string[] = []
+    .map((line) => ({ section: acceptanceSuggestionSection(line), text: acceptanceClauseText(line) }))
+    .filter((line) => Boolean(line.text))
+  const contents: Array<{ section: AcceptanceSuggestionSection; text: string }> = []
 
-  sourceLines.forEach((line) => {
-    const cleanedClauses = line
+  sourceLines.forEach(({ section, text }) => {
+    const cleanedClauses = text
       .split(/[；。]+/)
       .map((clause) => clause.trim())
       .filter(Boolean)
@@ -12510,9 +12534,9 @@ function sanitizeAcceptanceSuggestion(
         matchedNames.forEach((name) => seenAttachmentNames.add(name))
         hasDeliveryFileMention = true
         return true
-      })
+    })
     const cleaned = cleanedClauses.join('；').replace(/[；，,\s]+$/, '').trim()
-    if (cleaned && !contents.includes(cleaned)) contents.push(cleaned)
+    if (cleaned && !contents.some((item) => item.text === cleaned)) contents.push({ section, text: cleaned })
   })
 
   const firstFile = context.attachmentNames.find(Boolean)
@@ -12520,19 +12544,22 @@ function sanitizeAcceptanceSuggestion(
   const requirementFallback = firstFile
     ? `已按任务要求完成${taskLabel}的交付内容，并提交《${firstFile}》作为本次验收文件。`
     : `已按任务要求完成${taskLabel}的约定内容，并形成可供验收的正式成果。`
-  const extraValueFallback = '在基础需求之外，对内容结构、视觉一致性和文件可用性进行了补充完善，让交付结果更完整、更便于后续使用。'
-  const projectValueFallback = '本次成果已将内容、版式与交付文件统一沉淀，便于后续同类项目沿用、更新并保持视觉表达一致。'
-  const selected = [
-    contents[0] || requirementFallback,
-    contents[1] || extraValueFallback,
-    contents[2] || projectValueFallback,
-  ]
+  const requirement = contents.find((item) => item.section === 'requirement')?.text || contents[0]?.text || requirementFallback
+  const optionalWork = contents.filter((item) => (
+    (item.section === 'extra' && hasAcceptanceExtraEvidence(context.sourceEvidence || ''))
+    || (item.section === 'changes' && hasAcceptanceChangeEvidence(context.sourceEvidence || ''))
+  ))
+  const impact = contents.find((item) => item.section === 'impact')
+  const lines = [`1、需求达成：${requirement}`]
 
-  return [
-    `1、需求达成：${selected[0]}`,
-    `2、额外价值：${selected[1]}`,
-    `3、项目价值：${selected[2]}`,
-  ].join('\n')
+  optionalWork.forEach((item) => {
+    const label = item.section === 'extra' ? '补充完成' : '完成与完善'
+    lines.push(`${lines.length + 1}、${label}：${item.text}`)
+  })
+  if (impact && hasAcceptanceImpactEvidence(context.sourceEvidence || '')) {
+    lines.push(`${lines.length + 1}、项目影响：${impact.text}`)
+  }
+  return lines.join('\n')
 }
 
 async function optimizeTaskTextWithAi(env: Env, request: Request) {
@@ -12618,13 +12645,30 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     findings: item.findings,
     requirementMatches: item.requirementMatches,
   }))
+  const acceptanceSourceEvidence = [
+    taskRequirement,
+    text,
+    ...projectProgressHistory.map((item) => item.note),
+    ...acceptanceValueContexts.flatMap((item) => [
+      item.analysisSummary,
+      item.extractedText,
+      ...(item.findings || []),
+      ...(item.requirementMatches || []),
+    ]),
+  ].filter(Boolean).join('\n')
+  const acceptanceSanitizerContext = {
+    taskTitle,
+    taskType,
+    attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
+    sourceEvidence: acceptanceSourceEvidence,
+  }
   const textStyleGuide = await getOrBuildTextStyleGuide(env, mode, taskType)
   const modeLabel = mode === 'acceptance' ? '验收备注' : mode === 'feedback' ? '修改意见' : '进展记录'
   const textStyleGuideInjection = textStyleGuide
     ? `\n\n【用户${modeLabel}写法偏好】以下来自用户对历史 AI 建议的真实取舍和改写，请优先遵循：\n${textStyleGuide}`
     : ''
   const acceptanceModeRules = mode === 'acceptance'
-    ? `\n\n【验收备注专用规则】这次要生成面向甲方的价值说明，不是内部复盘，也不是质量检查报告。必须同时分析任务需求、全部历史进展、验收附件分析和用户原始备注。\n\n输出只能有以下三点，标题和顺序一字不改：\n1、需求达成：逐项说明新建任务里的目标、约束和交付范围已经完成，并在这里提及一次最终交付文件。\n2、额外价值：说明在原需求之外额外完成的更新、优化、整理或投入，突出设计工作的增量价值。\n3、项目价值：说明成果对当前项目和后续同类项目的正面影响，例如提高信息清晰度、视觉一致性、可编辑性、复用与迭代效率；必须有事实依据，不写空泛口号。\n\n严格禁止：\n- 不写实际工时、投入小时、金额、单价、改稿轮次、“一次交付”等内部结算或过程统计；authoritativeActualHours 仅用于防止模型误读，绝不能输出。\n- 不写待修改项、质量问题、风险、未来日期、内部清理建议，不把附件分析里的 suggestions / qualityIssues / risks 复制给甲方。\n- 同一个附件名称只能出现一次，不再增加“最终文件”作为第四点。\n- 不写客户已确认、已通过、已上线等输入没有明确提供的结论。\n- 只输出三行，每行一件事。`
+    ? `\n\n【验收备注专用规则】这次要生成面向甲方的交付说明，不是内部复盘，也不是质量检查报告。必须同时分析任务需求、全部历史进展、验收附件分析和用户原始备注。\n\n输出采用按事实出现的动态分点：\n- 必须有“需求达成”：逐项说明任务目标、约束和交付范围已完成，并在这里提及一次最终交付文件。\n- 只有能从任务需求、历史进展、原始备注或附件分析中明确证明“原需求之外”确实做了额外工作时，才写“补充完成”。\n- 有明确修改、反馈响应或版本完善时，写“完成与完善”；没有则省略。\n- “项目影响”只有在输入明确出现模板、复用、规范、标准、可编辑、后续沿用等依据时才能写；普通单次设计交付不写这一项。\n- 允许只输出一项或两项，绝不为了凑结构补写价值、影响、复用或效率。\n\n严格禁止：\n- 不写实际工时、投入小时、金额、单价、改稿轮次、“一次交付”等内部结算或过程统计；authoritativeActualHours 仅用于防止模型误读，绝不能输出。\n- 不写待修改项、质量问题、风险、未来日期、内部清理建议，不把附件分析里的 suggestions / qualityIssues / risks 复制给甲方。\n- 同一个附件名称只能出现一次，不再增加“最终文件”作为第四点。\n- 不写客户已确认、已通过、已上线等输入没有明确提供的结论。\n- 每行只写一件可由输入核实的事实。`
     : ''
   const feedbackModeRules = mode === 'feedback'
     ? `\n\n【修改意见专用规则】将甲方或客户给出的反馈整理为可执行的修改清单：\n- 保留版本号、反馈来源、明确修改对象、原问题和目标结果。\n- 合并重复表达，但不要遗漏否定词、数量、尺寸、颜色、文案、页面或文件版本等关键约束。\n- 不要写成已经完成的进展，也不要擅自承诺交付时间或判断客户已确认。\n- 输出按优先级组织；信息不足时保持原意，不自行补充设计方案。`
@@ -12649,7 +12693,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
           acceptanceAttachments: acceptanceValueContexts,
           authoritativeActualHours,
           authoritativeEntryCount,
-          instruction: '按“需求达成、额外价值、项目价值”生成三点对客说明。工时和分段数量只用于核对上下文，禁止写入验收备注。附件名称只出现一次。',
+          instruction: '按任务事实生成动态对客说明：需求达成必写；补充完成、完成与完善、项目影响均仅在有明确依据时出现。禁止为了凑三点编造价值。工时和分段数量只用于核对上下文，禁止写入验收备注。附件名称只出现一次。',
         }
       : undefined,
     styleGuide: textStyleGuide,
@@ -12661,11 +12705,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     : null
   if (runtimeSuggestion?.optimizedText) {
     const optimizedText = mode === 'acceptance'
-      ? sanitizeAcceptanceSuggestion(String(runtimeSuggestion.optimizedText), {
-          taskTitle,
-          taskType,
-          attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
-        })
+      ? sanitizeAcceptanceSuggestion(String(runtimeSuggestion.optimizedText), acceptanceSanitizerContext)
       : String(runtimeSuggestion.optimizedText).trim()
     await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
       mode,
@@ -12685,17 +12725,13 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const callFallback = async () => {
     const fallbackParsed = await callTextFallbackJson<TextAssistantToolArgs>(
       env,
-      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果。${acceptanceModeRules}${feedbackModeRules}${textStyleGuideInjection}`,
+      `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。使用连续中文序号分点排列（每点一行，一行一件事），不要写成一大段。保留事实，不要编造文件内容、交付物、客户确认或验收结果；acceptance 模式必须按专用规则决定条数。${acceptanceModeRules}${feedbackModeRules}${textStyleGuideInjection}`,
       aiPayload,
       'optimizedText:string, summary:string',
     )
     const rawOptimizedText = String(fallbackParsed?.optimizedText ?? '').trim()
     const optimizedText = mode === 'acceptance' && rawOptimizedText
-      ? sanitizeAcceptanceSuggestion(rawOptimizedText, {
-          taskTitle,
-          taskType,
-          attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
-        })
+      ? sanitizeAcceptanceSuggestion(rawOptimizedText, acceptanceSanitizerContext)
       : rawOptimizedText
     if (!optimizedText) {
       return null
@@ -12735,7 +12771,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
         {
           role: 'system',
           content:
-            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁。\n\n【结构化输出】必须把内容拆成分点，用「1、」「2、」「3、」这样的中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头。\n\nprogress 模式：像内部工作记录，分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nfeedback 模式：整理成尚待执行的修改清单，保留版本、来源和关键约束；不要把反馈写成已经完成的进展。\nacceptance 模式：写成面向甲方的项目交付总结，必须结合任务初始需求、全部历史分段进展、验收附件分析结果和用户原始验收备注；明确项目完成内容、全过程重要更新与修改、版本迭代及最终文件。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}${feedbackModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
+            `你是一个设计兼职任务管理助手。请基于任务信息、进展记录、文件/交付件名称和用户已写文本，优化成可直接写入系统的中文记录。\n\n要求：保留事实；不要编造文件内容、未出现的交付物、验收结果、客户反馈或承诺；如果只能从文件名判断，请使用“已上传/已补充”这类稳妥表达；语言要专业、简洁。\n\n【结构化输出】使用连续中文序号逐条排列，每点单独一行、一行说清一件事，不要写成一大段。只有一件事时也用「1、」开头；acceptance 模式必须按专用规则决定条数。\n\nprogress 模式：像内部工作记录，分点列出当前完成到哪一步、做了哪些具体改动、已上传哪些过程附件、下一步（仅在有明确事实时写）。不要写成正式验收结论。\nfeedback 模式：整理成尚待执行的修改清单，保留版本、来源和关键约束；不要把反馈写成已经完成的进展。\nacceptance 模式：写成面向甲方的项目交付总结，必须结合任务初始需求、全部历史分段进展、验收附件分析结果和用户原始验收备注；明确项目完成内容、全过程重要更新与修改、版本迭代及最终文件。不要改变验收状态，不要凭空说客户已确认。${acceptanceModeRules}${feedbackModeRules}\n\n只返回优化后的文本（分点序号格式）和一句简短摘要。${textStyleGuideInjection}`,
         },
         {
           role: 'user',
@@ -12753,7 +12789,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
               properties: {
                 optimizedText: {
                   type: 'string',
-                  description: '优化后的中文文本，必须用「1、」「2、」「3、」中文序号分点排列（每点一行，一行一件事），不要写成一大段。可直接写入进展记录、修改意见或验收备注；保留事实，不编造文件内容、交付物、客户确认或验收结果。',
+                  description: '优化后的中文文本，使用连续中文序号分点排列（每点一行，一行一件事），不要写成一大段。验收备注按事实决定条数；保留事实，不编造文件内容、交付物、客户确认或验收结果。',
                 },
                 summary: {
                   type: 'string',
@@ -12795,11 +12831,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
 
   const rawOptimizedText = String(parsed.optimizedText ?? '').trim()
   const optimizedText = mode === 'acceptance' && rawOptimizedText
-    ? sanitizeAcceptanceSuggestion(rawOptimizedText, {
-        taskTitle,
-        taskType,
-        attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
-      })
+    ? sanitizeAcceptanceSuggestion(rawOptimizedText, acceptanceSanitizerContext)
     : rawOptimizedText
   if (!optimizedText) {
     const fallback = await callFallback()

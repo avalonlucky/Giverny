@@ -13792,7 +13792,7 @@ function TaskProgressModal({
               {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
                 <div className="ai-suggestion-panel task-text-ai-panel">
                   <div className="ai-suggestion-head">
-                    <span>{isProgressAiLoading ? (isAcceptanceMode ? 'AI 正在整理验收备注' : 'AI 正在整理进展') : isAcceptanceMode ? 'AI 项目总结' : 'AI 建议'}</span>
+                    <span>{isProgressAiLoading ? (isAcceptanceMode ? 'AI 正在整理验收备注' : 'AI 正在整理进展') : isAcceptanceMode ? 'AI 验收建议' : 'AI 建议'}</span>
                     {!isProgressAiLoading && (progressAiSuggestion || progressAiError) && (
                       <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setProgressAiSuggestion(null); setProgressAiError('') }}>
                         <X size={14} />

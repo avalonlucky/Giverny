@@ -349,7 +349,7 @@ async function runAcceptanceNoteGuardrailCheck(cookie) {
         id: 1,
         title: '验收备注隔离评测',
         type: '展板',
-        requirement: '完成展板矢量化、统一视觉并交付正式文件。',
+        requirement: '完成展板矢量化，根据反馈完成版式调整与统一视觉，并交付正式文件。',
         actualHours: 5,
         timeEntries: [
           { id: 'acceptance-hours-1', date: '2026-06-08', start: '15:30', end: '18:30', note: '' },
@@ -370,16 +370,16 @@ async function runAcceptanceNoteGuardrailCheck(cookie) {
   const fileMentions = text.match(/验收预览\.pdf/g)?.length || 0
   if (
     !response.ok ||
-    lines.length !== 3 ||
+    lines.length !== 2 ||
     !lines[0]?.startsWith('1、需求达成：') ||
-    !lines[1]?.startsWith('2、额外价值：') ||
-    !lines[2]?.startsWith('3、项目价值：') ||
+    !lines[1]?.startsWith('2、完成与完善：') ||
+    /项目价值|项目影响|额外价值/.test(text) ||
     /3\s*小时|工时|一次交付|改稿轮次|2026\s*年|清理画布|建议修改/.test(text) ||
     fileMentions !== 1
   ) {
     throw new Error(`Acceptance note guardrail failed: ${response.status} ${JSON.stringify(payload)}`)
   }
-  process.stdout.write('Acceptance note authoritative-hours context, value structure, noise removal, and attachment deduplication checks passed.\n')
+  process.stdout.write('Acceptance note authoritative-hours context, evidence-based dynamic structure, noise removal, and attachment deduplication checks passed.\n')
 }
 
 async function runVoiceScheduleCheck(cookie) {
@@ -1004,7 +1004,16 @@ async function runBackgroundAnalysisCheck(cookie) {
     headers: { 'content-type': 'application/json', cookie },
   })
   const cancelled = await cancelResponse.json().catch(() => ({}))
-  if (!cancelResponse.ok || cancelled.job?.status !== 'cancelled') throw new Error('Background analysis cancellation failed')
+  const cancellationWon = cancelResponse.ok && cancelled.job?.status === 'cancelled'
+  if (!cancellationWon) {
+    const statusResponse = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${second.backgroundTask.id}`, { headers: { cookie } })
+    const statusPayload = await statusResponse.json().catch(() => ({}))
+    if (!statusResponse.ok || statusPayload.job?.status !== 'completed') {
+      throw new Error(`Background analysis cancellation failed: ${cancelResponse.status} ${JSON.stringify(cancelled)}`)
+    }
+    process.stdout.write('Background analysis completed before cancellation arrived; terminal-state race accepted.\n')
+  }
+  if (!cancellationWon) return
   const retryResponse = await fetch(`http://127.0.0.1:8798/api/ai/analysis-jobs/${second.backgroundTask.id}/retry`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', cookie },

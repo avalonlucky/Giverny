@@ -348,7 +348,7 @@ test('验收备注 AI 使用弹窗内当前完整工时快照', async ({ page })
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        optimizedText: '1、需求达成：已完成任务要求。\n2、额外价值：已完成视觉统一。\n3、项目价值：便于后续复用。',
+        optimizedText: '1、需求达成：已完成任务要求。\n2、完成与完善：已完成视觉统一。',
         summary: '已按当前验收草稿生成。',
       }),
     })
