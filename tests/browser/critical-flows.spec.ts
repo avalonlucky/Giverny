@@ -69,6 +69,8 @@ test('新建任务支持语音识别排期并确认后自动填写三项', async
         configurable: true,
         value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       });
+      window.SpeechRecognition = undefined;
+      window.webkitSpeechRecognition = undefined;
       class FakeMediaRecorder {
         static isTypeSupported() { return true; }
         constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; this.ondataavailable = null; this.onstop = null; }
@@ -116,6 +118,51 @@ test('新建任务支持语音识别排期并确认后自动填写三项', async
   await expect(dateInputs.nth(1)).toHaveValue('2026/07/20 18:10')
 })
 
+test('新建任务优先使用实时中文听写并仅提交转写文本', async ({ page }) => {
+  await page.addInitScript({
+    content: `
+      class FakeSpeechRecognition {
+        static isActive = null;
+        constructor() { this.lang = ''; this.continuous = false; this.interimResults = false; this.maxAlternatives = 1; this.onresult = null; this.onerror = null; this.onend = null; }
+        start() {
+          FakeSpeechRecognition.isActive = this;
+          setTimeout(() => this.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '预计开始时间是明天下午四点，预估工时两小时' } }] }), 40);
+        }
+        stop() { this.onend?.(); }
+        abort() {}
+      }
+      window.SpeechRecognition = FakeSpeechRecognition;
+      window.webkitSpeechRecognition = undefined;
+    `,
+  })
+  let requestBody: Record<string, unknown> | null = null
+  await page.route('**/api/ai/voice-schedule', async (route) => {
+    requestBody = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        transcript: '预计开始时间是明天下午四点，预估工时两小时',
+        startAt: '2026-07-21T16:00',
+        durationMinutes: 120,
+        endAt: '2026-07-21T18:00',
+        suppliedFields: ['start', 'hours'],
+        derivedField: 'end',
+        confidence: 'high',
+        warnings: [],
+        source: 'browser-live-transcript',
+      }),
+    })
+  })
+  await page.reload()
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  await page.getByRole('button', { name: '用语音填写时间与工时' }).click()
+  await expect(page.getByText('正在识别：预计开始时间是明天下午四点，预估工时两小时', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '停止语音录入' }).click()
+  await expect(page.getByText('识别结果', { exact: true })).toBeVisible()
+  expect(requestBody).toMatchObject({ transcript: '预计开始时间是明天下午四点，预估工时两小时' })
+})
+
 test('语音排期识别中可以立即关闭', async ({ page }) => {
   await page.addInitScript({
     content: `
@@ -123,6 +170,8 @@ test('语音排期识别中可以立即关闭', async ({ page }) => {
         configurable: true,
         value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       });
+      window.SpeechRecognition = undefined;
+      window.webkitSpeechRecognition = undefined;
       class FakeMediaRecorder {
         static isTypeSupported() { return true; }
         constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; this.ondataavailable = null; this.onstop = null; }

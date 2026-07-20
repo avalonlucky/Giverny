@@ -12422,7 +12422,7 @@ async function transcribeVoiceSchedule(env: Env, request: Request) {
   let transcript: string
   let referenceTime: string
   let context: string
-  let source = 'text-test'
+  let source = 'browser-live-transcript'
   if (contentType.includes('application/json')) {
     const body = await request.json().catch(() => ({})) as { transcript?: string; referenceTime?: string; context?: string }
     transcript = String(body.transcript || '').trim().slice(0, 1000)

@@ -1297,6 +1297,15 @@ export const api = {
     if (payload.currentEnd) body.append('currentEnd', payload.currentEnd)
     return requestJson<VoiceScheduleResult>('/api/ai/voice-schedule', { method: 'POST', body, signal: options?.signal })
   },
+  parseVoiceScheduleTranscript: (
+    payload: { transcript: string; referenceTime: string; context: string; currentStart?: string; currentDurationMinutes?: number; currentEnd?: string },
+    options?: { signal?: AbortSignal },
+  ) => requestJson<VoiceScheduleResult>('/api/ai/voice-schedule', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  }),
   suggestDailyKnowledge: (payload: DailyKnowledgePayload) =>
     requestJson<DailyKnowledgeSuggestion>('/api/ai/daily-knowledge', {
       method: 'POST',
