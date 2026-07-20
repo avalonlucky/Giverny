@@ -21851,27 +21851,16 @@ function NewTaskModal({
             <div className="ai-suggestion-panel wide">
               <div className="ai-suggestion-head">
                 <span>{isAiLoading ? 'AI 正在整理需求' : 'AI 建议'}</span>
-                {aiSuggestion && <em>{aiSuggestion.suggestedType}</em>}
                 {aiSuggestion && (
-                  <div className="ai-suggestion-inline-actions">
-                    <button type="button" className="text-button" onClick={applyAiSuggestion}>
-                      采用文案
-                    </button>
-                    {aiSuggestion.categoryExists ? (
-                      <button type="button" className="text-button" onClick={applyAiCategory}>
-                        采用分类
-                      </button>
-                    ) : (
-                      <button type="button" className="text-button" onClick={() => void addSuggestedCategoryAndApply()}>
-                        新增并采用分类
-                      </button>
-                    )}
-                    {aiSuggestion.suggestedTitle && (
-                      <button type="button" className="text-button" onClick={applyAiTitle}>
-                        采用任务名称
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    className="ai-suggestion-category-adopt"
+                    aria-label={`采用建议分类：${aiSuggestion.suggestedType}`}
+                    title="点击采用此分类"
+                    onClick={() => aiSuggestion.categoryExists ? applyAiCategory() : void addSuggestedCategoryAndApply()}
+                  >
+                    {aiSuggestion.suggestedType}
+                  </button>
                 )}
                 {!isAiLoading && (aiSuggestion || aiError) && (
                   <button type="button" className="ai-suggestion-dismiss" aria-label="关闭建议" title="关闭建议" onClick={() => { setAiSuggestion(null); setAiError('') }}>
@@ -21884,12 +21873,24 @@ function NewTaskModal({
               {aiSuggestion && (
                 <>
                   {aiSuggestion.suggestedTitle && (
-                    <div className="ai-suggestion-title-row">
+                    <button
+                      type="button"
+                      className="ai-suggestion-title-row ai-suggestion-adopt-target"
+                      aria-label="采用建议任务名称"
+                      title="点击采用建议任务名称"
+                      onClick={applyAiTitle}
+                    >
                       <span className="ai-suggestion-title-label">建议任务名称</span>
                       <span className="ai-suggestion-title-text">{aiSuggestion.suggestedTitle}</span>
-                    </div>
+                    </button>
                   )}
-                  <div className="ai-suggestion-body">
+                  <button
+                    type="button"
+                    className="ai-suggestion-body ai-suggestion-adopt-target"
+                    aria-label="采用建议文案"
+                    title="点击采用建议文案"
+                    onClick={applyAiSuggestion}
+                  >
                     {taskAssistantRequirementWithoutOutputFiles(aiSuggestion.optimizedRequirement).split('\n').map((line, index) => {
                       const trimmed = line.trim()
                       if (!trimmed) {
@@ -21905,7 +21906,7 @@ function NewTaskModal({
                       }
                       return <span className="ai-suggestion-line" key={index}>{trimmed}</span>
                     })}
-                  </div>
+                  </button>
                   {aiSuggestion.reason && <small>{aiSuggestion.reason}</small>}
                 </>
               )}

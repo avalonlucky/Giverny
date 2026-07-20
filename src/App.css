@@ -9574,7 +9574,7 @@ button.file-chip:focus-visible {
 
 .cloudflare-details[open] .cloudflare-summary > span {
   color: var(--color-primary);
-  background: rgba(47, 111, 109, 0.1);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 }
 
 .modal-backdrop {
@@ -11368,37 +11368,26 @@ button.file-chip:focus-visible {
   gap: 6px;
 }
 
-.ai-suggestion-head em {
+.ai-suggestion-category-adopt {
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 4px 8px;
   color: var(--color-primary);
+  background: rgba(47, 111, 109, 0.1);
+  font: inherit;
   font-size: 12px;
   font-style: normal;
-  background: rgba(47, 111, 109, 0.1);
-  border-radius: 999px;
-  padding: 4px 8px;
+  cursor: pointer;
 }
 
-.new-task-modal .ai-suggestion-head em {
+.new-task-modal .ai-suggestion-category-adopt {
   background: var(--brand-glow-soft);
 }
 
-.ai-suggestion-inline-actions {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.ai-suggestion-inline-actions .text-button {
-  color: var(--color-primary);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.ai-suggestion-inline-actions .text-button:hover {
+.ai-suggestion-category-adopt:hover,
+.ai-suggestion-category-adopt:focus-visible {
   color: var(--color-primary-strong);
+  background: var(--brand-glow-soft);
 }
 
 .new-task-modal .ai-suggestion-panel p,
@@ -11426,11 +11415,29 @@ button.file-chip:focus-visible {
   font-size: 13px;
 }
 
+.ai-suggestion-adopt-target {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ai-suggestion-adopt-target:hover,
+.ai-suggestion-adopt-target:focus-visible {
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
 .new-task-modal .ai-suggestion-title-row {
   padding: 0 0 8px;
   border-bottom: 1px solid var(--color-border);
   background: transparent;
   border-radius: 0;
+}
+
+.new-task-modal .ai-suggestion-title-row.ai-suggestion-adopt-target:hover,
+.new-task-modal .ai-suggestion-title-row.ai-suggestion-adopt-target:focus-visible {
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
 }
 
 .new-task-modal .ai-suggestion-title-label {
@@ -11457,6 +11464,11 @@ button.file-chip:focus-visible {
   color: #243840;
   font-size: 13px;
   line-height: 1.7;
+}
+
+button.ai-suggestion-body {
+  padding: 0;
+  align-items: stretch;
 }
 
 .ai-suggestion-heading {
@@ -11539,7 +11551,7 @@ button.file-chip:focus-visible {
 }
 
 .new-task-modal .field textarea {
-  min-height: 92px;
+  min-height: 156px;
   padding: 13px 15px;
   border: 0;
   border-radius: var(--radius-control);
