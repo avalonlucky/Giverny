@@ -2,6 +2,7 @@ import http from 'node:http'
 
 const port = Number(process.env.MOCK_MODEL_PORT || 8898)
 const requestLog = []
+let strictJsonRepairAttempts = 0
 
 function completion(message, finishReason = 'stop') {
   return {
@@ -50,6 +51,19 @@ function ambiguousTitle(text) {
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
+  if (text.includes('STRICT_JSON_REPAIR_EVAL')) {
+    strictJsonRepairAttempts += 1
+    if (strictJsonRepairAttempts === 1) {
+      return completion({ role: 'assistant', content: '{"optimizedText":' })
+    }
+    return completion({
+      role: 'assistant',
+      content: JSON.stringify({
+        optimizedText: '1、已使用当前选择的 DeepSeek 完成同模型结构修复。',
+        summary: '同模型修复完成',
+      }),
+    })
+  }
   if (text.includes('Giverny 的工作分析师')) {
     if (!text.includes('"type":"monthly_review"')) {
       return completion({
@@ -236,6 +250,9 @@ const server = http.createServer((request, response) => {
       requestLog.push({
         model: String(payload.model || ''),
         text: userText(Array.isArray(payload.messages) ? payload.messages : []).slice(0, 500),
+        maxTokens: Number(payload.max_tokens || 0),
+        thinking: payload.thinking?.type || '',
+        responseFormat: payload.response_format?.type || '',
       })
       const requestedToolNames = Array.isArray(payload.tools)
         ? payload.tools.map((item) => String(item.function?.name || '')).filter(Boolean)

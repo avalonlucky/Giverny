@@ -1044,6 +1044,7 @@ async function callAiEndpointText(
   prompt: string,
   maxOutputTokens = 64,
   signal?: AbortSignal,
+  options: { structuredJson?: boolean } = {},
 ) {
   if (!endpoint.apiKey) {
     throw new Error('模型 API Key 未配置')
@@ -1068,6 +1069,7 @@ async function callAiEndpointText(
     return extractGeminiText(data)
   }
 
+  const isDeepSeekV4 = endpoint.provider === 'deepseek' && /^deepseek-v4(?:-|$)/i.test(endpoint.model)
   const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
     method: 'POST',
     signal,
@@ -1079,6 +1081,8 @@ async function callAiEndpointText(
       model: endpoint.model,
       temperature: kimiTemperature(endpoint.provider, endpoint.model),
       max_tokens: maxOutputTokens,
+      ...(isDeepSeekV4 ? { thinking: { type: 'enabled' } } : {}),
+      ...(isDeepSeekV4 && options.structuredJson ? { response_format: { type: 'json_object' } } : {}),
       messages: [{ role: 'user', content: prompt }],
     }),
   })
@@ -1595,6 +1599,13 @@ async function maybeRefreshOpenRouterFreeModels(env: Env): Promise<void> {
 
 // 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
 async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal, skipActiveOverride = false): Promise<string> {
+  if (!skipActiveOverride) {
+    const activeChoice = await getActiveChatModelChoice(env)
+    if (activeChoice !== 'auto') {
+      const result = await callTextWithSelectedModel(env, prompt, activeChoice, maxOutputTokens)
+      return result.text
+    }
+  }
   if (!skipActiveOverride && await getActiveChatModelChoice(env) === 'workers-ai' && env.AI) {
     try {
       const output = await callWithAiTimeout(
@@ -1823,16 +1834,10 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
         kind: 'endpoint',
         endpoint: resolved,
         label: `${aiProviderDisplayName(providerChoice)} / ${resolved.model}`,
-        note: resolved.apiKey ? undefined : `${aiProviderDisplayName(providerChoice)} API Key 未配置，已回落到默认模型链路。`,
+        note: resolved.apiKey ? undefined : `${aiProviderDisplayName(providerChoice)} API Key 未配置。`,
       }
     }
-    const fallback = await resolveAiEndpoint(env, 'textPrimary', false)
-    return {
-      kind: 'endpoint',
-      endpoint: fallback,
-      label: `${aiProviderDisplayName(fallback.provider)} / ${fallback.model}`,
-      note: `${aiProviderDisplayName(providerChoice)} 还没有启用默认模型，已回落到文字主模型。`,
-    }
+    throw new Error(`${aiProviderDisplayName(providerChoice)} 还没有启用默认模型`)
   }
   if (choice === 'doubao-seed-2-1-pro') {
     const configured = await configuredDefaultEndpointForProvider(env, 'doubao')
@@ -1848,7 +1853,7 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
         apiKey,
         keySource: resolved?.keySource || (apiKey ? 'environment' : 'missing'),
       },
-      note: apiKey ? undefined : '豆包 API Key 未配置，已回落到默认模型链路。',
+      note: apiKey ? undefined : '豆包 API Key 未配置。',
     }
   }
   if (choice === 'deepseek-v4-flash' || choice === 'deepseek-v4-pro') {
@@ -1866,7 +1871,7 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
         apiKey,
         keySource: configured.provider === 'deepseek' ? configured.keySource : apiKey ? 'environment' : 'missing',
       },
-      note: apiKey ? undefined : 'DeepSeek API Key 未配置，已回落到默认模型链路。',
+      note: apiKey ? undefined : 'DeepSeek API Key 未配置。',
     }
   }
   if (choice.startsWith('openrouter:')) {
@@ -1882,7 +1887,7 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
         apiKey,
         keySource: apiKey ? 'environment' : 'missing',
       },
-      note: apiKey ? undefined : 'OpenRouter API Key 未配置，已回落到默认模型链路。',
+      note: apiKey ? undefined : 'OpenRouter API Key 未配置。',
     }
   }
   const route = choice === 'auto' ? 'textPrimary' : choice.replace(/^route:/, '') as AiModelRouteKey
@@ -1891,7 +1896,7 @@ async function resolveChatModelTarget(env: Env, choice: ChatModelChoice): Promis
     kind: 'endpoint',
     endpoint,
     label: `${route} / ${endpoint.model}`,
-    note: !endpoint.apiKey ? `${route} 未配置 API Key，已回落到默认模型链路。` : undefined,
+    note: !endpoint.apiKey ? `${route} 未配置 API Key。` : undefined,
   }
 }
 
@@ -1899,7 +1904,7 @@ async function callTextWithSelectedModel(
   env: Env,
   prompt: string,
   choice: ChatModelChoice,
-  maxOutputTokens = 1200,
+  maxOutputTokens = 12_000,
 ): Promise<{ text: string; modelLabel: string; fallbackUsed: boolean; notes: string[] }> {
   const notes: string[] = []
   const target = await resolveChatModelTarget(env, choice)
@@ -1911,13 +1916,15 @@ async function callTextWithSelectedModel(
       throw new Error('Workers AI 未返回内容')
     }
     if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
-    const text = await callAiEndpointText(target.endpoint, prompt, maxOutputTokens)
+    const outputBudget = target.endpoint.provider === 'deepseek'
+      ? Math.max(maxOutputTokens, 12_000)
+      : maxOutputTokens
+    const text = await callAiEndpointText(target.endpoint, prompt, outputBudget)
     if (text) return { text, modelLabel: target.label, fallbackUsed: false, notes }
     throw new Error('模型未返回内容')
   } catch (error) {
-    notes.push(`${target.label} 调用失败：${describeAiCallError(error)}；已回落到默认模型链路。`)
-    const text = await callTextWithFallback(env, prompt, maxOutputTokens, undefined, true)
-    return { text, modelLabel: '默认模型链路', fallbackUsed: true, notes }
+    notes.push(`${target.label} 调用失败：${describeAiCallError(error)}。系统已保持当前模型，未切换供应商。`)
+    throw new Error(notes[notes.length - 1], { cause: error })
   }
 }
 
@@ -1933,6 +1940,12 @@ async function callTextFallbackJson<T extends object>(
   maxOutputTokens = 1200,
   skipActiveOverride = false,
 ): Promise<T | null> {
+  if (!skipActiveOverride) {
+    const activeChoice = await getActiveChatModelChoice(env)
+    if (activeChoice !== 'auto') {
+      return callSelectedModelJson<T>(env, activeChoice, systemPrompt, payload, outputShape, Math.max(maxOutputTokens, 12_000))
+    }
+  }
   const prompt = `${systemPrompt}
 
 请只返回一个 JSON 对象，不要解释，不要使用 Markdown 代码块。
@@ -1997,7 +2010,7 @@ async function callSelectedModelJson<T extends object>(
   systemPrompt: string,
   payload: unknown,
   outputShape: string,
-  maxOutputTokens = 1200,
+  maxOutputTokens = 12_000,
 ): Promise<T | null> {
   if (choice === 'auto') {
     return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens)
@@ -2010,33 +2023,57 @@ JSON 字段要求：${outputShape}
 输入数据：
 ${JSON.stringify(payload)}`
   const target = await resolveChatModelTarget(env, choice)
+  const outputBudget = target.kind === 'endpoint' && target.endpoint.provider === 'deepseek'
+    ? Math.max(maxOutputTokens, 12_000)
+    : maxOutputTokens
+  const parseOutput = (output: string) => {
+    const parsed = parseLooseJsonObject(output)
+    return Object.keys(parsed).length > 0 ? parsed as T : null
+  }
   try {
     if (target.kind === 'workers-ai') {
       const output = await callWithAiTimeout(
-        () => callWorkersAiText(env, prompt, maxOutputTokens),
+        () => callWorkersAiText(env, prompt, outputBudget),
         30_000,
         `${target.label} 规划响应超时`,
       )
-      const parsed = parseLooseJsonObject(output)
-      if (Object.keys(parsed).length > 0) return parsed as T
-      throw new Error('模型未返回可解析 JSON')
+      const parsed = parseOutput(output)
+      if (parsed) return parsed
+      const repairedOutput = await callWithAiTimeout(
+        () => callWorkersAiText(env, `${prompt}\n\n上一次输出无法解析为 JSON。请重新生成完整 JSON，不要解释。`, outputBudget),
+        120_000,
+        `${target.label} JSON 修复响应超时`,
+      )
+      return parseOutput(repairedOutput)
     }
     if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
     const output = await callWithAiTimeout(
-      (signal) => callAiEndpointText(target.endpoint, prompt, maxOutputTokens, signal),
-      30_000,
+      (signal) => callAiEndpointText(target.endpoint, prompt, outputBudget, signal, { structuredJson: true }),
+      120_000,
       `${target.label} 规划响应超时`,
     )
-    const parsed = parseLooseJsonObject(output)
-    if (Object.keys(parsed).length > 0) return parsed as T
-    throw new Error('模型未返回可解析 JSON')
+    const parsed = parseOutput(output)
+    if (parsed) return parsed
+    const repairPrompt = `${prompt}
+
+上一次输出无法解析为 JSON：
+${output.slice(0, 12_000)}
+
+请在保持原意的前提下重新返回一个完整 JSON 对象，不要解释，不要使用 Markdown。`
+    const repairedOutput = await callWithAiTimeout(
+      (signal) => callAiEndpointText(target.endpoint, repairPrompt, outputBudget, signal, { structuredJson: true }),
+      120_000,
+      `${target.label} JSON 修复响应超时`,
+    )
+    return parseOutput(repairedOutput)
   } catch (error) {
     console.warn(JSON.stringify({
-      event: 'selected_chat_planner_fallback',
+      event: 'selected_model_json_failed',
       model: target.label,
       error: describeAiCallError(error),
+      fallbackBlocked: true,
     }))
-    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, maxOutputTokens, true)
+    return null
   }
 }
 
@@ -2286,6 +2323,10 @@ function selectedCloudModelLabel(choice: ChatModelChoice) {
   if (choice === 'route:visionPrimary') return '识图主模型'
   if (choice === 'route:visionFallback') return '识图备用模型'
   return '文字主模型'
+}
+
+function selectedModelStructuredFailureMessage(choice: ChatModelChoice) {
+  return `${selectedCloudModelLabel(choice)} 已响应，但没有返回完整可用的结构化结果。系统已保持当前模型，未切换供应商，请重试。`
 }
 
 function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number) {
@@ -12222,7 +12263,12 @@ async function suggestTaskWithAi(env: Env, request: Request) {
 
   if (activeModelChoice !== 'auto' || !env.DEEPSEEK_API_KEY) {
     const fallback = await callFallback()
-    return fallback ?? fail('当前首选文字模型与备用模型均不可用。', 503)
+    return fallback ?? fail(
+      activeModelChoice === 'auto'
+        ? '当前文字模型链路暂时不可用，请稍后重试。'
+        : selectedModelStructuredFailureMessage(activeModelChoice),
+      503,
+    )
   }
 
   const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)
@@ -12911,7 +12957,12 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
 
   if (activeModelChoice !== 'auto' || !env.DEEPSEEK_API_KEY) {
     const fallback = await callFallback()
-    return fallback ?? fail('当前首选文字模型与备用模型均不可用。', 503)
+    return fallback ?? fail(
+      activeModelChoice === 'auto'
+        ? '当前文字模型链路暂时不可用，请稍后重试。'
+        : selectedModelStructuredFailureMessage(activeModelChoice),
+      503,
+    )
   }
 
   const model = normalizeDeepSeekModel(env.DEEPSEEK_MODEL)

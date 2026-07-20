@@ -420,6 +420,46 @@ async function runAcceptanceNoteGuardrailCheck(cookie) {
   process.stdout.write('Acceptance note authoritative-hours context, evidence-based dynamic structure, noise removal, and attachment deduplication checks passed.\n')
 }
 
+async function runSelectedDeepSeekThinkingCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
+  const setChoice = async (choice) => {
+    const response = await fetch(`${base}/api/ai/active-model`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ choice }),
+    })
+    if (!response.ok) throw new Error(`Cannot set active model for strict DeepSeek check: ${response.status}`)
+  }
+  await setChoice('deepseek-v4-flash')
+  const before = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const response = await fetch(`${base}/api/ai/text-assistant`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      mode: 'progress',
+      text: 'STRICT_JSON_REPAIR_EVAL：完成同模型重试验证',
+      task: { id: 1, title: 'DeepSeek 思考模式评测', type: '测试' },
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  const after = await fetch('http://127.0.0.1:8898/test/requests').then((modelResponse) => modelResponse.json())
+  const requests = (after.requests || []).slice((before.requests || []).length)
+  await setChoice('auto')
+  if (
+    !response.ok
+    || !String(payload.optimizedText || '').includes('同模型结构修复')
+    || requests.length !== 2
+    || requests.some((request) => request.model !== 'deepseek-v4-flash')
+    || requests.some((request) => request.thinking !== 'enabled')
+    || requests.some((request) => request.maxTokens !== 12_000)
+    || requests.some((request) => request.responseFormat !== 'json_object')
+  ) {
+    throw new Error(`Selected DeepSeek strict route failed: ${response.status} ${JSON.stringify({ payload, requests })}`)
+  }
+  process.stdout.write('Selected DeepSeek keeps thinking enabled, uses 12000 output tokens, repairs JSON on the same model, and never switches providers.\n')
+}
+
 async function runVoiceScheduleCheck(cookie) {
   const response = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
     method: 'POST',
@@ -1684,6 +1724,7 @@ try {
   await runUploadLimitCheck(cookie)
   await runAttachmentPreviewResilienceCheck(cookie)
   await runAcceptanceNoteGuardrailCheck(cookie)
+  await runSelectedDeepSeekThinkingCheck(cookie)
   await runVoiceScheduleCheck(cookie)
   await runAiModelDraftListCheck(cookie)
   await runSiteWideModelPriorityCheck(cookie)
