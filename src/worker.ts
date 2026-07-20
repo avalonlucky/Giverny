@@ -12308,6 +12308,24 @@ function parseVoiceDateTime(text: string, referenceTime: string) {
   return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`
 }
 
+function parseVoiceTimeRange(text: string, referenceTime: string) {
+  const compact = text.replace(/\s+/g, '')
+  const datePrefix = compact.match(/(?:(?:\d{4})年)?\d{1,2}月\d{1,2}(?:日|号)?|后天|明天|明日|今天|今日/)?.[0] || ''
+  const numberToken = '[零一二两三四五六七八九十\\d]+'
+  const timePattern = new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?${numberToken}(?:点|时)(?:${numberToken}分?)?`, 'g')
+  const matches = Array.from(compact.matchAll(timePattern))
+  for (let index = 0; index < matches.length - 1; index += 1) {
+    const current = matches[index]
+    const next = matches[index + 1]
+    const between = compact.slice((current.index || 0) + current[0].length, next.index || 0)
+    if (!/^(?:到|至|—|-)+$/.test(between)) continue
+    const startAt = parseVoiceDateTime(`${datePrefix}${current[0]}`, referenceTime)
+    const endAt = parseVoiceDateTime(`${datePrefix}${next[0]}`, referenceTime)
+    if (startAt && endAt) return { startAt, endAt }
+  }
+  return null
+}
+
 function parseVoiceScheduleDeterministically(transcript: string, referenceTime: string) {
   const result: VoiceScheduleModelResult = { suppliedFields: [], confidence: 'medium' }
   const durationMinutes = parseVoiceDurationMinutes(transcript)
@@ -12324,6 +12342,12 @@ function parseVoiceScheduleDeterministically(transcript: string, referenceTime: 
   }
   const startAt = markerValue(/(?:预计)?(?:开始|开工|启动)(?:时间)?/)
   const endAt = markerValue(/(?:预计)?(?:交付|结束|截止)(?:时间)?/)
+  const timeRange = parseVoiceTimeRange(transcript, referenceTime)
+  if (timeRange) {
+    result.startAt = timeRange.startAt
+    result.endAt = timeRange.endAt
+    result.suppliedFields?.push('start', 'end')
+  }
   if (startAt) {
     result.startAt = startAt
     result.suppliedFields?.push('start')
@@ -12409,7 +12433,7 @@ async function parseVoiceScheduleWithAi(env: Env, transcript: string, referenceT
     env,
     `你是中文日期和工时解析器。当前时区固定为 Asia/Shanghai，参考时间是 ${referenceTime}。
 只提取用户明确说出的字段，不要推算缺失字段：startAt 为开始时间，durationMinutes 为工时分钟数，endAt 为结束或交付时间。
-正确理解今天、明天、后天、下周、上午、中午、下午、晚上、半小时、两个半小时、小数小时。
+正确理解今天、明天、后天、下周、上午、中午、下午、晚上、半小时、两个半小时、小数小时，以及“6月9号下午1点到下午3点”这类开始/结束时间范围。
 日期时间统一输出 YYYY-MM-DDTHH:mm；没有明确说出的字段必须为 null。suppliedFields 只能包含 start、hours、end。`,
     { transcript, context },
     'startAt:string|null, durationMinutes:number|null, endAt:string|null, suppliedFields:(start|hours|end)[], confidence:low|medium|high',

@@ -1999,15 +1999,18 @@ function buildTaskContextInsights(tasks: Task[], updates: TaskUpdate[]) {
       return
     }
     const type = task.type || '未分类'
-    const samples = (byType.get(type) ?? []).filter((item) => item.id !== task.id && item.actualHours > 0)
-    if (samples.length < 2) {
+    const samples = (byType.get(type) ?? []).filter((item) => (
+      item.id !== task.id
+      && item.status === '已验收'
+      && !isSupplementalTask(item)
+      && item.actualHours > 0
+      && item.estimatedHours > 0
+    ))
+    if (samples.length < 3) {
       return
     }
-    const estimateSamples = samples.filter((item) => item.estimatedHours > 0)
     const avgActualHours = averageNumber(samples.map((item) => item.actualHours))
-    const avgEstimateVariance = estimateSamples.length >= 2
-      ? averageNumber(estimateSamples.map((item) => (item.actualHours - item.estimatedHours) / item.estimatedHours))
-      : 0
+    const avgEstimateVariance = averageNumber(samples.map((item) => (item.actualHours - item.estimatedHours) / item.estimatedHours))
     const revisionSignals = samples.reduce(
       (sum, item) => sum + (updatesByTask.get(item.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
       0,
@@ -2020,8 +2023,8 @@ function buildTaskContextInsights(tasks: Task[], updates: TaskUpdate[]) {
       candidates.push({
         tone: 'warning',
         label: `同类历史平均超时 ${percent}%`,
-        detail: `这个任务类型过去 ${samples.length} 个样本平均实际工时高于预估 ${percent}%，建议今天预留缓冲时间。`,
-        evidence: `${type} · ${samples.length} 个历史样本 · 平均实际 ${avgActualHours.toFixed(1)}h`,
+        detail: `基于 ${samples.length} 个已验收、非补录的同类样本，平均实际工时高于预估 ${percent}%，建议今天预留缓冲时间。`,
+        evidence: `${type} · ${samples.length} 个有效历史样本 · 平均实际 ${avgActualHours.toFixed(1)}h`,
         priority: 90 + percent,
       })
     }

@@ -406,7 +406,26 @@ async function runVoiceScheduleCheck(cookie) {
   ) {
     throw new Error(`Voice schedule two-of-three derivation failed: ${response.status} ${JSON.stringify(payload)}`)
   }
-  process.stdout.write('Voice schedule transcription parsing and two-of-three derivation checks passed.\n')
+  const rangeResponse = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      transcript: '6月9号下午1点到下午3点',
+      referenceTime: '2026-07-20T15:30',
+      context: '新建任务的预计排期',
+    }),
+  })
+  const rangePayload = await rangeResponse.json().catch(() => ({}))
+  if (
+    !rangeResponse.ok
+    || rangePayload.startAt !== '2026-06-09T13:00'
+    || rangePayload.endAt !== '2026-06-09T15:00'
+    || rangePayload.durationMinutes !== 120
+    || rangePayload.derivedField !== 'hours'
+  ) {
+    throw new Error(`Voice schedule time-range parsing failed: ${rangeResponse.status} ${JSON.stringify(rangePayload)}`)
+  }
+  process.stdout.write('Voice schedule transcription parsing, spoken time ranges, and two-of-three derivation checks passed.\n')
 }
 
 async function runAiModelDraftListCheck(cookie) {
