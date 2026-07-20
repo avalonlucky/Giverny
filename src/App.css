@@ -11546,10 +11546,8 @@ input::file-selector-button {
 }
 
 .date-time-popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: var(--z-popover);
+  position: fixed;
+  z-index: var(--z-overlay-effect);
   width: min(396px, calc(100vw - 48px));
   padding: 10px;
   border: 1px solid var(--color-border);
@@ -11570,7 +11568,7 @@ input::file-selector-button {
   gap: 4px;
 }
 
-.date-input-wrap .date-time-popover-header button {
+.date-time-popover .date-time-popover-header button {
   width: 38px;
   height: 36px;
   border: 0;
@@ -11579,11 +11577,11 @@ input::file-selector-button {
   background: transparent;
 }
 
-.date-input-wrap .date-time-popover-header button:hover {
+.date-time-popover .date-time-popover-header button:hover {
   background: var(--color-supplement-bg);
 }
 
-.date-input-wrap .date-time-popover-header .date-time-month-trigger {
+.date-time-popover .date-time-popover-header .date-time-month-trigger {
   width: auto;
   min-width: 132px;
   margin-right: auto;
@@ -11623,7 +11621,7 @@ input::file-selector-button {
   align-items: center;
 }
 
-.date-input-wrap .date-time-calendar-navigation button {
+.date-time-popover .date-time-calendar-navigation button {
   width: 26px;
   height: 22px;
   border: 0;
@@ -11635,7 +11633,7 @@ input::file-selector-button {
   cursor: pointer;
 }
 
-.date-input-wrap .date-time-calendar-navigation button:hover {
+.date-time-popover .date-time-calendar-navigation button:hover {
   background: var(--color-supplement-bg);
 }
 
@@ -11661,7 +11659,7 @@ input::file-selector-button {
   margin-top: 3px;
 }
 
-.date-input-wrap .date-time-days button {
+.date-time-popover .date-time-days button {
   width: 100%;
   height: 23px;
   border: 0;
@@ -11671,17 +11669,17 @@ input::file-selector-button {
   font-size: 12px;
 }
 
-.date-input-wrap .date-time-days button:hover {
+.date-time-popover .date-time-days button:hover {
   background: var(--color-surface-alt);
 }
 
-.date-input-wrap .date-time-days button.active {
+.date-time-popover .date-time-days button.active {
   background: var(--color-primary);
   color: var(--color-surface-strong);
   font-weight: 800;
 }
 
-.date-input-wrap .date-time-days button.muted {
+.date-time-popover .date-time-days button.muted {
   color: var(--color-text-muted);
 }
 
@@ -11700,7 +11698,7 @@ input::file-selector-button {
   height: 0;
 }
 
-.date-input-wrap .date-time-scroll-column button {
+.date-time-popover .date-time-scroll-column button {
   width: 100%;
   min-height: 30px;
   border: 0;
@@ -11711,12 +11709,12 @@ input::file-selector-button {
   font-size: 13px;
 }
 
-.date-input-wrap .date-time-scroll-column button:hover {
+.date-time-popover .date-time-scroll-column button:hover {
   color: var(--color-primary-strong);
   background: var(--color-surface-alt);
 }
 
-.date-input-wrap .date-time-scroll-column button.active {
+.date-time-popover .date-time-scroll-column button.active {
   color: var(--color-surface-strong);
   background: var(--color-primary);
   font-weight: 800;
@@ -11756,8 +11754,8 @@ input::file-selector-button {
   border-right: 1px solid var(--color-border);
 }
 
-.date-input-wrap .date-time-year-list button,
-.date-input-wrap .date-time-month-grid button,
+.date-time-popover .date-time-year-list button,
+.date-time-popover .date-time-month-grid button,
 .month-year-picker-panel .date-time-year-list button,
 .month-year-picker-panel .date-time-month-grid button {
   width: 100%;
@@ -11770,16 +11768,16 @@ input::file-selector-button {
   font-size: 13px;
 }
 
-.date-input-wrap .date-time-year-list button:hover,
-.date-input-wrap .date-time-month-grid button:hover,
+.date-time-popover .date-time-year-list button:hover,
+.date-time-popover .date-time-month-grid button:hover,
 .month-year-picker-panel .date-time-year-list button:hover,
 .month-year-picker-panel .date-time-month-grid button:hover {
   color: var(--color-primary-strong);
   background: var(--color-surface-alt);
 }
 
-.date-input-wrap .date-time-year-list button.active,
-.date-input-wrap .date-time-month-grid button.active,
+.date-time-popover .date-time-year-list button.active,
+.date-time-popover .date-time-month-grid button.active,
 .month-year-picker-panel .date-time-year-list button.active,
 .month-year-picker-panel .date-time-month-grid button.active {
   color: var(--color-surface-strong);
@@ -11801,7 +11799,7 @@ input::file-selector-button {
   justify-content: space-between;
 }
 
-.date-input-wrap .date-time-popover-actions button {
+.date-time-popover .date-time-popover-actions button {
   width: auto;
   min-width: 58px;
   height: 28px;
@@ -11814,13 +11812,8 @@ input::file-selector-button {
   font-weight: 800;
 }
 
-.date-input-wrap .date-time-popover-actions button:hover {
+.date-time-popover .date-time-popover-actions button:hover {
   background: var(--color-supplement-bg);
-}
-
-.progress-lite-time-grid .field:first-child .date-time-popover {
-  right: auto;
-  left: 0;
 }
 
 /* The lightweight record dialogs keep their picker above the footer instead of clipping it. */

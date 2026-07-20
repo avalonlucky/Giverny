@@ -40,6 +40,21 @@ test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
 })
 
+test('新建任务预计开始日历超出弹窗时仍可选择日期', async ({ page }) => {
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  const modal = page.getByRole('dialog', { name: '新建任务' })
+  await expect(modal).toBeVisible()
+
+  await page.getByRole('button', { name: '选择预计开始' }).click()
+  const picker = page.getByRole('dialog', { name: '预计开始选择器' })
+  await expect(picker).toBeVisible()
+  await picker.getByRole('button', { name: '上个月' }).click()
+  await picker.locator('.date-time-days button:not(.muted)').filter({ hasText: /^8$/ }).click()
+
+  const startField = modal.getByPlaceholder('YYYY/MM/DD HH:mm').first()
+  await expect(startField).toHaveValue(/^2026\/06\/08 /)
+})
+
 test('新建任务附件支持逐张连续拖入', async ({ page }) => {
   await page.getByRole('button', { name: /新建任务/ }).first().click()
   const dropzone = page.getByTestId('new-task-brief-dropzone')

@@ -2961,7 +2961,7 @@ function PlanDateTimeField({
   const [draft, setDraft] = useState(() => formatValue(value))
   const [syncedValue, setSyncedValue] = useState(value)
   const [localPickerOpen, setLocalPickerOpen] = useState(false)
-  const [popoverLeft, setPopoverLeft] = useState<number | null>(null)
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => monthPart(value || isoDate()))
   const [pickerView, setPickerView] = useState<'calendar' | 'month'>('calendar')
   const hourListRef = useRef<HTMLDivElement | null>(null)
@@ -3036,13 +3036,19 @@ function PlanDateTimeField({
     }
     const wrapRect = wrap.getBoundingClientRect()
     const popoverWidth = popoverRef.current?.offsetWidth ?? Math.min(396, window.innerWidth - 48)
-    const viewportGutter = 24
-    const defaultLeft = wrapRect.width - popoverWidth
-    const minLeft = viewportGutter - wrapRect.left
-    const maxLeft = window.innerWidth - viewportGutter - wrapRect.left - popoverWidth
-    const boundedMaxLeft = Math.max(minLeft, maxLeft)
-    const nextLeft = Math.min(Math.max(defaultLeft, minLeft), boundedMaxLeft)
-    setPopoverLeft(nextLeft)
+    const popoverHeight = popoverRef.current?.offsetHeight ?? 250
+    const viewportGutter = window.innerWidth <= 640 ? 16 : 24
+    const popoverGap = 8
+    const maxLeft = Math.max(viewportGutter, window.innerWidth - viewportGutter - popoverWidth)
+    const left = Math.min(Math.max(wrapRect.right - popoverWidth, viewportGutter), maxLeft)
+    const belowTop = wrapRect.bottom + popoverGap
+    const aboveTop = wrapRect.top - popoverGap - popoverHeight
+    const preferredTop = belowTop + popoverHeight <= window.innerHeight - viewportGutter || aboveTop < viewportGutter
+      ? belowTop
+      : aboveTop
+    const maxTop = Math.max(viewportGutter, window.innerHeight - viewportGutter - popoverHeight)
+    const top = Math.min(Math.max(preferredTop, viewportGutter), maxTop)
+    setPopoverPosition({ left, top })
   }, [])
 
   useEffect(() => {
@@ -3050,7 +3056,8 @@ function PlanDateTimeField({
       return
     }
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!fieldRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!fieldRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
         setPickerOpen(false)
       }
     }
@@ -3063,9 +3070,11 @@ function PlanDateTimeField({
       }
     })
     window.addEventListener('resize', updatePopoverPosition)
+    window.addEventListener('scroll', updatePopoverPosition, true)
     return () => {
       document.removeEventListener('pointerdown', closeOnOutsidePointer)
       window.removeEventListener('resize', updatePopoverPosition)
+      window.removeEventListener('scroll', updatePopoverPosition, true)
       window.cancelAnimationFrame(frame)
     }
   }, [isPickerOpen, pickerView, selectedHour, selectedMinute, calendarYear, setPickerOpen, updatePopoverPosition])
@@ -3164,11 +3173,13 @@ function PlanDateTimeField({
         >
           <CalendarDays size={16} />
         </button>
-        {isPickerOpen && (
+        {isPickerOpen && typeof document !== 'undefined' && createPortal((
           <div
             ref={popoverRef}
             className="date-time-popover"
-            style={popoverLeft === null ? undefined : { left: `${popoverLeft}px`, right: 'auto' }}
+            style={popoverPosition === null
+              ? { visibility: 'hidden' }
+              : { left: `${popoverPosition.left}px`, top: `${popoverPosition.top}px` }}
             role="dialog"
             aria-label={`${label}选择器`}
             onMouseDown={(event) => {
@@ -3277,7 +3288,7 @@ function PlanDateTimeField({
               <button type="button" onClick={applyToday}>今天</button>
             </div>
           </div>
-        )}
+        ), document.body)}
       </div>
     </div>
   )
