@@ -62,6 +62,27 @@ test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
 })
 
+test('新建任务默认把图片粘贴到甲方附件，文本粘贴到任务需求', async ({ page }) => {
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  const dialog = page.getByRole('dialog', { name: '新建任务' })
+
+  await page.evaluate(() => {
+    const clipboard = new DataTransfer()
+    clipboard.items.add(new File([
+      Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (char) => char.charCodeAt(0)),
+    ], '默认粘贴.png', { type: 'image/png' }))
+    document.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard }))
+  })
+  await expect(dialog.locator('.brief-img-thumb')).toBeVisible()
+
+  await page.evaluate(() => {
+    const clipboard = new DataTransfer()
+    clipboard.setData('text/plain', '默认文字应写入任务需求')
+    document.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard }))
+  })
+  await expect(dialog.getByRole('textbox', { name: '任务具体需求' })).toHaveValue('默认文字应写入任务需求')
+})
+
 test('新建任务支持语音识别排期并确认后自动填写三项', async ({ page }) => {
   await page.addInitScript({
     content: `

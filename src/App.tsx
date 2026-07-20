@@ -21181,7 +21181,7 @@ function NewTaskModal({
     setActiveDatePickerId(null)
   }
 
-  const clearFieldError = (field: string) => {
+  const clearFieldError = useCallback((field: string) => {
     setFormErrors((current) => {
       if (!current[field]) {
         return current
@@ -21190,7 +21190,7 @@ function NewTaskModal({
       delete next[field]
       return next
     })
-  }
+  }, [])
 
   const recordTaskAssistantLearning = (finalTitle: string, finalRequirement: string, finalType: string) => {
     const requirementLearning = aiSuggestionAppliedRef.current
@@ -21356,7 +21356,7 @@ function NewTaskModal({
     }
   }
 
-  const loadBriefFiles = async (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
+  const loadBriefFiles = useCallback(async (fileList: FileList | File[] | null, source: 'picker' | 'paste' = 'picker') => {
     const files = Array.from(fileList ?? [])
     if (files.length === 0) return
     const availableSlots = Math.max(0, 6 - briefFilesRef.current.length)
@@ -21409,9 +21409,13 @@ function NewTaskModal({
       setIsBriefLoading(false)
       if (briefInputRef.current) briefInputRef.current.value = ''
     }
-  }
+  }, [revokeBriefPreview])
 
   const handleBriefPaste = (event: React.ClipboardEvent) => {
+    // 已明确聚焦任务名称/需求等可编辑字段时，交回给该字段正常粘贴，避免图片被附件区抢走。
+    if (isEditableShortcutTarget(event.target) && !(event.target instanceof Element && event.target.closest('.new-task-brief-field'))) {
+      return
+    }
     const pastedImages = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
       .map((item) => item.getAsFile())
@@ -21422,6 +21426,37 @@ function NewTaskModal({
     event.preventDefault()
     void loadBriefFiles(pastedImages, 'paste')
   }
+
+  useEffect(() => {
+    const routeDefaultPaste = (event: ClipboardEvent) => {
+      // 用户已经把光标放进输入框时，文本和图片都由当前字段决定；不覆盖明确意图。
+      if (isEditableShortcutTarget(document.activeElement)) {
+        return
+      }
+      const clipboard = event.clipboardData
+      if (!clipboard) {
+        return
+      }
+      const pastedImages = Array.from(clipboard.items)
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file))
+      if (pastedImages.length > 0) {
+        event.preventDefault()
+        void loadBriefFiles(pastedImages, 'paste')
+        return
+      }
+      const pastedText = clipboard.getData('text/plain').trim()
+      if (!pastedText) {
+        return
+      }
+      event.preventDefault()
+      setRequirement((current) => current ? `${current}\n${pastedText}` : pastedText)
+      clearFieldError('requirement')
+    }
+    window.addEventListener('paste', routeDefaultPaste, true)
+    return () => window.removeEventListener('paste', routeDefaultPaste, true)
+  }, [clearFieldError, loadBriefFiles])
 
   const isBriefFileDrag = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes('Files')
 
