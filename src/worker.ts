@@ -15343,7 +15343,7 @@ const LOCAL_CLI_COMPLEX_RUN_TTL_MS = 45 * 1000
 const LOCAL_CLI_BRIDGE_OVERHEAD_MS = 3 * 1000
 const LOCAL_CLI_RUN_TTL_MS = 50 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
-const LOCAL_CLI_RUNTIME_VERSION = '0.4.0'
+const LOCAL_CLI_RUNTIME_VERSION = '0.4.1'
 
 function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
   if (!value || typeof value !== 'object') return null

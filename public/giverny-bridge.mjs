@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { homedir, hostname, platform, arch } from 'node:os'
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
 const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
@@ -192,18 +192,32 @@ function scanAntigravity(definition, command) {
   return adapterResult(definition, command, version.output, 'unsupported', 'unknown', '已发现 Antigravity，但尚未确认安全的无界面结构化输出协议；不会使用跳过权限参数。')
 }
 
+const CLI_DEFINITIONS = [
+  { id: 'codex', name: 'Codex CLI', commands: ['codex'], supportsStreaming: true, supportsMcp: true, scan: scanCodex },
+  { id: 'claude', name: 'Claude Code', commands: ['claude'], supportsStreaming: true, supportsMcp: true, scan: scanClaude },
+  { id: 'grok', name: 'Grok Build', commands: ['grok'], supportsStreaming: true, supportsMcp: true, scan: scanGrok },
+  { id: 'antigravity', name: 'Antigravity', commands: ['agy', 'antigravity'], supportsStreaming: false, supportsMcp: false, scan: scanAntigravity },
+]
+
+function scanLocalCli(adapterId) {
+  const definition = CLI_DEFINITIONS.find((item) => item.id === adapterId)
+  if (!definition) return null
+  const command = findExecutable(definition.commands)
+  if (!command) return adapterResult(definition, '', '', 'not_installed', 'unknown', '未在 PATH 和常见安装目录中发现。')
+  return definition.scan(definition, command)
+}
+
 export function scanLocalClis() {
-  const definitions = [
-    { id: 'codex', name: 'Codex CLI', commands: ['codex'], supportsStreaming: true, supportsMcp: true, scan: scanCodex },
-    { id: 'claude', name: 'Claude Code', commands: ['claude'], supportsStreaming: true, supportsMcp: true, scan: scanClaude },
-    { id: 'grok', name: 'Grok Build', commands: ['grok'], supportsStreaming: true, supportsMcp: true, scan: scanGrok },
-    { id: 'antigravity', name: 'Antigravity', commands: ['agy', 'antigravity'], supportsStreaming: false, supportsMcp: false, scan: scanAntigravity },
-  ]
-  return definitions.map((definition) => {
-    const command = findExecutable(definition.commands)
-    if (!command) return adapterResult(definition, '', '', 'not_installed', 'unknown', '未在 PATH 和常见安装目录中发现。')
-    return definition.scan(definition, command)
-  })
+  return CLI_DEFINITIONS.map((definition) => scanLocalCli(definition.id))
+}
+
+function refreshCachedCli(clis, adapterId) {
+  const refreshed = scanLocalCli(adapterId)
+  if (!refreshed) return null
+  const index = clis.findIndex((item) => item.id === adapterId)
+  if (index >= 0) clis[index] = refreshed
+  else clis.push(refreshed)
+  return refreshed
 }
 
 function readConfig() {
@@ -454,7 +468,11 @@ function cliInvocation(adapterId, prompt, mcpUrl, resumeSessionId = '', timeoutM
 async function executeRunCommand(config, command, clis) {
   const payload = command.payload || {}
   const adapterId = String(payload.adapterId || '')
-  const adapter = clis.find((item) => item.id === adapterId && item.status === 'available' && item.command)
+  let adapter = clis.find((item) => item.id === adapterId && item.status === 'available' && item.command)
+  if (!adapter) {
+    const refreshed = refreshCachedCli(clis, adapterId)
+    if (refreshed?.status === 'available' && refreshed.command) adapter = refreshed
+  }
   if (!adapter) {
     await completeCommand(config, command.id, {}, '所选 CLI 当前不可用，请重新扫描或登录')
     return
@@ -606,6 +624,7 @@ async function start() {
   let clis = scanLocalClis()
   const initialHeartbeat = await heartbeat(config, clis)
   if (await maybeUpdateBridge(config, initialHeartbeat)) return
+  let selectedCliId = String(initialHeartbeat?.selectedCliId || '')
   process.stdout.write(`Giverny Local Bridge ${VERSION} 已连接，设备：${config.deviceName || config.deviceId}\n`)
   process.stdout.write('按 Ctrl+C 停止。\n')
   let lastHeartbeat = Date.now()
@@ -614,8 +633,13 @@ async function start() {
       const scanned = await pollCommand(config, clis)
       if (scanned) clis = scanned
       if (Date.now() - lastHeartbeat >= 15_000) {
+        if (selectedCliId && !clis.some((item) => item.id === selectedCliId && item.status === 'available' && item.command)) {
+          const refreshed = refreshCachedCli(clis, selectedCliId)
+          if (refreshed?.status === 'available') process.stdout.write(`[Bridge] ${refreshed.name} 已恢复可用。\n`)
+        }
         const heartbeatResult = await heartbeat(config, clis)
         if (await maybeUpdateBridge(config, heartbeatResult)) return
+        selectedCliId = String(heartbeatResult?.selectedCliId || selectedCliId)
         lastHeartbeat = Date.now()
       }
     } catch (error) {
