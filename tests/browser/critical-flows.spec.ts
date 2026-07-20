@@ -1,5 +1,27 @@
 import { expect, test, type Page } from '@playwright/test'
 
+function createPdfFixture() {
+  const stream = 'BT /F1 24 Tf 72 720 Td (Giverny acceptance preview) Tj ET'
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    `5 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`,
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets = [0]
+  objects.forEach((object) => {
+    offsets.push(Buffer.byteLength(pdf))
+    pdf += object
+  })
+  const xrefOffset = Buffer.byteLength(pdf)
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  pdf += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`
+  return Buffer.from(pdf)
+}
+
 async function login(page: Page) {
   const response = await page.request.post('/api/auth/login', {
     data: { email: 'bh141425@gmail.com', key: 'eval-admin-key' },
@@ -124,6 +146,74 @@ test('计划中任务可直接进入记录进展并切换验收模式', async ({
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   await expect(page.getByRole('heading', { name: '记录验收进展' })).toBeVisible()
   await page.getByRole('button', { name: '取消' }).click()
+})
+
+test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ page }) => {
+  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.getByRole('button', { name: /记录进展/ }).last().click()
+  await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
+  const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
+  const uploadInput = acceptanceDialog.locator('input[type="file"][multiple]')
+  await uploadInput.setInputFiles([
+    { name: '验收预览.pdf', mimeType: 'application/pdf', buffer: createPdfFixture() },
+    {
+      name: '验收截图.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DAwMDAxMDAwMAAAAwBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64'),
+    },
+  ])
+
+  await page.getByRole('button', { name: '预览 验收预览.pdf' }).click()
+  const pdfDialog = page.getByRole('dialog', { name: '验收预览.pdf' })
+  const pdfCanvas = pdfDialog.locator('canvas[data-pdf-page="1"]')
+  await expect(pdfCanvas).toBeVisible()
+  await expect.poll(async () => pdfCanvas.evaluate((canvas) => canvas.width > 0 && canvas.height > 0)).toBe(true)
+  await pdfDialog.getByRole('button', { name: '关闭' }).click()
+
+  await page.getByRole('button', { name: '预览 验收截图.png' }).click()
+  const imageDialog = page.getByRole('dialog', { name: '验收截图.png' })
+  await expect(imageDialog.locator('.image-preview-reader img')).toBeVisible()
+  await imageDialog.getByRole('button', { name: '关闭' }).click()
+})
+
+test('验收备注 AI 使用弹窗内当前完整工时快照', async ({ page }) => {
+  type AcceptanceAiPayload = {
+    task: {
+      actualHours: number
+      timeEntries: Array<{ start: string; end: string; isAcceptanceProgress?: boolean }>
+    }
+  }
+  let resolvePayload: (payload: AcceptanceAiPayload) => void = () => {}
+  const payloadPromise = new Promise<AcceptanceAiPayload>((resolve) => { resolvePayload = resolve })
+  await page.route('**/api/ai/text-assistant', async (route) => {
+    resolvePayload(route.request().postDataJSON() as AcceptanceAiPayload)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        optimizedText: '1、需求达成：已完成任务要求。\n2、额外价值：已完成视觉统一。\n3、项目价值：便于后续复用。',
+        summary: '已按当前验收草稿生成。',
+      }),
+    })
+  })
+
+  await page.getByText('公司产品封套修改', { exact: true }).click()
+  await page.getByRole('button', { name: /记录进展/ }).last().click()
+  await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
+  const dialog = page.getByRole('dialog', { name: '记录验收进展' })
+  const actualSchedule = dialog.locator('.progress-lite-schedule-row:not(.progress-lite-schedule-row-plan)')
+  const timeInputs = actualSchedule.getByPlaceholder('YYYY/MM/DD HH:mm')
+  await timeInputs.first().fill('2026/07/20 09:00')
+  await timeInputs.first().blur()
+  await timeInputs.nth(1).fill('2026/07/20 11:00')
+  await timeInputs.nth(1).blur()
+  await dialog.locator('#progress-lite-note').fill('请按当前全部进展生成验收备注')
+  await dialog.getByRole('button', { name: 'AI 汇总项目验收备注' }).click()
+
+  const payload = await payloadPromise
+  expect(payload.task.actualHours).toBe(4.52)
+  expect(payload.task.timeEntries).toHaveLength(2)
+  expect(payload.task.timeEntries.at(-1)).toMatchObject({ start: '09:00', end: '11:00', isAcceptanceProgress: true })
 })
 
 test('模型中心展示默认模型和服务商配置入口', async ({ page }) => {

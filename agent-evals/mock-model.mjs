@@ -221,7 +221,15 @@ const server = http.createServer((request, response) => {
         model: String(payload.model || ''),
         text: userText(Array.isArray(payload.messages) ? payload.messages : []).slice(0, 500),
       })
-      const result = chooseTool(Array.isArray(payload.messages) ? payload.messages : [])
+      const requestedToolNames = Array.isArray(payload.tools)
+        ? payload.tools.map((item) => String(item.function?.name || '')).filter(Boolean)
+        : []
+      const result = requestedToolNames.includes('optimize_task_worklog_text')
+        ? toolCall('optimize_task_worklog_text', {
+            optimizedText: '1、完成与交付概况：已完成任务要求并交付《验收预览.pdf》。\n2、主要更新和修改：补充版式整理与视觉统一。\n3、反馈响应与版本迭代：项目实际投入 3 小时，一次交付，未产生改稿轮次；建议在最终稿修改 2026 年未来日期并清理画布边缘。\n4、最终文件：验收文件为《验收预览.pdf》。',
+            summary: '隔离评测故意返回包含内部噪音与重复附件的验收备注。',
+          })
+        : chooseTool(Array.isArray(payload.messages) ? payload.messages : [])
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify(result))
     } catch (error) {

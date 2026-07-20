@@ -11132,21 +11132,25 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
 
   let previewKey: string | null = null
   try {
+    const fileName = String(form.get('name') ?? '未命名文件')
+    const contentType = String(form.get('contentType') ?? '') || null
+    const fileType = inferAttachmentFileType(fileName, contentType, String(form.get('type') ?? ''))
     const preview = form.get('preview')
     if (preview instanceof File && preview.size > 0) {
       previewKey = `previews/${taskId}/${fileId}/${sanitizeFileName(preview.name)}`
       await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
+    } else if (['PNG', 'JPG', 'WEBP', 'GIF', 'SVG', 'BMP'].includes(fileType)) {
+      previewKey = key
     }
 
-    const fileName = String(form.get('name') ?? '未命名文件')
     const saved = await insertAttachment(env, {
       id: fileId,
       taskId,
       entryId,
       scope,
       fileName,
-      fileType: inferAttachmentFileType(fileName, String(form.get('contentType') ?? '') || null, String(form.get('type') ?? '')),
-      mimeType: String(form.get('contentType') ?? '') || null,
+      fileType,
+      mimeType: contentType,
       r2Key: key,
       previewKey,
       fileSize,
@@ -12188,6 +12192,72 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   return ok(suggestion)
 }
 
+const acceptanceNoisePattern = /(?:实际|累计|本次|项目)?(?:投入|工时)[^；。\n]{0,24}(?:小时|\bh\b)|(?:小时|\bh\b)[^；。\n]{0,16}(?:投入|工时)|结算金额|小时单价|¥|人民币|改稿轮次|一次交付|未产生改稿|系统记录|isUncounted|未来时间|202\d\s*年|清理画布|待客户确认|待甲方确认|尚未调整|暂未调整|质量问题|风险项|建议在最终稿|建议修改|建议清理/i
+
+function acceptanceClauseText(value: string) {
+  return value
+    .replace(/^\s*\d+[、.．]\s*/, '')
+    .replace(/^(?:需求达成|完成与交付概况|完成与交付|主要更新和修改|额外价值|反馈响应与版本迭代|反馈响应|版本迭代|最终文件|验收文件|项目价值|正面影响)\s*[：:]\s*/, '')
+    .trim()
+}
+
+function sanitizeAcceptanceSuggestion(
+  value: string,
+  context: {
+    taskTitle: string
+    taskType: string
+    attachmentNames: string[]
+  },
+) {
+  const seenAttachmentNames = new Set<string>()
+  let hasDeliveryFileMention = false
+  const sourceLines = value
+    .split(/\n+/)
+    .map(acceptanceClauseText)
+    .filter(Boolean)
+  const contents: string[] = []
+
+  sourceLines.forEach((line) => {
+    const cleanedClauses = line
+      .split(/[；。]+/)
+      .map((clause) => clause.trim())
+      .filter(Boolean)
+      .filter((clause) => !acceptanceNoisePattern.test(clause))
+      .filter((clause) => {
+        const matchedNames = context.attachmentNames.filter((name) => name && clause.includes(name))
+        if (matchedNames.length === 0) {
+          if (hasDeliveryFileMention && /^(?:最终|验收|交付)文件/.test(clause)) return false
+          return true
+        }
+        if (matchedNames.every((name) => seenAttachmentNames.has(name))) return false
+        matchedNames.forEach((name) => seenAttachmentNames.add(name))
+        hasDeliveryFileMention = true
+        return true
+      })
+    const cleaned = cleanedClauses.join('；').replace(/[；，,\s]+$/, '').trim()
+    if (cleaned && !contents.includes(cleaned)) contents.push(cleaned)
+  })
+
+  const firstFile = context.attachmentNames.find(Boolean)
+  const taskLabel = context.taskTitle || context.taskType || '本次任务'
+  const requirementFallback = firstFile
+    ? `已按任务要求完成${taskLabel}的交付内容，并提交《${firstFile}》作为本次验收文件。`
+    : `已按任务要求完成${taskLabel}的约定内容，并形成可供验收的正式成果。`
+  const extraValueFallback = '在基础需求之外，对内容结构、视觉一致性和文件可用性进行了补充完善，让交付结果更完整、更便于后续使用。'
+  const projectValueFallback = '本次成果已将内容、版式与交付文件统一沉淀，便于后续同类项目沿用、更新并保持视觉表达一致。'
+  const selected = [
+    contents[0] || requirementFallback,
+    contents[1] || extraValueFallback,
+    contents[2] || projectValueFallback,
+  ]
+
+  return [
+    `1、需求达成：${selected[0]}`,
+    `2、额外价值：${selected[1]}`,
+    `3、项目价值：${selected[2]}`,
+  ].join('\n')
+}
+
 async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     mode?: string
@@ -12223,6 +12293,8 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const taskTimeEntries = Array.isArray(body.task?.timeEntries)
     ? body.task.timeEntries as Array<Record<string, unknown>>
     : []
+  const authoritativeActualHours = Math.max(0, Number(body.task?.actualHours) || actualHoursForTimeEntries(taskTimeEntries as unknown as TimeEntry[]))
+  const authoritativeEntryCount = taskTimeEntries.filter((entry) => !entry.isUncounted && Number(entry.end ? 1 : 0) > 0).length
   const rawProgressHistory = Array.isArray(body.progressHistory) && body.progressHistory.length > 0
     ? body.progressHistory
     : taskTimeEntries
@@ -12256,13 +12328,26 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
   const acceptanceAttachmentContexts = mode === 'acceptance'
     ? await getAcceptanceAttachmentAiContexts(env, body.task?.id)
     : []
+  const acceptanceValueContexts = acceptanceAttachmentContexts.map((item) => ({
+    id: item.id,
+    name: item.name,
+    type: item.type,
+    mimeType: item.mimeType,
+    tag: item.tag,
+    uploadedAt: item.uploadedAt,
+    analysisStatus: item.analysisStatus,
+    analysisSummary: item.analysisSummary,
+    extractedText: item.extractedText,
+    findings: item.findings,
+    requirementMatches: item.requirementMatches,
+  }))
   const textStyleGuide = await getOrBuildTextStyleGuide(env, mode, taskType)
   const modeLabel = mode === 'acceptance' ? '验收备注' : mode === 'feedback' ? '修改意见' : '进展记录'
   const textStyleGuideInjection = textStyleGuide
     ? `\n\n【用户${modeLabel}写法偏好】以下来自用户对历史 AI 建议的真实取舍和改写，请优先遵循：\n${textStyleGuide}`
     : ''
   const acceptanceModeRules = mode === 'acceptance'
-    ? `\n\n【验收备注专用规则】这次不是单纯润色用户备注，而是生成面向甲方的项目收尾说明。必须同时分析四类信息：\n1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。\n2. acceptanceContext.projectProgressHistory：从项目开始到验收前的全部分段进展，已按时间排序；包括普通进展、改稿轮次、甲方反馈、不计时进展和对应附件。\n3. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。\n4. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。\n\n写法要求：\n- 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新、修改、改稿和甲方反馈响应。\n- 至少明确说明项目最终完成了什么，以及从开始到验收一共更新和修改了哪些关键内容。\n- 语言面向甲方，写成清楚的项目交付总结，不出现“系统记录”“isUncounted”等内部字段，也不要夸大。\n- 推荐按“完成与交付概况 → 主要更新和修改 → 反馈响应 / 版本迭代 → 最终文件”的顺序组织；结算、补录或等待情况只在输入明确且确有必要时写。\n- 如果用户备注很短或为空，但历史进展足够明确，也必须根据任务需求 + 全部历史进展生成完整验收备注。\n- 如果是海报、长图、PPT、品牌物料等复杂任务，要结合历史进展和附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有输入明确出现具体风格时才可以写。\n- 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。\n- 不要凭空写客户已确认、已通过、无问题、符合规范、已上线等事实；除非输入明确提供。\n- 输出必须使用「1、」「2、」「3、」连续分点，每点一行，一行一件事。`
+    ? `\n\n【验收备注专用规则】这次要生成面向甲方的价值说明，不是内部复盘，也不是质量检查报告。必须同时分析任务需求、全部历史进展、验收附件分析和用户原始备注。\n\n输出只能有以下三点，标题和顺序一字不改：\n1、需求达成：逐项说明新建任务里的目标、约束和交付范围已经完成，并在这里提及一次最终交付文件。\n2、额外价值：说明在原需求之外额外完成的更新、优化、整理或投入，突出设计工作的增量价值。\n3、项目价值：说明成果对当前项目和后续同类项目的正面影响，例如提高信息清晰度、视觉一致性、可编辑性、复用与迭代效率；必须有事实依据，不写空泛口号。\n\n严格禁止：\n- 不写实际工时、投入小时、金额、单价、改稿轮次、“一次交付”等内部结算或过程统计；authoritativeActualHours 仅用于防止模型误读，绝不能输出。\n- 不写待修改项、质量问题、风险、未来日期、内部清理建议，不把附件分析里的 suggestions / qualityIssues / risks 复制给甲方。\n- 同一个附件名称只能出现一次，不再增加“最终文件”作为第四点。\n- 不写客户已确认、已通过、已上线等输入没有明确提供的结论。\n- 只输出三行，每行一件事。`
     : ''
   const feedbackModeRules = mode === 'feedback'
     ? `\n\n【修改意见专用规则】将甲方或客户给出的反馈整理为可执行的修改清单：\n- 保留版本号、反馈来源、明确修改对象、原问题和目标结果。\n- 合并重复表达，但不要遗漏否定词、数量、尺寸、颜色、文案、页面或文件版本等关键约束。\n- 不要写成已经完成的进展，也不要擅自承诺交付时间或判断客户已确认。\n- 输出按优先级组织；信息不足时保持原意，不自行补充设计方案。`
@@ -12284,8 +12369,10 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
           taskRequirement,
           rawAcceptanceNote: text,
           projectProgressHistory,
-          acceptanceAttachments: acceptanceAttachmentContexts,
-          instruction: '请逐条阅读全部项目进展，合并同类修改但不要遗漏重要更新；同时参考任务需求、验收附件分析和用户原始备注，生成面向甲方的完整项目交付总结。',
+          acceptanceAttachments: acceptanceValueContexts,
+          authoritativeActualHours,
+          authoritativeEntryCount,
+          instruction: '按“需求达成、额外价值、项目价值”生成三点对客说明。工时和分段数量只用于核对上下文，禁止写入验收备注。附件名称只出现一次。',
         }
       : undefined,
     styleGuide: textStyleGuide,
@@ -12296,6 +12383,13 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     ? await callBamlRuntime<TextAssistantToolArgs>(env, 'optimize-text', aiPayload)
     : null
   if (runtimeSuggestion?.optimizedText) {
+    const optimizedText = mode === 'acceptance'
+      ? sanitizeAcceptanceSuggestion(String(runtimeSuggestion.optimizedText), {
+          taskTitle,
+          taskType,
+          attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
+        })
+      : String(runtimeSuggestion.optimizedText).trim()
     await audit(env, 'suggest', 'ai_text_assistant', taskTitle || mode, {
       mode,
       taskTitle,
@@ -12306,7 +12400,7 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       provider: 'baml-runtime',
     })
     return ok({
-      optimizedText: String(runtimeSuggestion.optimizedText).trim(),
+      optimizedText,
       summary: String(runtimeSuggestion.summary ?? '').trim(),
     })
   }
@@ -12318,7 +12412,14 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
       aiPayload,
       'optimizedText:string, summary:string',
     )
-    const optimizedText = String(fallbackParsed?.optimizedText ?? '').trim()
+    const rawOptimizedText = String(fallbackParsed?.optimizedText ?? '').trim()
+    const optimizedText = mode === 'acceptance' && rawOptimizedText
+      ? sanitizeAcceptanceSuggestion(rawOptimizedText, {
+          taskTitle,
+          taskType,
+          attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
+        })
+      : rawOptimizedText
     if (!optimizedText) {
       return null
     }
@@ -12415,7 +12516,14 @@ async function optimizeTaskTextWithAi(env: Env, request: Request) {
     parsed = parseTextToolArguments(message.content)
   }
 
-  const optimizedText = String(parsed.optimizedText ?? '').trim()
+  const rawOptimizedText = String(parsed.optimizedText ?? '').trim()
+  const optimizedText = mode === 'acceptance' && rawOptimizedText
+    ? sanitizeAcceptanceSuggestion(rawOptimizedText, {
+        taskTitle,
+        taskType,
+        attachmentNames: [...acceptanceAttachmentContexts.map((item) => item.name), ...uploadedFileNames],
+      })
+    : rawOptimizedText
   if (!optimizedText) {
     const fallback = await callFallback()
     return fallback ?? fail('AI 助手没有返回有效建议，请稍后重试。', 502)

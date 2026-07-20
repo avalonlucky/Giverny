@@ -338,6 +338,50 @@ async function runUploadLimitCheck(cookie) {
   process.stdout.write('Multipart upload 200MB server limit check passed.\n')
 }
 
+async function runAcceptanceNoteGuardrailCheck(cookie) {
+  const response = await fetch('http://127.0.0.1:8798/api/ai/text-assistant', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      mode: 'acceptance',
+      text: '',
+      task: {
+        id: 1,
+        title: '验收备注隔离评测',
+        type: '展板',
+        requirement: '完成展板矢量化、统一视觉并交付正式文件。',
+        actualHours: 5,
+        timeEntries: [
+          { id: 'acceptance-hours-1', date: '2026-06-08', start: '15:30', end: '18:30', note: '' },
+          { id: 'acceptance-hours-2', date: '2026-06-09', start: '09:00', end: '11:00', note: '' },
+        ],
+      },
+      files: [{ name: '验收预览.pdf', type: 'PDF', tag: '验收文件', final: true, visible: true, uploadedAt: '2026-07-20' }],
+      uploadedFileNames: ['验收预览.pdf'],
+      progressHistory: [
+        { sequence: 1, date: '2026-06-08', endDate: '2026-06-08', start: '15:30', end: '18:30', note: '', kind: 'progress', counted: true, attachments: [] },
+        { sequence: 2, date: '2026-06-09', endDate: '2026-06-09', start: '09:00', end: '11:00', note: '', kind: 'progress', counted: true, attachments: [] },
+      ],
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  const text = String(payload.optimizedText || '')
+  const lines = text.split('\n').filter(Boolean)
+  const fileMentions = text.match(/验收预览\.pdf/g)?.length || 0
+  if (
+    !response.ok ||
+    lines.length !== 3 ||
+    !lines[0]?.startsWith('1、需求达成：') ||
+    !lines[1]?.startsWith('2、额外价值：') ||
+    !lines[2]?.startsWith('3、项目价值：') ||
+    /3\s*小时|工时|一次交付|改稿轮次|2026\s*年|清理画布|建议修改/.test(text) ||
+    fileMentions !== 1
+  ) {
+    throw new Error(`Acceptance note guardrail failed: ${response.status} ${JSON.stringify(payload)}`)
+  }
+  process.stdout.write('Acceptance note authoritative-hours context, value structure, noise removal, and attachment deduplication checks passed.\n')
+}
+
 async function runAiModelDraftListCheck(cookie) {
   const endpoint = 'http://127.0.0.1:8798/api/ai/models'
   const providerEndpoint = 'http://127.0.0.1:8798/api/ai/provider-models'
@@ -1423,6 +1467,7 @@ try {
   await runAgentLifecycleWriteCheck()
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
+  await runAcceptanceNoteGuardrailCheck(cookie)
   await runAiModelDraftListCheck(cookie)
   await runSiteWideModelPriorityCheck(cookie)
   await runLocalCliBridgeCheck(cookie)

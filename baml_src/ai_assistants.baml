@@ -103,17 +103,19 @@ function OptimizeTaskText(payload_json: string) -> TextAssistantOutput {
     acceptance 模式不是单纯润色用户备注，必须综合四类信息：
     1. task.requirement / acceptanceContext.taskRequirement：新建任务时写的任务需求，用来判断原始目标、约束和交付范围。
     2. acceptanceContext.projectProgressHistory：从项目开始到验收前的全部分段进展，已按时间排序；包括普通进展、改稿轮次、甲方反馈、不计时进展及对应附件。
-    3. acceptanceContext.acceptanceAttachments：验收附件的分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches、qualityIssues；文件名只作为兜底线索。
+    3. acceptanceContext.acceptanceAttachments：验收附件的对客分析结果，优先读取 analysisSummary、extractedText、findings、requirementMatches；文件名只作为兜底线索。内部质量问题、风险和修改建议不会进入这里。
     4. acceptanceContext.rawAcceptanceNote / currentText：用户手写的原始验收备注，必须保留其中的真实判断、补录说明、结算说明和主观体感。
 
     acceptance 模式写法：
-    - 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新、改稿和甲方反馈响应。
-    - 至少明确说明项目最终完成了什么，以及从开始到验收一共更新和修改了哪些关键内容。
-    - 推荐按“完成与交付概况 → 主要更新和修改 → 反馈响应 / 版本迭代 → 最终文件”的顺序组织；结算、补录或等待情况只在输入明确且确有必要时写。
+    - 必须逐条阅读 projectProgressHistory，再按事项合并同类修改；不要机械复制时间流水账，但不能遗漏对项目结果有影响的重要更新和甲方反馈响应。
+    - 输出严格固定为三行：“1、需求达成：…”“2、额外价值：…”“3、项目价值：…”，不得增加第四点或“最终文件”独立段。
+    - 需求达成逐项对应任务目标与交付范围，最终交付文件只在这一点提及一次；额外价值说明原需求之外的优化与投入；项目价值说明对当前项目和后续复用、更新、视觉一致性的正面影响。
     - 如果用户备注很短或为空，但历史进展足够明确，也必须基于任务需求 + 全部历史进展生成完整验收备注。
     - 如果是海报、长图、PPT、品牌物料等复杂任务，要结合历史进展和附件分析描述具体完成内容，例如信息结构、字体处理、插图/图形风格、排版层级、创意表达、版本调整等；只有在输入明确出现具体风格时才可以写。
     - 如果附件分析尚未完成或不可用，只能根据文件名稳妥描述“已上传/已补充对应验收文件”，不要假装看过文件内容。
     - 不要出现“系统记录”“isUncounted”等内部字段，不要改变验收状态，不要凭空说客户已确认、已通过、无问题、符合规范、已上线等事实。
+    - 禁止输出实际工时、投入小时、金额、单价、改稿轮次、“一次交付”、待修改项、质量问题、风险、未来日期或内部清理建议；工时和分段数量仅用于核对上下文。
+    - 同一个附件名称只能出现一次，不要复制 acceptanceAttachments 中的 suggestions、qualityIssues 或 risks 给甲方。
 
     只返回优化后的文本（分点序号格式）和一句简短摘要。
 
