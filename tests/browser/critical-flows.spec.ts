@@ -359,6 +359,34 @@ test('计划中任务可直接进入记录进展并切换验收模式', async ({
 
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   await expect(page.getByRole('heading', { name: '记录验收进展' })).toBeVisible()
+
+  await page.getByRole('button', { name: '切换本段工时' }).click()
+  const segmentDuration = page.getByRole('textbox', { name: '本段工时，可输入15分钟、1小时30分钟或小数小时' })
+  await segmentDuration.fill('15分钟')
+  await segmentDuration.blur()
+  await expect(segmentDuration).toHaveValue('15 分钟')
+
+  await segmentDuration.fill('1小时')
+  await segmentDuration.blur()
+  await expect(segmentDuration).toHaveValue('1 小时')
+
+  await segmentDuration.fill('30分钟')
+  await segmentDuration.blur()
+  await expect(segmentDuration).toHaveValue('30 分钟')
+
+  await segmentDuration.fill('1.5小时')
+  await segmentDuration.blur()
+  await expect(segmentDuration).toHaveValue('1 小时 30 分钟')
+
+  await segmentDuration.fill('0.25')
+  await segmentDuration.blur()
+  await expect(segmentDuration).toHaveValue('15 分钟')
+
+  await page.getByRole('button', { name: '切换预计工时' }).click()
+  const plannedDuration = page.getByRole('textbox', { name: '验收预计工时，可输入15分钟、1小时30分钟或小数小时' })
+  await plannedDuration.fill('30分钟')
+  await plannedDuration.blur()
+  await expect(plannedDuration).toHaveValue('30 分钟')
   await page.getByRole('button', { name: '取消' }).click()
 })
 

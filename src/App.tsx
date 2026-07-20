@@ -914,25 +914,6 @@ const TIME_STEP_MINUTES = 5   // 时间选择器分钟列步进（5分钟）
 const DURATION_STEP_MINUTES = 30  // 工时输入最小粒度（30分钟 = 0.5h）
 const ESTIMATED_HOURS_STEP_MINUTES = 1 // 新建任务支持直接输入分钟，按 1 分钟精度保存
 
-function snapDurationMinutes(value: number, minimum = DURATION_STEP_MINUTES) {
-  if (!Number.isFinite(value)) {
-    return minimum
-  }
-  return Math.max(minimum, Math.round(value / DURATION_STEP_MINUTES) * DURATION_STEP_MINUTES)
-}
-
-function formatHoursInputValue(minutes: number) {
-  const snapped = snapDurationMinutes(minutes)
-  const hours = snapped / 60
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1)
-}
-
-function formatExactHoursInputValue(minutes: number) {
-  const safeMinutes = Math.max(0, Math.round(Number.isFinite(minutes) ? minutes : 0))
-  const hours = safeMinutes / 60
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
-}
-
 function formatEstimatedDurationInputValue(minutes: number) {
   return formatDurationZh(Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round(minutes)))
 }
@@ -11913,6 +11894,8 @@ function TaskProgressModal({
   const [waitingDraft, setWaitingDraft] = useState<TimeEntryDraft>(initialProgressDraft.waitingDraft)
   const [draftWaitingEntries] = useState<WaitingEntry[]>(initialProgressDraft.waitingEntries)
   const [segmentMinutes, setSegmentMinutes] = useState(initialProgressDraft.segmentMinutes)
+  const [segmentDurationInput, setSegmentDurationInput] = useState(() => formatEstimatedDurationInputValue(initialProgressDraft.segmentMinutes))
+  const [isSegmentDurationFocused, setIsSegmentDurationFocused] = useState(false)
   const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialProgressDraft.scheduleAnchor)
   const [hasTouchedSchedule, setHasTouchedSchedule] = useState(Boolean(editingEntry))
   const [isSaving, setIsSaving] = useState(false)
@@ -11963,6 +11946,8 @@ function TaskProgressModal({
     note: '',
   }))
   const [planReferenceMinutes, setPlanReferenceMinutes] = useState(initialPlanMinutes)
+  const [planReferenceDurationInput, setPlanReferenceDurationInput] = useState(() => formatEstimatedDurationInputValue(initialPlanMinutes))
+  const [isPlanReferenceDurationFocused, setIsPlanReferenceDurationFocused] = useState(false)
   const [planReferenceDerivedField, setPlanReferenceDerivedField] = useState<ScheduleAnchor>('hours')
   // 验收阶段是否计入本次工时：默认计入；关闭后本次验收不新增工时（已汇总工时仍保留），
   // 用于「临近验收时一两分钟的小改动不想计时」等极少数特殊情况。
@@ -13023,6 +13008,29 @@ function TaskProgressModal({
     }
   }
 
+  useEffect(() => {
+    if (!isPlanReferenceDurationFocused) {
+      setPlanReferenceDurationInput(formatEstimatedDurationInputValue(planReferenceMinutes))
+    }
+  }, [isPlanReferenceDurationFocused, planReferenceMinutes])
+
+  const updatePlanReferenceDurationInput = (value: string) => {
+    setPlanReferenceDurationInput(value.slice(0, 32))
+    const nextMinutes = parseEstimatedDurationInputMinutes(value)
+    if (nextMinutes) {
+      updatePlanReferenceMinutes(nextMinutes)
+    }
+  }
+
+  const commitPlanReferenceDurationInput = () => {
+    const nextMinutes = parseEstimatedDurationInputMinutes(planReferenceDurationInput)
+    if (nextMinutes) {
+      updatePlanReferenceMinutes(nextMinutes)
+    }
+    setPlanReferenceDurationInput(formatEstimatedDurationInputValue(nextMinutes || planReferenceMinutes))
+    setIsPlanReferenceDurationFocused(false)
+  }
+
   const applyPlanReferenceDerivedField = (field: ScheduleAnchor) => {
     const currentReferenceMinutes = exactDurationMinutesBetween(planReferenceStartValue, planReferenceEndValue)
     if (field === 'start' && planReferenceEndValue) {
@@ -13149,7 +13157,7 @@ function TaskProgressModal({
 
   const updateProgressMinutes = (value: number) => {
     setHasTouchedSchedule(true)
-    const nextMinutes = snapDurationMinutes(value)
+    const nextMinutes = Math.max(1, Math.round(Number.isFinite(value) ? value : segmentMinutes))
     setSegmentMinutes(nextMinutes)
     if (scheduleDerivedField === 'start' && progressEndValue) {
       writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -nextMinutes))
@@ -13166,6 +13174,29 @@ function TaskProgressModal({
     if (scheduleDerivedField === 'end' && progressEndValue) {
       writeProgressStart(addMinutesToPlanDateTime(progressEndValue, -nextMinutes))
     }
+  }
+
+  useEffect(() => {
+    if (!isSegmentDurationFocused) {
+      setSegmentDurationInput(formatEstimatedDurationInputValue(segmentMinutes))
+    }
+  }, [isSegmentDurationFocused, segmentMinutes])
+
+  const updateSegmentDurationInput = (value: string) => {
+    setSegmentDurationInput(value.slice(0, 32))
+    const nextMinutes = parseEstimatedDurationInputMinutes(value)
+    if (nextMinutes) {
+      updateProgressMinutes(nextMinutes)
+    }
+  }
+
+  const commitSegmentDurationInput = () => {
+    const nextMinutes = parseEstimatedDurationInputMinutes(segmentDurationInput)
+    if (nextMinutes) {
+      updateProgressMinutes(nextMinutes)
+    }
+    setSegmentDurationInput(formatEstimatedDurationInputValue(nextMinutes || segmentMinutes))
+    setIsSegmentDurationFocused(false)
   }
 
   const applyVoiceProgressSchedule = (result: VoiceScheduleResult) => {
@@ -13502,15 +13533,19 @@ function TaskProgressModal({
               ) : (
                 <input
                   className="new-task-hours-input"
-                  type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={formatHoursInputValue(segmentMinutes)}
-                  onChange={(event) => updateProgressMinutes(Number(event.target.value || 0) * 60)}
-                  aria-label="本段工时"
+                  type="text"
+                  inputMode="text"
+                  value={segmentDurationInput}
+                  placeholder="如 15分钟"
+                  onFocus={(event) => {
+                    setIsSegmentDurationFocused(true)
+                    event.currentTarget.select()
+                  }}
+                  onChange={(event) => updateSegmentDurationInput(event.target.value)}
+                  onBlur={commitSegmentDurationInput}
+                  aria-label="本段工时，可输入15分钟、1小时30分钟或小数小时"
                 />
               )}
-              {scheduleDerivedField !== 'hours' && <span className="progress-lite-hours-unit">小时</span>}
             </div>
           </div>
           <PlanDateTimeField
@@ -13563,14 +13598,18 @@ function TaskProgressModal({
                   <>
                     <input
                       className="new-task-hours-input"
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={formatExactHoursInputValue(planReferenceMinutes)}
-                      onChange={(event) => updatePlanReferenceMinutes(Number(event.target.value || 0) * 60)}
-                      aria-label="预计工时"
+                      type="text"
+                      inputMode="text"
+                      value={planReferenceDurationInput}
+                      placeholder="如 15分钟"
+                      onFocus={(event) => {
+                        setIsPlanReferenceDurationFocused(true)
+                        event.currentTarget.select()
+                      }}
+                      onChange={(event) => updatePlanReferenceDurationInput(event.target.value)}
+                      onBlur={commitPlanReferenceDurationInput}
+                      aria-label="验收预计工时，可输入15分钟、1小时30分钟或小数小时"
                     />
-                    <span className="progress-lite-hours-unit">小时</span>
                   </>
                 )}
               </div>

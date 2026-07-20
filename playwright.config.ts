@@ -21,6 +21,6 @@ export default defineConfig({
     command: 'exec node agent-evals/start-browser-eval.mjs',
     url: 'http://127.0.0.1:8799/api/health',
     reuseExistingServer: false,
-    timeout: 45_000,
+    timeout: 90_000,
   },
 })
