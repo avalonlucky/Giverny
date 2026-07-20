@@ -5676,29 +5676,6 @@ button.topbar-create-button:hover {
   outline: none;
 }
 
-.progress-feedback-source > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.progress-feedback-source button {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--color-surface-alt);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.progress-feedback-source button.active {
-  background: var(--color-primary);
-  color: var(--color-surface-strong);
-}
-
 .progress-lite-label-row {
   display: flex;
   align-items: center;

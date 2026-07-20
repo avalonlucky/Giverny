@@ -372,6 +372,18 @@ test('普通记录进展可展开完整基础信息', async ({ page }) => {
   await expect(baseInfo.getByText('实际工时', { exact: true })).toBeVisible()
 })
 
+test('反馈来源支持自由输入且使用合作伙伴称呼', async ({ page }) => {
+  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.getByRole('tab', { name: '修改建议' }).click()
+  await page.getByRole('button', { name: '记录反馈' }).click()
+  const dialog = page.getByRole('dialog', { name: '记录反馈' })
+  const sourceInput = dialog.getByLabel('反馈来源')
+  await expect(sourceInput).toHaveValue('合作伙伴')
+  await sourceInput.fill('项目负责人')
+  await expect(sourceInput).toHaveValue('项目负责人')
+  await expect(dialog.getByText('甲方', { exact: false })).toHaveCount(0)
+})
+
 test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ page }) => {
   await page.getByText('公司产品封套延展', { exact: true }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()

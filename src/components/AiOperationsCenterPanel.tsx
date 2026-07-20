@@ -114,7 +114,7 @@ export default function AiOperationsCenterPanel({
               <div className="ai-workspace-tools">
                 <label className="ai-workspace-row">
                   <span>新建工作区</span>
-                  <input value={workspaceName} placeholder="例如：甲方项目组" onChange={(event) => setWorkspaceName(event.target.value)} />
+                  <input value={workspaceName} placeholder="例如：合作伙伴项目组" onChange={(event) => setWorkspaceName(event.target.value)} />
                   <button type="button" disabled={workspaceSwitching || !workspaceName.trim()} onClick={submitWorkspace}>
                     <Plus size={13} />
                     创建

@@ -61,7 +61,7 @@ export type TimeEntry = {
   isRevision?: boolean
   /** 本段是否「不计工时」：时间仍可自选（用于记录与排序），但计 0 工时、不进结算。 */
   isUncounted?: boolean
-  /** 本段是否为甲方反馈 / 修改意见节点：用于记录 B01/B02 等版本反馈，不计工时但进入任务生命周期。 */
+  /** 本段是否为合作伙伴反馈 / 修改意见节点：用于记录 B01/B02 等版本反馈，不计工时但进入任务生命周期。 */
   isClientFeedback?: boolean
   feedbackVersion?: string
   feedbackSource?: string
@@ -69,7 +69,7 @@ export type TimeEntry = {
   groupId?: string
 }
 
-export type WaitingReason = '等待甲方意见' | '等待补充资料' | '等待排期' | '其他'
+export type WaitingReason = '等待合作伙伴意见' | '等待补充资料' | '等待排期' | '其他'
 
 export type WaitingEntry = TimeEntry & {
   reason?: WaitingReason

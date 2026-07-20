@@ -88,7 +88,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 创建任务、记录反馈、修改字段、修改状态、追加进展、记录等待、维护已有记录、标记验收文件和完整验收只能调用对应的 preview 工具。
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
 - 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；不要只在正文里写一次性清单。
-- 讨论某个任务的历史脉络、未解决问题、甲方偏好或下一步前，优先调用 get_task_memory；任务记忆只压缩事实，不替代任务详情权威数据。
+- 讨论某个任务的历史脉络、未解决问题、合作伙伴偏好或下一步前，优先调用 get_task_memory；任务记忆只压缩事实，不替代任务详情权威数据。
 - 附件工具只能选择网站里已经存在的 attachmentId；用户电脑上的新文件必须先上传，不能伪造文件或文件地址。
 - 工具返回多个候选任务时必须让用户选择，不得自行猜测；用户选择“任务 #ID”后，后续工具必须传 taskId。
 - preview 返回后，清楚展示草稿、缺失项和风险；不要声称已经执行。
@@ -555,7 +555,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         execute: (input) => this.callTool('create-task-plan', { ...input, conversationId }),
       }),
       get_task_memory: tool({
-        description: '读取并刷新某个任务的长期记忆，包括需求摘要、近期记录、甲方反馈偏好和未解决事项。',
+        description: '读取并刷新某个任务的长期记忆，包括需求摘要、近期记录、合作伙伴反馈偏好和未解决事项。',
         inputSchema: z.object({ taskId: z.number().int().positive() }),
         execute: (input) => this.callTool('get-task-memory', input, 'GET'),
       }),
@@ -605,7 +605,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         }),
       }),
       record_feedback_preview: tool({
-        description: '生成记录甲方反馈或修改建议的预览。',
+        description: '生成记录合作伙伴反馈或修改建议的预览。',
         inputSchema: z.object({
           taskId: z.number().int().positive().optional(),
           taskTitle: z.string().optional(),
@@ -656,7 +656,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           taskId: z.number().int().positive().optional(),
           taskTitle: z.string().optional(),
           note: z.string(),
-          reason: z.enum(['等待甲方意见', '等待补充资料', '等待排期', '其他']).optional(),
+          reason: z.enum(['等待合作伙伴意见', '等待补充资料', '等待排期', '其他']).optional(),
           startDateTime: z.string().optional(),
           endDateTime: z.string().optional(),
         }),

@@ -195,10 +195,10 @@ const featureCapabilities: ProductCapability[] = [
     id: 'feature.permissions',
     category: '权限',
     title: '角色和数据权限',
-    summary: '管理员、成员、甲方和公开只读访问使用不同的数据与操作边界，Agent 工具沿用同一身份和工作区权限。',
+    summary: '管理员、成员、合作伙伴和公开只读访问使用不同的数据与操作边界，Agent 工具沿用同一身份和工作区权限。',
     details: ['本机 CLI 不直接获得 D1 凭证，只能通过短期、只读、受租户约束的 MCP 工具读取允许的数据。'],
     route: '设置 → 登录与权限',
-    searchTerms: ['权限', '管理员', '成员', '甲方', '只读', '多租户', '数据库权限', 'MCP权限'],
+    searchTerms: ['权限', '管理员', '成员', '合作伙伴', '只读', '多租户', '数据库权限', 'MCP权限'],
     adminOnly: true,
   },
 ]

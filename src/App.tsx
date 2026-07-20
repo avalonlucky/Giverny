@@ -2574,7 +2574,8 @@ function fillTimeDraftFromDuration(draft: TimeEntryDraft, minutes: number) {
 
 type ProgressRecordMode = 'progress' | 'waiting' | 'feedback'
 
-const clientFeedbackSources = ['甲方', '需求人', '验收人', '其他'] as const
+const partnerFacingText = (value: string | undefined, fallback = '合作伙伴') =>
+  (value?.trim() || fallback).replaceAll('甲方', '合作伙伴')
 
 type ProgressModalTarget = {
   taskId: number
@@ -4847,7 +4848,7 @@ function KnowledgeView() {
           <input className="knowledge-input" placeholder="标题（可选）" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea
             className="knowledge-textarea"
-            placeholder="写下你的知识、定价逻辑、甲方话术、行业笔记… AI 对话时会自动参考"
+            placeholder="写下你的知识、定价逻辑、合作伙伴沟通方式、行业笔记… AI 对话时会自动参考"
             value={content}
             rows={6}
             onChange={(e) => setContent(e.target.value)}
@@ -4882,7 +4883,7 @@ function KnowledgeView() {
         {!loading && activeTab === 'user' && userNotes.length === 0 && (
           <div className="empty-state">
             <strong>还没有笔记</strong>
-            <p>写下定价逻辑、甲方话术、行业心得，AI 工作助手对话时会自动参考这里的内容。</p>
+            <p>写下定价逻辑、合作伙伴沟通方式、行业心得，AI 工作助手对话时会自动参考这里的内容。</p>
           </div>
         )}
         {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
@@ -8500,7 +8501,7 @@ function App() {
     const link = `${window.location.origin}/share/${token}`
     try {
       await window.navigator.clipboard.writeText(link)
-      notify('甲方分享链接已复制')
+      notify('合作伙伴分享链接已复制')
     } catch {
       notify(link)
     }
@@ -8508,20 +8509,20 @@ function App() {
 
   const handleRotateReportToken = (report: ReportRecord) => {
     setConfirmDialog({
-      eyebrow: '重置甲方链接',
-      title: `确定重置 ${monthLabelOf(report.month)} 的甲方链接吗？`,
+      eyebrow: '重置合作伙伴链接',
+      title: `确定重置 ${monthLabelOf(report.month)} 的合作伙伴链接吗？`,
       body: '确认后会生成一个新的只读链接，旧链接将立即失效。结算金额、工时和任务快照不会变化。',
       confirmText: '重置链接',
-      details: [`当前结算：${report.billableHours.toFixed(1)}h · ¥${formatYuan(report.totalAmount)}`, '旧链接失效后，需要把新链接重新发给甲方。'],
+      details: [`当前结算：${report.billableHours.toFixed(1)}h · ¥${formatYuan(report.totalAmount)}`, '旧链接失效后，需要把新链接重新发给合作伙伴。'],
       onConfirm: async () => {
         const result = await api.rotateMonthlyReportToken(report.id)
         setReports((current) => current.map((item) => (item.id === result.report.id ? result.report : item)))
         const link = `${window.location.origin}/share/${result.report.publicToken}`
         try {
           await window.navigator.clipboard.writeText(link)
-          notify('甲方链接已重置，新链接已复制')
+          notify('合作伙伴链接已重置，新链接已复制')
         } catch {
-          notify(`甲方链接已重置：${link}`)
+          notify(`合作伙伴链接已重置：${link}`)
         }
       },
     })
@@ -8551,7 +8552,7 @@ function App() {
       title: `确定删除「${file?.name ?? '该文件'}」吗？`,
       body: shouldRollbackAcceptance
         ? '这是已验收任务的验收文件。删除后会同时撤回验收状态，任务回到待验收，方便重新补传文件后再次确认。'
-        : '删除后会同时移除 D1 文件记录、R2 源文件和预览图。请只删除误传文件，已验收或已发给甲方的文件建议保留。',
+        : '删除后会同时移除 D1 文件记录、R2 源文件和预览图。请只删除误传文件，已验收或已发给合作伙伴的文件建议保留。',
       confirmText: shouldRollbackAcceptance ? '删除并撤回验收' : '确认删除',
       tone: 'danger',
       details: [file?.task, file?.type, file?.size, shouldRollbackAcceptance ? '状态将改回待验收' : ''].filter(Boolean) as string[],
@@ -8813,7 +8814,7 @@ function App() {
       const link = `${window.location.origin}/share/${report.publicToken}`
       try {
         await window.navigator.clipboard.writeText(link)
-        notify(`结算已锁定 ¥${formatYuan(report.totalAmount)}，甲方链接已复制`)
+        notify(`结算已锁定 ¥${formatYuan(report.totalAmount)}，合作伙伴链接已复制`)
       } catch {
         notify(`结算已锁定 ¥${formatYuan(report.totalAmount)}：${link}`)
       }
@@ -9135,7 +9136,7 @@ function App() {
       <div className="panel-header compact">
         <div>
           <h2>管理员可见</h2>
-          <p>这里包含洞察、结算、收入或系统配置，只对管理员开放。游客和甲方成员可以继续查看公开任务、进展和甲方可见文件。</p>
+          <p>这里包含洞察、结算、收入或系统配置，只对管理员开放。游客和合作伙伴成员可以继续查看公开任务、进展和合作伙伴可见文件。</p>
         </div>
       </div>
       <button className="primary-button" onClick={() => setIsLoginModalOpen(true)}>
@@ -9219,7 +9220,7 @@ function App() {
                     isAdmin ? '最终管理员'
                       : role === 'collaborator' ? '协作者（可录入）'
                       : role === 'viewer' ? '只读全局'
-                      : role === 'client' ? '甲方（当月可见）'
+                      : role === 'client' ? '合作伙伴（当月可见）'
                       : auth ? '访问口令（只读）' : '游客只读'
                   }</span>
                 </div>
@@ -9244,7 +9245,7 @@ function App() {
                 </>
               ) : (
                 <>
-                  <p className="account-menu-note">当前只能查看公开任务、进展和甲方可见文件；编辑、上传、验收和结算需要管理员身份。</p>
+                  <p className="account-menu-note">当前只能查看公开任务、进展和合作伙伴可见文件；编辑、上传、验收和结算需要管理员身份。</p>
                   <button className="account-menu-item" type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); setIsLoginModalOpen(true) }}>
                     <KeyRound size={17} />
                     <span>登录管理员</span>
@@ -11137,14 +11138,14 @@ function DashboardTaskSidebar({
                               </span>
                             ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
-                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">甲方反馈</span>}
+                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">合作伙伴反馈</span>}
                             {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
                             {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
                           {entry.isClientFeedback && (
                             <p className="dashboard-side-entry-meta">
-                              {entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}
+                              {partnerFacingText(entry.feedbackSource)}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}
                             </p>
                           )}
                           <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
@@ -11185,14 +11186,14 @@ function DashboardTaskSidebar({
             <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-feedback" role="tabpanel">
               <div className="dashboard-side-subsection-title">
                 <span>修改建议</span>
-                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录甲方反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
+                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录合作伙伴反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
                   <Plus size={15} />
                   记录反馈
                 </button>}
               </div>
               <p className="dashboard-side-subsection-meta">用于追溯 B01 / B02 等每轮修改意见，默认不计工时。</p>
               {sortedFeedbackEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无甲方反馈；收到批注、聊天截图或版本意见时可单独记录。</p>
+                <p className="dashboard-side-muted">暂无合作伙伴反馈；收到批注、聊天截图或版本意见时可单独记录。</p>
               ) : (
                 <>
                   <div className="dashboard-side-timeline">
@@ -11207,11 +11208,11 @@ function DashboardTaskSidebar({
                           </div>}
                           <div className="dashboard-side-entry-time-row">
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
-                            <span className="progress-entry-tag client-feedback">甲方反馈</span>
+                            <span className="progress-entry-tag client-feedback">合作伙伴反馈</span>
                             {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
                           </div>
                           {renderEntryNote(`${task.id}:feedback:${entry.id}`, entry.note || '未填写修改意见')}
-                          <p className="dashboard-side-entry-meta">{entry.feedbackSource || '甲方'}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>
+                          <p className="dashboard-side-entry-meta">{partnerFacingText(entry.feedbackSource)}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>
                           <em className="progress-time-pill is-uncounted">不计工时</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="反馈附件">
@@ -11257,7 +11258,7 @@ function DashboardTaskSidebar({
               </div>
               {waitingMinutes > 0 && <p className="dashboard-side-subsection-meta">等待合计 {(waitingMinutes / 60).toFixed(1)}h · 仅进入洞察分析</p>}
               {waitingEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无等待记录；等待甲方意见、补资料或确认时可单独记录。</p>
+                <p className="dashboard-side-muted">暂无等待记录；等待合作伙伴意见、补资料或确认时可单独记录。</p>
               ) : (
                 <>
                   <div className="dashboard-side-waiting-list">
@@ -11270,7 +11271,7 @@ function DashboardTaskSidebar({
                             {canDelete && <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>}
                           </div>}
                           <time>{formatWaitingEntryDateTimeRange(task, entry)}</time>
-                          {renderEntryNote(`${task.id}:waiting:${entry.id}`, entry.note || entry.reason || '等待甲方确认')}
+                          {renderEntryNote(`${task.id}:waiting:${entry.id}`, partnerFacingText(entry.note || entry.reason, '等待合作伙伴确认'))}
                           <em>{minutes > 0 ? `等待 ${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h` : '等待中'} · 不计结算</em>
                         </article>
                       )
@@ -11954,7 +11955,7 @@ function TaskProgressModal({
   // 关 = 只是把任务分阶段提交，不算改稿。仅用于画像/AI 分析，不影响计时与结算。
   const [isRevisionRound, setIsRevisionRound] = useState(isFeedbackMode ? editingEntry?.isRevision !== false : Boolean(editingEntry?.isRevision))
   const [feedbackVersion, setFeedbackVersion] = useState(editingEntry?.feedbackVersion ?? '')
-  const [feedbackSource, setFeedbackSource] = useState(editingEntry?.feedbackSource ?? '甲方')
+  const [feedbackSource, setFeedbackSource] = useState(partnerFacingText(editingEntry?.feedbackSource))
   const [isAcceptanceBaseExpanded, setIsAcceptanceBaseExpanded] = useState(false)
   const acceptanceBaseRef = useRef<HTMLElement | null>(null)
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialProgressDraft.feedbackRating ?? '')
@@ -12127,7 +12128,7 @@ function TaskProgressModal({
         isUncounted: true,
         isRevision: isRevisionRound,
         feedbackVersion: feedbackVersion.trim(),
-        feedbackSource: feedbackSource.trim() || '甲方',
+        feedbackSource: feedbackSource.trim() || '合作伙伴',
       } as TimeEntry
     }
     // 不计工时的普通进展：时间由用户自选（用于记录与排序），计 0 工时。未选时间则锚到当前时刻。
@@ -12653,7 +12654,7 @@ function TaskProgressModal({
     : isWaitingMode
       ? '记录非工作的等待开始时间，仅用于洞察分析，不计入结算工时'
       : isFeedbackMode
-        ? '记录甲方给出的版本反馈、批注意见或聊天截图，默认不计工时但进入生命周期'
+        ? '记录合作伙伴给出的版本反馈、批注意见或聊天截图，默认不计工时但进入生命周期'
       : isEditingEntry
         ? '修改这段记录的内容和时间'
         : `${task.title} · 按时间段计时，工时自动累计并计入结算`
@@ -12763,7 +12764,7 @@ function TaskProgressModal({
               ? '验收进展已撤回'
               : isEditingEntry
                 ? (isWaitingMode ? '等待记录已修改' : isFeedbackMode ? '反馈记录已修改' : '进展记录已修改')
-                : (isWaitingMode ? '等待记录' : isFeedbackMode ? '甲方反馈' : '进展更新'),
+                : (isWaitingMode ? '等待记录' : isFeedbackMode ? '合作伙伴反馈' : '进展更新'),
             body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
             hours: 0,
             visible: false,
@@ -13342,7 +13343,7 @@ function TaskProgressModal({
           <small>只用于生命周期追溯，不计入结算工时</small>
         </div>
         <VoiceScheduleButton
-          context="甲方反馈发生时间"
+          context="合作伙伴反馈发生时间"
           currentStart={progressStartValue}
           onApply={applyVoiceSingleProgressTime}
         />
@@ -13374,7 +13375,7 @@ function TaskProgressModal({
           </div>
         </div>
       </div>
-      <p className="progress-lite-duration" role="status">保存后显示为一条「甲方反馈」节点，可附截图 / 批注文件追溯。</p>
+      <p className="progress-lite-duration" role="status">保存后显示为一条「合作伙伴反馈」节点，可附截图 / 批注文件追溯。</p>
     </section>
   )
 
@@ -13759,22 +13760,15 @@ function TaskProgressModal({
                       placeholder="例如：B01 / B02 / B03"
                     />
                   </label>
-                  <div className="progress-feedback-source" role="group" aria-label="反馈来源">
+                  <label className="progress-feedback-source">
                     <span>反馈来源</span>
-                    <div>
-                      {clientFeedbackSources.map((source) => (
-                        <button
-                          type="button"
-                          key={source}
-                          className={feedbackSource === source ? 'active' : ''}
-                          aria-pressed={feedbackSource === source}
-                          onClick={() => setFeedbackSource(source)}
-                        >
-                          {source}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                    <input
+                      value={feedbackSource}
+                      onChange={(event) => setFeedbackSource(event.target.value)}
+                      placeholder="例如：合作伙伴 / 需求人 / 项目负责人"
+                      maxLength={80}
+                    />
+                  </label>
                 </section>
                 {feedbackTimeFields}
               </>
@@ -13816,7 +13810,7 @@ function TaskProgressModal({
                     updateActiveDraft((current) => ({ ...current, note: value }))
                   }
                 }}
-                placeholder={isAcceptanceMode ? '可补充本次收尾重点；AI 会结合全部历史进展，汇总项目更新、修改与最终交付。' : isFeedbackMode ? '例如：B01 反馈：标题需要更突出，主视觉换成更正式的蓝色，补充数据安全痛点。' : '例如：按甲方反馈调整封面配色，导出终稿'}
+                placeholder={isAcceptanceMode ? '可补充本次收尾重点；AI 会结合全部历史进展，汇总项目更新、修改与最终交付。' : isFeedbackMode ? '例如：B01 反馈：标题需要更突出，主视觉换成更正式的蓝色，补充数据安全痛点。' : '例如：按合作伙伴反馈调整封面配色，导出终稿'}
               />
               {(progressAiSuggestion || progressAiError || isProgressAiLoading) && (
                 <div className="ai-suggestion-panel task-text-ai-panel">
@@ -14344,7 +14338,7 @@ function TaskProgressModal({
                     )}
                     <label className="acceptance-feedback-note">
                       <span>体感评价</span>
-                      <textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="例如：需求清晰，但等待甲方确认主色耗时较长。" />
+                      <textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="例如：需求清晰，但等待合作伙伴确认主色耗时较长。" />
                     </label>
                   </div>
                 </section>
@@ -15935,7 +15929,7 @@ function InsightsView({
   ]
   const summaryReportActions = [
     riskRows.length > 0 ? '先打开项目诊断逐条核对异常任务，修正进展、附件或验收状态。' : '继续保持分段计时和验收附件留存，方便后续结算复盘。',
-    waitingHours > 0 ? '等待原因要写入等待记录，避免 AI 把甲方反馈等待误判为设计执行时间。' : '若后续出现甲方反馈停滞，及时补一条等待记录。',
+    waitingHours > 0 ? '等待原因要写入等待记录，避免 AI 把合作伙伴反馈等待误判为设计执行时间。' : '若后续出现合作伙伴反馈停滞，及时补一条等待记录。',
     leadingType ? `把「${leadingType.label}」沉淀成报价和交付模板，下次同类任务直接复用。` : '先积累 3 条以上同类任务，再判断报价与排期模板。',
   ]
   const reportUnit = period === 'week' ? '本周' : period === 'month' ? '本月' : '本期'
@@ -16727,7 +16721,7 @@ function InsightsView({
             if (topTags.some(([tag]) => tag === '沟通成本高') || avgRevisions > 1.5) adviceLines.push('沟通 / 改稿成本偏高：约定每轮反馈时限与改稿轮次上限，超出按新增工时计。')
             if (topTags.some(([tag]) => tag === '定价偏低')) adviceLines.push('历史标记「定价偏低」：该需求人项目建议重新评估单价。')
             if (c.waiting > 2) adviceLines.push('等待耗时偏高：排期预留缓冲，并把等待计入洞察（不计结算）。')
-            if (c.acceptanceFiles === 0 && c.accepted > 0) adviceLines.push('验收附件偏少：主动留存甲方确认截图 / 最终稿，作为后续对账与画像依据。')
+            if (c.acceptanceFiles === 0 && c.accepted > 0) adviceLines.push('验收附件偏少：主动留存合作伙伴确认截图 / 最终稿，作为后续对账与画像依据。')
             if (adviceLines.length === 0) adviceLines.push('链路顺畅，可作为优先排期对象，沿用当前报价与验收资料要求。')
             return (
             <>
@@ -16739,7 +16733,7 @@ function InsightsView({
                 <div className="cp-head">
                   <b>{c.name}</b>
                   <span>{c.projects} 个项目 · {c.hours.toFixed(1)}h · 综合评级 {grade}</span>
-                  <span className={`cp-resp ${c.waiting > 0 ? 'r-甲方' : 'r-共同'}`}>{responsibility}</span>
+                  <span className={`cp-resp ${c.waiting > 0 ? 'r-partner' : 'r-共同'}`}>{responsibility}</span>
                 </div>
                 <div className="cp-stats">
                   <div className="cp-stat"><span className="k">合作项目</span><b>{c.projects}</b></div>
@@ -16817,7 +16811,7 @@ function InsightsView({
             </div>
             <label className="field">
               <span>补充说明（选填）</span>
-              <textarea value={hourCorrectionNote} onChange={(event) => setHourCorrectionNote(event.target.value)} placeholder="例如：甲方在第二轮新增了 3 个横版尺寸，不属于原始任务范围。" />
+              <textarea value={hourCorrectionNote} onChange={(event) => setHourCorrectionNote(event.target.value)} placeholder="例如：合作伙伴在第二轮新增了 3 个横版尺寸，不属于原始任务范围。" />
             </label>
             {hourCorrectionError && <p className="error-text">{hourCorrectionError}</p>}
           </div>
@@ -16849,7 +16843,7 @@ function InsightsView({
                 <option value="pending">等待确认</option><option value="accepted">直接接受</option><option value="adjusted">调整后接受</option><option value="rejected">未接受</option>
               </select>
             </label>
-            <label className="field"><span>补充说明（选填）</span><textarea value={hourQuoteNote} onChange={(event) => setHourQuoteNote(event.target.value)} placeholder="例如：甲方缩减一个尺寸后按 1500 元确认。" /></label>
+            <label className="field"><span>补充说明（选填）</span><textarea value={hourQuoteNote} onChange={(event) => setHourQuoteNote(event.target.value)} placeholder="例如：合作伙伴缩减一个尺寸后按 1500 元确认。" /></label>
             {hourQuoteError && <p className="error-text">{hourQuoteError}</p>}
           </div>
           <footer className="modal-footer">
@@ -17418,12 +17412,12 @@ function ReportsView({
           </div>
         </div>
         <p className="report-flow-hint">
-          当前查看：{selectedMonthLabel}。核对下方结算单 → 锁定结算生成甲方分享链接；历史记录可重新查看并下载 User 工时表。
+          当前查看：{selectedMonthLabel}。核对下方结算单 → 锁定结算生成合作伙伴分享链接；历史记录可重新查看并下载 User 工时表。
         </p>
         <div className="report-bar-actions">
           <button className="primary-button" onClick={onLockReport} disabled={selectedMonth !== currentMonth.value}>
             <CheckCircle2 size={18} />
-            {selectedMonth === currentMonth.value ? '锁定结算并生成甲方链接' : '历史结算已锁定'}
+            {selectedMonth === currentMonth.value ? '锁定结算并生成合作伙伴链接' : '历史结算已锁定'}
           </button>
           <button className="ghost-button" onClick={() => void handleExportPdf()} disabled={isPdfExporting}>
             <Download size={18} />
@@ -17453,7 +17447,7 @@ function ReportsView({
                 </span>
                 <small>
                   锁定于 {report.generatedAt || '—'}
-                  {report.viewCount > 0 ? ` · 甲方已查看 ${report.viewCount} 次（最近 ${report.viewedAt}）` : ' · 甲方尚未查看'}
+                  {report.viewCount > 0 ? ` · 合作伙伴已查看 ${report.viewCount} 次（最近 ${report.viewedAt}）` : ' · 合作伙伴尚未查看'}
                 </small>
                 <div className="report-history-actions">
                   <button className="ghost-button compact-button" onClick={() => setSelectedReportMonth(report.month)}>
@@ -17462,14 +17456,14 @@ function ReportsView({
                   <button className="ghost-button compact-button" aria-label={`下载 ${report.month} User 表`} onClick={() => void handleExportUserSheet(report.month)}>
                     下载 User 表
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`复制 ${report.month} 甲方链接`} onClick={() => onCopyShareLink(report.publicToken)}>
+                  <button className="ghost-button compact-button" aria-label={`复制 ${report.month} 合作伙伴链接`} onClick={() => onCopyShareLink(report.publicToken)}>
                     复制链接
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`重置 ${report.month} 甲方链接`} onClick={() => onRotateReportToken(report)}>
+                  <button className="ghost-button compact-button" aria-label={`重置 ${report.month} 合作伙伴链接`} onClick={() => onRotateReportToken(report)}>
                     重置链接
                   </button>
-                  <a className="ghost-button compact-button" aria-label={`打开 ${report.month} 甲方页面`} href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
-                    打开甲方页
+                  <a className="ghost-button compact-button" aria-label={`打开 ${report.month} 合作伙伴页面`} href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
+                    打开合作伙伴页
                   </a>
                 </div>
               </div>
@@ -17654,7 +17648,7 @@ function ReportsView({
             {plannedCount > 0 ? `，计划中 ${plannedCount} 项（未计费）` : ''}
             {freeTasks.length > 0 ? `，另含 ${freeTasks.length} 项不计费协助` : ''}。
           </p>
-          <p>本回单由系统根据任务与工时记录自动生成，验收状态以甲方确认为准。</p>
+          <p>本回单由系统根据任务与工时记录自动生成，验收状态以合作伙伴确认为准。</p>
         </div>
 
         {uncountedItems.length > 0 && (
@@ -18000,7 +17994,7 @@ function LocalCliConnectionPanel() {
         <div className="panel-header compact local-cli-panel-header">
           <div>
             <h2>本机 CLI 连接</h2>
-            <p>识别当前网页登录电脑上的 Agent CLI；设备按登录账号隔离，不会把甲方命令发送到其他人的电脑。</p>
+            <p>识别当前网页登录电脑上的 Agent CLI；设备按登录账号隔离，不会把合作伙伴的命令发送到其他人的电脑。</p>
           </div>
           <div className="local-cli-header-actions">
             <a className="ghost-button compact-button" href="/giverny-bridge.mjs" download>下载连接器</a>
@@ -18254,7 +18248,7 @@ function SettingsView({
   const tokenScopeOptions: Array<{ value: TokenScope; label: string; desc: string }> = [
     { value: 'collaborator', label: '协作者', desc: '看管理员所见的全部数据，可记进展、传附件、改任务基本信息；不能删除/作废任务、锁定结算、改 AI Key、管理口令、改密码、导出或清空数据。' },
     { value: 'viewer', label: '只读全局', desc: '看管理员所见的全部数据，但完全只读——什么都改不了。适合给对接测试或老板审阅。' },
-    { value: 'client', label: '甲方', desc: '看当月任务、进展、交付件和当月结算回单（含金额），只读；看不到往月与全年财务、看不到后台配置。' },
+    { value: 'client', label: '合作伙伴', desc: '看当月任务、进展、交付件和当月结算回单（含金额），只读；看不到往月与全年财务、看不到后台配置。' },
     { value: 'guest', label: '对客访客', desc: '只看进展和对客可见的交付件，只读。适合对外分享。' },
     { value: 'mcp-read', label: 'MCP 只读', desc: '仅允许外部 AI 客户端通过 MCP 查询任务、财务、工时和任务详情；不能登录网站，也不能执行任何写入。' },
   ]
@@ -19721,7 +19715,7 @@ function SettingsView({
               <div className="token-create">
                 <label className="field">
                   <span>备注</span>
-                  <input value={tokenLabel} placeholder="例如：协作设计师 / 甲方财务 / 对接测试" onChange={(event) => setTokenLabel(event.target.value)} />
+                  <input value={tokenLabel} placeholder="例如：协作设计师 / 合作伙伴财务 / 对接测试" onChange={(event) => setTokenLabel(event.target.value)} />
                 </label>
                 <label className="field">
                   <span>权限</span>
@@ -21792,7 +21786,7 @@ function NewTaskModal({
             onDrop={handleBriefDrop}
           >
             <span className="field-label-row">
-              <span>甲方文案附件（选填）</span>
+              <span>合作伙伴文案附件（选填）</span>
             </span>
             <div className="brief-files-list">
               {briefFiles.map((f) => (
@@ -21839,7 +21833,7 @@ function NewTaskModal({
                   disabled={isBriefLoading}
                 >
                   <Plus size={briefFiles.length > 0 ? 16 : 14} />
-                  {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传、拖拽或 Command+V 粘贴甲方文案到这里')}
+                  {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传、拖拽或 Command+V 粘贴合作伙伴文案到这里')}
                   {briefFiles.length > 0 && isBriefLoading && <small>读取中…</small>}
                   {briefFiles.length === 0 && <small>支持 Word .docx / PPT .pptx / PDF / txt / 图片，最多 6 个</small>}
                 </button>
