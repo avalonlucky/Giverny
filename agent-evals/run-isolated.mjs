@@ -642,6 +642,27 @@ async function runSiteWideModelPriorityCheck(cookie) {
     throw new Error(`Site-wide vision route ignored selected multimodal model: ${JSON.stringify(visionRequests.slice(0, 3))}`)
   }
 
+  const preservedNameRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const preservedNameResponse = await fetch(`${base}/api/ai/attachment-name`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      fileName: '昂楷52315模型V1.0B01.pdf',
+      mimeType: 'application/pdf',
+      task: { id: 92001, title: '模型展板设计', type: '传播类 / 文化墙' },
+    }),
+  })
+  const preservedNamePayload = await preservedNameResponse.json().catch(() => ({}))
+  const preservedNameRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  if (
+    !preservedNameResponse.ok
+    || preservedNamePayload.unchanged !== true
+    || preservedNamePayload.suggestedName !== '昂楷52315模型V1.0B01.pdf'
+    || (preservedNameRequestsAfter.requests || []).length !== (preservedNameRequestsBefore.requests || []).length
+  ) {
+    throw new Error(`Attachment name preservation failed: ${preservedNameResponse.status} ${JSON.stringify(preservedNamePayload)}`)
+  }
+
   const fallbackNameResponse = await fetch(`${base}/api/ai/attachment-name`, {
     method: 'POST',
     headers,

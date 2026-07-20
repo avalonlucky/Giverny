@@ -4045,6 +4045,7 @@ function AttachmentHoverThumbnail({
   name,
   type,
   previewUrl,
+  previewFallback = false,
   sourceUrl,
   sourceFile,
   compact = false,
@@ -4053,6 +4054,7 @@ function AttachmentHoverThumbnail({
   name: string
   type?: string
   previewUrl?: string
+  previewFallback?: boolean
   sourceUrl?: string
   sourceFile?: File
   compact?: boolean
@@ -4066,20 +4068,21 @@ function AttachmentHoverThumbnail({
   } | null>(null)
   const inferred = inferFileType({ name, type })
   const extension = inferred.type
-  const pdfSourceUrl = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
-  const pdfSourceFile = !previewUrl && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceFile : undefined
+  const hasUsablePreview = Boolean(previewUrl && !previewFallback)
+  const pdfSourceUrl = !hasUsablePreview && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
+  const pdfSourceFile = !hasUsablePreview && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceFile : undefined
   const pdfSourceKey = pdfSourceFile
     ? `file:${pdfSourceFile.name}:${pdfSourceFile.size}:${pdfSourceFile.lastModified}`
     : pdfSourceUrl
-  const psdSourceUrl = !previewUrl && inferred.kind === 'psd' ? sourceUrl : ''
-  const officeSourceUrl = !previewUrl && inferred.kind === 'office' ? sourceUrl : ''
-  const videoSourceUrl = !previewUrl && inferred.kind === 'video' ? sourceUrl : ''
+  const psdSourceUrl = !hasUsablePreview && inferred.kind === 'psd' ? sourceUrl : ''
+  const officeSourceUrl = !hasUsablePreview && inferred.kind === 'office' ? sourceUrl : ''
+  const videoSourceUrl = !hasUsablePreview && inferred.kind === 'video' ? sourceUrl : ''
   const currentPdfPreview = generatedPdfPreview?.source === pdfSourceKey ? generatedPdfPreview : null
-  const effectivePreviewUrl = previewUrl || (currentPdfPreview?.status === 'ready' ? currentPdfPreview.url ?? '' : '')
+  const effectivePreviewUrl = hasUsablePreview ? previewUrl : (currentPdfPreview?.status === 'ready' ? currentPdfPreview.url ?? '' : '')
   const pdfPreviewFailed = currentPdfPreview?.status === 'failed'
 
   useEffect(() => {
-    if ((!pdfSourceUrl && !pdfSourceFile) || previewUrl || !pdfSourceKey) {
+    if ((!pdfSourceUrl && !pdfSourceFile) || hasUsablePreview || !pdfSourceKey) {
       return
     }
     let cancelled = false
@@ -4126,7 +4129,7 @@ function AttachmentHoverThumbnail({
         URL.revokeObjectURL(objectUrl)
       }
     }
-  }, [name, pdfSourceFile, pdfSourceKey, pdfSourceUrl, previewUrl])
+  }, [hasUsablePreview, name, pdfSourceFile, pdfSourceKey, pdfSourceUrl])
 
   const media = effectivePreviewUrl
     ? <img src={effectivePreviewUrl} alt="" loading="lazy" />
@@ -4736,6 +4739,7 @@ function SemanticSearchModal({
                             name={file.name}
                             type={fileType}
                             previewUrl={previewUrl}
+                            previewFallback={Boolean(file.previewFallback)}
                             sourceUrl={documentSourceUrl}
                             compact
                             onOpen={() => onJumpToFile(file)}
@@ -11081,6 +11085,7 @@ function DashboardTaskSidebar({
                                   name={file.name}
                                   type={fileType}
                                   previewUrl={previewUrl}
+                                  previewFallback={Boolean(file.previewFallback)}
                                   sourceUrl={documentSourceUrl}
                                   compact
                                   onOpen={() => onPreviewFile(file)}
@@ -11155,6 +11160,7 @@ function DashboardTaskSidebar({
                                     name={file.name}
                                     type={fileType}
                                     previewUrl={previewUrl}
+                                    previewFallback={Boolean(file.previewFallback)}
                                     sourceUrl={documentSourceUrl}
                                     compact
                                     onOpen={() => onPreviewFile(file)}
@@ -11219,6 +11225,7 @@ function DashboardTaskSidebar({
                                     name={file.name}
                                     type={fileType}
                                     previewUrl={previewUrl}
+                                    previewFallback={Boolean(file.previewFallback)}
                                     sourceUrl={documentSourceUrl}
                                     compact
                                     onOpen={() => onPreviewFile(file)}
@@ -12425,13 +12432,16 @@ function TaskProgressModal({
         recentFileNames: files.filter((file) => file.taskId === task.id).map((file) => file.name).slice(-12),
         task,
       })
+      const unchanged = suggestion.unchanged || !suggestion.suggestedName || suggestion.suggestedName === attachment.name
       setPendingAttachments((current) => current.map((item) =>
-        item.id === attachmentId ? { ...item, aiLoading: false, aiSuggestion: suggestion } : item,
+        item.id === attachmentId ? { ...item, aiLoading: false, aiSuggestion: unchanged ? undefined : suggestion } : item,
       ))
-      pendingAttachmentAiNameAppliedRef.current[attachmentId] = {
-        sourceInput: sanitizeAttachmentName(attachment.name, attachment.originalName),
-        aiOutput: suggestion.suggestedName,
-        applied: false,
+      if (!unchanged) {
+        pendingAttachmentAiNameAppliedRef.current[attachmentId] = {
+          sourceInput: sanitizeAttachmentName(attachment.name, attachment.originalName),
+          aiOutput: suggestion.suggestedName,
+          applied: false,
+        }
       }
     } catch {
       setPendingAttachments((current) => current.map((item) =>
@@ -12549,14 +12559,18 @@ function TaskProgressModal({
         recentFileNames: files.filter((item) => item.taskId === task.id && item.id !== file.id).map((item) => item.name).slice(-12),
         task,
       })
+      const currentName = sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name)
+      const unchanged = suggestion.unchanged || !suggestion.suggestedName || suggestion.suggestedName === currentName
       setExistingAttachmentAiState((current) => ({
         ...current,
-        [file.id]: { loading: false, suggestion },
+        [file.id]: { loading: false, suggestion: unchanged ? undefined : suggestion },
       }))
-      existingAttachmentAiNameAppliedRef.current[file.id] = {
-        sourceInput: sanitizeAttachmentName(existingAttachmentDrafts[file.id] ?? file.name, file.name),
-        aiOutput: suggestion.suggestedName,
-        applied: false,
+      if (!unchanged) {
+        existingAttachmentAiNameAppliedRef.current[file.id] = {
+          sourceInput: currentName,
+          aiOutput: suggestion.suggestedName,
+          applied: false,
+        }
       }
     } catch {
       setExistingAttachmentAiState((current) => ({
@@ -13959,6 +13973,7 @@ function TaskProgressModal({
                             name={file.name}
                             type={fileType}
                             previewUrl={previewUrl}
+                            previewFallback={Boolean(file.previewFallback)}
                             sourceUrl={documentSourceUrl}
                             onOpen={() => onPreviewFile(file)}
                           />
@@ -14003,11 +14018,7 @@ function TaskProgressModal({
                             {aiState.error && <small className="attachment-ai-error">{aiState.error}</small>}
                             {aiState.suggestion && (
                               <div className="attachment-ai-suggestion">
-                                <span>
-                                  建议：{aiState.suggestion.suggestedName}
-                                  {aiState.suggestion.sourceLabel ? ` · 当前使用：${aiState.suggestion.sourceLabel}` : ''}
-                                  {aiState.suggestion.reason ? ` · ${aiState.suggestion.reason}` : ''}
-                                </span>
+                                <span>建议：{aiState.suggestion.suggestedName}</span>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -14128,11 +14139,7 @@ function TaskProgressModal({
                         {attachment.aiError && <small className="attachment-ai-error">{attachment.aiError}</small>}
                         {attachment.aiSuggestion && (
                           <div className="attachment-ai-suggestion">
-                            <span>
-                              建议：{attachment.aiSuggestion.suggestedName}
-                              {attachment.aiSuggestion.sourceLabel ? ` · 当前使用：${attachment.aiSuggestion.sourceLabel}` : ''}
-                              {attachment.aiSuggestion.reason ? ` · ${attachment.aiSuggestion.reason}` : ''}
-                            </span>
+                            <span>建议：{attachment.aiSuggestion.suggestedName}</span>
                             <button
                               type="button"
                               onClick={() => {
@@ -15439,7 +15446,7 @@ function FileThumbnailPreview({ file, inspector = false }: { file: FileAsset; in
   const previewUrl = authedPreviewUrl(file.previewUrl)
   const sourceUrl = fileDocumentPreviewSource(file)
 
-  if (previewUrl || (isInlineImageFileType(fileType) && sourceUrl)) {
+  if ((previewUrl && !file.previewFallback) || (isInlineImageFileType(fileType) && sourceUrl)) {
     return <img src={previewUrl ?? sourceUrl} alt={file.name} loading="lazy" />
   }
 
@@ -20368,7 +20375,7 @@ function FilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => v
   const sourceUrl = fileDocumentPreviewSource(file)
   const previewUrl = authedPreviewUrl(file.previewUrl ?? file.sourceUrl)
   const isImage = isInlineImageFileType(fileType)
-  const isRasterPreview = Boolean(file.previewUrl) && ['PSD', 'AI'].includes(fileType)
+  const isRasterPreview = Boolean(file.previewUrl) && !file.previewFallback && ['PSD', 'AI'].includes(fileType)
   const isPdfLike = isInlineDocumentFileType(fileType)
   const isVideo = videoFileTypes.has(fileType)
   const isOffice = isOfficeFileType(fileType)

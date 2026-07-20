@@ -13030,6 +13030,21 @@ async function suggestAttachmentNameWithAi(env: Env, request: Request) {
   }
   const dotIndex = fileName.lastIndexOf('.')
   const extension = dotIndex > 0 && dotIndex < fileName.length - 1 ? fileName.slice(dotIndex).toLowerCase() : ''
+  const originalBaseName = (dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName).trim()
+  // 已有中文主体和明确版本号的名称通常是用户确认过的交付命名，例如
+  // “昂楷52315模型V1.0B01.pdf”。这类名称不应再消耗模型并制造无意义建议。
+  const hasDeliberateVersionedName = originalBaseName.length >= 8
+    && originalBaseName.length <= 48
+    && /[一-龥]/.test(originalBaseName)
+    && /[vV]\s*\d+(?:[._-]\d+)*(?:[A-Za-z]\d+)?/.test(originalBaseName)
+  if (hasDeliberateVersionedName) {
+    return ok({
+      suggestedName: fileName,
+      reason: '原文件名已包含完整主体和版本号',
+      confidence: '高',
+      unchanged: true,
+    })
+  }
   const imageBase64 = String(body.imageBase64 ?? '').trim()
   const mimeType = String(body.mimeType ?? '').trim() || 'image/png'
   const recentFileNames = Array.isArray(body.recentFileNames)

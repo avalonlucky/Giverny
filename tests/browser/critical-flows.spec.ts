@@ -369,6 +369,7 @@ test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ pag
     },
   ])
 
+  await expect(acceptanceDialog.getByRole('button', { name: '预览 验收预览.pdf' }).locator('img')).toBeVisible()
   await page.getByRole('button', { name: '预览 验收预览.pdf' }).click()
   const pdfDialog = page.getByRole('dialog', { name: '验收预览.pdf' })
   const pdfCanvas = pdfDialog.locator('canvas[data-pdf-page="1"]')

@@ -542,6 +542,7 @@ export type AttachmentNameSuggestion = {
   suggestedName: string
   reason: string
   confidence: '低' | '中' | '高'
+  unchanged?: boolean
   fallbackUsed?: boolean
   sourceLabel?: string
 }
