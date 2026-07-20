@@ -30,7 +30,6 @@ import {
   FileArchive,
   FileImage,
   FileText,
-  NotebookText,
   Folder,
   FolderKanban,
   Bot,
@@ -11958,7 +11957,6 @@ function TaskProgressModal({
   const [feedbackSource, setFeedbackSource] = useState(editingEntry?.feedbackSource ?? '甲方')
   const [isAcceptanceBaseExpanded, setIsAcceptanceBaseExpanded] = useState(false)
   const acceptanceBaseRef = useRef<HTMLElement | null>(null)
-  const [taskReferenceMode, setTaskReferenceMode] = useState<'closed' | 'hover' | 'pinned'>('closed')
   const [feedbackRating, setFeedbackRating] = useState<TaskFeedbackRating | ''>(initialProgressDraft.feedbackRating ?? '')
   const [feedbackTags, setFeedbackTags] = useState<TaskFeedbackTag[]>(initialProgressDraft.feedbackTags ?? [])
   const [feedbackNote, setFeedbackNote] = useState(initialProgressDraft.feedbackNote ?? '')
@@ -12021,7 +12019,6 @@ function TaskProgressModal({
       acceptanceBaseRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
   }
-  const taskReferenceVisible = taskReferenceMode !== 'closed'
   const shouldIncludeAcceptanceDraftEntry = !isWaitingMode && !isFeedbackMode && !isEditingEntry && hasTouchedSchedule && hasDraftTimeEntry && !draftConflict && countAcceptanceTime
   // 本次是否计入工时：等待恒计；验收看 countAcceptanceTime；普通进展看 countProgressTime
   const timeCounts = isWaitingMode ? true : isFeedbackMode ? false : isAcceptanceMode ? countAcceptanceTime : countProgressTime
@@ -13672,39 +13669,9 @@ function TaskProgressModal({
           <h2 id="task-progress-title">{isWaitingMode ? '记录等待' : isFeedbackMode ? (isEditingEntry ? '编辑反馈' : '记录反馈') : isAcceptanceRevisionMode ? '编辑验收进展' : isAcceptanceMode ? '记录验收进展' : '记录进展'}</h2>
           {progressHeaderHint && <small>{progressHeaderHint}</small>}
         </div>
-        <div className="progress-lite-header-actions">
-          <div
-            className="progress-task-reference"
-            onMouseEnter={() => setTaskReferenceMode((current) => current === 'closed' ? 'hover' : current)}
-            onMouseLeave={() => setTaskReferenceMode((current) => current === 'hover' ? 'closed' : current)}
-          >
-            <button
-              type="button"
-              className="icon-button progress-task-reference-trigger"
-              aria-label="查看任务详情参考"
-              aria-expanded={taskReferenceVisible}
-              title="查看任务详情参考"
-              onFocus={() => setTaskReferenceMode((current) => current === 'closed' ? 'hover' : current)}
-              onClick={() => setTaskReferenceMode((current) => current === 'pinned' ? 'closed' : 'pinned')}
-            >
-              <NotebookText size={17} />
-            </button>
-            {taskReferenceVisible && (
-              <aside className="progress-task-reference-popover" aria-label="任务详情参考">
-                <strong>任务详情</strong>
-                <dl>
-                  <div className="wide"><dt>任务需求</dt><dd>{task.requirement || '未填写'}</dd></div>
-                  <div><dt>预计开始</dt><dd>{formatPlanDateTime(task.date)}</dd></div>
-                  <div><dt>预计交付</dt><dd>{formatPlanDateTime(task.estimatedDate || task.date)}</dd></div>
-                  <div><dt>预估工时</dt><dd>{formatDurationZh(Math.max(0, Math.round(task.estimatedHours * 60)))}</dd></div>
-                </dl>
-              </aside>
-            )}
-          </div>
-          <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
+        <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
+          <X size={18} />
+        </button>
       </header>
       <div className={`progress-lite-body ${isWaitingMode ? 'waiting-mode' : ''} ${isFeedbackMode ? 'feedback-mode' : ''} ${isAcceptanceMode ? 'acceptance-mode' : ''}`}>
         {isWaitingMode ? (
@@ -13751,7 +13718,7 @@ function TaskProgressModal({
                 </em>
               </div>
             )}
-            {isAcceptanceMode && (
+            {!isFeedbackMode && (
               <section className="progress-acceptance-base" ref={acceptanceBaseRef}>
                 <button
                   type="button"
@@ -13772,6 +13739,8 @@ function TaskProgressModal({
                     <div><span>验收人</span><strong>{task.reviewer || task.requester || '待确认'}</strong></div>
                     <div><span>预计开始</span><strong>{formatPlanDateTime(task.date)}</strong></div>
                     <div><span>预计交付</span><strong>{formatPlanDateTime(task.estimatedDate || task.date)}</strong></div>
+                    <div><span>预估工时</span><strong>{formatDurationZh(Math.max(0, Math.round(task.estimatedHours * 60)))}</strong></div>
+                    <div><span>实际工时</span><strong>{formatDurationZh(Math.max(0, Math.round(task.actualHours * 60)))}</strong></div>
                     <div><span>实际交付</span><strong>{task.actualDeliveryDate ? formatPlanDateTime(task.actualDeliveryDate) : '待验收确认'}</strong></div>
                     <div className="wide"><span>需求描述</span><strong>{task.requirement || '未填写'}</strong></div>
                   </div>
