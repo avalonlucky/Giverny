@@ -2577,6 +2577,9 @@ type ProgressRecordMode = 'progress' | 'waiting' | 'feedback'
 const partnerFacingText = (value: string | undefined, fallback = '合作伙伴') =>
   (value?.trim() || fallback).replaceAll('甲方', '合作伙伴')
 
+const feedbackEntryLabel = (entry: Pick<TimeEntry, 'feedbackSource' | 'isRevision'>) =>
+  `${partnerFacingText(entry.feedbackSource)}反馈${entry.isRevision ? ' · 计入改稿轮次' : ''}`
+
 type ProgressModalTarget = {
   taskId: number
   mode: ProgressRecordMode
@@ -11138,16 +11141,11 @@ function DashboardTaskSidebar({
                               </span>
                             ))}
                             {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
-                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">合作伙伴反馈</span>}
+                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">{feedbackEntryLabel(entry)}</span>}
                             {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
                             {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
                           </div>
                           {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          {entry.isClientFeedback && (
-                            <p className="dashboard-side-entry-meta">
-                              {partnerFacingText(entry.feedbackSource)}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}
-                            </p>
-                          )}
                           <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="本段进展附件">
@@ -11208,11 +11206,10 @@ function DashboardTaskSidebar({
                           </div>}
                           <div className="dashboard-side-entry-time-row">
                             <time>{formatEntryDateTimeRange(task, entry)}</time>
-                            <span className="progress-entry-tag client-feedback">合作伙伴反馈</span>
+                            <span className="progress-entry-tag client-feedback">{feedbackEntryLabel(entry)}</span>
                             {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
                           </div>
                           {renderEntryNote(`${task.id}:feedback:${entry.id}`, entry.note || '未填写修改意见')}
-                          <p className="dashboard-side-entry-meta">{partnerFacingText(entry.feedbackSource)}反馈{entry.isRevision ? ' · 计入改稿轮次' : ''}</p>
                           <em className="progress-time-pill is-uncounted">不计工时</em>
                           {entryFiles.length > 0 && (
                             <div className="dashboard-side-entry-files" aria-label="反馈附件">
@@ -12765,7 +12762,7 @@ function TaskProgressModal({
               ? '验收进展已撤回'
               : isEditingEntry
                 ? (isWaitingMode ? '等待记录已修改' : isFeedbackMode ? '反馈记录已修改' : '进展记录已修改')
-                : (isWaitingMode ? '等待记录' : isFeedbackMode ? '合作伙伴反馈' : '进展更新'),
+                : (isWaitingMode ? '等待记录' : isFeedbackMode ? `${partnerFacingText(feedbackSource)}反馈` : '进展更新'),
             body: body || `上传过程附件：${finalizedUploadedNames.join('、')}`,
             hours: 0,
             visible: false,

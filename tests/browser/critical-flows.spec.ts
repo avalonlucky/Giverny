@@ -379,9 +379,17 @@ test('反馈来源支持自由输入且使用合作伙伴称呼', async ({ page 
   const dialog = page.getByRole('dialog', { name: '记录反馈' })
   const sourceInput = dialog.getByLabel('反馈来源')
   await expect(sourceInput).toHaveValue('合作伙伴')
-  await sourceInput.fill('项目负责人')
-  await expect(sourceInput).toHaveValue('项目负责人')
+  await sourceInput.fill('李敏波')
+  await expect(sourceInput).toHaveValue('李敏波')
   await expect(dialog.getByText('甲方', { exact: false })).toHaveCount(0)
+  await dialog.getByLabel('反馈版本').fill('B01')
+  await dialog.getByRole('textbox', { name: '修改意见' }).fill('调整信息排序和版式结构')
+  await dialog.getByRole('button', { name: '记录反馈' }).click()
+
+  const feedbackPane = page.getByRole('tabpanel')
+  await expect(feedbackPane.getByText('李敏波反馈 · 计入改稿轮次', { exact: true })).toBeVisible()
+  await expect(feedbackPane.getByText('合作伙伴反馈', { exact: true })).toHaveCount(0)
+  await expect(feedbackPane.locator('.dashboard-side-entry-meta', { hasText: '李敏波反馈' })).toHaveCount(0)
 })
 
 test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ page }) => {
