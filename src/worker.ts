@@ -12455,6 +12455,19 @@ function voiceNumber(value: string): number | null {
   return null
 }
 
+function voiceDateNumber(value: string): number | null {
+  const normalized = value.trim().replace(/两/g, '二').replace(/〇/g, '零')
+  if (/^\d+$/.test(normalized)) return Number(normalized)
+  const digitMap: Record<string, number> = { 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+  if (!normalized.includes('十') && normalized.length > 1 && [...normalized].every((char) => digitMap[char] !== undefined)) {
+    return Number([...normalized].map((char) => digitMap[char]).join(''))
+  }
+  return voiceNumber(normalized)
+}
+
+const VOICE_DATE_NUMBER_TOKEN = '[零〇一二两三四五六七八九十\\d]+'
+const VOICE_ABSOLUTE_DATE_PATTERN = `(?:(${VOICE_DATE_NUMBER_TOKEN})年)?(${VOICE_DATE_NUMBER_TOKEN})月(${VOICE_DATE_NUMBER_TOKEN})(?:日|号)?`
+
 function parseVoiceDurationMinutes(text: string) {
   const compact = text.replace(/\s+/g, '')
   const numberToken = '[零一二两三四五六七八九十百点\\d.]+'
@@ -12492,12 +12505,17 @@ function parseVoiceDateTime(text: string, referenceTime: string) {
   const reference = voiceReferenceParts(referenceTime)
   let { year, month, day } = reference
   let hasDate = false
-  const absoluteDate = compact.match(/(?:(\d{4})年)?(\d{1,2})月(\d{1,2})(?:日|号)?/)
+  const absoluteDate = compact.match(new RegExp(VOICE_ABSOLUTE_DATE_PATTERN))
   if (absoluteDate) {
-    year = Number(absoluteDate[1] || reference.year)
-    month = Number(absoluteDate[2])
-    day = Number(absoluteDate[3])
-    hasDate = true
+    const parsedYear = absoluteDate[1] ? voiceDateNumber(absoluteDate[1]) : reference.year
+    const parsedMonth = voiceDateNumber(absoluteDate[2])
+    const parsedDay = voiceDateNumber(absoluteDate[3])
+    if (parsedYear && parsedMonth && parsedDay) {
+      year = parsedYear
+      month = parsedMonth
+      day = parsedDay
+      hasDate = true
+    }
   } else if (/后天/.test(compact)) {
     ;({ year, month, day } = offsetVoiceDate(reference, 2))
     hasDate = true
@@ -12528,7 +12546,7 @@ function parseVoiceDateTime(text: string, referenceTime: string) {
 
 function parseVoiceTimeRange(text: string, referenceTime: string) {
   const compact = text.replace(/\s+/g, '')
-  const datePrefix = compact.match(/(?:(?:\d{4})年)?\d{1,2}月\d{1,2}(?:日|号)?|后天|明天|明日|今天|今日/)?.[0] || ''
+  const datePrefix = compact.match(new RegExp(`${VOICE_ABSOLUTE_DATE_PATTERN}|后天|明天|明日|今天|今日`))?.[0] || ''
   const numberToken = '[零一二两三四五六七八九十\\d]+'
   const timePattern = new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?${numberToken}(?:点|时)(?:${numberToken}分?)?`, 'g')
   const matches = Array.from(compact.matchAll(timePattern))
@@ -12538,7 +12556,7 @@ function parseVoiceTimeRange(text: string, referenceTime: string) {
     const between = compact.slice((current.index || 0) + current[0].length, next.index || 0)
     // Speech recognition can repeat the date before the end time, for example
     // "7月21号下午3点到7月21号下午5点". It is still one time range.
-    if (!/^(?:到|至|—|-)(?:(?:(?:\d{4})年)?\d{1,2}月\d{1,2}(?:日|号)?)?的?$/.test(between)) continue
+    if (!new RegExp(`^(?:到|至|—|-)(?:${VOICE_ABSOLUTE_DATE_PATTERN})?的?$`).test(between)) continue
     const startAt = parseVoiceDateTime(`${datePrefix}${current[0]}`, referenceTime)
     const endAt = parseVoiceDateTime(`${datePrefix}${next[0]}`, referenceTime)
     if (startAt && endAt) return { startAt, endAt }

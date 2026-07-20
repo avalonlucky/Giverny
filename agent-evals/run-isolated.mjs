@@ -582,6 +582,25 @@ async function runVoiceScheduleCheck(cookie) {
   ) {
     throw new Error(`Voice schedule implicit-start parsing failed: ${implicitStartResponse.status} ${JSON.stringify(implicitStartPayload)}`)
   }
+  const chineseMonthResponse = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      transcript: '六月10号上午11点39公司为15分钟',
+      referenceTime: '2026-07-21T09:00',
+      context: '新建任务的预计排期',
+    }),
+  })
+  const chineseMonthPayload = await chineseMonthResponse.json().catch(() => ({}))
+  if (
+    !chineseMonthResponse.ok
+    || chineseMonthPayload.startAt !== '2026-06-10T11:39'
+    || chineseMonthPayload.durationMinutes !== 15
+    || chineseMonthPayload.endAt !== '2026-06-10T11:54'
+    || chineseMonthPayload.derivedField !== 'end'
+  ) {
+    throw new Error(`Voice schedule Chinese month parsing failed: ${chineseMonthResponse.status} ${JSON.stringify(chineseMonthPayload)}`)
+  }
   process.stdout.write('Voice schedule transcription parsing, spoken time ranges, and two-of-three derivation checks passed.\n')
 }
 
