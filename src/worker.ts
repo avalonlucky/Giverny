@@ -1909,27 +1909,55 @@ async function callTextWithSelectedModel(
   const notes: string[] = []
   const target = await resolveChatModelTarget(env, choice)
   if (target.note) notes.push(target.note)
-  try {
+  const runSelected = async () => {
     if (target.kind === 'workers-ai') {
-      const text = await callWorkersAiText(env, prompt, maxOutputTokens)
-      if (text) return { text, modelLabel: target.label, fallbackUsed: false, notes }
-      throw new Error('Workers AI 未返回内容')
+      return callWorkersAiText(env, prompt, maxOutputTokens)
     }
     if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
     const outputBudget = target.endpoint.provider === 'deepseek'
       ? Math.max(maxOutputTokens, 12_000)
       : maxOutputTokens
-    const text = await callAiEndpointText(target.endpoint, prompt, outputBudget)
+    return callAiEndpointText(target.endpoint, prompt, outputBudget)
+  }
+  try {
+    const text = await runSelected()
     if (text) return { text, modelLabel: target.label, fallbackUsed: false, notes }
     throw new Error('模型未返回内容')
-  } catch (error) {
-    notes.push(`${target.label} 调用失败：${describeAiCallError(error)}。系统已保持当前模型，未切换供应商。`)
-    throw new Error(notes[notes.length - 1], { cause: error })
+  } catch (firstError) {
+    try {
+      const retriedText = await runSelected()
+      if (retriedText) {
+        notes.push(`${target.label} 首次调用失败，已由同一模型重试成功。`)
+        return { text: retriedText, modelLabel: target.label, fallbackUsed: false, notes }
+      }
+      throw new Error('模型重试后仍未返回内容', { cause: firstError })
+    } catch (retryError) {
+      const reason = `${describeAiCallError(firstError)}；重试：${describeAiCallError(retryError)}`
+      await recordSelectedModelEmergencyFallback(env, target.label, 'text', reason)
+      notes.push(`${target.label} 连续失败，已在迫不得已时启动应急备用模型。原因：${reason}`)
+      const text = await callTextWithFallback(env, prompt, maxOutputTokens, undefined, true)
+      return { text, modelLabel: '应急备用模型链路', fallbackUsed: true, notes }
+    }
   }
 }
 
 function describeAiCallError(error: unknown) {
   return error instanceof Error ? error.message : '模型请求失败'
+}
+
+async function recordSelectedModelEmergencyFallback(
+  env: Env,
+  modelLabel: string,
+  requestType: 'text' | 'structured_json',
+  reason: string,
+) {
+  console.warn(JSON.stringify({
+    event: 'selected_model_emergency_fallback',
+    model: modelLabel,
+    requestType,
+    reason,
+  }))
+  await audit(env, 'emergency_fallback', 'ai_model', modelLabel, { requestType, reason }).catch(() => {})
 }
 
 async function callTextFallbackJson<T extends object>(
@@ -2030,6 +2058,10 @@ ${JSON.stringify(payload)}`
     const parsed = parseLooseJsonObject(output)
     return Object.keys(parsed).length > 0 ? parsed as T : null
   }
+  const emergencyFallback = async (reason: string) => {
+    await recordSelectedModelEmergencyFallback(env, target.label, 'structured_json', reason)
+    return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, outputBudget, true)
+  }
   try {
     if (target.kind === 'workers-ai') {
       const output = await callWithAiTimeout(
@@ -2045,6 +2077,7 @@ ${JSON.stringify(payload)}`
         `${target.label} JSON 修复响应超时`,
       )
       return parseOutput(repairedOutput)
+        ?? emergencyFallback('所选模型两次返回的内容均无法解析为完整 JSON')
     }
     if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
     const output = await callWithAiTimeout(
@@ -2066,14 +2099,31 @@ ${output.slice(0, 12_000)}
       `${target.label} JSON 修复响应超时`,
     )
     return parseOutput(repairedOutput)
-  } catch (error) {
-    console.warn(JSON.stringify({
-      event: 'selected_model_json_failed',
-      model: target.label,
-      error: describeAiCallError(error),
-      fallbackBlocked: true,
-    }))
-    return null
+      ?? emergencyFallback('所选模型两次返回的内容均无法解析为完整 JSON')
+  } catch (firstError) {
+    try {
+      if (target.kind === 'workers-ai') {
+        const retriedOutput = await callWithAiTimeout(
+          () => callWorkersAiText(env, prompt, outputBudget),
+          120_000,
+          `${target.label} 重试响应超时`,
+        )
+        const retried = parseOutput(retriedOutput)
+        if (retried) return retried
+      } else {
+        if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置', { cause: firstError })
+        const retriedOutput = await callWithAiTimeout(
+          (signal) => callAiEndpointText(target.endpoint, prompt, outputBudget, signal, { structuredJson: true }),
+          120_000,
+          `${target.label} 重试响应超时`,
+        )
+        const retried = parseOutput(retriedOutput)
+        if (retried) return retried
+      }
+      throw new Error('模型重试后仍未返回可解析 JSON', { cause: firstError })
+    } catch (retryError) {
+      return emergencyFallback(`${describeAiCallError(firstError)}；重试：${describeAiCallError(retryError)}`)
+    }
   }
 }
 
@@ -2326,7 +2376,7 @@ function selectedCloudModelLabel(choice: ChatModelChoice) {
 }
 
 function selectedModelStructuredFailureMessage(choice: ChatModelChoice) {
-  return `${selectedCloudModelLabel(choice)} 已响应，但没有返回完整可用的结构化结果。系统已保持当前模型，未切换供应商，请重试。`
+  return `${selectedCloudModelLabel(choice)} 经同模型重试后仍未返回完整结果，应急备用链路也未完成。系统已保留你的主模型选择，请重试。`
 }
 
 function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number) {

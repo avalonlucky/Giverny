@@ -64,6 +64,15 @@ function chooseTool(messages) {
       }),
     })
   }
+  if (text.includes('EMERGENCY_FALLBACK_EVAL')) {
+    return completion({
+      role: 'assistant',
+      content: JSON.stringify({
+        optimizedText: '1、所选模型连续故障后，由应急备用模型保障本次工作继续完成。',
+        summary: '应急备用完成',
+      }),
+    })
+  }
   if (text.includes('Giverny 的工作分析师')) {
     if (!text.includes('"type":"monthly_review"')) {
       return completion({
@@ -258,6 +267,11 @@ const server = http.createServer((request, response) => {
         ? payload.tools.map((item) => String(item.function?.name || '')).filter(Boolean)
         : []
       const requestText = userText(Array.isArray(payload.messages) ? payload.messages : [])
+      if (requestText.includes('EMERGENCY_FALLBACK_EVAL') && String(payload.model || '').includes('doubao')) {
+        response.writeHead(503, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: { message: 'simulated selected provider outage' } }))
+        return
+      }
       if (requestText.includes('fallback-name-eval.png')) {
         response.writeHead(429, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: { message: 'simulated provider quota exhausted' } }))

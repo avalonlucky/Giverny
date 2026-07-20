@@ -460,6 +460,45 @@ async function runSelectedDeepSeekThinkingCheck(cookie) {
   process.stdout.write('Selected DeepSeek keeps thinking enabled, uses 12000 output tokens, repairs JSON on the same model, and never switches providers.\n')
 }
 
+async function runSelectedModelEmergencyFallbackCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' }
+  const setChoice = async (choice) => {
+    const response = await fetch(`${base}/api/ai/active-model`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ choice }),
+    })
+    if (!response.ok) throw new Error(`Cannot set active model for emergency fallback check: ${response.status}`)
+  }
+  await setChoice('doubao-seed-2-1-pro')
+  const before = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const response = await fetch(`${base}/api/ai/text-assistant`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      mode: 'progress',
+      text: 'EMERGENCY_FALLBACK_EVAL：模拟所选模型持续故障',
+      task: { id: 1, title: '应急备用模型评测', type: '测试' },
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  const after = await fetch('http://127.0.0.1:8898/test/requests').then((modelResponse) => modelResponse.json())
+  const requests = (after.requests || []).slice((before.requests || []).length)
+  await setChoice('auto')
+  if (
+    !response.ok
+    || !String(payload.optimizedText || '').includes('应急备用模型')
+    || requests.length < 3
+    || requests[0]?.model !== 'doubao-seed-eval'
+    || requests[1]?.model !== 'doubao-seed-eval'
+    || requests[2]?.model !== 'deepseek-v4-flash'
+  ) {
+    throw new Error(`Emergency fallback did not preserve selected-model priority: ${response.status} ${JSON.stringify({ payload, requests })}`)
+  }
+  process.stdout.write('Selected model is retried first; only a repeated provider outage activates the emergency fallback chain.\n')
+}
+
 async function runVoiceScheduleCheck(cookie) {
   const response = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
     method: 'POST',
@@ -1725,6 +1764,7 @@ try {
   await runAttachmentPreviewResilienceCheck(cookie)
   await runAcceptanceNoteGuardrailCheck(cookie)
   await runSelectedDeepSeekThinkingCheck(cookie)
+  await runSelectedModelEmergencyFallbackCheck(cookie)
   await runVoiceScheduleCheck(cookie)
   await runAiModelDraftListCheck(cookie)
   await runSiteWideModelPriorityCheck(cookie)
