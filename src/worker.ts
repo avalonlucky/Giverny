@@ -4260,7 +4260,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       actualHours: Number(task.actual_hours) || 0,
       startDate: task.start_date ?? '',
       estimatedDate: task.estimated_delivery_date ?? '',
-      actualDeliveryDate: task.actual_delivery_date || acceptanceProgressEndDateTime(parseTimeEntries(task.time_entries_json), task.start_date),
+      actualDeliveryDate: acceptanceProgressEndDateTime(parseTimeEntries(task.time_entries_json), task.start_date) || task.actual_delivery_date,
       settlementMonth: task.settlement_month ?? '',
       billable: isBillableDbTask(task),
       overdue: isOverdue(task),

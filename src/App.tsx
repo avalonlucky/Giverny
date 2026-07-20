@@ -2315,11 +2315,19 @@ function waitingEntryMonth(task: Task, entry: WaitingEntry) {
 }
 
 function latestTaskActivityValue(task: Task) {
+  const acceptanceValue = acceptanceProgressEndDateTime(task)
+  const acceptanceStamp = dateTimeMinuteStamp(datePart(acceptanceValue), formatTimePart(acceptanceValue))
   const candidates = [
-    task.actualDeliveryDate,
+    acceptanceValue || task.actualDeliveryDate,
     task.date,
     ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
-    ...(task.waitingEntries ?? []).map((entry) => waitingEntryActivityValue(task, entry)),
+    ...(task.waitingEntries ?? [])
+      .map((entry) => waitingEntryActivityValue(task, entry))
+      .filter((value) => {
+        if (!acceptanceValue || !Number.isFinite(acceptanceStamp)) return true
+        const stamp = dateTimeMinuteStamp(datePart(value), formatTimePart(value))
+        return Number.isFinite(stamp) && stamp <= acceptanceStamp
+      }),
   ].filter(Boolean)
   return candidates.sort().at(-1) ?? ''
 }
@@ -2361,15 +2369,23 @@ function taskRelatedMonths(task: Task) {
     months.add(settlement)
     return months
   }
+  const acceptanceValue = acceptanceProgressEndDateTime(task)
+  const acceptanceMonth = safeMonthPart(acceptanceValue)
+  const acceptanceStamp = dateTimeMinuteStamp(datePart(acceptanceValue), formatTimePart(acceptanceValue))
   ;(task.timeEntries ?? []).forEach((entry) => {
     const value = timeEntryMonth(entry, task)
     if (value) months.add(value)
   })
   ;(task.waitingEntries ?? []).forEach((entry) => {
+    if (acceptanceValue && Number.isFinite(acceptanceStamp)) {
+      const activityValue = waitingEntryActivityValue(task, entry)
+      const stamp = dateTimeMinuteStamp(datePart(activityValue), formatTimePart(activityValue))
+      if (!Number.isFinite(stamp) || stamp > acceptanceStamp) return
+    }
     const value = waitingEntryMonth(task, entry)
     if (value) months.add(value)
   })
-  const deliveryMonth = safeMonthPart(task.actualDeliveryDate)
+  const deliveryMonth = acceptanceMonth || safeMonthPart(task.actualDeliveryDate)
   if (deliveryMonth) months.add(deliveryMonth)
   if (months.size === 0) {
     if (/^\d{4}-\d{2}$/.test(settlement)) months.add(settlement)

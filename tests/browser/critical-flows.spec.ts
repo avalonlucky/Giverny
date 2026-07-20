@@ -188,6 +188,11 @@ test('补录任务显示真实验收动态日期而不是补录操作日期', as
   await expect(taskRow).toContainText('06/07')
   await expect(taskRow).not.toContainText('07/01')
   await expect(taskRow).not.toContainText('06/30')
+
+  const normalAcceptedRow = page.locator('article.task-row').filter({ hasText: '官网历史验收日期回归' })
+  await expect(normalAcceptedRow).toHaveCount(1)
+  await expect(normalAcceptedRow).toContainText('06/03')
+  await expect(normalAcceptedRow).not.toContainText('06/23')
 })
 
 test('计划中任务可直接进入记录进展并切换验收模式', async ({ page }) => {
