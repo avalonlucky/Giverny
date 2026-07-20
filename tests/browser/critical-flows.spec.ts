@@ -49,14 +49,22 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
-test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
+test('新建任务支持按分钟或小数小时填写预估工时并可关闭', async ({ page }) => {
   await page.getByRole('button', { name: /新建任务/ }).first().click()
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeVisible()
 
-  const hours = page.getByRole('textbox', { name: '预估工时，可手动输入小数' })
+  const hours = page.getByRole('textbox', { name: '预估工时，可输入15分钟、1小时30分钟或小数小时' })
   await hours.fill('1.2')
   await hours.blur()
-  await expect(hours).toHaveValue('1.2')
+  await expect(hours).toHaveValue('1 小时 12 分钟')
+
+  await hours.fill('15分钟')
+  await hours.blur()
+  await expect(hours).toHaveValue('15 分钟')
+
+  await hours.fill('1小时30分钟')
+  await hours.blur()
+  await expect(hours).toHaveValue('1 小时 30 分钟')
 
   await page.getByRole('button', { name: '取消' }).click()
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
@@ -163,7 +171,7 @@ test('新建任务支持语音识别排期并确认后自动填写三项', async
   const dateInputs = modal.getByPlaceholder('YYYY/MM/DD HH:mm')
   await expect(dateInputs).toHaveCount(2)
   await expect(dateInputs.nth(0)).toHaveValue('2026/07/20 16:10')
-  await expect(modal.getByRole('textbox', { name: '预估工时，可手动输入小数' })).toHaveValue('2')
+  await expect(modal.getByRole('textbox', { name: '预估工时，可输入15分钟、1小时30分钟或小数小时' })).toHaveValue('2 小时')
   await expect(dateInputs.nth(1)).toHaveValue('2026/07/20 18:10')
 })
 
@@ -316,7 +324,7 @@ test('数字键可跳转到今年对应月份且输入时不会误触', async ({
   await expect(page.getByRole('heading', { name: '2026 年 12 月工作台' })).toBeVisible()
 
   await page.getByRole('button', { name: /新建任务/ }).first().click()
-  const hours = page.getByRole('textbox', { name: '预估工时，可手动输入小数' })
+  const hours = page.getByRole('textbox', { name: '预估工时，可输入15分钟、1小时30分钟或小数小时' })
   await hours.fill('1.')
   await hours.press('2')
   await expect(hours).toHaveValue('1.2')

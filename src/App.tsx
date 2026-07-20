@@ -912,7 +912,7 @@ function addMinutesToPlanDateTime(value: string, minutes: number) {
 
 const TIME_STEP_MINUTES = 5   // 时间选择器分钟列步进（5分钟）
 const DURATION_STEP_MINUTES = 30  // 工时输入最小粒度（30分钟 = 0.5h）
-const ESTIMATED_HOURS_STEP_MINUTES = 6 // 新建任务的预估工时支持 0.1h 精度
+const ESTIMATED_HOURS_STEP_MINUTES = 1 // 新建任务支持直接输入分钟，按 1 分钟精度保存
 
 function snapDurationMinutes(value: number, minimum = DURATION_STEP_MINUTES) {
   if (!Number.isFinite(value)) {
@@ -931,6 +931,39 @@ function formatExactHoursInputValue(minutes: number) {
   const safeMinutes = Math.max(0, Math.round(Number.isFinite(minutes) ? minutes : 0))
   const hours = safeMinutes / 60
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+function formatEstimatedDurationInputValue(minutes: number) {
+  return formatDurationZh(Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round(minutes)))
+}
+
+function parseEstimatedDurationInputMinutes(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/,/g, '.')
+    .replace(/\s+/g, '')
+  if (!normalized) return null
+
+  // Backward compatibility: a bare number continues to mean decimal hours.
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) {
+    const hours = Number(normalized)
+    return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : null
+  }
+
+  const clockMatch = normalized.match(/^(\d+):([0-5]?\d)$/)
+  if (clockMatch) {
+    return Number(clockMatch[1]) * 60 + Number(clockMatch[2])
+  }
+
+  const hourMatch = normalized.match(/(\d+(?:\.\d+)?)(?:小时|时|hours?|hrs?|h)/)
+  const minuteMatch = normalized.match(/(\d+(?:\.\d+)?)(?:分钟|分|minutes?|mins?|m)/)
+  if (!hourMatch && !minuteMatch) return null
+
+  const hours = hourMatch ? Number(hourMatch[1]) : 0
+  const minutes = minuteMatch ? Number(minuteMatch[1]) : 0
+  const totalMinutes = Math.round(hours * 60 + minutes)
+  return Number.isFinite(totalMinutes) && totalMinutes > 0 ? totalMinutes : null
 }
 
 function normalizeEstimatedMinutes(value: number) {
@@ -20985,7 +21018,7 @@ function NewTaskModal({
   const [type, setType] = useState(initialDraft.type)
   const [startDate, setStartDate] = useState(initialDraft.startDate)
   const [estimatedMinutes, setEstimatedMinutes] = useState(initialDraft.estimatedMinutes)
-  const [estimatedHoursInput, setEstimatedHoursInput] = useState(() => formatExactHoursInputValue(initialDraft.estimatedMinutes))
+  const [estimatedHoursInput, setEstimatedHoursInput] = useState(() => formatEstimatedDurationInputValue(initialDraft.estimatedMinutes))
   const [estimatedDate, setEstimatedDate] = useState(initialDraft.estimatedDate)
   const [scheduleDerivedField, setScheduleDerivedField] = useState<ScheduleAnchor>(initialDraft.scheduleAnchor)
   const [isSupplemental, setIsSupplemental] = useState(initialSupplemental || initialDraft.isSupplemental)
@@ -21111,7 +21144,7 @@ function NewTaskModal({
       const nextMinutes = exactDurationMinutesBetween(value, estimatedDate)
       if (nextMinutes > 0) {
         setEstimatedMinutes(nextMinutes)
-        setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
+        setEstimatedHoursInput(formatEstimatedDurationInputValue(nextMinutes))
       }
       return
     }
@@ -21131,7 +21164,7 @@ function NewTaskModal({
       const nextMinutes = exactDurationMinutesBetween(startDate, value)
       if (nextMinutes > 0) {
         setEstimatedMinutes(nextMinutes)
-        setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
+        setEstimatedHoursInput(formatEstimatedDurationInputValue(nextMinutes))
       }
       return
     }
@@ -21142,7 +21175,7 @@ function NewTaskModal({
     const nextMinutes = normalizeEstimatedMinutes(value)
     setEstimatedMinutes(nextMinutes)
     if (!preserveInput) {
-      setEstimatedHoursInput(formatExactHoursInputValue(nextMinutes))
+      setEstimatedHoursInput(formatEstimatedDurationInputValue(nextMinutes))
     }
     if (scheduleDerivedField === 'start') {
       setStartDate(addMinutesToPlanDateTime(estimatedDate, -nextMinutes))
@@ -21152,33 +21185,26 @@ function NewTaskModal({
   }
 
   const updateEstimatedHoursInput = (value: string) => {
-    const normalizedValue = value.replace(',', '.')
-    if (!/^\d*(?:\.\d*)?$/.test(normalizedValue)) {
-      return
-    }
-    setEstimatedHoursInput(normalizedValue)
+    setEstimatedHoursInput(value.slice(0, 32))
     if (scheduleDerivedField === 'hours') {
       setScheduleDerivedField('end')
     }
-    if (!normalizedValue.trim()) {
-      return
-    }
-    const hours = Number(normalizedValue)
-    if (Number.isFinite(hours) && hours > 0) {
-      updateEstimatedMinutes(hours * 60, true)
+    const nextMinutes = parseEstimatedDurationInputMinutes(value)
+    if (nextMinutes) {
+      updateEstimatedMinutes(nextMinutes, true)
     }
   }
 
   const commitEstimatedHoursInput = () => {
-    const hours = Number(estimatedHoursInput)
-    updateEstimatedMinutes(Number.isFinite(hours) && hours > 0 ? hours * 60 : estimatedMinutes)
+    const nextMinutes = parseEstimatedDurationInputMinutes(estimatedHoursInput)
+    updateEstimatedMinutes(nextMinutes || estimatedMinutes)
   }
 
   const applyVoiceTaskSchedule = (result: VoiceScheduleResult) => {
     if (result.startAt && result.durationMinutes && result.endAt) {
       setStartDate(result.startAt)
       setEstimatedMinutes(result.durationMinutes)
-      setEstimatedHoursInput(formatExactHoursInputValue(result.durationMinutes))
+      setEstimatedHoursInput(formatEstimatedDurationInputValue(result.durationMinutes))
       setEstimatedDate(result.endAt)
       if (result.derivedField) setScheduleDerivedField(result.derivedField)
       setActiveDatePickerId(null)
@@ -21986,17 +22012,18 @@ function NewTaskModal({
                 <input
                   className="new-task-hours-input"
                   type="text"
-                  inputMode="decimal"
-                  pattern="[0-9]*[.]?[0-9]*"
+                  inputMode="text"
                   value={estimatedHoursInput}
-                  onFocus={() => {
+                  placeholder="如 15分钟"
+                  onFocus={(event) => {
+                    event.currentTarget.select()
                     if (scheduleDerivedField === 'hours') {
                       setScheduleDerivedField('end')
                     }
                   }}
                   onChange={(event) => updateEstimatedHoursInput(event.target.value)}
                   onBlur={commitEstimatedHoursInput}
-                  aria-label="预估工时，可手动输入小数"
+                  aria-label="预估工时，可输入15分钟、1小时30分钟或小数小时"
                 />
                 <button
                   type="button"
