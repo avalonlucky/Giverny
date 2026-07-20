@@ -62,6 +62,22 @@ function chooseTool(messages) {
       content: '## 本月结论\n- 隔离评测月度数据已核对。\n## 完成与产出\n- 任务结果以结构化快照为准。\n## 未完成与风险\n- 无额外编造。\n## 工作模式\n- 已汇总工时和进展。\n## 下月动作\n- 优先跟进未完成任务。',
     })
   }
+  if (text.includes('附件命名偏好分析助手')) {
+    return completion({
+      role: 'assistant',
+      content: '聊天记录、验收确认和审批通过截图优先使用短语义名，如“验收通过截图”；避免复述完整任务标题或项目通用名称。',
+    })
+  }
+  if (text.includes('"currentFileName":"next-chat-proof.png"') && text.includes('验收通过截图')) {
+    return completion({
+      role: 'assistant',
+      content: JSON.stringify({
+        suggestedName: '验收通过截图.png',
+        reason: '沿用已确认的验收截图命名',
+        confidence: '高',
+      }),
+    })
+  }
   if (tools.length > 0) {
     if (text.includes('最近一次反馈') && !tools.includes('get_task_detail')) {
       return toolCall('get_task_detail', { taskId: 1 })

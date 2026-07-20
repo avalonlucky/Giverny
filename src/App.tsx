@@ -1569,7 +1569,7 @@ function aiLearningAction(draft: AiLearningDraft, userFinal: string): AiLearning
   if (normalizedFinal === draft.sourceInput.trim()) {
     return 'rejected'
   }
-  return draft.applied ? 'edited' : 'rejected'
+  return 'edited'
 }
 
 function validateUploadFile(file: File) {
@@ -12646,6 +12646,7 @@ function TaskProgressModal({
     : { ...task, timeEntries: acceptancePreviewTimeEntries }
   const acceptanceComputedMinutes = sumTimeEntries(acceptancePreviewTimeEntries)
   const acceptanceLockedHours = Math.round((acceptanceComputedMinutes / 60) * 100) / 100
+  const acceptanceBillablePreviewTimeEntries = acceptancePreviewTimeEntries.filter((entry) => minutesForTimeEntry(entry) > 0)
   const acceptanceWaitingMinutes = sumWaitingEntries(acceptanceWaitingPreviewTask)
   const acceptanceEstimatedAmount = roundCents(acceptanceLockedHours * hourlyRate)
   const canConfirmAcceptance = (acceptanceLockedHours > 0 || isAcceptanceRevisionMode || !countAcceptanceTime) && !isSaving && Boolean(onConfirmAcceptance) && !hasAnotherAcceptanceProgress && (!countAcceptanceTime || !draftConflict)
@@ -14263,14 +14264,14 @@ function TaskProgressModal({
                 </section>
                 <section className="progress-acceptance-block">
                   <h3 className="progress-acceptance-block-title">计时与工时汇总</h3>
-                  {acceptancePreviewTimeEntries.length === 0 ? (
+                  {acceptanceBillablePreviewTimeEntries.length === 0 ? (
                     <p className="progress-acceptance-hint">还没有分段计时。</p>
                   ) : (
                     <div className="progress-acceptance-time-table-wrap">
                       <table className="progress-acceptance-time-table">
                         <thead><tr><th>日期</th><th>时间段</th><th>工时</th></tr></thead>
                         <tbody>
-                          {acceptancePreviewTimeEntries.map((entry) => (
+                          {acceptanceBillablePreviewTimeEntries.map((entry) => (
                             <tr key={entry.id}>
                               <td>{formatMonthDay(entry.date || datePart(task.date))}</td>
                               <td>{entry.start}–{entry.end}</td>

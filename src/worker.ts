@@ -13067,13 +13067,13 @@ async function suggestAttachmentNameWithAi(env: Env, request: Request) {
   const prompt = `你是 Giverny 的设计交付文件命名助手。请分析附件内容和业务上下文，为设计师给出一个可直接使用的中文文件名。
 
 分析优先级：
-1. 如果提供了图片，先识别图片中的标题、项目名、版本、页面类型；企微/微信聊天截图、反馈截图、审批截图等，要准确描述其场景。
+1. 如果提供了图片，先识别图片中的标题、项目名、版本、页面类型；聊天记录、沟通截图、验收确认、审批通过、反馈截图等，要优先按截图语义命名，例如“验收通过截图”“修改反馈截图”“沟通记录截图”，不要只套用任务标题生成通用名称。
 2. 结合任务名称、设计类型、任务需求和当前进展备注，避免只复述原始随机文件名。
 3. 参考 recentFileNames 的真实命名习惯，但不要照抄无意义的截图时间戳。
 4. 文件名必须简洁、可检索，主体建议 8-20 个中文字符，最多不超过 28 个中文字符；不要把任务标题全文、聊天原文、时间句子或失败原因塞进文件名。
 5. 必须保留 requiredExtension；去掉 / \\ : * ? " < > | 等非法字符。
 6. 如果确实无法识别附件内容，请返回空 suggestedName，不要编造兜底文件名。
-7. 如果 styleGuide 不为空，优先遵循用户已经确认过的附件命名偏好。
+7. 如果 styleGuide 不为空，优先遵循用户已经确认过的附件命名偏好；用户曾把类似截图改成“验收通过截图”时，下次同类截图应优先沿用这个短名称。
 8. 只返回 JSON，不要 Markdown，不要额外解释。
 
 JSON 结构：
@@ -13786,17 +13786,30 @@ async function mergeTextStyleSummary(
     )
     .join('\n')
   const prompt = existingSummary
-    ? `你是写作风格分析助手。请在以下「已有${label}写法指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（200 字以内）。若新样本与已有指导一致则强化，若有新规律则补充，若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
+    ? (context === 'attachment_name'
+        ? `你是附件命名偏好分析助手。请在以下「已有${label}写法指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（160 字以内）。重点归纳：用户如何命名聊天记录、验收确认、反馈截图、版本文件和最终稿；哪些通用任务标题式名称应避免。若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
 
 已有${label}写法指导：
 ${existingSummary}
 
 新增${typeLabel}${label}修改样本：
 ${samplesText}`
-    : `你是写作风格分析助手。以下是一位设计师对 AI 生成的${typeLabel}${label}建议的修改记录（共 ${newSamples.length} 条）。分析用户的写法偏好，生成「${label}写法指导」（200 字以内）：倾向保留/删除什么、偏好分点还是短句、惯用表达、对事实边界和下一步的写法。只输出指导文字，不要编号和标题。
+        : `你是写作风格分析助手。请在以下「已有${label}写法指导」的基础上，结合新增的 ${newSamples.length} 条用户修改样本，更新并完善这份指导（200 字以内）。若新样本与已有指导一致则强化，若有新规律则补充，若发现矛盾则以最新样本为准。只输出更新后的完整指导文字，不要解释。
+
+已有${label}写法指导：
+${existingSummary}
+
+新增${typeLabel}${label}修改样本：
+${samplesText}`)
+    : (context === 'attachment_name'
+        ? `你是附件命名偏好分析助手。以下是一位设计师对 AI 生成的${typeLabel}${label}建议的修改记录（共 ${newSamples.length} 条）。分析用户的附件命名偏好，生成「${label}写法指导」（160 字以内）：重点归纳聊天记录、验收确认、反馈截图、版本文件、最终稿等场景应如何命名，以及应避免哪些通用任务标题式名称。只输出指导文字，不要编号和标题。
 
 样本：
 ${samplesText}`
+        : `你是写作风格分析助手。以下是一位设计师对 AI 生成的${typeLabel}${label}建议的修改记录（共 ${newSamples.length} 条）。分析用户的写法偏好，生成「${label}写法指导」（200 字以内）：倾向保留/删除什么、偏好分点还是短句、惯用表达、对事实边界和下一步的写法。只输出指导文字，不要编号和标题。
+
+样本：
+${samplesText}`)
   try {
     const result = await callTextWithFallback(env, prompt, 450)
     return result.trim()
@@ -13937,7 +13950,7 @@ async function getOrBuildStyleGuide(env: Env, field: 'requirement' | 'title', de
 async function getOrBuildTextStyleGuide(env: Env, context: TextLearningContext, designType: string): Promise<string> {
   const keyPrefix = `text:${context}`
   const BATCH_SIZE = 30
-  const MIN_TOTAL = 3
+  const MIN_TOTAL = context === 'attachment_name' ? 1 : 3
 
   try {
     await ensureTaskLearningTables(env)

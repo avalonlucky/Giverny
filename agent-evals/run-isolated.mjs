@@ -1243,6 +1243,44 @@ async function runAiLearningCheck(cookie) {
   process.stdout.write('AI feedback learning endpoint check passed.\n')
 }
 
+async function runAttachmentNameLearningCheck(cookie) {
+  const headers = { 'content-type': 'application/json', cookie }
+  const learningResponse = await fetch('http://127.0.0.1:8798/api/ai/learning-events', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      context: 'attachment_name',
+      action: 'edited',
+      sourceInput: 'chat-proof.png',
+      aiOutput: '湖南大学展厅昂楷52315模型展板上墙.png',
+      userFinal: '验收通过截图.png',
+      designType: '传播类 / 文化墙',
+      taskTitle: '昂楷52315模型展板上墙设计',
+    }),
+  })
+  const learning = await learningResponse.json().catch(() => ({}))
+  if (!learningResponse.ok || learning.saved !== true) {
+    throw new Error(`Attachment name learning event failed: ${JSON.stringify(learning)}`)
+  }
+
+  const suggestionResponse = await fetch('http://127.0.0.1:8798/api/ai/attachment-name', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      fileName: 'next-chat-proof.png',
+      mimeType: 'image/png',
+      imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      note: '聊天记录里显示已经确认通过',
+      task: { id: 92002, title: '昂楷52315模型展板上墙设计', type: '传播类 / 文化墙' },
+    }),
+  })
+  const suggestion = await suggestionResponse.json().catch(() => ({}))
+  if (!suggestionResponse.ok || suggestion.suggestedName !== '验收通过截图.png') {
+    throw new Error(`Attachment name learning did not affect next suggestion: ${suggestionResponse.status} ${JSON.stringify(suggestion)}`)
+  }
+  process.stdout.write('Attachment naming single-sample learning check passed.\n')
+}
+
 async function runProgressAssessmentCheck(cookie) {
   const endpoint = 'http://127.0.0.1:8798/api/ai/progress-estimate'
   const headers = { 'content-type': 'application/json', cookie }
@@ -1654,6 +1692,7 @@ try {
   await runBackgroundAnalysisCheck(cookie)
   await runAgentWorkspaceCheck(cookie)
   await runAiLearningCheck(cookie)
+  await runAttachmentNameLearningCheck(cookie)
   await runProgressAssessmentCheck(cookie)
   await runHourEstimateLearningCheck(cookie)
 
