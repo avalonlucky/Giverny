@@ -12318,7 +12318,9 @@ function parseVoiceTimeRange(text: string, referenceTime: string) {
     const current = matches[index]
     const next = matches[index + 1]
     const between = compact.slice((current.index || 0) + current[0].length, next.index || 0)
-    if (!/^(?:到|至|—|-)+$/.test(between)) continue
+    // Speech recognition can repeat the date before the end time, for example
+    // "7月21号下午3点到7月21号下午5点". It is still one time range.
+    if (!/^(?:到|至|—|-)(?:(?:(?:\d{4})年)?\d{1,2}月\d{1,2}(?:日|号)?)?的?$/.test(between)) continue
     const startAt = parseVoiceDateTime(`${datePrefix}${current[0]}`, referenceTime)
     const endAt = parseVoiceDateTime(`${datePrefix}${next[0]}`, referenceTime)
     if (startAt && endAt) return { startAt, endAt }
