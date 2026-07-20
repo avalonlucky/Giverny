@@ -13387,6 +13387,26 @@ input::file-selector-button {
   max-width: 360px;
 }
 
+.file-preview-placeholder.pdf-native-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  padding: 18px;
+}
+
+.pdf-native-fallback > svg,
+.pdf-native-fallback > strong {
+  flex: 0 0 auto;
+}
+
+.pdf-native-preview {
+  width: 100%;
+  min-height: 420px;
+  border: 0;
+  background: var(--color-surface-alt);
+}
+
 .preview-meta {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

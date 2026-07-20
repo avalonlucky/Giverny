@@ -12991,6 +12991,23 @@ ${JSON.stringify(payload)}`
     }
   }
 
+  const deterministicFallbackSuggestion = () => {
+    const originalBase = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName
+    const taskTitle = String(body.task?.title ?? '').trim()
+    const base = (taskTitle || originalBase || '附件')
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/[.\s-]+$/g, '')
+      .trim()
+      .slice(0, 28) || '附件'
+    return {
+      suggestedName: `${base}${extension}`,
+      reason: '已按任务信息和原文件名生成保守候选',
+      confidence: '低' as const,
+      fallbackUsed: true,
+    }
+  }
+
   const routes: AiModelRouteKey[] = ['visionPrimary', 'visionFallback']
   const attachmentNameTimeoutMs = 30_000
   const modelErrors: string[] = []
@@ -13082,11 +13099,25 @@ ${JSON.stringify(payload)}`
     clearTimeout(textFallbackTimeout)
   }
 
-  if (configuredRouteCount === 0 && modelErrors.length === 0) {
-    return fail('AI 模型尚未配置可用的 API Key，且 Workers AI 未启用', 503)
-  }
-  const detail = modelErrors.slice(-3).join('；')
-  return fail(detail ? `AI 命名暂时不可用：${detail}` : 'AI 模型没有返回可用命名建议，请稍后重试或手动命名。', 503)
+  // 文件上传和命名不能被任一供应商额度、429 或网络故障阻断。这里不伪装成视觉识别，
+  // 只给出可编辑的保守候选，并把供应商细节保留在服务端日志。
+  const fallbackSuggestion = deterministicFallbackSuggestion()
+  console.warn(JSON.stringify({
+    event: 'ai_attachment_name_deterministic_fallback',
+    modelErrors: modelErrors.slice(-3),
+    fileName,
+    usedImage: Boolean(imageBase64),
+  }))
+  await audit(env, 'suggest', 'ai_attachment_name', String(body.task?.id ?? fileName), {
+    originalName: fileName,
+    suggestedName: fallbackSuggestion.suggestedName,
+    provider: 'deterministic-fallback',
+    model: 'none',
+    fallbackUsed: true,
+    usedImage: false,
+    visionAttempts: configuredRouteCount,
+  })
+  return ok(fallbackSuggestion)
 }
 
 async function suggestDailyKnowledgeWithAi(env: Env, request: Request) {

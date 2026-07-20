@@ -224,6 +224,12 @@ const server = http.createServer((request, response) => {
       const requestedToolNames = Array.isArray(payload.tools)
         ? payload.tools.map((item) => String(item.function?.name || '')).filter(Boolean)
         : []
+      const requestText = userText(Array.isArray(payload.messages) ? payload.messages : [])
+      if (requestText.includes('fallback-name-eval.png')) {
+        response.writeHead(429, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: { message: 'simulated provider quota exhausted' } }))
+        return
+      }
       const result = requestedToolNames.includes('optimize_task_worklog_text')
         ? toolCall('optimize_task_worklog_text', {
             optimizedText: '1、完成与交付概况：已完成任务要求并交付《验收预览.pdf》。\n2、主要更新和修改：补充版式整理与视觉统一。\n3、反馈响应与版本迭代：项目实际投入 3 小时，一次交付，未产生改稿轮次；建议在最终稿修改 2026 年未来日期并清理画布边缘。\n4、最终文件：验收文件为《验收预览.pdf》。',

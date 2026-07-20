@@ -563,7 +563,7 @@ async function runSiteWideModelPriorityCheck(cookie) {
   }
 
   const visionRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
-  await fetch(`${base}/api/ai/attachment-name`, {
+  const visionResponse = await fetch(`${base}/api/ai/attachment-name`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -574,10 +574,32 @@ async function runSiteWideModelPriorityCheck(cookie) {
       task: { id: 92001, title: '全站识图模型优先级评测', type: '评测类 / 模型路由' },
     }),
   })
+  if (!visionResponse.ok) {
+    throw new Error(`Site-wide vision route failed: ${visionResponse.status} ${await visionResponse.text()}`)
+  }
   const visionRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
   const visionRequests = (visionRequestsAfter.requests || []).slice((visionRequestsBefore.requests || []).length)
   if (visionRequests[0]?.model !== 'doubao-seed-eval') {
     throw new Error(`Site-wide vision route ignored selected multimodal model: ${JSON.stringify(visionRequests.slice(0, 3))}`)
+  }
+
+  const fallbackNameResponse = await fetch(`${base}/api/ai/attachment-name`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      fileName: 'fallback-name-eval.png',
+      mimeType: 'image/png',
+      imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      task: { id: 92001, title: '附件命名降级评测', type: '评测类 / 模型路由' },
+    }),
+  })
+  const fallbackNamePayload = await fallbackNameResponse.json().catch(() => ({}))
+  if (
+    !fallbackNameResponse.ok
+    || fallbackNamePayload.suggestedName !== '附件命名降级评测.png'
+    || fallbackNamePayload.fallbackUsed !== true
+  ) {
+    throw new Error(`Attachment name deterministic fallback failed: ${fallbackNameResponse.status} ${JSON.stringify(fallbackNamePayload)}`)
   }
 
   await setChoice('auto')

@@ -1120,7 +1120,9 @@ async function createPdfPreviewFile(file: File) {
   return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
 }
 
-const PDF_PREVIEW_TIMEOUT_MS = 8000
+// PDF 首页只是辅助缩略图，不得阻塞源文件上传；给复杂设计稿足够的后台渲染时间，
+// 失败时完整阅读器仍直接读取源 PDF。
+const PDF_PREVIEW_TIMEOUT_MS = 20_000
 
 async function withPreviewTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId = 0
@@ -1281,7 +1283,7 @@ async function createOptionalPreviewFile(file: File) {
       return await createPsdPreviewFile(file)
     }
     if (inferred.kind === 'pdf') {
-      return await createPdfPreviewFile(file)
+      return await withPreviewTimeout(createPdfPreviewFile(file), PDF_PREVIEW_TIMEOUT_MS, 'PDF 首页渲染超时')
     }
     if (inferred.kind === 'video') {
       return await createVideoPreviewFile(file)
@@ -4132,7 +4134,7 @@ function AttachmentHoverThumbnail({
   const hoverMedia = effectivePreviewUrl
     ? <img src={effectivePreviewUrl} alt="" />
     : pdfSourceUrl
-      ? <><FileText size={42} /><strong>PDF</strong><span>{pdfPreviewFailed ? '首页预览暂不可用，点击缩略图查看完整 PDF' : '正在生成首页预览'}</span></>
+      ? <><FileText size={42} /><strong>PDF</strong><span>{pdfPreviewFailed ? '点击查看完整 PDF' : '正在生成首页预览'}</span></>
       : psdSourceUrl
         ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
         : officeSourceUrl
@@ -12423,10 +12425,10 @@ function TaskProgressModal({
         aiOutput: suggestion.suggestedName,
         applied: false,
       }
-    } catch (error) {
+    } catch {
       setPendingAttachments((current) => current.map((item) =>
         item.id === attachmentId
-          ? { ...item, aiLoading: false, aiError: error instanceof Error ? error.message : 'AI 命名暂时不可用' }
+          ? { ...item, aiLoading: false, aiError: 'AI 命名暂时不可用，请稍后重试或手动填写。' }
           : item,
       ))
     }
@@ -12548,10 +12550,10 @@ function TaskProgressModal({
         aiOutput: suggestion.suggestedName,
         applied: false,
       }
-    } catch (error) {
+    } catch {
       setExistingAttachmentAiState((current) => ({
         ...current,
-        [file.id]: { loading: false, error: error instanceof Error ? error.message : 'AI 命名暂时不可用' },
+        [file.id]: { loading: false, error: 'AI 命名暂时不可用，请稍后重试或手动填写。' },
       }))
     }
   }
@@ -15469,6 +15471,7 @@ function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }
     const controller = new AbortController()
     const renderFirstPage = async () => {
       try {
+        setFailed(false)
         await withPreviewTimeout((async () => {
           const response = await fetch(sourceUrl, { credentials: 'same-origin', signal: controller.signal })
           if (!response.ok) {
@@ -20450,6 +20453,9 @@ function PdfPreviewReader({
     let loadingTask: { promise: Promise<unknown>; destroy?: () => Promise<void> } | null = null
     const load = async () => {
       try {
+        setError('')
+        setPageCount(0)
+        setRenderedPages(0)
         const data = sourceFile
           ? await sourceFile.arrayBuffer()
           : await fetch(sourceUrl, { credentials: 'same-origin' }).then((response) => {
@@ -20549,13 +20555,14 @@ function PdfPreviewReader({
       </div>
       <div ref={viewportRef} className="pdf-preview-viewport" aria-label={`${label} PDF 内容`}>
         {error ? (
-          <div className="file-preview-placeholder">
+          <div className="file-preview-placeholder pdf-native-fallback">
             <FileText size={42} />
             <strong>PDF</strong>
-            <span>站内阅读器暂时无法解析这份文件，已保留浏览器原生预览和源文件入口。</span>
-            <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
+            <span>站内阅读器未能解析这份文件，已切换到浏览器原生阅读器。</span>
+            <iframe className="pdf-native-preview" src={sourceUrl} title={`${label} 浏览器原生预览`} />
+            <a className="ghost-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
               <ExternalLink size={15} />
-              使用浏览器打开
+              在新窗口打开
             </a>
           </div>
         ) : (
