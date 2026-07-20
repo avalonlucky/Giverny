@@ -6182,6 +6182,16 @@ button.topbar-create-button:hover {
   flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
+  min-height: 76px;
+  transition: background-color 0.16s ease;
+}
+
+.new-task-brief-field.is-dragover .brief-files-list {
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-alt));
+}
+
+.new-task-brief-field.is-dragover .brief-upload-box {
+  color: var(--color-primary) !important;
 }
 
 .brief-img-chip {

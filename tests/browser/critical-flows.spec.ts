@@ -40,6 +40,30 @@ test('新建任务支持小数预估工时并可关闭', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeHidden()
 })
 
+test('新建任务附件支持逐张连续拖入', async ({ page }) => {
+  await page.getByRole('button', { name: /新建任务/ }).first().click()
+  const dropzone = page.getByTestId('new-task-brief-dropzone')
+  await expect(dropzone).toBeVisible()
+
+  const dropImage = async (name: string) => {
+    const dataTransfer = await page.evaluateHandle((fileName) => {
+      const transfer = new DataTransfer()
+      transfer.items.add(new File(['giverny-image'], fileName, { type: 'image/png' }))
+      return transfer
+    }, name)
+    await dropzone.dispatchEvent('dragenter', { dataTransfer })
+    await dropzone.dispatchEvent('dragover', { dataTransfer })
+    await dropzone.dispatchEvent('drop', { dataTransfer })
+  }
+
+  await dropImage('第一张.png')
+  await expect(dropzone.getByRole('img', { name: '第一张.png' })).toBeVisible()
+
+  await dropImage('第二张.png')
+  await expect(dropzone.getByRole('img', { name: '第二张.png' })).toBeVisible()
+  await expect(dropzone.getByRole('img')).toHaveCount(2)
+})
+
 test('数字键可跳转到今年对应月份且输入时不会误触', async ({ page }) => {
   await page.keyboard.press('3')
   await expect(page.getByRole('heading', { name: '2026 年 3 月工作台' })).toBeVisible()

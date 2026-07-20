@@ -20280,9 +20280,11 @@ function NewTaskModal({
   const [briefFiles, setBriefFiles] = useState<BriefItem[]>([])
   const [briefError, setBriefError] = useState('')
   const [isBriefLoading, setIsBriefLoading] = useState(false)
+  const [isBriefDragOver, setIsBriefDragOver] = useState(false)
   const [briefLightboxSrc, setBriefLightboxSrc] = useState<string | null>(null)
   const briefInputRef = useRef<HTMLInputElement | null>(null)
   const briefFilesRef = useRef<BriefItem[]>([])
+  const briefDragDepthRef = useRef(0)
   const [hourSuggestion, setHourSuggestion] = useState<HourEstimateSuggestion | null>(null)
   const [hourSuggestionInputSignature, setHourSuggestionInputSignature] = useState('')
   const [hourSuggestionError, setHourSuggestionError] = useState('')
@@ -20674,6 +20676,36 @@ function NewTaskModal({
     void loadBriefFiles(pastedImages, 'paste')
   }
 
+  const isBriefFileDrag = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes('Files')
+
+  const handleBriefDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isBriefFileDrag(event)) return
+    event.preventDefault()
+    briefDragDepthRef.current += 1
+    setIsBriefDragOver(true)
+  }
+
+  const handleBriefDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isBriefFileDrag(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleBriefDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isBriefFileDrag(event)) return
+    briefDragDepthRef.current = Math.max(0, briefDragDepthRef.current - 1)
+    if (briefDragDepthRef.current === 0) setIsBriefDragOver(false)
+  }
+
+  const handleBriefDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isBriefFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    briefDragDepthRef.current = 0
+    setIsBriefDragOver(false)
+    void loadBriefFiles(event.dataTransfer.files)
+  }
+
   const requestAiSuggestion = async () => {
     setAiError('')
     setAiSuggestion(null)
@@ -20952,7 +20984,14 @@ function NewTaskModal({
             />
             {formErrors.requirement && <small className="field-error">{formErrors.requirement}</small>}
           </div>
-          <div className="field wide new-task-brief-field">
+          <div
+            className={`field wide new-task-brief-field ${isBriefDragOver ? 'is-dragover' : ''}`}
+            data-testid="new-task-brief-dropzone"
+            onDragEnter={handleBriefDragEnter}
+            onDragOver={handleBriefDragOver}
+            onDragLeave={handleBriefDragLeave}
+            onDrop={handleBriefDrop}
+          >
             <span className="field-label-row">
               <span>甲方文案附件（选填）</span>
             </span>
@@ -20999,13 +21038,6 @@ function NewTaskModal({
                   className={`brief-upload-box ${briefFiles.length > 0 ? 'brief-upload-compact' : ''}`}
                   onClick={() => briefInputRef.current?.click()}
                   disabled={isBriefLoading}
-                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over') }}
-                  onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    e.currentTarget.classList.remove('drag-over')
-                    void loadBriefFiles(e.dataTransfer.files)
-                  }}
                 >
                   <Plus size={briefFiles.length > 0 ? 16 : 14} />
                   {briefFiles.length === 0 && (isBriefLoading ? '正在读取…' : '上传、拖拽或 Command+V 粘贴甲方文案到这里')}
