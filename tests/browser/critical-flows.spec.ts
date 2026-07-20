@@ -354,6 +354,24 @@ test('计划中任务可直接进入记录进展并切换验收模式', async ({
   await page.getByRole('button', { name: '取消' }).click()
 })
 
+test('记录进展可从右上角查看任务详情与预计时间', async ({ page }) => {
+  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.getByRole('button', { name: /记录进展/ }).last().click()
+  const referenceButton = page.getByRole('button', { name: '查看任务详情参考' })
+  await referenceButton.hover()
+  const reference = page.getByRole('complementary', { name: '任务详情参考' })
+  await expect(reference).toBeVisible()
+  await expect(reference.getByText('任务需求', { exact: true })).toBeVisible()
+  await expect(reference.getByText('预计开始', { exact: true })).toBeVisible()
+  await expect(reference.getByText('预计交付', { exact: true })).toBeVisible()
+  await expect(reference.getByText('预估工时', { exact: true })).toBeVisible()
+  await referenceButton.click()
+  await page.mouse.move(0, 0)
+  await expect(reference).toBeVisible()
+  await referenceButton.click()
+  await expect(reference).toBeHidden()
+})
+
 test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ page }) => {
   await page.getByText('公司产品封套延展', { exact: true }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()

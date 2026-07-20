@@ -5611,6 +5611,72 @@ button.topbar-create-button:hover {
   min-width: 0;
 }
 
+.progress-lite-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.progress-task-reference {
+  position: relative;
+}
+
+.progress-task-reference-trigger {
+  color: var(--color-primary);
+}
+
+.progress-task-reference-popover {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(420px, calc(100vw - 64px));
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+.progress-task-reference-popover > strong {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-task-reference-popover dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+  margin: 0;
+}
+
+.progress-task-reference-popover dl > div {
+  min-width: 0;
+}
+
+.progress-task-reference-popover dl > div.wide {
+  grid-column: 1 / -1;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress-task-reference-popover dt {
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.progress-task-reference-popover dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .progress-lite-header h2 {
   margin: 0;
   color: var(--color-text);
