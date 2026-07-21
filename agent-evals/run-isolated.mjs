@@ -69,6 +69,34 @@ function mcpStructured(result) {
   }
 }
 
+function parseSseEvents(text) {
+  return String(text || '')
+    .split('\n\n')
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.startsWith('data:'))
+    .map((chunk) => {
+      const payload = chunk.replace(/^data:\s*/, '').trim()
+      if (!payload || payload === '[DONE]') return null
+      try {
+        return JSON.parse(payload)
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+}
+
+function assertProgressiveTraceBeforeResult(sseText, label) {
+  const events = parseSseEvents(sseText)
+  const resultIndex = events.findIndex((event) => event.type === 'result')
+  const traceBeforeResult = events.slice(0, resultIndex < 0 ? 0 : resultIndex).filter((event) => event.type === 'trace')
+  const traceSizes = traceBeforeResult.map((event) => Array.isArray(event.trace) ? event.trace.length : 0)
+  const grewStepByStep = traceSizes.some((size, index) => index > 0 && size > traceSizes[index - 1])
+  if (resultIndex <= 0 || traceBeforeResult.length < 2 || !grewStepByStep) {
+    throw new Error(`${label} did not stream progressive trace before the final answer: ${sseText}`)
+  }
+}
+
 async function runMcpChecks() {
   const endpoint = 'http://127.0.0.1:8798/mcp'
   const unauthorized = await fetch(endpoint, {
@@ -133,7 +161,7 @@ async function runMcpChecks() {
     throw new Error(`MCP product help did not return the model setup workflow: ${JSON.stringify(modelHelpResult.structuredContent)}`)
   }
   const releaseHelpResult = await request(63, 'tools/call', { name: 'search_product_help', arguments: { query: '最近更新了哪些内容', limit: 3 } })
-  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.3'))) {
+  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.4'))) {
     throw new Error(`MCP product help did not return recent releases: ${JSON.stringify(releaseHelpResult.structuredContent)}`)
   }
   const brandHelpResult = await request(64, 'tools/call', { name: 'search_product_help', arguments: { query: '这个网站为什么叫吉维尼', limit: 3 } })
@@ -1016,6 +1044,7 @@ async function runLocalCliBridgeCheck(cookie) {
     }),
   })
   const productHelpText = await productHelpResponse.text()
+  assertProgressiveTraceBeforeResult(productHelpText, 'Product help')
   if (!productHelpResponse.ok
     || !productHelpText.includes('Command + Shift + M')
     || !productHelpText.includes('search_product_help')
@@ -1030,7 +1059,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const productQuestions = [
     { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
     { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
-    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.3', '需求人画像'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.4', '分析过程'] },
     { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
   ]
   for (const [index, item] of productQuestions.entries()) {
@@ -1072,6 +1101,7 @@ async function runLocalCliBridgeCheck(cookie) {
     }),
   })
   const profileText = await profileResponse.text()
+  assertProgressiveTraceBeforeResult(profileText, 'Requester profile')
   if (!profileResponse.ok
     || !profileText.includes('get_requester_profile')
     || !profileText.includes('陈义君')

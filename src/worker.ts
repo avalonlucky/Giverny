@@ -14919,7 +14919,9 @@ async function searchTavily(apiKey: string, query: string): Promise<string> {
   }
 }
 
-async function chatWithAi(env: Env, request: Request) {
+type AgentVisibleTraceSink = (trace: string[]) => void | Promise<void>
+
+async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisibleTraceSink) {
   const body = (await request.json().catch(() => ({}))) as {
     messages?: Array<{ role: string; content: string }>
     month?: string
@@ -14947,6 +14949,12 @@ async function chatWithAi(env: Env, request: Request) {
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
   const textAttachments = attachments.filter((a) => a.type === 'text').slice(0, 3)
+  const emitVisibleTrace = async (items: string | string[]) => {
+    if (!onVisibleTrace) return
+    const lines = Array.isArray(items) ? items : [items]
+    const normalized = lines.map((line) => String(line || '').trim()).filter(Boolean)
+    if (normalized.length > 0) await onVisibleTrace(normalized)
+  }
 
   // 判断是否需要联网搜索（用户在问自身数据则不搜）
   const lastMsg = messages.at(-1)?.content ?? ''
@@ -14988,6 +14996,10 @@ async function chatWithAi(env: Env, request: Request) {
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
+      await emitVisibleTrace([
+        '理解问题：先判断是否需要进入长期 Agent Runtime。',
+        '制定计划：由网站编排层准备工作区上下文，再交给 Agent Runtime 分析。',
+      ])
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         context: agentContext,
@@ -15011,6 +15023,10 @@ async function chatWithAi(env: Env, request: Request) {
             messageCount: messages.length + 1,
           })
         }
+        await emitVisibleTrace([
+          ...formatAgentRuntimeTrace(runtimeResult.trace),
+          '整理回答：Agent Runtime 已返回结果，准备展示最终答案。',
+        ])
         return ok({
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,
@@ -15107,6 +15123,7 @@ async function chatWithAi(env: Env, request: Request) {
 
   if (imageAttachments.length === 0 && textAttachments.length === 0) {
     let orchestratedTurn = createAgentTurn({ principal: agentPrincipal, question: lastMsg })
+    await emitVisibleTrace('理解问题：识别用户目标，并判断需要核对哪些站内依据。')
     const rawPlan = await planChatAgentTurn(env, modelChoice, {
       question: lastMsg,
       currentMonth: month,
@@ -15154,6 +15171,8 @@ async function chatWithAi(env: Env, request: Request) {
       question: rawPlan?.question || lastMsg,
       tools: plannedTools,
     }
+    await emitVisibleTrace(chatUnderstandingTrace(lastMsg, plan.intent))
+    await emitVisibleTrace(chatPlanTrace(plan, plannedTools.map((tool) => normalizeChatToolName(tool.name)).filter((name): name is ChatAgentToolName => name !== 'none')))
     orchestratedTurn = {
       ...orchestratedTurn,
       intent: normalizeAgentIntent(plan?.intent),
@@ -15175,6 +15194,10 @@ async function chatWithAi(env: Env, request: Request) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const startedAt = performance.now()
       try {
+        const toolLabels = plannedTools.map((tool) => normalizeChatToolName(tool.name)).filter((name) => name !== 'none')
+        if (toolLabels.length > 0) {
+          await emitVisibleTrace(`执行计划：调用 ${toolLabels.join('、')} 读取真实数据。`)
+        }
         const execution = await executeChatAgentTools(
           env,
           plan,
@@ -15184,6 +15207,7 @@ async function chatWithAi(env: Env, request: Request) {
         )
         toolResults = execution.results
         trace.push(...execution.trace)
+        await emitVisibleTrace(execution.trace)
         orchestratedTurn = {
           ...orchestratedTurn,
           attempts: attempt,
@@ -15199,6 +15223,7 @@ async function chatWithAi(env: Env, request: Request) {
         break
       } catch (error) {
         toolExecutionError = describeAiCallError(error) || '工具执行失败'
+        await emitVisibleTrace(`工具执行第 ${attempt} 次未完成：${toolExecutionError}`)
         orchestratedTurn = {
           ...orchestratedTurn,
           attempts: attempt,
@@ -15223,6 +15248,7 @@ async function chatWithAi(env: Env, request: Request) {
       }, 503)
     }
     if (toolResults.length > 0) {
+      await emitVisibleTrace(chatEvidenceFindingTrace(toolResults))
       const evidence: AgentEvidence[] = toolResults.map((item, index) => ({
         id: `${orchestratedTurn.id}:evidence:${index + 1}`,
         toolCallId: orchestratedTurn.plan[index]?.id || `${orchestratedTurn.id}:tool:${index + 1}`,
@@ -15233,6 +15259,7 @@ async function chatWithAi(env: Env, request: Request) {
       }))
       orchestratedTurn = { ...orchestratedTurn, phase: 'analyze', evidence }
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
+      await emitVisibleTrace('整理回答：根据工具结果组织最终答案。')
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
       let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
@@ -15281,6 +15308,7 @@ async function chatWithAi(env: Env, request: Request) {
           }))
         if (repairTools.length) {
           const repair = await executeChatAgentTools(env, { intent: plan.intent, tools: repairTools }, requestedMonths, hourlyRate, workspaceId)
+          await emitVisibleTrace(repair.trace)
           repair.results.forEach((item, index) => {
             const callId = `${orchestratedTurn.id}:repair:${index + 1}`
             orchestratedTurn.plan.push({ id: callId, name: item.name, args: item.args, reason: repairTools[index]?.reason || '验真补查', risk: 'read', status: 'success', attempt: orchestratedTurn.attempts + 1 })
@@ -15373,7 +15401,16 @@ ${textAttachmentSection}
     const visionPrompt = `${systemPrompt}\n\n用户问题：${lastUserContent}`
     const assets: MultimodalAsset[] = imageAttachments.map((a) => ({ base64: a.data, mimeType: a.mimeType }))
     try {
+      await emitVisibleTrace([
+        '理解问题：用户提供了图片附件，需要进入识图模型。',
+        '执行计划：读取图片内容并结合任务上下文生成回答。',
+      ])
       const answer = await callMultimodalWithSelectedModel(env, modelChoice, visionPrompt, assets)
+      await emitVisibleTrace([
+        `识图答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
+        ...answer.notes,
+        '整理回答：识图结果已返回，准备展示最终答案。',
+      ])
       return ok({
         content: answer.text,
         model: answer.modelLabel,
@@ -15400,7 +15437,12 @@ ${textAttachmentSection}
   }
 
   try {
+    await emitVisibleTrace([
+      '理解问题：这是普通问答，本轮不需要读取站内业务数据。',
+      '组织答案：结合当前问题与对话上下文形成直接回答。',
+    ])
     const answer = await callTextWithSelectedModel(env, fallbackChatPrompt, modelChoice, 1500)
+    await emitVisibleTrace('核对结论：没有引用未经查询的任务、金额或产品事实。')
     return ok({
       content: answer.text,
       model: answer.modelLabel,
@@ -15673,7 +15715,7 @@ async function waitForAgentTimeline(ms: number) {
 
 function uniqueAgentTrace(trace: unknown) {
   if (!Array.isArray(trace)) return []
-  return [...new Set(trace.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 10)
+  return [...new Set(trace.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 16)
 }
 
 type LocalCliChatRoute = {
@@ -16077,7 +16119,13 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           send({ type: 'trace', status: 'running', trace: uniqueAgentTrace(routingTrace) })
         }
 
-        const response = await chatWithAi(env, cloudRequest)
+        let cloudTrace: string[] = []
+        const emitCloudTrace: AgentVisibleTraceSink = async (items) => {
+          cloudTrace = uniqueAgentTrace([...cloudTrace, ...items])
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]) })
+          await waitForAgentTimeline(120)
+        }
+        const response = await chatWithAi(env, cloudRequest, emitCloudTrace)
         const metricResponse = response.clone()
         const metricWrite = recordAgentRunMetric(
           env,
@@ -16100,12 +16148,10 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
         const trace = uniqueAgentTrace(payload.trace)
         const visibleTrace = uniqueAgentTrace([
           ...routingTrace,
+          ...cloudTrace,
           ...(trace.length > 0 ? trace : ['整理回答']),
         ])
-        for (let index = 0; index < visibleTrace.length; index += 1) {
-          send({ type: 'trace', status: 'running', trace: visibleTrace.slice(0, index + 1) })
-          if (index < visibleTrace.length - 1) await waitForAgentTimeline(120)
-        }
+        send({ type: 'trace', status: 'running', trace: visibleTrace })
         send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace })
         send({ type: 'done' })
       } catch (error) {

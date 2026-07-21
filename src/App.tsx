@@ -5345,7 +5345,7 @@ function AgentExecutionTimeline({
   const running = status === 'running'
   const displayTraceLine = (line: string) => line.replace(/\s*\[tool:[^\]]+\]\s*/g, ' ').trim()
   return (
-    <details className={`chat-agent-timeline status-${status}`} open={running}>
+    <details className={`chat-agent-timeline status-${status}`} open>
       <summary>
         <span>{running ? '分析中…' : status === 'failed' ? '分析中断' : '分析过程'}</span>
         <small>{running ? displayTraceLine(trace.at(-1) ?? '') : '已核对，可展开查看'}</small>
