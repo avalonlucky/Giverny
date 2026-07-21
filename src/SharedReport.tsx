@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, Sparkles, X } from 'lucide-react'
+import { Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, X } from 'lucide-react'
 import { defaultPdfTitle, defaultServiceCompanyName } from './config/appConfig'
 import { api, type SharedReportState } from './lib/api'
-import { toChineseAmount } from './lib/format'
 import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
+import { SettlementReceipt } from './components/SettlementReceipt'
 import type { FileAsset } from './types/domain'
 import './App.css'
-
-// 金额展示：真实保留小数（最多两位），不四舍五入到元
-const formatYuan = (value: number) =>
-  (Math.round(value * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 function monthLabel(month: string) {
   const [year, monthNumber] = month.split('-').map(Number)
@@ -18,10 +14,6 @@ function monthLabel(month: string) {
 
 function datePart(value: string) {
   return value.slice(0, 10)
-}
-
-function monthPart(value: string) {
-  return datePart(value).slice(0, 7)
 }
 
 function formatPublicDate(value: string) {
@@ -124,13 +116,39 @@ export default function SharedReport({ token }: { token: string }) {
   const serviceCompanyName = state.settings?.serviceCompanyName || defaultServiceCompanyName
   // 计费口径与主应用一致：状态不影响计费，只排除「不计费」；仅展示有工时的计费行
   const billableTasks = tasks.filter((task) => task.billable !== false && task.status !== '不计费' && task.actualHours > 0)
-  // 不计费任务（免费协助）：以 ¥0 行体现在回单里，不计入合计金额
-  const freeTasks = tasks.filter((task) => task.billable === false || task.status === '不计费')
   // 用精确单价（不取整）反推，保证每行金额之和恰好等于已锁定的总额
   const hourlyRate = report.billableHours > 0 ? report.totalAmount / report.billableHours : 0
   const receiptNo = `AK-${report.month.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
-  const acceptedCount = tasks.filter((task) => task.status === '已验收').length
-  const pendingCount = tasks.filter((task) => task.status === '待验收').length
+  const fileLabel = monthLabel(report.month).replace(/\s/g, '')
+  const receiptRows: ReceiptExcelRow[] = billableTasks.map((task, index) => ({
+    sequence: String(index + 1).padStart(2, '0'),
+    type: task.type,
+    title: task.title,
+    requirement: task.requirement || '',
+    estimatedStartDate: formatPublicDate(task.date),
+    actualCompletionDate: formatPublicDate(task.actualDeliveryDate || task.estimatedDate || task.date),
+    requester: task.requester || task.contact || '—',
+    contact: task.contact || task.requester || '—',
+    status: task.status,
+    estimatedHours: Number(task.estimatedHours) || null,
+    actualHours: task.actualHours,
+    unitPrice: hourlyRate,
+    amount: Math.round(task.actualHours * hourlyRate * 100) / 100,
+    acceptanceNote: task.acceptanceNote || '—',
+  }))
+  const receiptOptions = {
+    fileLabel,
+    title: pdfTitle,
+    receiptNo,
+    issuedAt: report.generatedAt || new Date().toLocaleString('zh-CN', { hour12: false }),
+    companyName: serviceCompanyName,
+    serviceName: '平面设计兼职',
+    settlementLabel: monthLabel(report.month),
+    hourlyRate,
+    rows: receiptRows,
+    totalHours: report.billableHours,
+    totalAmount: report.totalAmount,
+  }
 
   const handleExportPdf = () => {
     const previousTitle = document.title
@@ -140,40 +158,7 @@ export default function SharedReport({ token }: { token: string }) {
   }
 
   const handleExportUserSheet = async () => {
-    const fileLabel = monthLabel(report.month).replace(/\s/g, '')
-    const rows: ReceiptExcelRow[] = billableTasks.map((task, index) => ({
-      sequence: String(index + 1).padStart(2, '0'),
-      type: task.type,
-      title: task.title,
-      requirement: task.requirement || '',
-      estimatedStartDate: formatPublicDate(task.date),
-      actualCompletionDate: formatPublicDate(task.actualDeliveryDate || task.estimatedDate || task.date),
-      requester: task.requester || task.contact || '—',
-      contact: task.contact || task.requester || '—',
-      status: task.status,
-      estimatedHours: Number(task.estimatedHours) || null,
-      actualHours: task.actualHours,
-      unitPrice: hourlyRate,
-      amount: Math.round(task.actualHours * hourlyRate * 100) / 100,
-      acceptanceNote: task.acceptanceNote || '—',
-    }))
-    const buffer = await buildReceiptExcelBuffer({
-      fileLabel,
-      title: pdfTitle,
-      receiptNo,
-      issuedAt: report.generatedAt || new Date().toLocaleString('zh-CN', { hour12: false }),
-      companyName: serviceCompanyName,
-      serviceName: '平面设计兼职',
-      settlementLabel: monthLabel(report.month),
-      hourlyRate,
-      rows,
-      totalHours: report.billableHours,
-      totalAmount: report.totalAmount,
-      remarks: [
-        `本回单共 ${rows.length} 项，计费工时 ${report.billableHours.toFixed(2)}h，结算金额 ¥${formatYuan(report.totalAmount)}。`,
-        '本回单由系统根据已锁定的任务与工时记录自动生成。',
-      ],
-    })
+    const buffer = await buildReceiptExcelBuffer(receiptOptions)
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -205,93 +190,7 @@ export default function SharedReport({ token }: { token: string }) {
           </div>
         </header>
 
-        <section className="receipt receipt-template-min shared-receipt" aria-label="月度结算回单" data-company={serviceCompanyName}>
-          <header className="receipt-header">
-            <div className="receipt-brand">
-              <span className="receipt-mark"><Sparkles size={16} /></span>
-              <div>
-                <strong>{serviceCompanyName}</strong>
-                <small>ANKKI TECHNOLOGY</small>
-              </div>
-            </div>
-            <div className="receipt-title">
-              <h2>{pdfTitle}</h2>
-              <span>MONTHLY SETTLEMENT RECEIPT</span>
-            </div>
-            <div className="receipt-no">
-              <span>回单编号：{receiptNo}</span>
-              <span>锁定时间：{report.generatedAt || '—'}</span>
-            </div>
-          </header>
-          <div className="receipt-rule" />
-          <dl className="receipt-info">
-            <div><dt>客户名称</dt><dd>{serviceCompanyName}</dd></div>
-            <div><dt>服务内容</dt><dd>平面设计兼职</dd></div>
-            <div><dt>结算月份</dt><dd>{monthLabel(report.month)}</dd></div>
-            <div><dt>结算单价</dt><dd>¥{formatYuan(hourlyRate)} / 小时</dd></div>
-          </dl>
-          <table className="receipt-table">
-            <thead>
-              <tr>
-                <th>序号</th>
-                <th>结算月份</th>
-                <th>项目名称</th>
-                <th>类型</th>
-                <th className="num">工时</th>
-                <th className="num">金额（元）</th>
-              </tr>
-            </thead>
-            <tbody>
-              {billableTasks.map((task, index) => (
-                <tr key={task.id}>
-                  <td>{String(index + 1).padStart(2, '0')}</td>
-                  <td>
-                    {monthLabel(task.settlementMonth || report.month)}
-                    {task.settlementMonth && task.settlementMonth !== monthPart(task.date) ? '（补录）' : ''}
-                  </td>
-                  <td className="receipt-task-name">{task.title}</td>
-                  <td>{task.type}</td>
-                  <td className="num">{task.actualHours.toFixed(1)}</td>
-                  <td className="num">{formatYuan(task.actualHours * hourlyRate)}</td>
-                </tr>
-              ))}
-              {freeTasks.map((task, index) => (
-                <tr key={task.id} className="receipt-free-row">
-                  <td>{String(billableTasks.length + index + 1).padStart(2, '0')}</td>
-                  <td>{monthLabel(task.settlementMonth || report.month)}</td>
-                  <td className="receipt-task-name">{task.title} <em className="receipt-free-tag">不计费</em></td>
-                  <td>{task.type}</td>
-                  <td className="num">{task.actualHours.toFixed(1)}</td>
-                  <td className="num">¥0</td>
-                </tr>
-              ))}
-              {billableTasks.length === 0 && freeTasks.length === 0 && (
-                <tr><td className="receipt-empty" colSpan={6}>本月暂无可纳入结算的任务</td></tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={4}>合计</td>
-                <td className="num">{report.billableHours.toFixed(1)}</td>
-                <td className="num">¥{formatYuan(report.totalAmount)}</td>
-              </tr>
-            </tfoot>
-          </table>
-          <div className="receipt-amount">
-            <span>人民币（大写）</span>
-            <strong>{toChineseAmount(report.totalAmount)}</strong>
-          </div>
-          <div className="receipt-remarks">
-            <p>备注：本月共 {tasks.length} 项任务，已验收 {acceptedCount} 项，待验收 {pendingCount} 项。</p>
-            <p>本回单由系统根据已锁定的任务与工时记录自动生成。</p>
-            <div className="receipt-stamp" aria-hidden="true">
-              <span>{serviceCompanyName}</span>
-              <em>★</em>
-              <span>工时结算确认</span>
-            </div>
-          </div>
-          <div className="receipt-cutline"><span>✂</span></div>
-        </section>
+        <SettlementReceipt options={receiptOptions} className="shared-receipt" />
 
         {(files.length > 0 || updates.length > 0) && (
           <section className="shared-receipt-appendix">

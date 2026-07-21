@@ -49,6 +49,41 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ page }) => {
+  await page.getByRole('button', { name: '结算' }).click()
+  const receipt = page.getByRole('region', { name: '月度结算回单' })
+  await expect(receipt.getByText('Giverny', { exact: true })).toBeVisible()
+  await expect(receipt.getByText('让创作在自己的花园里生长', { exact: true })).toBeVisible()
+  await expect(receipt.locator('thead th')).toHaveText([
+    '序号', '设计类型', '任务', '任务需求', '预计开始日期', '实际完成日期',
+    '需求人', '对接人', '状态', '预估工时', '实际工时', '单价', '小计', '验收备注',
+  ])
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '下载 Excel 回单' }).first().click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  expect(downloadPath).toBeTruthy()
+
+  const ExcelJsModule = await import('exceljs')
+  const ExcelJS = ExcelJsModule.default ?? ExcelJsModule
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.readFile(downloadPath!)
+  const sheet = workbook.getWorksheet('结算回单')
+  expect(sheet).toBeTruthy()
+  expect(sheet!.getCell('A1').value).toBe('Giverny')
+  expect(sheet!.getCell('A2').value).toBe('让创作在自己的花园里生长')
+  expect(sheet!.getRow(11).values).toEqual([
+    undefined,
+    '序号', '设计类型', '任务', '任务需求', '预计开始日期', '实际完成日期',
+    '需求人', '对接人', '状态', '预估工时', '实际工时', '单价', '小计', '验收备注',
+  ])
+  expect(sheet!.getColumn(4).width).toBe(78)
+  expect(sheet!.getColumn(14).width).toBe(78)
+  expect(sheet!.getCell('L12').formula).toBe('$K$9')
+  expect(sheet!.getCell('M12').formula).toBe('K12*L12')
+})
+
 test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {
   await page.route('**/api/ai/conversations', async (route) => {
     if (route.request().method() === 'GET') {

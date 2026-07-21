@@ -115,8 +115,9 @@ import {
   type OpenRouterFreeModel,
   type WorkspaceSummary,
 } from './lib/api'
-import { formatFileSize, toChineseAmount } from './lib/format'
+import { formatFileSize } from './lib/format'
 import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
+import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
@@ -17703,7 +17704,6 @@ function ReportsView({
   onNotify: (message: string, tone?: ToastTone) => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
-  const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail'>('min')
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
@@ -17801,7 +17801,15 @@ function ReportsView({
     }
     return taskLatestActivityInMonth(task, month) || acceptanceDate || task.date || ''
   }
-  const buildMonthReceiptRows = (month: string, tasksForMonth: Task[], updatesMap = latestUpdatesByTask): SettlementTaskRow[] => tasksForMonth
+  const selectedReceiptHourlyRate = selectedReport?.billableHours && selectedReport.billableHours > 0
+    ? selectedReport.totalAmount / selectedReport.billableHours
+    : hourlyRate
+  const buildMonthReceiptRows = (
+    month: string,
+    tasksForMonth: Task[],
+    updatesMap = latestUpdatesByTask,
+    rate = selectedReceiptHourlyRate,
+  ): SettlementTaskRow[] => tasksForMonth
     .filter((task) => isTaskBillable(task) && taskBillableHoursInMonth(task, month) > 0)
     .map((task, index) => {
       const actualHours = taskBillableHoursInMonth(task, month)
@@ -17812,7 +17820,7 @@ function ReportsView({
         actualCompletionDate: formatReceiptDate(actualCompletionDateForMonth(task, month)),
         estimatedHours: Number(task.estimatedHours) || 0,
         actualHours,
-        amount: roundCents(actualHours * hourlyRate),
+        amount: roundCents(actualHours * rate),
         progressText: getTaskProgressText(task, updatesMap),
       }
     })
@@ -17828,54 +17836,55 @@ function ReportsView({
         accepted: selectedTasks.filter((task) => task.status === '已验收').length,
         pending: selectedTasks.filter((task) => task.status === '待验收').length,
       }
-  const billableTasks = receiptRows.map((row) => row.task)
-  // 只统计真正没进结算表的计划中任务：有实际工时的计划中任务会照常计费，不能在备注里说成未计费
-  const plannedCount = selectedTasks.filter((task) => task.status === '计划中' && isTaskBillable(task) && getSelectedTaskHours(task) === 0).length
-  const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
-  // 不计时清单：① 整单不计费的任务；② 计费任务里「不计工时」的分段（如仅改名）。两者都要让甲方看到做了什么、为何不计时。
-  const uncountedItems: Array<{ key: string; title: string; type: string; reason: string; formula: string }> = []
-  freeTasks.forEach((task) => {
-    const hours = getSelectedTaskHours(task)
-    uncountedItems.push({
-      key: `task-${task.id}`,
-      title: task.title,
-      type: task.type,
-      reason: task.status === '挂起'
-        ? task.suspendReason || '挂起'
-        : task.status === '终止'
-          ? task.terminateReason || '终止'
-          : '整单不计费',
-      formula: hours > 0
-        ? `${hours.toFixed(1)}h × ¥${hourlyRate} = ¥0（不计费）`
-        : '不计费',
-    })
-  })
-  selectedTasks.forEach((task) => {
-    if (!isTaskBillable(task)) {
-      return
-    }
-    ;(task.timeEntries ?? []).forEach((entry) => {
-      if (timeEntryMonth(entry, task) !== selectedMonth) {
-        return
-      }
-      if (entry.isAcceptanceProgress || minutesForTimeEntry(entry) > 0) {
-        return
-      }
-      uncountedItems.push({
-        key: `entry-${task.id}-${entry.id}`,
-        title: task.title,
-        type: task.type,
-        reason: entry.note?.trim() || '该分段不计工时',
-        formula: '0h · 不计工时',
-      })
-    })
-  })
   const visibleReports = isHistoryExpanded ? reports : reports.slice(0, Math.max(3, Math.min(reports.length, 5)))
   const receiptNo = `AK-${selectedMonth.replace('-', '')}-${String(receiptRows.length + 1).padStart(3, '0')}`
-  const templateOptions = [
-    { value: 'min' as const, label: '简约' },
-    { value: 'detail' as const, label: '编辑式 Excel' },
-  ]
+  const previewReceiptRows: ReceiptExcelRow[] = receiptRows.map((row) => ({
+    sequence: row.sequence,
+    type: row.task.type,
+    title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
+    requirement: row.task.requirement || '',
+    estimatedStartDate: row.estimatedStartDate,
+    actualCompletionDate: row.actualCompletionDate,
+    requester: row.task.requester || row.task.contact || '—',
+    contact: row.task.contact || row.task.requester || '—',
+    status: row.task.status,
+    estimatedHours: row.estimatedHours,
+    actualHours: row.actualHours,
+    unitPrice: selectedReceiptHourlyRate,
+    amount: roundCents(row.actualHours * selectedReceiptHourlyRate),
+    acceptanceNote: row.task.acceptanceNote?.trim() || row.progressText || '—',
+  }))
+  if (selectedImportedHours > 0) {
+    previewReceiptRows.push({
+      sequence: String(previewReceiptRows.length + 1).padStart(2, '0'),
+      type: '导入',
+      title: '月初导入工时（线下记录补录）',
+      requirement: '—',
+      estimatedStartDate: '—',
+      actualCompletionDate: '—',
+      requester: '—',
+      contact: '—',
+      status: '导入',
+      estimatedHours: null,
+      actualHours: selectedImportedHours,
+      unitPrice: selectedReceiptHourlyRate,
+      amount: roundCents(selectedImportedHours * selectedReceiptHourlyRate),
+      acceptanceNote: '线下记录补录',
+    })
+  }
+  const previewReceiptOptions = {
+    fileLabel: selectedMonthLabel.replace(/\s/g, ''),
+    title: pdfTitle,
+    receiptNo,
+    issuedAt: selectedReport?.generatedAt || nowStamp(),
+    companyName: serviceCompanyName,
+    serviceName: '平面设计兼职',
+    settlementLabel: selectedMonthLabel,
+    hourlyRate: selectedReceiptHourlyRate,
+    rows: previewReceiptRows,
+    totalHours: selectedStats.billableHours,
+    totalAmount: selectedStats.amount,
+  }
   useEffect(() => {
     window.localStorage.setItem(settlementExportRecordsKey, JSON.stringify(exportRecords.slice(0, 40)))
   }, [exportRecords])
@@ -17962,6 +17971,9 @@ function ReportsView({
             month,
             sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, month) && !task.voidedAt)),
             updatesMap,
+            targetReport?.billableHours && targetReport.billableHours > 0
+              ? targetReport.totalAmount / targetReport.billableHours
+              : hourlyRate,
           )
       const exportHourlyRate = targetReport?.billableHours && targetReport.billableHours > 0
         ? targetReport.totalAmount / targetReport.billableHours
@@ -18015,10 +18027,6 @@ function ReportsView({
         rows: exportRows,
         totalHours,
         totalAmount,
-        remarks: [
-          `本回单共 ${exportRows.length} 项，计费工时 ${totalHours.toFixed(2)}h，结算金额 ¥${formatYuan(totalAmount)}。`,
-          '本回单由系统根据任务、工时与验收记录自动生成，验收状态以合作伙伴确认为准。',
-        ],
       })
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       const url = URL.createObjectURL(blob)
@@ -18211,225 +18219,7 @@ function ReportsView({
         )}
       </section>
 
-      <div className="receipt-tools">
-        <div className="segment-tabs report-template-tabs" aria-label="结算回单模板">
-          <span>模板</span>
-          {templateOptions.map((option) => (
-            <button
-              type="button"
-              className={receiptTemplate === option.value ? 'active' : ''}
-              key={option.value}
-              onClick={() => setReceiptTemplate(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <section className={`receipt receipt-template-${receiptTemplate}`} aria-label="月度结算回单" data-company={serviceCompanyName}>
-        {receiptTemplate === 'detail' && (
-          <div className="receipt-excel-bar">
-            <FileText size={14} />
-            <span>结算回单_{selectedMonthLabel.replace(/\s/g, '')}.xlsx</span>
-          </div>
-        )}
-        <header className="receipt-header">
-          <div className="receipt-title">
-            <h2>{pdfTitle}</h2>
-            <span>MONTHLY SETTLEMENT RECEIPT</span>
-          </div>
-          <div className="receipt-no">
-            <span>回单编号：{receiptNo}</span>
-            <span>出单时间：{nowStamp()}</span>
-          </div>
-        </header>
-
-        <div className="receipt-rule" />
-
-        <dl className="receipt-info">
-          <div>
-            <dt>客户名称</dt>
-            <dd>{serviceCompanyName}</dd>
-          </div>
-          <div>
-            <dt>服务内容</dt>
-            <dd>平面设计兼职</dd>
-          </div>
-          <div>
-            <dt>结算月份</dt>
-            <dd>{selectedMonthLabel}</dd>
-          </div>
-          <div>
-            <dt>结算单价</dt>
-            <dd>¥{hourlyRate} / 小时</dd>
-          </div>
-        </dl>
-
-        <table className={`receipt-table ${receiptTemplate === 'detail' ? 'receipt-table-expanded' : ''}`}>
-          <thead>
-            {receiptTemplate === 'detail' ? (
-              <tr>
-                <th>序号</th>
-                <th>设计类型</th>
-                <th>任务</th>
-                <th>任务需求</th>
-                <th>预计开始日期</th>
-                <th>实际完成日期</th>
-                <th>需求人</th>
-                <th>对接人</th>
-                <th>状态</th>
-                <th className="num">预估工时</th>
-                <th className="num">实际工时</th>
-                <th className="num">单价</th>
-                <th className="num">小计</th>
-                <th>验收备注</th>
-              </tr>
-            ) : (
-              <tr>
-                <th>序号</th>
-                <th>设计类型</th>
-                <th>任务</th>
-                <th>任务需求</th>
-                <th>预计开始</th>
-                <th>实际完成</th>
-                <th>需求人</th>
-                <th>对接人</th>
-                <th>验收状态</th>
-                <th className="num">工时</th>
-                <th className="num">金额（元）</th>
-              </tr>
-            )}
-          </thead>
-          <tbody>
-            {receiptRows.map((row) => (
-              receiptTemplate === 'detail' ? (
-                <tr key={row.task.id}>
-                  <td>{row.sequence}</td>
-                  <td>{row.task.type}</td>
-                  <td className="receipt-task-name"><b>{row.task.title}</b>{isSupplementalTask(row.task) && <span>补录</span>}</td>
-                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
-                  <td>{row.estimatedStartDate}</td>
-                  <td>{row.actualCompletionDate}</td>
-                  <td>{row.task.requester || row.task.contact || '—'}</td>
-                  <td>{row.task.contact || row.task.requester || '—'}</td>
-                  <td>{row.task.status}</td>
-                  <td className="num">{row.estimatedHours.toFixed(1)}h</td>
-                  <td className="num">{row.actualHours.toFixed(1)}h</td>
-                  <td className="num">¥{hourlyRate}</td>
-                  <td className="num">{formatYuan(row.amount)}</td>
-                  <td>{row.task.acceptanceNote || '—'}</td>
-                </tr>
-              ) : (
-                <tr key={row.task.id}>
-                  <td>{row.sequence}</td>
-                  <td>{row.task.type}</td>
-                  <td className="receipt-task-name">{row.task.title}{isSupplementalTask(row.task) ? '（补录）' : ''}</td>
-                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
-                  <td>{row.estimatedStartDate}</td>
-                  <td>{row.actualCompletionDate}</td>
-                  <td>{row.task.requester || row.task.contact || '—'}</td>
-                  <td>{row.task.contact || row.task.requester || '—'}</td>
-                  <td>{row.task.status}</td>
-                  <td className="num">{row.actualHours.toFixed(1)}</td>
-                  <td className="num">{formatYuan(row.amount)}</td>
-                </tr>
-              )
-            ))}
-            {selectedImportedHours > 0 && (
-              receiptTemplate === 'detail' ? (
-	                <tr>
-	                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
-	                  <td>导入</td>
-	                  <td className="receipt-task-name"><b>月初导入工时</b><span>线下记录补录</span></td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>导入</td>
-	                  <td className="num">—</td>
-                  <td className="num">{selectedImportedHours.toFixed(1)}h</td>
-                  <td className="num">¥{hourlyRate}</td>
-                  <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
-                  <td>—</td>
-                </tr>
-              ) : (
-	                <tr>
-	                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
-	                  <td>导入</td>
-	                  <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>—</td>
-	                  <td>导入</td>
-	                  <td className="num">{selectedImportedHours.toFixed(1)}</td>
-                  <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
-                </tr>
-              )
-            )}
-            {billableTasks.length === 0 && selectedImportedHours === 0 && freeTasks.length === 0 && (
-              <tr>
-	                <td colSpan={receiptTemplate === 'detail' ? 14 : 11} className="receipt-empty">
-                  本月暂无任务
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr>
-	              <td colSpan={receiptTemplate === 'detail' ? 10 : 9}>合计</td>
-              <td className="num">{selectedStats.billableHours.toFixed(1)}</td>
-              {receiptTemplate === 'detail' && <td />}
-              <td className="num">¥{formatYuan(selectedStats.amount)}</td>
-              {receiptTemplate === 'detail' && (
-	                <>
-	                  <td />
-	                </>
-              )}
-            </tr>
-          </tfoot>
-        </table>
-
-        <div className="receipt-amount">
-          <span>人民币（大写）</span>
-          <strong>{toChineseAmount(selectedStats.amount)}</strong>
-        </div>
-
-        <div className="receipt-remarks">
-          <p>
-            备注：本月共 {selectedTasks.length} 项任务，已验收 {selectedStats.accepted} 项，待验收 {selectedStats.pending} 项
-            {plannedCount > 0 ? `，计划中 ${plannedCount} 项（未计费）` : ''}
-            {freeTasks.length > 0 ? `，另含 ${freeTasks.length} 项不计费协助` : ''}。
-          </p>
-          <p>本回单由系统根据任务与工时记录自动生成，验收状态以合作伙伴确认为准。</p>
-        </div>
-
-        {uncountedItems.length > 0 && (
-          <div className="receipt-uncounted">
-            <div className="receipt-uncounted-head">
-              <h3>{selectedMonthLabel} · 不计时</h3>
-              <span>已完成但不计入计费工时，仅作说明</span>
-            </div>
-            <ul>
-              {uncountedItems.map((item) => (
-                <li key={item.key}>
-                  <span className="receipt-uncounted-name">{item.title}</span>
-                  <span className="receipt-uncounted-type">{item.type}</span>
-                  <span className="receipt-uncounted-reason">{item.reason}</span>
-                  <span className="receipt-uncounted-formula">{item.formula}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="receipt-cutline">
-          <span>✂</span>
-        </div>
-      </section>
+      <SettlementReceipt options={previewReceiptOptions} />
     </section>
   )
 }

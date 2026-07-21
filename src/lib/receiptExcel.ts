@@ -1,5 +1,3 @@
-import { toChineseAmount } from './format'
-
 export type ReceiptExcelRow = {
   sequence: string
   type: string
@@ -29,116 +27,152 @@ export type ReceiptExcelOptions = {
   rows: ReceiptExcelRow[]
   totalHours: number
   totalAmount: number
-  remarks: string[]
 }
 
-const currencyFormat = '"¥"#,##0.00'
-const hourFormat = '0.00'
+const currencyFormat = '\\¥#,##0.00'
+const hourFormat = '0.00" h"'
 
 const palette = {
-  text: 'FF17282F',
-  muted: 'FF66736F',
-  green: 'FF2F6F6D',
-  border: 'FFD8DED8',
-  headerFill: 'FFF2F4EF',
-  zebraFill: 'FFFAFBF7',
+  text: 'FF2B2B28',
+  muted: 'FF8C8B80',
+  green: 'FF3F5E4A',
+  greenText: 'FF2F4938',
+  border: 'FFDDE4D9',
+  innerBorder: 'FFE8ECE5',
+  infoFill: 'FFEAF0E6',
+  zebraFill: 'FFFBFAF4',
   paperFill: 'FFFFFFFF',
-  acceptedFill: 'FFE4F0E9',
-  pendingFill: 'FFF3EEE1',
-  activeFill: 'FFE8F0F2',
+  acceptedFill: 'FFE6F2E7',
+  acceptedText: 'FF397047',
+  pendingFill: 'FFF5F1E7',
+  pendingText: 'FF856826',
+  activeFill: 'FFFFEAD0',
+  activeText: 'FFB06F19',
 }
 
 const cleanText = (value: string | undefined | null, fallback = '—') => {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim()
+  const text = (value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
   return text || fallback
 }
 
-const formatYuan = (value: number) =>
-  (Math.round(value * 100) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-
 const estimateRowHeight = (requirement: string, note: string) => {
-  const weightedLength = Math.max(requirement.length / 42, note.length / 54)
-  return Math.max(42, Math.min(118, 30 + Math.ceil(weightedLength) * 18))
+  const requirementLines = requirement.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 52)), 0)
+  const noteLines = note.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 54)), 0)
+  return Math.max(30, Math.min(117.75, Math.max(requirementLines, noteLines) * 12 + 12))
 }
 
+const parseReceiptDate = (value: string) => {
+  const matched = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/)
+  if (!matched) return null
+  return new Date(Date.UTC(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3])))
+}
+
+const borderForCell = (column: number) => ({
+  top: { style: 'thin' as const, color: { argb: palette.border } },
+  bottom: { style: 'thin' as const, color: { argb: palette.border } },
+  left: { style: 'thin' as const, color: { argb: column === 1 ? palette.border : palette.innerBorder } },
+  right: { style: 'thin' as const, color: { argb: column === 14 ? palette.border : palette.innerBorder } },
+})
+
 export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
-  const ExcelJS = await import('exceljs')
+  const ExcelJsModule = await import('exceljs')
+  const ExcelJS = ExcelJsModule.default ?? ExcelJsModule
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Giverny'
   workbook.created = new Date()
   workbook.modified = new Date()
 
   const sheet = workbook.addWorksheet('结算回单', {
-    views: [{ showGridLines: false, state: 'frozen', ySplit: 10 }],
+    views: [{ showGridLines: false }],
     pageSetup: {
       orientation: 'landscape',
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
-      paperSize: 9,
-      margins: { left: 0.35, right: 0.35, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 },
+      margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
     },
   })
 
   sheet.columns = [
     { key: 'sequence', width: 6 },
-    { key: 'type', width: 13 },
-    { key: 'title', width: 30 },
-    { key: 'requirement', width: 56 },
-    { key: 'estimatedStartDate', width: 14 },
-    { key: 'actualCompletionDate', width: 14 },
-    { key: 'requester', width: 8 },
-    { key: 'contact', width: 8 },
+    { key: 'type', width: 16 },
+    { key: 'title', width: 26 },
+    { key: 'requirement', width: 78 },
+    { key: 'estimatedStartDate', width: 13 },
+    { key: 'actualCompletionDate', width: 13 },
+    { key: 'requester', width: 9 },
+    { key: 'contact', width: 9 },
     { key: 'status', width: 9 },
     { key: 'estimatedHours', width: 10 },
     { key: 'actualHours', width: 10 },
     { key: 'unitPrice', width: 9 },
     { key: 'amount', width: 12 },
-    { key: 'acceptanceNote', width: 58 },
+    { key: 'acceptanceNote', width: 78 },
   ]
 
-  sheet.mergeCells('A1:C1')
-  sheet.getCell('A1').value = `结算回单_${options.fileLabel}.xlsx`
-  sheet.getCell('A1').font = { name: 'Arial', size: 10, bold: true, color: { argb: palette.green } }
-  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF4F1' } }
-  sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' }
+  sheet.getRow(1).height = 21.75
+  sheet.getCell('A1').value = 'Giverny'
+  sheet.getCell('A1').font = { name: 'Georgia', size: 15, bold: true, color: { argb: palette.text } }
+  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F9F5' } }
+  sheet.getRow(2).height = 15
+  sheet.getCell('A2').value = '让创作在自己的花园里生长'
+  sheet.getCell('A2').font = { name: 'Noto Sans CJK SC', size: 8, color: { argb: palette.muted } }
+  sheet.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F9F5' } }
+  sheet.getRow(3).height = 6
 
-  sheet.mergeCells('A3:H3')
-  sheet.getCell('A3').value = options.title
-  sheet.getCell('A3').font = { name: 'Arial', size: 20, bold: true, color: { argb: palette.text } }
-  sheet.mergeCells('A4:H4')
-  sheet.getCell('A4').value = 'MONTHLY SETTLEMENT RECEIPT'
-  sheet.getCell('A4').font = { name: 'Arial', size: 9, color: { argb: palette.muted } }
-  sheet.getCell('A4').alignment = { horizontal: 'left' }
+  sheet.mergeCells('A4:G4')
+  sheet.mergeCells('H4:N4')
+  sheet.getRow(4).height = 24
+  sheet.getCell('A4').value = options.title
+  sheet.getCell('A4').font = { name: 'Noto Sans CJK SC', size: 17, bold: true, color: { argb: palette.text } }
+  sheet.getCell('H4').value = `回单编号  ${options.receiptNo}`
+  sheet.getCell('H4').font = { name: 'Noto Sans CJK SC', size: 9, color: { argb: palette.muted } }
+  sheet.getCell('H4').alignment = { horizontal: 'right' }
 
-  sheet.mergeCells('L3:N3')
-  sheet.getCell('L3').value = `回单编号：${options.receiptNo}`
-  sheet.mergeCells('L4:N4')
-  sheet.getCell('L4').value = `出单时间：${options.issuedAt}`
-  ;['L3', 'L4'].forEach((cell) => {
-    sheet.getCell(cell).font = { name: 'Arial', size: 9, color: { argb: palette.muted } }
-    sheet.getCell(cell).alignment = { horizontal: 'right' }
-  })
-
-  sheet.mergeCells('A5:N5')
+  sheet.mergeCells('A5:G5')
+  sheet.mergeCells('H5:N5')
+  sheet.getRow(5).height = 13.5
+  sheet.getCell('A5').value = 'MONTHLY SETTLEMENT RECEIPT'
+  sheet.getCell('A5').font = { name: 'Microsoft YaHei', size: 8, color: { argb: palette.muted } }
   sheet.getCell('A5').border = { bottom: { style: 'medium', color: { argb: palette.green } } }
+  sheet.getCell('H5').value = `出单时间  ${options.issuedAt}`
+  sheet.getCell('H5').font = { name: 'Noto Sans CJK SC', size: 9, color: { argb: palette.muted } }
+  sheet.getCell('H5').alignment = { horizontal: 'right' }
+  sheet.getCell('H5').border = { bottom: { style: 'medium', color: { argb: palette.green } } }
+  sheet.getRow(6).height = 3.75
+  sheet.getRow(7).height = 6
 
   const infoLabels = [
-    ['A7', '客户名称', 'A8', options.companyName, 'A8:D8'],
-    ['E7', '服务内容', 'E8', options.serviceName, 'E8:H8'],
-    ['I7', '结算月份', 'I8', options.settlementLabel, 'I8:L8'],
-    ['M7', '结算单价', 'M8', `¥${formatYuan(options.hourlyRate)} / 小时`, 'M8:N8'],
+    ['A8', '客户名称', 'A9', options.companyName, 'A8:C8', 'A9:C9'],
+    ['D8', '服务内容', 'D9', options.serviceName, 'D8:G8', 'D9:G9'],
+    ['H8', '结算月份', 'H9', options.settlementLabel, 'H8:J8', 'H9:J9'],
+    ['K8', '结算单价', 'K9', options.hourlyRate, 'K8:N8', 'K9:N9'],
   ] as const
-  infoLabels.forEach(([labelCell, label, valueCell, value, mergeRange]) => {
-    sheet.mergeCells(mergeRange)
+  sheet.getRow(8).height = 15.75
+  sheet.getRow(9).height = 21.75
+  infoLabels.forEach(([labelCell, label, valueCell, value, labelMergeRange, valueMergeRange]) => {
+    sheet.mergeCells(labelMergeRange)
+    sheet.mergeCells(valueMergeRange)
     sheet.getCell(labelCell).value = label
-    sheet.getCell(labelCell).font = { name: 'Arial', size: 9, color: { argb: palette.muted } }
+    sheet.getCell(labelCell).font = { name: 'Noto Sans CJK SC', size: 8, color: { argb: palette.muted } }
+    sheet.getCell(labelCell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.infoFill } }
+    sheet.getCell(labelCell).border = {
+      top: { style: 'thin', color: { argb: palette.border } },
+      bottom: { style: 'thin', color: { argb: 'FFE3E1D6' } },
+    }
     sheet.getCell(valueCell).value = value
-    sheet.getCell(valueCell).font = { name: 'Arial', size: 11, bold: true, color: { argb: palette.text } }
-    sheet.getCell(valueCell).border = { bottom: { style: 'thin', color: { argb: palette.border } } }
+    sheet.getCell(valueCell).font = { name: 'Noto Sans CJK SC', size: 11, bold: true, color: { argb: palette.text } }
+    sheet.getCell(valueCell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.infoFill } }
+    sheet.getCell(valueCell).border = {
+      top: { style: 'thin', color: { argb: 'FFE3E1D6' } },
+      bottom: { style: 'thin', color: { argb: palette.border } },
+    }
   })
+  sheet.getCell('K9').numFmt = '\\¥0" / 小时"'
+  sheet.getRow(10).height = 7.5
 
-  const headerRow = sheet.getRow(10)
+  const headerRow = sheet.getRow(11)
   headerRow.values = [
     '序号',
     '设计类型',
@@ -155,10 +189,10 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
     '小计',
     '验收备注',
   ]
-  headerRow.height = 36
+  headerRow.height = 30
   headerRow.eachCell((cell) => {
-    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: palette.text } }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.headerFill } }
+    cell.font = { name: 'Noto Sans CJK SC', size: 9, bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.green } }
     cell.border = {
       top: { style: 'thin', color: { argb: palette.border } },
       bottom: { style: 'thin', color: { argb: palette.border } },
@@ -168,7 +202,7 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
   })
 
-  const dataStartRow = 11
+  const dataStartRow = 12
   options.rows.forEach((item, index) => {
     const rowNumber = dataStartRow + index
     const row = sheet.getRow(rowNumber)
@@ -177,84 +211,82 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
       cleanText(item.type),
       cleanText(item.title),
       cleanText(item.requirement),
-      cleanText(item.estimatedStartDate),
-      cleanText(item.actualCompletionDate),
+      parseReceiptDate(item.estimatedStartDate),
+      parseReceiptDate(item.actualCompletionDate),
       cleanText(item.requester),
       cleanText(item.contact),
       cleanText(item.status),
       item.estimatedHours ?? null,
       item.actualHours,
-      item.unitPrice,
+      { formula: '$K$9', result: item.unitPrice },
       { formula: `K${rowNumber}*L${rowNumber}`, result: item.amount },
       cleanText(item.acceptanceNote),
     ]
     row.height = estimateRowHeight(item.requirement, item.acceptanceNote)
     row.eachCell((cell, colNumber) => {
-      cell.font = { name: 'Arial', size: 10, color: { argb: palette.text } }
+      cell.font = { name: 'Noto Sans CJK SC', size: 9, color: { argb: palette.text } }
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
         fgColor: { argb: index % 2 === 0 ? palette.paperFill : palette.zebraFill },
       }
-      cell.border = {
-        bottom: { style: 'thin', color: { argb: palette.border } },
-        left: { style: 'thin', color: { argb: palette.border } },
-        right: { style: 'thin', color: { argb: palette.border } },
-      }
-      const isNumberColumn = colNumber >= 10 && colNumber <= 13
+      cell.border = borderForCell(colNumber)
+      const isCenteredColumn = colNumber === 1 || (colNumber >= 5 && colNumber <= 12)
       cell.alignment = {
         vertical: 'top',
-        horizontal: isNumberColumn ? 'right' : 'left',
+        horizontal: isCenteredColumn ? 'center' : 'left',
         wrapText: true,
       }
     })
+    row.getCell(5).numFmt = 'yyyy/mm/dd'
+    row.getCell(6).numFmt = 'yyyy/mm/dd'
     row.getCell(10).numFmt = hourFormat
     row.getCell(11).numFmt = hourFormat
-    row.getCell(12).numFmt = currencyFormat
+    row.getCell(12).numFmt = '\\¥0'
     row.getCell(13).numFmt = currencyFormat
+    row.getCell(13).font = { name: 'Microsoft YaHei', size: 9, bold: true, color: { argb: palette.greenText } }
     const statusCell = row.getCell(9)
     statusCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+    const isAccepted = item.status === '已验收' || item.status === '已完成'
+    const isActive = item.status === '进行中'
     statusCell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: {
-        argb: item.status === '已验收'
+        argb: isAccepted
           ? palette.acceptedFill
-          : item.status === '进行中'
+          : isActive
             ? palette.activeFill
             : palette.pendingFill,
       },
+    }
+    statusCell.font = {
+      name: 'Noto Sans CJK SC',
+      size: 9,
+      color: { argb: isAccepted ? palette.acceptedText : isActive ? palette.activeText : palette.pendingText },
     }
   })
 
   const totalRowNumber = dataStartRow + options.rows.length
   const totalRow = sheet.getRow(totalRowNumber)
-  totalRow.values = []
-  sheet.mergeCells(`A${totalRowNumber}:I${totalRowNumber}`)
-  totalRow.getCell(1).value = '合计'
-  totalRow.getCell(10).value = '计费工时'
-  totalRow.getCell(11).value = options.totalHours
-  totalRow.getCell(12).value = '结算金额'
+  sheet.mergeCells(`A${totalRowNumber}:J${totalRowNumber}`)
+  sheet.mergeCells(`M${totalRowNumber}:N${totalRowNumber}`)
+  totalRow.getCell(1).value = '合  计'
+  totalRow.getCell(11).value = options.rows.length > 0
+    ? { formula: `SUM(K${dataStartRow}:K${totalRowNumber - 1})`, result: options.totalHours }
+    : options.totalHours
   totalRow.getCell(13).value = options.rows.length > 0
     ? { formula: `SUM(M${dataStartRow}:M${totalRowNumber - 1})`, result: options.totalAmount }
     : options.totalAmount
-  totalRow.getCell(14).value = `人民币（大写）${toChineseAmount(options.totalAmount)}`
-  totalRow.height = 34
-  totalRow.eachCell((cell, colNumber) => {
-    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: colNumber === 13 ? palette.green : palette.text } }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF1ED' } }
-    cell.border = { top: { style: 'medium', color: { argb: palette.green } } }
-    cell.alignment = { vertical: 'middle', horizontal: colNumber >= 11 && colNumber <= 13 ? 'right' : 'left', wrapText: true }
-  })
+  totalRow.height = 25.5
+  for (let colNumber = 1; colNumber <= 14; colNumber += 1) {
+    const cell = totalRow.getCell(colNumber)
+    cell.font = { name: 'Noto Sans CJK SC', size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.green } }
+    cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 ? 'center' : colNumber >= 11 ? 'right' : 'left', wrapText: true }
+  }
   totalRow.getCell(11).numFmt = hourFormat
   totalRow.getCell(13).numFmt = currencyFormat
-
-  const remarkStart = totalRowNumber + 2
-  sheet.mergeCells(`A${remarkStart}:N${remarkStart}`)
-  sheet.getCell(`A${remarkStart}`).value = options.remarks.filter(Boolean).join('\n')
-  sheet.getCell(`A${remarkStart}`).font = { name: 'Arial', size: 10, color: { argb: palette.muted } }
-  sheet.getCell(`A${remarkStart}`).alignment = { vertical: 'top', wrapText: true }
-  sheet.getRow(remarkStart).height = Math.max(32, options.remarks.length * 18)
 
   sheet.eachRow((row) => {
     row.eachCell((cell) => {

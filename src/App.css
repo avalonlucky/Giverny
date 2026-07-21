@@ -53,6 +53,21 @@
   --color-editorial-primary-hover: #2f564e;
   --color-editorial-menu: #20302c;
   --color-editorial-backdrop: rgba(20, 28, 26, 0.34);
+  --color-receipt-text: #2b2b28;
+  --color-receipt-muted: #8c8b80;
+  --color-receipt-green: #3f5e4a;
+  --color-receipt-green-text: #2f4938;
+  --color-receipt-info: #eaf0e6;
+  --color-receipt-paper: #ffffff;
+  --color-receipt-zebra: #fbfaf4;
+  --color-receipt-border: #dde4d9;
+  --color-receipt-inner-border: #e8ece5;
+  --color-receipt-accepted: #e6f2e7;
+  --color-receipt-accepted-text: #397047;
+  --color-receipt-active: #ffead0;
+  --color-receipt-active-text: #b06f19;
+  --color-receipt-pending: #f5f1e7;
+  --color-receipt-pending-text: #856826;
   --color-surface-deep: #ecede5;
   --color-border: rgba(31, 42, 39, 0.08);
   --color-border-soft: rgba(31, 42, 39, 0.045);
@@ -22662,6 +22677,216 @@ button.topbar-create-button kbd {
   box-shadow: inset 0 -2px 0 var(--color-primary);
 }
 
+/* 结算回单：线上预览与下载工作簿共用用户提供的正式模板。 */
+.settlement-receipt-template {
+  width: 100%;
+  padding: 30px 34px 0;
+  color: var(--color-receipt-text);
+  background: var(--color-receipt-paper);
+  overflow: hidden;
+}
+
+.settlement-receipt-brand {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 14px;
+}
+
+.settlement-receipt-brand strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.settlement-receipt-brand span {
+  color: var(--color-receipt-muted);
+  font-size: 10px;
+}
+
+.settlement-receipt-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, auto);
+  align-items: end;
+  gap: 36px;
+  padding-bottom: 9px;
+  border-bottom: 3px solid var(--color-receipt-green);
+}
+
+.settlement-receipt-heading h2 {
+  margin: 0;
+  color: var(--color-receipt-text);
+  font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.settlement-receipt-heading > div:first-child > span {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-receipt-muted);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.settlement-receipt-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  padding-bottom: 1px;
+  color: var(--color-receipt-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settlement-receipt-info {
+  display: grid;
+  grid-template-columns: 3fr 4fr 3fr 4fr;
+  margin: 13px 0 10px;
+  background: var(--color-receipt-info);
+}
+
+.settlement-receipt-info div {
+  min-width: 0;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--color-receipt-border);
+  border-bottom: 1px solid var(--color-receipt-border);
+}
+
+.settlement-receipt-info dt {
+  color: var(--color-receipt-muted);
+  font-size: 10px;
+}
+
+.settlement-receipt-info dd {
+  margin: 4px 0 0;
+  color: var(--color-receipt-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settlement-receipt-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.settlement-receipt-table {
+  width: 100%;
+  min-width: 1760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--color-receipt-text);
+  font-size: 11px;
+}
+
+.settlement-receipt-table .col-sequence { width: 2.02%; }
+.settlement-receipt-table .col-type { width: 5.37%; }
+.settlement-receipt-table .col-title { width: 8.72%; }
+.settlement-receipt-table .col-requirement { width: 26.18%; }
+.settlement-receipt-table .col-date { width: 4.36%; }
+.settlement-receipt-table .col-person,
+.settlement-receipt-table .col-status { width: 3.02%; }
+.settlement-receipt-table .col-hours { width: 3.36%; }
+.settlement-receipt-table .col-price { width: 3.02%; }
+.settlement-receipt-table .col-amount { width: 4.03%; }
+.settlement-receipt-table .col-note { width: 26.18%; }
+
+.settlement-receipt-table th,
+.settlement-receipt-table td {
+  padding: 7px 8px;
+  border-top: 1px solid var(--color-receipt-border);
+  border-bottom: 1px solid var(--color-receipt-border);
+  border-left: 1px solid var(--color-receipt-inner-border);
+  vertical-align: top;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.settlement-receipt-table th:first-child,
+.settlement-receipt-table td:first-child {
+  border-left-color: var(--color-receipt-border);
+}
+
+.settlement-receipt-table th:last-child,
+.settlement-receipt-table td:last-child {
+  border-right: 1px solid var(--color-receipt-border);
+}
+
+.settlement-receipt-table thead th {
+  padding: 8px 6px;
+  color: var(--color-receipt-paper);
+  background: var(--color-receipt-green);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.settlement-receipt-table tbody tr:nth-child(even) td {
+  background: var(--color-receipt-zebra);
+}
+
+.settlement-receipt-table .cell-center {
+  text-align: center;
+}
+
+.settlement-receipt-table .cell-number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settlement-receipt-table .cell-amount {
+  color: var(--color-receipt-green-text);
+  font-weight: 700;
+}
+
+.settlement-receipt-table .cell-status {
+  vertical-align: middle;
+}
+
+.settlement-receipt-table .cell-status.is-accepted {
+  color: var(--color-receipt-accepted-text);
+  background: var(--color-receipt-accepted) !important;
+}
+
+.settlement-receipt-table .cell-status.is-active {
+  color: var(--color-receipt-active-text);
+  background: var(--color-receipt-active) !important;
+}
+
+.settlement-receipt-table .cell-status.is-pending {
+  color: var(--color-receipt-pending-text);
+  background: var(--color-receipt-pending) !important;
+}
+
+.settlement-receipt-table tfoot td {
+  padding: 8px;
+  color: var(--color-receipt-paper);
+  background: var(--color-receipt-green);
+  border-color: var(--color-receipt-green);
+  font-size: 12px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.settlement-receipt-table tfoot td:first-child {
+  text-align: center;
+}
+
+.settlement-receipt-table tfoot .cell-amount {
+  color: var(--color-receipt-paper);
+  text-align: right;
+}
+
+.settlement-receipt-empty {
+  height: 84px;
+  color: var(--color-receipt-muted);
+  text-align: center;
+  vertical-align: middle !important;
+}
+
 .income-view .stats-grid {
   margin-bottom: 14px;
 }
@@ -22818,7 +23043,7 @@ button.topbar-create-button kbd {
 }
 
 .shared-content {
-  width: min(1240px, 100%);
+  width: 100%;
 }
 
 .shared-receipt-view {
@@ -22873,7 +23098,7 @@ button.topbar-create-button kbd {
 }
 
 .shared-receipt {
-  width: min(1120px, 100%);
+  width: 100%;
   justify-self: center;
 }
 
@@ -22962,7 +23187,7 @@ button.topbar-create-button kbd {
   }
 
   .shared-receipt {
-    padding: 24px 18px;
+    padding: 22px 16px 0;
   }
 
   .shared-receipt-appendix {
@@ -23014,6 +23239,25 @@ button.topbar-create-button kbd {
     border-radius: 0;
     box-shadow: none;
     padding: 12px 6px;
+  }
+
+  .settlement-receipt-template {
+    padding: 8px 0 0;
+  }
+
+  .settlement-receipt-table-scroll {
+    overflow: visible;
+  }
+
+  .settlement-receipt-table {
+    min-width: 0;
+    font-size: 5.5px;
+  }
+
+  .settlement-receipt-table th,
+  .settlement-receipt-table td {
+    padding: 2px;
+    line-height: 1.25;
   }
 
   .receipt-detail-title {
