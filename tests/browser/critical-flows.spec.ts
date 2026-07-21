@@ -72,11 +72,12 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   const initialRowCount = await receipt.locator('tbody tr').count()
   const rangeInputs = page.locator('.report-range-export input')
   expect(await rangeInputs.count()).toBe(2)
+  const selectedEndDate = await rangeInputs.nth(1).inputValue()
   await page.getByRole('button', { name: '选择自定义导出' }).click()
   const startDatePicker = page.getByRole('dialog', { name: '自定义导出选择器' })
   await startDatePicker.getByRole('button', { name: '上个月' }).click()
   await startDatePicker.getByRole('button', { name: '2026-06-01' }).click()
-  await expect(receipt.getByText('2026/06/01 至 2026/07/22', { exact: true })).toBeVisible()
+  await expect(receipt.getByText(`2026/06/01 至 ${selectedEndDate.replaceAll('-', '/')}`, { exact: true })).toBeVisible()
   await expect(receipt.getByText('结算日期', { exact: true })).toBeVisible()
   expect(await receipt.locator('tbody tr').count()).toBeGreaterThan(initialRowCount)
 
