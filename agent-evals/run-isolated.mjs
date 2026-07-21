@@ -1848,6 +1848,9 @@ try {
   start('npx', ['wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--port', '8798'])
   await waitForHealth('http://127.0.0.1:8798/api/health')
 
+  const anonymousOperations = await fetch('http://127.0.0.1:8798/api/ai/operations-center?days=7')
+  if (![401, 403].includes(anonymousOperations.status)) throw new Error(`AI operations center allowed anonymous access: ${anonymousOperations.status}`)
+
   const loginResponse = await fetch('http://127.0.0.1:8798/api/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

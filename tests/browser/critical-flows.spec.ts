@@ -587,6 +587,20 @@ test('模型中心展示默认模型和服务商配置入口', async ({ page }) 
 
 test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({ page }) => {
   await page.goto('/settings')
+  const chatResult = await page.evaluate(async () => {
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        modelChoice: 'deepseek-v4-flash',
+        month: '2026-07',
+        messages: [{ role: 'user', content: '显示金额和隐藏金额的快捷键是什么？' }],
+      }),
+    })
+    return { status: response.status, payload: await response.json() }
+  }) as { status: number; payload: { agentTurn?: { verification?: { passed?: boolean } } } }
+  expect(chatResult.status, JSON.stringify(chatResult.payload)).toBe(200)
+  expect(chatResult.payload.agentTurn?.verification?.passed, JSON.stringify(chatResult.payload)).toBe(true)
   const result = await page.evaluate(async () => {
     const response = await fetch('/api/ai/operations-center?days=7')
     return {
@@ -598,6 +612,7 @@ test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({
     payload: {
     workspace: { id: string; foundationReady: boolean }
     routing: { totalRuns: number; recent: Array<{ route: string }> }
+    agentTurns: { total: number; recent: Array<{ id: string }> }
     background: { failedCount: number; jobs: Array<{ id: string }> }
     learning: { totalSamples: number }
     }
@@ -605,13 +620,18 @@ test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({
   expect(result.status, JSON.stringify(result.payload)).toBe(200)
   const { payload } = result
   expect(payload.workspace).toMatchObject({ id: 'default', foundationReady: true })
-  expect(payload.routing.totalRuns).toBe(0)
-  expect(payload.routing.recent).toHaveLength(0)
+  expect(payload.routing.totalRuns).toBeGreaterThan(0)
+  expect(payload.routing.recent.length).toBeGreaterThan(0)
+  expect(payload.agentTurns.total).toBeGreaterThan(0)
+  expect(payload.agentTurns.recent.length).toBeGreaterThan(0)
   expect(payload.background.failedCount).toBeGreaterThan(0)
   expect(payload.background.jobs.some((job) => job.id === 'browser-job-failed')).toBeTruthy()
   expect(payload.learning.totalSamples).toBeGreaterThan(0)
 
+  await page.locator('.ai-operations-panel').getByRole('button', { name: '刷新' }).click()
   await expect(page.getByRole('heading', { name: 'AI 运行中心' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Agent 执行审计' })).toBeVisible()
+  await expect(page.getByText('已验真', { exact: true }).first()).toBeVisible()
   const workspaceSelect = page.getByLabel('切换工作区')
   await expect(workspaceSelect).toHaveValue('default')
   await expect(workspaceSelect.locator('option[value="default"]')).toHaveText('Giverny 默认工作区')

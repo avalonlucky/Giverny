@@ -24,6 +24,13 @@ const intentLabels: Record<string, string> = {
   financial_query: '财务查询',
   monthly_review: '月度复盘',
   task_operation: '任务操作',
+  finance: '财务查询',
+  task_data: '任务数据',
+  attachment: '附件查询',
+  product_help: '产品帮助',
+  knowledge: '知识查询',
+  write: '写入操作',
+  unknown: '待识别',
 }
 
 function formatDuration(value: number) {
@@ -152,6 +159,38 @@ export default function AiOperationsCenterPanel({
               <small>直接采用 {operations.learning.adoptionRate}% · 修改后采用 {operations.learning.editedRate}%</small>
             </article>
           </div>
+          <section className="ai-agent-audit-section" aria-label="Agent 执行审计">
+            <div className="ai-agent-audit-heading">
+              <div>
+                <h3>Agent 执行审计</h3>
+                <p>已验真 {operations.agentTurns.verified} · 自动修复 {operations.agentTurns.repaired} · 未完成 {operations.agentTurns.failed}</p>
+              </div>
+              <small>仅记录执行状态，不保存对话正文</small>
+            </div>
+            {operations.agentTurns.recent.length ? (
+              <div className="ai-operations-list ai-agent-audit-list">
+                {operations.agentTurns.recent.slice(0, 10).map((turn) => (
+                  <details key={turn.id}>
+                    <summary>
+                      <div>
+                        <strong>{intentLabels[turn.intent] || turn.intent}</strong>
+                        <small>{turn.model} · {turn.tools.length ? turn.tools.map((tool) => tool.name).join('、') : '未调用工具'} · {formatDuration(turn.durationMs)}</small>
+                      </div>
+                      <span className={turn.verificationPassed ? 'status-completed' : turn.outcome === 'failed' ? 'status-failed' : 'status-running'}>
+                        {turn.verificationPassed ? turn.attempts > 1 ? '修复后验真' : '已验真' : turn.outcome === 'failed' ? '未完成' : '待核对'}
+                      </span>
+                    </summary>
+                    <div className="ai-agent-audit-detail">
+                      <p>执行 {turn.attempts} 次 · 确定性证据 {turn.deterministicEvidenceCount} 条{turn.fallbackUsed ? ' · 已启用备用模型' : ' · 主模型完成'}</p>
+                      {turn.tools.length > 0 && <p>工具：{turn.tools.map((tool) => `${tool.name}（${tool.status === 'success' ? '成功' : tool.status}）`).join('、')}</p>}
+                      {turn.issues.length > 0 && <p>验真：{turn.issues.join(' ')}</p>}
+                      {turn.fallbackReason && <p>备用原因：{turn.fallbackReason}</p>}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : <p className="calendar-empty-hint">新的 Agent 请求完成后，这里会显示可核对的执行记录。</p>}
+          </section>
           <div className="ai-operations-columns">
             <section>
               <h3>最近路由</h3>

@@ -4,6 +4,7 @@ import type { AgentPrincipalContext } from './agentScope'
 export type AgentTurnPhase = 'understand' | 'plan' | 'authorize' | 'execute' | 'analyze' | 'verify' | 'complete' | 'needs_input' | 'failed'
 export type AgentIntent = 'finance' | 'task_data' | 'attachment' | 'product_help' | 'knowledge' | 'write' | 'general' | 'unknown'
 export type AgentRiskLevel = 'read' | 'write' | 'sensitive'
+export type AgentToolExecutionStatus = 'pending' | 'running' | 'success' | 'failed' | 'denied' | 'skipped'
 
 export type AgentPlannedToolCall = {
   id: string
@@ -11,6 +12,10 @@ export type AgentPlannedToolCall = {
   args: Record<string, unknown>
   reason: string
   risk: AgentRiskLevel
+  status?: AgentToolExecutionStatus
+  attempt?: number
+  error?: string
+  durationMs?: number
 }
 
 export type AgentEvidence = {
@@ -42,6 +47,12 @@ export type AgentTurn = {
   attempts: number
   startedAt: string
   completedAt?: string
+}
+
+export type AgentReplanDecision = {
+  shouldReplan: boolean
+  requiredTools: string[]
+  reason: string
 }
 
 export function createAgentTurn(input: {
@@ -93,7 +104,48 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (turn.plan.some((item) => item.risk !== 'read') && !turn.answer.includes('确认')) {
     issues.push('写入动作没有进入人工确认流程。')
   }
+  const failedTools = turn.plan.filter((item) => item.status === 'failed' || item.status === 'pending').map((item) => item.name)
+  if (failedTools.length) {
+    issues.push(`工具执行失败：${[...new Set(failedTools)].join('、')}。`)
+    failedTools.forEach((name) => requiredTools.push(String(name)))
+  }
   return { passed: issues.length === 0, issues, requiredTools: [...new Set(requiredTools)] }
+}
+
+export function decideAgentReplan(turn: AgentTurn, maxAttempts = 3): AgentReplanDecision {
+  const verification = verifyAgentAnswer(turn)
+  const requiredTools = verification.requiredTools.filter((toolName) => {
+    const attempts = turn.plan.filter((item) => item.name === toolName).length
+    return attempts < maxAttempts
+  })
+  return {
+    shouldReplan: !verification.passed && requiredTools.length > 0 && turn.attempts < maxAttempts,
+    requiredTools,
+    reason: verification.issues.join(' '),
+  }
+}
+
+export function sanitizeAgentTurnAudit(turn: AgentTurn) {
+  return {
+    id: turn.id,
+    phase: turn.phase,
+    intent: turn.intent,
+    attempts: turn.attempts,
+    plan: turn.plan.map((item) => ({
+      name: String(item.name),
+      risk: item.risk,
+      status: item.status || 'pending',
+      attempt: item.attempt || 1,
+      durationMs: Math.max(0, Number(item.durationMs) || 0),
+      error: String(item.error || '').slice(0, 240),
+    })),
+    evidence: turn.evidence.map((item) => ({
+      toolName: item.toolName,
+      source: item.source,
+      deterministic: item.deterministic,
+    })),
+    verification: turn.verification,
+  }
 }
 
 export function completeAgentTurn(turn: AgentTurn, answer: string): AgentTurn {

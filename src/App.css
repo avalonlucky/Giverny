@@ -25197,6 +25197,84 @@ button.topbar-create-button kbd {
   margin-top: 28px;
 }
 
+.ai-agent-audit-section {
+  margin-top: 28px;
+}
+
+.ai-agent-audit-heading,
+.ai-agent-audit-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.ai-agent-audit-heading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ai-agent-audit-heading p,
+.ai-agent-audit-heading small,
+.ai-agent-audit-detail p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-agent-audit-list {
+  margin-top: 10px;
+}
+
+.ai-agent-audit-list details {
+  padding: 9px 0;
+}
+
+.ai-agent-audit-list summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-agent-audit-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-agent-audit-list summary > div {
+  min-width: 0;
+}
+
+.ai-agent-audit-list summary strong,
+.ai-agent-audit-list summary small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-agent-audit-list summary strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.ai-agent-audit-list summary > span {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.ai-agent-audit-list summary > .status-completed {
+  color: var(--color-primary);
+}
+
+.ai-agent-audit-list summary > .status-failed {
+  color: var(--color-danger);
+}
+
+.ai-agent-audit-detail {
+  padding: 7px 0 0;
+}
+
 .ai-operations-columns h3 {
   margin: 0 0 12px;
   font-size: 14px;

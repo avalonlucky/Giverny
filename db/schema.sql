@@ -331,6 +331,26 @@ CREATE TABLE IF NOT EXISTS agent_run_metrics (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS agent_turn_runs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'system',
+  runtime TEXT NOT NULL DEFAULT 'cloud',
+  model TEXT NOT NULL DEFAULT '',
+  intent TEXT NOT NULL DEFAULT 'unknown',
+  phase TEXT NOT NULL DEFAULT 'failed',
+  outcome TEXT NOT NULL DEFAULT 'failed',
+  planned_tools_json TEXT NOT NULL DEFAULT '[]',
+  evidence_summary_json TEXT NOT NULL DEFAULT '[]',
+  verification_json TEXT NOT NULL DEFAULT '{}',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  fallback_used INTEGER NOT NULL DEFAULT 0,
+  fallback_reason TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  is_eval INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
   action TEXT NOT NULL,
@@ -517,6 +537,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_confirmation_uses_expiry ON agent_confirmat
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_created ON agent_run_metrics(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_outcome ON agent_run_metrics(is_eval, outcome, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_intent ON agent_run_metrics(is_eval, intent, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_workspace ON agent_turn_runs(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_outcome ON agent_turn_runs(workspace_id, outcome, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS local_cli_pairings (
   id TEXT PRIMARY KEY,

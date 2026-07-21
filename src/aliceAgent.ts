@@ -3,7 +3,7 @@ import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
-import { completeAgentTurn, createAgentTurn, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
+import { completeAgentTurn, createAgentTurn, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection } from './types/agent'
@@ -77,7 +77,7 @@ export type AliceAgentChatResult = {
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
-  agentTurn?: { id: string; phase: string; intent: string; evidenceCount: number; verification: { passed: boolean; issues: string[]; requiredTools: string[] } }
+  agentTurn?: ReturnType<typeof sanitizeAgentTurnAudit> & { evidenceCount?: number }
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
@@ -943,6 +943,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           args: toJsonObject(call.input),
           reason: '由主模型结合完整语义规划。',
           risk: call.toolName.endsWith('_preview') ? 'write' : 'read',
+          status: 'pending',
+          attempt: 1,
         })
         trace.push({ type: 'tool', label: agentToolTraceLabel(call.toolName, 'running') })
       }
@@ -959,6 +961,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           deterministic: true,
           payload: output,
         })
+        const planned = [...plannedCalls].reverse().find((item) => item.name === toolResult.toolName && item.status === 'pending')
+        if (planned) planned.status = 'success'
         if (toolResult.toolName === 'search_attachments' || wantsAttachmentResults(message)) {
           this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
         }
@@ -990,7 +994,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       const activeWait = waitingRecords.find((item) => item.active === true)
       if (task.title && activeWait) {
         const repairCallId = `${agentTurn.id}:tool:${plannedCalls.length + 1}`
-        plannedCalls.push({ id: repairCallId, name: 'get_task_detail', args: { title: message }, reason: '验真阶段补查任务阻塞证据。', risk: 'read' })
+        plannedCalls.push({ id: repairCallId, name: 'get_task_detail', args: { title: message }, reason: '验真阶段补查任务阻塞证据。', risk: 'read', status: 'success', attempt: 2 })
         evidence.push({ id: `${agentTurn.id}:evidence:${evidence.length + 1}`, toolCallId: repairCallId, toolName: 'get_task_detail', source: 'd1', deterministic: true, payload: repairedRecord })
         usedTools.add('get_task_detail')
         const elapsedMinutes = Math.max(0, Number(activeWait.elapsedMinutes) || 0)
@@ -1018,13 +1022,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       answer,
       trace: [...trace, { type: 'result' as const, label: '整理回答', detail: '将工具结果组织为可核对的结论。' }].slice(0, 10),
       model: `deepseek:${modelName}`,
-      agentTurn: {
-        id: agentTurn.id,
-        phase: agentTurn.phase,
-        intent: agentTurn.intent,
-        evidenceCount: agentTurn.evidence.length,
-        verification: agentTurn.verification,
-      },
+      agentTurn: { ...sanitizeAgentTurnAudit(agentTurn), evidenceCount: agentTurn.evidence.length },
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),

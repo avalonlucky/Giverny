@@ -178,6 +178,30 @@ export type AiOperationsCenter = {
       fallback: boolean
     }>
   }
+  agentTurns: {
+    total: number
+    verified: number
+    repaired: number
+    failed: number
+    recent: Array<{
+      id: string
+      runtime: string
+      model: string
+      intent: string
+      phase: string
+      outcome: string
+      tools: Array<{ name: string; status: string }>
+      evidenceCount: number
+      deterministicEvidenceCount: number
+      verificationPassed: boolean
+      issues: string[]
+      attempts: number
+      fallbackUsed: boolean
+      fallbackReason: string
+      durationMs: number
+      createdAt: string
+    }>
+  }
   background: {
     activeCount: number
     failedCount: number

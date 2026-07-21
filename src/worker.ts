@@ -5,7 +5,7 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
-import { completeAgentTurn, createAgentTurn, normalizeAgentIntent, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
+import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 import { productCapabilities, searchProductHelp } from './productCapabilities'
 import { AliceAgent } from './aliceAgent'
@@ -2640,7 +2640,7 @@ type OpenAiAgentRuntimeResult = {
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
-  agentTurn?: { id: string; phase: string; intent: string; evidenceCount: number; verification: { passed: boolean; issues: string[]; requiredTools: string[] } }
+  agentTurn?: ReturnType<typeof sanitizeAgentTurnAudit> & { evidenceCount?: number }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -14583,6 +14583,7 @@ async function chatWithAi(env: Env, request: Request) {
           backgroundTask: runtimeResult.backgroundTask,
           attachments: runtimeResult.attachments,
           agentTurn: runtimeResult.agentTurn,
+          model: runtimeResult.model,
         })
       }
       if (requiresRuntime) {
@@ -14697,15 +14698,63 @@ async function chatWithAi(env: Env, request: Request) {
         args: item.args && typeof item.args === 'object' ? item.args : {},
         reason: String(item.reason || ''),
         risk: 'read',
+        status: 'pending',
+        attempt: 1,
       })),
     }
-    const { results: toolResults, trace } = await executeChatAgentTools(
-      env,
-      plan,
-      requestedMonths.length > 0 && isFinanceQuestion(lastMsg) ? requestedMonths : [],
-      hourlyRate,
-      workspaceId,
-    )
+    let toolResults: ChatAgentToolResult[] = []
+    const trace: string[] = []
+    let toolExecutionError = ''
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const startedAt = performance.now()
+      try {
+        const execution = await executeChatAgentTools(
+          env,
+          plan,
+          requestedMonths.length > 0 && isFinanceQuestion(lastMsg) ? requestedMonths : [],
+          hourlyRate,
+          workspaceId,
+        )
+        toolResults = execution.results
+        trace.push(...execution.trace)
+        orchestratedTurn = {
+          ...orchestratedTurn,
+          attempts: attempt,
+          plan: orchestratedTurn.plan.map((item) => ({
+            ...item,
+            status: toolResults.some((result) => result.name === item.name) ? 'success' : 'skipped',
+            attempt,
+            durationMs: Math.round(performance.now() - startedAt),
+            error: '',
+          })),
+        }
+        toolExecutionError = ''
+        break
+      } catch (error) {
+        toolExecutionError = describeAiCallError(error) || '工具执行失败'
+        orchestratedTurn = {
+          ...orchestratedTurn,
+          attempts: attempt,
+          plan: orchestratedTurn.plan.map((item) => ({
+            ...item,
+            status: 'failed',
+            attempt,
+            durationMs: Math.round(performance.now() - startedAt),
+            error: toolExecutionError,
+          })),
+        }
+        trace.push(`工具执行第 ${attempt} 次未完成：${toolExecutionError}`)
+        if (attempt < 3) trace.push('验真未通过，保持原计划并重新执行工具。')
+      }
+    }
+    if (toolExecutionError) {
+      const failedTurn = completeAgentTurn(orchestratedTurn, '工具连续执行失败，本轮没有生成未经验证的业务结论。')
+      return ok({
+        error: `Agent 工具连续执行失败：${toolExecutionError}`,
+        agentTurn: { ...sanitizeAgentTurnAudit(failedTurn), evidenceCount: 0 },
+        trace,
+      }, 503)
+    }
     if (toolResults.length > 0) {
       const evidence: AgentEvidence[] = toolResults.map((item, index) => ({
         id: `${orchestratedTurn.id}:evidence:${index + 1}`,
@@ -14740,15 +14789,52 @@ async function chatWithAi(env: Env, request: Request) {
         }
       }
       orchestratedTurn = completeAgentTurn(orchestratedTurn, finalContent)
+      const replan = decideAgentReplan(orchestratedTurn)
+      if (replan.shouldReplan) {
+        trace.push(`验真未通过，补充工具：${replan.requiredTools.join('、')}。`)
+        const repairTools = replan.requiredTools
+          .filter((name): name is Exclude<ChatAgentToolName, 'none'> => ['query_month_finance', 'search_tasks', 'get_task_detail', 'search_product_help'].includes(name))
+          .map((name) => ({
+            name,
+            args: name === 'query_month_finance' ? { months: requestedMonths } : { title: lastMsg, query: lastMsg },
+            reason: `验真阶段动态重规划：${replan.reason}`,
+          }))
+        if (repairTools.length) {
+          const repair = await executeChatAgentTools(env, { intent: plan.intent, tools: repairTools }, requestedMonths, hourlyRate, workspaceId)
+          repair.results.forEach((item, index) => {
+            const callId = `${orchestratedTurn.id}:repair:${index + 1}`
+            orchestratedTurn.plan.push({ id: callId, name: item.name, args: item.args, reason: repairTools[index]?.reason || '验真补查', risk: 'read', status: 'success', attempt: orchestratedTurn.attempts + 1 })
+            orchestratedTurn.evidence.push({ id: `${callId}:evidence`, toolCallId: callId, toolName: item.name, source: item.name === 'search_product_help' ? 'product_registry' : 'd1', deterministic: true, payload: item.result })
+          })
+          trace.push(...repair.trace)
+          const combinedResults = [...toolResults, ...repair.results]
+          const repairedAnswer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults: combinedResults, modelChoice })
+          const repairedFinance = (combinedResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined)?.stats ?? []
+          finalContent = repairedAnswer.content.trim() || (repairedFinance.length ? renderMonthFinanceAnswer(repairedFinance, hourlyRate) : finalContent)
+          if (isTaskBlockerQuestion(lastMsg)) {
+            const repairedDetail = combinedResults.find((item) => item.name === 'get_task_detail')?.result as {
+              results?: Array<{ task?: Task; waitingRecords?: ReturnType<typeof agentWaitingRecords> }>
+            } | undefined
+            const repairedTask = repairedDetail?.results?.[0]
+            const repairedWait = repairedTask?.waitingRecords?.find((entry) => entry.active)
+            const repairedReason = repairedWait?.note || repairedWait?.reason || ''
+            if (repairedReason && !finalContent.includes(repairedReason)) {
+              finalContent = [
+                `**${repairedTask?.task?.title || '这个任务'}** 目前卡在等待环节。`,
+                '',
+                `- **具体原因**：${repairedReason}`,
+                `- **开始等待**：${repairedWait?.startAt?.replace('T', ' ') || '未记录'}`,
+                `- **已等待**：${formatAgentElapsed(repairedWait?.elapsedMinutes || 0)}`,
+              ].join('\n')
+            }
+          }
+          orchestratedTurn = completeAgentTurn({ ...orchestratedTurn, attempts: orchestratedTurn.attempts + 1 }, finalContent)
+        }
+      }
       return ok({
         content: finalContent,
-        agentTurn: {
-          id: orchestratedTurn.id,
-          phase: orchestratedTurn.phase,
-          intent: orchestratedTurn.intent,
-          verification: orchestratedTurn.verification,
-          evidenceCount: orchestratedTurn.evidence.length,
-        },
+        model: answer.modelLabel,
+        agentTurn: { ...sanitizeAgentTurnAudit(orchestratedTurn), evidenceCount: orchestratedTurn.evidence.length },
         trace: [
           `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
           ...trace,
@@ -14884,6 +14970,35 @@ async function ensureAgentRunMetricsTable(env: Env) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
   ).run()
+  for (const statement of [
+    "ALTER TABLE agent_run_metrics ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE agent_run_metrics ADD COLUMN principal_id TEXT NOT NULL DEFAULT 'system'",
+  ]) {
+    await env.DB.prepare(statement).run().catch(() => undefined)
+  }
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_turn_runs (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL DEFAULT 'default',
+      principal_id TEXT NOT NULL DEFAULT 'system',
+      runtime TEXT NOT NULL DEFAULT 'cloud',
+      model TEXT NOT NULL DEFAULT '',
+      intent TEXT NOT NULL DEFAULT 'unknown',
+      phase TEXT NOT NULL DEFAULT 'failed',
+      outcome TEXT NOT NULL DEFAULT 'failed',
+      planned_tools_json TEXT NOT NULL DEFAULT '[]',
+      evidence_summary_json TEXT NOT NULL DEFAULT '[]',
+      verification_json TEXT NOT NULL DEFAULT '{}',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      fallback_used INTEGER NOT NULL DEFAULT 0,
+      fallback_reason TEXT NOT NULL DEFAULT '',
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      is_eval INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+  await env.DB.prepare('ALTER TABLE agent_turn_runs ADD COLUMN is_eval INTEGER NOT NULL DEFAULT 0').run().catch(() => undefined)
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_workspace ON agent_turn_runs(workspace_id, created_at DESC)').run()
   agentRunMetricsTableEnsured = true
 }
 
@@ -14949,7 +15064,7 @@ async function estimateAgentRequestTokens(request: Request) {
   return estimateAgentTokens(text)
 }
 
-async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean, promptTokens: number) {
+async function recordAgentRunMetric(env: Env, response: Response, durationMs: number, isEval: boolean, promptTokens: number, request?: Request) {
   try {
     await ensureAgentRunMetricsTable(env)
     const contentType = response.headers.get('content-type') || ''
@@ -14964,23 +15079,28 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
     const approvalAction = String(approval.action || '')
     const approvalStatus = String(approval.status || '')
     const modelTrace = [...trace].reverse().find((line) => line.includes('生成答复：使用 ')) || ''
-    const model = modelTrace.match(/生成答复：使用 (.+?)(?:组织最终回答|。|（|$)/)?.[1]?.trim() || ''
+    const model = String(payload.model || '').trim() || modelTrace.match(/生成答复：使用 (.+?)(?:组织最终回答|。|（|$)/)?.[1]?.trim() || ''
     const completionTokens = estimateAgentTokens(JSON.stringify(payload))
     const estimatedCostCny = estimateAgentCostCny(model, promptTokens, completionTokens)
     const fallbackUsed = trace.some((line) => /回落|fallback/i.test(line))
     const outcome = agentMetricOutcome(response.status, approvalStatus, candidates.length > 0)
     const intent = agentMetricIntent(tools, approvalAction, candidates.length > 0)
+    const principal = request ? await resolveRequestPrincipal(env, request).catch(() => null) : null
+    const workspaceId = principalWorkspaceId(principal)
+    const principalId = principal?.principalId || 'system'
     await env.DB.prepare(
       `INSERT INTO agent_run_metrics (
-        id, intent, outcome, model, tools_json, tool_count, duration_ms,
+        id, intent, outcome, model, workspace_id, principal_id, tools_json, tool_count, duration_ms,
         approval_action, selection_count, fallback_used, http_status, is_eval,
         prompt_tokens, completion_tokens, estimated_cost_cny
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       intent,
       outcome,
       model,
+      workspaceId,
+      principalId,
       JSON.stringify(tools),
       tools.length,
       Math.max(0, Math.round(durationMs)),
@@ -14992,6 +15112,34 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       promptTokens,
       completionTokens,
       estimatedCostCny,
+    ).run()
+    const rawTurn = payload.agentTurn && typeof payload.agentTurn === 'object'
+      ? payload.agentTurn as Record<string, unknown>
+      : {}
+    const turnPlan = Array.isArray(rawTurn.plan) ? rawTurn.plan : tools.map((name) => ({ name, status: response.ok ? 'success' : 'failed', risk: 'read', attempt: 1 }))
+    const turnEvidence = Array.isArray(rawTurn.evidence) ? rawTurn.evidence : []
+    const rawVerification = rawTurn.verification && typeof rawTurn.verification === 'object'
+      ? rawTurn.verification as Record<string, unknown>
+      : { passed: response.ok, issues: response.ok ? [] : ['运行未完成'], requiredTools: [] }
+    const phase = String(rawTurn.phase || (response.ok ? 'complete' : 'failed'))
+    const auditOutcome = rawVerification.passed === true ? 'verified'
+      : phase === 'needs_input' ? 'needs_input'
+        : response.ok ? 'unverified' : 'failed'
+    const fallbackReason = trace.find((line) => /回落|回退|fallback/i.test(line)) || ''
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO agent_turn_runs (
+        id, workspace_id, principal_id, runtime, model, intent, phase, outcome,
+        planned_tools_json, evidence_summary_json, verification_json, attempts,
+        fallback_used, fallback_reason, duration_ms, is_eval
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      String(rawTurn.id || crypto.randomUUID()), workspaceId, principalId,
+      payload.localCli ? 'local-cli' : String(payload.runtime || 'cloud'), model,
+      String(rawTurn.intent || intent), phase, auditOutcome,
+      JSON.stringify(turnPlan).slice(0, 12_000), JSON.stringify(turnEvidence).slice(0, 8_000),
+      JSON.stringify(rawVerification).slice(0, 4_000), Math.max(1, Number(rawTurn.attempts) || 1),
+      fallbackUsed ? 1 : 0, fallbackReason.slice(0, 500), Math.max(0, Math.round(durationMs)),
+      isEval ? 1 : 0,
     ).run()
     if (!isEval && (outcome === 'error' || outcome === 'approval_failed')) {
       await learnAgentFailure(env, { intent, outcome, status: response.status, durationMs, tools, approvalAction })
@@ -15009,6 +15157,7 @@ async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     return streamChatWithAiInstrumented(env, request, ctx)
   }
   const startedAt = performance.now()
+  const metricScopeRequest = request.clone()
   const promptTokens = await estimateAgentRequestTokens(request)
   const response = await chatWithAi(env, request)
   const metricResponse = response.clone()
@@ -15018,6 +15167,7 @@ async function chatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     performance.now() - startedAt,
     request.headers.get('x-giverny-agent-eval') === '1',
     promptTokens,
+    metricScopeRequest,
   )
   if (ctx) ctx.waitUntil(metricWrite)
   else await metricWrite
@@ -15374,6 +15524,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
             performance.now() - startedAt,
             request.headers.get('x-giverny-agent-eval') === '1',
             promptTokens,
+            metricsRequest,
           )
           if (ctx) ctx.waitUntil(metricWrite)
           else await metricWrite
@@ -15411,6 +15562,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
               performance.now() - startedAt,
               request.headers.get('x-giverny-agent-eval') === '1',
               promptTokens,
+              metricsRequest,
             )
             if (ctx) ctx.waitUntil(metricWrite)
             else await metricWrite
@@ -15444,6 +15596,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           performance.now() - startedAt,
           request.headers.get('x-giverny-agent-eval') === '1',
           promptTokens,
+          metricsRequest,
         )
         if (ctx) ctx.waitUntil(metricWrite)
         else await metricWrite
@@ -15635,6 +15788,8 @@ async function syncAiOperationAlerts(env: Env, workspaceId: string, alerts: AiOp
 
 async function updateAiOperationAlert(env: Env, alertId: string, request: Request) {
   const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再管理 AI 运行告警', 401)
+  if (principal.role !== 'admin') return fail('仅管理员可以管理 AI 运行告警', 403)
   const workspaceId = principalWorkspaceId(principal)
   const body = await request.json().catch(() => ({})) as { status?: string }
   const status = body.status === 'resolved' ? 'resolved' : 'acknowledged'
@@ -15651,9 +15806,11 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   const requestedDays = Number(new URL(request.url).searchParams.get('days'))
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
   const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再查看 AI 运行中心', 401)
+  if (principal.role !== 'admin') return fail('仅管理员可以查看 AI 运行中心', 403)
   const workspaceId = principalWorkspaceId(principal)
   await recoverAgentAnalysisJobs(env, workspaceId)
-  const [metricRows, jobRows, learningRows, attachmentStatusRows, hourRows] = await Promise.all([
+  const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows] = await Promise.all([
     env.DB.prepare(
       `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
               selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
@@ -15662,6 +15819,18 @@ async function getAiOperationsCenter(env: Env, request: Request) {
        WHERE is_eval = 0 AND workspace_id = ? AND created_at >= datetime('now', ?)
        ORDER BY created_at DESC LIMIT 500`,
     ).bind(workspaceId, `-${periodDays} days`).all<AiOperationsMetricRow>(),
+    env.DB.prepare(
+      `SELECT id, runtime, model, intent, phase, outcome, planned_tools_json,
+              evidence_summary_json, verification_json, attempts, fallback_used,
+              fallback_reason, duration_ms, created_at
+       FROM agent_turn_runs
+       WHERE workspace_id = ? AND is_eval = 0 AND created_at >= datetime('now', ?)
+       ORDER BY created_at DESC LIMIT 50`,
+    ).bind(workspaceId, `-${periodDays} days`).all<{
+      id: string; runtime: string; model: string; intent: string; phase: string; outcome: string
+      planned_tools_json: string; evidence_summary_json: string; verification_json: string
+      attempts: number; fallback_used: number; fallback_reason: string; duration_ms: number; created_at: string
+    }>(),
     env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 30')
       .bind(workspaceId).all<DbAgentAnalysisJob>(),
     env.DB.prepare(
@@ -15684,6 +15853,29 @@ async function getAiOperationsCenter(env: Env, request: Request) {
     ).bind(`-${Math.max(periodDays, 30)} days`).all<{ suggested_hours: number; actual_hours: number }>(),
   ])
   const metrics = metricRows.results ?? []
+  const turns = (turnRows.results ?? []).map((item) => {
+    const planned = (() => { try { return JSON.parse(item.planned_tools_json) as Array<Record<string, unknown>> } catch { return [] } })()
+    const evidence = (() => { try { return JSON.parse(item.evidence_summary_json) as Array<Record<string, unknown>> } catch { return [] } })()
+    const verification = (() => { try { return JSON.parse(item.verification_json) as Record<string, unknown> } catch { return {} } })()
+    return {
+      id: item.id,
+      runtime: item.runtime,
+      model: item.model || '未识别模型',
+      intent: item.intent,
+      phase: item.phase,
+      outcome: item.outcome,
+      tools: planned.map((tool) => ({ name: String(tool.name || ''), status: String(tool.status || 'pending') })).filter((tool) => tool.name),
+      evidenceCount: evidence.length,
+      deterministicEvidenceCount: evidence.filter((entry) => entry.deterministic === true).length,
+      verificationPassed: verification.passed === true,
+      issues: Array.isArray(verification.issues) ? verification.issues.map(String).slice(0, 5) : [],
+      attempts: Number(item.attempts) || 1,
+      fallbackUsed: Number(item.fallback_used) > 0,
+      fallbackReason: item.fallback_reason || '',
+      durationMs: Number(item.duration_ms) || 0,
+      createdAt: item.created_at,
+    }
+  })
   const errorRuns = metrics.filter((item) => item.outcome === 'error' || item.outcome === 'approval_failed').length
   const fallbackRuns = metrics.filter((item) => Number(item.fallback_used) > 0).length
   const localCliRuns = metrics.filter((item) => agentRouteFromMetric(item) === 'local-cli').length
@@ -15773,6 +15965,13 @@ async function getAiOperationsCenter(env: Env, request: Request) {
         durationMs: Number(item.duration_ms) || 0,
         fallback: Number(item.fallback_used) > 0,
       })),
+    },
+    agentTurns: {
+      total: turns.length,
+      verified: turns.filter((item) => item.verificationPassed).length,
+      repaired: turns.filter((item) => item.attempts > 1 && item.verificationPassed).length,
+      failed: turns.filter((item) => item.outcome === 'failed' || item.outcome === 'unverified').length,
+      recent: turns.slice(0, 20),
     },
     background: {
       activeCount: jobs.filter((item) => item.status === 'queued' || item.status === 'running').length,
