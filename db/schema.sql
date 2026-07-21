@@ -242,6 +242,8 @@ CREATE TABLE IF NOT EXISTS agent_conversations (
   title TEXT NOT NULL,
   last_message_preview TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
+  project_id TEXT,
+  project_name TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT

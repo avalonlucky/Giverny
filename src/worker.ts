@@ -1150,6 +1150,37 @@ function taskVectorMetadata(row: SearchTaskRow): Record<string, string | number>
   }
 }
 
+async function indexAgentConversationSearch(env: Env, input: {
+  storageId: string
+  publicId: string
+  workspaceId: string
+  title: string
+  lastMessagePreview: string
+  projectId?: string
+  projectName?: string
+}) {
+  if (!env.VECTORIZE || !env.AI) return
+  try {
+    const text = [input.projectName, input.title, input.lastMessagePreview].filter(Boolean).join('\n').slice(0, 2000)
+    if (!text.trim()) return
+    const [values] = await embedTexts(env, [text])
+    if (!values) return
+    await env.VECTORIZE.upsert([{
+      id: `conversation-${input.storageId}`,
+      values,
+      metadata: {
+        conversationId: input.publicId,
+        workspaceId: input.workspaceId,
+        title: input.title.slice(0, 200),
+        projectId: input.projectId || '',
+        projectName: input.projectName || '',
+      },
+    }])
+  } catch {
+    // 对话向量索引失败不影响对话保存。
+  }
+}
+
 // 单任务增量入库（创建/编辑后调用）：删除态则从索引移除。
 async function indexTaskSearch(env: Env, id: string): Promise<void> {
   if (!env.VECTORIZE || !env.AI) {
@@ -2546,6 +2577,31 @@ function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
   return ''
 }
 
+function renderProductHelpAnswer(result: unknown) {
+  const payload = result as {
+    matches?: Array<{
+      title?: string
+      summary?: string
+      details?: string[]
+      route?: string
+      answer?: string
+      sourceLabel?: string
+    }>
+  } | undefined
+  const matches = Array.isArray(payload?.matches) ? payload.matches : []
+  const top = matches[0]
+  if (!top) return ''
+  const answer = String(top.answer || '').trim()
+  if (answer) return answer
+  const parts = [`**${top.title || '相关说明'}**：${String(top.summary || '').trim()}`.trim()]
+  if (Array.isArray(top.details) && top.details.length) {
+    parts.push(top.details.map((item) => `- ${String(item).trim()}`).join('\n'))
+  }
+  if (top.route) parts.push(`入口：${top.route}。`)
+  if (top.sourceLabel) parts.push(`依据：${top.sourceLabel}。`)
+  return parts.filter(Boolean).join('\n\n')
+}
+
 async function planChatAgentTurn(
   env: Env,
   modelChoice: ChatModelChoice,
@@ -2760,6 +2816,8 @@ async function ensureAgentWorkspaceColumns(env: Env) {
   if (agentWorkspaceColumnsEnsured) return
   for (const statement of [
     "ALTER TABLE agent_conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE agent_conversations ADD COLUMN project_id TEXT",
+    "ALTER TABLE agent_conversations ADD COLUMN project_name TEXT",
     "ALTER TABLE agent_task_plans ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
     "ALTER TABLE agent_task_memories ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
   ]) {
@@ -2836,6 +2894,8 @@ function toAgentConversationSummary(row: {
   title: string
   last_message_preview: string
   message_count: number
+  project_id?: string | null
+  project_name?: string | null
   created_at: string
   updated_at: string
 }): AgentConversationSummary {
@@ -2846,6 +2906,8 @@ function toAgentConversationSummary(row: {
     messageCount: Number(row.message_count) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    projectId: row.project_id || undefined,
+    projectName: row.project_name || undefined,
   }
 }
 
@@ -2855,42 +2917,146 @@ async function upsertAgentConversationIndex(env: Env, input: {
   title: string
   lastMessagePreview: string
   messageCount: number
+  savedAt?: number
+  projectId?: string
+  projectName?: string
 }) {
   if (!input.id) return
   await ensureAgentWorkspaceColumns(env)
+  const savedAtSeconds = Number.isFinite(input.savedAt) && input.savedAt ? Math.floor(Number(input.savedAt) / 1000) : null
+  const storageId = agentConversationStorageId(input.workspaceId, input.id)
+  const projectId = agentString(input.projectId, 120)
+  const projectName = agentString(input.projectName, 80)
+  const title = input.title.slice(0, 80) || '新对话'
+  const lastMessagePreview = input.lastMessagePreview.slice(0, 160)
   await env.DB.prepare(
-    `INSERT INTO agent_conversations (id, workspace_id, title, last_message_preview, message_count)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO agent_conversations (id, workspace_id, title, last_message_preview, message_count, project_id, project_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(datetime(?, 'unixepoch'), CURRENT_TIMESTAMP), COALESCE(datetime(?, 'unixepoch'), CURRENT_TIMESTAMP))
      ON CONFLICT(id) DO UPDATE SET
        title = CASE WHEN agent_conversations.title = '' THEN excluded.title ELSE agent_conversations.title END,
        last_message_preview = excluded.last_message_preview,
        message_count = MAX(agent_conversations.message_count, excluded.message_count),
-       updated_at = CURRENT_TIMESTAMP,
+       project_id = COALESCE(excluded.project_id, agent_conversations.project_id),
+       project_name = COALESCE(excluded.project_name, agent_conversations.project_name),
+       updated_at = excluded.updated_at,
        deleted_at = NULL`,
   ).bind(
-    agentConversationStorageId(input.workspaceId, input.id),
+    storageId,
     input.workspaceId,
-    input.title.slice(0, 80) || '新对话',
-    input.lastMessagePreview.slice(0, 160),
+    title,
+    lastMessagePreview,
     Math.max(0, input.messageCount),
+    projectId || null,
+    projectName || null,
+    savedAtSeconds,
+    savedAtSeconds,
   ).run()
+  await indexAgentConversationSearch(env, {
+    storageId,
+    publicId: input.id,
+    workspaceId: input.workspaceId,
+    title,
+    lastMessagePreview,
+    projectId,
+    projectName,
+  })
 }
 
 async function listAgentConversations(env: Env, request: Request) {
   await ensureAgentWorkspaceColumns(env)
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const rows = await env.DB.prepare(
-    `SELECT id, title, last_message_preview, message_count, created_at, updated_at
+    `SELECT id, title, last_message_preview, message_count, project_id, project_name, created_at, updated_at
      FROM agent_conversations WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50`,
   ).bind(workspaceId).all<{
     id: string
     title: string
     last_message_preview: string
     message_count: number
+    project_id?: string | null
+    project_name?: string | null
     created_at: string
     updated_at: string
   }>()
   return ok({ conversations: (rows.results ?? []).map((row) => ({ ...toAgentConversationSummary(row), id: publicAgentConversationId(workspaceId, row.id) })) })
+}
+
+async function searchAgentConversations(env: Env, request: Request) {
+  await ensureAgentWorkspaceColumns(env)
+  const url = new URL(request.url)
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 120)
+  const projectId = (url.searchParams.get('projectId') || '').trim().slice(0, 120)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  if (!q) return ok({ conversations: [], semanticEnabled: Boolean(env.VECTORIZE && env.AI), searchMode: 'empty' })
+
+  const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+  const keywordRows = await env.DB.prepare(
+    `SELECT id, title, last_message_preview, message_count, project_id, project_name, created_at, updated_at
+     FROM agent_conversations
+     WHERE workspace_id = ? AND deleted_at IS NULL
+       AND (? = '' OR project_id = ?)
+       AND (title LIKE ? ESCAPE '\\' OR last_message_preview LIKE ? ESCAPE '\\' OR project_name LIKE ? ESCAPE '\\')
+     ORDER BY updated_at DESC LIMIT 30`,
+  ).bind(workspaceId, projectId, projectId, like, like, like).all<{
+    id: string
+    title: string
+    last_message_preview: string
+    message_count: number
+    project_id?: string | null
+    project_name?: string | null
+    created_at: string
+    updated_at: string
+  }>()
+
+  const byId = new Map<string, AgentConversationSummary & { semanticScore?: number }>()
+  ;(keywordRows.results ?? []).forEach((row) => {
+    byId.set(row.id, { ...toAgentConversationSummary(row), id: publicAgentConversationId(workspaceId, row.id) })
+  })
+
+  if (env.VECTORIZE && env.AI) {
+    try {
+      const [vector] = await embedTexts(env, [q])
+      if (vector) {
+        const semantic = await env.VECTORIZE.query(vector, { topK: 20, returnMetadata: 'all' })
+        const ids = (semantic.matches ?? [])
+          .filter((match) => match.id.startsWith('conversation-') && match.score >= 0.35 && String(match.metadata?.workspaceId || DEFAULT_WORKSPACE_ID) === workspaceId)
+          .filter((match) => !projectId || String(match.metadata?.projectId || '') === projectId)
+        if (ids.length) {
+          const storageIds = ids.map((match) => match.id.slice('conversation-'.length))
+          const placeholders = storageIds.map(() => '?').join(',')
+          const rows = await env.DB.prepare(
+            `SELECT id, title, last_message_preview, message_count, project_id, project_name, created_at, updated_at
+             FROM agent_conversations WHERE workspace_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`,
+          ).bind(workspaceId, ...storageIds).all<{
+            id: string
+            title: string
+            last_message_preview: string
+            message_count: number
+            project_id?: string | null
+            project_name?: string | null
+            created_at: string
+            updated_at: string
+          }>()
+          const scoreById = new Map(ids.map((match) => [match.id.slice('conversation-'.length), Math.round(match.score * 100) / 100]))
+          ;(rows.results ?? []).forEach((row) => {
+            byId.set(row.id, {
+              ...toAgentConversationSummary(row),
+              id: publicAgentConversationId(workspaceId, row.id),
+              semanticScore: scoreById.get(row.id),
+            })
+          })
+        }
+      }
+    } catch {
+      // 语义检索失败时保留关键词检索结果。
+    }
+  }
+
+  return ok({
+    conversations: Array.from(byId.values()).sort((a, b) => (b.semanticScore || 0) - (a.semanticScore || 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 30),
+    semanticEnabled: Boolean(env.VECTORIZE && env.AI),
+    searchMode: env.VECTORIZE && env.AI ? 'semantic-vector+keyword' : 'keyword',
+  })
 }
 
 async function getAgentConversation(env: Env, id: string, request: Request) {
@@ -2913,9 +3079,12 @@ async function syncAgentConversations(env: Env, request: Request) {
     id?: string
     agentConversationId?: string
     title?: string
+    savedAt?: number
+    projectId?: string
+    projectName?: string
     messages?: AgentConversationMessage[]
   }> }
-  const conversations = Array.isArray(body.conversations) ? body.conversations.slice(0, 20) : []
+  const conversations = Array.isArray(body.conversations) ? body.conversations.slice(0, 50) : []
   const requestPrincipal = await resolveRequestPrincipal(env, request)
   const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
   let imported = 0
@@ -2932,6 +3101,9 @@ async function syncAgentConversations(env: Env, request: Request) {
       title: agentString(item.title, 80) || firstUser?.content.slice(0, 80) || '历史对话',
       lastMessagePreview: last?.content || '',
       messageCount: item.messages.length,
+      savedAt: item.savedAt,
+      projectId: item.projectId,
+      projectName: item.projectName,
     })
     imported += result.imported
   }
@@ -2945,6 +3117,9 @@ async function deleteAgentConversation(env: Env, id: string, request: Request) {
   await env.DB.prepare(
     'UPDATE agent_conversations SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?',
   ).bind(agentConversationStorageId(principal.workspaceId, id), principal.workspaceId).run()
+  if (env.VECTORIZE) {
+    await env.VECTORIZE.deleteByIds([`conversation-${agentConversationStorageId(principal.workspaceId, id)}`]).catch(() => undefined)
+  }
   if (env.ALICE_AGENT) {
     const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, id)) as unknown as AliceAgent
     await agent.clearConversation()
@@ -14929,6 +15104,9 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     useWebSearch?: boolean
     modelChoice?: string
     agentRuntimeConversationId?: string
+    temporary?: boolean
+    projectId?: string
+    projectName?: string
     attachments?: Array<{ type: 'image' | 'text'; name: string; data: string; mimeType: string }>
   }
   const messages = Array.isArray(body.messages)
@@ -14938,6 +15116,9 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
   const useKnowledge = body.useKnowledge !== false
   const useWebSearch = body.useWebSearch !== false
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
+  const temporaryConversation = body.temporary === true
+  const conversationProjectId = agentString(body.projectId, 120)
+  const conversationProjectName = agentString(body.projectName, 80)
   const today = nowIso().slice(0, 10)
   const requestPrincipal = await resolveRequestPrincipal(env, request)
   const workspaceId = principalWorkspaceId(requestPrincipal)
@@ -15013,7 +15194,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       })
       if (runtimeResult?.answer) {
         const conversationId = String(runtimeResult.conversationId || '').trim()
-        if (conversationId) {
+        if (conversationId && !temporaryConversation) {
           const firstUserMessage = messages.find((message) => message.role === 'user')?.content || lastMsg
           await upsertAgentConversationIndex(env, {
             id: conversationId,
@@ -15021,6 +15202,9 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
             title: firstUserMessage.slice(0, 80),
             lastMessagePreview: runtimeResult.answer,
             messageCount: messages.length + 1,
+            savedAt: Date.now(),
+            projectId: conversationProjectId,
+            projectName: conversationProjectName,
           })
         }
         await emitVisibleTrace([
@@ -15145,6 +15329,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     if (hasHighConfidenceProductFact
       && !isTaskBlockerQuestion(lastMsg)
       && !isFinanceQuestion(lastMsg)
+      && !isRequesterProfileQuestion(lastMsg)
       && !plannedTools.some((item) => item.name === 'search_product_help')) {
       plannedTools.push({
         name: 'search_product_help',
@@ -15163,10 +15348,10 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     }
     const plan: ChatAgentPlanResponse = {
       ...rawPlan,
-      intent: hasHighConfidenceProductFact && !isTaskBlockerQuestion(lastMsg) && !isFinanceQuestion(lastMsg)
-        ? 'product_help'
-        : isRequesterProfileQuestion(lastMsg) && profileName
+      intent: isRequesterProfileQuestion(lastMsg) && profileName
           ? 'person_profile'
+        : hasHighConfidenceProductFact && !isTaskBlockerQuestion(lastMsg) && !isFinanceQuestion(lastMsg)
+          ? 'product_help'
         : rawPlan?.intent,
       question: rawPlan?.question || lastMsg,
       tools: plannedTools,
@@ -15264,6 +15449,15 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       const financeStats = statsResult?.stats ?? []
       let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
       let evidenceCorrection = ''
+      const productHelpResult = toolResults.find((item) => item.name === 'search_product_help')?.result
+      const productHelpAnswer = renderProductHelpAnswer(productHelpResult)
+      if (productHelpAnswer) {
+        const topProductSummary = String((productHelpResult as { matches?: Array<{ summary?: string }> })?.matches?.[0]?.summary || '').trim()
+        if (!finalContent || (topProductSummary && !finalContent.includes(topProductSummary.slice(0, Math.min(24, topProductSummary.length))))) {
+          finalContent = productHelpAnswer
+          evidenceCorrection = '答案验真：模型初稿未严格引用产品知识结果，已按官方产品能力库纠正。'
+        }
+      }
       const profileResult = toolResults.find((item) => item.name === 'get_requester_profile')?.result as RequesterProfileResult | undefined
       if (profileResult?.found && profileResult.profile) {
         const deniesProfile = /没有.*(?:记录|数据)|未找到|找不到|无法.*画像/.test(finalContent)
@@ -17841,6 +18035,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/ai/conversations' && request.method === 'GET') {
     return listAgentConversations(env, request)
+  }
+  if (path === '/api/ai/conversations/search' && request.method === 'GET') {
+    return searchAgentConversations(env, request)
   }
   if (path === '/api/ai/conversations/sync' && request.method === 'POST') {
     return syncAgentConversations(env, request)

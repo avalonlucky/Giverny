@@ -49,6 +49,82 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {
+  await page.route('**/api/ai/conversations', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          conversations: [{
+            id: 'cloud-profile-chen',
+            title: '给我一下陈义君的用户画像',
+            lastMessagePreview: '云端摘要',
+            messageCount: 2,
+            createdAt: '2026-07-21 11:52:00',
+            updatedAt: '2026-07-21 11:52:00',
+            projectId: 'project-profile',
+            projectName: '用户画像',
+          }],
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  await page.route('**/api/ai/conversations/cloud-profile-chen', async (route) => {
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+  })
+  await page.evaluate(() => {
+    const savedAt = new Date(2026, 6, 18, 14, 57).getTime()
+    window.localStorage.setItem('alice_chat_projects', JSON.stringify([{ id: 'project-profile', name: '用户画像', savedAt }]))
+    window.localStorage.setItem('alice_chat_history', JSON.stringify([{
+      id: 'local-profile-chen',
+      agentConversationId: 'cloud-profile-chen',
+      title: '给我一下陈义君的用户画像',
+      savedAt,
+      projectId: 'project-profile',
+      projectName: '用户画像',
+      messages: [
+        { id: 'u1', role: 'user', content: '给我一下陈义君的用户画像' },
+        { id: 'a1', role: 'assistant', content: '陈义君画像：历史任务 7 个。' },
+      ],
+    }]))
+  })
+  await page.reload()
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  await page.getByRole('button', { name: '记录与任务' }).click()
+  await expect(page.getByText('给我一下陈义君的用户画像', { exact: true })).toBeVisible()
+  await expect(page.locator('.chat-history-item', { hasText: '给我一下陈义君的用户画像' }).locator('.chat-history-item-meta em')).toHaveText('用户画像')
+  await expect(page.getByText(/7\/18 14:57/)).toBeVisible()
+  await page.getByText('给我一下陈义君的用户画像', { exact: true }).click()
+  await expect(page.getByText('陈义君画像：历史任务 7 个。', { exact: true })).toBeVisible()
+})
+
+test('工作助手临时对话不会写入历史记录', async ({ page }) => {
+  await page.route('**/api/ai/chat', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ content: '临时回答', trace: ['临时分析完成'] }),
+    })
+  })
+  await page.route('**/api/ai/conversations', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
+      return
+    }
+    await route.continue()
+  })
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  await page.getByRole('button', { name: '临时', exact: true }).click()
+  await page.getByPlaceholder('向爱丽丝提问…').fill('这只是临时问题')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('临时回答', { exact: true })).toBeVisible()
+  const saved = await page.evaluate(() => window.localStorage.getItem('alice_chat_history') || '[]')
+  expect(saved).not.toContain('这只是临时问题')
+})
+
 test('进行中的等待记录展示实时已等待时长', async ({ page }) => {
   await page.getByText('公司产品封套修改', { exact: true }).first().click()
   const sidebar = page.locator('.dashboard-task-sidebar')

@@ -5095,12 +5095,23 @@ type ChatMessage = {
   attachments?: AgentResultAttachment[]
 }
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
-type ConversationRecord = { id: string; title: string; messages: ChatMessage[]; savedAt: number; agentConversationId?: string; cloud?: boolean }
+type ConversationProject = { id: string; name: string; savedAt: number }
+type ConversationRecord = {
+  id: string
+  title: string
+  messages: ChatMessage[]
+  savedAt: number
+  agentConversationId?: string
+  cloud?: boolean
+  projectId?: string
+  projectName?: string
+}
 type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | `provider:${AiModelProvider}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
 type AiBrandKey = 'antigravity' | 'anthropic' | 'claude' | 'cloudflare' | 'codex' | 'custom' | 'deepseek' | 'doubao' | 'gemini' | 'grok' | 'kimi' | 'openai' | 'openrouter' | 'qwen' | 'auto'
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
 
 const CHAT_HISTORY_KEY = 'alice_chat_history'
+const CHAT_PROJECTS_KEY = 'alice_chat_projects'
 const CHAT_MODEL_CHOICE_KEY = 'alice_chat_model_choice'
 
 const AI_BRAND_ICONS: Partial<Record<AiBrandKey, string>> = {
@@ -5150,12 +5161,59 @@ function loadChatHistory(): ConversationRecord[] {
   catch { return [] }
 }
 
-function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversationId?: string) {
+function loadChatProjects(): ConversationProject[] {
+  try { return JSON.parse(localStorage.getItem(CHAT_PROJECTS_KEY) ?? '[]') as ConversationProject[] }
+  catch { return [] }
+}
+
+function saveChatProjects(projects: ConversationProject[]) {
+  localStorage.setItem(CHAT_PROJECTS_KEY, JSON.stringify(projects.slice(0, 50)))
+}
+
+function conversationRecordKey(record: Pick<ConversationRecord, 'id' | 'agentConversationId'>) {
+  return record.agentConversationId || record.id
+}
+
+function mergeConversationHistory(local: ConversationRecord[], cloud: ConversationRecord[]) {
+  const merged = new Map<string, ConversationRecord>()
+  local.forEach((record) => {
+    merged.set(conversationRecordKey(record), record)
+  })
+  cloud.forEach((record) => {
+    const key = conversationRecordKey(record)
+    const localRecord = merged.get(key)
+    merged.set(key, {
+      ...record,
+      messages: localRecord?.messages.length ? localRecord.messages : record.messages,
+      savedAt: localRecord ? localRecord.savedAt : record.savedAt,
+      agentConversationId: record.agentConversationId || localRecord?.agentConversationId || record.id,
+      cloud: true,
+    })
+  })
+  return Array.from(merged.values()).sort((a, b) => b.savedAt - a.savedAt).slice(0, 50)
+}
+
+function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversationId?: string, project?: ConversationProject | null) {
   const userMsgs = msgs.filter((m) => m.role === 'user')
   if (userMsgs.length === 0) return
   const title = userMsgs[0].content.slice(0, 30) + (userMsgs[0].content.length > 30 ? '…' : '')
-  const record: ConversationRecord = { id: recordId, title, messages: msgs, savedAt: Date.now(), agentConversationId }
-  const prev = loadChatHistory().filter((item) => item.id !== recordId).slice(0, 19)
+  const record: ConversationRecord = {
+    id: recordId,
+    title,
+    messages: msgs,
+    savedAt: Date.now(),
+    agentConversationId,
+    projectId: project?.id,
+    projectName: project?.name,
+  }
+  writeChatHistoryRecord(record)
+}
+
+function writeChatHistoryRecord(record: ConversationRecord) {
+  const recordKey = conversationRecordKey(record)
+  const prev = loadChatHistory()
+    .filter((item) => item.id !== record.id && conversationRecordKey(item) !== recordKey)
+    .slice(0, 49)
   localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([record, ...prev]))
 }
 
@@ -5891,6 +5949,11 @@ function ChatPanel({
   const [agentConversationId, setAgentConversationId] = useState<string | undefined>(initialConversation?.agentConversationId)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [temporaryChat, setTemporaryChat] = useState(false)
+  const [projects, setProjects] = useState<ConversationProject[]>(() => loadChatProjects())
+  const [activeProjectId, setActiveProjectId] = useState<string>(initialConversation?.projectId ?? '')
+  const [projectDraft, setProjectDraft] = useState('')
+  const [historySearch, setHistorySearch] = useState('')
   const [useKnowledge, setUseKnowledge] = useState(true)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
@@ -5922,6 +5985,7 @@ function ChatPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isWelcome = messages.length === 1 && messages[0].id === ALICE_WELCOME_ID
+  const activeProject = activeProjectId ? projects.find((project) => project.id === activeProjectId) ?? null : null
 
   useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -5949,21 +6013,36 @@ function ChatPanel({
     }
   }, [])
   useEffect(() => {
-    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
-  }, [agentConversationId, conversationRecordId, isWelcome, messages])
+    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
+  }, [activeProject, agentConversationId, conversationRecordId, isWelcome, messages, temporaryChat])
 
   const refreshCloudHistory = useCallback(async () => {
     const response = await fetch('/api/ai/conversations')
     const data = await response.json().catch(() => null) as { conversations?: AgentConversationSummary[] } | null
     if (!response.ok || !Array.isArray(data?.conversations)) return
-    setHistoryList(data.conversations.map((item) => ({
+    const cloudRecords = data.conversations.map((item) => ({
       id: item.id,
       title: item.title,
       messages: [],
       savedAt: new Date(item.updatedAt).getTime(),
       agentConversationId: item.id,
+      projectId: item.projectId,
+      projectName: item.projectName,
       cloud: true,
-    })))
+    }))
+    const localProjects = loadChatProjects()
+    const cloudProjects = cloudRecords
+      .filter((record) => record.projectId && record.projectName)
+      .map((record) => ({ id: record.projectId!, name: record.projectName!, savedAt: record.savedAt }))
+    const projectMap = new Map<string, ConversationProject>()
+    ;[...localProjects, ...cloudProjects].forEach((project) => {
+      const current = projectMap.get(project.id)
+      if (!current || project.savedAt > current.savedAt) projectMap.set(project.id, project)
+    })
+    const nextProjects = Array.from(projectMap.values()).sort((a, b) => b.savedAt - a.savedAt).slice(0, 50)
+    saveChatProjects(nextProjects)
+    setProjects(nextProjects)
+    setHistoryList(mergeConversationHistory(loadChatHistory(), cloudRecords))
   }, [])
 
   const refreshAnalysisJobs = useCallback(async () => {
@@ -5992,6 +6071,9 @@ function ChatPanel({
             id: record.id,
             agentConversationId: record.agentConversationId,
             title: record.title,
+            savedAt: record.savedAt,
+            projectId: record.projectId,
+            projectName: record.projectName,
             messages: record.messages.map((message, index) => ({ ...message, createdAt: record.savedAt + index })),
           })) }),
         }).catch(() => undefined)
@@ -6096,12 +6178,45 @@ function ChatPanel({
     }
   }, [])
 
+  useEffect(() => {
+    if (!showHistory) return
+    const q = historySearch.trim()
+    if (!q) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ q })
+      if (activeProjectId) params.set('projectId', activeProjectId)
+      void fetch(`/api/ai/conversations/search?${params.toString()}`)
+        .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+        .then(({ ok, data }: { ok: boolean; data: { conversations?: AgentConversationSummary[] } }) => {
+          if (!ok || cancelled || !Array.isArray(data.conversations)) return
+          const cloudRecords = data.conversations.map((item) => ({
+            id: item.id,
+            title: item.title,
+            messages: [] as ChatMessage[],
+            savedAt: new Date(item.updatedAt).getTime(),
+            agentConversationId: item.id,
+            projectId: item.projectId,
+            projectName: item.projectName,
+            cloud: true,
+          }))
+          setHistoryList((current) => mergeConversationHistory(loadChatHistory(), [...current.filter((record) => record.cloud), ...cloudRecords]))
+        })
+        .catch(() => undefined)
+    }, 220)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [activeProjectId, historySearch, showHistory])
+
   const newConversation = () => {
-    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId)
-    setHistoryList(loadChatHistory())
+    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
+    setHistoryList(mergeConversationHistory(loadChatHistory(), historyList.filter((record) => record.cloud)))
     setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
     setConversationRecordId(crypto.randomUUID())
     setAgentConversationId(undefined)
+    setTemporaryChat(false)
     setInput('')
     setAttachments([])
     setShowModelPopup(false)
@@ -6112,6 +6227,7 @@ function ChatPanel({
 
   const openHistory = () => {
     void refreshCloudHistory()
+    setHistoryList((current) => mergeConversationHistory(loadChatHistory(), current.filter((record) => record.cloud)))
     setShowTaskCenter(false)
     setShowHistory(true)
   }
@@ -6122,33 +6238,69 @@ function ChatPanel({
       const response = await fetch(`/api/ai/conversations/${encodeURIComponent(record.agentConversationId || record.id)}`)
       const data = await response.json().catch(() => null) as { messages?: AgentConversationMessage[] } | null
       if (!response.ok || !Array.isArray(data?.messages)) {
-        onNotify('云端会话读取失败，请稍后重试', 'error')
-        return
+        if (record.messages.length === 0) {
+          onNotify('云端会话读取失败，请稍后重试', 'error')
+          return
+        }
+        nextMessages = record.messages
+      } else {
+        const cloudMessages = data.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          trace: message.trace,
+          traceStatus: message.trace?.length ? 'completed' as const : undefined,
+          approval: message.approval,
+          selection: message.selection,
+          backgroundTask: message.backgroundTask,
+          attachments: message.attachments,
+        }))
+        nextMessages = cloudMessages.length > 0 ? cloudMessages : record.messages
       }
-      nextMessages = data.messages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        trace: message.trace,
-        traceStatus: message.trace?.length ? 'completed' : undefined,
-        approval: message.approval,
-        selection: message.selection,
-        backgroundTask: message.backgroundTask,
-        attachments: message.attachments,
-      }))
     }
     setMessages(nextMessages)
     setConversationRecordId(record.id)
     setAgentConversationId(record.agentConversationId || record.id)
+    setActiveProjectId(record.projectId ?? '')
+    setTemporaryChat(false)
     setShowHistory(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const deleteHistoryItem = async (id: string) => {
-    const updated = historyList.filter((r) => r.id !== id)
-    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(updated))
-    setHistoryList(updated)
-    await fetch(`/api/ai/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => undefined)
+    const target = historyList.find((r) => r.id === id || r.agentConversationId === id)
+    const cloudId = target?.agentConversationId || id
+    const updatedLocal = loadChatHistory().filter((r) => r.id !== id && r.agentConversationId !== id && r.id !== cloudId && r.agentConversationId !== cloudId)
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(updatedLocal))
+    setHistoryList((current) => current.filter((r) => r.id !== id && r.agentConversationId !== id && r.id !== cloudId && r.agentConversationId !== cloudId))
+    await fetch(`/api/ai/conversations/${encodeURIComponent(cloudId)}`, { method: 'DELETE' }).catch(() => undefined)
+  }
+
+  const createConversationProject = () => {
+    const name = projectDraft.trim()
+    if (!name) return
+    const project = { id: crypto.randomUUID(), name: name.slice(0, 24), savedAt: Date.now() }
+    const nextProjects = [project, ...projects.filter((item) => item.name !== project.name)].slice(0, 50)
+    saveChatProjects(nextProjects)
+    setProjects(nextProjects)
+    setActiveProjectId(project.id)
+    setProjectDraft('')
+    if (temporaryChat) setTemporaryChat(false)
+    onNotify(`已新建对话项目：${project.name}`, 'success')
+  }
+
+  const startTemporaryChat = () => {
+    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
+    setTemporaryChat(true)
+    setActiveProjectId('')
+    setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
+    setConversationRecordId(crypto.randomUUID())
+    setAgentConversationId(undefined)
+    setInput('')
+    setAttachments([])
+    setShowHistory(false)
+    setShowTaskCenter(false)
+    setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const openTaskCenter = () => {
@@ -6333,6 +6485,9 @@ function ChatPanel({
           attachments: sentAttachments.filter((item) => item.type !== 'file').map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
           agentRuntimeConversationId: agentConversationId,
           localCliConversationId: conversationRecordId,
+          temporary: temporaryChat,
+          projectId: activeProject?.id,
+          projectName: activeProject?.name,
           browserDeviceKey: localCliBrowserDeviceKey(),
         }),
       })
@@ -6544,6 +6699,19 @@ function ChatPanel({
     return false
   }
   const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length
+  const filteredHistoryList = useMemo(() => {
+    const keyword = historySearch.trim().toLowerCase()
+    return historyList.filter((record) => {
+      if (activeProjectId && record.projectId !== activeProjectId) return false
+      if (!keyword) return true
+      const haystack = [
+        record.title,
+        record.projectName,
+        ...record.messages.map((message) => message.content),
+      ].filter(Boolean).join('\n').toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [activeProjectId, historyList, historySearch])
   const chooseModel = async (choice: ChatModelChoice) => {
     const previous = selectedModelChoice
     setSelectedModelChoice(choice)
@@ -6573,12 +6741,15 @@ function ChatPanel({
             </div>
             <p className="chat-panel-runtime">
               <span aria-hidden="true" />
-              {activeRuntimeLabel}
-              <em>{usesLocalCli ? '本机' : selectedModelChoice === 'auto' ? '自动路由' : '全站首选'}</em>
+              {temporaryChat ? '临时对话' : activeProject?.name || activeRuntimeLabel}
+              <em>{temporaryChat ? '不保存' : activeProject ? '项目' : usesLocalCli ? '本机' : selectedModelChoice === 'auto' ? '自动路由' : '全站首选'}</em>
             </p>
           </div>
         </div>
         <div className="chat-panel-header-actions">
+          <button type="button" className={`chat-panel-text-btn ${temporaryChat ? 'active' : ''}`} onClick={startTemporaryChat} title="临时对话不进入历史记录">
+            临时
+          </button>
           <button type="button" className="chat-panel-icon-btn" onClick={newConversation} title="新建对话" aria-label="新建对话">
             <Plus size={15} />
           </button>
@@ -6837,13 +7008,44 @@ function ChatPanel({
               <X size={15} />
             </button>
           </div>
+          <div className="chat-history-tools">
+            <div className="chat-history-projects" aria-label="对话项目">
+              <button type="button" className={!activeProjectId ? 'active' : ''} onClick={() => setActiveProjectId('')}>全部</button>
+              {projects.map((project) => (
+                <button key={project.id} type="button" className={activeProjectId === project.id ? 'active' : ''} onClick={() => { setActiveProjectId(project.id); setTemporaryChat(false) }}>
+                  <Folder size={13} aria-hidden="true" />{project.name}
+                </button>
+              ))}
+            </div>
+            <div className="chat-history-create-project">
+              <input
+                value={projectDraft}
+                onChange={(event) => setProjectDraft(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && createConversationProject()}
+                placeholder="新建项目，例如：金额核对"
+                aria-label="新建对话项目名称"
+              />
+              <button type="button" onClick={createConversationProject}>新建项目</button>
+            </div>
+            <label className="chat-history-search">
+              <Search size={14} aria-hidden="true" />
+              <input
+                value={historySearch}
+                onChange={(event) => setHistorySearch(event.target.value)}
+                placeholder={activeProject ? `搜索「${activeProject.name}」里的对话` : '搜索对话标题和内容'}
+                aria-label="搜索对话记录"
+              />
+            </label>
+            <button type="button" className="chat-history-temp-btn" onClick={startTemporaryChat}>开始临时对话</button>
+          </div>
           <div className="chat-history-list">
-            {historyList.length === 0 ? (
+            {filteredHistoryList.length === 0 ? (
               <p className="chat-history-empty">暂无历史记录</p>
-            ) : historyList.map((r) => (
+            ) : filteredHistoryList.map((r) => (
               <div key={r.id} className="chat-history-item" onClick={() => void loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void loadConversation(r)}>
                 <span className="chat-history-item-title">{r.title}</span>
                 <div className="chat-history-item-meta">
+                  {r.projectName && <em>{r.projectName}</em>}
                   <span>{new Date(r.savedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   <button
                     type="button"

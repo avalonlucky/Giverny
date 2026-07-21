@@ -1059,7 +1059,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const productQuestions = [
     { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
     { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
-    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.4', '分析过程'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.5', '项目化历史', '分析过程'] },
     { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
   ]
   for (const [index, item] of productQuestions.entries()) {

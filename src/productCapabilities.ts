@@ -138,8 +138,9 @@ const featureCapabilities: ProductCapability[] = [
     id: 'feature.recent-releases',
     category: '产品版本',
     title: '最近更新',
-    summary: '当前版本是 v0.32.4，最近重点完善了 Agent 分析过程实时展开、需求人画像后台编排、产品知识验真和动态重规划。',
+    summary: '当前版本是 v0.32.5，最近重点完善了工作助手项目化历史、临时对话、混合搜索、Agent 分析过程实时展开和需求人画像后台编排。',
     details: [
+      'v0.32.5：工作助手历史记录支持按项目收纳，新增临时对话；历史搜索同时支持关键词和向量语义检索，且修复旧对话时间被同步覆盖的问题。',
       'v0.32.4：Agent 分析过程改为逐项实时展示，编排层边理解、边查数据、边核对结论，最终答案在过程结束后再出现。',
       'v0.32.3：需求人画像进入后台确定性工具，工作助手询问某人画像时会读取历史任务聚合结果，不再让模型凭搜索猜测。',
       'v0.32.2：工作助手的执行面板改为可核验的分析过程，展示理解目标、计划、依据、事实与校验，不再展示内部路由术语。',
@@ -274,6 +275,9 @@ function capabilityScore(capability: ProductCapability, query: string) {
   if (!normalizedQuery) return 0
   const title = normalizeProductHelpText(capability.title)
   const summary = normalizeProductHelpText(capability.summary)
+  const category = normalizeProductHelpText(capability.category)
+  const isShortcutQuestion = /快捷键|按键|键盘|怎么按/.test(query)
+  const isModelQuestion = /大模型|模型|api\s*key|apikey|key|服务商|deepseek|豆包|通义|qwen|kimi|gemini/i.test(query)
   let score = 0
   if (normalizedQuery === title) score += 120
   if (normalizedQuery.includes(title) || title.includes(normalizedQuery)) score += 40
@@ -286,7 +290,9 @@ function capabilityScore(capability: ProductCapability, query: string) {
     else if (normalizedTerm.length >= 4 && normalizedTerm.includes(normalizedQuery)) score += 12
   }
   if (summary.includes(normalizedQuery) && normalizedQuery.length >= 4) score += 18
-  if (capability.shortcut && /快捷键|按键|键盘|怎么按/.test(query)) score += 24
+  if (capability.shortcut && isShortcutQuestion) score += 24
+  if (capability.shortcut && !isShortcutQuestion && score > 0) score = Math.max(1, score - 18)
+  if (isModelQuestion && (title.includes('模型') || title.includes('服务商') || summary.includes('模型') || category.includes('设置'))) score += 80
   return score
 }
 

@@ -96,6 +96,8 @@ export type AgentConversationSummary = {
   messageCount: number
   createdAt: string
   updatedAt: string
+  projectId?: string
+  projectName?: string
 }
 
 export type AgentPlanStep = {
