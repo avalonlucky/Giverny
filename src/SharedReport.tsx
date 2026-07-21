@@ -3,6 +3,7 @@ import { Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, Sparkles
 import { defaultPdfTitle, defaultServiceCompanyName } from './config/appConfig'
 import { api, type SharedReportState } from './lib/api'
 import { toChineseAmount } from './lib/format'
+import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
 import type { FileAsset } from './types/domain'
 import './App.css'
 
@@ -139,44 +140,45 @@ export default function SharedReport({ token }: { token: string }) {
   }
 
   const handleExportUserSheet = async () => {
-    const ExcelJS = await import('exceljs')
-    const workbook = new ExcelJS.Workbook()
-    const sheet = workbook.addWorksheet('User')
-    sheet.columns = [
-      { header: '参考开始日期', key: 'start', width: 16 },
-      { header: '设计类型', key: 'type', width: 18 },
-      { header: '项目/任务名称', key: 'title', width: 34 },
-      { header: '具体任务需求', key: 'requirement', width: 46 },
-      { header: '需求人', key: 'requester', width: 14 },
-      { header: '实际工时', key: 'actualHours', width: 12 },
-      { header: '状态', key: 'status', width: 12 },
-      { header: '验收人/确认', key: 'reviewer', width: 14 },
-      { header: '验收备注', key: 'acceptanceNote', width: 48 },
-    ]
-    billableTasks.forEach((task) => {
-      sheet.addRow({
-        start: formatPublicDate(task.date),
-        type: task.type,
-        title: task.title,
-        requirement: task.requirement || '',
-        requester: task.requester || task.contact || '',
-        actualHours: task.actualHours,
-        status: task.status,
-        reviewer: task.reviewer || task.requester || '',
-        acceptanceNote: task.acceptanceNote || '',
-      })
+    const fileLabel = monthLabel(report.month).replace(/\s/g, '')
+    const rows: ReceiptExcelRow[] = billableTasks.map((task, index) => ({
+      sequence: String(index + 1).padStart(2, '0'),
+      type: task.type,
+      title: task.title,
+      requirement: task.requirement || '',
+      estimatedStartDate: formatPublicDate(task.date),
+      actualCompletionDate: formatPublicDate(task.actualDeliveryDate || task.estimatedDate || task.date),
+      requester: task.requester || task.contact || '—',
+      contact: task.contact || task.requester || '—',
+      status: task.status,
+      estimatedHours: Number(task.estimatedHours) || null,
+      actualHours: task.actualHours,
+      unitPrice: hourlyRate,
+      amount: Math.round(task.actualHours * hourlyRate * 100) / 100,
+      acceptanceNote: task.acceptanceNote || '—',
+    }))
+    const buffer = await buildReceiptExcelBuffer({
+      fileLabel,
+      title: pdfTitle,
+      receiptNo,
+      issuedAt: report.generatedAt || new Date().toLocaleString('zh-CN', { hour12: false }),
+      companyName: serviceCompanyName,
+      serviceName: '平面设计兼职',
+      settlementLabel: monthLabel(report.month),
+      hourlyRate,
+      rows,
+      totalHours: report.billableHours,
+      totalAmount: report.totalAmount,
+      remarks: [
+        `本回单共 ${rows.length} 项，计费工时 ${report.billableHours.toFixed(2)}h，结算金额 ¥${formatYuan(report.totalAmount)}。`,
+        '本回单由系统根据已锁定的任务与工时记录自动生成。',
+      ],
     })
-    sheet.getRow(1).font = { bold: true }
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
-    sheet.eachRow((row) => {
-      row.alignment = { vertical: 'top', wrapText: true }
-    })
-    const buffer = await workbook.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `User_${monthLabel(report.month).replace(/\s/g, '')}_工时明细.xlsx`
+    link.download = `结算回单_${fileLabel}.xlsx`
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -194,7 +196,7 @@ export default function SharedReport({ token }: { token: string }) {
           <div className="shared-receipt-actions">
             <button type="button" onClick={() => void handleExportUserSheet()}>
               <Download size={16} />
-              下载 User 表
+              下载 Excel 回单
             </button>
             <button type="button" onClick={handleExportPdf}>
               <Download size={16} />

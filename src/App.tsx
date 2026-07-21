@@ -116,6 +116,7 @@ import {
   type WorkspaceSummary,
 } from './lib/api'
 import { formatFileSize, toChineseAmount } from './lib/format'
+import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
@@ -17962,45 +17963,27 @@ function ReportsView({
             sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, month) && !task.voidedAt)),
             updatesMap,
           )
-      const totalHours = targetReport?.billableHours ?? targetRows.reduce((sum, row) => sum + row.actualHours, isRangeExport ? 0 : (month === importedHoursMonth ? importedMonthlyHours : 0))
-      const totalAmount = targetReport?.totalAmount ?? roundCents(totalHours * hourlyRate)
-      const ExcelJS = await import('exceljs')
-      const workbook = new ExcelJS.Workbook()
-      const sheet = workbook.addWorksheet('User')
-      sheet.columns = [
-        { header: '序号', key: 'sequence', width: 8 },
-        { header: '设计类型', key: 'type', width: 18 },
-        { header: '任务', key: 'title', width: 34 },
-        { header: '任务需求', key: 'requirement', width: 46 },
-        { header: '预计开始日期', key: 'estimatedStartDate', width: 16 },
-        { header: '实际完成日期', key: 'actualCompletionDate', width: 16 },
-        { header: '需求人', key: 'requester', width: 14 },
-        { header: '对接人', key: 'contact', width: 14 },
-        { header: '状态', key: 'status', width: 12 },
-        { header: '预估工时', key: 'estimatedHours', width: 12 },
-        { header: '实际工时', key: 'actualHours', width: 12 },
-        { header: '验收人/确认', key: 'reviewer', width: 14 },
-        { header: '验收备注/进展', key: 'progress', width: 56 },
-      ]
-      targetRows.forEach((row) => {
-        sheet.addRow({
-          sequence: row.sequence,
-          type: row.task.type,
-          title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
-          requirement: row.task.requirement || '',
-          estimatedStartDate: row.estimatedStartDate,
-          actualCompletionDate: row.actualCompletionDate,
-          requester: row.task.requester || row.task.contact || '',
-          contact: row.task.contact || row.task.requester || '',
-          status: row.task.status,
-          estimatedHours: row.estimatedHours,
-          actualHours: row.actualHours,
-          reviewer: row.task.reviewer || row.task.requester || '',
-          progress: row.progressText,
-        })
-      })
+      const exportHourlyRate = targetReport?.billableHours && targetReport.billableHours > 0
+        ? targetReport.totalAmount / targetReport.billableHours
+        : hourlyRate
+      const exportRows: ReceiptExcelRow[] = targetRows.map((row) => ({
+        sequence: row.sequence,
+        type: row.task.type,
+        title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
+        requirement: row.task.requirement || '',
+        estimatedStartDate: row.estimatedStartDate,
+        actualCompletionDate: row.actualCompletionDate,
+        requester: row.task.requester || row.task.contact || '—',
+        contact: row.task.contact || row.task.requester || '—',
+        status: row.task.status,
+        estimatedHours: row.estimatedHours,
+        actualHours: row.actualHours,
+        unitPrice: exportHourlyRate,
+        amount: roundCents(row.actualHours * exportHourlyRate),
+        acceptanceNote: row.task.acceptanceNote?.trim() || row.progressText || '—',
+      }))
       if (!isRangeExport && month === importedHoursMonth && importedMonthlyHours > 0) {
-        sheet.addRow({
+        exportRows.push({
           sequence: String(targetRows.length + 1).padStart(2, '0'),
           type: '导入',
           title: '月初导入工时（线下记录补录）',
@@ -18010,30 +17993,38 @@ function ReportsView({
           requester: '',
           contact: '',
           status: '导入',
-          estimatedHours: '',
+          estimatedHours: null,
           actualHours: importedMonthlyHours,
-          reviewer: '',
-          progress: '线下记录补录',
+          unitPrice: exportHourlyRate,
+          amount: roundCents(importedMonthlyHours * exportHourlyRate),
+          acceptanceNote: '线下记录补录',
         })
       }
-      sheet.addRow({})
-      sheet.addRow({
-        title: '合计',
-        actualHours: totalHours,
-        progress: `金额：¥${formatYuan(totalAmount)}`,
+      const totalHours = targetReport?.billableHours ?? exportRows.reduce((sum, row) => sum + row.actualHours, 0)
+      const totalAmount = targetReport?.totalAmount ?? roundCents(exportRows.reduce((sum, row) => sum + row.amount, 0))
+      const filenameLabel = options.label ?? (isRangeExport ? `${formatReceiptDate(rangeStart).replaceAll('/', '')}-${formatReceiptDate(rangeEnd).replaceAll('/', '')}` : monthLabelOf(month).replace(/\s/g, ''))
+      const buffer = await buildReceiptExcelBuffer({
+        fileLabel: filenameLabel,
+        title: pdfTitle,
+        receiptNo: `AK-${(isRangeExport ? `${rangeStart}-${rangeEnd}` : month).replaceAll('-', '')}-${String(exportRows.length + 1).padStart(3, '0')}`,
+        issuedAt: nowStamp(),
+        companyName: serviceCompanyName,
+        serviceName: '平面设计兼职',
+        settlementLabel: isRangeExport ? `${formatReceiptDate(rangeStart)} 至 ${formatReceiptDate(rangeEnd)}` : monthLabelOf(month),
+        hourlyRate: exportHourlyRate,
+        rows: exportRows,
+        totalHours,
+        totalAmount,
+        remarks: [
+          `本回单共 ${exportRows.length} 项，计费工时 ${totalHours.toFixed(2)}h，结算金额 ¥${formatYuan(totalAmount)}。`,
+          '本回单由系统根据任务、工时与验收记录自动生成，验收状态以合作伙伴确认为准。',
+        ],
       })
-      sheet.getRow(1).font = { bold: true }
-      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
-      sheet.columns.forEach((col) => {
-        col.alignment = { vertical: 'top', wrapText: col.key === 'progress' }
-      })
-      const buffer = await workbook.xlsx.writeBuffer()
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      const filenameLabel = options.label ?? (isRangeExport ? `${formatReceiptDate(rangeStart).replaceAll('/', '')}-${formatReceiptDate(rangeEnd).replaceAll('/', '')}` : monthLabelOf(month).replace(/\s/g, ''))
-      link.download = `User_${filenameLabel}_工时明细.xlsx`
+      link.download = `结算回单_${filenameLabel}.xlsx`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -18053,8 +18044,8 @@ function ReportsView({
         onNotify(`已导出 ${targetRows.length} 项，${totalHours.toFixed(1)}h · ¥${formatYuan(totalAmount)}`)
       }
     } catch (error) {
-      console.error('User 表导出失败', error)
-      onNotify(error instanceof Error ? `User 表导出失败：${error.message}` : 'User 表导出失败，请重试', 'error')
+      console.error('Excel 回单导出失败', error)
+      onNotify(error instanceof Error ? `Excel 回单导出失败：${error.message}` : 'Excel 回单导出失败，请重试', 'error')
     }
   }
 
@@ -18106,7 +18097,7 @@ function ReportsView({
           </div>
         </div>
         <p className="report-flow-hint">
-          当前查看：{selectedMonthLabel}。核对下方结算单 → 锁定结算生成合作伙伴分享链接；历史记录可重新查看并下载 User 工时表。
+          当前查看：{selectedMonthLabel}。核对下方结算单 → 锁定结算生成合作伙伴分享链接；历史记录可重新查看并下载 Excel 回单。
         </p>
         <div className="report-bar-actions">
           <button className="primary-button" onClick={onLockReport} disabled={selectedMonth !== currentMonth.value}>
@@ -18119,7 +18110,7 @@ function ReportsView({
           </button>
           <button className="ghost-button" onClick={() => void handleExportUserSheet()}>
             <Download size={18} />
-            下载 User 表
+            下载 Excel 回单
           </button>
         </div>
 
@@ -18201,8 +18192,8 @@ function ReportsView({
                   <button className="ghost-button compact-button" onClick={() => setSelectedReportMonth(report.month)}>
                     查看
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`下载 ${report.month} User 表`} onClick={() => void handleExportUserSheet({ month: report.month })}>
-                    下载 User 表
+                  <button className="ghost-button compact-button" aria-label={`下载 ${report.month} Excel 回单`} onClick={() => void handleExportUserSheet({ month: report.month })}>
+                    下载 Excel 回单
                   </button>
                   <button className="ghost-button compact-button" aria-label={`复制 ${report.month} 合作伙伴链接`} onClick={() => onCopyShareLink(report.publicToken)}>
                     复制链接
