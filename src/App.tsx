@@ -20651,7 +20651,7 @@ function SettingsView({
       )}
       {providerModal && (
         <ModalShell className="model-provider-modal" labelledBy="model-provider-modal-title" onClose={() => setProviderModal(null)}>
-          <div className="model-provider-modal-head">
+          <div className="modal-header model-provider-modal-head">
             <div className="model-provider-modal-title">
               <span className="model-provider-icon large">
                 {aiProviderIconMap[providerModal] ? <img src={aiProviderIconMap[providerModal]} alt="" /> : <Sparkles size={22} />}
@@ -20784,7 +20784,7 @@ function SettingsView({
               ) : <p>还没有模型。请填写密钥后点击“加载模型”。</p>}
             </div>
           </div>
-          <div className="model-provider-modal-actions">
+          <div className="modal-footer model-provider-modal-actions">
             <button type="button" className="text-button model-provider-cancel" onClick={() => setProviderModal(null)}>取消</button>
             <button type="button" className="soft-primary-button" disabled={Boolean(providerBusy) || (providerEnabledDraft && (!providerModelsDraft.length || !providerDefaultModelDraft))} onClick={() => void saveProviderConfig()}>
               {providerBusy === 'save' ? '保存中…' : '保存配置'}
