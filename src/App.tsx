@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, memo, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -1316,45 +1316,6 @@ async function createOptionalPreviewFile(file: File) {
   return undefined
 }
 
-async function compressProgressImageFile(file: File) {
-  const isCompressibleImage = /image\/(jpeg|jpg|png|webp)/i.test(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name)
-  if (!isCompressibleImage || file.size < 900 * 1024) {
-    return file
-  }
-  try {
-    const bitmap = await createImageBitmap(file)
-    const maxSide = 1800
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
-    if (scale >= 1 && file.size < 2 * 1024 * 1024) {
-      bitmap.close()
-      return file
-    }
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-    const context = canvas.getContext('2d')
-    if (!context) {
-      bitmap.close()
-      return file
-    }
-    context.fillStyle = 'white'
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    bitmap.close()
-    const outputType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg'
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), outputType, 0.82))
-    if (!blob || blob.size >= file.size) {
-      return file
-    }
-    const base = splitFileName(file.name).base || '过程截图'
-    const extension = outputType === 'image/webp' ? '.webp' : '.jpg'
-    return new File([blob], `${base}${extension}`, { type: outputType, lastModified: file.lastModified })
-  } catch (error) {
-    console.warn('progress image compression failed', error)
-    return file
-  }
-}
-
 function stringifyCellValue(value: unknown): string {
   if (value === null || value === undefined) {
     return ''
@@ -1613,6 +1574,9 @@ type PendingProgressAttachment = {
   uploadScope?: 'acceptance' | 'progress'
   discarded?: boolean
   isAcceptanceFile?: boolean
+  previewFile?: File
+  optimizedFile?: File
+  preparationPromise?: Promise<{ uploadFile: File; previewFile?: File }>
 }
 
 const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
@@ -1668,6 +1632,158 @@ async function imageFileBase64(file: File) {
   }
   const dataUrl = await blobBase64(file)
   return dataUrl.slice(dataUrl.indexOf(',') + 1)
+}
+
+type PreparedImageFiles = { uploadFile: File; previewFile?: File }
+
+const IMAGE_ARCHIVE_MAX_SIDE = 2400
+const IMAGE_THUMBNAIL_MAX_SIDE = 480
+const IMAGE_OPTIMIZATION_WORKER_SOURCE = `
+let queue = Promise.resolve();
+const render = async (bitmap, maxSide, type, quality) => {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas unavailable');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.convertToBlob({ type, quality });
+};
+const processImage = async ({ id, file }) => {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const compressible = /image\\/(jpeg|jpg|png|webp)/i.test(file.type);
+    const archiveType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+    const shouldOptimize = compressible && (file.size >= 900 * 1024 || Math.max(bitmap.width, bitmap.height) > ${IMAGE_ARCHIVE_MAX_SIDE});
+    const uploadBlob = shouldOptimize ? await render(bitmap, ${IMAGE_ARCHIVE_MAX_SIDE}, archiveType, 0.86) : null;
+    const previewBlob = await render(bitmap, ${IMAGE_THUMBNAIL_MAX_SIDE}, 'image/jpeg', 0.78);
+    self.postMessage({ id, uploadBlob: uploadBlob && uploadBlob.size < file.size ? uploadBlob : null, previewBlob });
+  } finally {
+    bitmap.close();
+  }
+};
+self.onmessage = (event) => {
+  queue = queue.then(() => processImage(event.data)).catch((error) => {
+    self.postMessage({ id: event.data.id, error: error instanceof Error ? error.message : 'Image optimization failed' });
+  });
+};
+`
+
+let imageOptimizationWorker: Worker | null = null
+let imageOptimizationRequestId = 0
+const imageOptimizationRequests = new Map<number, {
+  resolve: (value: { uploadBlob?: Blob; previewBlob?: Blob }) => void
+  reject: (reason?: unknown) => void
+}>()
+let mainThreadImageOptimizationQueue: Promise<void> = Promise.resolve()
+
+function getImageOptimizationWorker() {
+  if (imageOptimizationWorker) return imageOptimizationWorker
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return null
+  const workerUrl = URL.createObjectURL(new Blob([IMAGE_OPTIMIZATION_WORKER_SOURCE], { type: 'text/javascript' }))
+  const worker = new Worker(workerUrl)
+  window.setTimeout(() => URL.revokeObjectURL(workerUrl), 0)
+  worker.onmessage = (event: MessageEvent<{ id: number; uploadBlob?: Blob; previewBlob?: Blob; error?: string }>) => {
+    const request = imageOptimizationRequests.get(event.data.id)
+    if (!request) return
+    imageOptimizationRequests.delete(event.data.id)
+    if (event.data.error) {
+      request.reject(new Error(event.data.error))
+      return
+    }
+    request.resolve(event.data)
+  }
+  worker.onerror = (event) => {
+    imageOptimizationRequests.forEach((request) => request.reject(new Error(event.message || '图片后台优化失败')))
+    imageOptimizationRequests.clear()
+    worker.terminate()
+    imageOptimizationWorker = null
+  }
+  imageOptimizationWorker = worker
+  return worker
+}
+
+async function renderImageBitmapBlob(bitmap: ImageBitmap, maxSide: number, type: string, quality: number) {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) return undefined
+  context.fillStyle = 'white'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  return new Promise<Blob | undefined>((resolve) => canvas.toBlob((blob) => resolve(blob ?? undefined), type, quality))
+}
+
+async function prepareImageOnMainThread(file: File): Promise<PreparedImageFiles> {
+  const bitmap = await createImageBitmap(file)
+  try {
+    const compressible = /image\/(jpeg|jpg|png|webp)/i.test(file.type)
+    const archiveType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg'
+    const shouldOptimize = compressible && (file.size >= 900 * 1024 || Math.max(bitmap.width, bitmap.height) > IMAGE_ARCHIVE_MAX_SIDE)
+    const uploadBlob = shouldOptimize ? await renderImageBitmapBlob(bitmap, IMAGE_ARCHIVE_MAX_SIDE, archiveType, 0.86) : undefined
+    const previewBlob = await renderImageBitmapBlob(bitmap, IMAGE_THUMBNAIL_MAX_SIDE, 'image/jpeg', 0.78)
+    return {
+      uploadFile: uploadBlob && uploadBlob.size < file.size
+        ? new File([uploadBlob], file.name, { type: uploadBlob.type, lastModified: file.lastModified })
+        : file,
+      previewFile: previewBlob
+        ? new File([previewBlob], `${splitFileName(file.name).base || '附件'}-thumbnail.jpg`, { type: 'image/jpeg' })
+        : undefined,
+    }
+  } finally {
+    bitmap.close()
+  }
+}
+
+async function prepareImageFiles(file: File): Promise<PreparedImageFiles> {
+  if (!file.type.startsWith('image/')) return { uploadFile: file }
+  const worker = getImageOptimizationWorker()
+  if (worker) {
+    try {
+      const id = ++imageOptimizationRequestId
+      const result = await new Promise<{ uploadBlob?: Blob; previewBlob?: Blob }>((resolve, reject) => {
+        imageOptimizationRequests.set(id, { resolve, reject })
+        worker.postMessage({ id, file })
+      })
+      return {
+        uploadFile: result.uploadBlob
+          ? new File([result.uploadBlob], file.name, { type: result.uploadBlob.type, lastModified: file.lastModified })
+          : file,
+        previewFile: result.previewBlob
+          ? new File([result.previewBlob], `${splitFileName(file.name).base || '附件'}-thumbnail.jpg`, { type: 'image/jpeg' })
+          : undefined,
+      }
+    } catch (error) {
+      console.warn('image worker optimization failed, using queued fallback', file.name, error)
+    }
+  }
+  const fallback = mainThreadImageOptimizationQueue
+    .then(() => new Promise<void>((resolve) => window.setTimeout(resolve, 0)))
+    .then(() => prepareImageOnMainThread(file))
+  mainThreadImageOptimizationQueue = fallback.then(() => undefined, () => undefined)
+  return fallback
+}
+
+function ensurePendingAttachmentPreparation(attachment: PendingProgressAttachment): Promise<PreparedImageFiles> {
+  if (!attachment.file.type.startsWith('image/')) return Promise.resolve({ uploadFile: attachment.file })
+  if (attachment.optimizedFile) {
+    return Promise.resolve({ uploadFile: attachment.optimizedFile, previewFile: attachment.previewFile })
+  }
+  if (attachment.preparationPromise) return attachment.preparationPromise
+  const preparationPromise = prepareImageFiles(attachment.file).then((prepared) => {
+    attachment.optimizedFile = prepared.uploadFile
+    attachment.previewFile = prepared.previewFile
+    return prepared
+  })
+  attachment.preparationPromise = preparationPromise
+  return preparationPromise
+}
+
+async function ensurePendingAttachmentPreview(attachment: PendingProgressAttachment) {
+  return (await ensurePendingAttachmentPreparation(attachment)).previewFile
 }
 
 async function blobBase64(blob: Blob) {
@@ -4223,7 +4339,7 @@ function AttachmentHoverThumbnail({
   )
 }
 
-function PendingAttachmentThumbnail({
+const PendingAttachmentThumbnail = memo(function PendingAttachmentThumbnail({
   attachment,
   onOpen,
 }: {
@@ -4232,8 +4348,24 @@ function PendingAttachmentThumbnail({
 }) {
   const inferred = fileTypeForFile(attachment.file)
   const isImage = inferred.kind === 'image'
-  const canUseSourceFallback = ['image', 'pdf', 'ai', 'psd', 'office', 'video'].includes(inferred.kind)
+  const canUseSourceFallback = ['pdf', 'ai', 'psd', 'office', 'video'].includes(inferred.kind)
   const sourcePreviewUrl = useMemo(() => canUseSourceFallback ? URL.createObjectURL(attachment.file) : undefined, [attachment.file, canUseSourceFallback])
+  const [thumbnailUrl, setThumbnailUrl] = useState('')
+
+  useEffect(() => {
+    if (!isImage) return
+    let active = true
+    let objectUrl = ''
+    void ensurePendingAttachmentPreview(attachment).then((preview) => {
+      if (!active || !preview) return
+      objectUrl = URL.createObjectURL(preview)
+      setThumbnailUrl(objectUrl)
+    })
+    return () => {
+      active = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [attachment, isImage])
 
   useEffect(() => () => {
     if (sourcePreviewUrl) {
@@ -4245,13 +4377,16 @@ function PendingAttachmentThumbnail({
     <AttachmentHoverThumbnail
       name={attachment.name}
       type={inferred.type}
-      previewUrl={isImage ? sourcePreviewUrl : undefined}
+      previewUrl={isImage ? thumbnailUrl : undefined}
       sourceUrl={sourcePreviewUrl}
-      sourceFile={attachment.file}
+      sourceFile={isImage ? undefined : attachment.file}
       onOpen={onOpen}
     />
   )
-}
+}, (previous, next) => (
+  previous.attachment.file === next.attachment.file
+  && previous.attachment.name === next.attachment.name
+))
 
 function PendingAttachmentPreview({
   attachment,
@@ -8178,9 +8313,10 @@ function App() {
   ) => {
     try {
       validateUploadFile(file)
-      const uploadFile = await compressProgressImageFile(file)
+      const prepared = await prepareImageFiles(file)
+      const uploadFile = prepared.uploadFile
       const uploadExtension = fileTypeForFile(uploadFile).type
-      const preview = await createOptionalPreviewFile(uploadFile)
+      const preview = prepared.previewFile ?? await createOptionalPreviewFile(uploadFile)
       await api.uploadFile({
         taskId,
         entryId,
@@ -8202,7 +8338,7 @@ function App() {
     }
   }
 
-  const handleAcceptanceFileUpload = async (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => {
+  const handleAcceptanceFileUpload = async (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string, preview?: File) => {
     const extension = fileTypeForFile(file).type
     const savedFile = await api.uploadFile(
       {
@@ -8210,6 +8346,7 @@ function App() {
         entryId,
         scope: 'acceptance',
         file,
+        preview,
         type: extension,
         size: formatFileSize(file.size),
         final: true,
@@ -8223,8 +8360,6 @@ function App() {
     setTaskItems((currentTasks) =>
       currentTasks.map((task) => (task.id === taskId ? { ...task, files: Array.from(new Set([savedFile.name, ...task.files])) } : task)),
     )
-    await loadTaskActivity(taskId)
-
     // 缩略图不是源文件上传的前置条件。复杂 PDF / Office 即使首次渲染失败，
     // 完整文件也已经可用；后台再有限重试并把成功结果持久化到 R2。
     if (fileTypeForFile(file).kind !== 'image') {
@@ -11368,7 +11503,7 @@ function TasksView({
   taskQuery: string
   showVoidedTasks: boolean
   voidedTaskCount: number
-  onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<FileAsset>
+  onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string, preview?: File) => Promise<FileAsset>
   onFilterChange: (filter: TaskFilter) => void
   onQueryChange: (query: string) => void
   onShowVoidedChange: (value: boolean) => void
@@ -11817,7 +11952,7 @@ function TaskProgressModal({
   onUpdateFile: (fileId: number, changes: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) => Promise<FileAsset>
   onDeleteFile: (fileId: number) => void
   onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => Promise<void>
-  onUploadAcceptanceFile?: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<FileAsset>
+  onUploadAcceptanceFile?: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string, preview?: File) => Promise<FileAsset>
   onNotify: (message: string, tone?: ToastTone) => void
   initialAcceptanceMode?: boolean
   hourlyRate?: number
@@ -12189,14 +12324,14 @@ function TaskProgressModal({
     onProgress: (ratio: number) => void,
   ): Promise<FileAsset> => {
     const acceptance = (attachment.uploadScope ?? (isAcceptanceMode ? 'acceptance' : 'progress')) === 'acceptance'
-    const uploadFile = acceptance
-      ? renamedFile(attachment.file, attachment.name)
-      : await compressProgressImageFile(renamedFile(attachment.file, attachment.name))
+    const prepared = await ensurePendingAttachmentPreparation(attachment)
+    const uploadFile = renamedFile(prepared.uploadFile, attachment.name)
+    const lightweightPreview = prepared.previewFile
     if (acceptance && onUploadAcceptanceFile) {
-      return onUploadAcceptanceFile(task.id, uploadFile, onProgress, stagedEntryIdRef.current)
+      return onUploadAcceptanceFile(task.id, uploadFile, onProgress, stagedEntryIdRef.current, lightweightPreview)
     }
     const extension = fileTypeForFile(uploadFile).type
-    const preview = await createOptionalPreviewFile(uploadFile)
+    const preview = lightweightPreview ?? await createOptionalPreviewFile(uploadFile)
     return api.uploadFile(
       {
         taskId: task.id,
@@ -12219,8 +12354,12 @@ function TaskProgressModal({
     attachment.uploadStatus = 'uploading'
     attachment.uploadProgress = 0
     attachment.uploadError = undefined
+    let renderedProgressBucket = -1
     const uploadPromise = stageUploadAttachment(attachment, (ratio) => {
       attachment.uploadProgress = ratio
+      const progressBucket = ratio >= 1 ? 10 : Math.floor(Math.max(0, ratio) * 10)
+      if (progressBucket === renderedProgressBucket) return
+      renderedProgressBucket = progressBucket
       setPendingAttachments((current) => current.map((item) =>
         item.id === attachment.id ? { ...item, uploadProgress: ratio } : item,
       ))
@@ -12443,7 +12582,7 @@ function TaskProgressModal({
       const suggestion = await api.suggestAttachmentName({
         fileName: sanitizeAttachmentName(attachment.name, attachment.originalName),
         mimeType: attachment.file.type,
-        imageBase64: await imageFileBase64(attachment.file),
+        imageBase64: await imageFileBase64(await ensurePendingAttachmentPreview(attachment) ?? attachment.file),
         note,
         recentFileNames: files.filter((file) => file.taskId === task.id).map((file) => file.name).slice(-12),
         task,

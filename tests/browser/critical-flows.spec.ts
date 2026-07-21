@@ -457,6 +457,47 @@ test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ pag
   await imageDialog.getByRole('button', { name: '关闭' }).click()
 })
 
+test('多张高分辨率验收图后台压缩时备注输入保持响应', async ({ page }) => {
+  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.getByRole('button', { name: /记录进展/ }).last().click()
+  await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
+  const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
+  const uploadInput = acceptanceDialog.locator('input[type="file"][multiple]')
+
+  await uploadInput.evaluate(async (input) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 3200
+    canvas.height = 1800
+    const context = canvas.getContext('2d')!
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height)
+    gradient.addColorStop(0, '#0b4f8a')
+    gradient.addColorStop(0.5, '#f8fbff')
+    gradient.addColorStop(1, '#245fa8')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#ffffff'
+    context.font = '120px sans-serif'
+    context.fillText('Giverny acceptance board', 260, 900)
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('fixture failed')), 'image/png'))
+    const transfer = new DataTransfer()
+    for (let index = 1; index <= 4; index += 1) {
+      transfer.items.add(new File([blob], `研究院展板${index}.png`, { type: 'image/png' }))
+    }
+    Object.defineProperty(input, 'files', { configurable: true, value: transfer.files })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+
+  await expect(acceptanceDialog.locator('.progress-attachment-desktop-item')).toHaveCount(4)
+  const note = acceptanceDialog.getByRole('textbox', { name: '验收备注' })
+  const startedAt = Date.now()
+  await note.fill('四张验收图已上传，继续填写备注。')
+  expect(Date.now() - startedAt).toBeLessThan(2000)
+  await expect(note).toHaveValue('四张验收图已上传，继续填写备注。')
+  await expect.poll(async () => acceptanceDialog.locator('.progress-attachment-desktop-item img').evaluateAll((images) => (
+    images.length === 4 && images.every((image) => image.naturalWidth > 0 && image.naturalWidth <= 480)
+  )), { timeout: 20_000 }).toBe(true)
+})
+
 test('验收备注 AI 使用弹窗内当前完整工时快照', async ({ page }) => {
   type AcceptanceAiPayload = {
     task: {
