@@ -1,6 +1,7 @@
 import { AgentWorkflow } from 'agents/workflows'
 import type { AgentWorkflowEvent, AgentWorkflowStep } from 'agents/workflows'
 import type { AliceAgent } from './aliceAgent'
+import { createAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 
 export type AgentWriteWorkflowParams = {
   action: string
@@ -8,6 +9,7 @@ export type AgentWriteWorkflowParams = {
   endpoint: string
   confirmationToken: string
   createdAt: number
+  principal: AgentPrincipalContext
 }
 
 type AgentWriteWorkflowProgress = {
@@ -66,11 +68,13 @@ export class AgentWriteWorkflow extends AgentWorkflow<
     }, async () => {
       const token = String(workflowEnv.AGENT_TOOL_TOKEN || '').trim()
       if (!token) throw new Error('AGENT_TOOL_TOKEN 未配置，Workflow 无法执行写入。')
+      const scopeHeaders = await createAgentScopeHeaders(token, params.principal)
       const response = await fetch(`${cleanBaseUrl(workflowEnv.GIVERNY_API_BASE_URL)}/api/agent/tools/workflow-write`, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
+          ...scopeHeaders,
         },
         body: JSON.stringify({
           operationId: this.workflowId,

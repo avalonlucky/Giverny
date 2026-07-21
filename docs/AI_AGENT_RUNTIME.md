@@ -1,5 +1,7 @@
 # AI Agent Runtime
 
+> 统一架构与多租户安全边界见 [`AGENT_ORCHESTRATOR.md`](./AGENT_ORCHESTRATOR.md)。本文件描述各 Runtime 适配器和已有持久任务能力。
+
 本文记录 Giverny 工作助手从外部编排验证流转向自建 Agent Runtime 的长期方案。Dify 验证链路已移除，后续不再作为站内工作助手主链路。
 
 ## 为什么移除外部编排验证
@@ -85,7 +87,7 @@ D1 / R2 / app data
 - 失败学习：匿名失败按权限、冲突 / 过期确认、超时、Workflow、工具、Runtime / 模型和意图校验分类；同一指纹出现两次后自动升级为必补回归类别，不保存用户问题或业务内容。
 - 质量与成本：真实请求记录输入 / 输出 Token 近似值和参考成本，按模型汇总成功率、平均耗时、用量与成本；参考单价只用于内部趋势，不替代供应商账单。
 - 延迟调优：必须达到至少 7 天、30 次真实请求才生成模型建议；建议只提示，不自动修改路由、Key 或模型配置。
-- 单一 Runtime：旧 Python/FastAPI Container、`AGENT_RUNTIME_CONTAINER`、`AGENT_RUNTIME_URL` 和 `AGENT_RUNTIME_KEY` 已移除，生产只保留 Cloudflare `AliceAgent` Durable Object 主链路。
+- 统一编排、多 Runtime 适配：旧 Python/FastAPI Container 已移除。Cloudflare `AliceAgent`、工作助手手选云模型和本机 CLI 是三种推理适配器，共用 AgentTurn、工具注册表、租户签名、权限与验真规则，不再各自定义业务事实。
 
 当前 Worker 已接入路径：纯文本工作助手请求调用 `ALICE_AGENT` Durable Object；涉及工作数据或写入意图且 Runtime 不可用时显式报错，避免旧模板伪装成智能体。
 

@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   expires_at TEXT,
   disabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  last_used_at TEXT
+  last_used_at TEXT,
+  workspace_id TEXT NOT NULL DEFAULT 'default'
 );
 
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -237,6 +238,7 @@ ON agent_analysis_jobs(read_at, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_conversations (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   title TEXT NOT NULL,
   last_message_preview TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
@@ -250,6 +252,7 @@ ON agent_conversations(deleted_at, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_task_plans (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   conversation_id TEXT,
   task_id TEXT,
   kind TEXT NOT NULL DEFAULT 'goal',
@@ -276,6 +279,7 @@ ON agent_task_plans(kind, task_id, goal) WHERE kind = 'reminder' AND status = 'a
 
 CREATE TABLE IF NOT EXISTS agent_task_memories (
   task_id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   task_title TEXT NOT NULL DEFAULT '',
   summary TEXT NOT NULL DEFAULT '',
   open_items_json TEXT NOT NULL DEFAULT '[]',

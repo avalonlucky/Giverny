@@ -5,6 +5,8 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
+import { completeAgentTurn, createAgentTurn, normalizeAgentIntent, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
+import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 import { productCapabilities, searchProductHelp } from './productCapabilities'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
@@ -308,6 +310,7 @@ type DbAccessToken = {
   disabled: number
   created_at: string
   last_used_at: string | null
+  workspace_id?: string | null
 }
 
 type DbTask = {
@@ -2637,6 +2640,7 @@ type OpenAiAgentRuntimeResult = {
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
+  agentTurn?: { id: string; phase: string; intent: string; evidenceCount: number; verification: { passed: boolean; issues: string[]; requiredTools: string[] } }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -2651,6 +2655,32 @@ function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
     .slice(0, 8)
 }
 
+function agentRuntimeObjectName(principal: AgentPrincipalContext, conversationId: string) {
+  return principal.workspaceId === DEFAULT_WORKSPACE_ID ? conversationId : `${principal.workspaceId}:${conversationId}`
+}
+
+function agentConversationStorageId(workspaceId: string, conversationId: string) {
+  return workspaceId === DEFAULT_WORKSPACE_ID ? conversationId : `${workspaceId}:${conversationId}`
+}
+
+function publicAgentConversationId(workspaceId: string, storageId: string) {
+  const prefix = `${workspaceId}:`
+  return workspaceId !== DEFAULT_WORKSPACE_ID && storageId.startsWith(prefix) ? storageId.slice(prefix.length) : storageId
+}
+
+let agentWorkspaceColumnsEnsured = false
+async function ensureAgentWorkspaceColumns(env: Env) {
+  if (agentWorkspaceColumnsEnsured) return
+  for (const statement of [
+    "ALTER TABLE agent_conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE agent_task_plans ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE agent_task_memories ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+  ]) {
+    try { await env.DB.prepare(statement).run() } catch { /* Column already exists. */ }
+  }
+  agentWorkspaceColumnsEnsured = true
+}
+
 async function callAgentRuntime(
   env: Env,
   args: {
@@ -2659,6 +2689,7 @@ async function callAgentRuntime(
     currentMonth?: string
     conversationId?: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    principal: AgentPrincipalContext
   },
 ): Promise<OpenAiAgentRuntimeResult | null> {
   const cleanQuery = String(args.query || '').trim()
@@ -2666,13 +2697,14 @@ async function callAgentRuntime(
   const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
   if (env.ALICE_AGENT) {
     try {
-      const agent = await getAgentByName(env.ALICE_AGENT as never, conversationId) as unknown as AliceAgent
+      const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(args.principal, conversationId)) as unknown as AliceAgent
       const result = await agent.chat({
         message: cleanQuery,
         currentMonth: args.currentMonth,
         conversationId,
         history: args.history,
         context: args.context,
+        principal: args.principal,
       })
       return { ...result, conversationId }
     } catch (error) {
@@ -2697,7 +2729,9 @@ async function reviseAgentApproval(env: Env, request: Request) {
     return fail('缺少会话、确认卡或草稿数据', 400)
   }
   try {
-    const agent = await getAgentByName(env.ALICE_AGENT as never, conversationId) as unknown as AliceAgent
+    const requestPrincipal = await resolveRequestPrincipal(env, request)
+    const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
+    const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, conversationId)) as unknown as AliceAgent
     const result = await agent.reviseApproval({ approvalId, draft: body.draft })
     return ok({
       content: result.answer,
@@ -2730,14 +2764,16 @@ function toAgentConversationSummary(row: {
 
 async function upsertAgentConversationIndex(env: Env, input: {
   id: string
+  workspaceId: string
   title: string
   lastMessagePreview: string
   messageCount: number
 }) {
   if (!input.id) return
+  await ensureAgentWorkspaceColumns(env)
   await env.DB.prepare(
-    `INSERT INTO agent_conversations (id, title, last_message_preview, message_count)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO agent_conversations (id, workspace_id, title, last_message_preview, message_count)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        title = CASE WHEN agent_conversations.title = '' THEN excluded.title ELSE agent_conversations.title END,
        last_message_preview = excluded.last_message_preview,
@@ -2745,18 +2781,21 @@ async function upsertAgentConversationIndex(env: Env, input: {
        updated_at = CURRENT_TIMESTAMP,
        deleted_at = NULL`,
   ).bind(
-    input.id,
+    agentConversationStorageId(input.workspaceId, input.id),
+    input.workspaceId,
     input.title.slice(0, 80) || '新对话',
     input.lastMessagePreview.slice(0, 160),
     Math.max(0, input.messageCount),
   ).run()
 }
 
-async function listAgentConversations(env: Env) {
+async function listAgentConversations(env: Env, request: Request) {
+  await ensureAgentWorkspaceColumns(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const rows = await env.DB.prepare(
     `SELECT id, title, last_message_preview, message_count, created_at, updated_at
-     FROM agent_conversations WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50`,
-  ).all<{
+     FROM agent_conversations WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50`,
+  ).bind(workspaceId).all<{
     id: string
     title: string
     last_message_preview: string
@@ -2764,16 +2803,19 @@ async function listAgentConversations(env: Env) {
     created_at: string
     updated_at: string
   }>()
-  return ok({ conversations: (rows.results ?? []).map(toAgentConversationSummary) })
+  return ok({ conversations: (rows.results ?? []).map((row) => ({ ...toAgentConversationSummary(row), id: publicAgentConversationId(workspaceId, row.id) })) })
 }
 
-async function getAgentConversation(env: Env, id: string) {
+async function getAgentConversation(env: Env, id: string, request: Request) {
   if (!env.ALICE_AGENT) return fail('Cloudflare Agent Runtime 未启用', 503)
+  await ensureAgentWorkspaceColumns(env)
+  const requestPrincipal = await resolveRequestPrincipal(env, request)
+  const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
   const index = await env.DB.prepare(
-    'SELECT id FROM agent_conversations WHERE id = ? AND deleted_at IS NULL',
-  ).bind(id).first<{ id: string }>()
+    'SELECT id FROM agent_conversations WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL',
+  ).bind(agentConversationStorageId(principal.workspaceId, id), principal.workspaceId).first<{ id: string }>()
   if (!index) return fail('会话不存在', 404)
-  const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+  const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, id)) as unknown as AliceAgent
   const snapshot = await agent.conversationSnapshot()
   return ok({ id, messages: snapshot.messages })
 }
@@ -2787,16 +2829,19 @@ async function syncAgentConversations(env: Env, request: Request) {
     messages?: AgentConversationMessage[]
   }> }
   const conversations = Array.isArray(body.conversations) ? body.conversations.slice(0, 20) : []
+  const requestPrincipal = await resolveRequestPrincipal(env, request)
+  const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
   let imported = 0
   for (const item of conversations) {
     const id = agentString(item.agentConversationId || item.id, 160)
     if (!id || !Array.isArray(item.messages) || item.messages.length === 0) continue
-    const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+    const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, id)) as unknown as AliceAgent
     const result = await agent.importConversation({ messages: item.messages })
     const firstUser = item.messages.find((message) => message.role === 'user')
     const last = item.messages[item.messages.length - 1]
     await upsertAgentConversationIndex(env, {
       id,
+      workspaceId: principal.workspaceId,
       title: agentString(item.title, 80) || firstUser?.content.slice(0, 80) || '历史对话',
       lastMessagePreview: last?.content || '',
       messageCount: item.messages.length,
@@ -2806,12 +2851,15 @@ async function syncAgentConversations(env: Env, request: Request) {
   return ok({ imported })
 }
 
-async function deleteAgentConversation(env: Env, id: string) {
+async function deleteAgentConversation(env: Env, id: string, request: Request) {
+  await ensureAgentWorkspaceColumns(env)
+  const requestPrincipal = await resolveRequestPrincipal(env, request)
+  const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
   await env.DB.prepare(
-    'UPDATE agent_conversations SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-  ).bind(id).run()
+    'UPDATE agent_conversations SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?',
+  ).bind(agentConversationStorageId(principal.workspaceId, id), principal.workspaceId).run()
   if (env.ALICE_AGENT) {
-    const agent = await getAgentByName(env.ALICE_AGENT as never, id) as unknown as AliceAgent
+    const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, id)) as unknown as AliceAgent
     await agent.clearConversation()
   }
   return ok({ deleted: true })
@@ -2900,6 +2948,7 @@ function toAgentTaskMemory(row: DbAgentTaskMemory): AgentTaskMemory {
 }
 
 async function createAgentTaskPlan(env: Env, input: {
+  workspaceId?: string
   conversationId?: string
   taskId?: number
   kind?: 'goal' | 'reminder'
@@ -2907,6 +2956,7 @@ async function createAgentTaskPlan(env: Env, input: {
   steps: Array<{ label: string; action: string }>
   nextActionAt?: string
 }) {
+  await ensureAgentWorkspaceColumns(env)
   const id = crypto.randomUUID()
   const steps = input.steps.slice(0, 10).map((step, index): AgentPlanStep => ({
     id: `${id}:${index + 1}`,
@@ -2916,9 +2966,9 @@ async function createAgentTaskPlan(env: Env, input: {
   })).filter((step) => step.label)
   if (!input.goal || steps.length === 0) throw new Error('目标和执行步骤不能为空')
   await env.DB.prepare(
-    `INSERT INTO agent_task_plans (id, conversation_id, task_id, kind, goal, steps_json, next_action_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, input.conversationId || null, input.taskId ? String(input.taskId) : null, input.kind || 'goal', input.goal.slice(0, 500), JSON.stringify(steps), input.nextActionAt || null).run()
+    `INSERT INTO agent_task_plans (id, workspace_id, conversation_id, task_id, kind, goal, steps_json, next_action_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, input.workspaceId || DEFAULT_WORKSPACE_ID, input.conversationId || null, input.taskId ? String(input.taskId) : null, input.kind || 'goal', input.goal.slice(0, 500), JSON.stringify(steps), input.nextActionAt || null).run()
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
   if (!row) throw new Error('任务计划创建失败')
   return toAgentTaskPlan(row)
@@ -2930,6 +2980,7 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
   const rawSteps = Array.isArray(body.steps) ? body.steps : []
   try {
     const plan = await createAgentTaskPlan(env, {
+      workspaceId: agentWorkspaceIdFromRequest(request),
       conversationId: agentString(body.conversationId, 160),
       taskId: Number(body.taskId) || undefined,
       goal: agentString(body.goal, 500),
@@ -2945,8 +2996,9 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
   }
 }
 
-async function refreshAgentTaskMemory(env: Env, taskId: number) {
-  const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
+async function refreshAgentTaskMemory(env: Env, taskId: number, workspaceId = DEFAULT_WORKSPACE_ID) {
+  await ensureAgentWorkspaceColumns(env)
+  const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId), workspaceId).first<DbTask>()
   if (!row) return null
   const existing = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(String(taskId)).first<DbAgentTaskMemory>()
   if (existing?.disabled) return toAgentTaskMemory(existing)
@@ -2966,12 +3018,12 @@ async function refreshAgentTaskMemory(env: Env, taskId: number) {
   ].filter(Boolean).join('\n')
   const visibleOpenItems = openItems.filter((item) => !ignoredItems.includes(item))
   await env.DB.prepare(
-    `INSERT INTO agent_task_memories (task_id, task_title, summary, open_items_json, preferences_json, last_event_at)
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `INSERT INTO agent_task_memories (task_id, workspace_id, task_title, summary, open_items_json, preferences_json, last_event_at)
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(task_id) DO UPDATE SET task_title = excluded.task_title, summary = excluded.summary,
        open_items_json = excluded.open_items_json, preferences_json = excluded.preferences_json,
        last_event_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`,
-  ).bind(String(taskId), row.title, summary, JSON.stringify(visibleOpenItems), JSON.stringify(feedback)).run()
+  ).bind(String(taskId), workspaceId, row.title, summary, JSON.stringify(visibleOpenItems), JSON.stringify(feedback)).run()
   const updated = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(String(taskId)).first<DbAgentTaskMemory>()
   return updated ? toAgentTaskMemory(updated) : null
 }
@@ -2981,7 +3033,7 @@ async function agentGetTaskMemoryTool(env: Env, request: Request) {
   const url = new URL(request.url)
   const taskId = Number(url.searchParams.get('taskId'))
   if (!Number.isFinite(taskId) || taskId <= 0) return agentFail('taskId 无效', 400)
-  const memory = await refreshAgentTaskMemory(env, taskId)
+  const memory = await refreshAgentTaskMemory(env, taskId, agentWorkspaceIdFromRequest(request))
   return memory ? agentOk({ tool: 'get_task_memory', memory }) : agentFail('任务不存在', 404)
 }
 
@@ -2991,9 +3043,10 @@ async function agentProgressTaskPlanTool(env: Env, request: Request) {
   const conversationId = agentString(body.conversationId, 160)
   const action = agentString(body.action, 60)
   const taskId = Number(body.taskId) || 0
-  if (taskId) await refreshAgentTaskMemory(env, taskId)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  if (taskId) await refreshAgentTaskMemory(env, taskId, workspaceId)
   if (!conversationId || !action) return agentOk({ updated: 0 })
-  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE conversation_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5").bind(conversationId).all<DbAgentTaskPlan>()
+  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND conversation_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5").bind(workspaceId, conversationId).all<DbAgentTaskPlan>()
   let updated = 0
   for (const row of rows.results ?? []) {
     const steps = parseAgentPlanSteps(row.steps_json)
@@ -3012,15 +3065,19 @@ async function agentProgressTaskPlanTool(env: Env, request: Request) {
 }
 
 async function listAgentTaskPlans(env: Env, request: Request) {
+  await ensureAgentWorkspaceColumns(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit')) || 50, 1), 100)
-  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE status != 'cancelled' ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, updated_at DESC LIMIT ?").bind(limit).all<DbAgentTaskPlan>()
+  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND status != 'cancelled' ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, updated_at DESC LIMIT ?").bind(workspaceId, limit).all<DbAgentTaskPlan>()
   return ok({ plans: (rows.results ?? []).map(toAgentTaskPlan) })
 }
 
 async function updateAgentTaskPlan(env: Env, id: string, request: Request, legacyAction?: 'read' | 'cancel') {
   const body = legacyAction ? {} : await request.json().catch(() => ({})) as { action?: string; stepId?: string }
   const action = legacyAction || agentString(body.action, 40)
-  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
+  await ensureAgentWorkspaceColumns(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAgentTaskPlan>()
   if (!row) return fail('任务计划不存在', 404)
   if (action === 'read') {
     await env.DB.prepare('UPDATE agent_task_plans SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
@@ -3051,13 +3108,15 @@ async function updateAgentTaskPlan(env: Env, id: string, request: Request, legac
 }
 
 async function listAgentTaskMemories(env: Env, request: Request) {
+  await ensureAgentWorkspaceColumns(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const url = new URL(request.url)
   const taskId = Number(url.searchParams.get('taskId'))
-  if (Number.isFinite(taskId) && taskId > 0) await refreshAgentTaskMemory(env, taskId)
+  if (Number.isFinite(taskId) && taskId > 0) await refreshAgentTaskMemory(env, taskId, workspaceId)
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 50, 1), 100)
   const rows = Number.isFinite(taskId) && taskId > 0
-    ? await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ? LIMIT 1').bind(String(taskId)).all<DbAgentTaskMemory>()
-    : await env.DB.prepare('SELECT * FROM agent_task_memories ORDER BY updated_at DESC LIMIT ?').bind(limit).all<DbAgentTaskMemory>()
+    ? await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ? AND workspace_id = ? LIMIT 1').bind(String(taskId), workspaceId).all<DbAgentTaskMemory>()
+    : await env.DB.prepare('SELECT * FROM agent_task_memories WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT ?').bind(workspaceId, limit).all<DbAgentTaskMemory>()
   return ok({ memories: (rows.results ?? []).map(toAgentTaskMemory) })
 }
 
@@ -3065,8 +3124,9 @@ async function updateAgentTaskMemory(env: Env, taskId: string, request: Request)
   const body = await request.json().catch(() => ({})) as { action?: string; note?: string; item?: string; enabled?: boolean }
   const numericTaskId = Number(taskId)
   if (!Number.isFinite(numericTaskId) || numericTaskId <= 0) return fail('taskId 无效', 400)
-  await refreshAgentTaskMemory(env, numericTaskId)
-  const row = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(taskId).first<DbAgentTaskMemory>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  await refreshAgentTaskMemory(env, numericTaskId, workspaceId)
+  const row = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ? AND workspace_id = ?').bind(taskId, workspaceId).first<DbAgentTaskMemory>()
   if (!row) return fail('任务记忆不存在', 404)
   const action = agentString(body.action, 40)
   if (action === 'add_note') {
@@ -3084,11 +3144,11 @@ async function updateAgentTaskMemory(env: Env, taskId: string, request: Request)
     await env.DB.prepare('UPDATE agent_task_memories SET ignored_items_json = ?, open_items_json = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(JSON.stringify(ignored), JSON.stringify(openItems), taskId).run()
   } else if (action === 'restore_items') {
     await env.DB.prepare("UPDATE agent_task_memories SET ignored_items_json = '[]', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?").bind(taskId).run()
-    await refreshAgentTaskMemory(env, numericTaskId)
+    await refreshAgentTaskMemory(env, numericTaskId, workspaceId)
   } else if (action === 'set_enabled') {
     if (body.enabled) {
       await env.DB.prepare('UPDATE agent_task_memories SET disabled = 0, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').bind(taskId).run()
-      await refreshAgentTaskMemory(env, numericTaskId)
+      await refreshAgentTaskMemory(env, numericTaskId, workspaceId)
     } else {
       await env.DB.prepare("UPDATE agent_task_memories SET disabled = 1, summary = '', open_items_json = '[]', preferences_json = '[]', user_notes_json = '[]', ignored_items_json = '[]', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?").bind(taskId).run()
     }
@@ -3103,7 +3163,7 @@ const agentToolCorsHeaders = {
   ...jsonHeaders,
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'authorization, content-type, x-agent-token',
+  'access-control-allow-headers': 'authorization, content-type, x-agent-token, x-agent-workspace-id, x-agent-principal-id, x-agent-role, x-agent-run-id, x-agent-scope-signature',
 }
 
 const agentOk = (data: unknown, status = 200) => Response.json(data, { status, headers: agentToolCorsHeaders })
@@ -3122,15 +3182,42 @@ async function verifyAgentToolRequest(env: Env, request: Request) {
   const authorization = request.headers.get('authorization') || ''
   const bearer = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
   const token = bearer || request.headers.get('x-agent-token') || ''
-  return token === expected
+  if (token !== expected) return false
+  const hasScopedHeaders = Boolean(request.headers.get('x-agent-scope-signature'))
+  if (!hasScopedHeaders) return true
+  const principal = await verifyAgentScopeHeaders(expected, request.headers)
+  return Boolean(principal && agentToolPathAllowed(principal.role, new URL(request.url).pathname, request.method))
+}
+
+function agentToolPathAllowed(role: AgentPrincipalContext['role'], path: string, method: string) {
+  const endpoint = path.split('/').pop() || ''
+  const publicRead = new Set(['context', 'product-help'])
+  const businessRead = new Set(['month-finance', 'search-tasks', 'task-detail', 'search-attachments', 'get-task-memory'])
+  if (publicRead.has(endpoint)) return true
+  if (businessRead.has(endpoint) && (method === 'GET' || method === 'POST')) {
+    if (endpoint === 'month-finance') return ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'].includes(role)
+    return ['admin', 'collaborator', 'viewer', 'client', 'mcp-read', 'system'].includes(role)
+  }
+  return ['admin', 'collaborator', 'system'].includes(role)
+}
+
+async function resolveAgentToolPrincipal(env: Env, request: Request): Promise<AgentPrincipalContext | null> {
+  if (!(await verifyAgentToolRequest(env, request))) return null
+  const expected = getAgentToolToken(env)
+  return (await verifyAgentScopeHeaders(expected, request.headers))
+    || normalizeAgentPrincipalContext({ workspaceId: DEFAULT_WORKSPACE_ID, principalId: 'legacy-internal', role: 'system' })
+}
+
+function agentWorkspaceIdFromRequest(request: Request) {
+  return agentString(request.headers.get('x-agent-workspace-id'), 80) || DEFAULT_WORKSPACE_ID
 }
 
 async function parseAgentToolBody(request: Request): Promise<Record<string, unknown>> {
   if (request.method === 'GET' || request.method === 'HEAD') {
     const params = new URL(request.url).searchParams
-    return Object.fromEntries(params.entries())
+    return { ...Object.fromEntries(params.entries()), __agentWorkspaceId: agentWorkspaceIdFromRequest(request) }
   }
-  return (await request.json().catch(() => ({}))) as Record<string, unknown>
+  return { ...(await request.json().catch(() => ({}))) as Record<string, unknown>, __agentWorkspaceId: agentWorkspaceIdFromRequest(request) }
 }
 
 function agentString(value: unknown, max = 1000) {
@@ -3295,17 +3382,18 @@ function toAgentTaskCandidate(task: DbTask): AgentTaskCandidate {
 async function agentTaskByRef(env: Env, body: Record<string, unknown>) {
   const taskId = agentNumber(body.taskId, 0)
   const title = agentString(body.taskTitle ?? body.title, 160)
+  const workspaceId = agentString(body.__agentWorkspaceId, 80) || DEFAULT_WORKSPACE_ID
   const task = taskId > 0
-    ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId)).first<DbTask>()
+    ? await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId), workspaceId).first<DbTask>()
     : null
   if (task) return task
   if (title) {
     const rows = await env.DB.prepare(
       `SELECT * FROM tasks
-       WHERE deleted_at IS NULL AND voided_at IS NULL AND title LIKE ?
+       WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND title LIKE ?
        ORDER BY CASE WHEN title = ? THEN 0 ELSE 1 END, start_date DESC, created_at DESC
        LIMIT 6`,
-    ).bind(`%${title}%`, title).all<DbTask>()
+    ).bind(workspaceId, `%${title}%`, title).all<DbTask>()
     const matches = rows.results ?? []
     const exactMatches = matches.filter((item) => item.title === title)
     if (exactMatches.length === 1) return exactMatches[0]
@@ -3393,12 +3481,13 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
   const estimatedDate = agentDateTime(draft.estimatedDate, startDate)
   await env.DB.prepare(
     `INSERT INTO tasks (
-      id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
+      id, workspace_id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_supplemental,
       estimated_hours, actual_hours, hourly_rate, requester, contact_person, reviewer, stage, status, progress,
       suspend_reason, terminate_reason, supplemental_note, acceptance_note, feedback_rating, feedback_tags_json, feedback_note, time_entries_json, waiting_entries_json, is_billable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id,
+    agentWorkspaceIdFromRequest(request),
     agentString(draft.title, 120),
     agentString(draft.requirement, 3000),
     agentString(draft.type, 120) || defaultDesignTypes[0],
@@ -3468,7 +3557,7 @@ async function agentRecordFeedbackTool(env: Env, request: Request, ctx?: WorkerE
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再写入反馈', 409)
   const entries = parseTimeEntries(task.time_entries_json)
@@ -3532,7 +3621,7 @@ async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: Worke
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再修改状态', 409)
   const status = agentString(draft.status, 20) as TaskStatus
@@ -3603,7 +3692,7 @@ async function agentUpdateTaskFieldsTool(env: Env, request: Request, ctx?: Worke
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再修改任务字段', 409)
   const fields = agentAllowedFieldChanges((draft.fields as Record<string, unknown>) ?? {})
@@ -3666,7 +3755,7 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再写入进展', 409)
   if (task.status === '已验收' && !agentBool(draft.isAcceptanceProgress, false)) return agentFail('已验收任务的工时已锁定，不能再追加普通进展', 409)
@@ -3748,7 +3837,7 @@ async function agentAppendWaitingTool(env: Env, request: Request, ctx?: WorkerEx
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能再记录等待', 409)
   if (task.status === '已验收') return agentFail('已验收任务已闭环，不能再追加等待记录', 409)
@@ -3814,7 +3903,7 @@ async function agentManageRecordTool(env: Env, request: Request, ctx?: WorkerExe
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能维护记录', 409)
   if (task.status === '已验收') return agentFail('已验收任务记录已锁定，不能通过 Agent 编辑或删除', 409)
@@ -3892,7 +3981,7 @@ async function agentMarkAcceptanceFilesTool(env: Env, request: Request, ctx?: Wo
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能调整验收文件', 409)
   const attachmentIds = agentAttachmentIds(draft.attachmentIds)
@@ -3943,7 +4032,7 @@ async function agentCompleteAcceptanceTool(env: Env, request: Request, ctx?: Wor
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId)).first<DbTask>()
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), agentWorkspaceIdFromRequest(request)).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, task.workspace_id || DEFAULT_WORKSPACE_ID)) return agentFail('该任务所属月份已锁定结算，不能执行验收', 409)
   if (task.status === '已验收') return agentFail('任务已经验收，请勿重复执行完整验收', 409)
@@ -4369,7 +4458,8 @@ function agentOpenApiSpec(request: Request) {
 }
 
 async function agentMonthFinanceTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
@@ -4380,7 +4470,7 @@ async function agentMonthFinanceTool(env: Env, request: Request) {
     return agentFail('months 不能为空，格式为 YYYY-MM；也可以在 question 中包含月份。', 400)
   }
   const hourlyRate = await getHourlyRate(env)
-  const stats = await computeMonthFinanceStats(env, months, hourlyRate)
+  const stats = await computeMonthFinanceStats(env, months, hourlyRate, principal.workspaceId)
   return agentOk({
     tool: 'query_month_finance',
     hourlyRate,
@@ -4393,7 +4483,8 @@ async function agentMonthFinanceTool(env: Env, request: Request) {
 }
 
 async function agentSearchTasksTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
@@ -4412,39 +4503,41 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
+           WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(...monthBindings, like, like, like, limit).all<DbTask>()
+        ).bind(principal.workspaceId, ...monthBindings, like, like, like, limit).all<DbTask>()
       : await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL
+           WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(like, like, like, limit).all<DbTask>()
+        ).bind(principal.workspaceId, like, like, like, limit).all<DbTask>()
     : { results: [] as DbTask[], success: true }
   const scopeRows = statusIntent || !query
     ? month
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
-           WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
+           WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(...monthBindings, limit).all<DbTask>()
+        ).bind(principal.workspaceId, ...monthBindings, limit).all<DbTask>()
       : await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
-          WHERE deleted_at IS NULL AND voided_at IS NULL
+          WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
-        ).bind(limit).all<DbTask>()
+        ).bind(principal.workspaceId, limit).all<DbTask>()
     : { results: [] as DbTask[], success: true }
   const semanticMatches = query && !statusIntent ? await semanticTaskIds(env, query, limit, month) : []
-  const semanticRows = semanticMatches.length ? await tasksByIds(env, semanticMatches.map((item) => item.id)) : []
+  const semanticRows = semanticMatches.length
+    ? (await tasksByIds(env, semanticMatches.map((item) => item.id))).filter((task) => (task.workspace_id || DEFAULT_WORKSPACE_ID) === principal.workspaceId)
+    : []
   const semanticScoreById = new Map(semanticMatches.map((item) => [item.id, item.score]))
   const mergedById = new Map<string, DbTask>()
   semanticRows.forEach((task) => mergedById.set(String(task.id), task))
@@ -4569,7 +4662,8 @@ function toAgentResultAttachment(row: DbAttachment): AgentResultAttachment {
 }
 
 async function agentSearchAttachmentsTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
@@ -4581,19 +4675,19 @@ async function agentSearchAttachmentsTool(env: Env, request: Request) {
         `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.settlement_month
          FROM attachments
          INNER JOIN tasks ON tasks.id = attachments.task_id
-         WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+         WHERE tasks.workspace_id = ? AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
            AND (tasks.settlement_month = ? OR tasks.start_date LIKE ?)
          ORDER BY attachments.uploaded_at DESC
          LIMIT 500`,
-      ).bind(month, `${month}%`).all<AgentAttachmentSearchRow>()
+      ).bind(principal.workspaceId, month, `${month}%`).all<AgentAttachmentSearchRow>()
     : await env.DB.prepare(
         `SELECT attachments.*, tasks.title AS task_title, tasks.requirement, tasks.settlement_month
          FROM attachments
          INNER JOIN tasks ON tasks.id = attachments.task_id
-         WHERE attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+         WHERE tasks.workspace_id = ? AND attachments.deleted_at IS NULL AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
          ORDER BY attachments.uploaded_at DESC
          LIMIT 500`,
-      ).all<AgentAttachmentSearchRow>()
+      ).bind(principal.workspaceId).all<AgentAttachmentSearchRow>()
   const semanticMatches = query ? await semanticTaskIds(env, query, 20, month) : []
   const semanticScores = new Map(semanticMatches.map((item) => [item.id, item.score]))
   const { normalized, terms } = attachmentSearchTerms(query)
@@ -4626,13 +4720,14 @@ async function agentSearchAttachmentsTool(env: Env, request: Request) {
 }
 
 async function agentTaskDetailTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
   let task: DbTask
   try {
-    task = await agentTaskByRef(env, { taskId: body.taskId, taskTitle: body.title })
+    task = await agentTaskByRef(env, { taskId: body.taskId, taskTitle: body.title, __agentWorkspaceId: principal.workspaceId })
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'get_task_detail')
     return agentFail(error instanceof Error ? error.message : '任务不存在或已作废', 404)
@@ -4660,11 +4755,13 @@ async function agentTaskDetailTool(env: Env, request: Request) {
 }
 
 async function agentContextTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   return agentOk({
     name: '爱丽丝',
+    workspaceId: principal.workspaceId,
     identity: 'Giverny 设计兼职平台的工作智能体，也是用户的长期工作助手。',
     capabilities: [
       '查询任务、任务详情、进展、验收附件和交付件分析',
@@ -4694,7 +4791,7 @@ async function agentContextTool(env: Env, request: Request) {
 }
 
 async function agentProductHelpTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) {
+  if (!(await resolveAgentToolPrincipal(env, request))) {
     return agentFail('Agent tool token missing or invalid', 401)
   }
   const body = await parseAgentToolBody(request)
@@ -4734,9 +4831,9 @@ async function agentAnalysisJobById(env: Env, jobId: string) {
     .first<DbAgentAnalysisJob>()
 }
 
-async function startAgentAnalysisWorkflow(env: Env, jobId: string, workflowId: string) {
+async function startAgentAnalysisWorkflow(env: Env, jobId: string, workflowId: string, principal: AgentPrincipalContext) {
   if (!env.AGENT_ANALYSIS_WORKFLOW) throw new Error('AGENT_ANALYSIS_WORKFLOW 未配置')
-  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId } })
+  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId, principal } })
 }
 
 const AGENT_ANALYSIS_TITLES: Record<AgentBackgroundTask['type'], (month: string) => string> = {
@@ -4765,9 +4862,11 @@ async function createAgentAnalysisJob(env: Env, input: {
   principalId?: string
 }) {
   if (!/^\d{4}-\d{2}$/.test(input.month)) throw new Error('分析任务需要 YYYY-MM 格式的 month')
+  const workspaceId = input.workspaceId || DEFAULT_WORKSPACE_ID
+  const scopedDedupeKey = input.dedupeKey && workspaceId !== DEFAULT_WORKSPACE_ID ? `${workspaceId}:${input.dedupeKey}` : input.dedupeKey
   if (input.dedupeKey) {
-    const existing = await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE dedupe_key = ?')
-      .bind(input.dedupeKey).first<DbAgentAnalysisJob>()
+    const existing = await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE dedupe_key = ? AND workspace_id = ?')
+      .bind(scopedDedupeKey, workspaceId).first<DbAgentAnalysisJob>()
     if (existing) return existing
   }
   const jobId = `analysis-${crypto.randomUUID()}`
@@ -4787,12 +4886,16 @@ async function createAgentAnalysisJob(env: Env, input: {
     String(input.query || '').slice(0, 1000),
     JSON.stringify({ taskIds: (input.taskIds || []).slice(0, 30) }),
     input.source || 'manual',
-    input.dedupeKey || null,
-    input.workspaceId || DEFAULT_WORKSPACE_ID,
+    scopedDedupeKey || null,
+    workspaceId,
     input.principalId || 'system',
   ).run()
   try {
-    await startAgentAnalysisWorkflow(env, jobId, workflowId)
+    await startAgentAnalysisWorkflow(env, jobId, workflowId, normalizeAgentPrincipalContext({
+      workspaceId: input.workspaceId || DEFAULT_WORKSPACE_ID,
+      principalId: input.principalId || 'system',
+      role: input.principalId && input.principalId !== 'system' ? 'admin' : 'system',
+    }))
   } catch (error) {
     const message = error instanceof Error ? error.message : '无法启动后台分析'
     await env.DB.prepare(
@@ -4807,13 +4910,14 @@ async function createAgentAnalysisJob(env: Env, input: {
 }
 
 async function agentMonthlyReviewStartTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const month = agentString(body.month, 7)
   if (!/^\d{4}-\d{2}$/.test(month)) return agentFail('月度复盘需要 YYYY-MM 格式的 month', 400)
   const conversationId = agentString(body.conversationId, 160)
   try {
-    const row = await createAgentAnalysisJob(env, { type: 'monthly_review', month, conversationId })
+    const row = await createAgentAnalysisJob(env, { type: 'monthly_review', month, conversationId, workspaceId: principal.workspaceId, principalId: principal.principalId })
     return agentOk({
       tool: 'start_monthly_review',
       backgroundTask: toAgentBackgroundTask(row),
@@ -4827,7 +4931,8 @@ async function agentMonthlyReviewStartTool(env: Env, request: Request) {
 }
 
 async function agentAnalysisJobStartTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const type = agentString(body.type, 40)
   const month = agentString(body.month, 7)
@@ -4840,6 +4945,8 @@ async function agentAnalysisJobStartTool(env: Env, request: Request) {
       query: agentString(body.query, 1000),
       taskIds: Array.isArray(body.taskIds) ? body.taskIds.map(Number).filter((id) => Number.isInteger(id) && id > 0) : [],
       conversationId: agentString(body.conversationId, 160),
+      workspaceId: principal.workspaceId,
+      principalId: principal.principalId,
     })
     return agentOk({
       tool: 'start_deep_analysis',
@@ -4859,12 +4966,14 @@ function agentAnalysisStatusGuard(row: DbAgentAnalysisJob | null) {
 }
 
 async function agentAnalysisJobPrepareTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const jobId = agentString(body.jobId, 180)
   let row: DbAgentAnalysisJob
   try {
     row = agentAnalysisStatusGuard(await agentAnalysisJobById(env, jobId))
+    if (row.workspace_id !== principal.workspaceId) return agentFail('后台分析任务不存在', 404)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '任务状态无效', 409)
   }
@@ -5018,12 +5127,14 @@ function cleanAgentAnalysisResult(value: string) {
 }
 
 async function agentAnalysisJobGenerateTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const jobId = agentString(body.jobId, 180)
   let row: DbAgentAnalysisJob
   try {
     row = agentAnalysisStatusGuard(await agentAnalysisJobById(env, jobId))
+    if (row.workspace_id !== principal.workspaceId) return agentFail('后台分析任务不存在', 404)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '任务状态无效', 409)
   }
@@ -5076,7 +5187,8 @@ ${snapshotText}`
 }
 
 async function agentAnalysisJobFailTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const jobId = agentString(body.jobId, 180)
   const error = agentString(body.error, 1200) || '后台分析失败'
@@ -5084,8 +5196,8 @@ async function agentAnalysisJobFailTool(env: Env, request: Request) {
     `UPDATE agent_analysis_jobs
      SET status = 'failed', phase = 'failed', progress = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP,
          next_retry_at = CASE WHEN retry_count < max_attempts THEN datetime('now', '+2 minutes') ELSE NULL END
-     WHERE id = ? AND status NOT IN ('completed', 'cancelled')`,
-  ).bind(error, jobId).run()
+     WHERE id = ? AND workspace_id = ? AND status NOT IN ('completed', 'cancelled')`,
+  ).bind(error, jobId, principal.workspaceId).run()
   return agentOk({ failed: true })
 }
 
@@ -5099,22 +5211,25 @@ async function listAgentAnalysisJobs(env: Env, request: Request) {
   return ok({ jobs: (rows.results ?? []).map(toAgentBackgroundTask) })
 }
 
-async function markAgentAnalysisJobRead(env: Env, jobId?: string) {
+async function markAgentAnalysisJobRead(env: Env, request: Request, jobId?: string) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   if (jobId) {
-    await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(jobId).run()
-    return getAgentAnalysisJob(env, jobId)
+    await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?').bind(jobId, workspaceId).run()
+    return getAgentAnalysisJob(env, jobId, request)
   }
-  await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL').run()
+  await env.DB.prepare('UPDATE agent_analysis_jobs SET read_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND read_at IS NULL').bind(workspaceId).run()
   return ok({ updated: true })
 }
 
-async function getAgentAnalysisJob(env: Env, jobId: string) {
-  const row = await agentAnalysisJobById(env, jobId)
+async function getAgentAnalysisJob(env: Env, jobId: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE id = ? AND workspace_id = ?').bind(jobId, workspaceId).first<DbAgentAnalysisJob>()
   return row ? ok({ job: toAgentBackgroundTask(row) }) : fail('后台分析任务不存在', 404)
 }
 
-async function cancelAgentAnalysisJob(env: Env, jobId: string) {
-  const row = await agentAnalysisJobById(env, jobId)
+async function cancelAgentAnalysisJob(env: Env, jobId: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE id = ? AND workspace_id = ?').bind(jobId, workspaceId).first<DbAgentAnalysisJob>()
   if (!row) return fail('后台分析任务不存在', 404)
   if (row.status === 'completed') return fail('复盘已完成，无需取消', 409)
   if (row.status === 'cancelled') return ok({ job: toAgentBackgroundTask(row) })
@@ -5131,8 +5246,10 @@ async function cancelAgentAnalysisJob(env: Env, jobId: string) {
   return ok({ job: cancelled ? toAgentBackgroundTask(cancelled) : null })
 }
 
-async function retryAgentAnalysisJob(env: Env, jobId: string) {
-  const row = await agentAnalysisJobById(env, jobId)
+async function retryAgentAnalysisJob(env: Env, jobId: string, workspaceId?: string) {
+  const row = workspaceId
+    ? await env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE id = ? AND workspace_id = ?').bind(jobId, workspaceId).first<DbAgentAnalysisJob>()
+    : await agentAnalysisJobById(env, jobId)
   if (!row) return fail('后台分析任务不存在', 404)
   if (row.status !== 'failed' && row.status !== 'cancelled') return fail('只能重试失败或已取消的复盘', 409)
   const workflowId = `agent-analysis-${crypto.randomUUID()}`
@@ -5145,7 +5262,11 @@ async function retryAgentAnalysisJob(env: Env, jobId: string) {
      WHERE id = ?`,
   ).bind(workflowId, jobId).run()
   try {
-    await startAgentAnalysisWorkflow(env, jobId, workflowId)
+    await startAgentAnalysisWorkflow(env, jobId, workflowId, normalizeAgentPrincipalContext({
+      workspaceId: row.workspace_id,
+      principalId: row.principal_id || 'system',
+      role: 'system',
+    }))
   } catch (error) {
     const message = error instanceof Error ? error.message : '无法重新启动后台分析'
     await env.DB.prepare(
@@ -5456,31 +5577,36 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   return agentFail('Agent tool not found', 404)
 }
 
-async function verifyMcpReadRequest(env: Env, request: Request) {
+async function verifyMcpReadRequest(env: Env, request: Request): Promise<AgentPrincipalContext | null> {
   const authorization = request.headers.get('authorization') || ''
   const token = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
-  if (!token) return false
+  if (!token) return null
   await ensureAccessTokenScope(env)
   const row = await env.DB.prepare(
-    `SELECT id, expires_at
+    `SELECT id, expires_at, workspace_id
      FROM access_tokens
      WHERE token = ? AND scope = 'mcp-read' AND disabled = 0`,
-  ).bind(token).first<{ id: string; expires_at: string | null }>()
-  if (!row || (row.expires_at && row.expires_at < nowIso())) return false
+  ).bind(token).first<{ id: string; expires_at: string | null; workspace_id?: string | null }>()
+  if (!row || (row.expires_at && row.expires_at < nowIso())) return null
   await env.DB.prepare(
     "UPDATE access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ? AND (last_used_at IS NULL OR last_used_at < datetime('now', '-5 minutes'))",
   ).bind(row.id).run()
-  return true
+  return normalizeAgentPrincipalContext({
+    workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
+    principalId: row.id,
+    role: 'mcp-read',
+  })
 }
 
-async function callMcpReadTool(env: Env, endpoint: string, input: Record<string, unknown>) {
+async function callMcpReadTool(env: Env, endpoint: string, input: Record<string, unknown>, principal: AgentPrincipalContext) {
   if (!env.AGENT_TOOL_TOKEN) throw new Error('AGENT_TOOL_TOKEN 未配置，MCP 无法访问业务工具。')
   const url = new URL(`https://giverny.internal/api/agent/tools/${endpoint}`)
   Object.entries(input).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
   })
+  const scopedHeaders = await createAgentScopeHeaders(env.AGENT_TOOL_TOKEN, principal)
   const response = await handleAgentToolApi(new Request(url, {
-    headers: { authorization: `Bearer ${env.AGENT_TOOL_TOKEN}` },
+    headers: { authorization: `Bearer ${env.AGENT_TOOL_TOKEN}`, ...scopedHeaders },
   }), env)
   const data = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok || !data) throw new Error(String(data?.error || `工具调用失败：HTTP ${response.status}`))
@@ -5501,7 +5627,7 @@ function mcpToolError(error: unknown) {
   }
 }
 
-function registerGivernyMcpTools(server: McpServer, env: Env) {
+function registerGivernyMcpTools(server: McpServer, env: Env, principal: AgentPrincipalContext) {
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   const finance = agentReadToolRegistry.query_month_finance
   server.registerTool('query_month_finance', {
@@ -5510,7 +5636,7 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: finance.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, finance.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, finance.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const search = agentReadToolRegistry.search_tasks
   server.registerTool('search_tasks', {
@@ -5519,7 +5645,7 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: search.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, search.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, search.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const detail = agentReadToolRegistry.get_task_detail
   server.registerTool('get_task_detail', {
@@ -5528,7 +5654,7 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: detail.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const attachments = agentReadToolRegistry.search_attachments
   server.registerTool('search_attachments', {
@@ -5537,7 +5663,7 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: attachments.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, attachments.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, attachments.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const context = agentReadToolRegistry.get_giverny_context
   server.registerTool('get_giverny_context', {
@@ -5546,7 +5672,7 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: context.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, context.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, context.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const productHelp = agentReadToolRegistry.search_product_help
   server.registerTool('search_product_help', {
@@ -5555,19 +5681,22 @@ function registerGivernyMcpTools(server: McpServer, env: Env) {
     inputSchema: productHelp.inputSchema,
     annotations,
   }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, productHelp.endpoint, input)) } catch (error) { return mcpToolError(error) }
+    try { return mcpToolResult(await callMcpReadTool(env, productHelp.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
 }
 
 async function handleMcp(request: Request, env: Env, ctx: WorkerExecutionContext) {
-  if (request.method !== 'OPTIONS' && !(await verifyMcpReadRequest(env, request))) {
+  const principal = request.method === 'OPTIONS'
+    ? normalizeAgentPrincipalContext({ workspaceId: DEFAULT_WORKSPACE_ID, principalId: 'mcp-options', role: 'mcp-read' })
+    : await verifyMcpReadRequest(env, request)
+  if (!principal) {
     return Response.json(
       { error: '需要有效的 MCP 只读口令' },
       { status: 401, headers: { 'www-authenticate': 'Bearer realm="Giverny MCP"', 'cache-control': 'no-store' } },
     )
   }
   const server = new McpServer({ name: 'Giverny', version: '1.0.0' })
-  registerGivernyMcpTools(server, env)
+  registerGivernyMcpTools(server, env, principal)
   const handler = createMcpHandler(server, { route: '/mcp', enableJsonResponse: true })
   return handler(request, env, ctx as Parameters<typeof handler>[2])
 }
@@ -10098,6 +10227,11 @@ async function ensureAccessTokenScope(env: Env) {
   } catch {
     // 列已存在则忽略
   }
+  try {
+    await env.DB.prepare("ALTER TABLE access_tokens ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'").run()
+  } catch {
+    // 列已存在则忽略
+  }
   accessTokenScopeEnsured = true
 }
 
@@ -14366,7 +14500,13 @@ async function chatWithAi(env: Env, request: Request) {
   const useWebSearch = body.useWebSearch !== false
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
   const today = nowIso().slice(0, 10)
-  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const requestPrincipal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(requestPrincipal)
+  const agentPrincipal = normalizeAgentPrincipalContext({
+    workspaceId,
+    principalId: requestPrincipal?.principalId || 'anonymous',
+    role: requestPrincipal?.role || 'guest',
+  })
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const imageAttachments = attachments.filter((a) => a.type === 'image').slice(0, 4)
   const textAttachments = attachments.filter((a) => a.type === 'text').slice(0, 3)
@@ -14420,6 +14560,7 @@ async function chatWithAi(env: Env, request: Request) {
           role: message.role === 'assistant' ? 'assistant' as const : 'user' as const,
           content: message.content,
         })),
+        principal: agentPrincipal,
       })
       if (runtimeResult?.answer) {
         const conversationId = String(runtimeResult.conversationId || '').trim()
@@ -14427,6 +14568,7 @@ async function chatWithAi(env: Env, request: Request) {
           const firstUserMessage = messages.find((message) => message.role === 'user')?.content || lastMsg
           await upsertAgentConversationIndex(env, {
             id: conversationId,
+            workspaceId,
             title: firstUserMessage.slice(0, 80),
             lastMessagePreview: runtimeResult.answer,
             messageCount: messages.length + 1,
@@ -14440,6 +14582,7 @@ async function chatWithAi(env: Env, request: Request) {
           selection: runtimeResult.selection,
           backgroundTask: runtimeResult.backgroundTask,
           attachments: runtimeResult.attachments,
+          agentTurn: runtimeResult.agentTurn,
         })
       }
       if (requiresRuntime) {
@@ -14525,7 +14668,8 @@ async function chatWithAi(env: Env, request: Request) {
     : ''
 
   if (imageAttachments.length === 0 && textAttachments.length === 0) {
-    const plan = await planChatAgentTurn(env, modelChoice, {
+    let orchestratedTurn = createAgentTurn({ principal: agentPrincipal, question: lastMsg })
+    const rawPlan = await planChatAgentTurn(env, modelChoice, {
       question: lastMsg,
       currentMonth: month,
       today,
@@ -14534,6 +14678,27 @@ async function chatWithAi(env: Env, request: Request) {
       useKnowledge,
       useWebSearch: Boolean(needsWebSearch),
     })
+    const plannedTools = Array.isArray(rawPlan?.tools) ? [...rawPlan.tools] : []
+    if (isTaskBlockerQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'get_task_detail')) {
+      plannedTools.push({ name: 'get_task_detail', args: { title: lastMsg }, reason: '编排层验真要求：任务阻塞问题必须读取任务详情与等待记录。' })
+    }
+    if (isFinanceQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'query_month_finance')) {
+      plannedTools.push({ name: 'query_month_finance', args: { months: requestedMonths }, reason: '编排层验真要求：财务结论必须由确定性计算工具生成。' })
+    }
+    const plan: ChatAgentPlanResponse = { ...rawPlan, tools: plannedTools }
+    orchestratedTurn = {
+      ...orchestratedTurn,
+      intent: normalizeAgentIntent(plan?.intent),
+      phase: 'authorize',
+      attempts: orchestratedTurn.attempts + 1,
+      plan: (Array.isArray(plan?.tools) ? plan.tools : []).filter((item) => item.name && item.name !== 'none').map((item, index): AgentPlannedToolCall => ({
+        id: `${orchestratedTurn.id}:tool:${index + 1}`,
+        name: String(item.name),
+        args: item.args && typeof item.args === 'object' ? item.args : {},
+        reason: String(item.reason || ''),
+        risk: 'read',
+      })),
+    }
     const { results: toolResults, trace } = await executeChatAgentTools(
       env,
       plan,
@@ -14542,6 +14707,15 @@ async function chatWithAi(env: Env, request: Request) {
       workspaceId,
     )
     if (toolResults.length > 0) {
+      const evidence: AgentEvidence[] = toolResults.map((item, index) => ({
+        id: `${orchestratedTurn.id}:evidence:${index + 1}`,
+        toolCallId: orchestratedTurn.plan[index]?.id || `${orchestratedTurn.id}:tool:${index + 1}`,
+        toolName: item.name,
+        source: item.name === 'search_product_help' ? 'product_registry' : 'd1',
+        deterministic: true,
+        payload: item.result,
+      }))
+      orchestratedTurn = { ...orchestratedTurn, phase: 'analyze', evidence }
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
@@ -14565,8 +14739,16 @@ async function chatWithAi(env: Env, request: Request) {
           evidenceCorrection = '答案验真：模型初稿未引用当前等待证据，已按工具事实纠正。'
         }
       }
+      orchestratedTurn = completeAgentTurn(orchestratedTurn, finalContent)
       return ok({
         content: finalContent,
+        agentTurn: {
+          id: orchestratedTurn.id,
+          phase: orchestratedTurn.phase,
+          intent: orchestratedTurn.intent,
+          verification: orchestratedTurn.verification,
+          evidenceCount: orchestratedTurn.evidence.length,
+        },
         trace: [
           `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
           ...trace,
@@ -15030,6 +15212,14 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     String(body.month || '').slice(0, 7),
     principalWorkspaceId(principal),
   )
+  const cliTurn = createAgentTurn({
+    principal: normalizeAgentPrincipalContext({
+      workspaceId: principalWorkspaceId(principal),
+      principalId: principal.principalId,
+      role: principal.role,
+    }),
+    question: lastMessage,
+  })
   if (readContext.immediate) {
     return {
       route: null,
@@ -15059,6 +15249,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const historyMessages = messages.slice(-8)
   const history = historyMessages.map((message) => `${message.role === 'assistant' ? '助手' : '用户'}：${message.content}`).join('\n\n')
   const prompt = `你是 Giverny 工作助手爱丽丝，现在运行在用户当前电脑上的 ${adapter.name}。\n\n` +
+    `本轮 AgentTurn：${cliTurn.id}。你是统一编排层下的推理适配器，不能自行扩大权限或把推测当成业务事实。\n\n` +
     `执行边界：\n` +
     `1. 查询任务、工时、收入、附件、产品功能、快捷键和工作区数据时，优先使用下方由网站工具预取的结果；数据不足时再调用 giverny MCP 工具，不得凭空猜测。\n` +
     `2. 站内任务创建、状态修改、进展、反馈、验收等写入必须回到网页的确认流程；本轮不得绕过确认直接修改 Giverny 数据。\n` +
@@ -15072,9 +15263,9 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
     `\n对话上下文：\n${history}`
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled)
-       VALUES (?, ?, ?, 'mcp-read', ?, 0)`,
-    ).bind(crypto.randomUUID(), mcpToken, `local-cli:${commandId}`, expiresAt),
+      `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled, workspace_id)
+       VALUES (?, ?, ?, 'mcp-read', ?, 0, ?)`,
+    ).bind(crypto.randomUUID(), mcpToken, `local-cli:${commandId}`, expiresAt, principalWorkspaceId(principal)),
     env.DB.prepare(
       `INSERT INTO local_cli_commands (
         id, device_id, principal_id, command_type, payload_json, status, expires_at
@@ -16915,34 +17106,34 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return chatWithAiInstrumented(env, request, ctx)
   }
   if (path === '/api/ai/conversations' && request.method === 'GET') {
-    return listAgentConversations(env)
+    return listAgentConversations(env, request)
   }
   if (path === '/api/ai/conversations/sync' && request.method === 'POST') {
     return syncAgentConversations(env, request)
   }
   if (path.startsWith('/api/ai/conversations/') && request.method === 'GET') {
-    return getAgentConversation(env, path.split('/')[4] || '')
+    return getAgentConversation(env, path.split('/')[4] || '', request)
   }
   if (path.startsWith('/api/ai/conversations/') && request.method === 'DELETE') {
-    return deleteAgentConversation(env, path.split('/')[4] || '')
+    return deleteAgentConversation(env, path.split('/')[4] || '', request)
   }
   if (path === '/api/ai/analysis-jobs' && request.method === 'GET') {
     return listAgentAnalysisJobs(env, request)
   }
   if (path === '/api/ai/analysis-jobs/read-all' && request.method === 'POST') {
-    return markAgentAnalysisJobRead(env)
+    return markAgentAnalysisJobRead(env, request)
   }
   if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/read') && request.method === 'POST') {
-    return markAgentAnalysisJobRead(env, path.split('/')[4] || '')
+    return markAgentAnalysisJobRead(env, request, path.split('/')[4] || '')
   }
   if (path.startsWith('/api/ai/analysis-jobs/') && request.method === 'GET') {
-    return getAgentAnalysisJob(env, path.split('/')[4] || '')
+    return getAgentAnalysisJob(env, path.split('/')[4] || '', request)
   }
   if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/cancel') && request.method === 'POST') {
-    return cancelAgentAnalysisJob(env, path.split('/')[4] || '')
+    return cancelAgentAnalysisJob(env, path.split('/')[4] || '', request)
   }
   if (path.startsWith('/api/ai/analysis-jobs/') && path.endsWith('/retry') && request.method === 'POST') {
-    return retryAgentAnalysisJob(env, path.split('/')[4] || '')
+    return retryAgentAnalysisJob(env, path.split('/')[4] || '', principalWorkspaceId(await resolveRequestPrincipal(env, request)))
   }
   if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
     return getAgentRunMetrics(env, request)

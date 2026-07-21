@@ -41,6 +41,7 @@
 │   └── record-production-deployment.yml
 ├── docs/
 │   ├── AI_AGENT_RUNTIME.md
+│   ├── AGENT_ORCHESTRATOR.md
 │   ├── AGENT_WORKFLOWS.md
 │   ├── AI_MODEL_ROUTING.md
 │   ├── AI_LEARNING.md
@@ -83,6 +84,8 @@
 │   ├── App.css
 │   ├── App.tsx
 │   ├── agentToolRegistry.ts
+│   ├── agentOrchestrator.ts
+│   ├── agentScope.ts
 │   ├── agentAnalysisWorkflow.ts
 │   ├── agentWriteWorkflow.ts
 │   ├── aliceAgent.ts
@@ -113,6 +116,8 @@
 - Independent BAML Node runtime: `ai-runtime/`
 - Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
 - Shared Agent/MCP read-tool registry: `src/agentToolRegistry.ts`
+- Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
+- Signed tenant/principal context for internal tools: `src/agentScope.ts`
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`
 - Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`
 - Agent regression suite and isolated quality gate: `agent-evals/`
@@ -127,6 +132,7 @@
 - `workspaces` 与 `workspace_memberships` 是多租户的数据边界；现有记录默认归属 `default` 工作区。当前版本已开放第一阶段管理入口：AI 运行中心可创建 / 切换工作区、添加或邀请成员，默认工作区保持兼容。
 - 新增需要租户隔离的表时，应同时保存 `workspace_id` 和 `principal_id`，并在 Worker 查询层先解析当前 principal，再拼接工作区条件。
 - Agent runtime architecture notes: `docs/AI_AGENT_RUNTIME.md`
+- Agent orchestration and multi-tenant boundary: `docs/AGENT_ORCHESTRATOR.md`
 - Agent production controls and user operations: `docs/AGENT_PRODUCTION_OPERATIONS.md`
 - Durable Agent write workflow notes: `docs/AGENT_WORKFLOWS.md`
 - Remote MCP endpoint and authentication: `docs/MCP_SERVER.md`

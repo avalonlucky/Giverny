@@ -612,7 +612,9 @@ test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({
   expect(payload.learning.totalSamples).toBeGreaterThan(0)
 
   await expect(page.getByRole('heading', { name: 'AI 运行中心' })).toBeVisible()
-  await expect(page.getByText('Giverny 默认工作区', { exact: true })).toBeVisible()
+  const workspaceSelect = page.getByLabel('切换工作区')
+  await expect(workspaceSelect).toHaveValue('default')
+  await expect(workspaceSelect.locator('option[value="default"]')).toHaveText('Giverny 默认工作区')
   await expect(page.getByText('浏览器回归后台任务', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
 })

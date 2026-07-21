@@ -149,3 +149,14 @@ export type AgentFailureCase = {
   lastSeenAt: string
   updatedAt: string
 }
+
+export type {
+  AgentEvidence,
+  AgentIntent,
+  AgentPlannedToolCall,
+  AgentRiskLevel,
+  AgentTurn,
+  AgentTurnPhase,
+  AgentVerification,
+} from '../agentOrchestrator'
+export type { AgentPrincipalContext, AgentPrincipalRole } from '../agentScope'

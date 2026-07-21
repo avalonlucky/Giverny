@@ -1,6 +1,17 @@
 INSERT INTO access_tokens (id, token, label, scope, disabled)
 VALUES ('mcp-eval', 'mcp_eval_read_token', 'MCP 隔离评测', 'mcp-read', 0);
 
+INSERT OR IGNORE INTO workspaces (id, name) VALUES ('tenant-b', '隔离评测工作区 B');
+
+INSERT INTO tasks (
+  id, workspace_id, title, requirement, design_type, start_date, estimated_delivery_date, settlement_month,
+  is_supplemental, estimated_hours, actual_hours, hourly_rate, requester, contact_person,
+  reviewer, status, stage, progress, time_entries_json, waiting_entries_json, is_billable
+) VALUES (
+  '9001', 'tenant-b', '租户B机密任务', '不得被默认工作区 Agent 读取', '隔离评测', '2026-07-01T09:00', '2026-07-02T18:00', '2026-07',
+  0, 1, 0, 300, '隔离用户', '隔离用户', '隔离用户', '计划中', '计划中', 0, '[]', '[]', 1
+);
+
 INSERT INTO tasks (
   id, title, requirement, design_type, start_date, estimated_delivery_date, settlement_month,
   is_supplemental, estimated_hours, actual_hours, hourly_rate, requester, contact_person,

@@ -3,6 +3,8 @@ import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry } from './agentToolRegistry'
+import { completeAgentTurn, createAgentTurn, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
+import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection } from './types/agent'
 
@@ -58,6 +60,7 @@ export type AliceAgentChatRequest = {
   conversationId?: string
   history?: StoredMessage[]
   context?: string
+  principal?: AgentPrincipalContext
 }
 
 export type AliceAgentTraceItem = {
@@ -74,6 +77,7 @@ export type AliceAgentChatResult = {
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
+  agentTurn?: { id: string; phase: string; intent: string; evidenceCount: number; verification: { passed: boolean; issues: string[]; requiredTools: string[] } }
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
@@ -170,6 +174,7 @@ function parseJsonObject(value: string) {
 
 export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   private activeConversationId = ''
+  private activePrincipal = normalizeAgentPrincipalContext({ role: 'system' })
   private readonly aliceEnv: AliceAgentEnv
 
   constructor(ctx: AgentContext, env: AliceAgentEnv) {
@@ -389,6 +394,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const token = String(this.aliceEnv.AGENT_TOOL_TOKEN || '').trim()
     if (!token) throw new Error('AGENT_TOOL_TOKEN 未配置，Agent 无法访问业务工具。')
     headers.authorization = `Bearer ${token}`
+    Object.assign(headers, await createAgentScopeHeaders(token, this.activePrincipal))
 
     const url = new URL(`${baseUrl}/api/agent/tools/${endpoint}`)
     if (method === 'GET') {
@@ -432,6 +438,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           endpoint: config.executeEndpoint,
           confirmationToken,
           createdAt,
+          principal: this.activePrincipal,
         }, {
           id: `agent-write-${crypto.randomUUID()}`,
           metadata: { action: action.replace(/_preview$/, ''), createdAt },
@@ -849,6 +856,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const message = String(request.message || '').trim()
     if (!message) throw new Error('消息不能为空。')
     this.activeConversationId = String(request.conversationId || '')
+    this.activePrincipal = normalizeAgentPrincipalContext(request.principal)
+    let agentTurn = createAgentTurn({ principal: this.activePrincipal, question: message })
 
     if (this.state.messageCount === 0 && Array.isArray(request.history)) {
       request.history.slice(-12).forEach((item) => {
@@ -916,21 +925,40 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       temperature: 0.2,
     })
 
-    const answer = cleanAnswer(result.text) || '我已经处理了这次请求，但没有生成有效回答。'
+    let answer = cleanAnswer(result.text) || '我已经处理了这次请求，但没有生成有效回答。'
     const trace: AliceAgentTraceItem[] = [
       { type: 'plan', label: '理解问题', detail: '结合持久会话判断是否需要读取或修改 Giverny 数据。' },
     ]
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
     const attachmentsById = new Map<number, AgentResultAttachment>()
+    const usedTools = new Set<string>()
+    const plannedCalls: AgentPlannedToolCall[] = []
+    const evidence: AgentEvidence[] = []
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
+        plannedCalls.push({
+          id: `${agentTurn.id}:tool:${plannedCalls.length + 1}`,
+          name: call.toolName,
+          args: toJsonObject(call.input),
+          reason: '由主模型结合完整语义规划。',
+          risk: call.toolName.endsWith('_preview') ? 'write' : 'read',
+        })
         trace.push({ type: 'tool', label: agentToolTraceLabel(call.toolName, 'running') })
       }
       for (const toolResult of step.toolResults) {
+        usedTools.add(toolResult.toolName)
         trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
         selection = this.taskSelection(toolResult.output) || selection
         const output = toJsonObject(toolResult.output)
+        evidence.push({
+          id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
+          toolCallId: plannedCalls.find((item) => item.name === toolResult.toolName)?.id || `${agentTurn.id}:tool:unknown`,
+          toolName: toolResult.toolName,
+          source: toolResult.toolName === 'search_product_help' || toolResult.toolName === 'get_giverny_context' ? 'product_registry' : 'd1',
+          deterministic: true,
+          payload: output,
+        })
         if (toolResult.toolName === 'search_attachments' || wantsAttachmentResults(message)) {
           this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
         }
@@ -940,6 +968,48 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         }
       }
     }
+    const inferredIntent: AgentIntent = usedTools.has('query_month_finance')
+      ? 'finance'
+      : usedTools.has('search_attachments')
+        ? 'attachment'
+        : [...usedTools].some((name) => name.endsWith('_preview'))
+          ? 'write'
+          : usedTools.has('get_task_detail') || usedTools.has('search_tasks')
+            ? 'task_data'
+            : usedTools.has('search_product_help')
+              ? 'product_help'
+              : 'general'
+    const usedWritePreview = [...usedTools].some((toolName) => toolName.endsWith('_preview'))
+    if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message) && !usedTools.has('get_task_detail') && !usedWritePreview) {
+      const repaired = await this.callTool('task-detail', { title: message }, 'GET').catch(() => null)
+      const repairedRecord = toJsonObject(repaired)
+      const task = toJsonObject(repairedRecord.task)
+      const waitingRecords = Array.isArray(repairedRecord.waitingRecords)
+        ? repairedRecord.waitingRecords.map(toJsonObject)
+        : []
+      const activeWait = waitingRecords.find((item) => item.active === true)
+      if (task.title && activeWait) {
+        const repairCallId = `${agentTurn.id}:tool:${plannedCalls.length + 1}`
+        plannedCalls.push({ id: repairCallId, name: 'get_task_detail', args: { title: message }, reason: '验真阶段补查任务阻塞证据。', risk: 'read' })
+        evidence.push({ id: `${agentTurn.id}:evidence:${evidence.length + 1}`, toolCallId: repairCallId, toolName: 'get_task_detail', source: 'd1', deterministic: true, payload: repairedRecord })
+        usedTools.add('get_task_detail')
+        const elapsedMinutes = Math.max(0, Number(activeWait.elapsedMinutes) || 0)
+        const elapsed = elapsedMinutes >= 1440
+          ? `${Math.floor(elapsedMinutes / 1440)} 天 ${Math.floor(elapsedMinutes % 1440 / 60)} 小时`
+          : `${Math.floor(elapsedMinutes / 60)} 小时 ${elapsedMinutes % 60} 分钟`
+        answer = [
+          `**${String(task.title)}** 目前卡在等待环节。`,
+          '',
+          `- **具体原因**：${String(activeWait.note || activeWait.reason || '未填写')}`,
+          `- **开始等待**：${String(activeWait.startAt || '未记录').replace('T', ' ')}`,
+          `- **已等待**：${elapsed}`,
+        ].join('\n')
+        trace.push({ type: 'tool', label: '验真补查任务详情 [tool:get_task_detail]' })
+        trace.push({ type: 'result', label: '已用等待记录纠正模型初稿' })
+      }
+    }
+    const verifiedIntent: AgentIntent = usedTools.has('get_task_detail') && inferredIntent === 'general' ? 'task_data' : inferredIntent
+    agentTurn = completeAgentTurn({ ...agentTurn, intent: verifiedIntent, phase: 'analyze', plan: plannedCalls, evidence, attempts: 1 }, answer)
     const nextPending = this.getPendingAction()
     const approval = nextPending && (!pending || nextPending.createdAt !== pending.createdAt)
       ? this.approvalResult(nextPending, 'pending')
@@ -948,6 +1018,13 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       answer,
       trace: [...trace, { type: 'result' as const, label: '整理回答', detail: '将工具结果组织为可核对的结论。' }].slice(0, 10),
       model: `deepseek:${modelName}`,
+      agentTurn: {
+        id: agentTurn.id,
+        phase: agentTurn.phase,
+        intent: agentTurn.intent,
+        evidenceCount: agentTurn.evidence.length,
+        verification: agentTurn.verification,
+      },
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),

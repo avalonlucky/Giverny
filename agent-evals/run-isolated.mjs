@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createHmac } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -123,6 +124,40 @@ async function runMcpChecks() {
     throw new Error(`MCP task search did not expose active waiting records: ${JSON.stringify(taskSearchResult.structuredContent)}`)
   }
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
+}
+
+function agentScopeHeaders(workspaceId, principalId = 'scope-eval', role = 'admin') {
+  const runId = `scope-${crypto.randomUUID()}`
+  const signature = createHmac('sha256', 'eval-agent-tool-token')
+    .update([workspaceId, principalId, role, runId].join('\n'))
+    .digest('base64url')
+  return {
+    authorization: 'Bearer eval-agent-tool-token',
+    'x-agent-workspace-id': workspaceId,
+    'x-agent-principal-id': principalId,
+    'x-agent-role': role,
+    'x-agent-run-id': runId,
+    'x-agent-scope-signature': signature,
+  }
+}
+
+async function runAgentScopeChecks() {
+  const endpoint = 'http://127.0.0.1:8798/api/agent/tools/search-tasks?query=%E7%A7%9F%E6%88%B7B%E6%9C%BA%E5%AF%86%E4%BB%BB%E5%8A%A1'
+  const defaultResponse = await fetch(endpoint, { headers: agentScopeHeaders('default') })
+  const defaultData = await defaultResponse.json().catch(() => ({}))
+  if (!defaultResponse.ok || defaultData.count !== 0) {
+    throw new Error(`Default workspace leaked tenant B task: ${JSON.stringify(defaultData)}`)
+  }
+  const tenantResponse = await fetch(endpoint, { headers: agentScopeHeaders('tenant-b') })
+  const tenantData = await tenantResponse.json().catch(() => ({}))
+  if (!tenantResponse.ok || tenantData.count !== 1 || tenantData.results?.[0]?.title !== '租户B机密任务') {
+    throw new Error(`Tenant B scoped Agent could not read its own task: ${JSON.stringify(tenantData)}`)
+  }
+  const tamperedResponse = await fetch(endpoint, {
+    headers: { ...agentScopeHeaders('default'), 'x-agent-workspace-id': 'tenant-b' },
+  })
+  if (tamperedResponse.status !== 401) throw new Error(`Tampered Agent scope returned HTTP ${tamperedResponse.status}`)
+  process.stdout.write('Signed Agent workspace scope and cross-tenant isolation checks passed.\n')
 }
 
 async function runWorkflowWriteCheck(cookie) {
@@ -1822,6 +1857,7 @@ try {
   if (!loginResponse.ok || !cookie) throw new Error('Isolated eval login failed')
 
   await runMcpChecks()
+  await runAgentScopeChecks()
   await runFinanceAnchorCheck(cookie)
   await runSupplementalActivityDateCheck(cookie)
   await runWorkflowWriteCheck(cookie)
@@ -1858,6 +1894,8 @@ try {
     .filter((line) => line.includes('/api/agent/tools/') && !line.includes('200 OK'))
     .filter((line) => !line.includes('/monthly-review-generate 409 Conflict'))
     .filter((line) => !line.includes('/analysis-job-generate 409 Conflict'))
+  const expectedScopeRejection = toolErrors.findIndex((line) => line.includes('/search-tasks 401 Unauthorized'))
+  if (expectedScopeRejection >= 0) toolErrors.splice(expectedScopeRejection, 1)
   if (toolErrors.length) {
     throw new Error(`Agent tools returned non-200 responses:\n${toolErrors.join('\n')}`)
   }

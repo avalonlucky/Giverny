@@ -1,7 +1,9 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers'
+import { createAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 
 export type AgentAnalysisWorkflowParams = {
   jobId: string
+  principal: AgentPrincipalContext
 }
 
 type AgentAnalysisWorkflowEnv = {
@@ -29,14 +31,16 @@ function cleanBaseUrl(value: string | undefined) {
 }
 
 export class AgentAnalysisWorkflow extends WorkflowEntrypoint<AgentAnalysisWorkflowEnv, AgentAnalysisWorkflowParams> {
-  private async callTool(endpoint: string, body: Record<string, unknown>) {
+  private async callTool(endpoint: string, body: Record<string, unknown>, principal: AgentPrincipalContext) {
     const token = String(this.env.AGENT_TOOL_TOKEN || '').trim()
     if (!token) throw new Error('AGENT_TOOL_TOKEN 未配置，后台分析无法读取数据。')
+    const scopeHeaders = await createAgentScopeHeaders(token, principal)
     const response = await fetch(`${cleanBaseUrl(this.env.GIVERNY_API_BASE_URL)}/api/agent/tools/${endpoint}`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
+        ...scopeHeaders,
       },
       body: JSON.stringify(body),
     })
@@ -48,22 +52,22 @@ export class AgentAnalysisWorkflow extends WorkflowEntrypoint<AgentAnalysisWorkf
   }
 
   async run(event: AgentAnalysisWorkflowEvent, step: DurableWorkflowStep) {
-    const { jobId } = event.payload
+    const { jobId, principal } = event.payload
     try {
       await step.do('collect-analysis-data', {
         retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
         timeout: '30 seconds',
-      }, () => this.callTool('analysis-job-prepare', { jobId }))
+      }, () => this.callTool('analysis-job-prepare', { jobId }, principal))
 
       const result = await step.do('generate-analysis-report', {
         retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
         timeout: '2 minutes',
-      }, () => this.callTool('analysis-job-generate', { jobId }))
+      }, () => this.callTool('analysis-job-generate', { jobId }, principal))
 
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : '后台分析失败'
-      await this.callTool('analysis-job-fail', { jobId, error: message }).catch(() => undefined)
+      await this.callTool('analysis-job-fail', { jobId, error: message }, principal).catch(() => undefined)
       throw error
     }
   }
