@@ -5959,6 +5959,7 @@ function ChatPanel({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [showTaskCenter, setShowTaskCenter] = useState(false)
+  const [showProjectPopup, setShowProjectPopup] = useState(false)
   const [showScopePopup, setShowScopePopup] = useState(false)
   const [showModelPopup, setShowModelPopup] = useState(false)
   const [selectedModelChoice, setSelectedModelChoice] = useState<ChatModelChoice>(() => readChatModelChoice())
@@ -6229,6 +6230,7 @@ function ChatPanel({
     void refreshCloudHistory()
     setHistoryList((current) => mergeConversationHistory(loadChatHistory(), current.filter((record) => record.cloud)))
     setShowTaskCenter(false)
+    setShowProjectPopup(false)
     setShowHistory(true)
   }
 
@@ -6286,7 +6288,25 @@ function ChatPanel({
     setActiveProjectId(project.id)
     setProjectDraft('')
     if (temporaryChat) setTemporaryChat(false)
+    setShowProjectPopup(false)
     onNotify(`已新建对话项目：${project.name}`, 'success')
+  }
+
+  const selectConversationProject = (projectId: string) => {
+    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
+    setActiveProjectId(projectId)
+    setTemporaryChat(false)
+    setShowProjectPopup(false)
+    setShowHistory(false)
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const clearConversationProject = () => {
+    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
+    setActiveProjectId('')
+    setTemporaryChat(false)
+    setShowProjectPopup(false)
+    setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const startTemporaryChat = () => {
@@ -6298,6 +6318,7 @@ function ChatPanel({
     setAgentConversationId(undefined)
     setInput('')
     setAttachments([])
+    setShowProjectPopup(false)
     setShowHistory(false)
     setShowTaskCenter(false)
     setTimeout(() => inputRef.current?.focus(), 50)
@@ -6747,6 +6768,22 @@ function ChatPanel({
           </div>
         </div>
         <div className="chat-panel-header-actions">
+          <button
+            type="button"
+            className={`chat-panel-project-btn ${activeProject || showProjectPopup ? 'active' : ''}`}
+            onClick={() => {
+              setShowProjectPopup((value) => !value)
+              setShowHistory(false)
+              setShowTaskCenter(false)
+              setShowScopePopup(false)
+              setShowModelPopup(false)
+            }}
+            title="新建或切换对话项目"
+            aria-label="新建或切换对话项目"
+          >
+            <Folder size={14} />
+            <span>{activeProject?.name || '项目'}</span>
+          </button>
           <button type="button" className={`chat-panel-text-btn ${temporaryChat ? 'active' : ''}`} onClick={startTemporaryChat} title="临时对话不进入历史记录">
             临时
           </button>
@@ -6768,6 +6805,43 @@ function ChatPanel({
           </button>
         </div>
       </div>
+
+      {showProjectPopup && (
+        <div className="chat-project-popup">
+          <div className="chat-project-popup-header">
+            <strong>对话项目</strong>
+            <span>像文件夹一样收纳同一主题的问题</span>
+          </div>
+          <div className="chat-project-quick-actions">
+            <button type="button" className={!activeProjectId && !temporaryChat ? 'active' : ''} onClick={clearConversationProject}>
+              全部对话
+            </button>
+            <button type="button" className={temporaryChat ? 'active' : ''} onClick={startTemporaryChat}>
+              临时对话
+            </button>
+          </div>
+          <div className="chat-project-list">
+            {projects.length === 0 ? (
+              <p>还没有项目，可以先建一个「金额核对」。</p>
+            ) : projects.map((project) => (
+              <button key={project.id} type="button" className={activeProjectId === project.id ? 'active' : ''} onClick={() => selectConversationProject(project.id)}>
+                <Folder size={13} aria-hidden="true" />
+                <span>{project.name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="chat-project-create">
+            <input
+              value={projectDraft}
+              onChange={(event) => setProjectDraft(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && createConversationProject()}
+              placeholder="新建项目，例如：金额核对"
+              aria-label="新建对话项目名称"
+            />
+            <button type="button" onClick={createConversationProject}>新建项目</button>
+          </div>
+        </div>
+      )}
 
       {/* messages / welcome screen */}
       <div className="chat-panel-messages">

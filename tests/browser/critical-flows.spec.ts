@@ -125,6 +125,19 @@ test('工作助手临时对话不会写入历史记录', async ({ page }) => {
   expect(saved).not.toContain('这只是临时问题')
 })
 
+test('工作助手主面板可以直接新建对话项目', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '新建或切换对话项目' }).click()
+  await expect(dialog.getByText('对话项目', { exact: true })).toBeVisible()
+  await dialog.getByLabel('新建对话项目名称').fill('金额核对')
+  await dialog.getByRole('button', { name: '新建项目' }).click()
+  await expect(dialog.getByText('金额核对').first()).toBeVisible()
+  const projects = await page.evaluate(() => window.localStorage.getItem('alice_chat_projects') || '[]')
+  expect(projects).toContain('金额核对')
+})
+
 test('进行中的等待记录展示实时已等待时长', async ({ page }) => {
   await page.getByText('公司产品封套修改', { exact: true }).first().click()
   const sidebar = page.locator('.dashboard-task-sidebar')

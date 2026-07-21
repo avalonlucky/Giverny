@@ -13629,6 +13629,37 @@ input::file-selector-button {
   gap: 4px;
 }
 
+.chat-panel-project-btn {
+  max-width: 120px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  transition: color 0.15s, background 0.15s;
+}
+
+.chat-panel-project-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-panel-project-btn:hover,
+.chat-panel-project-btn.active {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
 .chat-panel-text-btn {
   border: 0;
   background: transparent;
@@ -13676,6 +13707,104 @@ input::file-selector-button {
 
 .chat-panel-icon-btn.has-unread {
   color: var(--color-primary);
+}
+
+.chat-project-popup {
+  position: absolute;
+  top: 56px;
+  right: 50px;
+  z-index: 7;
+  width: min(300px, calc(100% - 28px));
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-surface-strong);
+  box-shadow: 0 18px 45px rgba(31, 45, 42, 0.16);
+  display: grid;
+  gap: 10px;
+}
+
+.chat-project-popup-header {
+  display: grid;
+  gap: 3px;
+}
+
+.chat-project-popup-header strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.chat-project-popup-header span,
+.chat-project-list p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-project-quick-actions,
+.chat-project-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-project-list {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.chat-project-quick-actions button,
+.chat-project-list button,
+.chat-project-create button {
+  border: 0;
+  background: var(--color-surface-soft);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  transition: color 0.15s, background 0.15s;
+}
+
+.chat-project-quick-actions button,
+.chat-project-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+}
+
+.chat-project-quick-actions button:hover,
+.chat-project-quick-actions button.active,
+.chat-project-list button:hover,
+.chat-project-list button.active,
+.chat-project-create button:hover {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface-soft));
+}
+
+.chat-project-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  background: var(--color-surface-soft);
+  border-radius: 8px;
+  padding: 8px 8px 8px 10px;
+}
+
+.chat-project-create input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
+.chat-project-create button {
+  padding: 6px 10px;
 }
 
 .chat-task-unread {
