@@ -2582,6 +2582,39 @@ function sumBillableAmountForMonth(tasks: Task[], month: string, hourlyRate: num
   return roundCents(taskAmount + importedAmount)
 }
 
+function isDateValueInRange(value: string, startDate: string, endDate: string) {
+  const day = datePart(value || '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= startDate && day <= endDate
+}
+
+function taskTimeEntriesInDateRange(task: Task, startDate: string, endDate: string) {
+  return billableTimeEntries(task).filter((entry) => isDateValueInRange(timeEntryActivityValue(entry, task), startDate, endDate))
+}
+
+function taskBillableHoursInDateRange(task: Task, startDate: string, endDate: string) {
+  if (!isTaskBillable(task)) {
+    return 0
+  }
+  const minutes = taskTimeEntriesInDateRange(task, startDate, endDate).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+  if (minutes > 0) {
+    return Number((minutes / 60).toFixed(2))
+  }
+  if (billableTimeEntries(task).length === 0 && isDateValueInRange(task.actualDeliveryDate || task.date, startDate, endDate)) {
+    return roundCents(Number(task.actualHours) || 0)
+  }
+  return 0
+}
+
+function taskLatestActivityInMonth(task: Task, month: string) {
+  const candidates = [
+    task.date,
+    ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
+    ...(task.waitingEntries ?? []).map((entry) => waitingEntryActivityValue(task, entry)),
+    acceptanceProgressEndDateTime(task) || task.actualDeliveryDate,
+  ].filter((value) => value && safeMonthPart(value) === month)
+  return candidates.sort().at(-1) ?? ''
+}
+
 function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
   const startDate = entry.date || ''
   const endDate = entry.endDate || startDate
@@ -10239,8 +10272,6 @@ function App() {
               pdfTitle={pdfTitle}
               serviceCompanyName={serviceCompanyName}
               reports={reports}
-              files={fileItems}
-              attachmentAnalyses={attachmentAnalyses}
               onCopyShareLink={handleCopyShareLink}
               onRotateReportToken={handleRotateReportToken}
               onLockReport={handleLockMonthlyReport}
@@ -17638,8 +17669,6 @@ function ReportsView({
   pdfTitle,
   serviceCompanyName,
   reports,
-  files,
-  attachmentAnalyses,
   onCopyShareLink,
   onRotateReportToken,
   onLockReport,
@@ -17662,8 +17691,6 @@ function ReportsView({
   pdfTitle: string
   serviceCompanyName: string
   reports: ReportRecord[]
-  files: FileAsset[]
-  attachmentAnalyses: AttachmentAnalysis[]
   onCopyShareLink: (token: string) => void
   onRotateReportToken: (report: ReportRecord) => void
   onLockReport: () => void
@@ -17672,6 +17699,36 @@ function ReportsView({
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
   const [receiptTemplate, setReceiptTemplate] = useState<'min' | 'detail'>('min')
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
+  const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
+  const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
+  type SettlementExportRecord = {
+    id: string
+    label: string
+    startDate: string
+    endDate: string
+    exportedAt: string
+    taskCount: number
+    billableHours: number
+    amount: number
+    locked: boolean
+  }
+  const settlementExportRecordsKey = 'giverny-settlement-export-records-v1'
+  const readSettlementExportRecords = (): SettlementExportRecord[] => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(settlementExportRecordsKey) ?? '[]') as unknown
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((item): item is SettlementExportRecord => (
+        Boolean(item)
+        && typeof item === 'object'
+        && typeof (item as SettlementExportRecord).id === 'string'
+        && typeof (item as SettlementExportRecord).startDate === 'string'
+        && typeof (item as SettlementExportRecord).endDate === 'string'
+      ))
+    } catch {
+      return []
+    }
+  }
+  const [exportRecords, setExportRecords] = useState<SettlementExportRecord[]>(readSettlementExportRecords)
   const selectedMonth = selectedReportMonth || currentMonth.value
   const selectedMonthLabel = monthLabelOf(selectedMonth)
   const selectedReport = reports.find((report) => report.month === selectedMonth)
@@ -17690,7 +17747,69 @@ function ReportsView({
   const selectedImportedHours = selectedMonth === currentMonth.value ? importedHours : 0
   const getSelectedTaskHours = (task: Task) => taskHoursInMonth(task, selectedMonth)
   const getSelectedTaskBillableHours = (task: Task) => taskBillableHoursInMonth(task, selectedMonth)
-  const getSelectedTaskAmount = (task: Task) => billableTaskAmountInMonth(task, selectedMonth, hourlyRate)
+  type SettlementTaskRow = {
+    task: Task
+    sequence: string
+    estimatedStartDate: string
+    actualCompletionDate: string
+    estimatedHours: number
+    actualHours: number
+    amount: number
+    progressText: string
+  }
+  const formatReceiptDate = (value?: string) => (value ? datePart(value).replaceAll('-', '/') : '—')
+  const latestUpdatesByTask = useMemo(() => {
+    const result = new Map<number, TaskUpdate>()
+    selectedUpdates
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .forEach((update) => {
+        if (!result.has(update.taskId)) {
+          result.set(update.taskId, update)
+        }
+      })
+    return result
+  }, [selectedUpdates])
+  const getTaskProgressText = (task: Task, updatesMap = latestUpdatesByTask) => {
+    const latestUpdate = updatesMap.get(task.id)
+    const parts: string[] = []
+    if (task.acceptanceNote?.trim()) {
+      parts.push(task.acceptanceNote.trim())
+    }
+    if (latestUpdate) {
+      parts.push(`${latestUpdate.title}${latestUpdate.body ? `：${latestUpdate.body}` : ''}`)
+    }
+    if (task.acceptanceFiles && task.acceptanceFiles.length > 0) {
+      parts.push(`验收文件：${task.acceptanceFiles.slice(0, 3).join('、')}${task.acceptanceFiles.length > 3 ? ` 等 ${task.acceptanceFiles.length} 个` : ''}`)
+    }
+    if (parts.length === 0) {
+      parts.push(`${task.status}，进度 ${taskDisplayProgress(task)}%`)
+    }
+    return parts.join('；')
+  }
+  const actualCompletionDateForMonth = (task: Task, month: string) => {
+    const acceptanceDate = acceptanceProgressEndDateTime(task) || task.actualDeliveryDate
+    if (task.status === '已验收' && safeMonthPart(acceptanceDate) === month) {
+      return acceptanceDate
+    }
+    return taskLatestActivityInMonth(task, month) || acceptanceDate || task.date || ''
+  }
+  const buildMonthReceiptRows = (month: string, tasksForMonth: Task[], updatesMap = latestUpdatesByTask): SettlementTaskRow[] => tasksForMonth
+    .filter((task) => isTaskBillable(task) && taskBillableHoursInMonth(task, month) > 0)
+    .map((task, index) => {
+      const actualHours = taskBillableHoursInMonth(task, month)
+      return {
+        task,
+        sequence: String(index + 1).padStart(2, '0'),
+        estimatedStartDate: formatReceiptDate(task.date),
+        actualCompletionDate: formatReceiptDate(actualCompletionDateForMonth(task, month)),
+        estimatedHours: Number(task.estimatedHours) || 0,
+        actualHours,
+        amount: roundCents(actualHours * hourlyRate),
+        progressText: getTaskProgressText(task, updatesMap),
+      }
+    })
+  const receiptRows = buildMonthReceiptRows(selectedMonth, selectedTasks)
   const selectedStats = selectedMonth === currentMonth.value
     ? stats
     : {
@@ -17702,8 +17821,7 @@ function ReportsView({
         accepted: selectedTasks.filter((task) => task.status === '已验收').length,
         pending: selectedTasks.filter((task) => task.status === '待验收').length,
       }
-  const billableTasks = selectedTasks.filter((task) => isTaskBillable(task) && getSelectedTaskBillableHours(task) > 0)
-  const receiptDetailTasks = billableTasks
+  const billableTasks = receiptRows.map((row) => row.task)
   // 只统计真正没进结算表的计划中任务：有实际工时的计划中任务会照常计费，不能在备注里说成未计费
   const plannedCount = selectedTasks.filter((task) => task.status === '计划中' && isTaskBillable(task) && getSelectedTaskHours(task) === 0).length
   const freeTasks = selectedTasks.filter((task) => !isTaskBillable(task))
@@ -17746,60 +17864,17 @@ function ReportsView({
     })
   })
   const visibleReports = isHistoryExpanded ? reports : reports.slice(0, Math.max(3, Math.min(reports.length, 5)))
-  const receiptNo = `AK-${selectedMonth.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
+  const receiptNo = `AK-${selectedMonth.replace('-', '')}-${String(receiptRows.length + 1).padStart(3, '0')}`
   const templateOptions = [
     { value: 'min' as const, label: '简约' },
     { value: 'detail' as const, label: '编辑式 Excel' },
   ]
-  // 交付件理解：取该任务验收交付件的 AI 分析摘要，放进回单让甲方看到我们对成果的理解。
-  const analysisByAttachment = useMemo(
-    () => new Map(attachmentAnalyses.map((analysis) => [analysis.attachmentId, analysis])),
-    [attachmentAnalyses],
-  )
-  const getDeliveryUnderstanding = (task: Task): string => {
-    const acceptanceNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
-    const taskFiles = files.filter(
-      (file) => file.taskId === task.id && !file.deletedAt && (file.scope === 'acceptance' || acceptanceNames.has(file.name)),
-    )
-    for (const file of taskFiles) {
-      const summary = analysisByAttachment.get(file.id)?.summary?.trim()
-      if (summary) {
-        return summary
-      }
-    }
-    return ''
-  }
-  const latestUpdatesByTask = useMemo(() => {
-    const result = new Map<number, TaskUpdate>()
-    selectedUpdates
-      .slice()
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .forEach((update) => {
-        if (!result.has(update.taskId)) {
-          result.set(update.taskId, update)
-        }
-      })
-    return result
-  }, [selectedUpdates])
-
-  const formatReceiptDate = (value: string) => (value ? datePart(value).replaceAll('-', '/') : '—')
-  const getTaskProgressText = (task: Task) => {
-    const latestUpdate = latestUpdatesByTask.get(task.id)
-    const parts: string[] = []
-    if (task.acceptanceNote?.trim()) {
-      parts.push(task.acceptanceNote.trim())
-    }
-    if (latestUpdate) {
-      parts.push(`${latestUpdate.title}${latestUpdate.body ? `：${latestUpdate.body}` : ''}`)
-    }
-    if (task.acceptanceFiles && task.acceptanceFiles.length > 0) {
-      parts.push(`验收文件：${task.acceptanceFiles.slice(0, 3).join('、')}${task.acceptanceFiles.length > 3 ? ` 等 ${task.acceptanceFiles.length} 个` : ''}`)
-    }
-    if (parts.length === 0) {
-      parts.push(`${task.status}，进度 ${taskDisplayProgress(task)}%`)
-    }
-    return parts.join('；')
-  }
+  useEffect(() => {
+    window.localStorage.setItem(settlementExportRecordsKey, JSON.stringify(exportRecords.slice(0, 40)))
+  }, [exportRecords])
+  const lastLockedExport = exportRecords
+    .filter((record) => record.locked)
+    .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
 
   const [isPdfExporting, setIsPdfExporting] = useState(false)
   const handleExportPdf = async () => {
@@ -17830,88 +17905,177 @@ function ReportsView({
     }
   }
 
-  const handleExportUserSheet = async (month = selectedMonth) => {
+  const handleExportUserSheet = async (
+    options: { month?: string; startDate?: string; endDate?: string; label?: string } = { month: selectedMonth },
+  ) => {
     try {
-    const targetReport = reports.find((report) => report.month === month)
-    const targetTasks = month === selectedMonth
-      ? receiptDetailTasks
-      : sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, month) && !task.voidedAt && isTaskBillable(task) && taskBillableHoursInMonth(task, month) > 0))
-    const targetUpdates = month === selectedMonth
-      ? selectedUpdates
-      : allUpdates.filter((update) => {
-        const task = allTasks.find((item) => item.id === update.taskId)
-        return !task?.voidedAt && update.date.startsWith(month)
+      const rangeStart = options.startDate ?? ''
+      const rangeEnd = options.endDate ?? ''
+      const isRangeExport = Boolean(rangeStart && rangeEnd)
+      const month = options.month ?? selectedMonth
+      const targetReport = !isRangeExport ? reports.find((report) => report.month === month) : undefined
+      const targetUpdates = isRangeExport
+        ? allUpdates.filter((update) => {
+          const task = allTasks.find((item) => item.id === update.taskId)
+          return !task?.voidedAt && isDateValueInRange(update.date, rangeStart, rangeEnd)
+        })
+        : month === selectedMonth
+          ? selectedUpdates
+          : allUpdates.filter((update) => {
+            const task = allTasks.find((item) => item.id === update.taskId)
+            return !task?.voidedAt && update.date.startsWith(month)
+          })
+      const updatesMap = new Map<number, TaskUpdate>()
+      targetUpdates
+        .slice()
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .forEach((update) => {
+          if (!updatesMap.has(update.taskId)) {
+            updatesMap.set(update.taskId, update)
+          }
+        })
+      const targetRows = isRangeExport
+        ? sortTasksByLatestActivity(allTasks.filter((task) => !task.voidedAt && isTaskBillable(task) && taskBillableHoursInDateRange(task, rangeStart, rangeEnd) > 0))
+            .map((task, index) => {
+              const actualHours = taskBillableHoursInDateRange(task, rangeStart, rangeEnd)
+              return {
+                task,
+                sequence: String(index + 1).padStart(2, '0'),
+                estimatedStartDate: formatReceiptDate(task.date),
+                actualCompletionDate: formatReceiptDate(rangeEnd),
+                estimatedHours: Number(task.estimatedHours) || 0,
+                actualHours,
+                amount: roundCents(actualHours * hourlyRate),
+                progressText: getTaskProgressText(task, updatesMap),
+              } satisfies SettlementTaskRow
+            })
+        : month === selectedMonth
+          ? receiptRows
+          : buildMonthReceiptRows(
+            month,
+            sortTasksByLatestActivity(allTasks.filter((task) => taskHasMonthActivity(task, month) && !task.voidedAt)),
+            updatesMap,
+          )
+      const totalHours = targetReport?.billableHours ?? targetRows.reduce((sum, row) => sum + row.actualHours, isRangeExport ? 0 : (month === importedHoursMonth ? importedMonthlyHours : 0))
+      const totalAmount = targetReport?.totalAmount ?? roundCents(totalHours * hourlyRate)
+      const ExcelJS = await import('exceljs')
+      const workbook = new ExcelJS.Workbook()
+      const sheet = workbook.addWorksheet('User')
+      sheet.columns = [
+        { header: '序号', key: 'sequence', width: 8 },
+        { header: '设计类型', key: 'type', width: 18 },
+        { header: '任务', key: 'title', width: 34 },
+        { header: '预计开始日期', key: 'estimatedStartDate', width: 16 },
+        { header: '实际完成日期', key: 'actualCompletionDate', width: 16 },
+        { header: '预估工时', key: 'estimatedHours', width: 12 },
+        { header: '实际工时', key: 'actualHours', width: 12 },
+        { header: '需求人', key: 'requester', width: 14 },
+        { header: '对接人', key: 'contact', width: 14 },
+        { header: '任务需求', key: 'requirement', width: 46 },
+        { header: '状态', key: 'status', width: 12 },
+        { header: '验收人/确认', key: 'reviewer', width: 14 },
+        { header: '验收备注/进展', key: 'progress', width: 56 },
+      ]
+      targetRows.forEach((row) => {
+        sheet.addRow({
+          sequence: row.sequence,
+          type: row.task.type,
+          title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
+          estimatedStartDate: row.estimatedStartDate,
+          actualCompletionDate: row.actualCompletionDate,
+          estimatedHours: row.estimatedHours,
+          actualHours: row.actualHours,
+          requester: row.task.requester || row.task.contact || '',
+          contact: row.task.contact || row.task.requester || '',
+          requirement: row.task.requirement || '',
+          status: row.task.status,
+          reviewer: row.task.reviewer || row.task.requester || '',
+          progress: row.progressText,
+        })
       })
-    const updatesMap = new Map<number, TaskUpdate>()
-    targetUpdates
-      .slice()
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .forEach((update) => {
-        if (!updatesMap.has(update.taskId)) {
-          updatesMap.set(update.taskId, update)
-        }
-      })
-    const ExcelJS = await import('exceljs')
-    const workbook = new ExcelJS.Workbook()
-    const sheet = workbook.addWorksheet('User')
-    sheet.columns = [
-      { header: '参考开始日期', key: 'start', width: 16 },
-      { header: '设计类型', key: 'type', width: 18 },
-      { header: '项目/任务名称', key: 'title', width: 34 },
-      { header: '具体任务需求', key: 'requirement', width: 46 },
-      { header: '需求人', key: 'requester', width: 14 },
-      { header: '参考预估工时', key: 'estimatedHours', width: 14 },
-      { header: '实际工时', key: 'actualHours', width: 12 },
-      { header: '参考交付日期', key: 'estimatedDate', width: 16 },
-      { header: '实际交付日期', key: 'actualDeliveryDate', width: 16 },
-      { header: '状态', key: 'status', width: 12 },
-      { header: '验收人/确认', key: 'reviewer', width: 14 },
-      { header: '进展', key: 'progress', width: 52 },
-    ]
-    targetTasks.forEach((task) => {
-      const latestUpdate = updatesMap.get(task.id)
+      if (!isRangeExport && month === importedHoursMonth && importedMonthlyHours > 0) {
+        sheet.addRow({
+          sequence: String(targetRows.length + 1).padStart(2, '0'),
+          type: '导入',
+          title: '月初导入工时（线下记录补录）',
+          estimatedStartDate: '—',
+          actualCompletionDate: '—',
+          estimatedHours: '',
+          actualHours: importedMonthlyHours,
+          requester: '',
+          contact: '',
+          requirement: '',
+          status: '导入',
+          reviewer: '',
+          progress: '线下记录补录',
+        })
+      }
+      sheet.addRow({})
       sheet.addRow({
-        start: `${formatReceiptDate(task.date)}${isSupplementalTask(task) ? '（补录）' : ''}`,
-        type: task.type,
-        title: task.title,
-        requirement: task.requirement || '',
-        requester: task.requester || task.contact || '',
-        estimatedHours: task.estimatedHours,
-        actualHours: taskBillableHoursInMonth(task, month),
-        estimatedDate: formatReceiptDate(task.estimatedDate),
-        actualDeliveryDate: task.status === '已验收' ? formatReceiptDate(latestUpdate?.date ?? '') : '',
-        status: task.status,
-        reviewer: task.reviewer || task.requester || '',
-        progress: getTaskProgressText(task),
+        title: '合计',
+        actualHours: totalHours,
+        progress: `金额：¥${formatYuan(totalAmount)}`,
       })
-    })
-    sheet.addRow({})
-    sheet.addRow({
-      title: '合计',
-      actualHours: targetReport?.billableHours ?? targetTasks.reduce((sum, task) => sum + taskBillableHoursInMonth(task, month), 0),
-      progress: `金额：¥${formatYuan(targetReport?.totalAmount ?? sumBillableAmountForMonth(targetTasks, month, hourlyRate))}`,
-    })
-    sheet.getRow(1).font = { bold: true }
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
-    // 「进展」列自动换行便于甲方阅读；「具体任务需求」列不换行（默认裁切，双击单元格看全文），
-    // 不设固定行高，由 Excel 按「进展」内容自动调整，避免长需求把每一行都撑得很高。
-    sheet.columns.forEach((col) => {
-      col.alignment = { vertical: 'top', wrapText: col.key === 'progress' }
-    })
-    const buffer = await workbook.xlsx.writeBuffer()
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `User_${monthLabelOf(month).replace(/\s/g, '')}_工时明细.xlsx`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+      sheet.getRow(1).font = { bold: true }
+      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F3EE' } }
+      sheet.columns.forEach((col) => {
+        col.alignment = { vertical: 'top', wrapText: col.key === 'progress' }
+      })
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const filenameLabel = options.label ?? (isRangeExport ? `${formatReceiptDate(rangeStart).replaceAll('/', '')}-${formatReceiptDate(rangeEnd).replaceAll('/', '')}` : monthLabelOf(month).replace(/\s/g, ''))
+      link.download = `User_${filenameLabel}_工时明细.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      if (isRangeExport) {
+        setExportRecords((records) => [{
+          id: `${Date.now()}`,
+          label: `${formatReceiptDate(rangeStart)} 至 ${formatReceiptDate(rangeEnd)}`,
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          exportedAt: nowStamp(),
+          taskCount: targetRows.length,
+          billableHours: totalHours,
+          amount: totalAmount,
+          locked: false,
+        }, ...records].slice(0, 40))
+        onNotify(`已导出 ${targetRows.length} 项，${totalHours.toFixed(1)}h · ¥${formatYuan(totalAmount)}`)
+      }
     } catch (error) {
       console.error('User 表导出失败', error)
       onNotify(error instanceof Error ? `User 表导出失败：${error.message}` : 'User 表导出失败，请重试', 'error')
     }
+  }
+
+  const handleExportCustomRange = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(customExportStart) || !/^\d{4}-\d{2}-\d{2}$/.test(customExportEnd)) {
+      onNotify('请选择完整的开始日期和结束日期', 'error')
+      return
+    }
+    if (customExportStart > customExportEnd) {
+      onNotify('开始日期不能晚于结束日期', 'error')
+      return
+    }
+    const overlappingLocked = exportRecords.find((record) => record.locked && customExportStart <= record.endDate && customExportEnd >= record.startDate)
+    if (overlappingLocked) {
+      onNotify(`该范围与已锁定记录 ${overlappingLocked.label} 有重叠，请注意不要重复结算`, 'error')
+    }
+    void handleExportUserSheet({
+      startDate: customExportStart,
+      endDate: customExportEnd,
+      label: `${customExportStart.replaceAll('-', '')}-${customExportEnd.replaceAll('-', '')}`,
+    })
+  }
+
+  const toggleExportRecordLock = (recordId: string) => {
+    setExportRecords((records) => records.map((record) => (
+      record.id === recordId ? { ...record, locked: !record.locked } : record
+    )))
   }
 
   return (
@@ -17953,6 +18117,50 @@ function ReportsView({
           </button>
         </div>
 
+        <div className="report-range-export">
+          <div className="report-range-fields">
+            <label>
+              <span>自定义导出</span>
+              <input type="date" value={customExportStart} onChange={(event) => setCustomExportStart(event.target.value)} />
+            </label>
+            <label>
+              <span>至</span>
+              <input type="date" value={customExportEnd} onChange={(event) => setCustomExportEnd(event.target.value)} />
+            </label>
+            <button className="ghost-button compact-button" type="button" onClick={handleExportCustomRange}>
+              <Download size={16} />
+              导出范围 Excel
+            </button>
+          </div>
+          <p>
+            {lastLockedExport
+              ? `已锁定至 ${formatReceiptDate(lastLockedExport.endDate)}，下次建议从下一天开始，避免重复或漏算。`
+              : '可按任意日期范围导出，导出后可锁定记录作为下次核对边界。'}
+          </p>
+        </div>
+
+        {exportRecords.length > 0 && (
+          <div className="report-export-history">
+            <div className="report-history-header">
+              <h3>导出记录</h3>
+              <span>锁定后作为下次导出的日期边界参考</span>
+            </div>
+            {exportRecords.slice(0, 6).map((record) => (
+              <div className="report-history-row report-export-row" key={record.id}>
+                <strong>{record.label}</strong>
+                <span>{record.taskCount} 项 · {record.billableHours.toFixed(1)}h · ¥{formatYuan(record.amount)}</span>
+                <small>导出于 {record.exportedAt}</small>
+                <div className="report-history-actions">
+                  <button className="ghost-button compact-button" onClick={() => toggleExportRecordLock(record.id)}>
+                    <Lock size={14} />
+                    {record.locked ? '已锁定' : '锁定'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {reports.length > 0 && (
           <div className="report-history">
             <div className="report-history-header">
@@ -17977,7 +18185,7 @@ function ReportsView({
                   <button className="ghost-button compact-button" onClick={() => setSelectedReportMonth(report.month)}>
                     查看
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`下载 ${report.month} User 表`} onClick={() => void handleExportUserSheet(report.month)}>
+                  <button className="ghost-button compact-button" aria-label={`下载 ${report.month} User 表`} onClick={() => void handleExportUserSheet({ month: report.month })}>
                     下载 User 表
                   </button>
                   <button className="ghost-button compact-button" aria-label={`复制 ${report.month} 合作伙伴链接`} onClick={() => onCopyShareLink(report.publicToken)}>
@@ -18056,68 +18264,82 @@ function ReportsView({
             {receiptTemplate === 'detail' ? (
               <tr>
                 <th>序号</th>
-                <th>设计类型 / 任务</th>
-                <th>任务需求</th>
+                <th>设计类型</th>
+                <th>任务</th>
+                <th>预计开始日期</th>
+                <th>实际完成日期</th>
                 <th>需求人</th>
+                <th>对接人</th>
+                <th>任务需求</th>
                 <th>状态</th>
                 <th className="num">预估工时</th>
                 <th className="num">实际工时</th>
                 <th className="num">单价</th>
                 <th className="num">小计</th>
                 <th>验收备注</th>
-                <th>交付件理解</th>
               </tr>
             ) : (
               <tr>
                 <th>序号</th>
-                <th>项目名称</th>
-                <th>类型</th>
+                <th>设计类型</th>
+                <th>任务</th>
+                <th>预计开始</th>
+                <th>实际完成</th>
+                <th>需求人</th>
+                <th>对接人</th>
                 <th>验收状态</th>
-                <th>具体任务需求</th>
-                <th>交付件理解</th>
                 <th className="num">工时</th>
                 <th className="num">金额（元）</th>
               </tr>
             )}
           </thead>
           <tbody>
-            {billableTasks.map((task, index) => (
+            {receiptRows.map((row) => (
               receiptTemplate === 'detail' ? (
-                <tr key={task.id}>
-                  <td>{String(index + 1).padStart(2, '0')}</td>
-                  <td className="receipt-task-name"><b>{task.title}</b><span>{task.type}</span></td>
-                  <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
-                  <td>{task.requester || task.contact || '—'}</td>
-                  <td>{task.status}</td>
-                  <td className="num">{task.estimatedHours.toFixed(1)}h</td>
-                  <td className="num">{getSelectedTaskBillableHours(task).toFixed(1)}h</td>
+                <tr key={row.task.id}>
+                  <td>{row.sequence}</td>
+                  <td>{row.task.type}</td>
+                  <td className="receipt-task-name"><b>{row.task.title}</b>{isSupplementalTask(row.task) && <span>补录</span>}</td>
+                  <td>{row.estimatedStartDate}</td>
+                  <td>{row.actualCompletionDate}</td>
+                  <td>{row.task.requester || row.task.contact || '—'}</td>
+                  <td>{row.task.contact || row.task.requester || '—'}</td>
+                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
+                  <td>{row.task.status}</td>
+                  <td className="num">{row.estimatedHours.toFixed(1)}h</td>
+                  <td className="num">{row.actualHours.toFixed(1)}h</td>
                   <td className="num">¥{hourlyRate}</td>
-                  <td className="num">{formatYuan(getSelectedTaskAmount(task))}</td>
-                  <td>{task.acceptanceNote || '—'}</td>
-                  <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
+                  <td className="num">{formatYuan(row.amount)}</td>
+                  <td>{row.task.acceptanceNote || '—'}</td>
                 </tr>
               ) : (
-                <tr key={task.id}>
-                  <td>{String(index + 1).padStart(2, '0')}</td>
-                  <td className="receipt-task-name">{task.title}{isSupplementalTask(task) ? '（补录）' : ''}</td>
-                  <td>{task.type}</td>
-                  <td>{task.status}</td>
-                  <td className="receipt-requirement-cell"><span title={task.requirement || ''}>{task.requirement || '—'}</span></td>
-                  <td className="receipt-delivery-cell"><span title={getDeliveryUnderstanding(task)}>{getDeliveryUnderstanding(task) || '—'}</span></td>
-                  <td className="num">{getSelectedTaskBillableHours(task).toFixed(1)}</td>
-                  <td className="num">{formatYuan(getSelectedTaskAmount(task))}</td>
+                <tr key={row.task.id}>
+                  <td>{row.sequence}</td>
+                  <td>{row.task.type}</td>
+                  <td className="receipt-task-name">{row.task.title}{isSupplementalTask(row.task) ? '（补录）' : ''}</td>
+                  <td>{row.estimatedStartDate}</td>
+                  <td>{row.actualCompletionDate}</td>
+                  <td>{row.task.requester || row.task.contact || '—'}</td>
+                  <td>{row.task.contact || row.task.requester || '—'}</td>
+                  <td>{row.task.status}</td>
+                  <td className="num">{row.actualHours.toFixed(1)}</td>
+                  <td className="num">{formatYuan(row.amount)}</td>
                 </tr>
               )
             ))}
             {selectedImportedHours > 0 && (
               receiptTemplate === 'detail' ? (
-                <tr>
-                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
-                  <td className="receipt-task-name"><b>月初导入工时</b><span>线下记录补录</span></td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td>导入</td>
-                  <td className="num">—</td>
+	                <tr>
+	                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
+	                  <td>导入</td>
+	                  <td className="receipt-task-name"><b>月初导入工时</b><span>线下记录补录</span></td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>导入</td>
+	                  <td className="num">—</td>
                   <td className="num">{selectedImportedHours.toFixed(1)}h</td>
                   <td className="num">¥{hourlyRate}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
@@ -18125,21 +18347,23 @@ function ReportsView({
                   <td>—</td>
                 </tr>
               ) : (
-                <tr>
-                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
-                  <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
-                  <td>导入</td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td className="num">{selectedImportedHours.toFixed(1)}</td>
+	                <tr>
+	                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
+	                  <td>导入</td>
+	                  <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>—</td>
+	                  <td>导入</td>
+	                  <td className="num">{selectedImportedHours.toFixed(1)}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
                 </tr>
               )
             )}
             {billableTasks.length === 0 && selectedImportedHours === 0 && freeTasks.length === 0 && (
               <tr>
-                <td colSpan={receiptTemplate === 'detail' ? 11 : 8} className="receipt-empty">
+	                <td colSpan={receiptTemplate === 'detail' ? 14 : 10} className="receipt-empty">
                   本月暂无任务
                 </td>
               </tr>
@@ -18147,15 +18371,14 @@ function ReportsView({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={6}>合计</td>
+	              <td colSpan={receiptTemplate === 'detail' ? 10 : 8}>合计</td>
               <td className="num">{selectedStats.billableHours.toFixed(1)}</td>
               {receiptTemplate === 'detail' && <td />}
               <td className="num">¥{formatYuan(selectedStats.amount)}</td>
               {receiptTemplate === 'detail' && (
-                <>
-                  <td />
-                  <td />
-                </>
+	                <>
+	                  <td />
+	                </>
               )}
             </tr>
           </tfoot>

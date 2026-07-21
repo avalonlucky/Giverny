@@ -9037,6 +9037,54 @@ button.file-chip:focus-visible {
   gap: 10px;
 }
 
+.report-range-export,
+.report-export-history {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.report-range-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.report-range-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.report-range-fields input {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.report-range-export p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.report-export-history .report-history-header span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.report-export-row {
+  grid-template-columns: minmax(160px, 1fr) auto minmax(150px, auto) auto;
+}
+
 .report-bar-actions .share-box {
   flex: 1;
   min-width: 220px;
@@ -9126,7 +9174,7 @@ button.file-chip:focus-visible {
 }
 
 .receipt-table-expanded {
-  min-width: 980px;
+  min-width: 1320px;
 }
 
 .receipt-table-expanded th,
@@ -21053,29 +21101,9 @@ textarea:focus-visible {
   vertical-align: top;
 }
 
-/* 全宽下任务需求列展示更多文字，超出省略，悬停看全文；交付件理解新增到最后一栏后，需求列稍收窄。 */
+/* 全宽下任务需求列展示更多文字，超出省略，悬停看全文。 */
 .receipt-template-detail .receipt-requirement-cell {
   min-width: 220px;
-}
-
-/* 交付件理解列：与任务需求同样的限高省略 + 悬停看全文。 */
-.receipt-delivery-cell {
-  vertical-align: top;
-}
-
-.receipt-delivery-cell span {
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: help;
-  color: var(--color-text-secondary);
-}
-
-.receipt-template-detail .receipt-delivery-cell {
-  min-width: 200px;
 }
 
 .receipt-requirement-cell span {
