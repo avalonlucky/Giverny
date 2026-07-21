@@ -12527,10 +12527,14 @@ function parseVoiceDateTime(text: string, referenceTime: string) {
   }
 
   const numberToken = '[零一二两三四五六七八九十\\d]+'
-  const timeMatch = compact.match(new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?(${numberToken})(?:点|时)(?:(${numberToken})分?)?`))
+  const timeMatch = compact.match(new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?(${numberToken})(?:点|时)(?:(半)|([一三])刻|(${numberToken})分?)?`))
   if (!timeMatch) return null
   let hour = voiceNumber(timeMatch[2])
-  const minute = timeMatch[3] ? voiceNumber(timeMatch[3]) : 0
+  const minute = timeMatch[3]
+    ? 30
+    : timeMatch[4]
+      ? timeMatch[4] === '三' ? 45 : 15
+      : timeMatch[5] ? voiceNumber(timeMatch[5]) : 0
   if (hour === null || minute === null || minute < 0 || minute > 59) return null
   const period = timeMatch[1] || ''
   if (/下午|傍晚|晚上/.test(period) && hour < 12) hour += 12
@@ -12548,7 +12552,7 @@ function parseVoiceTimeRange(text: string, referenceTime: string) {
   const compact = text.replace(/\s+/g, '')
   const datePrefix = compact.match(new RegExp(`${VOICE_ABSOLUTE_DATE_PATTERN}|后天|明天|明日|今天|今日`))?.[0] || ''
   const numberToken = '[零一二两三四五六七八九十\\d]+'
-  const timePattern = new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?${numberToken}(?:点|时)(?:${numberToken}分?)?`, 'g')
+  const timePattern = new RegExp(`(凌晨|早上|上午|中午|下午|傍晚|晚上)?${numberToken}(?:点|时)(?:半|[一三]刻|${numberToken}分?)?`, 'g')
   const matches = Array.from(compact.matchAll(timePattern))
   for (let index = 0; index < matches.length - 1; index += 1) {
     const current = matches[index]

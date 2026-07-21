@@ -601,6 +601,25 @@ async function runVoiceScheduleCheck(cookie) {
   ) {
     throw new Error(`Voice schedule Chinese month parsing failed: ${chineseMonthResponse.status} ${JSON.stringify(chineseMonthPayload)}`)
   }
+  const halfHourResponse = await fetch('http://127.0.0.1:8798/api/ai/voice-schedule', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      transcript: '6月11号下午2点半工时20分钟',
+      referenceTime: '2026-07-21T15:48',
+      context: '新建任务的预计排期',
+    }),
+  })
+  const halfHourPayload = await halfHourResponse.json().catch(() => ({}))
+  if (
+    !halfHourResponse.ok
+    || halfHourPayload.startAt !== '2026-06-11T14:30'
+    || halfHourPayload.durationMinutes !== 20
+    || halfHourPayload.endAt !== '2026-06-11T14:50'
+    || halfHourPayload.derivedField !== 'end'
+  ) {
+    throw new Error(`Voice schedule half-hour parsing failed: ${halfHourResponse.status} ${JSON.stringify(halfHourPayload)}`)
+  }
   process.stdout.write('Voice schedule transcription parsing, spoken time ranges, and two-of-three derivation checks passed.\n')
 }
 
