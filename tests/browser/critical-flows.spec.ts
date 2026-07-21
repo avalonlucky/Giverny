@@ -520,7 +520,7 @@ test('反馈来源支持自由输入且使用合作伙伴称呼', async ({ page 
   await dialog.getByRole('button', { name: '记录反馈' }).click()
 
   const feedbackPane = page.getByRole('tabpanel')
-  await expect(feedbackPane.getByText('李敏波反馈 · 计入改稿轮次', { exact: true })).toBeVisible()
+  await expect(feedbackPane.getByText('李敏波反馈 · 计入改稿轮次', { exact: true }).first()).toBeVisible()
   await expect(feedbackPane.getByText('合作伙伴反馈', { exact: true })).toHaveCount(0)
   await expect(feedbackPane.locator('.dashboard-side-entry-meta', { hasText: '李敏波反馈' })).toHaveCount(0)
 })

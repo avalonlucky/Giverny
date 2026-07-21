@@ -25110,6 +25110,18 @@ button.topbar-create-button kbd {
   max-height: min(760px, calc(100vh - 32px));
 }
 
+.task-modal.model-provider-modal > .model-provider-modal-head,
+.task-modal.model-provider-modal > .model-provider-modal-actions {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+
+.task-modal.model-provider-modal > .model-provider-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .model-provider-modal-head {
   padding: 24px 26px 18px;
 }
