@@ -457,6 +457,27 @@ test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ pag
   await imageDialog.getByRole('button', { name: '关闭' }).click()
 })
 
+test('验收面板任意位置可直接粘贴图片到验收附件', async ({ page }) => {
+  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.getByRole('button', { name: /记录进展/ }).last().click()
+  await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
+  const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
+  const note = acceptanceDialog.getByRole('textbox', { name: '验收备注' })
+  await note.focus()
+
+  await note.evaluate((target) => {
+    const clipboard = new DataTransfer()
+    clipboard.items.add(new File([
+      Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (char) => char.charCodeAt(0)),
+    ], '验收面板直接粘贴.png', { type: 'image/png' }))
+    target.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard }))
+  })
+
+  await expect(acceptanceDialog.locator('.progress-attachment-desktop-item')).toHaveCount(1)
+  await expect(acceptanceDialog.getByText(/粘贴截图_/).first()).toBeVisible()
+  await expect(note).toHaveValue('')
+})
+
 test('多张高分辨率验收图后台压缩时备注输入保持响应', async ({ page }) => {
   await page.getByText('公司产品封套延展', { exact: true }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()

@@ -11960,6 +11960,7 @@ function TaskProgressModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const replacementInputRef = useRef<HTMLInputElement | null>(null)
   const existingReplacementInputRef = useRef<HTMLInputElement | null>(null)
+  const pasteImageFilesRef = useRef<(files: File[]) => void>(() => undefined)
   const [replacementAttachmentId, setReplacementAttachmentId] = useState('')
   const [replacementExistingFileId, setReplacementExistingFileId] = useState<number | null>(null)
   const isWaitingMode = mode === 'waiting'
@@ -12504,6 +12505,24 @@ function TaskProgressModal({
       fileInputRef.current.value = ''
     }
   }
+
+  pasteImageFilesRef.current = (pastedImages) => addPendingFiles(pastedImages, 'paste')
+
+  useEffect(() => {
+    const routeModalImagePaste = (event: ClipboardEvent) => {
+      if (event.defaultPrevented || !event.clipboardData) return
+      const pastedImages = Array.from(event.clipboardData.items)
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file))
+      if (pastedImages.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      pasteImageFilesRef.current(pastedImages)
+    }
+    window.addEventListener('paste', routeModalImagePaste, true)
+    return () => window.removeEventListener('paste', routeModalImagePaste, true)
+  }, [])
 
   const replacePendingAttachment = (fileList: FileList | null) => {
     const file = fileList?.[0]
