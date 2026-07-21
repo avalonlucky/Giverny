@@ -17701,6 +17701,7 @@ function ReportsView({
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
+  const [activeRangePickerId, setActiveRangePickerId] = useState<string | null>(null)
   type SettlementExportRecord = {
     id: string
     label: string
@@ -17965,14 +17966,14 @@ function ReportsView({
         { header: '序号', key: 'sequence', width: 8 },
         { header: '设计类型', key: 'type', width: 18 },
         { header: '任务', key: 'title', width: 34 },
+        { header: '任务需求', key: 'requirement', width: 46 },
         { header: '预计开始日期', key: 'estimatedStartDate', width: 16 },
         { header: '实际完成日期', key: 'actualCompletionDate', width: 16 },
-        { header: '预估工时', key: 'estimatedHours', width: 12 },
-        { header: '实际工时', key: 'actualHours', width: 12 },
         { header: '需求人', key: 'requester', width: 14 },
         { header: '对接人', key: 'contact', width: 14 },
-        { header: '任务需求', key: 'requirement', width: 46 },
         { header: '状态', key: 'status', width: 12 },
+        { header: '预估工时', key: 'estimatedHours', width: 12 },
+        { header: '实际工时', key: 'actualHours', width: 12 },
         { header: '验收人/确认', key: 'reviewer', width: 14 },
         { header: '验收备注/进展', key: 'progress', width: 56 },
       ]
@@ -17981,14 +17982,14 @@ function ReportsView({
           sequence: row.sequence,
           type: row.task.type,
           title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
+          requirement: row.task.requirement || '',
           estimatedStartDate: row.estimatedStartDate,
           actualCompletionDate: row.actualCompletionDate,
-          estimatedHours: row.estimatedHours,
-          actualHours: row.actualHours,
           requester: row.task.requester || row.task.contact || '',
           contact: row.task.contact || row.task.requester || '',
-          requirement: row.task.requirement || '',
           status: row.task.status,
+          estimatedHours: row.estimatedHours,
+          actualHours: row.actualHours,
           reviewer: row.task.reviewer || row.task.requester || '',
           progress: row.progressText,
         })
@@ -17998,14 +17999,14 @@ function ReportsView({
           sequence: String(targetRows.length + 1).padStart(2, '0'),
           type: '导入',
           title: '月初导入工时（线下记录补录）',
+          requirement: '',
           estimatedStartDate: '—',
           actualCompletionDate: '—',
-          estimatedHours: '',
-          actualHours: importedMonthlyHours,
           requester: '',
           contact: '',
-          requirement: '',
           status: '导入',
+          estimatedHours: '',
+          actualHours: importedMonthlyHours,
           reviewer: '',
           progress: '线下记录补录',
         })
@@ -18119,15 +18120,25 @@ function ReportsView({
 
         <div className="report-range-export">
           <div className="report-range-fields">
-            <label>
-              <span>自定义导出</span>
-              <input type="date" value={customExportStart} onChange={(event) => setCustomExportStart(event.target.value)} />
-            </label>
-            <label>
-              <span>至</span>
-              <input type="date" value={customExportEnd} onChange={(event) => setCustomExportEnd(event.target.value)} />
-            </label>
-            <button className="ghost-button compact-button" type="button" onClick={handleExportCustomRange}>
+            <PlanDateTimeField
+              label="自定义导出"
+              value={customExportStart}
+              onChange={setCustomExportStart}
+              includeTime={false}
+              pickerId="report-range-start"
+              activePickerId={activeRangePickerId}
+              onActivePickerChange={setActiveRangePickerId}
+            />
+            <PlanDateTimeField
+              label="至"
+              value={customExportEnd}
+              onChange={setCustomExportEnd}
+              includeTime={false}
+              pickerId="report-range-end"
+              activePickerId={activeRangePickerId}
+              onActivePickerChange={setActiveRangePickerId}
+            />
+            <button className="report-range-export-button" type="button" onClick={handleExportCustomRange}>
               <Download size={16} />
               导出范围 Excel
             </button>
@@ -18266,11 +18277,11 @@ function ReportsView({
                 <th>序号</th>
                 <th>设计类型</th>
                 <th>任务</th>
+                <th>任务需求</th>
                 <th>预计开始日期</th>
                 <th>实际完成日期</th>
                 <th>需求人</th>
                 <th>对接人</th>
-                <th>任务需求</th>
                 <th>状态</th>
                 <th className="num">预估工时</th>
                 <th className="num">实际工时</th>
@@ -18283,6 +18294,7 @@ function ReportsView({
                 <th>序号</th>
                 <th>设计类型</th>
                 <th>任务</th>
+                <th>任务需求</th>
                 <th>预计开始</th>
                 <th>实际完成</th>
                 <th>需求人</th>
@@ -18300,11 +18312,11 @@ function ReportsView({
                   <td>{row.sequence}</td>
                   <td>{row.task.type}</td>
                   <td className="receipt-task-name"><b>{row.task.title}</b>{isSupplementalTask(row.task) && <span>补录</span>}</td>
+                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
                   <td>{row.estimatedStartDate}</td>
                   <td>{row.actualCompletionDate}</td>
                   <td>{row.task.requester || row.task.contact || '—'}</td>
                   <td>{row.task.contact || row.task.requester || '—'}</td>
-                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
                   <td>{row.task.status}</td>
                   <td className="num">{row.estimatedHours.toFixed(1)}h</td>
                   <td className="num">{row.actualHours.toFixed(1)}h</td>
@@ -18317,6 +18329,7 @@ function ReportsView({
                   <td>{row.sequence}</td>
                   <td>{row.task.type}</td>
                   <td className="receipt-task-name">{row.task.title}{isSupplementalTask(row.task) ? '（补录）' : ''}</td>
+                  <td className="receipt-requirement-cell"><span title={row.task.requirement || ''}>{row.task.requirement || '—'}</span></td>
                   <td>{row.estimatedStartDate}</td>
                   <td>{row.actualCompletionDate}</td>
                   <td>{row.task.requester || row.task.contact || '—'}</td>
@@ -18344,13 +18357,13 @@ function ReportsView({
                   <td className="num">¥{hourlyRate}</td>
                   <td className="num">{formatYuan(selectedImportedHours * hourlyRate)}</td>
                   <td>—</td>
-                  <td>—</td>
                 </tr>
               ) : (
 	                <tr>
 	                  <td>{String(billableTasks.length + 1).padStart(2, '0')}</td>
 	                  <td>导入</td>
 	                  <td className="receipt-task-name">月初导入工时（线下记录补录）</td>
+	                  <td>—</td>
 	                  <td>—</td>
 	                  <td>—</td>
 	                  <td>—</td>
@@ -18363,7 +18376,7 @@ function ReportsView({
             )}
             {billableTasks.length === 0 && selectedImportedHours === 0 && freeTasks.length === 0 && (
               <tr>
-	                <td colSpan={receiptTemplate === 'detail' ? 14 : 10} className="receipt-empty">
+	                <td colSpan={receiptTemplate === 'detail' ? 14 : 11} className="receipt-empty">
                   本月暂无任务
                 </td>
               </tr>
@@ -18371,7 +18384,7 @@ function ReportsView({
           </tbody>
           <tfoot>
             <tr>
-	              <td colSpan={receiptTemplate === 'detail' ? 10 : 8}>合计</td>
+	              <td colSpan={receiptTemplate === 'detail' ? 10 : 9}>合计</td>
               <td className="num">{selectedStats.billableHours.toFixed(1)}</td>
               {receiptTemplate === 'detail' && <td />}
               <td className="num">¥{formatYuan(selectedStats.amount)}</td>

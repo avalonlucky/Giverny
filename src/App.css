@@ -9042,7 +9042,6 @@ button.file-chip:focus-visible {
   display: grid;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--color-border-soft);
 }
 
 .report-range-fields {
@@ -9052,28 +9051,76 @@ button.file-chip:focus-visible {
   gap: 10px;
 }
 
-.report-range-fields label {
-  display: grid;
+.report-range-export p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.report-range-fields .date-field {
+  width: 190px;
   gap: 5px;
+}
+
+.report-range-fields .field-label-row {
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 700;
 }
 
-.report-range-fields input {
-  min-height: 36px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-  font: inherit;
+.report-range-fields .date-input-wrap {
+  display: flex;
+  align-items: stretch;
 }
 
-.report-range-export p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+.report-range-fields .date-input-wrap input[type='text'] {
+  height: 38px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.report-range-fields .date-input-wrap > button {
+  width: 34px;
+  height: 38px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.report-range-fields .date-input-wrap:focus-within input[type='text'],
+.report-range-fields .date-input-wrap:focus-within > button {
+  border-color: var(--color-primary);
+}
+
+.report-range-export-button {
+  min-height: 38px;
+  padding: 7px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.report-range-export-button:hover,
+.report-range-export-button:focus-visible {
+  color: var(--color-primary);
 }
 
 .report-export-history .report-history-header span {
