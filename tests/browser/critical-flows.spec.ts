@@ -59,6 +59,16 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
     '需求人', '对接人', '状态', '预估工时', '实际工时', '单价', '小计', '验收备注',
   ])
 
+  const initialRowCount = await receipt.locator('tbody tr').count()
+  const rangeInputs = page.locator('.report-range-export input')
+  expect(await rangeInputs.count()).toBe(2)
+  await page.getByRole('button', { name: '选择自定义导出' }).click()
+  const startDatePicker = page.getByRole('dialog', { name: '自定义导出选择器' })
+  await startDatePicker.getByRole('button', { name: '上个月' }).click()
+  await startDatePicker.getByRole('button', { name: '2026-06-01' }).click()
+  await expect(receipt.getByText('2026/06/01 至 2026/07/22', { exact: true })).toBeVisible()
+  expect(await receipt.locator('tbody tr').count()).toBeGreaterThan(initialRowCount)
+
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: '下载 Excel 回单' }).first().click()
   const download = await downloadPromise
@@ -78,8 +88,8 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
     '序号', '设计类型', '任务', '任务需求', '预计开始日期', '实际完成日期',
     '需求人', '对接人', '状态', '预估工时', '实际工时', '单价', '小计', '验收备注',
   ])
-  expect(sheet!.getColumn(4).width).toBe(78)
-  expect(sheet!.getColumn(14).width).toBe(78)
+  expect(sheet!.getColumn(4).width).toBe(96)
+  expect(sheet!.getColumn(14).width).toBe(96)
   expect(sheet!.getCell('L12').formula).toBe('$K$9')
   expect(sheet!.getCell('M12').formula).toBe('K12*L12')
 })

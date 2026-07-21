@@ -3144,6 +3144,7 @@ function PlanDateTimeField({
   activePickerId,
   onActivePickerChange,
   afterInput,
+  commitValidInputOnChange = false,
 }: {
   label: string
   value: string
@@ -3158,6 +3159,7 @@ function PlanDateTimeField({
   activePickerId?: string | null
   onActivePickerChange?: (pickerId: string | null) => void
   afterInput?: ReactNode
+  commitValidInputOnChange?: boolean
 }) {
   const fieldRef = useRef<HTMLDivElement | null>(null)
   const inputWrapRef = useRef<HTMLDivElement | null>(null)
@@ -3352,7 +3354,16 @@ function PlanDateTimeField({
           value={draft}
           placeholder={includeTime ? 'YYYY/MM/DD HH:mm' : 'YYYY/MM/DD'}
           readOnly={readOnly}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const nextDraft = event.target.value
+            setDraft(nextDraft)
+            if (commitValidInputOnChange) {
+              const normalized = normalizeDateTimeInput(nextDraft)
+              if (normalized) {
+                onChange(normalized)
+              }
+            }
+          }}
           onBlur={commitDraft}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -3448,6 +3459,7 @@ function PlanDateTimeField({
                       <button
                         type="button"
                         key={day.value}
+                        aria-label={day.value}
                         className={`${day.inMonth ? '' : 'muted'} ${day.value === selectedDate ? 'active' : ''}`}
                         onClick={() => applyDatePart(day.value)}
                       >
@@ -17707,6 +17719,7 @@ function ReportsView({
   const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
+  const [isCustomRangePreviewActive, setIsCustomRangePreviewActive] = useState(false)
   const [activeRangePickerId, setActiveRangePickerId] = useState<string | null>(null)
   type SettlementExportRecord = {
     id: string
@@ -17824,6 +17837,43 @@ function ReportsView({
         progressText: getTaskProgressText(task, updatesMap),
       }
     })
+  const buildRangeReceiptRows = (
+    rangeStart: string,
+    rangeEnd: string,
+    rate = hourlyRate,
+  ): SettlementTaskRow[] => {
+    const rangeUpdatesMap = new Map<number, TaskUpdate>()
+    allUpdates
+      .filter((update) => {
+        const task = allTasks.find((item) => item.id === update.taskId)
+        return !task?.voidedAt && isDateValueInRange(update.date, rangeStart, rangeEnd)
+      })
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .forEach((update) => {
+        if (!rangeUpdatesMap.has(update.taskId)) {
+          rangeUpdatesMap.set(update.taskId, update)
+        }
+      })
+
+    return sortTasksByLatestActivity(allTasks.filter((task) => (
+      !task.voidedAt
+      && isTaskBillable(task)
+      && taskBillableHoursInDateRange(task, rangeStart, rangeEnd) > 0
+    ))).map((task, index) => {
+      const actualHours = taskBillableHoursInDateRange(task, rangeStart, rangeEnd)
+      return {
+        task,
+        sequence: String(index + 1).padStart(2, '0'),
+        estimatedStartDate: formatReceiptDate(task.date),
+        actualCompletionDate: formatReceiptDate(rangeEnd),
+        estimatedHours: Number(task.estimatedHours) || 0,
+        actualHours,
+        amount: roundCents(actualHours * rate),
+        progressText: getTaskProgressText(task, rangeUpdatesMap),
+      }
+    })
+  }
   const receiptRows = buildMonthReceiptRows(selectedMonth, selectedTasks)
   const selectedStats = selectedMonth === currentMonth.value
     ? stats
@@ -17837,8 +17887,22 @@ function ReportsView({
         pending: selectedTasks.filter((task) => task.status === '待验收').length,
       }
   const visibleReports = isHistoryExpanded ? reports : reports.slice(0, Math.max(3, Math.min(reports.length, 5)))
-  const receiptNo = `AK-${selectedMonth.replace('-', '')}-${String(receiptRows.length + 1).padStart(3, '0')}`
-  const previewReceiptRows: ReceiptExcelRow[] = receiptRows.map((row) => ({
+  const hasValidCustomPreviewRange = isCustomRangePreviewActive
+    && /^\d{4}-\d{2}-\d{2}$/.test(customExportStart)
+    && /^\d{4}-\d{2}-\d{2}$/.test(customExportEnd)
+    && customExportStart <= customExportEnd
+  const activeReceiptRows = hasValidCustomPreviewRange
+    ? buildRangeReceiptRows(customExportStart, customExportEnd)
+    : receiptRows
+  const activeReceiptHourlyRate = hasValidCustomPreviewRange ? hourlyRate : selectedReceiptHourlyRate
+  const activeReceiptLabel = hasValidCustomPreviewRange
+    ? `${formatReceiptDate(customExportStart)} 至 ${formatReceiptDate(customExportEnd)}`
+    : selectedMonthLabel
+  const activeReceiptKey = hasValidCustomPreviewRange
+    ? `${customExportStart}-${customExportEnd}`
+    : selectedMonth
+  const receiptNo = `AK-${activeReceiptKey.replaceAll('-', '')}-${String(activeReceiptRows.length + 1).padStart(3, '0')}`
+  const previewReceiptRows: ReceiptExcelRow[] = activeReceiptRows.map((row) => ({
     sequence: row.sequence,
     type: row.task.type,
     title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
@@ -17850,11 +17914,11 @@ function ReportsView({
     status: row.task.status,
     estimatedHours: row.estimatedHours,
     actualHours: row.actualHours,
-    unitPrice: selectedReceiptHourlyRate,
-    amount: roundCents(row.actualHours * selectedReceiptHourlyRate),
+    unitPrice: activeReceiptHourlyRate,
+    amount: roundCents(row.actualHours * activeReceiptHourlyRate),
     acceptanceNote: row.task.acceptanceNote?.trim() || row.progressText || '—',
   }))
-  if (selectedImportedHours > 0) {
+  if (!hasValidCustomPreviewRange && selectedImportedHours > 0) {
     previewReceiptRows.push({
       sequence: String(previewReceiptRows.length + 1).padStart(2, '0'),
       type: '导入',
@@ -17872,18 +17936,24 @@ function ReportsView({
       acceptanceNote: '线下记录补录',
     })
   }
+  const previewTotalHours = hasValidCustomPreviewRange
+    ? previewReceiptRows.reduce((sum, row) => sum + row.actualHours, 0)
+    : selectedStats.billableHours
+  const previewTotalAmount = hasValidCustomPreviewRange
+    ? roundCents(previewReceiptRows.reduce((sum, row) => sum + row.amount, 0))
+    : selectedStats.amount
   const previewReceiptOptions = {
-    fileLabel: selectedMonthLabel.replace(/\s/g, ''),
+    fileLabel: activeReceiptLabel.replace(/[\s/]/g, ''),
     title: pdfTitle,
     receiptNo,
-    issuedAt: selectedReport?.generatedAt || nowStamp(),
+    issuedAt: hasValidCustomPreviewRange ? nowStamp() : selectedReport?.generatedAt || nowStamp(),
     companyName: serviceCompanyName,
     serviceName: '平面设计兼职',
-    settlementLabel: selectedMonthLabel,
-    hourlyRate: selectedReceiptHourlyRate,
+    settlementLabel: activeReceiptLabel,
+    hourlyRate: activeReceiptHourlyRate,
     rows: previewReceiptRows,
-    totalHours: selectedStats.billableHours,
-    totalAmount: selectedStats.amount,
+    totalHours: previewTotalHours,
+    totalAmount: previewTotalAmount,
   }
   useEffect(() => {
     window.localStorage.setItem(settlementExportRecordsKey, JSON.stringify(exportRecords.slice(0, 40)))
@@ -17951,20 +18021,7 @@ function ReportsView({
           }
         })
       const targetRows = isRangeExport
-        ? sortTasksByLatestActivity(allTasks.filter((task) => !task.voidedAt && isTaskBillable(task) && taskBillableHoursInDateRange(task, rangeStart, rangeEnd) > 0))
-            .map((task, index) => {
-              const actualHours = taskBillableHoursInDateRange(task, rangeStart, rangeEnd)
-              return {
-                task,
-                sequence: String(index + 1).padStart(2, '0'),
-                estimatedStartDate: formatReceiptDate(task.date),
-                actualCompletionDate: formatReceiptDate(rangeEnd),
-                estimatedHours: Number(task.estimatedHours) || 0,
-                actualHours,
-                amount: roundCents(actualHours * hourlyRate),
-                progressText: getTaskProgressText(task, updatesMap),
-              } satisfies SettlementTaskRow
-            })
+        ? buildRangeReceiptRows(rangeStart, rangeEnd)
         : month === selectedMonth
           ? receiptRows
           : buildMonthReceiptRows(
@@ -18127,20 +18184,28 @@ function ReportsView({
             <PlanDateTimeField
               label="自定义导出"
               value={customExportStart}
-              onChange={setCustomExportStart}
+              onChange={(value) => {
+                setCustomExportStart(value)
+                setIsCustomRangePreviewActive(true)
+              }}
               includeTime={false}
               pickerId="report-range-start"
               activePickerId={activeRangePickerId}
               onActivePickerChange={setActiveRangePickerId}
+              commitValidInputOnChange
             />
             <PlanDateTimeField
               label="至"
               value={customExportEnd}
-              onChange={setCustomExportEnd}
+              onChange={(value) => {
+                setCustomExportEnd(value)
+                setIsCustomRangePreviewActive(true)
+              }}
               includeTime={false}
               pickerId="report-range-end"
               activePickerId={activeRangePickerId}
               onActivePickerChange={setActiveRangePickerId}
+              commitValidInputOnChange
             />
             <button className="report-range-export-button" type="button" onClick={handleExportCustomRange}>
               <Download size={16} />

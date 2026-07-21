@@ -22773,24 +22773,24 @@ button.topbar-create-button kbd {
 
 .settlement-receipt-table {
   width: 100%;
-  min-width: 1760px;
+  min-width: 2200px;
   border-collapse: collapse;
   table-layout: fixed;
   color: var(--color-receipt-text);
   font-size: 11px;
 }
 
-.settlement-receipt-table .col-sequence { width: 2.02%; }
-.settlement-receipt-table .col-type { width: 5.37%; }
-.settlement-receipt-table .col-title { width: 8.72%; }
-.settlement-receipt-table .col-requirement { width: 26.18%; }
-.settlement-receipt-table .col-date { width: 4.36%; }
+.settlement-receipt-table .col-sequence { width: 1.8%; }
+.settlement-receipt-table .col-type { width: 4.79%; }
+.settlement-receipt-table .col-title { width: 7.78%; }
+.settlement-receipt-table .col-requirement { width: 28.74%; }
+.settlement-receipt-table .col-date { width: 3.89%; }
 .settlement-receipt-table .col-person,
-.settlement-receipt-table .col-status { width: 3.02%; }
-.settlement-receipt-table .col-hours { width: 3.36%; }
-.settlement-receipt-table .col-price { width: 3.02%; }
-.settlement-receipt-table .col-amount { width: 4.03%; }
-.settlement-receipt-table .col-note { width: 26.18%; }
+.settlement-receipt-table .col-status { width: 2.69%; }
+.settlement-receipt-table .col-hours { width: 2.99%; }
+.settlement-receipt-table .col-price { width: 2.69%; }
+.settlement-receipt-table .col-amount { width: 3.59%; }
+.settlement-receipt-table .col-note { width: 28.74%; }
 
 .settlement-receipt-table th,
 .settlement-receipt-table td {

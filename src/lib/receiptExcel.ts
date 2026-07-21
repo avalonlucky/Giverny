@@ -60,8 +60,8 @@ const cleanText = (value: string | undefined | null, fallback = '—') => {
 }
 
 const estimateRowHeight = (requirement: string, note: string) => {
-  const requirementLines = requirement.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 52)), 0)
-  const noteLines = note.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 54)), 0)
+  const requirementLines = requirement.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 64)), 0)
+  const noteLines = note.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 64)), 0)
   return Math.max(30, Math.min(117.75, Math.max(requirementLines, noteLines) * 12 + 12))
 }
 
@@ -98,7 +98,7 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
     { key: 'sequence', width: 6 },
     { key: 'type', width: 16 },
     { key: 'title', width: 26 },
-    { key: 'requirement', width: 78 },
+    { key: 'requirement', width: 96 },
     { key: 'estimatedStartDate', width: 13 },
     { key: 'actualCompletionDate', width: 13 },
     { key: 'requester', width: 9 },
@@ -108,7 +108,7 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
     { key: 'actualHours', width: 10 },
     { key: 'unitPrice', width: 9 },
     { key: 'amount', width: 12 },
-    { key: 'acceptanceNote', width: 78 },
+    { key: 'acceptanceNote', width: 96 },
   ]
 
   sheet.getRow(1).height = 21.75
