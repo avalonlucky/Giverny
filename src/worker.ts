@@ -3992,7 +3992,7 @@ function agentOpenApiSpec(request: Request) {
           operationId: 'search_tasks',
           tags: ['Tasks'],
           summary: 'Search tasks',
-          description: 'Search active Giverny tasks by title, requirement or design type.',
+          description: 'Search active Giverny tasks by title, requirement or design type. Results include explicit waiting records and current blockers.',
           security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'query', in: 'query', required: true, schema: { type: 'string' } },
@@ -4023,7 +4023,7 @@ function agentOpenApiSpec(request: Request) {
           operationId: 'get_task_detail',
           tags: ['Tasks'],
           summary: 'Get task detail',
-          description: 'Return one task with progress updates, attachments and attachment analysis summaries.',
+          description: 'Return one task with progress updates, explicit waiting records/current blockers, attachments and attachment analysis summaries.',
           security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'taskId', in: 'query', required: false, schema: { type: 'integer' } },
@@ -4306,7 +4306,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const keywordRows = query && !statusIntent
     ? month
       ? await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
@@ -4314,7 +4314,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
            LIMIT ?`,
         ).bind(...monthBindings, like, like, like, limit).all<DbTask>()
       : await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL
              AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
@@ -4325,14 +4325,14 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const scopeRows = statusIntent || !query
     ? month
       ? await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
            WHERE deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(...monthBindings, limit).all<DbTask>()
       : await env.DB.prepare(
-          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
+          `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
           WHERE deleted_at IS NULL AND voided_at IS NULL
            ORDER BY start_date DESC, created_at DESC
@@ -4391,9 +4391,35 @@ async function agentSearchTasksTool(env: Env, request: Request) {
       settlementMonth: task.settlement_month ?? '',
       billable: isBillableDbTask(task),
       overdue: isOverdue(task),
+      waitingRecords: agentWaitingRecords(task),
       semanticScore: semanticScoreById.get(String(task.id)) ?? null,
     })),
     generatedAt: nowIso(),
+  })
+}
+
+function agentWaitingRecords(task: DbTask) {
+  const workStarts = parseTimeEntries(task.time_entries_json)
+    .filter((entry) => !entry.isClientFeedback)
+    .map((entry) => entryMinuteStamp(entry.date || String(task.start_date || '').slice(0, 10), entry.start))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  const nowBeijingMinute = Math.floor(Date.now() / 60000) + 8 * 60
+  return parseWaitingEntries(task.waiting_entries_json).map((entry) => {
+    const startDate = entry.date || String(task.start_date || '').slice(0, 10)
+    const startMinute = entryMinuteStamp(startDate, entry.start)
+    const nextWorkStart = workStarts.find((stamp) => stamp > startMinute)
+    const active = Number.isFinite(startMinute) && nextWorkStart === undefined && !['已验收', '终止', '不计费'].includes(task.status)
+    const endMinute = nextWorkStart ?? (active ? nowBeijingMinute : startMinute)
+    return {
+      id: entry.id,
+      reason: entry.reason || '',
+      note: entry.note || '',
+      startAt: `${startDate}T${entry.start}`,
+      endAt: nextWorkStart === undefined ? null : `${dateFromMinuteStamp(nextWorkStart)}T${pad2(nextWorkStart % 1440 / 60 | 0)}:${pad2(nextWorkStart % 60)}`,
+      active,
+      elapsedMinutes: Number.isFinite(startMinute) ? Math.max(0, endMinute - startMinute) : 0,
+    }
   })
 }
 
@@ -4521,6 +4547,7 @@ async function agentTaskDetailTool(env: Env, request: Request) {
   return agentOk({
     tool: 'get_task_detail',
     task: toTask(task),
+    waitingRecords: agentWaitingRecords(task),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
     files: (fileRows.results ?? []).map(toAgentResultAttachment),
     attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),

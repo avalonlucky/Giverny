@@ -112,6 +112,16 @@ async function runMcpChecks() {
   if (productHelpResult.isError || !Array.isArray(productMatches) || !productMatches.some((item) => String(item.answer || '').includes('Command + Shift + M'))) {
     throw new Error('MCP product help did not return the authoritative shortcut')
   }
+  const taskDetailResult = await request(7, 'tools/call', { name: 'get_task_detail', arguments: { taskId: 1 } })
+  const waitingRecords = taskDetailResult.structuredContent?.waitingRecords
+  if (taskDetailResult.isError || !Array.isArray(waitingRecords) || waitingRecords[0]?.note !== '等待刘总的建议' || waitingRecords[0]?.active !== true || waitingRecords[0]?.elapsedMinutes <= 0) {
+    throw new Error(`MCP task detail did not expose active waiting records: ${JSON.stringify(taskDetailResult.structuredContent)}`)
+  }
+  const taskSearchResult = await request(8, 'tools/call', { name: 'search_tasks', arguments: { query: '公司产品封套修改' } })
+  const searchedWaiting = taskSearchResult.structuredContent?.results?.[0]?.waitingRecords
+  if (taskSearchResult.isError || !Array.isArray(searchedWaiting) || searchedWaiting[0]?.note !== '等待刘总的建议' || searchedWaiting[0]?.active !== true) {
+    throw new Error(`MCP task search did not expose active waiting records: ${JSON.stringify(taskSearchResult.structuredContent)}`)
+  }
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }
 

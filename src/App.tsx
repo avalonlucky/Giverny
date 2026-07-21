@@ -2374,17 +2374,30 @@ function nextWorkStartForWaiting(task: Task, waitingEntry: WaitingEntry) {
   return nextStart ?? Number.NaN
 }
 
-function minutesForWaitingEntry(task: Task, entry: WaitingEntry) {
+function minutesForWaitingEntry(task: Task, entry: WaitingEntry, ongoingUntilStamp?: number) {
   const waitingStart = timeEntryStartStamp(entry)
   const nextStart = nextWorkStartForWaiting(task, entry)
-  if (!Number.isFinite(waitingStart) || !Number.isFinite(nextStart) || nextStart <= waitingStart) {
+  const waitingEnd = Number.isFinite(nextStart) ? nextStart : ongoingUntilStamp
+  if (!Number.isFinite(waitingStart) || !Number.isFinite(waitingEnd) || Number(waitingEnd) <= waitingStart) {
     return 0
   }
-  return nextStart - waitingStart
+  return Number(waitingEnd) - waitingStart
 }
 
-function sumWaitingEntries(task: Task) {
-  return (task.waitingEntries ?? []).reduce((sum, entry) => sum + minutesForWaitingEntry(task, entry), 0)
+function sumWaitingEntries(task: Task, ongoingUntilStamp?: number) {
+  return (task.waitingEntries ?? []).reduce((sum, entry) => sum + minutesForWaitingEntry(task, entry, ongoingUntilStamp), 0)
+}
+
+function isWaitingEntryActive(task: Task, entry: WaitingEntry) {
+  return !Number.isFinite(nextWorkStartForWaiting(task, entry))
+}
+
+function formatWaitingElapsed(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  const days = Math.floor(safeMinutes / 1440)
+  const hours = Math.floor((safeMinutes % 1440) / 60)
+  const restMinutes = safeMinutes % 60
+  return [days > 0 ? `${days} 天` : '', hours > 0 ? `${hours} 小时` : '', `${restMinutes} 分钟`].filter(Boolean).join(' ')
 }
 
 function formatWaitingEntryDateTimeRange(task: Task, entry: WaitingEntry) {
@@ -10954,6 +10967,7 @@ function DashboardTaskSidebar({
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
   const [expandedEntryNotes, setExpandedEntryNotes] = useState<Record<string, boolean>>({})
+  const [waitingNowStamp, setWaitingNowStamp] = useState(() => Math.floor(Date.now() / 60000))
   const [progressUiState, setProgressUiState] = useState({
     taskId: 0,
     pane: 'progress' as ProgressRecordMode,
@@ -10979,6 +10993,11 @@ function DashboardTaskSidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, activeTab, evidenceSignature])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setWaitingNowStamp(Math.floor(Date.now() / 60000)), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   if (!task) {
     return (
       <aside className="dashboard-task-sidebar">
@@ -10996,7 +11015,7 @@ function DashboardTaskSidebar({
   const billableMinutes = progressBillableEntries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
   const billableHours = billableMinutes > 0 ? billableMinutes / 60 : (isTaskBillable(task) ? task.actualHours : 0)
   const billableAmount = roundCents(billableHours * hourlyRate)
-  const waitingMinutes = sumWaitingEntries(task)
+  const waitingMinutes = sumWaitingEntries(task, waitingNowStamp)
   const canAcceptTask = task.status === '待验收'
   const canRecordProgress = canRecordNewProgress(task)
   const canAdjustProgress = canRecordProgress && isTaskStarted(task)
@@ -11409,7 +11428,8 @@ function DashboardTaskSidebar({
                 <>
                   <div className="dashboard-side-waiting-list">
                     {shownWaitingEntries.map((entry) => {
-                      const minutes = minutesForWaitingEntry(task, entry)
+                      const active = isWaitingEntryActive(task, entry)
+                      const minutes = minutesForWaitingEntry(task, entry, waitingNowStamp)
                       return (
                         <article className="dashboard-side-waiting-item" key={entry.id}>
                           {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
@@ -11418,7 +11438,7 @@ function DashboardTaskSidebar({
                           </div>}
                           <time>{formatWaitingEntryDateTimeRange(task, entry)}</time>
                           {renderEntryNote(`${task.id}:waiting:${entry.id}`, partnerFacingText(entry.note || entry.reason, '等待合作伙伴确认'))}
-                          <em>{minutes > 0 ? `等待 ${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)}h` : '等待中'} · 不计结算</em>
+                          <em>{active ? `已等待 ${formatWaitingElapsed(minutes)}` : `等待 ${formatWaitingElapsed(minutes)}`} · 不计结算</em>
                         </article>
                       )
                     })}

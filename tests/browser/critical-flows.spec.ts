@@ -49,6 +49,14 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('进行中的等待记录展示实时已等待时长', async ({ page }) => {
+  await page.getByText('公司产品封套修改', { exact: true }).first().click()
+  const sidebar = page.locator('.dashboard-task-sidebar')
+  await sidebar.getByRole('tab', { name: '等待记录' }).click()
+  await expect(sidebar.getByText('等待刘总的建议', { exact: true })).toBeVisible()
+  await expect(sidebar.getByText(/已等待 \d+ 天 \d+ 小时 \d+ 分钟 · 不计结算/)).toBeVisible()
+})
+
 test('新建任务支持按分钟或小数小时填写预估工时并可关闭', async ({ page }) => {
   await page.getByRole('button', { name: /新建任务/ }).first().click()
   await expect(page.getByRole('heading', { name: '新建任务' })).toBeVisible()
