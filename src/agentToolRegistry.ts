@@ -33,6 +33,15 @@ export const agentReadToolRegistry = {
       title: z.string().optional(),
     }),
   },
+  get_requester_profile: {
+    title: '读取需求人画像',
+    description: '按需求人姓名读取当前工作区的全部历史任务，并确定性计算项目数、工时、验收率、准时率、工时偏差、改稿、等待和反馈特征。用户要求某人的用户画像、需求人画像或合作特征时必须调用。',
+    endpoint: 'requester-profile',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read'] },
+    inputSchema: z.object({
+      name: z.string().min(1).max(80),
+    }),
+  },
   search_attachments: {
     title: '搜索任务附件',
     description: '按任务语义、任务名和文件名搜索真实附件。用户要求查看、预览、打开或下载附件时必须优先调用。',

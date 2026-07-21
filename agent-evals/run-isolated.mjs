@@ -58,6 +58,17 @@ function stopChildren() {
   }
 }
 
+function mcpStructured(result) {
+  if (result?.structuredContent) return result.structuredContent
+  const text = Array.isArray(result?.content) ? result.content.find((item) => item.type === 'text')?.text : ''
+  if (!text) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
 async function runMcpChecks() {
   const endpoint = 'http://127.0.0.1:8798/mcp'
   const unauthorized = await fetch(endpoint, {
@@ -97,7 +108,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['get_giverny_context', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -122,7 +133,7 @@ async function runMcpChecks() {
     throw new Error(`MCP product help did not return the model setup workflow: ${JSON.stringify(modelHelpResult.structuredContent)}`)
   }
   const releaseHelpResult = await request(63, 'tools/call', { name: 'search_product_help', arguments: { query: '最近更新了哪些内容', limit: 3 } })
-  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.2'))) {
+  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.3'))) {
     throw new Error(`MCP product help did not return recent releases: ${JSON.stringify(releaseHelpResult.structuredContent)}`)
   }
   const brandHelpResult = await request(64, 'tools/call', { name: 'search_product_help', arguments: { query: '这个网站为什么叫吉维尼', limit: 3 } })
@@ -146,6 +157,12 @@ async function runMcpChecks() {
   const searchedWaiting = taskSearchResult.structuredContent?.results?.[0]?.waitingRecords
   if (taskSearchResult.isError || !Array.isArray(searchedWaiting) || searchedWaiting[0]?.note !== '等待刘总的建议' || searchedWaiting[0]?.active !== true) {
     throw new Error(`MCP task search did not expose active waiting records: ${JSON.stringify(taskSearchResult.structuredContent)}`)
+  }
+  const profileResult = await request(9, 'tools/call', { name: 'get_requester_profile', arguments: { name: '陈义君' } })
+  const profileStructured = mcpStructured(profileResult)
+  const profile = profileStructured?.profile
+  if (profileResult.isError || profile?.name !== '陈义君' || profile.projects !== 4 || Number(profile.hours) !== 13.6 || !Array.isArray(profile.traits)) {
+    throw new Error(`MCP requester profile did not return the deterministic profile: ${JSON.stringify(profileStructured || profileResult)}`)
   }
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }
@@ -1013,7 +1030,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const productQuestions = [
     { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
     { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
-    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.2', '动态重规划'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.3', '需求人画像'] },
     { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
   ]
   for (const [index, item] of productQuestions.entries()) {
@@ -1042,6 +1059,27 @@ async function runLocalCliBridgeCheck(cookie) {
       || responseText.includes('"commandId"')) {
       throw new Error(`Product knowledge question ${index + 1} was not grounded: ${responseText}`)
     }
+  }
+
+  const profileResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'deepseek-v4-pro',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '给我一下陈义君的用户画像' }],
+    }),
+  })
+  const profileText = await profileResponse.text()
+  if (!profileResponse.ok
+    || !profileText.includes('get_requester_profile')
+    || !profileText.includes('陈义君')
+    || !profileText.includes('4 个项目')
+    || !profileText.includes('13.6')
+    || profileText.includes('没有任何关于')
+    || profileText.includes('没有在当前工作区找到')) {
+    throw new Error(`Requester profile question was not grounded in the profile tool: ${profileText}`)
   }
 
   const blockerResponse = await fetch(`${base}/api/ai/chat`, {

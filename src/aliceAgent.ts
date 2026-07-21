@@ -86,6 +86,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 先理解用户整句话的真实目的，再决定工具；不得因为看到单个关键词就立即回答。
 - 先区分“查真实任务数据”与“问网站怎么用”。用户提到具体任务名、状态、进展、等待、延期、卡点或为何未交付时，必须优先查任务数据，不得调用产品快捷键帮助。
 - 用户询问 Giverny 的快捷键、入口、功能、设置、操作方法、版本更新、品牌名称或设计原因、模型路由或权限边界时，必须调用 search_product_help，以产品能力注册表为准。
+- 用户询问某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；画像指标必须来自后台聚合结果，不得用 search_tasks 代替。
 - 产品知识工具标记为“部分确认”或明确说资料未记录时，必须保留这个边界；可以说明已确认线索，但不得把推断改写成作者事实。
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
 - 用户询问某个任务“卡在哪里 / 为什么没交付”时，必须读取任务详情，优先核对 active 等待记录的 note、reason、startAt 和 elapsedMinutes，再给出具体结论。
@@ -122,6 +123,7 @@ const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: stri
   search_tasks: { running: '检索相关任务', completed: '任务检索已完成' },
   search_attachments: { running: '查找相关附件', completed: '附件检索已完成' },
   get_task_detail: { running: '读取任务详情', completed: '任务详情已返回' },
+  get_requester_profile: { running: '读取需求人画像', completed: '需求人画像已返回' },
   get_giverny_context: { running: '确认平台能力边界', completed: '能力范围已确认' },
   search_product_help: { running: '查询产品使用说明', completed: '产品说明已返回' },
   create_task_preview: { running: '整理新任务草稿', completed: '任务草稿已生成' },
@@ -539,6 +541,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: readTools.get_task_detail.description,
         inputSchema: readTools.get_task_detail.inputSchema,
         execute: (input) => this.callTool('task-detail', input, 'GET'),
+      }),
+      get_requester_profile: tool({
+        description: readTools.get_requester_profile.description,
+        inputSchema: readTools.get_requester_profile.inputSchema,
+        execute: (input) => this.callTool('requester-profile', input, 'GET'),
       }),
       search_attachments: tool({
         description: readTools.search_attachments.description,
@@ -985,6 +992,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
     const inferredIntent: AgentIntent = usedTools.has('query_month_finance')
       ? 'finance'
+      : usedTools.has('get_requester_profile')
+        ? 'person_profile'
       : usedTools.has('search_attachments')
         ? 'attachment'
         : [...usedTools].some((name) => name.endsWith('_preview'))

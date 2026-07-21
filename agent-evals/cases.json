@@ -84,6 +84,8 @@
     { "id": "product-help-06", "category": "product_help", "prompt": "我应该怎么设置大模型？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-07", "category": "product_help", "prompt": "这个网站为什么叫吉维尼？作者起这个名字有什么原因？", "expect": { "tools": ["search_product_help"] } },
 
+    { "id": "person-profile-01", "category": "person_profile", "prompt": "给我一下陈义君的用户画像", "expect": { "tools": ["get_requester_profile"] } },
+
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-03", "category": "disambiguation", "prompt": "把视频任务的进度改成80%", "expect": { "tools": ["update_task_status_preview"], "selectionAllowed": true, "selectionRequired": true } },

@@ -2468,9 +2468,9 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'search_tasks' | 'get_task_detail' | 'search_product_help' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'search_tasks' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
 type ChatAgentPlanResponse = {
-  intent?: 'finance' | 'task_data' | 'product_help' | 'knowledge' | 'general' | 'unknown'
+  intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
   confidence?: number
   question?: string
@@ -2483,6 +2483,9 @@ type ChatAgentToolResult = {
 }
 
 function chatPlanTrace(plan: ChatAgentPlanResponse | null, tools: ChatAgentToolName[]) {
+  if (plan?.intent === 'person_profile' || tools.includes('get_requester_profile')) {
+    return '制定计划：先读取需求人历史画像，再核对项目、工时、验收、等待和反馈特征。'
+  }
   if (plan?.intent === 'product_help' || tools.includes('search_product_help')) {
     return '制定计划：先核对官方产品资料，再依据文档组织回答。'
   }
@@ -2497,6 +2500,7 @@ function chatPlanTrace(plan: ChatAgentPlanResponse | null, tools: ChatAgentToolN
 
 function chatUnderstandingTrace(question: string, intent?: ChatAgentPlanResponse['intent']) {
   const subject = `“${question.slice(0, 40)}${question.length > 40 ? '…' : ''}”`
+  if (intent === 'person_profile') return `理解问题：用户在询问具体需求人的合作画像，需要从历史任务聚合。问题是 ${subject}`
   if (intent === 'product_help') return `理解问题：用户在询问 Giverny 的产品说明，需要以官方资料为准。问题是 ${subject}`
   if (intent === 'finance') return `理解问题：用户在询问工时或金额，需要使用真实结算数据。问题是 ${subject}`
   if (intent === 'task_data') return `理解问题：用户在询问具体工作情况，需要核对任务记录。问题是 ${subject}`
@@ -2504,6 +2508,7 @@ function chatUnderstandingTrace(question: string, intent?: ChatAgentPlanResponse
 }
 
 function chatVerificationTrace(results: ChatAgentToolResult[]) {
+  if (results.some((item) => item.name === 'get_requester_profile')) return '核对结论：画像指标来自确定性历史任务聚合，没有使用模型猜测。'
   if (results.some((item) => item.name === 'search_product_help')) return '核对结论：回答已与官方手册和版本记录交叉核对。'
   if (results.some((item) => item.name === 'query_month_finance')) return '核对结论：金额与工时来自确定性结算计算，没有使用模型估算。'
   if (results.some((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')) return '核对结论：状态、进展和等待原因均来自当前任务记录。'
@@ -2511,6 +2516,14 @@ function chatVerificationTrace(results: ChatAgentToolResult[]) {
 }
 
 function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
+  const profileResult = results.find((item) => item.name === 'get_requester_profile')?.result as {
+    profile?: { name?: string; projects?: number; hours?: number; acceptanceRate?: number; onTimeRate?: number }
+    found?: boolean
+  } | undefined
+  if (profileResult?.found && profileResult.profile?.name) {
+    const profile = profileResult.profile
+    return `提取数据：${profile.name} 共 ${Number(profile.projects || 0)} 个项目、${Number(profile.hours || 0)}h，验收通过率 ${Number(profile.acceptanceRate || 0)}%，准时交付率 ${Number(profile.onTimeRate || 0)}%。`
+  }
   const productResult = results.find((item) => item.name === 'search_product_help')?.result as {
     matches?: Array<{ summary?: string }>
   } | undefined
@@ -2551,8 +2564,9 @@ async function planChatAgentTurn(
 1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
 2. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
 3. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
-4. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
-5. none：不需要工具，交给普通聊天模型回答。
+4. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
+5. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
+6. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
@@ -2562,6 +2576,7 @@ async function planChatAgentTurn(
 - 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
+- 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
 - 只输出 JSON，不要回答正文。`
   return callSelectedModelJson<ChatAgentPlanResponse>(
@@ -2569,7 +2584,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"search_tasks"|"get_task_detail"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"search_tasks"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2587,9 +2602,7 @@ async function executeChatAgentTools(
   let usedFinanceFallback = false
 
   for (const tool of plannedTools) {
-    const name = ['query_month_finance', 'search_tasks', 'get_task_detail', 'search_product_help'].includes(String(tool.name))
-      ? tool.name as ChatAgentToolName
-      : 'none'
+    const name = normalizeChatToolName(tool.name)
     if (name === 'none') continue
     if (name === 'query_month_finance') {
       const rawMonths = Array.isArray(tool.args?.months) ? tool.args?.months : fallbackMonths
@@ -2610,6 +2623,20 @@ async function executeChatAgentTools(
       trace.push(titles
         ? `查找依据：已从${sources || '产品知识库'}找到 ${titles}${result.total > 3 ? ' 等相关资料' : ''}。`
         : '查找依据：官方产品知识库没有找到足够明确的记录。')
+      continue
+    }
+    if (name === 'get_requester_profile') {
+      const nameArg = agentString(tool.args?.name, 80) || extractRequesterProfileName(agentString(plan?.question, 300))
+      if (!nameArg) {
+        results.push({ name, args: { name: '' }, result: { found: false, error: '缺少需求人姓名' } })
+        trace.push('查找依据：问题中没有识别到明确的需求人姓名。')
+        continue
+      }
+      const result = await computeRequesterProfile(env, workspaceId, nameArg)
+      results.push({ name, args: { name: nameArg }, result })
+      trace.push(result.found && result.profile
+        ? `查找依据：已读取“${result.profile.name}”的 ${result.profile.projects} 个历史项目，聚合工时、验收、等待和反馈。`
+        : `查找依据：没有找到“${nameArg}”作为需求人的历史任务。`)
       continue
     }
     if (name === 'search_tasks' || name === 'get_task_detail') {
@@ -2667,6 +2694,7 @@ async function composeChatAgentAnswer(
   const prompt = `你是 Giverny 的工作智能体。请基于工具结果回答用户问题。
 要求：
 - 如果工具结果里有金额、工时、月份，必须严格使用工具结果数字，不要重算或改写为其他数值。
+- 如果工具结果里有 get_requester_profile，必须把 found/profile 当作需求人画像的唯一事实来源；found=true 时不得说没有记录，必须引用 profile.projects、profile.hours、acceptanceRate、onTimeRate、traits 和 advice。
 - 先给结论，再给分月/分项说明。
 - 如果用户问某任务为什么没交付或卡在哪里，必须优先读取 waitingRecords 中 active=true 的 note/reason，明确说出等待谁、等待什么、开始时间和已等待时长。
 - 如果工具返回 needsDisambiguation=true，必须请用户选择，不得自行假定。
@@ -3251,7 +3279,7 @@ async function verifyAgentToolRequest(env: Env, request: Request) {
 function agentToolPathAllowed(role: AgentPrincipalContext['role'], path: string, method: string) {
   const endpoint = path.split('/').pop() || ''
   const publicRead = new Set(['context', 'product-help'])
-  const businessRead = new Set(['month-finance', 'search-tasks', 'task-detail', 'search-attachments', 'get-task-memory'])
+  const businessRead = new Set(['month-finance', 'search-tasks', 'task-detail', 'requester-profile', 'search-attachments', 'get-task-memory'])
   if (publicRead.has(endpoint)) return true
   if (businessRead.has(endpoint) && (method === 'GET' || method === 'POST')) {
     if (endpoint === 'month-finance') return ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'].includes(role)
@@ -4198,6 +4226,7 @@ function agentOpenApiSpec(request: Request) {
     tags: [
       { name: 'Finance', description: 'Income and billable hour statistics.' },
       { name: 'Tasks', description: 'Task search and task detail lookup.' },
+      { name: 'Profiles', description: 'Deterministic requester profile aggregation.' },
       { name: 'Context', description: 'Stable assistant context and capability notes.' },
       { name: 'Write Tools', description: 'Preview/execute tools for confirmed writes.' },
     ],
@@ -4286,6 +4315,23 @@ function agentOpenApiSpec(request: Request) {
             '400': errorResponse,
             '401': errorResponse,
             '404': errorResponse,
+          },
+        },
+      },
+      '/api/agent/tools/requester-profile': {
+        get: {
+          operationId: 'get_requester_profile',
+          tags: ['Profiles'],
+          summary: 'Get requester profile',
+          description: 'Aggregate all historical tasks for a requester in the current workspace and return deterministic cooperation metrics, traits and advice.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'name', in: 'query', required: true, schema: { type: 'string' }, description: 'Requester name, for example 陈义君.' },
+          ],
+          responses: {
+            '200': jsonResponse('Requester profile', '#/components/schemas/RequesterProfileResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
           },
         },
       },
@@ -4464,6 +4510,33 @@ function agentOpenApiSpec(request: Request) {
             attachmentAnalyses: {
               type: 'array',
               items: { type: 'object', additionalProperties: true },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        RequesterProfileResponse: {
+          type: 'object',
+          required: ['tool', 'found', 'name', 'searchedName', 'closeCandidates', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['get_requester_profile'] },
+            found: { type: 'boolean' },
+            name: { type: 'string' },
+            searchedName: { type: 'string' },
+            closeCandidates: { type: 'array', items: { type: 'string' } },
+            profile: {
+              type: 'object',
+              additionalProperties: true,
+              properties: {
+                projects: { type: 'integer' },
+                hours: { type: 'number' },
+                acceptanceRate: { type: 'number' },
+                onTimeRate: { type: 'number' },
+                hourDeviationRate: { type: 'number' },
+                avgRevisionCount: { type: 'number' },
+                waitingHours: { type: 'number' },
+                traits: { type: 'array', items: { type: 'string' } },
+                advice: { type: 'array', items: { type: 'string' } },
+              },
             },
             generatedAt: { type: 'string', format: 'date-time' },
           },
@@ -4679,6 +4752,284 @@ function agentWaitingRecords(task: DbTask) {
   })
 }
 
+type RequesterProfileTaskEvidence = {
+  id: number
+  title: string
+  type: string
+  status: TaskStatus
+  hours: number
+  estimatedHours: number
+  startDate: string
+  estimatedDeliveryDate: string
+  actualDeliveryDate: string
+  onTime: boolean | null
+  revisionCount: number
+  waitingHours: number
+  feedbackRating: TaskFeedbackRating | ''
+  feedbackTags: TaskFeedbackTag[]
+}
+
+type RequesterProfileResult = {
+  found: boolean
+  name: string
+  searchedName: string
+  closeCandidates: string[]
+  profile?: {
+    name: string
+    projects: number
+    hours: number
+    acceptedProjects: number
+    acceptanceRate: number
+    avgHoursPerProject: number
+    onTimeRate: number
+    hourDeviationRate: number
+    avgRevisionCount: number
+    waitingHours: number
+    grade: string
+    traits: string[]
+    advice: string[]
+    feedbackRatings: Record<string, number>
+    feedbackTags: Record<string, number>
+    tasks: RequesterProfileTaskEvidence[]
+  }
+  generatedAt: string
+}
+
+function normalizeRequesterName(value: unknown) {
+  return String(value || '').trim().replace(/\s+/g, '')
+}
+
+function extractRequesterProfileName(question: string) {
+  const normalized = String(question || '')
+    .trim()
+    .replace(/^(?:麻烦|请|帮我|给我|查一下|看一下|分析一下|整理一下|生成一下|来一份|给我一下|帮我查一下|帮我看一下)\s*/g, '')
+  const patterns = [
+    /(?:给我|帮我|查一下|看一下|生成|分析|整理)?\s*([\u4e00-\u9fa5A-Za-z·]{2,20})\s*的(?:用户|需求人|合作|客户)?画像/,
+    /(?:需求人|合作伙伴|客户|用户)\s*([\u4e00-\u9fa5A-Za-z·]{2,20})\s*(?:画像|特征|偏好|分析)/,
+    /([\u4e00-\u9fa5A-Za-z·]{2,20})\s*(?:这个人|这个需求人|合作起来|历史表现|历史偏好)/,
+  ]
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (match?.[1]) return match[1].trim().replace(/^(?:一下|下|这个|那个)/, '')
+  }
+  return ''
+}
+
+function isRequesterProfileQuestion(question: string) {
+  return /画像|需求人.*(?:特征|偏好|分析)|合作.*(?:画像|特征|偏好|建议)|客户.*(?:画像|特征|偏好)/.test(question)
+}
+
+function normalizeChatToolName(value: unknown): ChatAgentToolName {
+  return ['query_month_finance', 'search_tasks', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
+    ? value as ChatAgentToolName
+    : 'none'
+}
+
+function requesterProfileGrade(metrics: { acceptanceRate: number; onTimeRate: number; hourDeviationRate: number; avgRevisionCount: number; projects: number }) {
+  let score = 72
+  if (metrics.acceptanceRate >= 95) score += 10
+  else if (metrics.acceptanceRate < 70) score -= 12
+  if (metrics.onTimeRate >= 80) score += 8
+  else if (metrics.onTimeRate < 50) score -= 10
+  if (metrics.hourDeviationRate <= 10) score += 6
+  else if (metrics.hourDeviationRate > 30) score -= 8
+  if (metrics.avgRevisionCount <= 0.5) score += 4
+  else if (metrics.avgRevisionCount >= 2) score -= 8
+  if (metrics.projects >= 6) score += 4
+  if (score >= 88) return 'A'
+  if (score >= 75) return 'B'
+  if (score >= 62) return 'C'
+  return 'D'
+}
+
+function deliveryStamp(value: string | null | undefined) {
+  const raw = String(value || '').trim()
+  if (!raw) return Number.NaN
+  const normalized = raw.includes('T') ? raw : raw.includes(' ') ? raw.replace(' ', 'T') : `${raw}T23:59`
+  const withZone = /Z$|[+-]\d\d:?\d\d$/.test(normalized) ? normalized : `${normalized}:00+08:00`
+  const stamp = Date.parse(withZone)
+  return Number.isFinite(stamp) ? stamp : Number.NaN
+}
+
+async function computeRequesterProfile(env: Env, workspaceId: string, requestedName: string): Promise<RequesterProfileResult> {
+  const searchedName = String(requestedName || '').trim()
+  const normalizedTarget = normalizeRequesterName(searchedName)
+  const rows = await env.DB.prepare(
+    `SELECT *
+     FROM tasks
+     WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+     ORDER BY start_date ASC, created_at ASC`,
+  ).bind(workspaceId).all<DbTask>()
+  const tasks = rows.results ?? []
+  const requesterNames = Array.from(new Set(tasks.map((task) => String(task.requester || '').trim()).filter(Boolean)))
+  const closeCandidates = requesterNames
+    .filter((name) => {
+      const normalized = normalizeRequesterName(name)
+      return normalizedTarget && (normalized.includes(normalizedTarget) || normalizedTarget.includes(normalized))
+    })
+    .slice(0, 8)
+  const matched = tasks.filter((task) => normalizeRequesterName(task.requester) === normalizedTarget)
+  if (!normalizedTarget || matched.length === 0) {
+    return {
+      found: false,
+      name: searchedName,
+      searchedName,
+      closeCandidates: closeCandidates.length ? closeCandidates : requesterNames.slice(0, 8),
+      generatedAt: nowIso(),
+    }
+  }
+
+  const requesterGroups = new Map<string, DbTask[]>()
+  tasks.forEach((task) => {
+    const name = String(task.requester || '').trim()
+    if (!name) return
+    requesterGroups.set(name, [...(requesterGroups.get(name) ?? []), task])
+  })
+  const cohortHppRows = Array.from(requesterGroups.values()).map((group) => {
+    const hours = group.reduce((sum, task) => sum + actualHoursForDbTask(task), 0)
+    return hours / Math.max(group.length, 1)
+  }).filter(Number.isFinite)
+  const cohortHpp = cohortHppRows.length
+    ? cohortHppRows.reduce((sum, value) => sum + value, 0) / cohortHppRows.length
+    : 0
+
+  const feedbackRatingsCount: Record<string, number> = {}
+  const feedbackTagsCount: Record<string, number> = {}
+  let hours = 0
+  let acceptedProjects = 0
+  let comparableDeliveryCount = 0
+  let onTimeCount = 0
+  let comparableHourCount = 0
+  let deviationSum = 0
+  let revisionCount = 0
+  let waitingMinutes = 0
+  const evidenceTasks: RequesterProfileTaskEvidence[] = []
+
+  matched.forEach((row) => {
+    const task = toTask(row)
+    const taskHours = roundCents(task.actualHours)
+    const entries = parseTimeEntries(row.time_entries_json)
+    const taskRevisions = entries.filter((entry) => entry.isRevision).length
+    const waits = agentWaitingRecords(row)
+    const taskWaitingMinutes = waits.reduce((sum, entry) => sum + Number(entry.elapsedMinutes || 0), 0)
+    const estimatedStamp = deliveryStamp(row.estimated_delivery_date)
+    const actualDelivery = acceptanceProgressEndDateTime(entries, row.start_date) || row.actual_delivery_date || ''
+    const actualStamp = deliveryStamp(actualDelivery)
+    const onTime = Number.isFinite(estimatedStamp) && Number.isFinite(actualStamp)
+      ? actualStamp <= estimatedStamp
+      : null
+    if (onTime !== null) {
+      comparableDeliveryCount += 1
+      if (onTime) onTimeCount += 1
+    }
+    if (task.estimatedHours > 0 && taskHours > 0) {
+      comparableHourCount += 1
+      deviationSum += ((taskHours - task.estimatedHours) / task.estimatedHours) * 100
+    }
+    if (task.status === '已验收') acceptedProjects += 1
+    hours += taskHours
+    revisionCount += taskRevisions
+    waitingMinutes += taskWaitingMinutes
+    const taskFeedbackRating = task.feedbackRating || ''
+    const taskFeedbackTags = task.feedbackTags ?? []
+    if (taskFeedbackRating) feedbackRatingsCount[taskFeedbackRating] = (feedbackRatingsCount[taskFeedbackRating] || 0) + 1
+    taskFeedbackTags.forEach((tag) => {
+      feedbackTagsCount[tag] = (feedbackTagsCount[tag] || 0) + 1
+    })
+    evidenceTasks.push({
+      id: task.id,
+      title: task.title,
+      type: task.type,
+      status: task.status,
+      hours: taskHours,
+      estimatedHours: task.estimatedHours,
+      startDate: task.date,
+      estimatedDeliveryDate: task.estimatedDate,
+      actualDeliveryDate: actualDelivery,
+      onTime,
+      revisionCount: taskRevisions,
+      waitingHours: roundCents(taskWaitingMinutes / 60),
+      feedbackRating: taskFeedbackRating,
+      feedbackTags: taskFeedbackTags,
+    })
+  })
+
+  const projects = matched.length
+  const roundedHours = roundCents(hours)
+  const avgHoursPerProject = roundCents(roundedHours / Math.max(projects, 1))
+  const acceptanceRate = Math.round((acceptedProjects / Math.max(projects, 1)) * 100)
+  const onTimeRate = comparableDeliveryCount > 0 ? Math.round((onTimeCount / comparableDeliveryCount) * 100) : 0
+  const hourDeviationRate = comparableHourCount > 0 ? Math.round(deviationSum / comparableHourCount) : 0
+  const avgRevisionCount = roundCents(revisionCount / Math.max(projects, 1))
+  const waitingHours = roundCents(waitingMinutes / 60)
+  const traits: string[] = []
+  if (acceptanceRate >= 95) traits.push('验收通过率高，交付多能顺利闭环')
+  if (onTimeRate < 70 && comparableDeliveryCount > 0) traits.push('准时率偏低，排期需要预留缓冲')
+  if (hourDeviationRate > 20) traits.push(`实际工时平均高于预估 ${hourDeviationRate}%`)
+  if (avgHoursPerProject > cohortHpp * 1.2 && cohortHpp > 0) traits.push(`单项目耗时偏长，均 ${avgHoursPerProject}h，高于全站需求人均值 ${roundCents(cohortHpp)}h`)
+  if (avgRevisionCount <= 0.5) traits.push(`改稿轮次少，均 ${avgRevisionCount} 轮/项目`)
+  if (waitingHours > 24) traits.push(`等待耗时较高，累计 ${waitingHours}h`)
+  if (traits.length === 0) traits.push('历史样本较少或指标较均衡，建议继续积累数据')
+
+  const advice: string[] = []
+  if (hourDeviationRate > 20) advice.push('下次报价建议上浮或在开工前补一版需求确认稿。')
+  if (waitingHours > 24) advice.push('排期中预留确认等待，并把等待记录写入洞察但不计入结算。')
+  if (onTimeRate < 70 && comparableDeliveryCount > 0) advice.push('交付节点建议提前拆成初稿、确认、终稿，避免最后一天集中确认。')
+  if (avgRevisionCount <= 0.5) advice.push('改稿轮次低，适合标准化任务报价与稳定复用流程。')
+  if (advice.length === 0) advice.push('保持当前记录粒度，继续用验收、等待和反馈节点沉淀合作偏好。')
+
+  const grade = requesterProfileGrade({ acceptanceRate, onTimeRate, hourDeviationRate, avgRevisionCount, projects })
+  const displayName = String(matched[0]?.requester || searchedName).trim()
+  return {
+    found: true,
+    name: displayName,
+    searchedName,
+    closeCandidates: [],
+    profile: {
+      name: displayName,
+      projects,
+      hours: roundedHours,
+      acceptedProjects,
+      acceptanceRate,
+      avgHoursPerProject,
+      onTimeRate,
+      hourDeviationRate,
+      avgRevisionCount,
+      waitingHours,
+      grade,
+      traits,
+      advice,
+      feedbackRatings: feedbackRatingsCount,
+      feedbackTags: feedbackTagsCount,
+      tasks: evidenceTasks.sort((a, b) => String(b.actualDeliveryDate || b.startDate).localeCompare(String(a.actualDeliveryDate || a.startDate))),
+    },
+    generatedAt: nowIso(),
+  }
+}
+
+function renderRequesterProfileAnswer(result: RequesterProfileResult) {
+  if (!result.found || !result.profile) {
+    const candidates = result.closeCandidates.length ? `\n\n可选需求人：${result.closeCandidates.join('、')}` : ''
+    return `我没有在当前工作区找到“${result.searchedName || result.name}”作为需求人的历史任务。${candidates}`
+  }
+  const profile = result.profile
+  return [
+    `**${profile.name} 的需求人画像**`,
+    '',
+    `结论：共 **${profile.projects} 个项目**、**${profile.hours}h**，综合评级 **${profile.grade}**。验收通过率 ${profile.acceptanceRate}%，准时率 ${profile.onTimeRate}%，工时偏差 ${profile.hourDeviationRate >= 0 ? '+' : ''}${profile.hourDeviationRate}%。`,
+    '',
+    `- 单项目均时：${profile.avgHoursPerProject}h`,
+    `- 平均改稿：${profile.avgRevisionCount} 轮/项目`,
+    `- 累计等待：${profile.waitingHours}h`,
+    '',
+    '**合作特征**',
+    ...profile.traits.map((item) => `- ${item}`),
+    '',
+    '**下次报价 / 排期建议**',
+    ...profile.advice.map((item) => `- ${item}`),
+  ].join('\n')
+}
+
 type AgentAttachmentSearchRow = DbAttachment & {
   task_title: string
   requirement: string | null
@@ -4810,6 +5161,21 @@ async function agentTaskDetailTool(env: Env, request: Request) {
     files: (fileRows.results ?? []).map(toAgentResultAttachment),
     attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
     generatedAt: nowIso(),
+  })
+}
+
+async function agentRequesterProfileTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) {
+    return agentFail('Agent tool token missing or invalid', 401)
+  }
+  const body = await parseAgentToolBody(request)
+  const name = String(body.name ?? '').trim().slice(0, 80)
+  if (!name) return agentFail('name 不能为空', 400)
+  const result = await computeRequesterProfile(env, principal.workspaceId, name)
+  return agentOk({
+    tool: 'get_requester_profile',
+    ...result,
   })
 }
 
@@ -5543,6 +5909,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/task-detail' && (request.method === 'POST' || request.method === 'GET')) {
     return agentTaskDetailTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/requester-profile' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentRequesterProfileTool(env, request)
+  }
   if (url.pathname === '/api/agent/tools/search-attachments' && (request.method === 'POST' || request.method === 'GET')) {
     return agentSearchAttachmentsTool(env, request)
   }
@@ -5714,6 +6083,15 @@ function registerGivernyMcpTools(server: McpServer, env: Env, principal: AgentPr
     annotations,
   }, async (input) => {
     try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
+  })
+  const profile = agentReadToolRegistry.get_requester_profile
+  server.registerTool('get_requester_profile', {
+    title: profile.title,
+    description: profile.description,
+    inputSchema: profile.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, profile.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const attachments = agentReadToolRegistry.search_attachments
   server.registerTool('search_attachments', {
@@ -14740,6 +15118,7 @@ async function chatWithAi(env: Env, request: Request) {
     })
     const plannedTools = Array.isArray(rawPlan?.tools) ? [...rawPlan.tools] : []
     const productHelpProbe = searchProductKnowledge(lastMsg, 1)
+    const profileName = extractRequesterProfileName(lastMsg)
     const topProductMatch = productHelpProbe.matches[0]
     const hasHighConfidenceProductFact = Boolean(topProductMatch) && (
       topProductMatch.id.startsWith('document.')
@@ -14762,11 +15141,17 @@ async function chatWithAi(env: Env, request: Request) {
     if (isFinanceQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'query_month_finance')) {
       plannedTools.push({ name: 'query_month_finance', args: { months: requestedMonths }, reason: '编排层验真要求：财务结论必须由确定性计算工具生成。' })
     }
+    if (isRequesterProfileQuestion(lastMsg) && profileName && !plannedTools.some((item) => item.name === 'get_requester_profile')) {
+      plannedTools.push({ name: 'get_requester_profile', args: { name: profileName }, reason: '编排层验真要求：需求人画像必须由历史任务聚合工具生成。' })
+    }
     const plan: ChatAgentPlanResponse = {
       ...rawPlan,
       intent: hasHighConfidenceProductFact && !isTaskBlockerQuestion(lastMsg) && !isFinanceQuestion(lastMsg)
         ? 'product_help'
+        : isRequesterProfileQuestion(lastMsg) && profileName
+          ? 'person_profile'
         : rawPlan?.intent,
+      question: rawPlan?.question || lastMsg,
       tools: plannedTools,
     }
     orchestratedTurn = {
@@ -14852,6 +15237,14 @@ async function chatWithAi(env: Env, request: Request) {
       const financeStats = statsResult?.stats ?? []
       let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
       let evidenceCorrection = ''
+      const profileResult = toolResults.find((item) => item.name === 'get_requester_profile')?.result as RequesterProfileResult | undefined
+      if (profileResult?.found && profileResult.profile) {
+        const deniesProfile = /没有.*(?:记录|数据)|未找到|找不到|无法.*画像/.test(finalContent)
+        if (deniesProfile || !finalContent.includes(profileResult.profile.name) || !finalContent.includes(String(profileResult.profile.projects))) {
+          finalContent = renderRequesterProfileAnswer(profileResult)
+          evidenceCorrection = '答案验真：模型初稿未完整引用需求人画像工具结果，已按后台聚合事实纠正。'
+        }
+      }
       if (isTaskBlockerQuestion(lastMsg)) {
         const detailResult = toolResults.find((item) => item.name === 'get_task_detail')?.result as {
           results?: Array<{ task?: Task; waitingRecords?: ReturnType<typeof agentWaitingRecords> }>
@@ -14875,10 +15268,15 @@ async function chatWithAi(env: Env, request: Request) {
       if (replan.shouldReplan) {
         trace.push(`验真未通过，补充工具：${replan.requiredTools.join('、')}。`)
         const repairTools = replan.requiredTools
-          .filter((name): name is Exclude<ChatAgentToolName, 'none'> => ['query_month_finance', 'search_tasks', 'get_task_detail', 'search_product_help'].includes(name))
+          .map((name) => normalizeChatToolName(name))
+          .filter((name): name is Exclude<ChatAgentToolName, 'none'> => name !== 'none')
           .map((name) => ({
             name,
-            args: name === 'query_month_finance' ? { months: requestedMonths } : { title: lastMsg, query: lastMsg },
+            args: name === 'query_month_finance'
+              ? { months: requestedMonths }
+              : name === 'get_requester_profile'
+                ? { name: profileName || extractRequesterProfileName(lastMsg) }
+                : { title: lastMsg, query: lastMsg },
             reason: `验真阶段动态重规划：${replan.reason}`,
           }))
         if (repairTools.length) {
@@ -15094,6 +15492,7 @@ function agentMetricIntent(tools: string[], approvalAction: string, hasSelection
   if (hasSelection) return 'task_disambiguation'
   if (approvalAction) return `write_${approvalAction}`
   if (tools.includes('query_month_finance')) return 'month_finance'
+  if (tools.includes('get_requester_profile')) return 'person_profile'
   if (tools.includes('search_attachments')) return 'attachment_search'
   if (tools.includes('get_task_detail')) return 'task_detail'
   if (tools.includes('search_tasks')) return 'task_search'

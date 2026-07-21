@@ -2,7 +2,7 @@ import type { AgentReadToolName } from './agentToolRegistry'
 import type { AgentPrincipalContext } from './agentScope'
 
 export type AgentTurnPhase = 'understand' | 'plan' | 'authorize' | 'execute' | 'analyze' | 'verify' | 'complete' | 'needs_input' | 'failed'
-export type AgentIntent = 'finance' | 'task_data' | 'attachment' | 'product_help' | 'knowledge' | 'write' | 'general' | 'unknown'
+export type AgentIntent = 'finance' | 'task_data' | 'person_profile' | 'attachment' | 'product_help' | 'knowledge' | 'write' | 'general' | 'unknown'
 export type AgentRiskLevel = 'read' | 'write' | 'sensitive'
 export type AgentToolExecutionStatus = 'pending' | 'running' | 'success' | 'failed' | 'denied' | 'skipped'
 
@@ -77,13 +77,13 @@ export function createAgentTurn(input: {
 
 export function normalizeAgentIntent(value: unknown): AgentIntent {
   const intent = String(value || '') as AgentIntent
-  return ['finance', 'task_data', 'attachment', 'product_help', 'knowledge', 'write', 'general', 'unknown'].includes(intent)
+  return ['finance', 'task_data', 'person_profile', 'attachment', 'product_help', 'knowledge', 'write', 'general', 'unknown'].includes(intent)
     ? intent
     : 'unknown'
 }
 
 export function requiresBusinessEvidence(intent: AgentIntent) {
-  return intent === 'finance' || intent === 'task_data' || intent === 'attachment' || intent === 'write'
+  return intent === 'finance' || intent === 'task_data' || intent === 'person_profile' || intent === 'attachment' || intent === 'write'
 }
 
 export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
@@ -99,6 +99,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (turn.intent === 'product_help' && !turn.evidence.some((item) => item.toolName === 'search_product_help')) {
     requiredTools.push('search_product_help')
     issues.push('产品说明没有经过官方产品知识工具核对。')
+  }
+  if (turn.intent === 'person_profile' && !turn.evidence.some((item) => item.toolName === 'get_requester_profile')) {
+    requiredTools.push('get_requester_profile')
+    issues.push('需求人画像没有读取当前工作区的历史任务证据。')
   }
   if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(turn.question)
     && !turn.evidence.some((item) => item.toolName === 'get_task_detail')) {

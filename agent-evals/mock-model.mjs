@@ -55,7 +55,7 @@ function productHelpAnswer(text) {
     return '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。'
   }
   if (/最近更新|更新了哪些|更新了什么|最新版本/.test(subject)) {
-    return '当前版本是 **v0.32.2**，最近重点更新了 Agent 可核验分析过程、产品知识验真、动态重规划、执行审计与真实等待原因读取。'
+    return '当前版本是 **v0.32.3**，最近重点更新了需求人画像后台编排、Agent 可核验分析过程、产品知识验真、动态重规划与执行审计。'
   }
   if (/为什么叫.*(?:Giverny|吉维尼)|(?:Giverny|吉维尼).*由来|品牌故事/i.test(subject)) {
     return 'Giverny 的名字是作者为致敬莫奈而取。莫奈晚年居住在法国小镇吉维尼；网站以“莫奈花园”为主题，四季配色取自《睡莲》。品牌理念是让产品加入艺术成分、让创作成为乐趣，Slogan 是“让创作在自己的花园里生长”。'
@@ -69,10 +69,25 @@ function productHelpAnswer(text) {
   return '已根据站内产品知识工具返回的官方资料完成回答。'
 }
 
+function toolResultText(text) {
+  const marker = '工具结果 JSON：'
+  const index = text.indexOf(marker)
+  return index >= 0 ? text.slice(index + marker.length) : text
+}
+
+function hasToolResult(text, toolName) {
+  const resultText = toolResultText(text)
+  const escapedName = toolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`"name"\\s*:\\s*"${escapedName}"|"tool"\\s*:\\s*"${escapedName}"`).test(resultText)
+}
+
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
   if (text.includes('工具结果 JSON')) {
+    if (hasToolResult(text, 'get_requester_profile')) {
+      return completion({ role: 'assistant', content: '陈义君的需求人画像：共 4 个项目、13.6h，验收通过率 50%，可据此安排报价和排期。' })
+    }
     if (/显示金额|隐藏金额|Giverny\s*主题|吉维尼|大模型|模型设置|最近更新|更新了哪些|更新了什么|品牌故事/i.test(text)) {
       return completion({ role: 'assistant', content: productHelpAnswer(text) })
     }
@@ -88,6 +103,9 @@ function chooseTool(messages) {
     const plannerQuestion = questionMatch ? JSON.parse(`"${questionMatch[1]}"`) : text
     if (/快捷键|怎么用键盘|功能入口|网站怎么用|怎么设置|如何设置|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'product_help', tools: [{ name: 'search_product_help', args: { query: plannerQuestion }, reason: '用户在询产品用法' }], confidence: 0.99 }) })
+    }
+    if (/画像|需求人.*(?:特征|偏好|分析)|合作.*(?:画像|特征|偏好|建议)/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'person_profile', tools: [{ name: 'get_requester_profile', args: { name: '陈义君' }, reason: '需要聚合需求人历史任务画像' }], confidence: 0.99 }) })
     }
     if (/卡在哪|为什么一直没有交付/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'get_task_detail', args: { title: '公司产品分套的修改' }, reason: '需要核对具体任务的等待记录' }], confidence: 0.99 }) })
@@ -154,6 +172,9 @@ function chooseTool(messages) {
     if (tools.includes('search_product_help')) {
       return completion({ role: 'assistant', content: productHelpAnswer(text) })
     }
+    if (tools.includes('get_requester_profile')) {
+      return completion({ role: 'assistant', content: '陈义君的需求人画像：共 4 个项目、13.6h，验收通过率 50%，可据此安排报价和排期。' })
+    }
     if (tools.includes('get_task_detail') && /卡在哪|为什么一直没有交付/.test(text)) {
       return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
     }
@@ -174,6 +195,9 @@ function chooseTool(messages) {
   }
   if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
+  }
+  if (/画像|需求人.*(?:特征|偏好|分析)|合作.*(?:画像|特征|偏好|建议)/.test(text)) {
+    return toolCall('get_requester_profile', { name: /陈义君/.test(text) ? '陈义君' : '黄媚' })
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
