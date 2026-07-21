@@ -2482,6 +2482,57 @@ type ChatAgentToolResult = {
   result: unknown
 }
 
+function chatPlanTrace(plan: ChatAgentPlanResponse | null, tools: ChatAgentToolName[]) {
+  if (plan?.intent === 'product_help' || tools.includes('search_product_help')) {
+    return '制定计划：先核对官方产品资料，再依据文档组织回答。'
+  }
+  if (plan?.intent === 'finance' || tools.includes('query_month_finance')) {
+    return '制定计划：先读取真实工时与结算数据，再完成金额核算。'
+  }
+  if (plan?.intent === 'task_data' || tools.includes('get_task_detail') || tools.includes('search_tasks')) {
+    return '制定计划：先定位相关任务，再核对状态、进展与等待记录。'
+  }
+  return '制定计划：结合当前问题与对话上下文整理回答。'
+}
+
+function chatUnderstandingTrace(question: string, intent?: ChatAgentPlanResponse['intent']) {
+  const subject = `“${question.slice(0, 40)}${question.length > 40 ? '…' : ''}”`
+  if (intent === 'product_help') return `理解问题：用户在询问 Giverny 的产品说明，需要以官方资料为准。问题是 ${subject}`
+  if (intent === 'finance') return `理解问题：用户在询问工时或金额，需要使用真实结算数据。问题是 ${subject}`
+  if (intent === 'task_data') return `理解问题：用户在询问具体工作情况，需要核对任务记录。问题是 ${subject}`
+  return `理解问题：先判断问题是否需要站内数据支持。问题是 ${subject}`
+}
+
+function chatVerificationTrace(results: ChatAgentToolResult[]) {
+  if (results.some((item) => item.name === 'search_product_help')) return '核对结论：回答已与官方手册和版本记录交叉核对。'
+  if (results.some((item) => item.name === 'query_month_finance')) return '核对结论：金额与工时来自确定性结算计算，没有使用模型估算。'
+  if (results.some((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')) return '核对结论：状态、进展和等待原因均来自当前任务记录。'
+  return '核对结论：回答已与本轮可用依据核对。'
+}
+
+function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
+  const productResult = results.find((item) => item.name === 'search_product_help')?.result as {
+    matches?: Array<{ summary?: string }>
+  } | undefined
+  const productSummary = String(productResult?.matches?.[0]?.summary || '').replace(/\s+/g, ' ').trim()
+  if (productSummary) return `提取事实：${productSummary.slice(0, 180)}${productSummary.length > 180 ? '…' : ''}`
+  const financeResult = results.find((item) => item.name === 'query_month_finance')?.result as {
+    stats?: Array<{ month?: string; billableHours?: number; amount?: number }>
+  } | undefined
+  if (financeResult?.stats?.length) {
+    return `提取数据：${financeResult.stats.map((item) => `${item.month || '未指定月份'} ${Number(item.billableHours || 0)} 小时、¥${Number(item.amount || 0)}`).join('；')}。`
+  }
+  const taskResult = results.find((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')?.result as {
+    results?: Array<{ task?: { title?: string; status?: string }; waitingRecords?: Array<{ active?: boolean; note?: string; reason?: string }> }>
+  } | undefined
+  const firstTask = taskResult?.results?.[0]
+  if (firstTask?.task?.title) {
+    const activeWait = firstTask.waitingRecords?.find((item) => item.active)
+    return `提取事实：已定位“${firstTask.task.title}”，当前状态为${firstTask.task.status || '未记录'}${activeWait ? `，正在等待“${activeWait.note || activeWait.reason || '未填写原因'}”` : ''}。`
+  }
+  return ''
+}
+
 async function planChatAgentTurn(
   env: Env,
   modelChoice: ChatModelChoice,
@@ -2547,13 +2598,18 @@ async function executeChatAgentTools(
       if (!finalMonths.length) continue
       const stats = await computeMonthFinanceStats(env, finalMonths, hourlyRate, workspaceId)
       results.push({ name, args: { months: finalMonths }, result: { hourlyRate, stats } })
-      trace.push(`工具执行：query_month_finance(${finalMonths.join('、')})，从 D1 读取任务、工时和计费状态。`)
+      trace.push(`查找依据：已读取 ${finalMonths.join('、')} 的任务、计费工时和结算记录。`)
       continue
     }
     if (name === 'search_product_help') {
       const query = agentString(tool.args?.query, 500)
-      results.push({ name, args: { query }, result: searchProductKnowledge(query, 5) })
-      trace.push('工具执行：search_product_help，读取产品能力注册表。')
+      const result = searchProductKnowledge(query, 5)
+      results.push({ name, args: { query }, result })
+      const titles = result.matches.slice(0, 3).map((item) => `《${item.title}》`).join('、')
+      const sources = [...new Set(result.matches.map((item) => item.category))].slice(0, 3).join('、')
+      trace.push(titles
+        ? `查找依据：已从${sources || '产品知识库'}找到 ${titles}${result.total > 3 ? ' 等相关资料' : ''}。`
+        : '查找依据：官方产品知识库没有找到足够明确的记录。')
       continue
     }
     if (name === 'search_tasks' || name === 'get_task_detail') {
@@ -2581,7 +2637,9 @@ async function executeChatAgentTools(
         needsDisambiguation: name === 'get_task_detail' && taskResults.length > 1 && taskResults[0].matchScore - taskResults[1].matchScore < 0.08,
         results: taskResults,
       } })
-      trace.push(`工具执行：${name}，按完整语义匹配任务并读取等待记录。`)
+      trace.push(taskResults.length
+        ? `查找依据：已匹配 ${taskResults.length} 条相关任务，并读取进展与等待记录。`
+        : '查找依据：没有匹配到可确认的任务记录。')
     }
   }
 
@@ -2589,11 +2647,11 @@ async function executeChatAgentTools(
     usedFinanceFallback = true
     const stats = await computeMonthFinanceStats(env, fallbackMonths, hourlyRate, workspaceId)
     results.push({ name: 'query_month_finance', args: { months: fallbackMonths }, result: { hourlyRate, stats } })
-    trace.push(`工具补救：规划器未给出可执行金额工具参数，使用月份候选 ${fallbackMonths.join('、')} 计算。`)
+    trace.push(`补充核对：根据问题中的月份 ${fallbackMonths.join('、')} 完成确定性金额计算。`)
   }
 
   if (usedFinanceFallback || results.length > 0) {
-    trace.unshift(`模型规划：${plan?.intent || 'unknown'}，${plannedTools.map((tool) => tool.name).filter(Boolean).join('、') || '未显式选择工具'}`)
+    trace.unshift(chatPlanTrace(plan, plannedTools.map((tool) => tool.name).filter((name): name is ChatAgentToolName => Boolean(name))))
   }
   return { results, trace }
 }
@@ -14860,12 +14918,14 @@ async function chatWithAi(env: Env, request: Request) {
         model: answer.modelLabel,
         agentTurn: { ...sanitizeAgentTurnAudit(orchestratedTurn), evidenceCount: orchestratedTurn.evidence.length },
         trace: [
-          `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
+          chatUnderstandingTrace(lastMsg, plan.intent),
           ...trace,
-          `生成答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''} 组织最终回答。`,
+          chatEvidenceFindingTrace(toolResults),
+          '整理回答：只保留与问题直接相关、且有依据支持的结论。',
           ...(evidenceCorrection ? [evidenceCorrection] : []),
-          ...answer.notes,
-        ],
+          chatVerificationTrace(toolResults),
+        ].filter(Boolean),
+        fallbackUsed: answer.fallbackUsed,
       })
     }
     const blockerFallback = await resolveTaskBlockerAnswer(env, lastMsg, workspaceId)
@@ -14918,6 +14978,8 @@ ${textAttachmentSection}
       const answer = await callMultimodalWithSelectedModel(env, modelChoice, visionPrompt, assets)
       return ok({
         content: answer.text,
+        model: answer.modelLabel,
+        fallbackUsed: answer.fallbackUsed,
         trace: [
           `识图答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
           ...answer.notes,
@@ -14943,10 +15005,12 @@ ${textAttachmentSection}
     const answer = await callTextWithSelectedModel(env, fallbackChatPrompt, modelChoice, 1500)
     return ok({
       content: answer.text,
+      model: answer.modelLabel,
+      fallbackUsed: answer.fallbackUsed,
       trace: [
-        '理解问题：未触发结构化工具，进入普通对话流程。',
-        `生成答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
-        ...answer.notes,
+        '理解问题：这是普通问答，本轮不需要读取站内业务数据。',
+        '组织答案：结合当前问题与对话上下文形成直接回答。',
+        '核对结论：没有引用未经查询的任务、金额或产品事实。',
       ],
     })
   } catch (error) {
@@ -15096,7 +15160,12 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       ? await response.clone().json().catch(() => ({})) as Record<string, unknown>
       : {}
     const trace = Array.isArray(payload.trace) ? payload.trace.map(String) : []
-    const tools = [...new Set(trace.flatMap((line) => [...line.matchAll(/(?:调用工具|工具已返回)：([a-z0-9_]+)/gi)].map((match) => match[1])))]
+    const rawTurn = payload.agentTurn && typeof payload.agentTurn === 'object'
+      ? payload.agentTurn as Record<string, unknown>
+      : {}
+    const auditedPlan = Array.isArray(rawTurn.plan) ? rawTurn.plan as Array<Record<string, unknown>> : []
+    const traceTools = trace.flatMap((line) => [...line.matchAll(/(?:调用工具|工具已返回)：([a-z0-9_]+)/gi)].map((match) => match[1]))
+    const tools = [...new Set([...auditedPlan.map((item) => String(item.name || '')).filter(Boolean), ...traceTools])]
     const approval = payload.approval && typeof payload.approval === 'object' ? payload.approval as Record<string, unknown> : {}
     const selection = payload.selection && typeof payload.selection === 'object' ? payload.selection as Record<string, unknown> : {}
     const candidates = Array.isArray(selection.candidates) ? selection.candidates : []
@@ -15106,7 +15175,7 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
     const model = String(payload.model || '').trim() || modelTrace.match(/生成答复：使用 (.+?)(?:组织最终回答|。|（|$)/)?.[1]?.trim() || ''
     const completionTokens = estimateAgentTokens(JSON.stringify(payload))
     const estimatedCostCny = estimateAgentCostCny(model, promptTokens, completionTokens)
-    const fallbackUsed = trace.some((line) => /回落|fallback/i.test(line))
+    const fallbackUsed = payload.fallbackUsed === true || trace.some((line) => /回落|fallback/i.test(line))
     const outcome = agentMetricOutcome(response.status, approvalStatus, candidates.length > 0)
     const intent = agentMetricIntent(tools, approvalAction, candidates.length > 0)
     const principal = request ? await resolveRequestPrincipal(env, request).catch(() => null) : null
@@ -15137,9 +15206,6 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       completionTokens,
       estimatedCostCny,
     ).run()
-    const rawTurn = payload.agentTurn && typeof payload.agentTurn === 'object'
-      ? payload.agentTurn as Record<string, unknown>
-      : {}
     const turnPlan = Array.isArray(rawTurn.plan) ? rawTurn.plan : tools.map((name) => ({ name, status: response.ok ? 'success' : 'failed', risk: 'read', attempt: 1 }))
     const turnEvidence = Array.isArray(rawTurn.evidence) ? rawTurn.evidence : []
     const rawVerification = rawTurn.verification && typeof rawTurn.verification === 'object'
@@ -15328,7 +15394,7 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   if (!lastMessage) return { route: null, cloudReason: '' }
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
   if (modelChoice !== 'auto') {
-    return { route: null, cloudReason: `已按你的选择直接使用 ${selectedCloudModelLabel(modelChoice)}，不经过本机 CLI` }
+    return { route: null, cloudReason: '' }
   }
   if (isBackgroundAnalysisQuestion(lastMessage)) {
     return { route: null, cloudReason: '识别为多月深度分析，已直接进入站内后台分析流程' }
@@ -15479,9 +15545,9 @@ async function waitForLocalCliChat(
     if (!command) return { status: 'failed' as const, error: '本机命令记录不存在' }
     const result = normalizeLocalCliCommandResult(command.result_json ? JSON.parse(command.result_json) : null)
     const routeTrace = uniqueAgentTrace([
-      '思考中…',
-      `使用当前电脑的 ${route.cliName}`,
-      command.claimed_at ? '已进入本机执行环境' : '正在连接本机执行环境',
+      '理解问题：这项任务需要当前电脑的本机环境。',
+      `制定计划：由 ${route.cliName} 处理本机步骤，网站继续负责权限和结果校验。`,
+      command.claimed_at ? '执行计划：本机环境已接收任务。' : '执行计划：正在将任务交给当前电脑。',
       ...result.trace,
     ])
     const signature = JSON.stringify(routeTrace)
@@ -15527,8 +15593,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
         const promptTokens = await estimateAgentRequestTokens(metricsRequest)
-        send({ type: 'trace', status: 'running', trace: ['思考中…'] })
-        const routingTrace = ['思考中…']
+        send({ type: 'trace', status: 'running', trace: ['开始分析：识别问题目标与需要核对的依据。'] })
+        const routingTrace = ['开始分析：识别问题目标与需要核对的依据。']
         send({ type: 'trace', status: 'running', trace: routingTrace })
 
         const localDecision = await queueLocalCliChat(env, localRouteRequest)

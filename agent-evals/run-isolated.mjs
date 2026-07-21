@@ -122,7 +122,7 @@ async function runMcpChecks() {
     throw new Error(`MCP product help did not return the model setup workflow: ${JSON.stringify(modelHelpResult.structuredContent)}`)
   }
   const releaseHelpResult = await request(63, 'tools/call', { name: 'search_product_help', arguments: { query: '最近更新了哪些内容', limit: 3 } })
-  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.1'))) {
+  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.2'))) {
     throw new Error(`MCP product help did not return recent releases: ${JSON.stringify(releaseHelpResult.structuredContent)}`)
   }
   const brandHelpResult = await request(64, 'tools/call', { name: 'search_product_help', arguments: { query: '这个网站为什么叫吉维尼', limit: 3 } })
@@ -999,14 +999,21 @@ async function runLocalCliBridgeCheck(cookie) {
     }),
   })
   const productHelpText = await productHelpResponse.text()
-  if (!productHelpResponse.ok || !productHelpText.includes('Command + Shift + M') || !productHelpText.includes('search_product_help') || productHelpText.includes('"commandId"')) {
+  if (!productHelpResponse.ok
+    || !productHelpText.includes('Command + Shift + M')
+    || !productHelpText.includes('search_product_help')
+    || !productHelpText.includes('查找依据')
+    || productHelpText.includes('不经过本机 CLI')
+    || productHelpText.includes('模型规划：')
+    || productHelpText.includes('工具执行：')
+    || productHelpText.includes('"commandId"')) {
     throw new Error(`Product help did not bypass model and local CLI routing: ${productHelpText}`)
   }
 
   const productQuestions = [
     { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
     { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
-    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.1', '动态重规划'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.2', '动态重规划'] },
     { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
   ]
   for (const [index, item] of productQuestions.entries()) {
@@ -1021,7 +1028,18 @@ async function runLocalCliBridgeCheck(cookie) {
       }),
     })
     const responseText = await response.text()
-    if (!response.ok || !responseText.includes('search_product_help') || item.expected.some((value) => !responseText.includes(value)) || responseText.includes('"commandId"')) {
+    if (!response.ok
+      || !responseText.includes('search_product_help')
+      || !responseText.includes('理解问题：')
+      || !responseText.includes('制定计划：')
+      || !responseText.includes('查找依据：')
+      || !responseText.includes('提取事实：')
+      || !responseText.includes('核对结论：')
+      || item.expected.some((value) => !responseText.includes(value))
+      || responseText.includes('不经过本机 CLI')
+      || responseText.includes('模型规划：')
+      || responseText.includes('工具执行：')
+      || responseText.includes('"commandId"')) {
       throw new Error(`Product knowledge question ${index + 1} was not grounded: ${responseText}`)
     }
   }
@@ -1040,12 +1058,13 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!blockerResponse.ok
     || !blockerText.includes('等待刘总的建议')
     || !blockerText.includes('get_task_detail')
-    || !blockerText.includes('模型规划')
+    || !blockerText.includes('制定计划')
     || blockerText.includes('快捷键')
     || blockerText.includes('⌘ ⌥ 2')) {
     throw new Error(`Task blocker query did not return the concrete waiting reason: ${blockerText}`)
   }
 
+  const explicitModelRequestsBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
   const explicitModelResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
@@ -1057,7 +1076,9 @@ async function runLocalCliBridgeCheck(cookie) {
     }),
   })
   const explicitModelText = await explicitModelResponse.text()
-  if (!explicitModelResponse.ok || !explicitModelText.includes('直接使用 DeepSeek V4 Flash') || explicitModelText.includes('"commandId"')) {
+  const explicitModelRequestsAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const explicitModelRequests = (explicitModelRequestsAfter.requests || []).slice((explicitModelRequestsBefore.requests || []).length)
+  if (!explicitModelResponse.ok || explicitModelRequests[0]?.model !== 'deepseek-v4-flash' || explicitModelText.includes('"commandId"')) {
     throw new Error(`Explicit cloud model selection still entered the local CLI route: ${explicitModelText}`)
   }
 

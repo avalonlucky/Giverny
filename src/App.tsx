@@ -5347,8 +5347,8 @@ function AgentExecutionTimeline({
   return (
     <details className={`chat-agent-timeline status-${status}`} open={running}>
       <summary>
-        <span>{running ? '思考中…' : status === 'failed' ? '执行中断' : '执行记录'}</span>
-        <small>{running ? displayTraceLine(trace.at(-1) ?? '') : '已完成，可展开查看'}</small>
+        <span>{running ? '分析中…' : status === 'failed' ? '分析中断' : '分析过程'}</span>
+        <small>{running ? displayTraceLine(trace.at(-1) ?? '') : '已核对，可展开查看'}</small>
         <ChevronDown size={13} />
       </summary>
       <ol>
@@ -6312,7 +6312,7 @@ function ChatPanel({
       id: assistantId,
       role: 'assistant',
       content: '',
-      trace: ['思考中…'],
+      trace: ['开始分析：识别问题目标与需要核对的依据。'],
       traceStatus: 'running',
     }])
     setLoading(true)

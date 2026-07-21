@@ -55,7 +55,7 @@ function productHelpAnswer(text) {
     return '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。'
   }
   if (/最近更新|更新了哪些|更新了什么|最新版本/.test(subject)) {
-    return '当前版本是 **v0.32.1**，最近重点更新了产品知识验真、Agent 动态重规划、执行审计、统一 AgentTurn 与真实等待原因读取。'
+    return '当前版本是 **v0.32.2**，最近重点更新了 Agent 可核验分析过程、产品知识验真、动态重规划、执行审计与真实等待原因读取。'
   }
   if (/为什么叫.*(?:Giverny|吉维尼)|(?:Giverny|吉维尼).*由来|品牌故事/i.test(subject)) {
     return 'Giverny 的名字是作者为致敬莫奈而取。莫奈晚年居住在法国小镇吉维尼；网站以“莫奈花园”为主题，四季配色取自《睡莲》。品牌理念是让产品加入艺术成分、让创作成为乐趣，Slogan 是“让创作在自己的花园里生长”。'

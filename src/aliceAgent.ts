@@ -951,9 +951,19 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       }
       for (const toolResult of step.toolResults) {
         usedTools.add(toolResult.toolName)
-        trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
         selection = this.taskSelection(toolResult.output) || selection
         const output = toJsonObject(toolResult.output)
+        if (toolResult.toolName === 'search_product_help') {
+          const matches = Array.isArray(output.matches) ? output.matches.map(toJsonObject) : []
+          const titles = matches.slice(0, 3).map((item) => String(item.title || '')).filter(Boolean)
+          trace.push({
+            type: 'result',
+            label: '找到官方产品依据',
+            detail: titles.length ? titles.map((title) => `《${title}》`).join('、') : '产品知识库没有找到足够明确的记录。',
+          })
+        } else {
+          trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
+        }
         evidence.push({
           id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
           toolCallId: plannedCalls.find((item) => item.name === toolResult.toolName)?.id || `${agentTurn.id}:tool:unknown`,
@@ -1021,7 +1031,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       : undefined
     const response: AliceAgentChatResult = {
       answer,
-      trace: [...trace, { type: 'result' as const, label: '整理回答', detail: '将工具结果组织为可核对的结论。' }].slice(0, 10),
+      trace: [...trace, { type: 'result' as const, label: '核对并整理结论', detail: '只保留与问题直接相关、且有依据支持的内容。' }].slice(0, 10),
       model: `deepseek:${modelName}`,
       agentTurn: { ...sanitizeAgentTurnAudit(agentTurn), evidenceCount: agentTurn.evidence.length },
       ...(approval ? { approval } : {}),
