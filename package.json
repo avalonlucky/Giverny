@@ -1,19 +1,20 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.8",
+  "version": "0.32.9",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
     "baml:generate": "baml-cli generate",
     "dev": "vite",
     "build": "npm run product-knowledge:generate && npm run baml:generate && tsc -b && vite build",
+    "ui:guard": "node scripts/check-ui-reuse.mjs",
     "lint": "eslint .",
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
     "browser:eval": "playwright test",
-    "agent:quality:gate": "npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
+    "agent:quality:gate": "npm run ui:guard && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:pages": "npm run build && npx wrangler pages deploy dist --project-name designer-worklog",
     "deploy:worker": "npm run build && npx wrangler deploy"

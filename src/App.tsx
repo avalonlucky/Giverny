@@ -5642,10 +5642,15 @@ function AgentApprovalCard({
             <span>设计类型</span>
             <input value={String(editDraft.type ?? '')} onChange={(event) => setDraftField('type', event.target.value)} />
           </label>
-          <label className="agent-approval-editor-field">
+          <div className="agent-approval-editor-field">
             <span>结算月份</span>
-            <input type="month" value={String(editDraft.settlementMonth ?? '')} onChange={(event) => setDraftField('settlementMonth', event.target.value)} />
-          </label>
+            <MonthPicker
+              value={String(editDraft.settlementMonth ?? monthPart(isoDate()))}
+              taskMonthValues={new Set([String(editDraft.settlementMonth ?? monthPart(isoDate()))])}
+              onChange={(value) => setDraftField('settlementMonth', value)}
+              minimal
+            />
+          </div>
           <div className="agent-approval-editor-schedule-head agent-approval-editor-wide">
             <span>时间与工时</span>
             <VoiceScheduleButton
