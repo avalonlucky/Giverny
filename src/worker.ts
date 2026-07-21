@@ -7,7 +7,8 @@ import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
-import { productCapabilities, searchProductHelp } from './productCapabilities'
+import { productCapabilities } from './productCapabilities'
+import { searchProductKnowledge } from './productKnowledgeSearch'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
@@ -2499,14 +2500,14 @@ async function planChatAgentTurn(
 1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
 2. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
 3. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
-4. search_product_help：查询 Giverny 的快捷键、入口和使用方法。参数：query:string。
+4. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
 5. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
 - 必须先理解整句话在问“网站怎么用”还是“某个真实任务现在怎么样”，不得因为出现“任务”或“在哪里”就选产品帮助。
 - 提到具体任务名并询问状态、进展、卡点、等待、延期或为何未交付时，必须优先调用 get_task_detail。
-- 只有用户确实在问快捷键、功能入口或操作方法时，才调用 search_product_help。
+- 用户询问网站怎么用、如何设置、有哪些更新、产品名称由来或为何这样设计时，调用 search_product_help；工具没有确认的作者意图不得自行补写。
 - 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
@@ -2551,7 +2552,7 @@ async function executeChatAgentTools(
     }
     if (name === 'search_product_help') {
       const query = agentString(tool.args?.query, 500)
-      results.push({ name, args: { query }, result: searchProductHelp(query, 5) })
+      results.push({ name, args: { query }, result: searchProductKnowledge(query, 5) })
       trace.push('工具执行：search_product_help，读取产品能力注册表。')
       continue
     }
@@ -4797,7 +4798,7 @@ async function agentProductHelpTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   const query = String(body.query || '').trim().slice(0, 500)
   if (!query) return agentFail('query 不能为空', 400)
-  const result = searchProductHelp(query, Number(body.limit) || 5)
+  const result = searchProductKnowledge(query, Number(body.limit) || 5)
   return agentOk({
     tool: 'search_product_help',
     ...result,
@@ -14680,13 +14681,36 @@ async function chatWithAi(env: Env, request: Request) {
       useWebSearch: Boolean(needsWebSearch),
     })
     const plannedTools = Array.isArray(rawPlan?.tools) ? [...rawPlan.tools] : []
+    const productHelpProbe = searchProductKnowledge(lastMsg, 1)
+    const topProductMatch = productHelpProbe.matches[0]
+    const hasHighConfidenceProductFact = Boolean(topProductMatch) && (
+      topProductMatch.id.startsWith('document.')
+        ? topProductMatch.score >= 70
+        : topProductMatch.score >= 24
+    )
+    if (hasHighConfidenceProductFact
+      && !isTaskBlockerQuestion(lastMsg)
+      && !isFinanceQuestion(lastMsg)
+      && !plannedTools.some((item) => item.name === 'search_product_help')) {
+      plannedTools.push({
+        name: 'search_product_help',
+        args: { query: lastMsg },
+        reason: '编排层验真要求：问题命中官方产品知识，必须读取产品事实后再回答。',
+      })
+    }
     if (isTaskBlockerQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'get_task_detail')) {
       plannedTools.push({ name: 'get_task_detail', args: { title: lastMsg }, reason: '编排层验真要求：任务阻塞问题必须读取任务详情与等待记录。' })
     }
     if (isFinanceQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'query_month_finance')) {
       plannedTools.push({ name: 'query_month_finance', args: { months: requestedMonths }, reason: '编排层验真要求：财务结论必须由确定性计算工具生成。' })
     }
-    const plan: ChatAgentPlanResponse = { ...rawPlan, tools: plannedTools }
+    const plan: ChatAgentPlanResponse = {
+      ...rawPlan,
+      intent: hasHighConfidenceProductFact && !isTaskBlockerQuestion(lastMsg) && !isFinanceQuestion(lastMsg)
+        ? 'product_help'
+        : rawPlan?.intent,
+      tools: plannedTools,
+    }
     orchestratedTurn = {
       ...orchestratedTurn,
       intent: normalizeAgentIntent(plan?.intent),
@@ -15221,7 +15245,7 @@ function isLocalCliWriteIntent(message: string) {
 }
 
 async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string, workspaceId: string) {
-  const productHelp = isWorkDataQuestion(question) ? { query: question, total: 0, matches: [] } : searchProductHelp(question, 5)
+  const productHelp = isWorkDataQuestion(question) ? { query: question, total: 0, matches: [] } : searchProductKnowledge(question, 5)
   const productContext = productHelp.matches.length
     ? `\n\n=== Giverny 产品能力检索结果 ===\n${JSON.stringify(productHelp)}\n=== 产品能力检索结束 ===\n`
     : ''

@@ -48,12 +48,33 @@ function ambiguousTitle(text) {
   return ''
 }
 
+function productHelpAnswer(text) {
+  const questionMatch = text.match(/用户问题：\s*([\s\S]*?)\s*工具结果 JSON：/)
+  const subject = questionMatch?.[1]?.trim() || text
+  if (/显示金额|隐藏金额/.test(subject)) {
+    return '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。'
+  }
+  if (/最近更新|更新了哪些|更新了什么|最新版本/.test(subject)) {
+    return '当前版本是 **v0.32.1**，最近重点更新了产品知识验真、Agent 动态重规划、执行审计、统一 AgentTurn 与真实等待原因读取。'
+  }
+  if (/为什么叫.*(?:Giverny|吉维尼)|(?:Giverny|吉维尼).*由来|品牌故事/i.test(subject)) {
+    return 'Giverny 的名字是作者为致敬莫奈而取。莫奈晚年居住在法国小镇吉维尼；网站以“莫奈花园”为主题，四季配色取自《睡莲》。品牌理念是让产品加入艺术成分、让创作成为乐趣，Slogan 是“让创作在自己的花园里生长”。'
+  }
+  if (/Giverny\s*主题|吉维尼(?:主题|模式)|开通.*主题|开启.*主题/i.test(subject)) {
+    return '进入 **设置 → 外观 → 吉维尼模式**，打开开关即可启用；季节可跟随当前日期或手动锁定。'
+  }
+  if (/怎么设置大模型|如何设置大模型|配置大模型|模型设置|API\s*Key/i.test(subject)) {
+    return '进入 **设置 → 模型**，配置并启用服务商，填写 API Key 后加载模型、选择供应商默认模型，最后在页面上方设置全站文字模型和图片模型。'
+  }
+  return '已根据站内产品知识工具返回的官方资料完成回答。'
+}
+
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
   if (text.includes('工具结果 JSON')) {
-    if (/显示金额|隐藏金额/.test(text)) {
-      return completion({ role: 'assistant', content: '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。' })
+    if (/显示金额|隐藏金额|Giverny\s*主题|吉维尼|大模型|模型设置|最近更新|更新了哪些|更新了什么|品牌故事/i.test(text)) {
+      return completion({ role: 'assistant', content: productHelpAnswer(text) })
     }
     if (/用户问题：[\s\S]*?(?:卡在哪|为什么一直没有交付)/.test(text)) {
       return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
@@ -65,7 +86,7 @@ function chooseTool(messages) {
   if (isChatPlanner) {
     const questionMatch = text.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)"/)
     const plannerQuestion = questionMatch ? JSON.parse(`"${questionMatch[1]}"`) : text
-    if (/快捷键|怎么用键盘|功能入口/.test(plannerQuestion)) {
+    if (/快捷键|怎么用键盘|功能入口|网站怎么用|怎么设置|如何设置|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'product_help', tools: [{ name: 'search_product_help', args: { query: plannerQuestion }, reason: '用户在询产品用法' }], confidence: 0.99 }) })
     }
     if (/卡在哪|为什么一直没有交付/.test(plannerQuestion)) {
@@ -131,7 +152,7 @@ function chooseTool(messages) {
   }
   if (tools.length > 0) {
     if (tools.includes('search_product_help')) {
-      return completion({ role: 'assistant', content: '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。' })
+      return completion({ role: 'assistant', content: productHelpAnswer(text) })
     }
     if (tools.includes('get_task_detail') && /卡在哪|为什么一直没有交付/.test(text)) {
       return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
@@ -151,7 +172,7 @@ function chooseTool(messages) {
   if (/天气|删掉|所有任务都改成|所有密钥/.test(text)) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
   }
-  if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库/.test(text)) {
+  if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})

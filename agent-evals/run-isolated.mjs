@@ -113,6 +113,30 @@ async function runMcpChecks() {
   if (productHelpResult.isError || !Array.isArray(productMatches) || !productMatches.some((item) => String(item.answer || '').includes('Command + Shift + M'))) {
     throw new Error('MCP product help did not return the authoritative shortcut')
   }
+  const themeHelpResult = await request(61, 'tools/call', { name: 'search_product_help', arguments: { query: '目前我这个网站怎么开通 Giverny 主题', limit: 3 } })
+  if (themeHelpResult.isError || !themeHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('设置 → 外观 → 吉维尼模式'))) {
+    throw new Error(`MCP product help did not return the Giverny theme path: ${JSON.stringify(themeHelpResult.structuredContent)}`)
+  }
+  const modelHelpResult = await request(62, 'tools/call', { name: 'search_product_help', arguments: { query: '怎么设置大模型', limit: 3 } })
+  if (modelHelpResult.isError || !modelHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('填写 API Key'))) {
+    throw new Error(`MCP product help did not return the model setup workflow: ${JSON.stringify(modelHelpResult.structuredContent)}`)
+  }
+  const releaseHelpResult = await request(63, 'tools/call', { name: 'search_product_help', arguments: { query: '最近更新了哪些内容', limit: 3 } })
+  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.1'))) {
+    throw new Error(`MCP product help did not return recent releases: ${JSON.stringify(releaseHelpResult.structuredContent)}`)
+  }
+  const brandHelpResult = await request(64, 'tools/call', { name: 'search_product_help', arguments: { query: '这个网站为什么叫吉维尼', limit: 3 } })
+  if (brandHelpResult.isError || !brandHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('致敬莫奈') && String(item.answer || '').includes('让创作在自己的花园里生长'))) {
+    throw new Error(`MCP product help did not return the author-confirmed brand story: ${JSON.stringify(brandHelpResult.structuredContent)}`)
+  }
+  const operationsHelpResult = await request(65, 'tools/call', { name: 'search_product_help', arguments: { query: 'Agent 失败学习与回归在哪里查看', limit: 5 } })
+  if (operationsHelpResult.isError || Number(operationsHelpResult.structuredContent?.indexedDocuments || 0) < 500 || !operationsHelpResult.structuredContent?.matches?.some((item) => String(item.sourceLabel || '').includes('Agent 运营手册'))) {
+    throw new Error(`MCP product help did not search the generated operations manual index: ${JSON.stringify(operationsHelpResult.structuredContent)}`)
+  }
+  const historicalReleaseResult = await request(66, 'tools/call', { name: 'search_product_help', arguments: { query: 'v0.30.38 更新了什么', limit: 5 } })
+  if (historicalReleaseResult.isError || !historicalReleaseResult.structuredContent?.matches?.some((item) => String(item.sourceLabel || '').includes('Giverny 更新日志') && String(item.answer || '').includes('验收存档图后台压缩'))) {
+    throw new Error(`MCP product help did not search historical release notes: ${JSON.stringify(historicalReleaseResult.structuredContent)}`)
+  }
   const taskDetailResult = await request(7, 'tools/call', { name: 'get_task_detail', arguments: { taskId: 1 } })
   const waitingRecords = taskDetailResult.structuredContent?.waitingRecords
   if (taskDetailResult.isError || !Array.isArray(waitingRecords) || waitingRecords[0]?.note !== '等待刘总的建议' || waitingRecords[0]?.active !== true || waitingRecords[0]?.elapsedMinutes <= 0) {
@@ -977,6 +1001,29 @@ async function runLocalCliBridgeCheck(cookie) {
   const productHelpText = await productHelpResponse.text()
   if (!productHelpResponse.ok || !productHelpText.includes('Command + Shift + M') || !productHelpText.includes('search_product_help') || productHelpText.includes('"commandId"')) {
     throw new Error(`Product help did not bypass model and local CLI routing: ${productHelpText}`)
+  }
+
+  const productQuestions = [
+    { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
+    { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.1', '动态重规划'] },
+    { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
+  ]
+  for (const [index, item] of productQuestions.entries()) {
+    const response = await fetch(`${base}/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+      body: JSON.stringify({
+        browserDeviceKey,
+        modelChoice: 'deepseek-v4-pro',
+        month: '2026-07',
+        messages: [{ role: 'user', content: item.question }],
+      }),
+    })
+    const responseText = await response.text()
+    if (!response.ok || !responseText.includes('search_product_help') || item.expected.some((value) => !responseText.includes(value)) || responseText.includes('"commandId"')) {
+      throw new Error(`Product knowledge question ${index + 1} was not grounded: ${responseText}`)
+    }
   }
 
   const blockerResponse = await fetch(`${base}/api/ai/chat`, {

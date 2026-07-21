@@ -53,7 +53,7 @@ export const agentReadToolRegistry = {
   },
   search_product_help: {
     title: '查询产品使用说明',
-    description: '查询 Giverny 的快捷键、功能入口、操作流程、模型路由、权限边界和产品规则。网站怎么用的问题必须优先调用。',
+    description: '查询 Giverny 的快捷键、功能入口、操作流程、模型设置、版本更新、品牌说明、模型路由、权限边界和产品规则。网站怎么用、产品是什么或为何这样设计的问题必须优先调用。',
     endpoint: 'product-help',
     policy: { risk: 'read', deterministic: true, source: 'product_registry', scopes: ['product:read'] },
     inputSchema: z.object({

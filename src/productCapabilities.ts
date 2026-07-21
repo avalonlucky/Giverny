@@ -23,6 +23,8 @@ export type ProductCapability = {
   adminOnly?: boolean
   shortcut?: Pick<ProductShortcutItem, 'keys' | 'action'>
   answer?: string
+  evidenceStatus?: 'confirmed' | 'partial'
+  sourceLabel?: string
 }
 
 export type ProductHelpMatch = Omit<ProductCapability, 'searchTerms' | 'answer'> & {
@@ -102,6 +104,56 @@ const shortcutCapabilities: ProductCapability[] = productShortcutHelpGroups.flat
 
 const featureCapabilities: ProductCapability[] = [
   {
+    id: 'feature.giverny-theme',
+    category: '外观',
+    title: '吉维尼模式',
+    summary: '吉维尼模式是可选的莫奈花园主题，默认关闭，可在外观设置中手动开启并随季节变换色彩。',
+    details: [
+      '进入“设置 → 外观 → 吉维尼模式”，打开开关即可启用。',
+      '季节默认跟随电脑当前日期，也可以手动锁定春、夏、秋或冬。',
+      '任务行是否按状态上色由工作台“任务明细”旁的“状态色”开关控制，与吉维尼模式是两个独立设置。',
+    ],
+    route: '设置 → 外观 → 吉维尼模式',
+    searchTerms: ['吉维尼主题', 'giverny主题', 'Giverny主题', '吉维尼模式', '莫奈主题', '花园主题', '季节主题', '怎么开主题', '开启主题', '外观主题'],
+    evidenceStatus: 'confirmed',
+    sourceLabel: '使用手册 · 外观设置',
+  },
+  {
+    id: 'feature.giverny-name-origin',
+    category: '品牌',
+    title: 'Giverny 名称与品牌由来',
+    summary: 'Giverny 的名字是作者为致敬莫奈而取：莫奈晚年居住在法国小镇吉维尼，网站以“莫奈花园”为主题，并从《睡莲》中提取四季配色。',
+    details: [
+      '莫奈晚年居住的法国小镇名为 Giverny（吉维尼），这里也是莫奈花园与《睡莲》系列的重要创作背景。',
+      '网站的四季配色取自《睡莲》的色彩，整站主题是“莫奈花园”。',
+      '品牌理念：一个产品不能仅仅是产品，还应该加入艺术的成分，让创作成为一种乐趣。',
+      '品牌 Slogan：让创作在自己的花园里生长。',
+    ],
+    route: '使用手册 → 品牌故事',
+    searchTerms: ['为什么叫Giverny', '为什么叫吉维尼', 'Giverny名字由来', '吉维尼名字由来', '网站名字', '品牌名称', '品牌由来', '命名原因', '作者起名', '为什么取这个名字', '名字含义', '这个名字什么意思'],
+    evidenceStatus: 'confirmed',
+    sourceLabel: '使用手册 · 品牌故事（作者确认）',
+  },
+  {
+    id: 'feature.recent-releases',
+    category: '产品版本',
+    title: '最近更新',
+    summary: '当前版本是 v0.32.1，最近重点完善了产品知识验真、Agent 编排、执行审计、等待原因读取、语音时间录入和附件可靠性。',
+    details: [
+      'v0.32.1：产品问题强制查询官方知识；补齐模型设置、最近更新、吉维尼主题和作者确认的品牌故事。',
+      'v0.32.0：Agent 支持工具失败重试、证据不足时动态补查并重新生成答案；AI 运行中心新增执行审计。',
+      'v0.31.0：统一 AgentTurn、工具权限、确定性验真和工作区签名隔离，主模型保持优先。',
+      'v0.30.42：修复“任务卡在哪里”误答快捷键，改为读取真实等待原因和已等待时长。',
+      'v0.30.40：语音排期支持“两点半、一刻、三刻”等自然时间表达。',
+      'v0.30.39：验收面板打开后可在任意位置直接粘贴图片附件。',
+      '完整记录可在“设置 → 产品版本”或 GitHub Releases 查看。',
+    ],
+    route: '设置 → 产品版本',
+    searchTerms: ['最近更新', '最新更新', '更新了哪些', '更新了什么', '最近改了什么', '新功能', '版本更新', '更新内容', '当前版本', '最新版本', 'release notes', 'changelog'],
+    evidenceStatus: 'confirmed',
+    sourceLabel: 'CHANGELOG · 最近版本',
+  },
+  {
     id: 'feature.agent-routing',
     category: '工作助手',
     title: '工作助手模型与执行路由',
@@ -161,14 +213,19 @@ const featureCapabilities: ProductCapability[] = [
     id: 'feature.model-settings',
     category: '设置',
     title: '模型与服务商设置',
-    summary: '管理员先配置并启用服务商，再从已加载模型中设置供应商默认模型和全站文字、图片默认模型。',
+    summary: '管理员可以在模型设置中配置供应商 API Key、加载模型并分别指定文字与图片默认模型。',
     details: [
-      '工作助手里手动选择的双模态模型同时优先处理文字和图片；调用失败后才回落到全站默认模型。',
-      '服务商未启用时显示灰点，其模型不会出现在默认模型候选中。',
+      '进入“设置 → 模型”。先在文字模型服务商或图片识别服务商区域选择 DeepSeek、豆包、通义千问、Kimi 等供应商并点击“配置”。',
+      '填写 API Key；Base URL 通常会随供应商自动带出，也可以按官方控制台给出的专属地址修改。点击“加载模型”读取该 Key 可访问的模型列表。',
+      '在供应商模型列表中选定默认模型并启用服务商。启用成功的服务商显示绿点，未启用显示灰点且不会进入上方候选。',
+      '最后在页面上方分别选择全站“文字模型”和“图片模型”；工作助手中手动选择的模型在当前会话优先，只有极端故障才启动备用链路。',
+      '可在供应商配置中点击“测试”核对 Key、Base URL 和模型是否真实可用；不要只以已保存作为可用依据。',
     ],
     route: '设置 → 模型',
-    searchTerms: ['模型设置', '服务商配置', 'API Key', '默认文字模型', '默认图片模型', '加载模型', '豆包', '通义千问', 'DeepSeek'],
+    searchTerms: ['模型设置', '怎么设置大模型', '如何设置大模型', '配置大模型', '大模型怎么配置', '怎么接入模型', '服务商配置', 'API Key', 'API密钥', '默认文字模型', '默认图片模型', '加载模型', '获取模型', '启用服务商', '测试模型', '豆包', '通义千问', 'DeepSeek'],
     adminOnly: true,
+    evidenceStatus: 'confirmed',
+    sourceLabel: '使用手册 · AI 模型设置',
   },
   {
     id: 'feature.ai-hours',
@@ -233,8 +290,10 @@ function capabilityScore(capability: ProductCapability, query: string) {
 function capabilityAnswer(capability: ProductCapability) {
   if (capability.answer) return capability.answer
   const parts = [`**${capability.title}**：${capability.summary}`]
+  if (capability.evidenceStatus === 'partial') parts.push('资料状态：**部分确认**。以下内容会区分已记录事实与尚未记录的信息。')
   if (capability.route) parts.push(`入口：${capability.route}。`)
   if (capability.details?.length) parts.push(capability.details.map((item) => `- ${item}`).join('\n'))
+  if (capability.sourceLabel) parts.push(`依据：${capability.sourceLabel}。`)
   return parts.join('\n\n')
 }
 
@@ -253,6 +312,8 @@ export function searchProductHelp(query: string, limit = 5) {
       route: capability.route,
       adminOnly: capability.adminOnly,
       shortcut: capability.shortcut,
+      evidenceStatus: capability.evidenceStatus,
+      sourceLabel: capability.sourceLabel,
       answer: capabilityAnswer(capability),
       score,
     }))

@@ -96,6 +96,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('query_month_finance')
     issues.push('金额或工时结论没有经过财务计算工具。')
   }
+  if (turn.intent === 'product_help' && !turn.evidence.some((item) => item.toolName === 'search_product_help')) {
+    requiredTools.push('search_product_help')
+    issues.push('产品说明没有经过官方产品知识工具核对。')
+  }
   if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(turn.question)
     && !turn.evidence.some((item) => item.toolName === 'get_task_detail')) {
     requiredTools.push('get_task_detail')

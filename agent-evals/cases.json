@@ -79,6 +79,10 @@
     { "id": "product-help-01", "category": "product_help", "prompt": "显示金额和隐藏金额的快捷键是什么？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-02", "category": "product_help", "prompt": "11 月和 12 月怎么用键盘直接跳转？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-03", "category": "product_help", "prompt": "本机 CLI 能直接修改 Giverny 数据库吗？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-04", "category": "product_help", "prompt": "目前我这个网站怎么开通 Giverny 主题？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-05", "category": "product_help", "prompt": "这个网站最近更新了哪些内容？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-06", "category": "product_help", "prompt": "我应该怎么设置大模型？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-07", "category": "product_help", "prompt": "这个网站为什么叫吉维尼？作者起这个名字有什么原因？", "expect": { "tools": ["search_product_help"] } },
 
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },
