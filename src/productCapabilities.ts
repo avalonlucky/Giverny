@@ -258,17 +258,3 @@ export function searchProductHelp(query: string, limit = 5) {
     }))
   return { query, total: matches.length, matches }
 }
-
-export function resolveDirectProductHelp(query: string) {
-  const result = searchProductHelp(query, 3)
-  const primary = result.matches[0]
-  if (!primary) return null
-  const hasHelpIntent = /快捷键|怎么|如何|在哪|哪里|能否|能不能|是否支持|是什么|使用|操作|入口|菜单|导航|显示|隐藏|切换|设置/.test(query)
-    || /(?:能|可以|可不可以).{0,30}(?:吗|么)/.test(query)
-  if (!hasHelpIntent || primary.score < 42) return null
-  return {
-    ...result,
-    answer: primary.answer,
-    primary,
-  }
-}

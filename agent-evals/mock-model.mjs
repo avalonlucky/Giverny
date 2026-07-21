@@ -51,6 +51,34 @@ function ambiguousTitle(text) {
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
+  if (text.includes('工具结果 JSON')) {
+    if (/显示金额|隐藏金额/.test(text)) {
+      return completion({ role: 'assistant', content: '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。' })
+    }
+    if (/用户问题：[\s\S]*?(?:卡在哪|为什么一直没有交付)/.test(text)) {
+      return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
+    }
+    return completion({ role: 'assistant', content: '已根据站内工具返回的真实数据完成回答。' })
+  }
+  const isChatPlanner = messages.some((message) => message.role === 'system' && String(message.content || '').includes('Giverny 的聊天智能体规划器'))
+    || (text.includes('requestedMonthCandidates') && text.includes('hasAttachments') && text.includes('useKnowledge'))
+  if (isChatPlanner) {
+    const questionMatch = text.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)"/)
+    const plannerQuestion = questionMatch ? JSON.parse(`"${questionMatch[1]}"`) : text
+    if (/快捷键|怎么用键盘|功能入口/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'product_help', tools: [{ name: 'search_product_help', args: { query: plannerQuestion }, reason: '用户在询产品用法' }], confidence: 0.99 }) })
+    }
+    if (/卡在哪|为什么一直没有交付/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'get_task_detail', args: { title: '公司产品分套的修改' }, reason: '需要核对具体任务的等待记录' }], confidence: 0.99 }) })
+    }
+    if (/收入|金额|工时|结算|工资/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'query_month_finance', args: { months: /6月/.test(plannerQuestion) ? ['2026-06'] : ['2026-07'] }, reason: '需要读取确定性结算数据' }], confidence: 0.98 }) })
+    }
+    if (/任务|工作|项目/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'search_tasks', args: { query: plannerQuestion, limit: 12 }, reason: '需要查询真实任务数据' }], confidence: 0.9 }) })
+    }
+    return completion({ role: 'assistant', content: JSON.stringify({ intent: 'general', tools: [{ name: 'none', args: {}, reason: '不需要站内数据' }], confidence: 0.9 }) })
+  }
   if (text.includes('STRICT_JSON_REPAIR_EVAL')) {
     strictJsonRepairAttempts += 1
     if (strictJsonRepairAttempts === 1) {
@@ -102,6 +130,12 @@ function chooseTool(messages) {
     })
   }
   if (tools.length > 0) {
+    if (tools.includes('search_product_help')) {
+      return completion({ role: 'assistant', content: '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。' })
+    }
+    if (tools.includes('get_task_detail') && /卡在哪|为什么一直没有交付/.test(text)) {
+      return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
+    }
     if (text.includes('最近一次反馈') && !tools.includes('get_task_detail')) {
       return toolCall('get_task_detail', { taskId: 1 })
     }
@@ -116,6 +150,9 @@ function chooseTool(messages) {
 
   if (/天气|删掉|所有任务都改成|所有密钥/.test(text)) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
+  }
+  if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库/.test(text)) {
+    return toolCall('search_product_help', { query: text, limit: 5 })
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
@@ -212,7 +249,7 @@ function chooseTool(messages) {
       isAcceptanceProgress: text.includes('验收进展'),
     })
   }
-  if (/做到哪|所有进展|哪些附件|谁提的需求|几段工时|验收情况|封套项目|封套任务的详情|最近一次反馈/.test(text)) {
+  if (/做到哪|所有进展|哪些附件|谁提的需求|几段工时|验收情况|封套项目|封套任务的详情|最近一次反馈|卡在哪|为什么一直没有交付/.test(text)) {
     const title = text.includes('封套任务的详情') ? '封套' : ''
     return toolCall('get_task_detail', title ? { title } : { taskId: 1 })
   }

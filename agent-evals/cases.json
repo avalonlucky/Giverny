@@ -34,6 +34,7 @@
     { "id": "detail-08", "category": "task_detail", "prompt": "最近一次反馈是什么", "expect": { "tools": ["search_tasks", "get_task_detail"] } },
     { "id": "detail-09", "category": "task_detail", "prompt": "哪个任务提到了背景电流声降噪", "expect": { "tools": ["search_tasks"] } },
     { "id": "detail-10", "category": "task_detail", "prompt": "找一下和产品矩阵图相关的工作", "expect": { "tools": ["search_tasks"] } },
+    { "id": "detail-11", "category": "task_detail", "prompt": "查一下这个公司产品分套的修改，这个任务现在卡在哪里？为什么一直没有交付呢？", "expect": { "tools": ["get_task_detail"] } },
 
     { "id": "attachment-01", "category": "attachment_search", "prompt": "帮我看一下关于直播海报邀请函的附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
     { "id": "attachment-02", "category": "attachment_search", "prompt": "找到当天邀请V1.0B01.jpg这个文件", "expect": { "tools": ["search_attachments"], "attachments": true } },

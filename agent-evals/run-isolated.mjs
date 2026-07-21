@@ -944,6 +944,26 @@ async function runLocalCliBridgeCheck(cookie) {
     throw new Error(`Product help did not bypass model and local CLI routing: ${productHelpText}`)
   }
 
+  const blockerResponse = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
+    body: JSON.stringify({
+      browserDeviceKey,
+      modelChoice: 'deepseek-v4-pro',
+      month: '2026-07',
+      messages: [{ role: 'user', content: '查一下这个公司产品分套的修改，这个任务现在卡在哪里？为什么一直没有交付呢？' }],
+    }),
+  })
+  const blockerText = await blockerResponse.text()
+  if (!blockerResponse.ok
+    || !blockerText.includes('等待刘总的建议')
+    || !blockerText.includes('get_task_detail')
+    || !blockerText.includes('模型规划')
+    || blockerText.includes('快捷键')
+    || blockerText.includes('⌘ ⌥ 2')) {
+    throw new Error(`Task blocker query did not return the concrete waiting reason: ${blockerText}`)
+  }
+
   const explicitModelResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },

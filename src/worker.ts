@@ -5,7 +5,7 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
-import { productCapabilities, resolveDirectProductHelp, searchProductHelp } from './productCapabilities'
+import { productCapabilities, searchProductHelp } from './productCapabilities'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
@@ -2354,7 +2354,77 @@ function isFinanceQuestion(text: string) {
 }
 
 function isWorkDataQuestion(text: string) {
-  return /(?:任务|工作|项目|进展|进度|完成|未完成|没完成|验收|附件|收入|金额|多少钱|工时|计时|结算|明细|统计|查询|查看|查一下|列出|有哪些|哪几个|新增|新建|创建|记录|写入|修改|反馈|改稿|确认执行|可以新建)/.test(text)
+  return /(?:任务|工作|项目|进展|进度|完成|未完成|没完成|验收|附件|收入|金额|多少钱|工时|计时|结算|明细|统计|查询|查看|查一下|列出|有哪些|哪几个|新增|新建|创建|记录|写入|修改|反馈|改稿|等待|阻塞|卡在|卡住|延期|交付|确认执行|可以新建)/.test(text)
+}
+
+function isTaskBlockerQuestion(text: string) {
+  return /(?:卡在哪|卡在|卡住|阻塞|等待原因|延期原因|为什么.{0,20}(?:没|未).{0,10}(?:交付|完成)|为什么一直)/.test(text)
+}
+
+function normalizedTaskMatchText(value: string) {
+  return value.normalize('NFKC').toLowerCase().replace(/[的了呢吗啊吧一下这个该当前现在任务工作项目\s\p{P}\p{S}]+/gu, '')
+}
+
+function taskQuestionMatchScore(title: string, question: string) {
+  const normalizedTitle = normalizedTaskMatchText(title)
+  const normalizedQuestion = normalizedTaskMatchText(question)
+  if (!normalizedTitle || !normalizedQuestion) return 0
+  if (normalizedQuestion.includes(normalizedTitle)) return 1
+  const titleChars = new Set(normalizedTitle)
+  const sharedChars = [...titleChars].filter((char) => normalizedQuestion.includes(char)).length / titleChars.size
+  const titlePairs = Array.from({ length: Math.max(0, normalizedTitle.length - 1) }, (_, index) => normalizedTitle.slice(index, index + 2))
+  const sharedPairs = titlePairs.length ? titlePairs.filter((pair) => normalizedQuestion.includes(pair)).length / titlePairs.length : 0
+  return sharedChars * 0.45 + sharedPairs * 0.55
+}
+
+function formatAgentElapsed(minutes: number) {
+  const safeMinutes = Math.max(0, Math.floor(minutes))
+  const days = Math.floor(safeMinutes / 1440)
+  const hours = Math.floor((safeMinutes % 1440) / 60)
+  const restMinutes = safeMinutes % 60
+  return [days ? `${days} 天` : '', hours ? `${hours} 小时` : '', restMinutes || (!days && !hours) ? `${restMinutes} 分钟` : ''].filter(Boolean).join(' ')
+}
+
+async function resolveTaskBlockerAnswer(env: Env, question: string, workspaceId: string) {
+  if (!isTaskBlockerQuestion(question)) return null
+  const rows = await env.DB.prepare(
+    `SELECT id, title, status, progress, actual_hours, estimated_delivery_date, time_entries_json, waiting_entries_json
+       FROM tasks
+      WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 120`,
+  ).bind(workspaceId).all<DbTask>()
+  const ranked = (rows.results ?? [])
+    .map((task) => ({ task, score: taskQuestionMatchScore(task.title || '', question) }))
+    .filter((item) => item.score >= 0.58)
+    .sort((left, right) => right.score - left.score)
+  const best = ranked[0]
+  if (!best || (ranked[1] && best.score - ranked[1].score < 0.08)) return null
+  const waiting = agentWaitingRecords(best.task)
+    .filter((entry) => entry.active)
+    .sort((left, right) => right.startAt.localeCompare(left.startAt))
+  const currentWait = waiting[0]
+  if (!currentWait) return null
+  const reason = currentWait.note || currentWait.reason || '等待外部确认'
+  const reasonDetail = currentWait.reason && currentWait.reason !== reason ? `（${currentWait.reason}）` : ''
+  const startLabel = currentWait.startAt.replace('T', ' ')
+  return {
+    content: [
+      `查到了，**${best.task.title}** 目前确实卡在等待环节，不是系统没有记录。`,
+      '',
+      `- **具体等待原因**：${reason}${reasonDetail}`,
+      `- **开始等待**：${startLabel}`,
+      `- **已等待**：${formatAgentElapsed(currentWait.elapsedMinutes)}`,
+      `- **当前状态**：${best.task.status || '未标记'}，进度 ${Number(best.task.progress) || 0}%`,
+      '',
+      `所以一直没有交付的直接原因是：**${reason}**。`,
+    ].join('\n'),
+    trace: [
+      '识别为具体任务阻塞查询',
+      `匹配任务：${best.task.title} [tool:search_tasks]`,
+      '读取当前等待记录 [tool:get_task_detail]',
+    ],
+  }
 }
 
 function isBackgroundAnalysisQuestion(text: string) {
@@ -2394,9 +2464,9 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'query_recent_tasks' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'search_tasks' | 'get_task_detail' | 'search_product_help' | 'none'
 type ChatAgentPlanResponse = {
-  intent?: 'finance' | 'worklog' | 'knowledge' | 'general' | 'unknown'
+  intent?: 'finance' | 'task_data' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
   confidence?: number
   question?: string
@@ -2424,13 +2494,19 @@ async function planChatAgentTurn(
   const systemPrompt = `你是 Giverny 的聊天智能体规划器。你的任务是先理解用户问题，再决定是否调用工具；不要直接回答用户。
 可用工具：
 1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
-2. query_recent_tasks：查询近期任务摘要。参数：limit:number。
-3. none：不需要工具，交给普通聊天模型回答。
+2. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
+3. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
+4. search_product_help：查询 Giverny 的快捷键、入口和使用方法。参数：query:string。
+5. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
+- 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
+- 必须先理解整句话在问“网站怎么用”还是“某个真实任务现在怎么样”，不得因为出现“任务”或“在哪里”就选产品帮助。
+- 提到具体任务名并询问状态、进展、卡点、等待、延期或为何未交付时，必须优先调用 get_task_detail。
+- 只有用户确实在问快捷键、功能入口或操作方法时，才调用 search_product_help。
 - 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
-- 用户问任务概览、最近做了什么、效率如何，可调用 query_recent_tasks。
+- 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
 - 只输出 JSON，不要回答正文。`
   return callSelectedModelJson<ChatAgentPlanResponse>(
@@ -2438,7 +2514,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"worklog"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"query_recent_tasks"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"search_tasks"|"get_task_detail"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2448,6 +2524,7 @@ async function executeChatAgentTools(
   plan: ChatAgentPlanResponse | null,
   fallbackMonths: string[],
   hourlyRate: number,
+  workspaceId: string,
 ): Promise<{ results: ChatAgentToolResult[]; trace: string[] }> {
   const results: ChatAgentToolResult[] = []
   const trace: string[] = []
@@ -2455,33 +2532,58 @@ async function executeChatAgentTools(
   let usedFinanceFallback = false
 
   for (const tool of plannedTools) {
-    const name = tool.name === 'query_month_finance' || tool.name === 'query_recent_tasks' ? tool.name : 'none'
+    const name = ['query_month_finance', 'search_tasks', 'get_task_detail', 'search_product_help'].includes(String(tool.name))
+      ? tool.name as ChatAgentToolName
+      : 'none'
     if (name === 'none') continue
     if (name === 'query_month_finance') {
       const rawMonths = Array.isArray(tool.args?.months) ? tool.args?.months : fallbackMonths
       const months = rawMonths.map((item) => String(item)).filter((item) => /^\d{4}-\d{2}$/.test(item)).slice(0, 12)
       const finalMonths = months.length ? months : fallbackMonths
       if (!finalMonths.length) continue
-      const stats = await computeMonthFinanceStats(env, finalMonths, hourlyRate)
+      const stats = await computeMonthFinanceStats(env, finalMonths, hourlyRate, workspaceId)
       results.push({ name, args: { months: finalMonths }, result: { hourlyRate, stats } })
       trace.push(`工具执行：query_month_finance(${finalMonths.join('、')})，从 D1 读取任务、工时和计费状态。`)
       continue
     }
-    if (name === 'query_recent_tasks') {
-      const limit = Math.min(Math.max(Number(tool.args?.limit ?? 12), 1), 30)
+    if (name === 'search_product_help') {
+      const query = agentString(tool.args?.query, 500)
+      results.push({ name, args: { query }, result: searchProductHelp(query, 5) })
+      trace.push('工具执行：search_product_help，读取产品能力注册表。')
+      continue
+    }
+    if (name === 'search_tasks' || name === 'get_task_detail') {
+      const query = agentString(tool.args?.title ?? tool.args?.query, 300)
+      const limit = name === 'get_task_detail' ? 6 : Math.min(Math.max(Number(tool.args?.limit ?? 12), 1), 30)
       const rows = await env.DB.prepare(
-        'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_billable FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT ?',
+        `SELECT * FROM tasks
+         WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+         ORDER BY updated_at DESC, created_at DESC LIMIT 120`,
       )
-        .bind(limit)
+        .bind(workspaceId)
         .all<DbTask>()
-      results.push({ name, args: { limit }, result: rows.results ?? [] })
-      trace.push(`工具执行：query_recent_tasks(${limit})，读取近期任务摘要。`)
+      const ranked = (rows.results ?? [])
+        .map((task) => ({ task, score: query ? taskQuestionMatchScore(task.title || '', query) : 0.5 }))
+        .filter((item) => !query || item.score >= 0.3)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit)
+      const taskResults = ranked.map(({ task, score }) => ({
+        task: toTask(task),
+        waitingRecords: agentWaitingRecords(task),
+        matchScore: Number(score.toFixed(3)),
+      }))
+      results.push({ name, args: { query, limit }, result: {
+        count: taskResults.length,
+        needsDisambiguation: name === 'get_task_detail' && taskResults.length > 1 && taskResults[0].matchScore - taskResults[1].matchScore < 0.08,
+        results: taskResults,
+      } })
+      trace.push(`工具执行：${name}，按完整语义匹配任务并读取等待记录。`)
     }
   }
 
   if (results.length === 0 && fallbackMonths.length > 0) {
     usedFinanceFallback = true
-    const stats = await computeMonthFinanceStats(env, fallbackMonths, hourlyRate)
+    const stats = await computeMonthFinanceStats(env, fallbackMonths, hourlyRate, workspaceId)
     results.push({ name: 'query_month_finance', args: { months: fallbackMonths }, result: { hourlyRate, stats } })
     trace.push(`工具补救：规划器未给出可执行金额工具参数，使用月份候选 ${fallbackMonths.join('、')} 计算。`)
   }
@@ -2504,6 +2606,8 @@ async function composeChatAgentAnswer(
 要求：
 - 如果工具结果里有金额、工时、月份，必须严格使用工具结果数字，不要重算或改写为其他数值。
 - 先给结论，再给分月/分项说明。
+- 如果用户问某任务为什么没交付或卡在哪里，必须优先读取 waitingRecords 中 active=true 的 note/reason，明确说出等待谁、等待什么、开始时间和已等待时长。
+- 如果工具返回 needsDisambiguation=true，必须请用户选择，不得自行假定。
 - 语气自然、简洁，不要说“根据数据无法计算”。
 - 可以使用 Markdown 加粗突出关键金额或关键结论。
 
@@ -14269,18 +14373,6 @@ async function chatWithAi(env: Env, request: Request) {
 
   // 判断是否需要联网搜索（用户在问自身数据则不搜）
   const lastMsg = messages.at(-1)?.content ?? ''
-  const directProductHelp = resolveDirectProductHelp(lastMsg)
-  if (directProductHelp) {
-    return ok({
-      content: directProductHelp.answer,
-      runtime: 'site-tools',
-      trace: [
-        '识别为 Giverny 产品使用问题',
-        '查询产品能力注册表 [tool:search_product_help]',
-        `已匹配：${directProductHelp.primary.title}`,
-      ],
-    })
-  }
   const DATA_KW = ['今天', '今日', '本月', '上月', '工时', '任务', '收入', '赚', '计时', '结算', '明细', '近期', '最近', '历史', '验收']
   const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && !DATA_KW.some((kw) => lastMsg.includes(kw))
 
@@ -14447,20 +14539,49 @@ async function chatWithAi(env: Env, request: Request) {
       plan,
       requestedMonths.length > 0 && isFinanceQuestion(lastMsg) ? requestedMonths : [],
       hourlyRate,
+      workspaceId,
     )
     if (toolResults.length > 0) {
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
-      const finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
+      let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
+      let evidenceCorrection = ''
+      if (isTaskBlockerQuestion(lastMsg)) {
+        const detailResult = toolResults.find((item) => item.name === 'get_task_detail')?.result as {
+          results?: Array<{ task?: Task; waitingRecords?: ReturnType<typeof agentWaitingRecords> }>
+        } | undefined
+        const matchedTask = detailResult?.results?.[0]
+        const activeWait = matchedTask?.waitingRecords?.find((entry) => entry.active)
+        const reason = activeWait?.note || activeWait?.reason || ''
+        if (reason && !finalContent.includes(reason)) {
+          finalContent = [
+            `**${matchedTask?.task?.title || '这个任务'}** 目前卡在等待环节。`,
+            '',
+            `- **具体原因**：${reason}`,
+            `- **开始等待**：${activeWait?.startAt?.replace('T', ' ') || '未记录'}`,
+            `- **已等待**：${formatAgentElapsed(activeWait?.elapsedMinutes || 0)}`,
+          ].join('\n')
+          evidenceCorrection = '答案验真：模型初稿未引用当前等待证据，已按工具事实纠正。'
+        }
+      }
       return ok({
         content: finalContent,
         trace: [
           `理解问题：交给规划模型分析“${lastMsg.slice(0, 40)}${lastMsg.length > 40 ? '…' : ''}”。`,
           ...trace,
           `生成答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''} 组织最终回答。`,
+          ...(evidenceCorrection ? [evidenceCorrection] : []),
           ...answer.notes,
         ],
+      })
+    }
+    const blockerFallback = await resolveTaskBlockerAnswer(env, lastMsg, workspaceId)
+    if (blockerFallback) {
+      return ok({
+        ...blockerFallback,
+        runtime: 'site-tools',
+        trace: ['模型语义规划未形成完整工具调用，启动任务阻塞安全护栏', ...blockerFallback.trace],
       })
     }
   }
@@ -14768,7 +14889,7 @@ function isLocalCliWriteIntent(message: string) {
 }
 
 async function prepareLocalCliReadContext(env: Env, question: string, currentMonth: string, workspaceId: string) {
-  const productHelp = searchProductHelp(question, 5)
+  const productHelp = isWorkDataQuestion(question) ? { query: question, total: 0, matches: [] } : searchProductHelp(question, 5)
   const productContext = productHelp.matches.length
     ? `\n\n=== Giverny 产品能力检索结果 ===\n${JSON.stringify(productHelp)}\n=== 产品能力检索结束 ===\n`
     : ''
@@ -14796,8 +14917,8 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
   }
 
   const rows = await env.DB.prepare(
-    `SELECT id, title, design_type, status, progress, actual_hours, estimated_hours,
-            start_date, estimated_delivery_date, settlement_month, is_billable
+    `SELECT id, title, requirement, design_type, status, progress, actual_hours, estimated_hours,
+            start_date, estimated_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
        FROM tasks
       WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
       ORDER BY start_date DESC, created_at DESC
@@ -14815,6 +14936,8 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
     endDate: task.estimated_delivery_date || '',
     settlementMonth: task.settlement_month || '',
     billable: isBillableDbTask(task),
+    requirement: task.requirement || '',
+    waitingRecords: agentWaitingRecords(task),
   }))
   return {
     immediate: '',
@@ -14848,24 +14971,6 @@ async function queueLocalCliChat(env: Env, request: Request): Promise<LocalCliCh
   const lastMessage = messages.at(-1)?.content || ''
   if (!lastMessage) return { route: null, cloudReason: '' }
   const modelChoice = normalizeChatModelChoice(body.modelChoice)
-  const directProductHelp = resolveDirectProductHelp(lastMessage)
-  if (directProductHelp) {
-    return {
-      route: null,
-      cloudReason: '',
-      immediate: {
-        content: directProductHelp.answer,
-        trace: [
-          '识别为 Giverny 产品使用问题',
-          '查询产品能力注册表 [tool:search_product_help]',
-          `已匹配：${directProductHelp.primary.title}`,
-        ],
-        cliName: 'Giverny 产品指南',
-        deviceName: '站内能力库',
-        runtime: 'site-tools',
-      },
-    }
-  }
   if (modelChoice !== 'auto') {
     return { route: null, cloudReason: `已按你的选择直接使用 ${selectedCloudModelLabel(modelChoice)}，不经过本机 CLI` }
   }
