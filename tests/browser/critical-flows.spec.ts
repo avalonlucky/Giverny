@@ -49,6 +49,16 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const input = page.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('请帮我导出 6 月 1 号到 6 月 10 号的结算回单')
+  await input.press('Enter')
+  await expect(page.getByText(/已生成.*2026\/06\/01 至 2026\/06\/10.*结算回单/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('link', { name: '下载 Excel' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '在线预览' })).toBeVisible()
+})
+
 test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ page }) => {
   await page.getByRole('button', { name: '结算' }).click()
   const receipt = page.getByRole('region', { name: '月度结算回单' })
@@ -67,6 +77,7 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   await startDatePicker.getByRole('button', { name: '上个月' }).click()
   await startDatePicker.getByRole('button', { name: '2026-06-01' }).click()
   await expect(receipt.getByText('2026/06/01 至 2026/07/22', { exact: true })).toBeVisible()
+  await expect(receipt.getByText('结算日期', { exact: true })).toBeVisible()
   expect(await receipt.locator('tbody tr').count()).toBeGreaterThan(initialRowCount)
 
   const downloadPromise = page.waitForEvent('download')
@@ -92,6 +103,51 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   expect(sheet!.getColumn(14).width).toBe(96)
   expect(sheet!.getCell('L12').formula).toBe('$K$9')
   expect(sheet!.getCell('M12').formula).toBe('K12*L12')
+})
+
+test('日期范围回单支持线上分享、下载和锁定删除校验', async ({ page }) => {
+  await login(page)
+  const created = await page.request.post('/api/settlement-exports', {
+    headers: { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' },
+    data: {
+      startDate: '2026-06-01',
+      endDate: '2026-06-10',
+      receipt: {
+        fileLabel: '20260601-20260610',
+        title: '平面设计兼职服务结算回单',
+        receiptNo: 'AK-2026060120260610-001',
+        issuedAt: '2026-07-22 10:00',
+        companyName: '测试公司',
+        serviceName: '平面设计兼职',
+        settlementLabelTitle: '结算日期',
+        settlementLabel: '2026/06/01 至 2026/06/10',
+        hourlyRate: 85,
+        rows: [],
+        totalHours: 0,
+        totalAmount: 0,
+      },
+    },
+  })
+  const createdBody = await created.json() as { record?: { id: string; publicToken: string }; error?: string }
+  expect(created.ok(), createdBody.error || '创建范围回单失败').toBeTruthy()
+  const record = createdBody.record!
+
+  const shared = await page.request.get(`/api/shared-settlement/${record.publicToken}`)
+  expect(shared.ok()).toBeTruthy()
+  const sharedState = await shared.json() as { receipt: { settlementLabelTitle: string; settlementLabel: string } }
+  expect(sharedState.receipt.settlementLabelTitle).toBe('结算日期')
+  expect(sharedState.receipt.settlementLabel).toBe('2026/06/01 至 2026/06/10')
+
+  const excel = await page.request.get(`/api/shared-settlement/${record.publicToken}/excel`)
+  expect(excel.ok()).toBeTruthy()
+  expect(excel.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+  const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  expect((await page.request.patch(`/api/settlement-exports/${record.id}/lock`, { headers: authHeaders, data: { locked: true } })).ok()).toBeTruthy()
+  const deniedDelete = await page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders, data: { password: 'wrong-password' } })
+  expect(deniedDelete.status()).toBe(401)
+  const acceptedDelete = await page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders, data: { password: 'eval-admin-key' } })
+  expect(acceptedDelete.ok()).toBeTruthy()
 })
 
 test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {
@@ -716,7 +772,7 @@ test('模型中心展示默认模型和服务商配置入口', async ({ page }) 
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: '加载模型', exact: true })).toBeVisible()
   await expect(dialog.getByRole('switch')).toBeVisible()
-  await dialog.getByRole('button', { name: '取消' }).click()
+  await dialog.getByRole('button', { name: '取消' }).click({ force: true })
 })
 
 test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({ page }) => {

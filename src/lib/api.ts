@@ -1,6 +1,7 @@
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
 import type { AgentFailureCase, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
+import type { ReceiptExcelOptions } from './receiptExcel'
 
 export type ReportRecord = {
   id: string
@@ -13,6 +14,26 @@ export type ReportRecord = {
   generatedAt: string
   viewedAt: string
   viewCount: number
+}
+
+export type SettlementExportRecord = {
+  id: string
+  label: string
+  startDate: string
+  endDate: string
+  exportedAt: string
+  taskCount: number
+  billableHours: number
+  amount: number
+  locked: boolean
+  publicToken: string
+  viewedAt: string
+  viewCount: number
+}
+
+export type SharedSettlementExportState = {
+  exportRecord: SettlementExportRecord
+  receipt: ReceiptExcelOptions
 }
 
 export type ActivityItem = {
@@ -855,6 +876,27 @@ export const api = {
     return response.blob()
   },
   getSharedReport: (token: string) => requestJson<SharedReportState>(`/api/shared/${token}`, undefined, false),
+  getSettlementExports: () => requestJson<{ records: SettlementExportRecord[] }>('/api/settlement-exports'),
+  createSettlementExport: (payload: { startDate: string; endDate: string; receipt: ReceiptExcelOptions }) =>
+    requestJson<{ record: SettlementExportRecord }>('/api/settlement-exports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateSettlementExportLock: (id: string, locked: boolean) =>
+    requestJson<{ record: SettlementExportRecord }>(`/api/settlement-exports/${encodeURIComponent(id)}/lock`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ locked }),
+    }),
+  deleteSettlementExport: (id: string, password = '') =>
+    requestJson<{ ok: true }>(`/api/settlement-exports/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }),
+  getSharedSettlementExport: (token: string) =>
+    requestJson<SharedSettlementExportState>(`/api/shared-settlement/${encodeURIComponent(token)}`, undefined, false),
   createAccessToken: (payload: { label: string; expiresInDays: number | null; scope: TokenScope }) =>
     requestJson<AccessToken>('/api/tokens', {
       method: 'POST',

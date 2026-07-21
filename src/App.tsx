@@ -105,6 +105,7 @@ import {
   type HourEstimateMetrics,
   type LocalCliDevice,
   type ReportRecord,
+  type SettlementExportRecord,
   type StoredAuth,
   type TaskAssistantSuggestion,
   type TaskProgressAssessment,
@@ -5922,7 +5923,7 @@ function AgentAnalysisTaskCard({
 
 function agentResultAttachmentToFile(file: AgentResultAttachment): FileAsset {
   return {
-    id: file.id,
+    id: typeof file.id === 'number' ? file.id : 0,
     taskId: file.taskId,
     scope: file.scope,
     name: file.name,
@@ -5935,7 +5936,7 @@ function agentResultAttachmentToFile(file: AgentResultAttachment): FileAsset {
     visible: false,
     tag: file.tag,
     previewUrl: file.previewUrl,
-    sourceUrl: file.sourceUrl,
+    sourceUrl: file.downloadUrl || file.sourceUrl,
   }
 }
 
@@ -5950,8 +5951,8 @@ function AgentAttachmentResults({
     <section className="agent-attachment-results" aria-label={`附件结果，共 ${attachments.length} 个`}>
       <header className="agent-attachment-results-header">
         <div>
-          <small>找到的真实文件</small>
-          <strong>附件</strong>
+          <small>{attachments.some((item) => item.kind === 'settlement-receipt') ? '已生成可下载文件' : '找到的真实文件'}</small>
+          <strong>{attachments.some((item) => item.kind === 'settlement-receipt') ? '导出结果' : '附件'}</strong>
         </div>
         <span>{attachments.length} 个</span>
       </header>
@@ -5972,8 +5973,13 @@ function AgentAttachmentResults({
                 <button type="button" className="ghost-button compact-button" onClick={() => onPreview(file)}>
                   <Eye size={13} />预览
                 </button>
-                <a className="ghost-button compact-button" href={authedPreviewUrl(attachment.sourceUrl)} target="_blank" rel="noreferrer">
-                  <ExternalLink size={13} />打开
+                {attachment.shareUrl && (
+                  <a className="ghost-button compact-button" href={attachment.shareUrl} target="_blank" rel="noreferrer">
+                    <Eye size={13} />在线预览
+                  </a>
+                )}
+                <a className="ghost-button compact-button" href={authedPreviewUrl(attachment.downloadUrl || attachment.sourceUrl)} target="_blank" rel="noreferrer">
+                  <Download size={13} />{attachment.kind === 'settlement-receipt' ? '下载 Excel' : '打开'}
                 </a>
               </div>
             </article>
@@ -17721,34 +17727,15 @@ function ReportsView({
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
   const [isCustomRangePreviewActive, setIsCustomRangePreviewActive] = useState(false)
   const [activeRangePickerId, setActiveRangePickerId] = useState<string | null>(null)
-  type SettlementExportRecord = {
-    id: string
-    label: string
-    startDate: string
-    endDate: string
-    exportedAt: string
-    taskCount: number
-    billableHours: number
-    amount: number
-    locked: boolean
-  }
-  const settlementExportRecordsKey = 'giverny-settlement-export-records-v1'
-  const readSettlementExportRecords = (): SettlementExportRecord[] => {
-    try {
-      const parsed = JSON.parse(window.localStorage.getItem(settlementExportRecordsKey) ?? '[]') as unknown
-      if (!Array.isArray(parsed)) return []
-      return parsed.filter((item): item is SettlementExportRecord => (
-        Boolean(item)
-        && typeof item === 'object'
-        && typeof (item as SettlementExportRecord).id === 'string'
-        && typeof (item as SettlementExportRecord).startDate === 'string'
-        && typeof (item as SettlementExportRecord).endDate === 'string'
-      ))
-    } catch {
-      return []
-    }
-  }
-  const [exportRecords, setExportRecords] = useState<SettlementExportRecord[]>(readSettlementExportRecords)
+  const [exportRecords, setExportRecords] = useState<SettlementExportRecord[]>([])
+  const [deleteExportRecord, setDeleteExportRecord] = useState<SettlementExportRecord | null>(null)
+  const [deleteExportPassword, setDeleteExportPassword] = useState('')
+  const [isExportRecordBusy, setIsExportRecordBusy] = useState(false)
+  useEffect(() => {
+    api.getSettlementExports()
+      .then(({ records }) => setExportRecords(records))
+      .catch((error) => console.error('读取导出记录失败', error))
+  }, [])
   const selectedMonth = selectedReportMonth || currentMonth.value
   const selectedMonthLabel = monthLabelOf(selectedMonth)
   const selectedReport = reports.find((report) => report.month === selectedMonth)
@@ -17949,15 +17936,13 @@ function ReportsView({
     issuedAt: hasValidCustomPreviewRange ? nowStamp() : selectedReport?.generatedAt || nowStamp(),
     companyName: serviceCompanyName,
     serviceName: '平面设计兼职',
+    settlementLabelTitle: hasValidCustomPreviewRange ? '结算日期' : '结算月份',
     settlementLabel: activeReceiptLabel,
     hourlyRate: activeReceiptHourlyRate,
     rows: previewReceiptRows,
     totalHours: previewTotalHours,
     totalAmount: previewTotalAmount,
   }
-  useEffect(() => {
-    window.localStorage.setItem(settlementExportRecordsKey, JSON.stringify(exportRecords.slice(0, 40)))
-  }, [exportRecords])
   const lastLockedExport = exportRecords
     .filter((record) => record.locked)
     .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
@@ -18072,19 +18057,24 @@ function ReportsView({
       const totalHours = targetReport?.billableHours ?? exportRows.reduce((sum, row) => sum + row.actualHours, 0)
       const totalAmount = targetReport?.totalAmount ?? roundCents(exportRows.reduce((sum, row) => sum + row.amount, 0))
       const filenameLabel = options.label ?? (isRangeExport ? `${formatReceiptDate(rangeStart).replaceAll('/', '')}-${formatReceiptDate(rangeEnd).replaceAll('/', '')}` : monthLabelOf(month).replace(/\s/g, ''))
-      const buffer = await buildReceiptExcelBuffer({
+      const receiptPayload = {
         fileLabel: filenameLabel,
         title: pdfTitle,
         receiptNo: `AK-${(isRangeExport ? `${rangeStart}-${rangeEnd}` : month).replaceAll('-', '')}-${String(exportRows.length + 1).padStart(3, '0')}`,
         issuedAt: nowStamp(),
         companyName: serviceCompanyName,
         serviceName: '平面设计兼职',
+        settlementLabelTitle: isRangeExport ? '结算日期' : '结算月份',
         settlementLabel: isRangeExport ? `${formatReceiptDate(rangeStart)} 至 ${formatReceiptDate(rangeEnd)}` : monthLabelOf(month),
         hourlyRate: exportHourlyRate,
         rows: exportRows,
         totalHours,
         totalAmount,
-      })
+      }
+      const createdExport = isRangeExport
+        ? await api.createSettlementExport({ startDate: rangeStart, endDate: rangeEnd, receipt: receiptPayload })
+        : null
+      const buffer = await buildReceiptExcelBuffer(receiptPayload)
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -18094,18 +18084,8 @@ function ReportsView({
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
-      if (isRangeExport) {
-        setExportRecords((records) => [{
-          id: `${Date.now()}`,
-          label: `${formatReceiptDate(rangeStart)} 至 ${formatReceiptDate(rangeEnd)}`,
-          startDate: rangeStart,
-          endDate: rangeEnd,
-          exportedAt: nowStamp(),
-          taskCount: targetRows.length,
-          billableHours: totalHours,
-          amount: totalAmount,
-          locked: false,
-        }, ...records].slice(0, 40))
+      if (createdExport) {
+        setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
         onNotify(`已导出 ${targetRows.length} 项，${totalHours.toFixed(1)}h · ¥${formatYuan(totalAmount)}`)
       }
     } catch (error) {
@@ -18134,10 +18114,39 @@ function ReportsView({
     })
   }
 
-  const toggleExportRecordLock = (recordId: string) => {
-    setExportRecords((records) => records.map((record) => (
-      record.id === recordId ? { ...record, locked: !record.locked } : record
-    )))
+  const toggleExportRecordLock = async (record: SettlementExportRecord) => {
+    setIsExportRecordBusy(true)
+    try {
+      const result = await api.updateSettlementExportLock(record.id, !record.locked)
+      setExportRecords((records) => records.map((item) => item.id === record.id ? result.record : item))
+      onNotify(result.record.locked ? '导出记录已锁定' : '导出记录已解锁')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '更新锁定状态失败', 'error')
+    } finally {
+      setIsExportRecordBusy(false)
+    }
+  }
+
+  const copySettlementShareLink = async (record: SettlementExportRecord) => {
+    const url = `${window.location.origin}/settlement-share/${record.publicToken}`
+    await navigator.clipboard.writeText(url)
+    onNotify('线上回单链接已复制')
+  }
+
+  const confirmDeleteExportRecord = async () => {
+    if (!deleteExportRecord) return
+    setIsExportRecordBusy(true)
+    try {
+      await api.deleteSettlementExport(deleteExportRecord.id, deleteExportPassword)
+      setExportRecords((records) => records.filter((record) => record.id !== deleteExportRecord.id))
+      setDeleteExportRecord(null)
+      setDeleteExportPassword('')
+      onNotify('导出记录已删除')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '删除导出记录失败', 'error')
+    } finally {
+      setIsExportRecordBusy(false)
+    }
   }
 
   return (
@@ -18231,9 +18240,24 @@ function ReportsView({
                 <span>{record.taskCount} 项 · {record.billableHours.toFixed(1)}h · ¥{formatYuan(record.amount)}</span>
                 <small>导出于 {record.exportedAt}</small>
                 <div className="report-history-actions">
-                  <button className="ghost-button compact-button" onClick={() => toggleExportRecordLock(record.id)}>
+                  <button className="ghost-button compact-button" disabled={isExportRecordBusy || record.locked} onClick={() => void toggleExportRecordLock(record)}>
                     <Lock size={14} />
                     {record.locked ? '已锁定' : '锁定'}
+                  </button>
+                  <button className="ghost-button compact-button" onClick={() => void copySettlementShareLink(record)}>
+                    <Copy size={14} />复制链接
+                  </button>
+                  <a className="ghost-button compact-button" href={`/settlement-share/${record.publicToken}`} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} />在线预览
+                  </a>
+                  <a className="ghost-button compact-button" href={`/api/shared-settlement/${record.publicToken}/excel`}>
+                    <Download size={14} />下载
+                  </a>
+                  <button className="ghost-button compact-button danger-text" onClick={() => {
+                    setDeleteExportRecord(record)
+                    setDeleteExportPassword('')
+                  }}>
+                    <Trash2 size={14} />删除
                   </button>
                 </div>
               </div>
@@ -18285,6 +18309,33 @@ function ReportsView({
       </section>
 
       <SettlementReceipt options={previewReceiptOptions} />
+      {deleteExportRecord && (
+        <ModalShell className="delete-confirm-modal light-confirm-modal settlement-export-delete-modal" labelledBy="delete-settlement-export-title" onClose={() => setDeleteExportRecord(null)}>
+          <div className="delete-confirm-copy">
+            <h2 id="delete-settlement-export-title">删除这条导出记录？</h2>
+            <p>{deleteExportRecord.label}{deleteExportRecord.locked ? ' 已锁定，需要管理员密码才能删除。' : ' 尚未锁定，确认后将直接删除。'}</p>
+          </div>
+          {deleteExportRecord.locked && (
+            <label className="field settlement-export-password-field">
+              <span>管理员密码</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={deleteExportPassword}
+                onChange={(event) => setDeleteExportPassword(event.target.value)}
+                placeholder="输入当前管理员登录密码"
+                autoFocus
+              />
+            </label>
+          )}
+          <div className="delete-confirm-actions">
+            <button className="ghost-button" disabled={isExportRecordBusy} onClick={() => setDeleteExportRecord(null)}>取消</button>
+            <button className="danger-button solid-danger-button" disabled={isExportRecordBusy || (deleteExportRecord.locked && !deleteExportPassword)} onClick={() => void confirmDeleteExportRecord()}>
+              {isExportRecordBusy ? '删除中…' : '确认删除'}
+            </button>
+          </div>
+        </ModalShell>
+      )}
     </section>
   )
 }

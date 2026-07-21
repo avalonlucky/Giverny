@@ -939,7 +939,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     ]
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
-    const attachmentsById = new Map<number, AgentResultAttachment>()
+    const attachmentsById = new Map<number | string, AgentResultAttachment>()
     const usedTools = new Set<string>()
     const plannedCalls: AgentPlannedToolCall[] = []
     const evidence: AgentEvidence[] = []

@@ -40,7 +40,7 @@ export function SettlementReceipt({
       <dl className="settlement-receipt-info">
         <div><dt>客户名称</dt><dd>{options.companyName}</dd></div>
         <div><dt>服务内容</dt><dd>{options.serviceName}</dd></div>
-        <div><dt>结算月份</dt><dd>{options.settlementLabel}</dd></div>
+        <div><dt>{options.settlementLabelTitle || '结算月份'}</dt><dd>{options.settlementLabel}</dd></div>
         <div><dt>结算单价</dt><dd>¥{formatYuan(options.hourlyRate).replace(/\.00$/, '')} / 小时</dd></div>
       </dl>
 

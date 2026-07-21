@@ -33,7 +33,7 @@ export type AgentTaskSelection = {
 }
 
 export type AgentResultAttachment = {
-  id: number
+  id: number | string
   taskId: number
   taskTitle: string
   name: string
@@ -45,6 +45,9 @@ export type AgentResultAttachment = {
   uploadedAt: string
   previewUrl?: string
   sourceUrl: string
+  downloadUrl?: string
+  shareUrl?: string
+  kind?: 'task-file' | 'settlement-receipt'
 }
 
 export type AgentBackgroundTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'

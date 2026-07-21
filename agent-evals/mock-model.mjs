@@ -110,6 +110,9 @@ function chooseTool(messages) {
     if (/卡在哪|为什么一直没有交付/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'get_task_detail', args: { title: '公司产品分套的修改' }, reason: '需要核对具体任务的等待记录' }], confidence: 0.99 }) })
     }
+    if (/(?:导出|生成|下载).*(?:结算回单|Excel|excel)/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'export_settlement_receipt', args: { startDate: '2026-06-01', endDate: '2026-06-10' }, reason: '需要生成可下载的正式回单' }], confidence: 0.99 }) })
+    }
     if (/收入|金额|工时|结算|工资/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'query_month_finance', args: { months: /6月/.test(plannerQuestion) ? ['2026-06'] : ['2026-07'] }, reason: '需要读取确定性结算数据' }], confidence: 0.98 }) })
     }

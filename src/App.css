@@ -9147,6 +9147,20 @@ button.file-chip:focus-visible {
   grid-template-columns: minmax(160px, 1fr) auto minmax(150px, auto) auto;
 }
 
+.settlement-export-delete-modal {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.settlement-export-password-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.settlement-export-password-field input {
+  width: 100%;
+}
+
 .report-bar-actions .share-box {
   flex: 1;
   min-width: 220px;

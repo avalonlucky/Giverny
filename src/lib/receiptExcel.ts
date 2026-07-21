@@ -23,6 +23,7 @@ export type ReceiptExcelOptions = {
   companyName: string
   serviceName: string
   settlementLabel: string
+  settlementLabelTitle?: string
   hourlyRate: number
   rows: ReceiptExcelRow[]
   totalHours: number
@@ -146,7 +147,7 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
   const infoLabels = [
     ['A8', '客户名称', 'A9', options.companyName, 'A8:C8', 'A9:C9'],
     ['D8', '服务内容', 'D9', options.serviceName, 'D8:G8', 'D9:G9'],
-    ['H8', '结算月份', 'H9', options.settlementLabel, 'H8:J8', 'H9:J9'],
+    ['H8', options.settlementLabelTitle || '结算月份', 'H9', options.settlementLabel, 'H8:J8', 'H9:J9'],
     ['K8', '结算单价', 'K9', options.hourlyRate, 'K8:N8', 'K9:N9'],
   ] as const
   sheet.getRow(8).height = 15.75

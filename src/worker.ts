@@ -12,6 +12,7 @@ import { searchProductKnowledge } from './productKnowledgeSearch'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
+import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
@@ -464,6 +465,22 @@ type DbReport = {
   status: string
   public_token: string | null
   generated_at: string | null
+  viewed_at: string | null
+  view_count: number
+}
+
+type DbSettlementExport = {
+  id: string
+  workspace_id: string
+  start_date: string
+  end_date: string
+  task_count: number
+  billable_hours: number
+  total_amount: number
+  locked: number
+  public_token: string
+  snapshot_json: string
+  generated_at: string
   viewed_at: string | null
   view_count: number
 }
@@ -2499,7 +2516,7 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'search_tasks' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
 type ChatAgentPlanResponse = {
   intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
@@ -2618,11 +2635,12 @@ async function planChatAgentTurn(
   const systemPrompt = `你是 Giverny 的聊天智能体规划器。你的任务是先理解用户问题，再决定是否调用工具；不要直接回答用户。
 可用工具：
 1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
-2. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
-3. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
-4. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
-5. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
-6. none：不需要工具，交给普通聊天模型回答。
+2. export_settlement_receipt：按明确日期范围生成结算回单、线上预览链接和 Excel 下载。参数：startDate:string，endDate:string，格式 YYYY-MM-DD。
+3. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
+4. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
+5. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
+6. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
+7. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
@@ -2630,6 +2648,7 @@ async function planChatAgentTurn(
 - 提到具体任务名并询问状态、进展、卡点、等待、延期或为何未交付时，必须优先调用 get_task_detail。
 - 用户询问网站怎么用、如何设置、有哪些更新、产品名称由来或为何这样设计时，调用 search_product_help；工具没有确认的作者意图不得自行补写。
 - 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
+- 用户明确要求导出、生成或下载某个日期范围的结算回单/Excel 时，必须调用 export_settlement_receipt；不能只返回文字汇总。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
 - 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
@@ -2640,7 +2659,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"search_tasks"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2660,6 +2679,39 @@ async function executeChatAgentTools(
   for (const tool of plannedTools) {
     const name = normalizeChatToolName(tool.name)
     if (name === 'none') continue
+    if (name === 'export_settlement_receipt') {
+      const startDate = agentString(tool.args?.startDate, 10)
+      const endDate = agentString(tool.args?.endDate, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+        results.push({ name, args: { startDate, endDate }, result: { error: '缺少有效日期范围' } })
+        trace.push('导出准备：没有识别到完整的开始日期和结束日期。')
+        continue
+      }
+      const receipt = await buildSettlementReceiptSnapshot(env, workspaceId, startDate, endDate)
+      const row = await persistSettlementExport(env, workspaceId, startDate, endDate, receipt)
+      results.push({ name, args: { startDate, endDate }, result: {
+        record: toSettlementExportRecord(row),
+        receipt: { taskCount: receipt.rows.length, totalHours: receipt.totalHours, totalAmount: receipt.totalAmount },
+        attachment: {
+          id: row.id,
+          taskId: 0,
+          taskTitle: '结算回单',
+          name: `结算回单_${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}.xlsx`,
+          type: 'XLSX',
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          size: '',
+          scope: 'acceptance',
+          tag: '结算回单',
+          uploadedAt: formatBeijing(row.generated_at),
+          sourceUrl: `/api/shared-settlement/${row.public_token}/excel`,
+          downloadUrl: `/api/shared-settlement/${row.public_token}/excel`,
+          shareUrl: `/settlement-share/${row.public_token}`,
+          kind: 'settlement-receipt',
+        } satisfies AgentResultAttachment,
+      } })
+      trace.push(`生成回单：已按 ${receiptDateLabel(startDate)} 至 ${receiptDateLabel(endDate)} 保存 ${receipt.rows.length} 项结算快照并生成 Excel。`)
+      continue
+    }
     if (name === 'query_month_finance') {
       const rawMonths = Array.isArray(tool.args?.months) ? tool.args?.months : fallbackMonths
       const months = rawMonths.map((item) => String(item)).filter((item) => /^\d{4}-\d{2}$/.test(item)).slice(0, 12)
@@ -2750,6 +2802,7 @@ async function composeChatAgentAnswer(
   const prompt = `你是 Giverny 的工作智能体。请基于工具结果回答用户问题。
 要求：
 - 如果工具结果里有金额、工时、月份，必须严格使用工具结果数字，不要重算或改写为其他数值。
+- 如果工具结果里有 export_settlement_receipt，明确告诉用户 Excel 已生成，可在回答下方直接下载或打开线上预览；不要再输出冗长的重复明细表。
 - 如果工具结果里有 get_requester_profile，必须把 found/profile 当作需求人画像的唯一事实来源；found=true 时不得说没有记录，必须引用 profile.projects、profile.hours、acceptanceRate、onTimeRate、traits 和 advice。
 - 先给结论，再给分月/分项说明。
 - 如果用户问某任务为什么没交付或卡在哪里，必须优先读取 waitingRecords 中 active=true 的 note/reason，明确说出等待谁、等待什么、开始时间和已等待时长。
@@ -4995,9 +5048,26 @@ function isRequesterProfileQuestion(question: string) {
 }
 
 function normalizeChatToolName(value: unknown): ChatAgentToolName {
-  return ['query_month_finance', 'search_tasks', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
+  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
     ? value as ChatAgentToolName
     : 'none'
+}
+
+function isSettlementExportQuestion(question: string) {
+  return /(?:导出|生成|下载|给我).{0,48}(?:结算回单|结算报表|Excel|excel)|(?:结算回单|结算报表).{0,48}(?:导出|生成|下载)/i.test(question)
+}
+
+function parseAgentDateRange(question: string) {
+  const normalized = question.replace(/年/g, '-').replace(/月/g, '-').replace(/[日号]/g, '').replace(/[./]/g, '-').replace(/\s+/g, '')
+  const match = normalized.match(/(?:(\d{4})-)?(\d{1,2})-(\d{1,2})(?:到|至|~|—|-)(?:(\d{4})-)?(\d{1,2})-(\d{1,2})/)
+  if (!match) return null
+  const currentYear = new Date(Date.now() + 8 * 60 * 60 * 1000).getUTCFullYear()
+  const startYear = Number(match[1] || currentYear)
+  const endYear = Number(match[4] || startYear)
+  const date = (year: number, month: string, day: string) => `${year}-${String(Number(month)).padStart(2, '0')}-${String(Number(day)).padStart(2, '0')}`
+  const startDate = date(startYear, match[2], match[3])
+  const endDate = date(endYear, match[5], match[6])
+  return startDate <= endDate ? { startDate, endDate } : null
 }
 
 function requesterProfileGrade(metrics: { acceptanceRate: number; onTimeRate: number; hourDeviationRate: number; avgRevisionCount: number; projects: number }) {
@@ -8642,6 +8712,112 @@ const toReport = (row: DbReport) => ({
   viewedAt: formatBeijing(row.viewed_at),
   viewCount: Number(row.view_count) || 0,
 })
+
+const receiptDateLabel = (value: string) => value.slice(0, 10).replaceAll('-', '/')
+
+const toSettlementExportRecord = (row: DbSettlementExport) => ({
+  id: row.id,
+  label: `${receiptDateLabel(row.start_date)} 至 ${receiptDateLabel(row.end_date)}`,
+  startDate: row.start_date,
+  endDate: row.end_date,
+  exportedAt: formatBeijing(row.generated_at),
+  taskCount: Number(row.task_count) || 0,
+  billableHours: Number(row.billable_hours) || 0,
+  amount: Number(row.total_amount) || 0,
+  locked: Boolean(row.locked),
+  publicToken: row.public_token,
+  viewedAt: formatBeijing(row.viewed_at),
+  viewCount: Number(row.view_count) || 0,
+})
+
+function dbTaskHoursInDateRange(task: DbTask, startDate: string, endDate: string) {
+  if (!isBillableDbTask(task)) return 0
+  const entries = parseTimeEntries(task.time_entries_json)
+  const billableEntries = entries.filter((entry) => billableMinutesForTimeEntry(entry) > 0)
+  const minutes = billableEntries
+    .filter((entry) => {
+      const day = String(entry.endDate || entry.date || task.start_date || '').slice(0, 10)
+      return day >= startDate && day <= endDate
+    })
+    .reduce((sum, entry) => sum + billableMinutesForTimeEntry(entry), 0)
+  if (minutes > 0) return roundCents(minutes / 60)
+  const fallbackDay = String(task.actual_delivery_date || task.start_date || '').slice(0, 10)
+  return billableEntries.length === 0 && fallbackDay >= startDate && fallbackDay <= endDate
+    ? roundCents(Number(task.actual_hours) || 0)
+    : 0
+}
+
+async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string): Promise<ReceiptExcelOptions> {
+  const [taskResult, updateResult, hourlyRate, pdfTitle, serviceCompanyName] = await Promise.all([
+    env.DB.prepare('SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC')
+      .bind(workspaceId).all<DbTask>(),
+    env.DB.prepare(
+      `SELECT task_updates.* FROM task_updates
+       INNER JOIN tasks ON tasks.id = task_updates.task_id
+       WHERE tasks.workspace_id = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+         AND substr(task_updates.update_date, 1, 10) BETWEEN ? AND ?
+       ORDER BY task_updates.update_date DESC, task_updates.created_at DESC`,
+    ).bind(workspaceId, startDate, endDate).all<DbUpdate>(),
+    getHourlyRate(env),
+    getPdfTitle(env),
+    getServiceCompanyName(env),
+  ])
+  const latestUpdate = new Map<string, DbUpdate>()
+  for (const update of updateResult.results || []) {
+    if (!latestUpdate.has(update.task_id)) latestUpdate.set(update.task_id, update)
+  }
+  const tasks = (taskResult.results || [])
+    .map((task) => ({ task, hours: dbTaskHoursInDateRange(task, startDate, endDate) }))
+    .filter((item) => item.hours > 0)
+  const rows: ReceiptExcelRow[] = tasks.map(({ task, hours }, index) => {
+    const update = latestUpdate.get(task.id)
+    const note = String(task.acceptance_note || '').trim()
+      || (update ? `${update.title}${update.body ? `：${update.body}` : ''}` : '')
+      || `${task.status}，进度 ${Number(task.progress) || 0}%`
+    return {
+      sequence: String(index + 1).padStart(2, '0'),
+      type: task.design_type || '—',
+      title: `${task.title}${task.is_supplemental ? '（补录）' : ''}`,
+      requirement: task.requirement || '—',
+      estimatedStartDate: task.start_date ? receiptDateLabel(task.start_date) : '—',
+      actualCompletionDate: receiptDateLabel(endDate),
+      requester: task.requester || task.contact_person || '—',
+      contact: task.contact_person || task.requester || '—',
+      status: task.status,
+      estimatedHours: Number(task.estimated_hours) || null,
+      actualHours: hours,
+      unitPrice: hourlyRate,
+      amount: roundCents(hours * hourlyRate),
+      acceptanceNote: note,
+    }
+  })
+  const totalHours = roundCents(rows.reduce((sum, row) => sum + row.actualHours, 0))
+  const totalAmount = roundCents(rows.reduce((sum, row) => sum + row.amount, 0))
+  const key = `${startDate}-${endDate}`.replaceAll('-', '')
+  return {
+    fileLabel: `${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}`,
+    title: pdfTitle,
+    receiptNo: `AK-${key}-${String(rows.length + 1).padStart(3, '0')}`,
+    issuedAt: formatBeijing(nowIso()),
+    companyName: serviceCompanyName,
+    serviceName: '平面设计兼职',
+    settlementLabelTitle: '结算日期',
+    settlementLabel: `${receiptDateLabel(startDate)} 至 ${receiptDateLabel(endDate)}`,
+    hourlyRate,
+    rows,
+    totalHours,
+    totalAmount,
+  }
+}
+
+function parseSettlementReceiptSnapshot(value: string): ReceiptExcelOptions | null {
+  try {
+    const snapshot = JSON.parse(value) as ReceiptExcelOptions
+    return snapshot && Array.isArray(snapshot.rows) ? snapshot : null
+  } catch {
+    return null
+  }
+}
 
 async function getHourlyRate(env: Env) {
   const row = await env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('hourlyRate').first<{ value: string }>()
@@ -15162,7 +15338,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
   // ===== Agent Runtime 优先 =====
   // 工作数据问题必须进入项目自有 Runtime；失败时显式报错，避免旧本地逻辑伪装成智能体。
   // 触发联网搜索或带图片时仍走本地链路。
-  if (modelChoice === 'auto' && imageAttachments.length === 0 && !webSearchResult) {
+  if (modelChoice === 'auto' && imageAttachments.length === 0 && !webSearchResult && !isSettlementExportQuestion(lastMsg)) {
     const knowledgeSection = useKnowledge && knowledgeNotes.length
       ? `\n\n[参考资料：用户的个人知识库笔记，仅在与问题相关时引用]\n${knowledgeNotes
           .map((n) => `【${n.title || '笔记'}】\n${n.content}`)
@@ -15343,6 +15519,14 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     if (isFinanceQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'query_month_finance')) {
       plannedTools.push({ name: 'query_month_finance', args: { months: requestedMonths }, reason: '编排层验真要求：财务结论必须由确定性计算工具生成。' })
     }
+    const requestedRange = parseAgentDateRange(lastMsg)
+    if (isSettlementExportQuestion(lastMsg) && requestedRange && !plannedTools.some((item) => item.name === 'export_settlement_receipt')) {
+      plannedTools.unshift({
+        name: 'export_settlement_receipt',
+        args: requestedRange,
+        reason: '用户明确要求导出结算回单，必须生成可下载 Excel，而不是只返回文字汇总。',
+      })
+    }
     if (isRequesterProfileQuestion(lastMsg) && profileName && !plannedTools.some((item) => item.name === 'get_requester_profile')) {
       plannedTools.push({ name: 'get_requester_profile', args: { name: profileName }, reason: '编排层验真要求：需求人画像必须由历史任务聚合工具生成。' })
     }
@@ -15447,7 +15631,15 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       await emitVisibleTrace('整理回答：根据工具结果组织最终答案。')
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
+      const settlementExportResult = toolResults.find((item) => item.name === 'export_settlement_receipt')?.result as {
+        record?: ReturnType<typeof toSettlementExportRecord>
+        receipt?: { taskCount?: number; totalHours?: number; totalAmount?: number }
+        attachment?: AgentResultAttachment
+      } | undefined
       let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
+      if (settlementExportResult?.record && settlementExportResult.attachment) {
+        finalContent = `已生成 **${settlementExportResult.record.label}** 的结算回单，共 ${Number(settlementExportResult.receipt?.taskCount || 0)} 项、${Number(settlementExportResult.receipt?.totalHours || 0).toFixed(2)} 小时、¥${Number(settlementExportResult.receipt?.totalAmount || 0).toFixed(2)}。可在下方直接下载 Excel，或打开线上预览。`
+      }
       let evidenceCorrection = ''
       const productHelpResult = toolResults.find((item) => item.name === 'search_product_help')?.result
       const productHelpAnswer = renderProductHelpAnswer(productHelpResult)
@@ -15546,6 +15738,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           chatVerificationTrace(toolResults),
         ].filter(Boolean),
         fallbackUsed: answer.fallbackUsed,
+        attachments: settlementExportResult?.attachment ? [settlementExportResult.attachment] : undefined,
       })
     }
     const blockerFallback = await resolveTaskBlockerAnswer(env, lastMsg, workspaceId)
@@ -17290,6 +17483,111 @@ async function rotateMonthlyReportToken(env: Env, reportId: string, request: Req
   return ok({ report: toReport(updated ?? { ...existing, public_token: publicToken, viewed_at: null, view_count: 0 }) })
 }
 
+async function persistSettlementExport(
+  env: Env,
+  workspaceId: string,
+  startDate: string,
+  endDate: string,
+  receipt: ReceiptExcelOptions,
+) {
+  const id = `settlement-${workspaceId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const publicToken = crypto.randomUUID()
+  const taskCount = receipt.rows.length
+  const billableHours = roundCents(receipt.rows.reduce((sum, row) => sum + (Number(row.actualHours) || 0), 0))
+  const totalAmount = roundCents(receipt.rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0))
+  const normalizedReceipt: ReceiptExcelOptions = {
+    ...receipt,
+    settlementLabelTitle: '结算日期',
+    settlementLabel: `${receiptDateLabel(startDate)} 至 ${receiptDateLabel(endDate)}`,
+    totalHours: billableHours,
+    totalAmount,
+  }
+  await env.DB.prepare(
+    `INSERT INTO settlement_exports
+      (id, workspace_id, start_date, end_date, task_count, billable_hours, total_amount, locked, public_token, snapshot_json, generated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)`,
+  ).bind(id, workspaceId, startDate, endDate, taskCount, billableHours, totalAmount, publicToken, JSON.stringify(normalizedReceipt)).run()
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ?').bind(id).first<DbSettlementExport>()
+  if (!row) throw new Error('导出记录保存失败')
+  await audit(env, 'create', 'settlement_export', id, { workspaceId, startDate, endDate, taskCount, billableHours, totalAmount })
+  return row
+}
+
+async function listSettlementExports(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const rows = await env.DB.prepare('SELECT * FROM settlement_exports WHERE workspace_id = ? ORDER BY generated_at DESC LIMIT 100')
+    .bind(workspaceId).all<DbSettlementExport>()
+  return ok({ records: (rows.results || []).map(toSettlementExportRecord) })
+}
+
+async function createSettlementExport(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const body = await request.json().catch(() => ({})) as { startDate?: string; endDate?: string; receipt?: ReceiptExcelOptions }
+  const startDate = String(body.startDate || '').slice(0, 10)
+  const endDate = String(body.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    return fail('导出日期范围无效', 400)
+  }
+  const receipt = body.receipt && Array.isArray(body.receipt.rows)
+    ? body.receipt
+    : await buildSettlementReceiptSnapshot(env, workspaceId, startDate, endDate)
+  const row = await persistSettlementExport(env, workspaceId, startDate, endDate, receipt)
+  return ok({ record: toSettlementExportRecord(row) }, 201)
+}
+
+async function updateSettlementExportLock(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const body = await request.json().catch(() => ({})) as { locked?: boolean }
+  if (!body.locked) return fail('已锁定记录不能直接解锁；如需删除，请使用管理员密码确认', 409)
+  const result = await env.DB.prepare('UPDATE settlement_exports SET locked = 1 WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId).run()
+  if (!Number(result.meta?.changes)) return fail('导出记录不存在', 404)
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId).first<DbSettlementExport>()
+  await audit(env, 'lock', 'settlement_export', id, { workspaceId })
+  return ok({ record: toSettlementExportRecord(row!) })
+}
+
+async function deleteSettlementExport(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId).first<DbSettlementExport>()
+  if (!row) return fail('导出记录不存在', 404)
+  if (row.locked) {
+    const body = await request.json().catch(() => ({})) as { password?: string }
+    if (!(await verifyAdminPassword(env, String(body.password || '')))) return fail('管理员密码不正确', 401)
+  }
+  await env.DB.prepare('DELETE FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).run()
+  await audit(env, 'delete', 'settlement_export', id, { workspaceId, locked: Boolean(row.locked) })
+  return ok({ ok: true })
+}
+
+async function getSharedSettlementExport(env: Env, token: string) {
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
+  if (!row) return fail('分享链接无效或已失效', 404)
+  const receipt = parseSettlementReceiptSnapshot(row.snapshot_json)
+  if (!receipt) return fail('回单快照损坏，请重新导出', 500)
+  await env.DB.prepare('UPDATE settlement_exports SET viewed_at = CURRENT_TIMESTAMP, view_count = view_count + 1 WHERE id = ?').bind(row.id).run()
+  return ok({ exportRecord: toSettlementExportRecord(row), receipt })
+}
+
+async function downloadSharedSettlementExcel(env: Env, token: string) {
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
+  if (!row) return fail('分享链接无效或已失效', 404)
+  const receipt = parseSettlementReceiptSnapshot(row.snapshot_json)
+  if (!receipt) return fail('回单快照损坏，请重新导出', 500)
+  const buffer = await buildReceiptExcelBuffer(receipt)
+  const bytes = buffer instanceof ArrayBuffer ? buffer : Uint8Array.from(buffer as Uint8Array).buffer
+  const filename = `结算回单_${row.start_date.replaceAll('-', '')}-${row.end_date.replaceAll('-', '')}.xlsx`
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'cache-control': 'private, no-store',
+    },
+  })
+}
+
 type LocalCliStatus = 'available' | 'needs_auth' | 'unsupported' | 'not_installed' | 'unavailable'
 
 type LocalCliReport = {
@@ -17762,6 +18060,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     path === '/api/auth/password-reset/request' ||
     path === '/api/auth/password-reset/confirm' ||
     (isGet && path.startsWith('/api/shared/')) ||
+    (isGet && path.startsWith('/api/shared-settlement/')) ||
     (isGet && path.startsWith('/api/files/') && (path.endsWith('/preview') || path.endsWith('/source')))
 
   // 读取接口默认允许游客以只读身份访问；写入接口按角色分级（见下方守卫）。
@@ -17897,6 +18196,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/shared/') && isGet) {
     return getSharedReport(env, path.split('/').pop() ?? '')
+  }
+  if (path.startsWith('/api/shared-settlement/') && path.endsWith('/excel') && isGet) {
+    return downloadSharedSettlementExcel(env, path.split('/')[3] || '')
+  }
+  if (path.startsWith('/api/shared-settlement/') && isGet) {
+    return getSharedSettlementExport(env, path.split('/')[3] || '')
   }
   if (path === '/api/tokens' && request.method === 'POST') {
     return createAccessToken(env, request)
@@ -18195,6 +18500,18 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/reports/monthly' && request.method === 'POST') {
     return generateMonthlyReport(env, request)
+  }
+  if (path === '/api/settlement-exports' && request.method === 'GET') {
+    return listSettlementExports(env, request)
+  }
+  if (path === '/api/settlement-exports' && request.method === 'POST') {
+    return createSettlementExport(env, request)
+  }
+  if (path.startsWith('/api/settlement-exports/') && path.endsWith('/lock') && request.method === 'PATCH') {
+    return updateSettlementExportLock(env, path.split('/')[3] || '', request)
+  }
+  if (path.startsWith('/api/settlement-exports/') && request.method === 'DELETE') {
+    return deleteSettlementExport(env, path.split('/')[3] || '', request)
   }
   if (path.startsWith('/api/reports/') && path.endsWith('/token') && request.method === 'POST') {
     return rotateMonthlyReportToken(env, path.split('/')[3] ?? '', request)
