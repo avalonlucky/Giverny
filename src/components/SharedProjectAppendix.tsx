@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, FileArchive, FileText, Image as ImageIcon, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ExternalLink, FileArchive, FileText, Image as ImageIcon, X } from 'lucide-react'
 import type { FileAsset, Task, TaskUpdate, TimeEntry } from '../types/domain'
 
 type ProjectTimelineItem = {
@@ -101,7 +101,7 @@ function SharedFileThumbnail({ file }: { file: FileAsset }) {
 
 export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]; updates: TaskUpdate[]; files: FileAsset[] }) {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
-  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<number>>(new Set())
+  const [activeTimelineTaskId, setActiveTimelineTaskId] = useState<number | null>(null)
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
   const projects = useMemo(() => tasks
     .map((task) => ({
@@ -115,16 +115,14 @@ export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]
       return sortDirection === 'asc' ? compared : -compared
     }), [files, sortDirection, tasks, updates])
 
-  if (projects.length === 0) return null
+  useEffect(() => {
+    if (activeTimelineTaskId === null) return
+    const handleKeydown = (event: KeyboardEvent) => event.key === 'Escape' && setActiveTimelineTaskId(null)
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [activeTimelineTaskId])
 
-  const toggleTimeline = (taskId: number) => {
-    setExpandedTaskIds((current) => {
-      const next = new Set(current)
-      if (next.has(taskId)) next.delete(taskId)
-      else next.add(taskId)
-      return next
-    })
-  }
+  if (projects.length === 0) return null
 
   return (
     <section className="shared-project-appendix" aria-labelledby="shared-project-appendix-title">
@@ -140,21 +138,21 @@ export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]
       </header>
       <div className="shared-project-list">
         {projects.map(({ task, files: projectFiles, timeline }) => {
-          const isExpanded = expandedTaskIds.has(task.id)
+          const isTimelineOpen = activeTimelineTaskId === task.id
           return (
-            <article className="shared-project-row" key={task.id} data-task-id={task.id}>
+            <article className="shared-project-row" key={task.id} data-task-id={task.id} data-start-date={datePart(task.date)}>
               <header className="shared-project-row-header">
-                <time>{datePart(task.date).replaceAll('-', '/')}</time>
                 <div className="shared-project-row-main">
                   <h3>{task.title}</h3>
-                  <p>{task.type} · {task.status} · {projectFiles.length} 个交付文件 · {timeline.length} 条进展</p>
+                  <p>{datePart(task.date).replaceAll('-', '/')} · {task.type}</p>
                 </div>
                 {timeline.length > 0 && (
-                  <button type="button" className="shared-project-timeline-trigger" aria-expanded={isExpanded} onClick={() => toggleTimeline(task.id)}>
-                    {isExpanded ? '收起时间线' : '查看时间线'}<ChevronDown size={14} />
+                  <button type="button" className="shared-project-timeline-trigger" aria-expanded={isTimelineOpen} onClick={() => setActiveTimelineTaskId(task.id)}>
+                    时间线 {timeline.length}
                   </button>
                 )}
               </header>
+              <p className="shared-project-row-meta">{task.status} · {projectFiles.length} 个交付文件</p>
               {projectFiles.length > 0 && (
                 <div className="shared-project-files" aria-label={`${task.title}的交付文件`}>
                   {projectFiles.map((file) => (
@@ -167,14 +165,20 @@ export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]
                   ))}
                 </div>
               )}
-              {isExpanded && (
-                <div className="shared-project-timeline">
-                  {timeline.map((item) => (
-                    <div className="shared-project-timeline-item" key={item.id}>
-                      <time>{item.date.replace('T', ' ')}</time>
-                      <div><strong>{item.title}</strong><p>{item.body}</p></div>
-                    </div>
-                  ))}
+              {isTimelineOpen && (
+                <div className="shared-project-timeline-popover" role="dialog" aria-label={`${task.title}时间线`}>
+                  <header>
+                    <div><strong>{task.title}</strong><span>项目时间线</span></div>
+                    <button type="button" aria-label="关闭时间线" title="关闭" onClick={() => setActiveTimelineTaskId(null)}><X size={16} /></button>
+                  </header>
+                  <div className="shared-project-timeline" tabIndex={0}>
+                    {timeline.map((item) => (
+                      <div className="shared-project-timeline-item" key={item.id}>
+                        <time>{item.date.replace('T', ' ')}</time>
+                        <div><strong>{item.title}</strong><p>{item.body}</p></div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </article>

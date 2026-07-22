@@ -194,7 +194,7 @@ test('日期范围回单支持线上分享、下载和锁定删除校验', async
   expect(acceptedDelete.ok()).toBeTruthy()
 })
 
-test('合作伙伴回单按项目归档交付文件并支持排序与时间线', async ({ page }) => {
+test('合作伙伴回单按项目归档交付文件并支持排序与时间线', async ({ page }, testInfo) => {
   const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
   const created = await page.request.post('/api/settlement-exports', {
     headers: authHeaders,
@@ -206,21 +206,29 @@ test('合作伙伴回单按项目归档交付文件并支持排序与时间线',
 
   await page.goto(`/settlement-share/${record.publicToken}`)
   await expect(page.getByRole('heading', { name: '项目与交付' })).toBeVisible()
+  if (testInfo.project.name === 'desktop-chromium') {
+    const columnCount = await page.locator('.shared-project-list').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)
+    expect(columnCount).toBe(4)
+  }
   const inviteProject = page.locator('.shared-project-row[data-task-id="13"]')
   await expect(inviteProject.getByRole('heading', { name: '直播设计' })).toBeVisible()
   await expect(inviteProject.getByText('当天邀请V1.0B01.jpg', { exact: true })).toBeVisible()
   await expect(inviteProject.getByText('直播封面V1.0B01.jpg', { exact: true })).toBeVisible()
 
   const rows = page.locator('.shared-project-row')
-  const firstAscendingDate = await rows.first().locator('.shared-project-row-header > time').textContent()
+  await expect(rows.first()).toHaveAttribute('data-start-date', /^2026-/)
+  const firstAscendingDate = await rows.first().getAttribute('data-start-date')
   await page.getByRole('button', { name: '较新在前' }).click()
-  const firstDescendingDate = await rows.first().locator('.shared-project-row-header > time').textContent()
+  await expect.poll(() => rows.first().getAttribute('data-start-date')).not.toBe(firstAscendingDate)
+  const firstDescendingDate = await rows.first().getAttribute('data-start-date')
   expect(firstDescendingDate!.localeCompare(firstAscendingDate!)).toBeGreaterThan(0)
 
   const countdownProject = page.locator('.shared-project-row[data-task-id="11"]')
-  await countdownProject.getByRole('button', { name: '查看时间线' }).click()
+  await countdownProject.getByRole('button', { name: /时间线/ }).click()
+  await expect(countdownProject.getByRole('dialog', { name: /时间线/ })).toBeVisible()
   await expect(countdownProject.getByText('完成 6 月 8 日至 6 月 30 日倒计时海报')).toBeVisible()
-  await expect(countdownProject.getByRole('button', { name: '收起时间线' })).toBeVisible()
+  expect(await countdownProject.locator('.shared-project-timeline').evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto')
+  await expect(countdownProject.getByRole('button', { name: '关闭时间线' })).toBeVisible()
 
   await page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders })
 })
