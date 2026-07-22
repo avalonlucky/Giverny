@@ -117,7 +117,7 @@ import {
   type WorkspaceSummary,
 } from './lib/api'
 import { formatFileSize } from './lib/format'
-import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
+import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
@@ -5933,37 +5933,137 @@ function agentResultAttachmentToFile(file: AgentResultAttachment): FileAsset {
   }
 }
 
+function settlementReceiptRangeLabel(name: string) {
+  const matched = name.match(/_(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/)
+  if (!matched) return name.replace(/\.xlsx$/i, '')
+  const [, startYear, startMonth, startDay, endYear, endMonth, endDay] = matched
+  const start = `${startYear}/${startMonth}/${startDay}`
+  const end = `${endYear}/${endMonth}/${endDay}`
+  return `${start} 至 ${end}`
+}
+
+function AgentSettlementReceiptPreview({
+  attachment,
+  onClose,
+}: {
+  attachment: AgentResultAttachment
+  onClose: () => void
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const [receipt, setReceipt] = useState<ReceiptExcelOptions | null>(null)
+  const [error, setError] = useState('')
+  const [scale, setScale] = useState(0.42)
+  const shareToken = attachment.shareUrl?.split('/').filter(Boolean).at(-1) ?? ''
+
+  const fitReceipt = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    setScale(Math.max(0.25, Math.min(1, (viewport.clientWidth - 32) / 2200)))
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadReceipt = async () => {
+      if (!shareToken) {
+        setError('该回单缺少在线预览地址，请重新导出。')
+        return
+      }
+      try {
+        const response = await fetch(`/api/shared-settlement/${encodeURIComponent(shareToken)}`, { signal: controller.signal })
+        const payload = await response.json().catch(() => null) as { receipt?: ReceiptExcelOptions; error?: string } | null
+        if (!response.ok || !payload?.receipt) throw new Error(payload?.error || '回单读取失败')
+        setReceipt(payload.receipt)
+        window.requestAnimationFrame(fitReceipt)
+      } catch (caughtError) {
+        if (!controller.signal.aborted) setError(caughtError instanceof Error ? caughtError.message : '回单读取失败')
+      }
+    }
+    void loadReceipt()
+    return () => controller.abort()
+  }, [fitReceipt, shareToken])
+
+  const changeScale = (delta: number) => setScale((current) => Math.max(0.25, Math.min(1.5, Number((current + delta).toFixed(2)))))
+
+  return (
+    <ModalShell className="agent-receipt-preview-modal" labelledBy="agent-receipt-preview-title" onClose={onClose} closeOnEscape>
+      <header className="modal-header agent-receipt-preview-header">
+        <div>
+          <p className="eyebrow">回单预览</p>
+          <h2 id="agent-receipt-preview-title">{settlementReceiptRangeLabel(attachment.name)}</h2>
+        </div>
+        <div className="modal-header-actions">
+          <button type="button" className="icon-button" onClick={() => changeScale(-0.08)} disabled={scale <= 0.25} aria-label="缩小" title="缩小"><ZoomOut size={16} /></button>
+          <button type="button" className="agent-receipt-scale" onClick={fitReceipt} title="适合窗口">{Math.round(scale * 100)}%</button>
+          <button type="button" className="icon-button" onClick={() => changeScale(0.08)} disabled={scale >= 1.5} aria-label="放大" title="放大"><ZoomIn size={16} /></button>
+          <button type="button" className="icon-button" onClick={fitReceipt} aria-label="适合窗口" title="适合窗口"><Maximize2 size={16} /></button>
+          <button type="button" className="icon-button modal-close-button" onClick={onClose} aria-label="关闭" title="关闭"><X size={18} /></button>
+        </div>
+      </header>
+      <div
+        ref={viewportRef}
+        className="agent-receipt-preview-viewport"
+        onWheel={(event) => {
+          if (event.shiftKey) {
+            event.preventDefault()
+            event.currentTarget.scrollLeft += event.deltaY
+            return
+          }
+          if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
+            event.preventDefault()
+            changeScale(event.deltaY < 0 ? 0.06 : -0.06)
+          }
+        }}
+      >
+        {!receipt && !error && <div className="office-preview-status">正在加载完整回单…</div>}
+        {error && <div className="file-preview-placeholder"><FileText size={38} /><strong>暂时无法预览</strong><span>{error}</span></div>}
+        {receipt && (
+          <div className="agent-receipt-preview-sheet" style={{ zoom: scale } as CSSProperties}>
+            <SettlementReceipt options={receipt} />
+          </div>
+        )}
+      </div>
+    </ModalShell>
+  )
+}
+
+function AgentResultPreviewModal({ attachment, onClose }: { attachment: AgentResultAttachment; onClose: () => void }) {
+  if (attachment.kind === 'settlement-receipt') return <AgentSettlementReceiptPreview attachment={attachment} onClose={onClose} />
+  return <FilePreviewModal file={agentResultAttachmentToFile(attachment)} onClose={onClose} />
+}
+
 function AgentAttachmentResults({
   attachments,
   onPreview,
 }: {
   attachments: AgentResultAttachment[]
-  onPreview: (file: FileAsset) => void
+  onPreview: (attachment: AgentResultAttachment) => void
 }) {
+  const isSettlementBatch = attachments.every((item) => item.kind === 'settlement-receipt')
   return (
-    <section className="agent-attachment-results" aria-label={`附件结果，共 ${attachments.length} 个`}>
+    <section className={`agent-attachment-results ${isSettlementBatch ? 'is-settlement-receipt' : ''}`} aria-label={`附件结果，共 ${attachments.length} 个`}>
       <header className="agent-attachment-results-header">
         <div>
-          <small>{attachments.some((item) => item.kind === 'settlement-receipt') ? '已生成可下载文件' : '找到的真实文件'}</small>
-          <strong>{attachments.some((item) => item.kind === 'settlement-receipt') ? '导出结果' : '附件'}</strong>
+          <small>{isSettlementBatch ? '已生成文件' : '找到的真实文件'}</small>
+          <strong>{isSettlementBatch ? '导出结果' : '附件'}</strong>
         </div>
         <span>{attachments.length} 个</span>
       </header>
       <div className="agent-attachment-grid">
         {attachments.map((attachment) => {
           const file = agentResultAttachmentToFile(attachment)
+          const isSettlementReceipt = attachment.kind === 'settlement-receipt'
           return (
-            <article className="agent-attachment-card" key={attachment.id}>
-              <button type="button" className="agent-attachment-preview" onClick={() => onPreview(file)} aria-label={`预览 ${attachment.name}`} title="预览附件">
-                <FileThumbnailPreview file={file} />
+            <article className={`agent-attachment-card ${isSettlementReceipt ? 'is-settlement-receipt' : ''}`} key={attachment.id}>
+              <button type="button" className="agent-attachment-preview" onClick={() => onPreview(attachment)} aria-label={`预览 ${attachment.name}`} title="预览附件">
+                {isSettlementReceipt ? <span className="agent-receipt-file-mark"><FileText size={26} /><b>XLSX</b></span> : <FileThumbnailPreview file={file} />}
               </button>
               <div className="agent-attachment-info">
-                <strong title={attachment.name}>{attachment.name}</strong>
-                <span title={attachment.taskTitle}>{attachment.taskTitle}</span>
-                <small>{[attachment.type, attachment.size, attachment.tag || (attachment.scope === 'acceptance' ? '验收附件' : '进展附件')].filter(Boolean).join(' · ')}</small>
+                <strong title={attachment.name}>{isSettlementReceipt ? settlementReceiptRangeLabel(attachment.name) : attachment.name}</strong>
+                <span title={attachment.taskTitle}>{isSettlementReceipt ? 'Excel 工作簿' : attachment.taskTitle}</span>
+                <small>{isSettlementReceipt ? '可预览、在线查看或下载' : [attachment.type, attachment.size, attachment.tag || (attachment.scope === 'acceptance' ? '验收附件' : '进展附件')].filter(Boolean).join(' · ')}</small>
               </div>
               <div className="agent-attachment-actions">
-                <button type="button" className="ghost-button compact-button" onClick={() => onPreview(file)}>
+                <button type="button" className="ghost-button compact-button" onClick={() => onPreview(attachment)}>
                   <Eye size={13} />预览
                 </button>
                 {attachment.shareUrl && (
@@ -5972,7 +6072,7 @@ function AgentAttachmentResults({
                   </a>
                 )}
                 <a className="ghost-button compact-button" href={authedPreviewUrl(attachment.downloadUrl || attachment.sourceUrl)} target="_blank" rel="noreferrer">
-                  <Download size={13} />{attachment.kind === 'settlement-receipt' ? '下载 Excel' : '打开'}
+                  <Download size={13} />{isSettlementReceipt ? '下载' : '打开'}
                 </a>
               </div>
             </article>
@@ -6031,7 +6131,7 @@ function ChatPanel({
   const [activeLocalCliRoute, setActiveLocalCliRoute] = useState<ActiveLocalCliRoute | null>(null)
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [agentPreviewFile, setAgentPreviewFile] = useState<FileAsset | null>(null)
+  const [agentPreviewAttachment, setAgentPreviewAttachment] = useState<AgentResultAttachment | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -6947,7 +7047,7 @@ function ChatPanel({
                   />
                 )}
                 {msg.role === 'assistant' && msg.attachments && msg.attachments.length > 0 && (
-                  <AgentAttachmentResults attachments={msg.attachments} onPreview={setAgentPreviewFile} />
+                  <AgentAttachmentResults attachments={msg.attachments} onPreview={setAgentPreviewAttachment} />
                 )}
               </div>
             ))}
@@ -7116,7 +7216,7 @@ function ChatPanel({
       </div>
 
       {lightboxSrc && <ImageLightbox src={lightboxSrc} alt="附件预览" onClose={() => setLightboxSrc(null)} />}
-      {agentPreviewFile && <FilePreviewModal file={agentPreviewFile} onClose={() => setAgentPreviewFile(null)} />}
+      {agentPreviewAttachment && <AgentResultPreviewModal attachment={agentPreviewAttachment} onClose={() => setAgentPreviewAttachment(null)} />}
 
       {/* history panel (absolute overlay within chat-panel) */}
       {showHistory && (

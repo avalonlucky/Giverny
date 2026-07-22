@@ -14251,7 +14251,7 @@ input::file-selector-button {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 0;
 }
 
 .agent-attachment-results-header > div {
@@ -14358,6 +14358,135 @@ input::file-selector-button {
   padding: 4px 7px;
   font-size: 11px;
   text-decoration: none;
+}
+
+.agent-attachment-results.is-settlement-receipt {
+  width: min(920px, 100%);
+}
+
+.agent-attachment-results.is-settlement-receipt .agent-attachment-results-header {
+  padding-bottom: 6px;
+}
+
+.agent-attachment-results.is-settlement-receipt .agent-attachment-grid {
+  display: block;
+}
+
+.agent-attachment-card.is-settlement-receipt {
+  grid-template-columns: 112px minmax(180px, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px 16px;
+  border: 0;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-preview {
+  grid-row: auto;
+  width: 112px;
+  height: 72px;
+  border: 0;
+}
+
+.agent-receipt-file-mark {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+
+.agent-receipt-file-mark b {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-info {
+  gap: 5px;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-info strong {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-actions {
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-actions .ghost-button {
+  min-height: 30px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agent-attachment-card.is-settlement-receipt .agent-attachment-actions .ghost-button:hover {
+  color: var(--color-primary);
+  background: transparent;
+}
+
+.agent-receipt-preview-modal {
+  width: min(96vw, 1500px);
+  height: min(92vh, 980px);
+  min-width: min(720px, calc(100vw - 24px));
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agent-receipt-preview-header {
+  flex: 0 0 auto;
+}
+
+.agent-receipt-preview-header h2 {
+  font-size: 20px;
+}
+
+.agent-receipt-scale {
+  min-width: 54px;
+  min-height: 30px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-receipt-scale:hover {
+  color: var(--color-primary);
+}
+
+.agent-receipt-preview-viewport {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  padding: 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--color-surface-alt);
+}
+
+.agent-receipt-preview-sheet {
+  width: 2200px;
+  min-height: 760px;
+  transform-origin: top left;
+  background: var(--color-receipt-paper);
+}
+
+.agent-receipt-preview-sheet .settlement-receipt-template {
+  width: 2200px;
+  min-height: 760px;
 }
 
 .chat-agent-trace-line {
@@ -14950,6 +15079,26 @@ input::file-selector-button {
 
   .agent-attachment-card:last-child {
     border-bottom: 0;
+  }
+
+  .agent-attachment-card.is-settlement-receipt {
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 10px 12px;
+  }
+
+  .agent-attachment-card.is-settlement-receipt .agent-attachment-preview {
+    width: 84px;
+    height: 64px;
+  }
+
+  .agent-attachment-card.is-settlement-receipt .agent-attachment-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .agent-receipt-preview-modal {
+    min-width: calc(100vw - 20px);
+    min-height: 520px;
   }
 
   .chat-markdown-table-wrap table {

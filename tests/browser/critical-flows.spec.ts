@@ -55,7 +55,17 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
   await input.fill('请帮我导出 6 月 1 号到 6 月 10 号的结算回单')
   await input.press('Enter')
   await expect(page.getByText(/已生成.*2026\/06\/01 至 2026\/06\/10.*结算回单/).first()).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('link', { name: '下载 Excel' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '下载' })).toBeVisible()
+  const receiptPreviewButton = page.getByRole('button', { name: /预览 结算回单_/ })
+  expect(await receiptPreviewButton.count()).toBe(1)
+  await receiptPreviewButton.click()
+  const receiptPreviewDialog = page.getByRole('dialog', { name: '2026/06/01 至 2026/06/10' })
+  await expect(receiptPreviewDialog).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('region', { name: '月度结算回单' })).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('button', { name: '关闭' })).toBeVisible()
+  expect(await receiptPreviewDialog.locator('.agent-receipt-preview-viewport').evaluate((element) => getComputedStyle(element).overflow)).toBe('auto')
+  await receiptPreviewDialog.getByRole('button', { name: '关闭' }).click()
+  await expect(receiptPreviewDialog).toBeHidden()
   const previewLink = page.getByRole('link', { name: '在线预览' })
   await expect(previewLink).toBeVisible()
   const previewHref = await previewLink.getAttribute('href')
@@ -225,9 +235,23 @@ test('合作伙伴回单按项目归档交付文件并支持排序与时间线',
 
   const countdownProject = page.locator('.shared-project-row[data-task-id="11"]')
   await countdownProject.getByRole('button', { name: /时间线/ }).click()
-  await expect(countdownProject.getByRole('dialog', { name: /时间线/ })).toBeVisible()
+  const timelineDialog = countdownProject.getByRole('dialog', { name: /时间线/ })
+  await expect(timelineDialog).toBeVisible()
   await expect(countdownProject.getByText('完成 6 月 8 日至 6 月 30 日倒计时海报')).toBeVisible()
   await expect(countdownProject.getByText('倒计时1天海报.jpg', { exact: true })).toBeVisible()
+  const timelineSummary = await timelineDialog.locator('.shared-project-timeline').evaluate((element) => {
+    const items = Array.from(element.querySelectorAll('.shared-project-timeline-item'))
+    return {
+      kinds: items.map((item) => item.getAttribute('data-timeline-kind')),
+      dates: items.map((item) => item.querySelector('time')?.textContent || ''),
+      text: items.map((item) => item.textContent || '').join('\n'),
+    }
+  })
+  expect(timelineSummary.kinds[0]).toBe('acceptance')
+  expect(timelineSummary.kinds.at(-1)).toBe('created')
+  expect(timelineSummary.dates.every((value) => /^\d{4}\/\d{2}\/\d{2}$/.test(value))).toBe(true)
+  expect(timelineSummary.text).not.toContain('项目名称：')
+  expect(timelineSummary.text).not.toContain('任务名称：')
   expect(await countdownProject.locator('.shared-project-timeline').evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto')
   await expect(countdownProject.getByRole('button', { name: '关闭时间线' })).toBeVisible()
 

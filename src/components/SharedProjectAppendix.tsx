@@ -9,6 +9,7 @@ type ProjectTimelineItem = {
   body: string
   entryId?: string
   files: FileAsset[]
+  kind: 'acceptance' | 'feedback' | 'waiting' | 'progress' | 'update' | 'created'
 }
 
 const PROJECTS_PER_PAGE = 12
@@ -22,6 +23,30 @@ function timeEntryDate(entry: TimeEntry, fallback: string) {
   return `${day}${start ? ` ${start}` : ''}${end ? `-${end}` : ''}`
 }
 
+function timelineKind(entry: TimeEntry): ProjectTimelineItem['kind'] {
+  if (entry.isAcceptanceProgress) return 'acceptance'
+  if (entry.isClientFeedback) return 'feedback'
+  return 'progress'
+}
+
+function timelineSortValue(value: string) {
+  const normalized = value.replace('T', ' ').match(/^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?/)?.[0] ?? datePart(value)
+  const parsed = new Date(normalized.replace(' ', 'T')).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function compareTimelineItems(left: ProjectTimelineItem, right: ProjectTimelineItem) {
+  if (left.kind === 'acceptance' && right.kind !== 'acceptance') return -1
+  if (right.kind === 'acceptance' && left.kind !== 'acceptance') return 1
+  if (left.kind === 'created' && right.kind !== 'created') return 1
+  if (right.kind === 'created' && left.kind !== 'created') return -1
+  return timelineSortValue(right.date) - timelineSortValue(left.date)
+}
+
+function isSyntheticProjectArchive(update: TaskUpdate) {
+  return /^项目名称[：:]/.test(update.title.trim()) && /^任务名称[：:]/.test(update.body.trim())
+}
+
 function timelineTitle(entry: TimeEntry) {
   if (entry.isClientFeedback) return entry.feedbackSource ? `${entry.feedbackSource}反馈` : '反馈记录'
   if (entry.isAcceptanceProgress) return '验收进展'
@@ -31,8 +56,8 @@ function timelineTitle(entry: TimeEntry) {
 
 function taskTimeline(task: Task, updates: TaskUpdate[], files: FileAsset[]): ProjectTimelineItem[] {
   const updateItems = updates
-    .filter((update) => update.taskId === task.id)
-    .map((update) => ({ id: `update-${update.id}`, date: update.date, title: update.title, body: update.body, files: [] as FileAsset[] }))
+    .filter((update) => update.taskId === task.id && !isSyntheticProjectArchive(update))
+    .map((update) => ({ id: `update-${update.id}`, date: update.date, title: update.title, body: update.body, files: [] as FileAsset[], kind: 'update' as const }))
   const entryItems = (task.timeEntries ?? []).map((entry) => ({
     id: `entry-${entry.id}`,
     date: timeEntryDate(entry, task.date),
@@ -40,6 +65,7 @@ function taskTimeline(task: Task, updates: TaskUpdate[], files: FileAsset[]): Pr
     body: entry.note || '已记录本次进展',
     entryId: entry.id,
     files: files.filter((file) => file.entryId === entry.id),
+    kind: timelineKind(entry),
   }))
   const waitingItems = (task.waitingEntries ?? []).map((entry) => ({
     id: `waiting-${entry.id}`,
@@ -48,6 +74,7 @@ function taskTimeline(task: Task, updates: TaskUpdate[], files: FileAsset[]): Pr
     body: entry.note || '项目进入等待',
     entryId: entry.id,
     files: files.filter((file) => file.entryId === entry.id),
+    kind: 'waiting' as const,
   }))
   const createdItem = {
     id: `created-${task.id}`,
@@ -55,9 +82,10 @@ function taskTimeline(task: Task, updates: TaskUpdate[], files: FileAsset[]): Pr
     title: '项目创建',
     body: task.requirement || '任务已创建',
     files: [] as FileAsset[],
+    kind: 'created' as const,
   }
   const merged = new Map<string, ProjectTimelineItem>()
-  for (const item of [...updateItems, ...entryItems, ...waitingItems, createdItem].sort((a, b) => b.date.localeCompare(a.date))) {
+  for (const item of [...updateItems, ...entryItems, ...waitingItems, createdItem].sort(compareTimelineItems)) {
     const key = `${datePart(item.date)}|${item.body.trim()}`
     const current = merged.get(key)
     if (current) {
@@ -67,7 +95,7 @@ function taskTimeline(task: Task, updates: TaskUpdate[], files: FileAsset[]): Pr
     }
   }
   const timeline = [...merged.values()]
-    .sort((a, b) => b.date.localeCompare(a.date))
+    .sort(compareTimelineItems)
   const legacyAcceptanceFiles = files.filter((file) => file.scope === 'acceptance' && !file.entryId)
   const acceptanceItem = timeline.find((item) => item.title === '验收进展')
   if (acceptanceItem) acceptanceItem.files.push(...legacyAcceptanceFiles)
@@ -215,8 +243,8 @@ export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]
                   </header>
                   <div className="shared-project-timeline" tabIndex={0}>
                     {timeline.map((item) => (
-                      <div className="shared-project-timeline-item" key={item.id}>
-                        <time>{item.date.replace('T', ' ')}</time>
+                      <div className="shared-project-timeline-item" key={item.id} data-timeline-kind={item.kind}>
+                        <time dateTime={datePart(item.date)}>{datePart(item.date).replaceAll('-', '/')}</time>
                         <div>
                           <strong>{item.title}</strong><p>{item.body}</p>
                           {item.files.length > 0 && (
