@@ -517,6 +517,10 @@ button {
   animation: spin 0.9s linear infinite;
 }
 
+.backend-notice.slow > svg {
+  animation: spin 1.2s linear infinite;
+}
+
 .backend-notice.error {
   background: color-mix(in srgb, var(--color-status-danger) 5%, var(--color-surface-strong));
 }
@@ -8038,6 +8042,12 @@ button.file-chip:focus-visible {
   color: var(--color-text);
 }
 
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary);
+}
+
 .empty-state p {
   margin: 6px 0 0;
   font-size: 13px;
@@ -8045,6 +8055,49 @@ button.file-chip:focus-visible {
 
 .empty-state-action {
   margin-top: 14px;
+  justify-self: start;
+}
+
+.app-error-boundary {
+  min-height: 100vh;
+  padding: 32px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  display: grid;
+  place-items: center;
+}
+
+.app-error-boundary section {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-strong);
+  display: grid;
+  gap: 12px;
+}
+
+.app-error-boundary span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.app-error-boundary h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.app-error-boundary p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.app-error-boundary .primary-button {
   justify-self: start;
 }
 

@@ -150,6 +150,40 @@ type WorkflowBinding<Params> = {
 
 const roundCents = (value: number) => Math.round(value * 100) / 100
 
+const formatStorageUsageLabel = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  const fractionDigits = value >= 100 || unitIndex === 0 ? 0 : value >= 10 ? 1 : 2
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+const getStorageUsage = async (env: Env) => {
+  const row = await env.DB.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN a.file_size IS NOT NULL THEN a.file_size ELSE 0 END), 0) AS bytes,
+      COUNT(*) AS objectCount
+    FROM attachments a
+    LEFT JOIN tasks t ON t.id = a.task_id
+    WHERE a.deleted_at IS NULL
+      AND (t.id IS NULL OR (t.deleted_at IS NULL AND t.voided_at IS NULL))
+  `).first<{ bytes: number | string | null; objectCount: number | string | null }>()
+  const bytes = Number(row?.bytes ?? 0)
+  const objectCount = Number(row?.objectCount ?? 0)
+  return ok({
+    bytes: Number.isFinite(bytes) ? bytes : 0,
+    objectCount: Number.isFinite(objectCount) ? objectCount : 0,
+    label: formatStorageUsageLabel(Number.isFinite(bytes) ? bytes : 0),
+    checkedAt: nowIso(),
+    source: 'd1-attachments',
+  })
+}
+
 // 管理员账号：该邮箱 + 平台密码拥有最高权限（含口令管理）
 const ADMIN_EMAIL = 'bh141425@gmail.com'
 const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
@@ -18255,6 +18289,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/settings/ai-model' ||
       path === '/api/settings/ai-providers' ||
       path.startsWith('/api/settings/ai-providers/') ||
+      path === '/api/storage/usage' ||
       path === '/api/ai/model-test' ||
       path === '/api/ai/models' ||
       path === '/api/ai/provider-models' ||
@@ -18305,6 +18340,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
 
   if (path === '/api/health') {
     return ok({ ok: true, storage: 'D1/R2', checkedAt: nowIso() })
+  }
+  if (path === '/api/storage/usage') {
+    return getStorageUsage(env)
   }
   if (path.startsWith('/api/agent/')) {
     return handleAgentToolApi(request, env, ctx)

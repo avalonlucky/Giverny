@@ -106,6 +106,7 @@ import {
   type LocalCliDevice,
   type ReportRecord,
   type SettlementExportRecord,
+  type StorageUsage,
   type StoredAuth,
   type TaskAssistantSuggestion,
   type TaskProgressAssessment,
@@ -116,10 +117,12 @@ import {
   type OpenRouterFreeModel,
   type WorkspaceSummary,
 } from './lib/api'
+import { EmptyState } from './components/EmptyState'
 import { formatFileSize } from './lib/format'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
+import { loadTurnstileScript } from './lib/turnstile'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -4231,7 +4234,15 @@ const clearDraftCache = (key: string) => {
 
 // 静默刷新：把上次成功加载的后端状态快照存入 localStorage，刷新时先用它秒开首屏，
 // 后台 refreshState 完成后再无感更新，避免每次刷新都弹出「正在连接工作台」整页卡片。
-const STATE_CACHE_KEY = 'designer-worklog-state-cache-v1'
+const STATE_CACHE_KEY = 'designer-worklog-state-cache-v2'
+const STATE_CACHE_SCHEMA_VERSION = 2
+const STATE_CACHE_TTL_MS = 30 * 60 * 1000
+
+type StateCacheEnvelope = {
+  version: number
+  cachedAt: number
+  state: BackendState
+}
 
 const readStateCache = (): BackendState | null => {
   if (typeof window === 'undefined') {
@@ -4239,7 +4250,19 @@ const readStateCache = (): BackendState | null => {
   }
   try {
     const raw = window.localStorage.getItem(STATE_CACHE_KEY)
-    return raw ? (JSON.parse(raw) as BackendState) : null
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw) as Partial<StateCacheEnvelope>
+    if (parsed.version !== STATE_CACHE_SCHEMA_VERSION || typeof parsed.cachedAt !== 'number' || !parsed.state) {
+      window.localStorage.removeItem(STATE_CACHE_KEY)
+      return null
+    }
+    if (Date.now() - parsed.cachedAt > STATE_CACHE_TTL_MS) {
+      window.localStorage.removeItem(STATE_CACHE_KEY)
+      return null
+    }
+    return parsed.state
   } catch {
     return null
   }
@@ -4250,11 +4273,17 @@ const writeStateCache = (state: BackendState) => {
     return
   }
   try {
-    window.localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(state))
+    window.localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({
+      version: STATE_CACHE_SCHEMA_VERSION,
+      cachedAt: Date.now(),
+      state,
+    } satisfies StateCacheEnvelope))
   } catch {
     // 配额超限等忽略：快照仅用于加速首屏，缺失只是退回到原来的加载态
   }
 }
+
+const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
 
 function AttachmentHoverThumbnail({
   name,
@@ -4578,6 +4607,22 @@ type ToastState = {
   onAction?: () => void | Promise<void>
   durationMs?: number
 }
+
+const MAX_VISIBLE_TOASTS = 4
+
+const toastTonePriority = (tone: ToastTone) => {
+  if (tone === 'error') return 3
+  if (tone === 'info') return 1
+  return 0
+}
+
+const trimToastQueue = (items: ToastState[]) =>
+  items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => toastTonePriority(b.item.tone) - toastTonePriority(a.item.tone) || b.item.id - a.item.id)
+    .slice(0, MAX_VISIBLE_TOASTS)
+    .sort((a, b) => a.index - b.index)
+    .map(({ item }) => item)
 
 const inferToastTone = (message: string): ToastTone => {
   if (/(失败|异常|不正确|失效|错误|不可用|无效)/.test(message)) {
@@ -5114,16 +5159,16 @@ function KnowledgeView() {
 
         {loading && <p className="knowledge-empty">加载中…</p>}
         {!loading && activeTab === 'user' && userNotes.length === 0 && (
-          <div className="empty-state">
-            <strong>还没有笔记</strong>
-            <p>写下定价逻辑、合作伙伴沟通方式、行业心得，AI 工作助手对话时会自动参考这里的内容。</p>
-          </div>
+          <EmptyState
+            title="还没有笔记"
+            description="写下定价逻辑、合作伙伴沟通方式、行业心得，AI 工作助手对话时会自动参考这里的内容。"
+          />
         )}
         {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
-          <div className="empty-state">
-            <strong>还没有收藏</strong>
-            <p>在工作台的每日小知识里点击 ♥，感兴趣的内容会收进这里。</p>
-          </div>
+          <EmptyState
+            title="还没有收藏"
+            description="在工作台的每日小知识里点击收藏，感兴趣的内容会收进这里。"
+          />
         )}
         {(activeTab === 'user' ? userNotes : aiTipNotes).map((n) => (
           <div key={n.id} className={`knowledge-item ${n.source === 'ai-tip' ? 'knowledge-item-ai-tip' : ''}`}>
@@ -7486,6 +7531,9 @@ function App() {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const [backendStatus, setBackendStatus] = useState<'连接中' | '已接入 D1/R2' | '后端异常'>('连接中')
+  const [backendSyncSlow, setBackendSyncSlow] = useState(false)
+  const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
   const [taskQuery, setTaskQuery] = useState('')
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
   // 工作台任务明细：未完成列表兜底分页 + 已验收默认折叠
@@ -7563,7 +7611,7 @@ function App() {
     const id = Date.now() + Math.random()
     const nextToast: ToastState = { id, message, tone, ...options }
     const duration = options.durationMs ?? (tone === 'error' ? 4200 : 2400)
-    setToastQueue((current) => [...current, nextToast].slice(-3))
+    setToastQueue((current) => trimToastQueue([...current, nextToast]))
     const timer = window.setTimeout(() => {
       setToastQueue((current) => current.filter((item) => item !== nextToast))
       toastTimersRef.current = toastTimersRef.current.filter((value) => value !== timer)
@@ -7877,11 +7925,13 @@ function App() {
       return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? normalizedTasks[0]?.id ?? 0
     })
     setBackendStatus('已接入 D1/R2')
+    setBackendSyncSlow(false)
     setIsLoaded(true)
   }
 
   const retryRefreshState = async () => {
     setBackendStatus('连接中')
+    setBackendSyncSlow(false)
     try {
       await refreshState()
     } catch (error) {
@@ -7911,6 +7961,55 @@ function App() {
       notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
     })
   }, [auth, notify])
+
+  useEffect(() => {
+    if (backendStatus !== '连接中') {
+      return undefined
+    }
+    const timer = window.setTimeout(() => {
+      setBackendSyncSlow(true)
+    }, 8000)
+    return () => window.clearTimeout(timer)
+  }, [backendStatus])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') {
+      return undefined
+    }
+    const updateOnlineState = () => setIsOffline(!navigator.onLine)
+    window.addEventListener('online', updateOnlineState)
+    window.addEventListener('offline', updateOnlineState)
+    updateOnlineState()
+    return () => {
+      window.removeEventListener('online', updateOnlineState)
+      window.removeEventListener('offline', updateOnlineState)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isAdmin || backendStatus !== '已接入 D1/R2') {
+      return undefined
+    }
+    let cancelled = false
+    const loadStorageUsage = async () => {
+      try {
+        const usage = await api.getStorageUsage()
+        if (!cancelled) {
+          setStorageUsage(usage)
+        }
+      } catch {
+        if (!cancelled) {
+          setStorageUsage(null)
+        }
+      }
+    }
+    void loadStorageUsage()
+    const timer = window.setInterval(() => void loadStorageUsage(), 5 * 60 * 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [backendStatus, isAdmin])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -9703,6 +9802,7 @@ function App() {
       </button>
     </section>
   )
+  const effectiveBackendSyncSlow = backendStatus === '连接中' && backendSyncSlow
 
   if (!isLoaded) {
     return (
@@ -9791,11 +9891,14 @@ function App() {
                     <Settings size={17} />
                     <span>全站设置</span>
                   </button>
-                  <div className="account-menu-storage" title="Cloudflare R2 文件空间">
+                  <div
+                    className="account-menu-storage"
+                    title={storageUsage ? `Cloudflare R2 文件空间 · ${storageUsage.objectCount} 个对象` : 'Cloudflare R2 文件空间'}
+                  >
                     <Archive size={17} />
                     <div>
                       <span>R2 文件空间</span>
-                      <strong>18.6 GB</strong>
+                      <strong>{formatStorageUsage(storageUsage)}</strong>
                     </div>
                   </div>
                   <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
@@ -9925,14 +10028,35 @@ function App() {
           </div>
         </header>
 
-        {backendStatus !== '已接入 D1/R2' && (
-          <div className={`backend-notice ${backendStatus === '后端异常' ? 'error' : 'pending'}`} role={backendStatus === '后端异常' ? 'alert' : 'status'}>
-            {backendStatus === '后端异常' ? <AlertTriangle size={16} /> : <LoaderCircle size={16} />}
+        {(backendStatus !== '已接入 D1/R2' || effectiveBackendSyncSlow || isOffline) && (
+          <div
+            className={`backend-notice ${
+              backendStatus === '后端异常' || isOffline ? 'error' : effectiveBackendSyncSlow ? 'slow' : 'pending'
+            }`}
+            role={backendStatus === '后端异常' || isOffline ? 'alert' : 'status'}
+          >
+            {backendStatus === '后端异常' || isOffline ? <AlertTriangle size={16} /> : <LoaderCircle size={16} />}
             <div>
-              <strong>{backendStatus === '后端异常' ? '最新数据同步失败' : '正在同步最新数据'}</strong>
-              <span>{backendStatus === '后端异常' ? '当前页面可能显示上次成功加载的内容。' : '你可以先浏览页面，完成后会自动更新。'}</span>
+              <strong>
+                {isOffline
+                  ? '当前处于离线状态'
+                  : backendStatus === '后端异常'
+                    ? '最新数据同步失败'
+                    : effectiveBackendSyncSlow
+                      ? '同步时间较长'
+                      : '正在同步最新数据'}
+              </strong>
+              <span>
+                {isOffline
+                  ? '页面会保留本地快照，网络恢复后请重新同步。'
+                  : backendStatus === '后端异常'
+                    ? '当前页面可能显示上次成功加载的内容。'
+                    : effectiveBackendSyncSlow
+                      ? '网络可能较慢，你可以先浏览页面，完成后会自动更新。'
+                      : '你可以先浏览页面，完成后会自动更新。'}
+              </span>
             </div>
-            {backendStatus === '后端异常' && (
+            {(backendStatus === '后端异常' || effectiveBackendSyncSlow || isOffline) && (
               <button type="button" className="text-button" onClick={() => void retryRefreshState()}>
                 <RotateCcw size={14} />
                 重新同步
@@ -10386,6 +10510,7 @@ function App() {
               role={role}
               accessTokens={accessTokens}
               newTokenId={newTokenId}
+              storageUsage={storageUsage}
               onRateChange={handleRateChange}
               onPdfTitleChange={handlePdfTitleChange}
               onServiceCompanyNameChange={handleServiceCompanyNameChange}
@@ -11013,7 +11138,7 @@ function GivernyModeSettings() {
 }
 
 // Cloudflare Turnstile 站点密钥（公开，可放前端）；密钥(secret)只在 Worker 后端环境变量里。
-const TURNSTILE_SITE_KEY = '0x4AAAAAADq6J7chw6N3buxI'
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAADq6J7chw6N3buxI'
 
 function isLocalPreviewHost() {
   return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -11042,7 +11167,6 @@ function AdminLoginModal({
       return
     }
     let cancelled = false
-    let timer: number | undefined
     const renderWidget = () => {
       const ts = (window as unknown as { turnstile?: { render: (el: HTMLElement, opts: Record<string, unknown>) => string; reset: (id: string) => void } }).turnstile
       if (cancelled || !ts || !turnstileRef.current || turnstileWidgetId.current) {
@@ -11058,14 +11182,15 @@ function AdminLoginModal({
     if ((window as unknown as { turnstile?: unknown }).turnstile) {
       renderWidget()
     } else {
-      timer = window.setInterval(() => {
-        if ((window as unknown as { turnstile?: unknown }).turnstile) {
-          window.clearInterval(timer)
-          renderWidget()
-        }
-      }, 200)
+      void loadTurnstileScript()
+        .then(renderWidget)
+        .catch(() => {
+          if (!cancelled) {
+            setTurnstileToken('')
+          }
+        })
     }
-    return () => { cancelled = true; if (timer) window.clearInterval(timer) }
+    return () => { cancelled = true }
   }, [isLocalPreview])
 
   const submit = async () => {
@@ -19098,6 +19223,7 @@ function SettingsView({
   role,
   accessTokens,
   newTokenId,
+  storageUsage,
   onRateChange,
   onPdfTitleChange,
   onServiceCompanyNameChange,
@@ -19124,6 +19250,7 @@ function SettingsView({
   role: AuthRole
   accessTokens: AccessToken[]
   newTokenId: string
+  storageUsage: StorageUsage | null
   onRateChange: (rate: number) => void
   onPdfTitleChange: (title: string) => void
   onServiceCompanyNameChange: (name: string) => void
@@ -20861,7 +20988,10 @@ function SettingsView({
             <div className="cloudflare-list">
               <span>Worker：designer-worklog（mayeai.com）</span>
               <span>D1：designer-worklog-db</span>
-              <span>R2：designer-worklog-uploads · 18.6 GB</span>
+              <span>
+                R2：designer-worklog-uploads · {formatStorageUsage(storageUsage)}
+                {storageUsage ? ` · ${storageUsage.objectCount} 个对象` : ''}
+              </span>
               <span>登录体系：管理员邮箱 + 管理密码，或后台生成的访问口令</span>
             </div>
           </section>

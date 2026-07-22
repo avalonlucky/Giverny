@@ -523,6 +523,14 @@ export type BackendState = {
   accessTokens?: AccessToken[]
 }
 
+export type StorageUsage = {
+  bytes: number
+  objectCount: number
+  label: string
+  checkedAt: string
+  source: 'd1-attachments'
+}
+
 export type SharedReportState = {
   report: ReportRecord
   tasks: Task[]
@@ -868,6 +876,7 @@ export const api = {
       false,
     ),
   getState: () => requestJson<BackendState>('/api/state'),
+  getStorageUsage: () => requestJson<StorageUsage>('/api/storage/usage'),
   searchTasks: (q: string) =>
     requestJson<{ results: Array<{ taskId: number; score: number; title: string; month: string; type: string }> }>(
       `/api/search?q=${encodeURIComponent(q)}`,
