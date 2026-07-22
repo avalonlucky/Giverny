@@ -9306,23 +9306,6 @@ function App() {
     }
   }
 
-  const handleLockMonthlyReport = async () => {
-    try {
-      const report = await api.lockMonthlyReport({ month: currentMonth.value, hourlyRate, importedHours })
-      await refreshState()
-      const link = `${window.location.origin}/share/${report.publicToken}`
-      try {
-        await window.navigator.clipboard.writeText(link)
-        notify(`结算已锁定 ¥${formatYuan(report.totalAmount)}，合作伙伴链接已复制`)
-      } catch {
-        notify(`结算已锁定 ¥${formatYuan(report.totalAmount)}：${link}`)
-      }
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `结算锁定失败：${error.message}` : '结算锁定失败')
-    }
-  }
-
   const requireAdmin = () => {
     notify('请先登录管理员身份再编辑')
     setIsLoginModalOpen(true)
@@ -10299,7 +10282,6 @@ function App() {
               reports={reports}
               onCopyShareLink={handleCopyShareLink}
               onRotateReportToken={handleRotateReportToken}
-              onLockReport={handleLockMonthlyReport}
               onNotify={notify}
             />
           ) : (
@@ -17696,7 +17678,6 @@ function ReportsView({
   reports,
   onCopyShareLink,
   onRotateReportToken,
-  onLockReport,
   onNotify,
 }: {
   stats: {
@@ -17718,7 +17699,6 @@ function ReportsView({
   reports: ReportRecord[]
   onCopyShareLink: (token: string) => void
   onRotateReportToken: (report: ReportRecord) => void
-  onLockReport: () => void
   onNotify: (message: string, tone?: ToastTone) => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
@@ -17977,7 +17957,7 @@ function ReportsView({
   }
 
   const handleExportUserSheet = async (
-    options: { month?: string; startDate?: string; endDate?: string; label?: string } = { month: selectedMonth },
+    options: { month?: string; startDate?: string; endDate?: string; label?: string; action?: 'download' | 'share' } = { month: selectedMonth },
   ) => {
     try {
       const rangeStart = options.startDate ?? ''
@@ -18071,9 +18051,25 @@ function ReportsView({
         totalHours,
         totalAmount,
       }
-      const createdExport = isRangeExport
-        ? await api.createSettlementExport({ startDate: rangeStart, endDate: rangeEnd, receipt: receiptPayload })
+      const [exportYear, exportMonth] = month.split('-').map(Number)
+      const snapshotStart = isRangeExport ? rangeStart : `${month}-01`
+      const snapshotEnd = isRangeExport
+        ? rangeEnd
+        : `${month}-${pad(new Date(exportYear, exportMonth, 0).getDate())}`
+      const createdExport = isRangeExport || options.action === 'share'
+        ? await api.createSettlementExport({ startDate: snapshotStart, endDate: snapshotEnd, receipt: receiptPayload })
         : null
+      if (options.action === 'share' && createdExport) {
+        setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
+        const shareUrl = `${window.location.origin}/settlement-share/${createdExport.record.publicToken}`
+        try {
+          await navigator.clipboard.writeText(shareUrl)
+          onNotify(`已生成 ${createdExport.record.label} 分享链接，链接已复制`)
+        } catch {
+          onNotify(`已生成未锁定分享链接：${shareUrl}`)
+        }
+        return
+      }
       const buffer = await buildReceiptExcelBuffer(receiptPayload)
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       const url = URL.createObjectURL(blob)
@@ -18094,15 +18090,20 @@ function ReportsView({
     }
   }
 
-  const handleExportCustomRange = () => {
+  const validateCustomExportRange = () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(customExportStart) || !/^\d{4}-\d{2}-\d{2}$/.test(customExportEnd)) {
       onNotify('请选择完整的开始日期和结束日期', 'error')
-      return
+      return false
     }
     if (customExportStart > customExportEnd) {
       onNotify('开始日期不能晚于结束日期', 'error')
-      return
+      return false
     }
+    return true
+  }
+
+  const handleExportCustomRange = () => {
+    if (!validateCustomExportRange()) return
     const overlappingLocked = exportRecords.find((record) => record.locked && customExportStart <= record.endDate && customExportEnd >= record.startDate)
     if (overlappingLocked) {
       onNotify(`该范围与已锁定记录 ${overlappingLocked.label} 有重叠，请注意不要重复结算`, 'error')
@@ -18111,6 +18112,16 @@ function ReportsView({
       startDate: customExportStart,
       endDate: customExportEnd,
       label: `${customExportStart.replaceAll('-', '')}-${customExportEnd.replaceAll('-', '')}`,
+    })
+  }
+
+  const handleShareCustomRange = () => {
+    if (!validateCustomExportRange()) return
+    void handleExportUserSheet({
+      startDate: customExportStart,
+      endDate: customExportEnd,
+      label: `${customExportStart.replaceAll('-', '')}-${customExportEnd.replaceAll('-', '')}`,
+      action: 'share',
     })
   }
 
@@ -18171,12 +18182,12 @@ function ReportsView({
           </div>
         </div>
         <p className="report-flow-hint">
-          当前查看：{selectedMonthLabel}。核对下方结算单 → 锁定结算生成合作伙伴分享链接；历史记录可重新查看并下载 Excel 回单。
+          当前查看：{selectedMonthLabel}。分享和锁定互不影响；生成链接后，确认数据不再变动时再到导出记录中手动锁定。
         </p>
         <div className="report-bar-actions">
-          <button className="primary-button" onClick={onLockReport} disabled={selectedMonth !== currentMonth.value}>
-            <CheckCircle2 size={18} />
-            {selectedMonth === currentMonth.value ? '锁定结算并生成合作伙伴链接' : '历史结算已锁定'}
+          <button className="primary-button" onClick={() => void handleExportUserSheet({ month: selectedMonth, action: 'share' })}>
+            <Copy size={18} />
+            生成合作伙伴链接
           </button>
           <button className="ghost-button" onClick={() => void handleExportPdf()} disabled={isPdfExporting}>
             <Download size={18} />
@@ -18219,6 +18230,10 @@ function ReportsView({
             <button className="report-range-export-button" type="button" onClick={handleExportCustomRange}>
               <Download size={16} />
               导出范围 Excel
+            </button>
+            <button className="report-range-export-button" type="button" onClick={handleShareCustomRange}>
+              <Copy size={16} />
+              分享范围 Excel 链接
             </button>
           </div>
           <p>

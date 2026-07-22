@@ -151,6 +151,40 @@ test('日期范围回单支持线上分享、下载和锁定删除校验', async
   expect(acceptedDelete.ok()).toBeTruthy()
 })
 
+test('月度与自定义范围分享链接保持未锁定', async ({ page }) => {
+  const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  const readRecords = async () => {
+    const response = await page.request.get('/api/settlement-exports', { headers: authHeaders })
+    expect(response.ok()).toBeTruthy()
+    return (await response.json() as { records: Array<{ id: string; startDate: string; endDate: string; locked: boolean }> }).records
+  }
+
+  await page.getByRole('button', { name: '结算' }).click()
+  const beforeIds = new Set((await readRecords()).map((record) => record.id))
+
+  await page.getByRole('button', { name: '分享范围 Excel 链接' }).click()
+  await expect(page.getByText(/已生成.*分享链接/).first()).toBeVisible()
+  await expect.poll(async () => (await readRecords()).filter((record) => !beforeIds.has(record.id)).length).toBe(1)
+  const afterRangeShare = await readRecords()
+  const rangeRecord = afterRangeShare.find((record) => !beforeIds.has(record.id))
+  expect(rangeRecord).toBeTruthy()
+  expect(rangeRecord!.locked).toBe(false)
+
+  const rangeIds = new Set(afterRangeShare.map((record) => record.id))
+  await page.getByRole('button', { name: '生成合作伙伴链接' }).click()
+  await expect.poll(async () => (await readRecords()).filter((record) => !rangeIds.has(record.id)).length).toBe(1)
+  const afterMonthShare = await readRecords()
+  const monthRecord = afterMonthShare.find((record) => !rangeIds.has(record.id))
+  expect(monthRecord).toBeTruthy()
+  expect(monthRecord!.startDate).toBe('2026-07-01')
+  expect(monthRecord!.endDate).toBe('2026-07-31')
+  expect(monthRecord!.locked).toBe(false)
+
+  await Promise.all(
+    [rangeRecord!, monthRecord!].map((record) => page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders })),
+  )
+})
+
 test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {
   await page.route('**/api/ai/conversations', async (route) => {
     if (route.request().method() === 'GET') {
