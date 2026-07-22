@@ -1,4 +1,6 @@
 export type ReceiptExcelRow = {
+  /** 仅用于在线分享页关联项目证据，不写入 Excel 单元格。 */
+  taskId?: number
   sequence: string
   type: string
   title: string

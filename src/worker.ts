@@ -8804,6 +8804,7 @@ async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, sta
       || (update ? `${update.title}${update.body ? `：${update.body}` : ''}` : '')
       || `${task.status}，进度 ${Number(task.progress) || 0}%`
     return {
+      taskId: Number(task.id),
       sequence: String(index + 1).padStart(2, '0'),
       type: task.design_type || '—',
       title: `${task.title}${task.is_supplemental ? '（补录）' : ''}`,
@@ -12450,7 +12451,15 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
   )
     .bind(fileId, shareToken)
     .first<{ id: string }>()
-  return Boolean(row)
+  if (row) return true
+  const [attachment, settlementExport] = await Promise.all([
+    env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL AND visible_to_client = 1 AND attachment_scope = ?')
+      .bind(fileId, 'acceptance').first<{ task_id: string }>(),
+    env.DB.prepare('SELECT snapshot_json FROM settlement_exports WHERE public_token = ?').bind(shareToken).first<{ snapshot_json: string }>(),
+  ])
+  if (!attachment || !settlementExport) return false
+  const receipt = parseSettlementReceiptSnapshot(settlementExport.snapshot_json)
+  return Boolean(receipt?.rows.some((receiptRow) => Number(receiptRow.taskId) === Number(attachment.task_id)))
 }
 
 // 为已上传但缺少预览图的文件（如早期上传的 PDF）补一张预览图。前端客户端渲染 PDF 首页后回传。
@@ -17591,13 +17600,60 @@ async function deleteSettlementExport(env: Env, id: string, request: Request) {
   return ok({ ok: true })
 }
 
+async function getSettlementProjectEvidence(env: Env, row: DbSettlementExport, receipt: ReceiptExcelOptions) {
+  const explicitTaskIds = receipt.rows.map((item) => Number(item.taskId)).filter((id) => Number.isFinite(id) && id > 0)
+  const taskRows: DbTask[] = explicitTaskIds.length > 0 ? await (async () => {
+    const placeholders = explicitTaskIds.map(() => '?').join(', ')
+    const result = await env.DB.prepare(
+      `SELECT * FROM tasks WHERE workspace_id = ? AND id IN (${placeholders}) AND deleted_at IS NULL AND voided_at IS NULL`,
+    ).bind(row.workspace_id, ...explicitTaskIds.map(String)).all<DbTask>()
+    return result.results || []
+  })() : await (async () => {
+    // 兼容升级前创建的快照：只在当前工作区按回单中的完整任务名回查。
+    const titles = new Set(receipt.rows.map((item) => item.title.replace(/（补录）$/, '').trim()).filter(Boolean))
+    const result = await env.DB.prepare('SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL')
+      .bind(row.workspace_id).all<DbTask>()
+    return (result.results || []).filter((task) => titles.has(task.title.trim()))
+  })()
+  const taskIds = taskRows.map((task) => task.id)
+  if (taskIds.length === 0) return { tasks: [], updates: [], files: [] }
+  const placeholders = taskIds.map(() => '?').join(', ')
+  const [updateRows, fileRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT * FROM task_updates WHERE task_id IN (${placeholders}) AND visible_to_client = 1 ORDER BY update_date DESC`,
+    ).bind(...taskIds).all<DbUpdate>(),
+    env.DB.prepare(
+      `SELECT attachments.*, tasks.title AS task_title
+       FROM attachments INNER JOIN tasks ON tasks.id = attachments.task_id
+       WHERE attachments.task_id IN (${placeholders})
+         AND attachments.deleted_at IS NULL
+         AND attachments.visible_to_client = 1
+         AND attachments.attachment_scope = 'acceptance'
+       ORDER BY attachments.uploaded_at DESC`,
+    ).bind(...taskIds).all<DbAttachment>(),
+  ])
+  return {
+    tasks: taskRows.map((task) => toTask(task)),
+    updates: (updateRows.results || []).map((update) => toUpdate(update)),
+    files: (fileRows.results || []).map((file) => {
+      const mapped = toFile(file)
+      return {
+        ...mapped,
+        previewUrl: mapped.previewUrl ? `${mapped.previewUrl}?token=${row.public_token}` : undefined,
+        sourceUrl: `${mapped.sourceUrl}?token=${row.public_token}`,
+      }
+    }),
+  }
+}
+
 async function getSharedSettlementExport(env: Env, token: string) {
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
   if (!row) return fail('分享链接无效或已失效', 404)
   const receipt = parseSettlementReceiptSnapshot(row.snapshot_json)
   if (!receipt) return fail('回单快照损坏，请重新导出', 500)
+  const evidence = await getSettlementProjectEvidence(env, row, receipt)
   await env.DB.prepare('UPDATE settlement_exports SET viewed_at = CURRENT_TIMESTAMP, view_count = view_count + 1 WHERE id = ?').bind(row.id).run()
-  return ok({ exportRecord: toSettlementExportRecord(row), receipt })
+  return ok({ exportRecord: toSettlementExportRecord(row), receipt, ...evidence })
 }
 
 async function downloadSharedSettlementExcel(env: Env, token: string) {

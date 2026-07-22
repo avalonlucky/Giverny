@@ -34,6 +34,9 @@ export type SettlementExportRecord = {
 export type SharedSettlementExportState = {
   exportRecord: SettlementExportRecord
   receipt: ReceiptExcelOptions
+  tasks: Task[]
+  updates: TaskUpdate[]
+  files: FileAsset[]
 }
 
 export type ActivityItem = {

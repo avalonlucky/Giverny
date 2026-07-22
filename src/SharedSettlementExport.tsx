@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Download } from 'lucide-react'
 import { api, type SharedSettlementExportState } from './lib/api'
 import { SettlementReceipt } from './components/SettlementReceipt'
+import { SharedProjectAppendix } from './components/SharedProjectAppendix'
 import './App.css'
 
 export default function SharedSettlementExport({ token }: { token: string }) {
@@ -34,6 +35,7 @@ export default function SharedSettlementExport({ token }: { token: string }) {
           </a>
         </header>
         <SettlementReceipt options={state.receipt} className="shared-settlement-receipt" />
+        <SharedProjectAppendix tasks={state.tasks} updates={state.updates} files={state.files} />
       </div>
     </main>
   )

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Download, Eye, ExternalLink, FileArchive, FileText, Paperclip, X } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { defaultPdfTitle, defaultServiceCompanyName } from './config/appConfig'
 import { api, type SharedReportState } from './lib/api'
 import { buildReceiptExcelBuffer, type ReceiptExcelRow } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
-import type { FileAsset } from './types/domain'
+import { SharedProjectAppendix } from './components/SharedProjectAppendix'
 import './App.css'
 
 function monthLabel(month: string) {
@@ -20,67 +20,9 @@ function formatPublicDate(value: string) {
   return datePart(value).replaceAll('-', '/')
 }
 
-function SharedFilePreviewModal({ file, onClose }: { file: FileAsset; onClose: () => void }) {
-  const fileType = file.type.toUpperCase()
-  const sourceUrl = file.sourceUrl ?? ''
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeydown)
-    return () => window.removeEventListener('keydown', handleKeydown)
-  }, [onClose])
-
-  return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose()
-        }
-      }}
-    >
-      <section className="task-modal file-preview-modal" role="dialog" aria-modal="true" aria-labelledby="shared-preview-title">
-        <header className="modal-header">
-          <div>
-            <p className="eyebrow">文件预览</p>
-            <h2 id="shared-preview-title">{file.name}</h2>
-          </div>
-          <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </header>
-        <div className="file-preview-body">
-          {file.previewUrl ? (
-            <img src={file.previewUrl} alt={file.name} loading="lazy" />
-          ) : sourceUrl && fileType === 'PDF' ? (
-            <iframe className="file-preview-frame" src={sourceUrl} title={file.name} />
-          ) : (
-            <div className="file-preview-placeholder">
-              {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}
-              <strong>{file.type}</strong>
-              <span>{sourceUrl ? '该格式暂无在线预览图，可以直接打开源文件。' : '该文件暂无在线预览图，如需源文件请联系设计师。'}</span>
-              {sourceUrl && (
-                <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={15} />
-                  打开源文件
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
-  )
-}
-
 export default function SharedReport({ token }: { token: string }) {
   const [state, setState] = useState<SharedReportState | null>(null)
   const [error, setError] = useState('')
-  const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
 
   useEffect(() => {
     api
@@ -121,6 +63,7 @@ export default function SharedReport({ token }: { token: string }) {
   const receiptNo = `AK-${report.month.replace('-', '')}-${String(billableTasks.length + 1).padStart(3, '0')}`
   const fileLabel = monthLabel(report.month).replace(/\s/g, '')
   const receiptRows: ReceiptExcelRow[] = billableTasks.map((task, index) => ({
+    taskId: task.id,
     sequence: String(index + 1).padStart(2, '0'),
     type: task.type,
     title: task.title,
@@ -192,41 +135,9 @@ export default function SharedReport({ token }: { token: string }) {
 
         <SettlementReceipt options={receiptOptions} className="shared-receipt" />
 
-        {(files.length > 0 || updates.length > 0) && (
-          <section className="shared-receipt-appendix">
-            {files.length > 0 && (
-              <div>
-                <h2>交付文件</h2>
-                <div className="shared-file-list">
-                  {files.map((file) => (
-                    <button type="button" key={file.id} onClick={() => setPreviewFile(file)}>
-                      <Paperclip size={15} />
-                      <span>{file.name}</span>
-                      <Eye size={15} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {updates.length > 0 && (
-              <div>
-                <h2>验收与进展记录</h2>
-                <div className="shared-update-list">
-                  {updates.map((update) => (
-                    <article key={update.id}>
-                      <time>{datePart(update.date)}</time>
-                      <strong>{update.title}</strong>
-                      <p>{update.body}</p>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
+        <SharedProjectAppendix tasks={billableTasks} updates={updates} files={files} />
         <footer className="shared-footer">本页面为只读结算回单，由 Giverny 自动生成。</footer>
       </div>
-      {previewFile && <SharedFilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
     </main>
   )
 }

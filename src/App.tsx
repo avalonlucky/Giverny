@@ -17880,6 +17880,7 @@ function ReportsView({
     : selectedMonth
   const receiptNo = `AK-${activeReceiptKey.replaceAll('-', '')}-${String(activeReceiptRows.length + 1).padStart(3, '0')}`
   const previewReceiptRows: ReceiptExcelRow[] = activeReceiptRows.map((row) => ({
+    taskId: row.task.id,
     sequence: row.sequence,
     type: row.task.type,
     title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
@@ -18011,6 +18012,7 @@ function ReportsView({
         ? targetReport.totalAmount / targetReport.billableHours
         : hourlyRate
       const exportRows: ReceiptExcelRow[] = targetRows.map((row) => ({
+        taskId: row.task.id,
         sequence: row.sequence,
         type: row.task.type,
         title: `${row.task.title}${isSupplementalTask(row.task) ? '（补录）' : ''}`,
