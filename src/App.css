@@ -16654,8 +16654,21 @@ textarea:focus-visible {
   font-size: 14px;
 }
 
+.report-history-primary {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.report-history-kind {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .report-history-row span {
-  color: #405056;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 700;
 }
@@ -21314,17 +21327,21 @@ textarea:focus-visible {
   align-items: baseline;
   justify-content: space-between;
   padding-top: 8px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 0;
 }
 
 .report-history-row {
   display: grid;
-  grid-template-columns: 120px 150px minmax(0, 1fr) auto;
+  grid-template-columns: 170px 128px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--color-border);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 0;
   background: transparent;
+}
+
+.report-history-row + .report-history-row {
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .report-history-row small {
@@ -21336,7 +21353,8 @@ textarea:focus-visible {
 .report-history-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .receipt-tools {
@@ -22882,36 +22900,31 @@ button.topbar-create-button kbd {
 }
 
 .report-bar-actions :is(.primary-button, .ghost-button) svg,
-.report-history-actions .icon-button svg,
 .income-method-pill {
   display: none;
 }
 
 .report-history-row {
-  grid-template-columns: 110px 130px minmax(0, 1fr) auto;
+  grid-template-columns: 170px 128px minmax(0, 1fr) auto;
 }
 
 .report-history-actions {
-  gap: 14px;
+  gap: 6px;
 }
 
 .report-history-actions .ghost-button,
 .report-history-actions .icon-button {
-  width: auto;
+  width: 28px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 28px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--color-text-secondary);
 }
 
-.report-history-actions .icon-button::after {
-  content: attr(aria-label);
-  max-width: 4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.report-history-actions .icon-button svg {
+  display: block;
 }
 
 .report-history-actions .icon-button:hover,

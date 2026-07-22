@@ -1994,6 +1994,12 @@ function monthLabelOf(value: string) {
   return `${Number(value.slice(0, 4))} 年 ${Number(value.slice(5, 7))} 月`
 }
 
+function monthDateRangeLabelOf(value: string) {
+  const [year, month] = value.split('-').map(Number)
+  const end = new Date(year, month, 0)
+  return `${year}/${pad(month)}/01 至 ${end.getFullYear()}/${pad(end.getMonth() + 1)}/${pad(end.getDate())}`
+}
+
 function supplementalMonthSelectOptions(currentValue = monthPart(isoDate())) {
   const anchor = localDateFromIsoDate(`${currentValue}-01`)
   return Array.from({ length: 4 }, (_, index) => {
@@ -18417,14 +18423,17 @@ function ReportsView({
           <div className="report-export-history">
             <div className="report-history-header">
               <h3>导出记录</h3>
-              <span>锁定后作为下次导出的日期边界参考</span>
+              <span>按自定义日期范围生成，可分享、下载或锁定</span>
             </div>
             {exportRecords.slice(0, 6).map((record) => (
               <div className="report-history-row report-export-row" key={record.id}>
-                <strong>{record.label}</strong>
+                <div className="report-history-primary">
+                  <strong>{record.label}</strong>
+                  <em className="report-history-kind">自定义导出</em>
+                </div>
                 <span>{record.taskCount} 项 · {record.billableHours.toFixed(1)}h · ¥{formatYuan(record.amount)}</span>
                 <small>
-                  导出于 {record.exportedAt} · {record.disabled ? '链接已停止' : record.expired ? '链接已过期' : record.expiresAt ? `有效至 ${record.expiresAt}` : '永久有效'}
+                  {record.locked ? '已锁定' : '未锁定'} · 导出于 {record.exportedAt} · {record.disabled ? '链接已停止' : record.expired ? '链接已过期' : record.expiresAt ? `有效至 ${record.expiresAt}` : '永久有效'}
                 </small>
                 <div className="report-history-actions">
                   <button className="icon-button" disabled={isExportRecordBusy || record.locked} onClick={() => void toggleExportRecordLock(record)} aria-label={record.locked ? '已锁定' : '锁定记录'} title={record.locked ? '已锁定' : '锁定记录'}>
@@ -18460,7 +18469,7 @@ function ReportsView({
         {reportSectionTab === 'history' && reports.length > 0 && (
           <div className="report-history">
             <div className="report-history-header">
-              <h3>结算历史</h3>
+              <h3>已锁定快照</h3>
               {reports.length > 1 && (
                 <button type="button" onClick={() => setIsHistoryExpanded((expanded) => !expanded)}>
                   {isHistoryExpanded ? '收起' : `展开全部 ${reports.length} 条`}
@@ -18469,7 +18478,10 @@ function ReportsView({
             </div>
             {visibleReports.map((report) => (
               <div className="report-history-row" key={report.id}>
-                <strong>{monthLabelOf(report.month)}</strong>
+                <div className="report-history-primary">
+                  <strong>{monthDateRangeLabelOf(report.month)}</strong>
+                  <em className="report-history-kind">锁定快照</em>
+                </div>
                 <span>
                   {report.billableHours.toFixed(1)}h · ¥{formatYuan(report.totalAmount)}
                 </span>
