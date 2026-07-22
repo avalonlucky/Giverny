@@ -9751,6 +9751,7 @@ function App() {
           {visibleNavItems.map((item) => {
             const shortcut = navShortcutHints[item.label as AppView]
             const ariaShortcut = navAriaShortcutHints[item.label as AppView]
+            const NavIcon = item.icon
             return (
               <div key={item.label}>
                 <button
@@ -9760,6 +9761,7 @@ function App() {
                   title={shortcut ? `${item.label}（${shortcut}）` : item.label}
                   onClick={() => navigateView(item.label as AppView)}
                 >
+                  <NavIcon size={17} aria-hidden="true" />
                   <span>{item.label}</span>
                 </button>
               </div>
@@ -9834,6 +9836,7 @@ function App() {
               navigateView('设置')
             }}
           >
+            <Settings size={17} aria-hidden="true" />
             <span>设置</span>
           </button>
         </div>
