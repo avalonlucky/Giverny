@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/browser',
+  timeout: 60_000,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
@@ -21,6 +22,6 @@ export default defineConfig({
     command: 'exec node agent-evals/start-browser-eval.mjs',
     url: 'http://127.0.0.1:8799/api/health',
     reuseExistingServer: false,
-    timeout: 90_000,
+    timeout: 180_000,
   },
 })

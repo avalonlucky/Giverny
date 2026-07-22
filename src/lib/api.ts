@@ -29,6 +29,9 @@ export type SettlementExportRecord = {
   publicToken: string
   viewedAt: string
   viewCount: number
+  expiresAt: string
+  disabled: boolean
+  expired: boolean
 }
 
 export type SharedSettlementExportState = {
@@ -878,6 +881,12 @@ export const api = {
     }
     return response.blob()
   },
+  deleteReport: (id: string, password = '') =>
+    requestJson<{ ok: true }>(`/api/reports/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }),
   getSharedReport: (token: string) => requestJson<SharedReportState>(`/api/shared/${token}`, undefined, false),
   getSettlementExports: () => requestJson<{ records: SettlementExportRecord[] }>('/api/settlement-exports'),
   createSettlementExport: (payload: { startDate: string; endDate: string; receipt: ReceiptExcelOptions }) =>
@@ -891,6 +900,12 @@ export const api = {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ locked }),
+    }),
+  updateSettlementExportAccess: (id: string, payload: { expiresAt: string | null; disabled: boolean }) =>
+    requestJson<{ record: SettlementExportRecord }>(`/api/settlement-exports/${encodeURIComponent(id)}/access`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   deleteSettlementExport: (id: string, password = '') =>
     requestJson<{ ok: true }>(`/api/settlement-exports/${encodeURIComponent(id)}`, {

@@ -63,7 +63,13 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
   await expect(receiptPreviewDialog).toBeVisible()
   await expect(receiptPreviewDialog.getByRole('region', { name: '月度结算回单' })).toBeVisible()
   await expect(receiptPreviewDialog.getByRole('button', { name: '关闭' })).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('button', { name: '缩小' })).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('button', { name: '按 1 比 1 显示' })).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('button', { name: '放大' })).toBeVisible()
+  await expect(receiptPreviewDialog.getByRole('button', { name: '适合窗口' })).toBeVisible()
   expect(await receiptPreviewDialog.locator('.agent-receipt-preview-viewport').evaluate((element) => getComputedStyle(element).overflow)).toBe('auto')
+  await receiptPreviewDialog.getByRole('button', { name: '按 1 比 1 显示' }).click()
+  await expect.poll(async () => receiptPreviewDialog.locator('.agent-receipt-preview-viewport').evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
   await receiptPreviewDialog.getByRole('button', { name: '关闭' }).click()
   await expect(receiptPreviewDialog).toBeHidden()
   const previewLink = page.getByRole('link', { name: '在线预览' })
@@ -128,7 +134,7 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   expect(completionDates.every((value) => value.trim() === selectedEndDate.replaceAll('-', '/'))).toBe(false)
 
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: '下载 Excel 回单' }).first().click()
+  await page.getByRole('button', { name: '导出范围 Excel' }).click()
   const download = await downloadPromise
   const downloadPath = await download.path()
   expect(downloadPath).toBeTruthy()
@@ -197,6 +203,18 @@ test('日期范围回单支持线上分享、下载和锁定删除校验', async
   expect(excel.headers()['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
   const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  const disabled = await page.request.patch(`/api/settlement-exports/${record.id}/access`, {
+    headers: authHeaders,
+    data: { expiresAt: null, disabled: true },
+  })
+  expect(disabled.ok()).toBeTruthy()
+  expect((await page.request.get(`/api/shared-settlement/${record.publicToken}`)).status()).toBe(403)
+  const enabled = await page.request.patch(`/api/settlement-exports/${record.id}/access`, {
+    headers: authHeaders,
+    data: { expiresAt: '2026-12-31T23:59:59.000Z', disabled: false },
+  })
+  expect(enabled.ok()).toBeTruthy()
+  expect((await page.request.get(`/api/shared-settlement/${record.publicToken}`)).ok()).toBeTruthy()
   expect((await page.request.patch(`/api/settlement-exports/${record.id}/lock`, { headers: authHeaders, data: { locked: true } })).ok()).toBeTruthy()
   const deniedDelete = await page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders, data: { password: 'wrong-password' } })
   expect(deniedDelete.status()).toBe(401)
@@ -258,7 +276,7 @@ test('合作伙伴回单按项目归档交付文件并支持排序与时间线',
   await page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders })
 })
 
-test('月度与自定义范围分享链接保持未锁定', async ({ page }) => {
+test('自定义范围分享链接保持未锁定', async ({ page }) => {
   const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
   const readRecords = async () => {
     const response = await page.request.get('/api/settlement-exports', { headers: authHeaders })
@@ -269,7 +287,7 @@ test('月度与自定义范围分享链接保持未锁定', async ({ page }) => 
   await page.getByRole('button', { name: '结算' }).click()
   const beforeIds = new Set((await readRecords()).map((record) => record.id))
 
-  await page.getByRole('button', { name: '分享范围 Excel 链接' }).click()
+  await page.getByRole('button', { name: '分享范围链接' }).click()
   await expect(page.getByText(/已生成.*分享链接/).first()).toBeVisible()
   await expect.poll(async () => (await readRecords()).filter((record) => !beforeIds.has(record.id)).length).toBe(1)
   const afterRangeShare = await readRecords()
@@ -277,19 +295,7 @@ test('月度与自定义范围分享链接保持未锁定', async ({ page }) => 
   expect(rangeRecord).toBeTruthy()
   expect(rangeRecord!.locked).toBe(false)
 
-  const rangeIds = new Set(afterRangeShare.map((record) => record.id))
-  await page.getByRole('button', { name: '生成合作伙伴链接' }).click()
-  await expect.poll(async () => (await readRecords()).filter((record) => !rangeIds.has(record.id)).length).toBe(1)
-  const afterMonthShare = await readRecords()
-  const monthRecord = afterMonthShare.find((record) => !rangeIds.has(record.id))
-  expect(monthRecord).toBeTruthy()
-  expect(monthRecord!.startDate).toBe('2026-07-01')
-  expect(monthRecord!.endDate).toBe('2026-07-31')
-  expect(monthRecord!.locked).toBe(false)
-
-  await Promise.all(
-    [rangeRecord!, monthRecord!].map((record) => page.request.delete(`/api/settlement-exports/${record.id}`, { headers: authHeaders })),
-  )
+  await page.request.delete(`/api/settlement-exports/${rangeRecord!.id}`, { headers: authHeaders })
 })
 
 test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {

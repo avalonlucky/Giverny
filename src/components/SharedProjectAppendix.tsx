@@ -119,10 +119,10 @@ function SharedFilePreviewModal({ file, onClose }: { file: FileAsset; onClose: (
           <button className="icon-button modal-close-button" aria-label="关闭" title="关闭" onClick={onClose}><X size={18} /></button>
         </header>
         <div className="file-preview-body">
-          {file.previewUrl ? (
-            <img src={file.previewUrl} alt={file.name} />
-          ) : sourceUrl && fileType === 'PDF' ? (
+          {sourceUrl && fileType === 'PDF' ? (
             <iframe className="file-preview-frame" src={sourceUrl} title={file.name} />
+          ) : file.previewUrl ? (
+            <img src={file.previewUrl} alt={file.name} />
           ) : (
             <div className="file-preview-placeholder">
               {fileType === 'PDF' ? <FileText size={42} /> : <FileArchive size={42} />}

@@ -138,6 +138,7 @@ import openaiBrandIcon from '@lobehub/icons-static-svg/icons/openai.svg?url'
 import openrouterBrandIcon from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
 import qwenBrandIcon from '@lobehub/icons-static-svg/icons/qwen-color.svg?url'
 import anthropicBrandIcon from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
+import microsoftExcelIcon from './assets/microsoft-excel.svg?url'
 import './App.css'
 
 // 吉维尼模式：可选的莫奈花园整套色系（默认关，用户在设置里手动开启）。开启后主题随季节走，
@@ -2598,6 +2599,17 @@ function taskBillableHoursInDateRange(task: Task, startDate: string, endDate: st
   if (!isTaskBillable(task)) {
     return 0
   }
+  const minutes = taskTimeEntriesInDateRange(task, startDate, endDate).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
+  if (minutes > 0) {
+    return Number((minutes / 60).toFixed(2))
+  }
+  if (billableTimeEntries(task).length === 0 && isDateValueInRange(task.actualDeliveryDate || task.date, startDate, endDate)) {
+    return roundCents(Number(task.actualHours) || 0)
+  }
+  return 0
+}
+
+function taskHoursInDateRange(task: Task, startDate: string, endDate: string) {
   const minutes = taskTimeEntriesInDateRange(task, startDate, endDate).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
   if (minutes > 0) {
     return Number((minutes / 60).toFixed(2))
@@ -5984,7 +5996,7 @@ function AgentSettlementReceiptPreview({
 
   const changeScale = (delta: number) => setScale((current) => Math.max(0.25, Math.min(1.5, Number((current + delta).toFixed(2)))))
 
-  return (
+  return createPortal(
     <ModalShell className="agent-receipt-preview-modal" labelledBy="agent-receipt-preview-title" onClose={onClose} closeOnEscape>
       <header className="modal-header agent-receipt-preview-header">
         <div>
@@ -5993,27 +6005,13 @@ function AgentSettlementReceiptPreview({
         </div>
         <div className="modal-header-actions">
           <button type="button" className="icon-button" onClick={() => changeScale(-0.08)} disabled={scale <= 0.25} aria-label="缩小" title="缩小"><ZoomOut size={16} /></button>
-          <button type="button" className="agent-receipt-scale" onClick={fitReceipt} title="适合窗口">{Math.round(scale * 100)}%</button>
+          <button type="button" className="agent-receipt-scale" onClick={() => setScale(1)} aria-label="按 1 比 1 显示" title="1:1 原始尺寸">1:1</button>
           <button type="button" className="icon-button" onClick={() => changeScale(0.08)} disabled={scale >= 1.5} aria-label="放大" title="放大"><ZoomIn size={16} /></button>
           <button type="button" className="icon-button" onClick={fitReceipt} aria-label="适合窗口" title="适合窗口"><Maximize2 size={16} /></button>
           <button type="button" className="icon-button modal-close-button" onClick={onClose} aria-label="关闭" title="关闭"><X size={18} /></button>
         </div>
       </header>
-      <div
-        ref={viewportRef}
-        className="agent-receipt-preview-viewport"
-        onWheel={(event) => {
-          if (event.shiftKey) {
-            event.preventDefault()
-            event.currentTarget.scrollLeft += event.deltaY
-            return
-          }
-          if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
-            event.preventDefault()
-            changeScale(event.deltaY < 0 ? 0.06 : -0.06)
-          }
-        }}
-      >
+      <div ref={viewportRef} className="agent-receipt-preview-viewport">
         {!receipt && !error && <div className="office-preview-status">正在加载完整回单…</div>}
         {error && <div className="file-preview-placeholder"><FileText size={38} /><strong>暂时无法预览</strong><span>{error}</span></div>}
         {receipt && (
@@ -6022,7 +6020,8 @@ function AgentSettlementReceiptPreview({
           </div>
         )}
       </div>
-    </ModalShell>
+    </ModalShell>,
+    document.body,
   )
 }
 
@@ -6055,7 +6054,7 @@ function AgentAttachmentResults({
           return (
             <article className={`agent-attachment-card ${isSettlementReceipt ? 'is-settlement-receipt' : ''}`} key={attachment.id}>
               <button type="button" className="agent-attachment-preview" onClick={() => onPreview(attachment)} aria-label={`预览 ${attachment.name}`} title="预览附件">
-                {isSettlementReceipt ? <span className="agent-receipt-file-mark"><FileText size={26} /><b>XLSX</b></span> : <FileThumbnailPreview file={file} />}
+                {isSettlementReceipt ? <span className="agent-receipt-file-mark"><img src={microsoftExcelIcon} alt="Microsoft Excel" /></span> : <FileThumbnailPreview file={file} />}
               </button>
               <div className="agent-attachment-info">
                 <strong title={attachment.name}>{isSettlementReceipt ? settlementReceiptRangeLabel(attachment.name) : attachment.name}</strong>
@@ -10375,6 +10374,7 @@ function App() {
               reports={reports}
               onCopyShareLink={handleCopyShareLink}
               onRotateReportToken={handleRotateReportToken}
+              onReportDeleted={(reportId) => setReports((current) => current.filter((report) => report.id !== reportId))}
               onNotify={notify}
             />
           ) : (
@@ -17773,6 +17773,7 @@ function ReportsView({
   reports,
   onCopyShareLink,
   onRotateReportToken,
+  onReportDeleted,
   onNotify,
 }: {
   stats: {
@@ -17794,6 +17795,7 @@ function ReportsView({
   reports: ReportRecord[]
   onCopyShareLink: (token: string) => void
   onRotateReportToken: (report: ReportRecord) => void
+  onReportDeleted: (reportId: string) => void
   onNotify: (message: string, tone?: ToastTone) => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
@@ -17802,9 +17804,16 @@ function ReportsView({
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
   const [isCustomRangePreviewActive, setIsCustomRangePreviewActive] = useState(false)
   const [activeRangePickerId, setActiveRangePickerId] = useState<string | null>(null)
+  const [reportSectionTab, setReportSectionTab] = useState<'receipt' | 'history'>('receipt')
   const [exportRecords, setExportRecords] = useState<SettlementExportRecord[]>([])
   const [deleteExportRecord, setDeleteExportRecord] = useState<SettlementExportRecord | null>(null)
   const [deleteExportPassword, setDeleteExportPassword] = useState('')
+  const [deleteReport, setDeleteReport] = useState<ReportRecord | null>(null)
+  const [deleteReportPassword, setDeleteReportPassword] = useState('')
+  const [accessExportRecord, setAccessExportRecord] = useState<SettlementExportRecord | null>(null)
+  const [accessExpiryMode, setAccessExpiryMode] = useState<'permanent' | '1' | '7' | '30' | 'custom'>('permanent')
+  const [accessExpiryDate, setAccessExpiryDate] = useState('')
+  const [accessDisabled, setAccessDisabled] = useState(false)
   const [isExportRecordBusy, setIsExportRecordBusy] = useState(false)
   useEffect(() => {
     api.getSettlementExports()
@@ -18022,6 +18031,15 @@ function ReportsView({
   const previewTotalAmount = hasValidCustomPreviewRange
     ? roundCents(previewReceiptRows.reduce((sum, row) => sum + row.amount, 0))
     : selectedStats.amount
+  const activeSummaryStats = hasValidCustomPreviewRange
+    ? {
+        totalHours: roundCents(allTasks.filter((task) => !task.voidedAt).reduce((sum, task) => sum + taskHoursInDateRange(task, customExportStart, customExportEnd), 0)),
+        billableHours: previewTotalHours,
+        amount: previewTotalAmount,
+        accepted: activeReceiptRows.filter((row) => row.task.status === '已验收' || hasAcceptanceProgress(row.task)).length,
+        pending: activeReceiptRows.filter((row) => row.task.status === '待验收').length,
+      }
+    : selectedStats
   const previewReceiptOptions = {
     fileLabel: activeReceiptLabel.replace(/[\s/]/g, ''),
     title: pdfTitle,
@@ -18041,36 +18059,9 @@ function ReportsView({
     .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
 
   const [isPdfExporting, setIsPdfExporting] = useState(false)
-  const handleExportPdf = async () => {
-    if (isPdfExporting) {
-      return
-    }
-    setIsPdfExporting(true)
-    try {
-      // 服务端无头浏览器渲染清晰矢量 PDF
-      const blob = await api.exportReportPdf(selectedMonth)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${pdfTitle}_${selectedMonthLabel.replace(/\s/g, '')}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      // 服务端不可用时回退浏览器打印
-      console.error('服务端 PDF 导出失败，回退浏览器打印', error)
-      const previousTitle = document.title
-      document.title = `${pdfTitle}_${selectedMonth}`
-      window.print()
-      document.title = previousTitle
-    } finally {
-      setIsPdfExporting(false)
-    }
-  }
 
   const handleExportUserSheet = async (
-    options: { month?: string; startDate?: string; endDate?: string; label?: string; action?: 'download' | 'share' } = { month: selectedMonth },
+    options: { month?: string; startDate?: string; endDate?: string; label?: string; action?: 'download' | 'share' | 'pdf' } = { month: selectedMonth },
   ) => {
     try {
       const rangeStart = options.startDate ?? ''
@@ -18170,7 +18161,7 @@ function ReportsView({
       const snapshotEnd = isRangeExport
         ? rangeEnd
         : `${month}-${pad(new Date(exportYear, exportMonth, 0).getDate())}`
-      const createdExport = isRangeExport || options.action === 'share'
+      const createdExport = isRangeExport || options.action === 'share' || options.action === 'pdf'
         ? await api.createSettlementExport({ startDate: snapshotStart, endDate: snapshotEnd, receipt: receiptPayload })
         : null
       if (options.action === 'share' && createdExport) {
@@ -18182,6 +18173,17 @@ function ReportsView({
         } catch {
           onNotify(`已生成未锁定分享链接：${shareUrl}`)
         }
+        return
+      }
+      if (options.action === 'pdf' && createdExport) {
+        setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
+        const link = document.createElement('a')
+        link.href = `/api/shared-settlement/${createdExport.record.publicToken}/pdf`
+        link.download = `结算回单_${filenameLabel}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        onNotify(`正在生成 ${createdExport.record.label} PDF`)
         return
       }
       const buffer = await buildReceiptExcelBuffer(receiptPayload)
@@ -18239,6 +18241,21 @@ function ReportsView({
     })
   }
 
+  const handleExportCustomPdf = async () => {
+    if (!validateCustomExportRange() || isPdfExporting) return
+    setIsPdfExporting(true)
+    try {
+      await handleExportUserSheet({
+        startDate: customExportStart,
+        endDate: customExportEnd,
+        label: `${customExportStart.replaceAll('-', '')}-${customExportEnd.replaceAll('-', '')}`,
+        action: 'pdf',
+      })
+    } finally {
+      setIsPdfExporting(false)
+    }
+  }
+
   const toggleExportRecordLock = async (record: SettlementExportRecord) => {
     setIsExportRecordBusy(true)
     try {
@@ -18258,6 +18275,38 @@ function ReportsView({
     onNotify('线上回单链接已复制')
   }
 
+  const openSettlementAccessManager = (record: SettlementExportRecord) => {
+    setAccessExportRecord(record)
+    setAccessDisabled(record.disabled)
+    setAccessExpiryDate(record.expiresAt ? datePart(record.expiresAt) : '')
+    setAccessExpiryMode(record.expiresAt ? 'custom' : 'permanent')
+  }
+
+  const saveSettlementAccess = async () => {
+    if (!accessExportRecord) return
+    let expiresAt: string | null = null
+    if (accessExpiryMode === 'custom') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(accessExpiryDate)) {
+        onNotify('请选择完整的链接到期日期', 'error')
+        return
+      }
+      expiresAt = new Date(`${accessExpiryDate}T23:59:59+08:00`).toISOString()
+    } else if (accessExpiryMode !== 'permanent') {
+      expiresAt = new Date(Date.now() + Number(accessExpiryMode) * 86400000).toISOString()
+    }
+    setIsExportRecordBusy(true)
+    try {
+      const result = await api.updateSettlementExportAccess(accessExportRecord.id, { expiresAt, disabled: accessDisabled })
+      setExportRecords((records) => records.map((record) => record.id === result.record.id ? result.record : record))
+      setAccessExportRecord(null)
+      onNotify(accessDisabled ? '分享链接已停止访问' : expiresAt ? '链接有效期已更新' : '链接已设为永久有效')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '链接权限更新失败', 'error')
+    } finally {
+      setIsExportRecordBusy(false)
+    }
+  }
+
   const confirmDeleteExportRecord = async () => {
     if (!deleteExportRecord) return
     setIsExportRecordBusy(true)
@@ -18274,46 +18323,52 @@ function ReportsView({
     }
   }
 
+  const confirmDeleteReport = async () => {
+    if (!deleteReport) return
+    setIsExportRecordBusy(true)
+    try {
+      await api.deleteReport(deleteReport.id, deleteReportPassword)
+      onReportDeleted(deleteReport.id)
+      setDeleteReport(null)
+      setDeleteReportPassword('')
+      onNotify('结算历史已删除')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '删除结算历史失败', 'error')
+    } finally {
+      setIsExportRecordBusy(false)
+    }
+  }
+
   return (
     <section className="report-workspace">
       <section className="panel report-control-bar">
         <div className="report-summary-chips">
           <div>
             <span>总工时</span>
-            <strong>{selectedStats.totalHours.toFixed(1)}h</strong>
+            <strong>{activeSummaryStats.totalHours.toFixed(1)}h</strong>
           </div>
           <div>
             <span>计费工时</span>
-            <strong>{selectedStats.billableHours.toFixed(1)}h</strong>
+            <strong>{activeSummaryStats.billableHours.toFixed(1)}h</strong>
           </div>
           <div>
             <span>结算金额</span>
-            <strong>¥{formatYuan(selectedStats.amount)}</strong>
+            <strong>¥{formatYuan(activeSummaryStats.amount)}</strong>
           </div>
           <div>
             <span>已验收</span>
-            <strong>{selectedStats.accepted} 个</strong>
+            <strong>{activeSummaryStats.accepted} 个</strong>
           </div>
         </div>
         <p className="report-flow-hint">
-          当前查看：{selectedMonthLabel}。分享和锁定互不影响；生成链接后，确认数据不再变动时再到导出记录中手动锁定。
+          当前查看：{hasValidCustomPreviewRange ? activeReceiptLabel : selectedMonthLabel}。分享和锁定互不影响；确认数据不再变动时再到导出记录中手动锁定。
         </p>
-        <div className="report-bar-actions">
-          <button className="primary-button" onClick={() => void handleExportUserSheet({ month: selectedMonth, action: 'share' })}>
-            <Copy size={18} />
-            生成合作伙伴链接
-          </button>
-          <button className="ghost-button" onClick={() => void handleExportPdf()} disabled={isPdfExporting}>
-            <Download size={18} />
-            {isPdfExporting ? '生成中…' : '导出 PDF'}
-          </button>
-          <button className="ghost-button" onClick={() => void handleExportUserSheet()}>
-            <Download size={18} />
-            下载 Excel 回单
-          </button>
+        <div className="report-section-tabs" role="tablist" aria-label="结算视图">
+          <button type="button" role="tab" aria-selected={reportSectionTab === 'receipt'} className={reportSectionTab === 'receipt' ? 'active' : ''} onClick={() => setReportSectionTab('receipt')}>结算回单</button>
+          <button type="button" role="tab" aria-selected={reportSectionTab === 'history'} className={reportSectionTab === 'history' ? 'active' : ''} onClick={() => setReportSectionTab('history')}>导出记录</button>
         </div>
 
-        <div className="report-range-export">
+        {reportSectionTab === 'receipt' && <div className="report-range-export">
           <div className="report-range-fields">
             <PlanDateTimeField
               label="自定义导出"
@@ -18341,13 +18396,14 @@ function ReportsView({
               onActivePickerChange={setActiveRangePickerId}
               commitValidInputOnChange
             />
-            <button className="report-range-export-button" type="button" onClick={handleExportCustomRange}>
-              <Download size={16} />
-              导出范围 Excel
+            <button className="icon-button report-range-icon-button" type="button" onClick={handleExportCustomRange} aria-label="导出范围 Excel" title="导出范围 Excel">
+              <Download size={17} />
             </button>
-            <button className="report-range-export-button" type="button" onClick={handleShareCustomRange}>
-              <Copy size={16} />
-              分享范围 Excel 链接
+            <button className="icon-button report-range-icon-button" type="button" onClick={handleShareCustomRange} aria-label="分享范围链接" title="分享范围链接">
+              <Copy size={17} />
+            </button>
+            <button className="icon-button report-range-icon-button" type="button" onClick={() => void handleExportCustomPdf()} disabled={isPdfExporting} aria-label="导出范围 PDF" title="导出范围 PDF">
+              {isPdfExporting ? <LoaderCircle className="spin" size={17} /> : <FileTextIcon size={17} />}
             </button>
           </div>
           <p>
@@ -18355,9 +18411,9 @@ function ReportsView({
               ? `已锁定至 ${formatReceiptDate(lastLockedExport.endDate)}，下次建议从下一天开始，避免重复或漏算。`
               : '可按任意日期范围导出，导出后可锁定记录作为下次核对边界。'}
           </p>
-        </div>
+        </div>}
 
-        {exportRecords.length > 0 && (
+        {reportSectionTab === 'history' && exportRecords.length > 0 && (
           <div className="report-export-history">
             <div className="report-history-header">
               <h3>导出记录</h3>
@@ -18367,26 +18423,33 @@ function ReportsView({
               <div className="report-history-row report-export-row" key={record.id}>
                 <strong>{record.label}</strong>
                 <span>{record.taskCount} 项 · {record.billableHours.toFixed(1)}h · ¥{formatYuan(record.amount)}</span>
-                <small>导出于 {record.exportedAt}</small>
+                <small>
+                  导出于 {record.exportedAt} · {record.disabled ? '链接已停止' : record.expired ? '链接已过期' : record.expiresAt ? `有效至 ${record.expiresAt}` : '永久有效'}
+                </small>
                 <div className="report-history-actions">
-                  <button className="ghost-button compact-button" disabled={isExportRecordBusy || record.locked} onClick={() => void toggleExportRecordLock(record)}>
-                    <Lock size={14} />
-                    {record.locked ? '已锁定' : '锁定'}
+                  <button className="icon-button" disabled={isExportRecordBusy || record.locked} onClick={() => void toggleExportRecordLock(record)} aria-label={record.locked ? '已锁定' : '锁定记录'} title={record.locked ? '已锁定' : '锁定记录'}>
+                    <Lock size={15} />
                   </button>
-                  <button className="ghost-button compact-button" onClick={() => void copySettlementShareLink(record)}>
-                    <Copy size={14} />复制链接
+                  <button className="icon-button" onClick={() => void copySettlementShareLink(record)} aria-label="复制链接" title="复制链接">
+                    <Copy size={15} />
                   </button>
-                  <a className="ghost-button compact-button" href={`/settlement-share/${record.publicToken}`} target="_blank" rel="noreferrer">
-                    <ExternalLink size={14} />在线预览
+                  <button className="icon-button" onClick={() => openSettlementAccessManager(record)} aria-label="链接管理" title="链接管理">
+                    <Clock3 size={15} />
+                  </button>
+                  <a className="icon-button" href={`/settlement-share/${record.publicToken}`} target="_blank" rel="noreferrer" aria-label="在线预览" title="在线预览">
+                    <ExternalLink size={15} />
                   </a>
-                  <a className="ghost-button compact-button" href={`/api/shared-settlement/${record.publicToken}/excel`}>
-                    <Download size={14} />下载
+                  <a className="icon-button" href={`/api/shared-settlement/${record.publicToken}/excel`} aria-label="下载 Excel" title="下载 Excel">
+                    <Download size={15} />
                   </a>
-                  <button className="ghost-button compact-button danger-text" onClick={() => {
+                  <a className="icon-button" href={`/api/shared-settlement/${record.publicToken}/pdf`} aria-label="下载 PDF" title="下载 PDF">
+                    <FileTextIcon size={15} />
+                  </a>
+                  <button className="icon-button danger-text" aria-label="删除记录" title="删除记录" onClick={() => {
                     setDeleteExportRecord(record)
                     setDeleteExportPassword('')
                   }}>
-                    <Trash2 size={14} />删除
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </div>
@@ -18394,7 +18457,7 @@ function ReportsView({
           </div>
         )}
 
-        {reports.length > 0 && (
+        {reportSectionTab === 'history' && reports.length > 0 && (
           <div className="report-history">
             <div className="report-history-header">
               <h3>结算历史</h3>
@@ -18415,21 +18478,31 @@ function ReportsView({
                   {report.viewCount > 0 ? ` · 合作伙伴已查看 ${report.viewCount} 次（最近 ${report.viewedAt}）` : ' · 合作伙伴尚未查看'}
                 </small>
                 <div className="report-history-actions">
-                  <button className="ghost-button compact-button" onClick={() => setSelectedReportMonth(report.month)}>
-                    查看
+                  <button className="icon-button" onClick={() => {
+                    setSelectedReportMonth(report.month)
+                    setReportSectionTab('receipt')
+                    setIsCustomRangePreviewActive(false)
+                  }} aria-label={`查看 ${report.month} 回单`} title="查看回单">
+                    <Eye size={15} />
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`下载 ${report.month} Excel 回单`} onClick={() => void handleExportUserSheet({ month: report.month })}>
-                    下载 Excel 回单
+                  <button className="icon-button" aria-label={`下载 ${report.month} Excel 回单`} title="下载 Excel" onClick={() => void handleExportUserSheet({ month: report.month })}>
+                    <Download size={15} />
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`复制 ${report.month} 合作伙伴链接`} onClick={() => onCopyShareLink(report.publicToken)}>
-                    复制链接
+                  <button className="icon-button" aria-label={`复制 ${report.month} 合作伙伴链接`} title="复制链接" onClick={() => onCopyShareLink(report.publicToken)}>
+                    <Copy size={15} />
                   </button>
-                  <button className="ghost-button compact-button" aria-label={`重置 ${report.month} 合作伙伴链接`} onClick={() => onRotateReportToken(report)}>
-                    重置链接
+                  <button className="icon-button" aria-label={`重置 ${report.month} 合作伙伴链接`} title="重置链接" onClick={() => onRotateReportToken(report)}>
+                    <RotateCcw size={15} />
                   </button>
-                  <a className="ghost-button compact-button" aria-label={`打开 ${report.month} 合作伙伴页面`} href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
-                    打开合作伙伴页
+                  <a className="icon-button" aria-label={`打开 ${report.month} 合作伙伴页面`} title="打开合作伙伴页" href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
+                    <ExternalLink size={15} />
                   </a>
+                  <button className="icon-button danger-text" aria-label={`删除 ${report.month} 结算历史`} title="删除" onClick={() => {
+                    setDeleteReport(report)
+                    setDeleteReportPassword('')
+                  }}>
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -18437,7 +18510,7 @@ function ReportsView({
         )}
       </section>
 
-      <SettlementReceipt options={previewReceiptOptions} />
+      {reportSectionTab === 'receipt' && <SettlementReceipt options={previewReceiptOptions} />}
       {deleteExportRecord && (
         <ModalShell className="delete-confirm-modal light-confirm-modal settlement-export-delete-modal" labelledBy="delete-settlement-export-title" onClose={() => setDeleteExportRecord(null)}>
           <div className="delete-confirm-copy">
@@ -18462,6 +18535,60 @@ function ReportsView({
             <button className="danger-button solid-danger-button" disabled={isExportRecordBusy || (deleteExportRecord.locked && !deleteExportPassword)} onClick={() => void confirmDeleteExportRecord()}>
               {isExportRecordBusy ? '删除中…' : '确认删除'}
             </button>
+          </div>
+        </ModalShell>
+      )}
+      {accessExportRecord && (
+        <ModalShell className="settlement-access-modal" labelledBy="settlement-access-title" onClose={() => setAccessExportRecord(null)} closeOnEscape>
+          <header className="modal-header">
+            <div>
+              <p className="eyebrow">链接管理</p>
+              <h2 id="settlement-access-title">{accessExportRecord.label}</h2>
+            </div>
+            <button type="button" className="icon-button modal-close-button" onClick={() => setAccessExportRecord(null)} aria-label="关闭" title="关闭"><X size={18} /></button>
+          </header>
+          <div className="settlement-access-body">
+            <label className="settlement-access-switch">
+              <span><strong>允许访问</strong><small>关闭后，已分享的链接会立即失效</small></span>
+              <button type="button" className={`switch-control ${!accessDisabled ? 'active' : ''}`} aria-pressed={!accessDisabled} onClick={() => setAccessDisabled((disabled) => !disabled)}><i /></button>
+            </label>
+            <div className="settlement-expiry-options" aria-label="链接有效期">
+              {([
+                ['permanent', '永久'],
+                ['1', '1 天'],
+                ['7', '7 天'],
+                ['30', '30 天'],
+                ['custom', '自定义'],
+              ] as const).map(([value, label]) => (
+                <button type="button" key={value} className={accessExpiryMode === value ? 'active' : ''} onClick={() => setAccessExpiryMode(value)}>{label}</button>
+              ))}
+            </div>
+            {accessExpiryMode === 'custom' && (
+              <PlanDateTimeField label="有效至" value={accessExpiryDate} onChange={setAccessExpiryDate} includeTime={false} commitValidInputOnChange />
+            )}
+            <p>{accessDisabled ? '当前链接已停止访问。' : accessExpiryMode === 'permanent' ? '链接将永久有效，除非手动关闭。' : '到期后系统会自动拒绝访问，可随时改回永久有效。'}</p>
+          </div>
+          <footer className="modal-footer">
+            <button className="ghost-button" type="button" onClick={() => setAccessExportRecord(null)}>取消</button>
+            <button className="primary-button" type="button" disabled={isExportRecordBusy} onClick={() => void saveSettlementAccess()}>{isExportRecordBusy ? '保存中…' : '保存'}</button>
+          </footer>
+        </ModalShell>
+      )}
+      {deleteReport && (
+        <ModalShell className="delete-confirm-modal light-confirm-modal settlement-export-delete-modal" labelledBy="delete-report-title" onClose={() => setDeleteReport(null)}>
+          <div className="delete-confirm-copy">
+            <h2 id="delete-report-title">删除这条结算历史？</h2>
+            <p>{monthLabelOf(deleteReport.month)}{deleteReport.status === 'locked' ? ' 已锁定，需要管理员密码才能删除。' : ' 尚未锁定，确认后将直接删除。'}</p>
+          </div>
+          {deleteReport.status === 'locked' && (
+            <label className="field settlement-export-password-field">
+              <span>管理员密码</span>
+              <input type="password" autoComplete="current-password" value={deleteReportPassword} onChange={(event) => setDeleteReportPassword(event.target.value)} placeholder="输入当前管理员登录密码" autoFocus />
+            </label>
+          )}
+          <div className="delete-confirm-actions">
+            <button className="ghost-button" disabled={isExportRecordBusy} onClick={() => setDeleteReport(null)}>取消</button>
+            <button className="danger-button solid-danger-button" disabled={isExportRecordBusy || (deleteReport.status === 'locked' && !deleteReportPassword)} onClick={() => void confirmDeleteReport()}>{isExportRecordBusy ? '删除中…' : '确认删除'}</button>
           </div>
         </ModalShell>
       )}

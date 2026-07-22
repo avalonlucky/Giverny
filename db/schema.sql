@@ -393,6 +393,8 @@ CREATE TABLE IF NOT EXISTS settlement_exports (
   generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   viewed_at TEXT,
   view_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  disabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -549,6 +551,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_text_edits_context_type ON ai_text_edits(conte
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_month ON monthly_reports(month);
 CREATE INDEX IF NOT EXISTS idx_settlement_exports_workspace_generated ON settlement_exports(workspace_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_settlement_exports_public_token ON settlement_exports(public_token);
+CREATE INDEX IF NOT EXISTS idx_settlement_exports_access ON settlement_exports(public_token, disabled, expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);

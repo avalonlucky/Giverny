@@ -9045,6 +9045,28 @@ button.file-chip:focus-visible {
   font-size: 13px;
 }
 
+.report-section-tabs {
+  display: flex;
+  gap: 26px;
+  align-items: center;
+}
+
+.report-section-tabs button {
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.report-section-tabs button.active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
 .report-bar-actions {
   display: flex;
   flex-wrap: wrap;
@@ -9138,6 +9160,20 @@ button.file-chip:focus-visible {
   color: var(--color-primary);
 }
 
+.report-range-icon-button {
+  width: 36px;
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.report-range-icon-button:hover,
+.report-range-icon-button:focus-visible {
+  background: transparent;
+  color: var(--color-primary);
+}
+
 .report-export-history .report-history-header span {
   color: var(--color-text-muted);
   font-size: 12px;
@@ -9159,6 +9195,59 @@ button.file-chip:focus-visible {
 
 .settlement-export-password-field input {
   width: 100%;
+}
+
+.settlement-access-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.settlement-access-body {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+
+.settlement-access-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.settlement-access-switch > span {
+  display: grid;
+  gap: 4px;
+}
+
+.settlement-access-switch small,
+.settlement-access-body > p {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.settlement-access-body > p {
+  margin: 0;
+}
+
+.settlement-expiry-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.settlement-expiry-options button {
+  padding: 5px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settlement-expiry-options button.active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .report-bar-actions .share-box {
@@ -14397,10 +14486,10 @@ input::file-selector-button {
   background: var(--color-surface-alt);
 }
 
-.agent-receipt-file-mark b {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+.agent-receipt-file-mark img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
 }
 
 .agent-attachment-card.is-settlement-receipt .agent-attachment-info {
@@ -14442,6 +14531,10 @@ input::file-selector-button {
   overflow: hidden;
 }
 
+.modal-backdrop:has(.agent-receipt-preview-modal) {
+  z-index: calc(var(--z-overlay-effect) + 20);
+}
+
 .agent-receipt-preview-header {
   flex: 0 0 auto;
 }
@@ -14474,6 +14567,20 @@ input::file-selector-button {
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  background: var(--color-surface-alt);
+}
+
+.agent-receipt-preview-viewport::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.agent-receipt-preview-viewport::-webkit-scrollbar-thumb {
+  border: 3px solid var(--color-surface-alt);
+  background: var(--color-text-muted);
+}
+
+.agent-receipt-preview-viewport::-webkit-scrollbar-track {
   background: var(--color-surface-alt);
 }
 
@@ -23242,22 +23349,18 @@ button.topbar-create-button kbd {
   gap: 24px;
 }
 
-.shared-receipt-actions button {
-  min-height: 0;
-  padding: 0 0 4px;
+.shared-receipt-actions .icon-button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid transparent;
   color: var(--color-text-secondary);
   background: transparent;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
 }
 
-.shared-receipt-actions button:hover {
+.shared-receipt-actions .icon-button:hover {
   color: var(--color-primary);
-  border-bottom-color: currentColor;
+  background: transparent;
 }
 
 .shared-receipt {

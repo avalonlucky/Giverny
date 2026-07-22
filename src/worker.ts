@@ -483,6 +483,8 @@ type DbSettlementExport = {
   generated_at: string
   viewed_at: string | null
   view_count: number
+  expires_at: string | null
+  disabled: number
 }
 
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' }
@@ -8728,6 +8730,9 @@ const toSettlementExportRecord = (row: DbSettlementExport) => ({
   publicToken: row.public_token,
   viewedAt: formatBeijing(row.viewed_at),
   viewCount: Number(row.view_count) || 0,
+  expiresAt: formatBeijing(row.expires_at),
+  disabled: Boolean(row.disabled),
+  expired: Boolean(row.expires_at && row.expires_at <= nowIso()),
 })
 
 function dbTaskHoursInDateRange(task: DbTask, startDate: string, endDate: string) {
@@ -17584,6 +17589,27 @@ async function updateSettlementExportLock(env: Env, id: string, request: Request
   return ok({ record: toSettlementExportRecord(row!) })
 }
 
+async function updateSettlementExportAccess(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const body = await request.json().catch(() => ({})) as { expiresAt?: string | null; disabled?: boolean }
+  let expiresAt: string | null = null
+  if (body.expiresAt) {
+    const parsed = new Date(body.expiresAt)
+    if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+      return fail('链接有效期必须晚于当前时间', 400)
+    }
+    expiresAt = parsed.toISOString()
+  }
+  const result = await env.DB.prepare(
+    'UPDATE settlement_exports SET expires_at = ?, disabled = ? WHERE id = ? AND workspace_id = ?',
+  ).bind(expiresAt, body.disabled ? 1 : 0, id, workspaceId).run()
+  if (!Number(result.meta?.changes)) return fail('导出记录不存在', 404)
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId).first<DbSettlementExport>()
+  await audit(env, 'update_access', 'settlement_export', id, { workspaceId, expiresAt, disabled: Boolean(body.disabled) })
+  return ok({ record: toSettlementExportRecord(row!) })
+}
+
 async function deleteSettlementExport(env: Env, id: string, request: Request) {
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?')
@@ -17595,6 +17621,20 @@ async function deleteSettlementExport(env: Env, id: string, request: Request) {
   }
   await env.DB.prepare('DELETE FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).run()
   await audit(env, 'delete', 'settlement_export', id, { workspaceId, locked: Boolean(row.locked) })
+  return ok({ ok: true })
+}
+
+async function deleteMonthlyReport(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM monthly_reports WHERE id = ? AND workspace_id = ?')
+    .bind(id, workspaceId).first<DbReport>()
+  if (!row) return fail('结算历史不存在', 404)
+  if (row.status === 'locked') {
+    const body = await request.json().catch(() => ({})) as { password?: string }
+    if (!(await verifyAdminPassword(env, String(body.password || '')))) return fail('管理员密码不正确', 401)
+  }
+  await env.DB.prepare('DELETE FROM monthly_reports WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).run()
+  await audit(env, 'delete', 'monthly_report', id, { workspaceId, month: row.month, status: row.status })
   return ok({ ok: true })
 }
 
@@ -17643,9 +17683,17 @@ async function getSettlementProjectEvidence(env: Env, row: DbSettlementExport, r
   }
 }
 
+function settlementExportAccessFailure(row: DbSettlementExport) {
+  if (row.disabled) return fail('该分享链接已停止访问', 403)
+  if (row.expires_at && row.expires_at <= nowIso()) return fail('该分享链接已过期，请联系分享方重新开放', 410)
+  return null
+}
+
 async function getSharedSettlementExport(env: Env, token: string) {
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
   if (!row) return fail('分享链接无效或已失效', 404)
+  const accessFailure = settlementExportAccessFailure(row)
+  if (accessFailure) return accessFailure
   const receipt = parseSettlementReceiptSnapshot(row.snapshot_json)
   if (!receipt) return fail('回单快照损坏，请重新导出', 500)
   const evidence = await getSettlementProjectEvidence(env, row, receipt)
@@ -17656,6 +17704,8 @@ async function getSharedSettlementExport(env: Env, token: string) {
 async function downloadSharedSettlementExcel(env: Env, token: string) {
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
   if (!row) return fail('分享链接无效或已失效', 404)
+  const accessFailure = settlementExportAccessFailure(row)
+  if (accessFailure) return accessFailure
   const receipt = parseSettlementReceiptSnapshot(row.snapshot_json)
   if (!receipt) return fail('回单快照损坏，请重新导出', 500)
   const buffer = await buildReceiptExcelBuffer(receipt)
@@ -17668,6 +17718,43 @@ async function downloadSharedSettlementExcel(env: Env, token: string) {
       'cache-control': 'private, no-store',
     },
   })
+}
+
+async function downloadSharedSettlementPdf(env: Env, token: string, request: Request) {
+  if (!env.BROWSER) return fail('PDF 服务暂不可用', 503)
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE public_token = ?').bind(token).first<DbSettlementExport>()
+  if (!row) return fail('分享链接无效或已失效', 404)
+  const accessFailure = settlementExportAccessFailure(row)
+  if (accessFailure) return accessFailure
+  const browser = await puppeteer.launch(env.BROWSER)
+  try {
+    const page = await browser.newPage()
+    const origin = new URL(request.url).origin
+    await page.goto(`${origin}/settlement-share/${encodeURIComponent(token)}`, { waitUntil: 'networkidle0' })
+    await page.waitForSelector('.settlement-receipt-template', { timeout: 20_000 })
+    await page.addStyleTag({ content: `
+      .shared-receipt-toolbar, .shared-project-appendix { display: none !important; }
+      .shared-page, .shared-content, .settlement-receipt-template { margin: 0 !important; padding: 0 !important; background: var(--color-receipt-paper) !important; }
+      .settlement-receipt-template { width: 2200px !important; max-width: none !important; }
+    ` })
+    const pdf = await page.pdf({
+      format: 'A3',
+      landscape: true,
+      printBackground: true,
+      margin: { top: '8mm', bottom: '8mm', left: '8mm', right: '8mm' },
+    })
+    await audit(env, 'export', 'settlement_export_pdf', row.id, { token, startDate: row.start_date, endDate: row.end_date })
+    const filename = `结算回单_${row.start_date.replaceAll('-', '')}-${row.end_date.replaceAll('-', '')}.pdf`
+    return new Response(new Uint8Array(pdf), {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'cache-control': 'private, no-store',
+      },
+    })
+  } finally {
+    await browser.close()
+  }
 }
 
 type LocalCliStatus = 'available' | 'needs_auth' | 'unsupported' | 'not_installed' | 'unavailable'
@@ -18282,6 +18369,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path.startsWith('/api/shared-settlement/') && path.endsWith('/excel') && isGet) {
     return downloadSharedSettlementExcel(env, path.split('/')[3] || '')
   }
+  if (path.startsWith('/api/shared-settlement/') && path.endsWith('/pdf') && isGet) {
+    return downloadSharedSettlementPdf(env, path.split('/')[3] || '', request)
+  }
   if (path.startsWith('/api/shared-settlement/') && isGet) {
     return getSharedSettlementExport(env, path.split('/')[3] || '')
   }
@@ -18592,11 +18682,17 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path.startsWith('/api/settlement-exports/') && path.endsWith('/lock') && request.method === 'PATCH') {
     return updateSettlementExportLock(env, path.split('/')[3] || '', request)
   }
+  if (path.startsWith('/api/settlement-exports/') && path.endsWith('/access') && request.method === 'PATCH') {
+    return updateSettlementExportAccess(env, path.split('/')[3] || '', request)
+  }
   if (path.startsWith('/api/settlement-exports/') && request.method === 'DELETE') {
     return deleteSettlementExport(env, path.split('/')[3] || '', request)
   }
   if (path.startsWith('/api/reports/') && path.endsWith('/token') && request.method === 'POST') {
     return rotateMonthlyReportToken(env, path.split('/')[3] ?? '', request)
+  }
+  if (path.startsWith('/api/reports/') && request.method === 'DELETE') {
+    return deleteMonthlyReport(env, path.split('/')[3] ?? '', request)
   }
 
   return fail('接口不存在', 404)
