@@ -80,7 +80,7 @@
   --color-menu-accent: #8fbcaf;
   --color-menu-danger: #d98c8c;
   --radius-control: 4px;
-  --radius-panel: 0;
+  --radius-panel: 4px;
   --radius-menu: 8px;
   --radius-pill: 999px;
   --shadow-popover: none;
@@ -1493,7 +1493,7 @@ button.topbar-create-button:hover {
 .daily-knowledge-modal {
   width: min(580px, 92vw);
   max-height: 84vh;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
   box-shadow: none;
 }
@@ -1533,7 +1533,7 @@ button.topbar-create-button:hover {
   width: auto !important;
   min-height: auto !important;
   padding: 0;
-  border-radius: 0 !important;
+  border-radius: var(--radius-panel) !important;
   background: transparent !important;
   color: var(--color-text-muted);
   opacity: 0.5;
@@ -1762,7 +1762,7 @@ button.topbar-create-button:hover {
   padding: 0 0 8px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text-muted);
   background: transparent;
   display: flex;
@@ -1928,7 +1928,7 @@ button.topbar-create-button:hover {
 .task-active-filters button.task-filter-reset {
   padding-inline: 4px;
   border-color: transparent;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-primary);
   background: transparent;
 }
@@ -2160,7 +2160,7 @@ button.topbar-create-button:hover {
   padding: 0;
   margin-bottom: 24px;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   gap: 34px;
   overflow-x: auto;
@@ -2170,7 +2170,7 @@ button.topbar-create-button:hover {
   position: relative;
   height: 36px;
   padding: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text-muted);
   background: transparent;
   font-size: 16px;
@@ -2205,7 +2205,7 @@ button.topbar-create-button:hover {
   max-height: calc(100vh - 56px);
   padding: 30px 30px 34px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface);
   overflow: hidden;
   display: flex;
@@ -2279,7 +2279,7 @@ button.topbar-create-button:hover {
   min-height: 40px;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -2584,7 +2584,7 @@ button.topbar-create-button:hover {
   min-height: 36px;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -2958,7 +2958,7 @@ button.topbar-create-button:hover {
   width: 100%;
   padding: 14px 16px;
   border: 1px solid transparent;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text);
   /* 行填充随状态联动（方案B）：默认=中性浅灰（计划中/静默/其他状态），
      进行中=淡蓝、待验收=淡米、已验收=淡绿；临期/逾期再覆盖为暖橙/干净红。
@@ -3375,7 +3375,7 @@ button.topbar-create-button:hover {
   min-width: 0;
   min-height: 0;
   padding: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: none;
   display: inline-flex;
   align-items: center;
@@ -3509,7 +3509,7 @@ button.topbar-create-button:hover {
 .insight-shell {
   min-width: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -5306,7 +5306,7 @@ button.topbar-create-button:hover {
   border: 0;
   /* 保留工具条与列表之间的这一条分割线（其余多余的框已去掉） */
   border-bottom: 1px solid var(--color-border-soft);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -5601,7 +5601,7 @@ button.topbar-create-button:hover {
 .progress-lite-modal {
   width: min(560px, calc(100vw - 48px));
   overflow: visible;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
 }
 
@@ -5682,7 +5682,7 @@ button.topbar-create-button:hover {
   padding: 0 14px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-alt);
   color: var(--color-text);
   font: inherit;
@@ -5878,7 +5878,7 @@ button.topbar-create-button:hover {
   padding: 0 4px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   font-size: 16px;
 }
@@ -5888,7 +5888,7 @@ button.topbar-create-button:hover {
   height: 44px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -5940,7 +5940,7 @@ button.topbar-create-button:hover {
   height: 44px;
   padding: 0 4px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text);
   background: transparent;
   outline: 0;
@@ -6745,7 +6745,7 @@ button.topbar-create-button:hover {
   min-height: 32px;
   padding: 5px 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text);
   background: transparent;
   outline: 0;
@@ -7411,7 +7411,7 @@ button.file-chip:focus-visible {
 .acceptance-collapse-panel {
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -7517,7 +7517,7 @@ button.file-chip:focus-visible {
   padding: 8px 2px 10px 12px;
   margin-left: 18px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -7881,7 +7881,7 @@ button.file-chip:focus-visible {
 .task-time-panel {
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -8709,7 +8709,7 @@ button.file-chip:focus-visible {
 .file-library-filters select {
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -8718,7 +8718,7 @@ button.file-chip:focus-visible {
   margin: 0;
   padding: 9px 10px 9px 24px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   position: relative;
 }
@@ -8776,12 +8776,12 @@ button.file-chip:focus-visible {
 .file-thumb-card {
   margin: 0;
   gap: 9px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
 }
 
 .file-thumb-preview,
 .file-inspector-preview {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-alt);
 }
 
@@ -8827,7 +8827,7 @@ button.file-chip:focus-visible {
   padding: 22px;
   border: 0;
   border-left: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
   overflow-y: auto;
   overscroll-behavior: auto;
@@ -8840,14 +8840,14 @@ button.file-chip:focus-visible {
 .inspector-field input {
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
 .inspector-tags span,
 .inspector-tags span button,
 .inspector-action-button {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
 }
 
 .file-understanding {
@@ -9117,7 +9117,7 @@ button.file-chip:focus-visible {
   padding: 7px 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   font-size: 16px;
@@ -9129,7 +9129,7 @@ button.file-chip:focus-visible {
   height: 38px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
 }
@@ -9320,7 +9320,7 @@ button.file-chip:focus-visible {
   width: fit-content;
   margin: 0 0 16px;
   padding: 7px 12px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px 8px var(--radius-panel) var(--radius-panel);
   background: color-mix(in srgb, var(--color-primary) 10%, #fff);
   color: var(--color-primary-strong);
   display: inline-flex;
@@ -9837,7 +9837,7 @@ button.file-chip:focus-visible {
 .task-modal.daily-knowledge-modal {
   width: min(580px, 92vw);
   max-height: 84vh;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-editorial-surface);
   box-shadow: none;
 }
@@ -9855,7 +9855,7 @@ button.file-chip:focus-visible {
 .new-task-modal {
   width: min(960px, 96vw);
   max-height: 90vh;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-editorial-text);
   background: var(--color-editorial-surface);
   box-shadow: none;
@@ -10321,7 +10321,7 @@ button.file-chip:focus-visible {
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-secondary);
   display: inline-flex;
@@ -10522,7 +10522,7 @@ button.file-chip:focus-visible {
 .new-task-modal .supplemental-switch-wrap {
   min-height: 34px;
   padding: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   gap: 16px;
   flex-wrap: nowrap;
@@ -10562,7 +10562,7 @@ button.file-chip:focus-visible {
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   gap: 8px;
 }
@@ -10639,7 +10639,7 @@ button.file-chip:focus-visible {
   height: 40px;
   padding: 8px 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-editorial-text);
   font-size: 16px;
@@ -11509,7 +11509,7 @@ button.file-chip:focus-visible {
 .new-task-modal .ai-suggestion-panel {
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   padding: 16px 18px 18px;
   gap: 12px;
   margin-bottom: 24px;
@@ -11622,7 +11622,7 @@ button.file-chip:focus-visible {
   padding: 0 0 8px;
   border-bottom: 1px solid var(--color-border);
   background: transparent;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
 }
 
 .new-task-modal .ai-suggestion-title-row.ai-suggestion-adopt-target:hover,
@@ -11733,7 +11733,7 @@ button.ai-suggestion-body {
   padding: 8px 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-editorial-text);
   font-size: 16px;
@@ -11761,7 +11761,7 @@ button.ai-suggestion-body {
   height: 40px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-editorial-text);
   box-shadow: none;
@@ -11919,7 +11919,7 @@ input::file-selector-button {
 }
 
 .date-input-wrap input[type='text'] {
-  border-radius: 8px 0 0 8px;
+  border-radius: 8px var(--radius-panel) var(--radius-panel) 8px;
   border-right: 0;
 }
 
@@ -11927,7 +11927,7 @@ input::file-selector-button {
   width: 42px;
   height: 42px;
   border: 1px solid rgba(39, 54, 58, 0.08);
-  border-radius: 0 8px 8px 0;
+  border-radius: var(--radius-panel) 8px 8px var(--radius-panel);
   color: var(--color-text);
   background: var(--color-surface-strong);
   display: inline-grid;
@@ -11947,7 +11947,7 @@ input::file-selector-button {
   border: 0;
   border-right: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-editorial-text);
   background: transparent;
 }
@@ -11957,7 +11957,7 @@ input::file-selector-button {
   height: 40px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-editorial-text);
   background: transparent;
 }
@@ -12518,7 +12518,7 @@ input::file-selector-button {
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
 }
 
@@ -13022,7 +13022,7 @@ input::file-selector-button {
   min-height: 96px;
   padding: 18px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-alt);
   color: var(--color-text-muted);
   display: grid;
@@ -13190,7 +13190,7 @@ input::file-selector-button {
 .modal-footer.acceptance-final-footer {
   padding: 18px 32px 26px;
   border-top: 1px solid var(--color-border-soft);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
   display: flex;
   align-items: center;
@@ -13726,7 +13726,7 @@ input::file-selector-button {
   flex-direction: column;
   background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   box-shadow: none;
   z-index: var(--z-overlay-effect);
   overflow: hidden;
@@ -14073,7 +14073,7 @@ input::file-selector-button {
   width: 100%;
   max-width: 100%;
   padding: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   border: 0;
@@ -15825,14 +15825,14 @@ textarea:focus-visible {
 
 .calendar-event-pill:not(.span-start),
 .calendar-allday-chip:not(.span-start) {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+  border-top-left-radius: var(--radius-panel);
+  border-bottom-left-radius: var(--radius-panel);
 }
 
 .calendar-event-pill:not(.span-end),
 .calendar-allday-chip:not(.span-end) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+  border-top-right-radius: var(--radius-panel);
+  border-bottom-right-radius: var(--radius-panel);
 }
 
 .calendar-holiday-pill {
@@ -16738,7 +16738,7 @@ textarea:focus-visible {
   min-height: 50px;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   display: flex;
@@ -18636,7 +18636,7 @@ textarea:focus-visible {
   padding: 0 18px;
   border: 0;
   border-left: 3px solid var(--color-alert-accent);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-alert-surface);
   color: var(--color-text-secondary);
   display: flex;
@@ -19326,7 +19326,7 @@ textarea:focus-visible {
 
 .task-detail-section.plain-section {
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -20574,7 +20574,7 @@ textarea:focus-visible {
   min-width: 0;
   margin: 0;
   gap: 9px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   transition: transform 160ms ease;
 }
 
@@ -20587,7 +20587,7 @@ textarea:focus-visible {
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   outline: 2px solid transparent;
   outline-offset: 2px;
   background: var(--color-editorial-surface-alt);
@@ -20622,7 +20622,7 @@ textarea:focus-visible {
   bottom: 8px;
   left: 8px;
   min-height: 20px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   font-size: 10px;
   font-weight: 600;
 }
@@ -20681,7 +20681,7 @@ textarea:focus-visible {
   padding: 34px 36px;
   border: 0;
   border-left: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-editorial-surface);
   display: block;
   overflow-y: auto;
@@ -20751,7 +20751,7 @@ textarea:focus-visible {
   min-height: 240px;
   margin-top: 22px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-editorial-surface-alt);
 }
 
@@ -21060,7 +21060,7 @@ textarea:focus-visible {
 }
 
 .office-preview-xlsx.compact .spreadsheet-table-wrap {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   overflow: hidden;
 }
 
@@ -21163,7 +21163,7 @@ textarea:focus-visible {
   [class$='-popover']
 ),
 .command-overlay :is(.command-palette, .shortcut-help) {
-  border-radius: 0 !important;
+  border-radius: var(--radius-panel) !important;
 }
 
 .modal-backdrop {
@@ -21179,7 +21179,7 @@ textarea:focus-visible {
 
 .app-shell :is(.primary-button, .ghost-button, .danger-button),
 .modal-backdrop :is(.primary-button, .ghost-button, .danger-button) {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   font-weight: 500;
 }
 
@@ -21386,7 +21386,7 @@ textarea:focus-visible {
   width: 100%;
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   box-shadow: none;
   padding: 22px 4px 18px;
 }
@@ -21442,7 +21442,7 @@ textarea:focus-visible {
   width: 100%;
   background: #fff;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   box-shadow: none;
 }
 
@@ -21663,13 +21663,13 @@ textarea:focus-visible {
   min-height: 34px;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
 .tax-note {
   padding: 14px 0 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -21736,7 +21736,7 @@ textarea:focus-visible {
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -21787,7 +21787,7 @@ textarea:focus-visible {
   position: relative;
   height: 36px;
   padding: 0 0 0 16px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   color: var(--color-text-secondary);
   background: transparent;
   gap: 0;
@@ -21828,7 +21828,7 @@ button.topbar-create-button kbd {
   position: relative;
   height: 38px;
   padding: 0 0 0 16px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -21857,7 +21857,7 @@ button.topbar-create-button kbd {
 .sidebar-account-menu {
   width: 242px;
   padding: 18px 16px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   border: 1px solid var(--color-border);
   background: var(--color-surface-strong);
 }
@@ -21867,7 +21867,7 @@ button.topbar-create-button kbd {
 .account-menu-storage {
   min-height: 0;
   padding: 10px 0;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   gap: 12px;
 }
@@ -22950,7 +22950,7 @@ button.topbar-create-button kbd {
 .report-template-tabs button {
   min-height: 30px;
   padding: 0 12px 6px;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
 }
 
@@ -23311,7 +23311,7 @@ button.topbar-create-button kbd {
 .income-bar-track i.net {
   position: static;
   width: 100%;
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-primary);
 }
 
@@ -23825,7 +23825,7 @@ button.topbar-create-button kbd {
   .receipt {
     width: 100%;
     border: 0;
-    border-radius: 0;
+    border-radius: var(--radius-panel);
     box-shadow: none;
     padding: 12px 6px;
   }
@@ -23933,7 +23933,7 @@ button.topbar-create-button kbd {
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -24725,7 +24725,7 @@ button.topbar-create-button kbd {
   border: 0;
   background: transparent;
   color: var(--color-text);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   padding: 13px 4px;
   font-size: 13px;
   text-align: left;
@@ -25097,7 +25097,7 @@ button.topbar-create-button kbd {
   position: absolute;
   inset: 0;
   background: var(--color-surface-strong);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   display: flex;
   flex-direction: column;
   z-index: 5;
@@ -25492,7 +25492,7 @@ button.topbar-create-button kbd {
   width: 100%;
   resize: vertical;
   border: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--color-surface-strong);
   color: var(--color-text);
   font: inherit;
@@ -25564,7 +25564,7 @@ button.topbar-create-button kbd {
 .knowledge-item,
 .alice-scope-popup,
 .chat-history-panel {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   box-shadow: none;
 }
 
@@ -25589,14 +25589,14 @@ button.topbar-create-button kbd {
 }
 
 .insights-coverage-chip {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
 }
 
 .knowledge-save-btn,
 .knowledge-cancel-btn,
 .chat-knowledge-toggle,
 .chat-attachment-chip {
-  border-radius: 0;
+  border-radius: var(--radius-panel);
 }
 
 .knowledge-item-ai-tip {
@@ -25718,7 +25718,7 @@ button.topbar-create-button kbd {
   gap: 12px;
   border: 0;
   border-bottom: 1px solid var(--color-border-strong);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   padding: 0 28px 0 0;
@@ -26284,7 +26284,7 @@ button.topbar-create-button kbd {
   padding: 0 22px 5px 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   font: inherit;
@@ -26316,7 +26316,7 @@ button.topbar-create-button kbd {
   height: 30px;
   border: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text);
   font: inherit;

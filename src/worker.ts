@@ -18746,7 +18746,12 @@ export default {
       }
     }
 
-    return withSecurityHeaders(await env.ASSETS.fetch(request))
+    const assetRequest =
+      request.method === 'GET' && (request.headers.get('accept') ?? '').includes('text/html')
+        ? new Request(request, { cf: { cacheTtl: 0, cacheEverything: false } } as RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } })
+        : request
+
+    return withSecurityHeaders(await env.ASSETS.fetch(assetRequest))
   },
   async scheduled(_controller: unknown, env: Env) {
     await recoverAgentAnalysisJobs(env).catch((error) => {
