@@ -41,7 +41,6 @@ import {
   LoaderCircle,
   Lock,
   LogOut,
-  Mail,
   Maximize2,
   Mic,
   Pencil,
@@ -123,12 +122,15 @@ import { EmptyState } from './components/EmptyState'
 import { MonthYearPickerPanel } from './components/MonthYearPickerPanel'
 import { ModalShell } from './components/ModalShell'
 import { CreateTaskContextMenu, TaskContextMenu } from './components/TaskContextMenu'
+import { AdminLoginModal } from './components/AdminLoginModal'
+import { ConfirmDialogModal, type ConfirmDialogState } from './components/ConfirmDialogModal'
+import { FileContextMenu } from './components/FileContextMenu'
+import { VoidTaskModal } from './components/VoidTaskModal'
 import { formatFileSize } from './lib/format'
 import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
-import { loadTurnstileScript } from './lib/turnstile'
 import type { AppView, AttachmentAnalysis, FileAsset, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -4503,18 +4505,6 @@ const progressConfidenceLabels: Record<TaskProgressAssessment['confidence'], str
   low: '低置信度',
   medium: '中置信度',
   high: '高置信度',
-}
-
-type ConfirmDialogState = {
-  eyebrow?: string
-  title: string
-  body: string
-  confirmText: string
-  cancelText?: string
-  tone?: 'danger' | 'default'
-  details?: string[]
-  hideIcon?: boolean
-  onConfirm: () => void | Promise<void>
 }
 
 type ToastTone = 'success' | 'error' | 'info'
@@ -10618,6 +10608,7 @@ function App() {
       {voidTaskTarget && (
         <VoidTaskModal
           task={voidTaskTarget}
+          monthLabel={monthLabelOf(taskSettlementMonth(voidTaskTarget))}
           isBusy={isVoidTaskBusy}
           onClose={() => setVoidTaskTarget(null)}
           onConfirm={(reason) => void confirmVoidTask(reason)}
@@ -10890,199 +10881,6 @@ function GivernyModeSettings() {
         </section>
       </div>
     </details>
-  )
-}
-
-// Cloudflare Turnstile 站点密钥（公开，可放前端）；密钥(secret)只在 Worker 后端环境变量里。
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAADq6J7chw6N3buxI'
-
-function isLocalPreviewHost() {
-  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-}
-
-function AdminLoginModal({
-  error,
-  onClose,
-  onSubmit,
-}: {
-  error: string
-  onClose: () => void
-  onSubmit: (email: string, key: string, turnstileToken?: string) => void
-}) {
-  const [email, setEmail] = useState('')
-  const [key, setKey] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [turnstileToken, setTurnstileToken] = useState('')
-  const turnstileRef = useRef<HTMLDivElement | null>(null)
-  const turnstileWidgetId = useRef<string | null>(null)
-  const isLocalPreview = isLocalPreviewHost()
-
-  // 渲染 Cloudflare Turnstile 人机验证小组件，拿到 token 后才允许登录
-  useEffect(() => {
-    if (isLocalPreview) {
-      return
-    }
-    let cancelled = false
-    const renderWidget = () => {
-      const ts = (window as unknown as { turnstile?: { render: (el: HTMLElement, opts: Record<string, unknown>) => string; reset: (id: string) => void } }).turnstile
-      if (cancelled || !ts || !turnstileRef.current || turnstileWidgetId.current) {
-        return
-      }
-      turnstileWidgetId.current = ts.render(turnstileRef.current, {
-        sitekey: TURNSTILE_SITE_KEY,
-        callback: (token: string) => setTurnstileToken(token),
-        'error-callback': () => setTurnstileToken(''),
-        'expired-callback': () => setTurnstileToken(''),
-      })
-    }
-    if ((window as unknown as { turnstile?: unknown }).turnstile) {
-      renderWidget()
-    } else {
-      void loadTurnstileScript()
-        .then(renderWidget)
-        .catch(() => {
-          if (!cancelled) {
-            setTurnstileToken('')
-          }
-        })
-    }
-    return () => { cancelled = true }
-  }, [isLocalPreview])
-
-  const submit = async () => {
-    if (!key.trim() || isSubmitting) {
-      return
-    }
-    setIsSubmitting(true)
-    try {
-      await onSubmit(email.trim(), key.trim(), turnstileToken)
-      // 重置验证码：token 一次性，失败重试需要新 token（成功则弹窗已关闭，无影响）
-      const ts = (window as unknown as { turnstile?: { reset: (id: string) => void } }).turnstile
-      if (ts && turnstileWidgetId.current) {
-        ts.reset(turnstileWidgetId.current)
-        setTurnstileToken('')
-      }
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <ModalShell className="admin-login-modal" labelledBy="admin-login-title" onClose={onClose}>
-      <div className="login-atmosphere">
-        <div className="login-pond" aria-hidden="true" />
-        <button className="icon-button modal-close-button login-close" aria-label="关闭" title="关闭" onClick={onClose}>
-          <X size={18} />
-        </button>
-        <div className="login-wordmark">
-          <img className="brand-logo" src="/giverny-logo.png" alt="" />
-          <strong>Giverny</strong>
-          <span>让创作在自己的花园里生长</span>
-        </div>
-      </div>
-      <header className="modal-header login-functional-header">
-        <div>
-          <h2 id="admin-login-title">登录后才能编辑</h2>
-          <small>游客可直接浏览；新建、修改、上传、验收和结算需要管理员身份。</small>
-        </div>
-      </header>
-      <div className="admin-login-body">
-        <label className="lock-input">
-          <Mail size={17} />
-          <input value={email} placeholder="管理员邮箱（访问口令登录可留空）" onChange={(event) => setEmail(event.target.value)} />
-        </label>
-        <label className="lock-input">
-          <Lock size={17} />
-          <input
-            type="password"
-            value={key}
-            placeholder="管理密码或访问口令"
-            onChange={(event) => setKey(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void submit()
-              }
-            }}
-          />
-        </label>
-        {isLocalPreview ? (
-          <p className="login-local-preview">本地预览模式，无需人机验证</p>
-        ) : (
-          <div ref={turnstileRef} className="login-turnstile" />
-        )}
-        {error && <p className="lock-error">{error}</p>}
-      </div>
-      <footer className="modal-footer">
-        <button className="ghost-button" onClick={onClose}>取消</button>
-        <button
-          className="primary-button"
-          onClick={() => void submit()}
-          disabled={!key.trim() || (!isLocalPreview && !turnstileToken) || isSubmitting}
-          title={!isLocalPreview && !turnstileToken ? '请先完成人机验证' : undefined}
-        >
-          {isSubmitting ? '正在进入…' : '进入工作台'}
-        </button>
-      </footer>
-    </ModalShell>
-  )
-}
-
-function FileContextMenu({
-  menu,
-  onClose,
-  onPreview,
-  onOpen,
-  onDownload,
-  onFocusName,
-  onFocusTag,
-  onDelete,
-  canWrite,
-  canDelete,
-}: {
-  menu: { x: number; y: number; file: FileAsset }
-  onClose: () => void
-  onPreview: (file: FileAsset) => void
-  onOpen: (file: FileAsset) => void
-  onDownload: (file: FileAsset) => void
-  onFocusName: (file: FileAsset) => void
-  onFocusTag: (file: FileAsset) => void
-  onDelete: (fileId: number) => void
-  canWrite: boolean
-  canDelete: boolean
-}) {
-  const run = (action: () => void) => {
-    action()
-    onClose()
-  }
-
-  return (
-    <div className="task-context-menu file-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
-      <button type="button" onClick={() => run(() => onPreview(menu.file))}>
-        <Eye size={15} />
-        预览
-      </button>
-      <button type="button" onClick={() => run(() => onOpen(menu.file))}>
-        <ExternalLink size={15} />
-        打开原文件
-      </button>
-      {canWrite && <button type="button" onClick={() => run(() => onFocusName(menu.file))}>
-        <Pencil size={15} />
-        重命名
-      </button>}
-      {canWrite && <button type="button" onClick={() => run(() => onFocusTag(menu.file))}>
-        <Tag size={15} />
-        添加标签
-      </button>}
-      <button type="button" onClick={() => run(() => onDownload(menu.file))}>
-        <Download size={15} />
-        下载源文件
-      </button>
-      {canDelete && <div className="context-menu-separator" />}
-      {canDelete && <button type="button" className="danger" onClick={() => run(() => onDelete(menu.file.id))}>
-        <Trash2 size={15} />
-        删除
-      </button>}
-    </div>
   )
 }
 
@@ -20784,94 +20582,6 @@ function SettingsView({
         />
       )}
     </section>
-  )
-}
-
-function ConfirmDialogModal({
-  dialog,
-  isBusy,
-  onClose,
-  onConfirm,
-}: {
-  dialog: ConfirmDialogState
-  isBusy: boolean
-  onClose: () => void
-  onConfirm: () => void
-}) {
-  const isDanger = dialog.tone === 'danger'
-
-  return (
-    <ModalShell
-      className={`delete-confirm-modal confirm-dialog-modal ${isDanger ? 'danger-confirm' : ''} ${dialog.hideIcon ? 'compact-confirm-dialog' : ''}`}
-      labelledBy="confirm-dialog-title"
-      onClose={onClose}
-    >
-      {!dialog.hideIcon && (
-        <div className="delete-confirm-icon">
-          {isDanger ? <Trash2 size={24} /> : <CheckCircle2 size={24} />}
-        </div>
-      )}
-      <div className="delete-confirm-copy">
-        {dialog.eyebrow && <p className="eyebrow">{dialog.eyebrow}</p>}
-        <h2 id="confirm-dialog-title">{dialog.title}</h2>
-        <p>{dialog.body}</p>
-      </div>
-      {dialog.details && dialog.details.length > 0 && (
-        <div className="delete-confirm-meta">
-          {dialog.details.map((detail) => (
-            <span key={detail}>{detail}</span>
-          ))}
-        </div>
-      )}
-      <div className="delete-confirm-actions">
-        <button className="ghost-button" disabled={isBusy} onClick={onClose}>
-          {dialog.cancelText ?? '取消'}
-        </button>
-        <button className={isDanger ? 'danger-button solid-danger-button' : 'primary-button'} disabled={isBusy} onClick={onConfirm}>
-          {isBusy ? '处理中…' : dialog.confirmText}
-        </button>
-      </div>
-    </ModalShell>
-  )
-}
-
-function VoidTaskModal({
-  task,
-  isBusy,
-  onClose,
-  onConfirm,
-}: {
-  task: Task
-  isBusy: boolean
-  onClose: () => void
-  onConfirm: (reason: string) => void
-}) {
-  const submit = () => {
-    if (isBusy) {
-      return
-    }
-    onConfirm('')
-  }
-
-  return (
-    <ModalShell className="delete-confirm-modal void-task-modal danger-confirm light-confirm-modal" labelledBy="void-task-title" onClose={onClose}>
-      <div className="delete-confirm-copy">
-        <h2 id="void-task-title">确定作废「{task.title}」吗？</h2>
-        <p>作废后，这个任务不会计入工时、收入和结算；管理员仍可在数据中保留记录，避免误删真实历史。</p>
-      </div>
-      <div className="delete-confirm-meta">
-        <span>{task.type}</span>
-        <span>{monthLabelOf(taskSettlementMonth(task))}</span>
-      </div>
-      <div className="delete-confirm-actions">
-        <button className="ghost-button" disabled={isBusy} onClick={onClose}>
-          取消
-        </button>
-        <button className="danger-button solid-danger-button" disabled={isBusy} onClick={submit}>
-          {isBusy ? '处理中…' : '确认作废'}
-        </button>
-      </div>
-    </ModalShell>
   )
 }
 
