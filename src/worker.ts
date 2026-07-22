@@ -11646,7 +11646,6 @@ async function getSharedReport(env: Env, token: string) {
        WHERE attachments.deleted_at IS NULL
          AND tasks.workspace_id = ?
          AND attachments.visible_to_client = 1
-         AND attachments.attachment_scope = 'acceptance'
          AND (attachments.uploaded_at LIKE ? OR tasks.settlement_month = ?)
          AND tasks.deleted_at IS NULL
          AND tasks.voided_at IS NULL
@@ -12441,7 +12440,6 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
      WHERE monthly_reports.public_token = ?
        AND attachments.deleted_at IS NULL
        AND attachments.visible_to_client = 1
-       AND attachments.attachment_scope = 'acceptance'
        AND (
          attachments.uploaded_at LIKE monthly_reports.month || '%'
          OR tasks.settlement_month = monthly_reports.month
@@ -12453,8 +12451,8 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
     .first<{ id: string }>()
   if (row) return true
   const [attachment, settlementExport] = await Promise.all([
-    env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL AND visible_to_client = 1 AND attachment_scope = ?')
-      .bind(fileId, 'acceptance').first<{ task_id: string }>(),
+    env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL AND visible_to_client = 1')
+      .bind(fileId).first<{ task_id: string }>(),
     env.DB.prepare('SELECT snapshot_json FROM settlement_exports WHERE public_token = ?').bind(shareToken).first<{ snapshot_json: string }>(),
   ])
   if (!attachment || !settlementExport) return false
@@ -17628,7 +17626,6 @@ async function getSettlementProjectEvidence(env: Env, row: DbSettlementExport, r
        WHERE attachments.task_id IN (${placeholders})
          AND attachments.deleted_at IS NULL
          AND attachments.visible_to_client = 1
-         AND attachments.attachment_scope = 'acceptance'
        ORDER BY attachments.uploaded_at DESC`,
     ).bind(...taskIds).all<DbAttachment>(),
   ])

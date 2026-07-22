@@ -12651,7 +12651,9 @@ function TaskProgressModal({
     attachment: PendingProgressAttachment,
     onProgress: (ratio: number) => void,
   ): Promise<FileAsset> => {
-    const acceptance = (attachment.uploadScope ?? (isAcceptanceMode ? 'acceptance' : 'progress')) === 'acceptance'
+    // 用户可能先添加附件、再切换为验收进展。保存时必须以当前模式为准，
+    // 不能沿用附件刚加入时的旧 scope，否则验收文件会被误存为普通进展附件。
+    const acceptance = isAcceptanceMode || attachment.uploadScope === 'acceptance'
     const prepared = await ensurePendingAttachmentPreparation(attachment)
     const uploadFile = renamedFile(prepared.uploadFile, attachment.name)
     const lightweightPreview = prepared.previewFile

@@ -212,8 +212,8 @@ test('合作伙伴回单按项目归档交付文件并支持排序与时间线',
   }
   const inviteProject = page.locator('.shared-project-row[data-task-id="13"]')
   await expect(inviteProject.getByRole('heading', { name: '直播设计' })).toBeVisible()
-  await expect(inviteProject.getByText('当天邀请V1.0B01.jpg', { exact: true })).toBeVisible()
-  await expect(inviteProject.getByText('直播封面V1.0B01.jpg', { exact: true })).toBeVisible()
+  await expect(inviteProject.getByRole('button', { name: '预览 当天邀请V1.0B01.jpg' })).toBeVisible()
+  await expect(inviteProject.getByRole('button', { name: '预览 直播封面V1.0B01.jpg' })).toBeVisible()
 
   const rows = page.locator('.shared-project-row')
   await expect(rows.first()).toHaveAttribute('data-start-date', /^2026-/)
@@ -227,6 +227,7 @@ test('合作伙伴回单按项目归档交付文件并支持排序与时间线',
   await countdownProject.getByRole('button', { name: /时间线/ }).click()
   await expect(countdownProject.getByRole('dialog', { name: /时间线/ })).toBeVisible()
   await expect(countdownProject.getByText('完成 6 月 8 日至 6 月 30 日倒计时海报')).toBeVisible()
+  await expect(countdownProject.getByText('倒计时1天海报.jpg', { exact: true })).toBeVisible()
   expect(await countdownProject.locator('.shared-project-timeline').evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto')
   await expect(countdownProject.getByRole('button', { name: '关闭时间线' })).toBeVisible()
 

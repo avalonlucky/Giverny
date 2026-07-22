@@ -49,13 +49,13 @@ INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_
   ('u3', '5', '2026-06-30T17:16', '验收进展', '完成三个产品视频背景电流声降噪', 0, 1);
 
 INSERT INTO attachments (
-  id, task_id, attachment_scope, file_name, file_type, mime_type, r2_key,
+  id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,
   file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
 ) VALUES
-  ('101', '13', 'acceptance', '当天邀请V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-invite.jpg', 344064, '336 KB', 1, 1, '验收文件', '2026-06-29T18:00:00'),
-  ('102', '13', 'acceptance', '直播封面V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-cover.jpg', 445440, '435 KB', 1, 1, '验收文件', '2026-06-29T18:05:00'),
-  ('103', '11', 'acceptance', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 1, 1, '验收文件', '2026-06-30T18:00:00'),
-  ('104', '1', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00');
+  ('101', '13', NULL, 'acceptance', '当天邀请V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-invite.jpg', 344064, '336 KB', 1, 1, '验收文件', '2026-06-29T18:00:00'),
+  ('102', '13', NULL, 'acceptance', '直播封面V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-cover.jpg', 445440, '435 KB', 1, 1, '验收文件', '2026-06-29T18:05:00'),
+  ('103', '11', 'supplemental-acceptance-entry', 'progress', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 0, 1, '过程文件', '2026-06-30T18:00:00'),
+  ('104', '1', 'finance-anchor-entry', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00');
 
 INSERT INTO agent_failure_cases (
   fingerprint, category, intent, tool_name, http_status, occurrences, regression_status
