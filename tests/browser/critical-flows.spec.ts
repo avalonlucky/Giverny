@@ -56,7 +56,38 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
   await input.press('Enter')
   await expect(page.getByText(/已生成.*2026\/06\/01 至 2026\/06\/10.*结算回单/).first()).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('link', { name: '下载 Excel' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '在线预览' })).toBeVisible()
+  const previewLink = page.getByRole('link', { name: '在线预览' })
+  await expect(previewLink).toBeVisible()
+  const previewHref = await previewLink.getAttribute('href')
+  const token = previewHref?.split('/').filter(Boolean).at(-1)
+  expect(token).toBeTruthy()
+  const sharedResponse = await page.request.get(`/api/shared-settlement/${token}`)
+  expect(sharedResponse.ok()).toBeTruthy()
+  const sharedPayload = await sharedResponse.json() as {
+    exportRecord: { id: string }
+    receipt: { rows: Array<{ actualCompletionDate: string }> }
+  }
+  const completionDates = sharedPayload.receipt.rows.map((row) => row.actualCompletionDate)
+  expect(completionDates).toContain('2026/06/03')
+  expect(completionDates.every((value) => value === '2026/06/10')).toBe(false)
+  const sharedExcelResponse = await page.request.get(`/api/shared-settlement/${token}/excel`)
+  expect(sharedExcelResponse.ok()).toBeTruthy()
+  const ExcelJsModule = await import('exceljs')
+  const ExcelJS = ExcelJsModule.default ?? ExcelJsModule
+  const sharedWorkbook = new ExcelJS.Workbook()
+  await sharedWorkbook.xlsx.load(await sharedExcelResponse.body())
+  const sharedSheet = sharedWorkbook.getWorksheet('结算回单')
+  expect(sharedSheet).toBeTruthy()
+  const sharedCompletionDates = sharedPayload.receipt.rows.map((_, index) => {
+    const value = sharedSheet!.getCell(12 + index, 6).value
+    return value instanceof Date
+      ? `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, '0')}/${String(value.getDate()).padStart(2, '0')}`
+      : String(value ?? '')
+  })
+  expect(sharedCompletionDates).toContain('2026/06/03')
+  await page.request.delete(`/api/settlement-exports/${sharedPayload.exportRecord.id}`, {
+    headers: { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' },
+  })
 })
 
 test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ page }) => {
@@ -77,9 +108,14 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   const startDatePicker = page.getByRole('dialog', { name: '自定义导出选择器' })
   await startDatePicker.getByRole('button', { name: '上个月' }).click()
   await startDatePicker.getByRole('button', { name: '2026-06-01' }).click()
+  await expect(startDatePicker).toBeHidden()
   await expect(receipt.getByText(`2026/06/01 至 ${selectedEndDate.replaceAll('-', '/')}`, { exact: true })).toBeVisible()
   await expect(receipt.getByText('结算日期', { exact: true })).toBeVisible()
   expect(await receipt.locator('tbody tr').count()).toBeGreaterThan(initialRowCount)
+  const completionDates = await receipt.locator('tbody tr td:nth-child(6)').allTextContents()
+  expect(completionDates).toContain('2026/06/03')
+  expect(completionDates).toContain('2026/07/03')
+  expect(completionDates.every((value) => value.trim() === selectedEndDate.replaceAll('-', '/'))).toBe(false)
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: '下载 Excel 回单' }).first().click()
@@ -104,6 +140,13 @@ test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ p
   expect(sheet!.getColumn(14).width).toBe(96)
   expect(sheet!.getCell('L12').formula).toBe('$K$9')
   expect(sheet!.getCell('M12').formula).toBe('K12*L12')
+  const exportedCompletionDates = Array.from({ length: completionDates.length }, (_, index) => {
+    const value = sheet!.getCell(12 + index, 6).value
+    return value instanceof Date
+      ? `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, '0')}/${String(value.getDate()).padStart(2, '0')}`
+      : String(value ?? '')
+  })
+  expect(exportedCompletionDates).toContain('2026/07/03')
 })
 
 test('日期范围回单支持线上分享、下载和锁定删除校验', async ({ page }) => {

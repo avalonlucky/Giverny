@@ -2608,16 +2608,6 @@ function taskBillableHoursInDateRange(task: Task, startDate: string, endDate: st
   return 0
 }
 
-function taskLatestActivityInMonth(task: Task, month: string) {
-  const candidates = [
-    task.date,
-    ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
-    ...(task.waitingEntries ?? []).map((entry) => waitingEntryActivityValue(task, entry)),
-    acceptanceProgressEndDateTime(task) || task.actualDeliveryDate,
-  ].filter((value) => value && safeMonthPart(value) === month)
-  return candidates.sort().at(-1) ?? ''
-}
-
 function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
   const startDate = entry.date || ''
   const endDate = entry.endDate || startDate
@@ -3301,6 +3291,9 @@ function PlanDateTimeField({
     onChange(next)
     setDraft(formatValue(next))
     setCalendarMonth(monthPart(next))
+    if (!includeTime) {
+      setPickerOpen(false)
+    }
   }
 
   const applyTimePart = (part: 'hour' | 'minute', rawValue: string) => {
@@ -17774,12 +17767,21 @@ function ReportsView({
     }
     return parts.join('；')
   }
-  const actualCompletionDateForMonth = (task: Task, month: string) => {
-    const acceptanceDate = acceptanceProgressEndDateTime(task) || task.actualDeliveryDate
-    if (task.status === '已验收' && safeMonthPart(acceptanceDate) === month) {
-      return acceptanceDate
+  const latestTaskProgressDate = (
+    task: Task,
+    latestUpdate: TaskUpdate | undefined,
+    isIncluded: (value: string) => boolean,
+  ) => [
+    latestUpdate?.date ?? '',
+    ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
+    task.date,
+  ].filter((value) => value && isIncluded(value)).sort().at(-1) ?? ''
+  const actualCompletionDateForMonth = (task: Task, month: string, updatesMap = latestUpdatesByTask) => {
+    const latestProgressDate = latestTaskProgressDate(task, updatesMap.get(task.id), (value) => safeMonthPart(value) === month)
+    if (task.status === '已验收' || hasAcceptanceProgress(task)) {
+      return acceptanceProgressEndDateTime(task) || task.actualDeliveryDate || latestProgressDate || task.date || ''
     }
-    return taskLatestActivityInMonth(task, month) || acceptanceDate || task.date || ''
+    return latestProgressDate || task.date || ''
   }
   const selectedReceiptHourlyRate = selectedReport?.billableHours && selectedReport.billableHours > 0
     ? selectedReport.totalAmount / selectedReport.billableHours
@@ -17797,7 +17799,7 @@ function ReportsView({
         task,
         sequence: String(index + 1).padStart(2, '0'),
         estimatedStartDate: formatReceiptDate(task.date),
-        actualCompletionDate: formatReceiptDate(actualCompletionDateForMonth(task, month)),
+        actualCompletionDate: formatReceiptDate(actualCompletionDateForMonth(task, month, updatesMap)),
         estimatedHours: Number(task.estimatedHours) || 0,
         actualHours,
         amount: roundCents(actualHours * rate),
@@ -17829,11 +17831,19 @@ function ReportsView({
       && taskBillableHoursInDateRange(task, rangeStart, rangeEnd) > 0
     ))).map((task, index) => {
       const actualHours = taskBillableHoursInDateRange(task, rangeStart, rangeEnd)
+      const latestProgressDate = latestTaskProgressDate(
+        task,
+        rangeUpdatesMap.get(task.id),
+        (value) => isDateValueInRange(value, rangeStart, rangeEnd),
+      )
+      const actualCompletionDate = task.status === '已验收' || hasAcceptanceProgress(task)
+        ? acceptanceProgressEndDateTime(task) || task.actualDeliveryDate || latestProgressDate || task.date
+        : latestProgressDate || task.date
       return {
         task,
         sequence: String(index + 1).padStart(2, '0'),
         estimatedStartDate: formatReceiptDate(task.date),
-        actualCompletionDate: formatReceiptDate(rangeEnd),
+        actualCompletionDate: formatReceiptDate(actualCompletionDate),
         estimatedHours: Number(task.estimatedHours) || 0,
         actualHours,
         amount: roundCents(actualHours * rate),

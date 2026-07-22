@@ -8747,6 +8747,35 @@ function dbTaskHoursInDateRange(task: DbTask, startDate: string, endDate: string
     : 0
 }
 
+function dbTimeEntryActivityValue(entry: TimeEntry, fallbackDate: string | null | undefined) {
+  const day = String(entry.endDate || entry.date || fallbackDate || '').slice(0, 10)
+  const clock = String(entry.end || entry.start || '').slice(0, 5)
+  return day && clock ? `${day}T${clock}` : day
+}
+
+function dbTaskReceiptCompletionDate(task: DbTask, latestUpdate: DbUpdate | undefined, rangeStart: string, rangeEnd: string) {
+  const entries = parseTimeEntries(task.time_entries_json)
+  const progressDate = [
+    latestUpdate?.update_date ?? '',
+    ...entries.map((entry) => dbTimeEntryActivityValue(entry, task.start_date)),
+    task.start_date ?? '',
+  ]
+    .filter((value) => {
+      const day = String(value).slice(0, 10)
+      return day >= rangeStart && day <= rangeEnd
+    })
+    .sort()
+    .at(-1) ?? ''
+  if (task.status === '已验收' || entries.some((entry) => entry.isAcceptanceProgress)) {
+    return acceptanceProgressEndDateTime(entries, task.start_date)
+      || task.actual_delivery_date
+      || progressDate
+      || task.start_date
+      || ''
+  }
+  return progressDate || task.start_date || ''
+}
+
 async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string): Promise<ReceiptExcelOptions> {
   const [taskResult, updateResult, hourlyRate, pdfTitle, serviceCompanyName] = await Promise.all([
     env.DB.prepare('SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC')
@@ -8780,7 +8809,7 @@ async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, sta
       title: `${task.title}${task.is_supplemental ? '（补录）' : ''}`,
       requirement: task.requirement || '—',
       estimatedStartDate: task.start_date ? receiptDateLabel(task.start_date) : '—',
-      actualCompletionDate: receiptDateLabel(endDate),
+      actualCompletionDate: receiptDateLabel(dbTaskReceiptCompletionDate(task, update, startDate, endDate)),
       requester: task.requester || task.contact_person || '—',
       contact: task.contact_person || task.requester || '—',
       status: task.status,
