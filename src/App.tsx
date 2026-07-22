@@ -2000,6 +2000,15 @@ function monthDateRangeLabelOf(value: string) {
   return `${year}/${pad(month)}/01 至 ${end.getFullYear()}/${pad(end.getMonth() + 1)}/${pad(end.getDate())}`
 }
 
+function monthDateRangeOf(value: string) {
+  const [year, month] = value.split('-').map(Number)
+  const end = new Date(year, month, 0)
+  return {
+    startDate: `${year}-${pad(month)}-01`,
+    endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
+  }
+}
+
 function supplementalMonthSelectOptions(currentValue = monthPart(isoDate())) {
   const anchor = localDateFromIsoDate(`${currentValue}-01`)
   return Array.from({ length: 4 }, (_, index) => {
@@ -9094,37 +9103,6 @@ function App() {
     })
   }
 
-  const handleCopyShareLink = async (token: string) => {
-    const link = `${window.location.origin}/share/${token}`
-    try {
-      await window.navigator.clipboard.writeText(link)
-      notify('合作伙伴分享链接已复制')
-    } catch {
-      notify(link)
-    }
-  }
-
-  const handleRotateReportToken = (report: ReportRecord) => {
-    setConfirmDialog({
-      eyebrow: '重置合作伙伴链接',
-      title: `确定重置 ${monthLabelOf(report.month)} 的合作伙伴链接吗？`,
-      body: '确认后会生成一个新的只读链接，旧链接将立即失效。结算金额、工时和任务快照不会变化。',
-      confirmText: '重置链接',
-      details: [`当前结算：${report.billableHours.toFixed(1)}h · ¥${formatYuan(report.totalAmount)}`, '旧链接失效后，需要把新链接重新发给合作伙伴。'],
-      onConfirm: async () => {
-        const result = await api.rotateMonthlyReportToken(report.id)
-        setReports((current) => current.map((item) => (item.id === result.report.id ? result.report : item)))
-        const link = `${window.location.origin}/share/${result.report.publicToken}`
-        try {
-          await window.navigator.clipboard.writeText(link)
-          notify('合作伙伴链接已重置，新链接已复制')
-        } catch {
-          notify(`合作伙伴链接已重置：${link}`)
-        }
-      },
-    })
-  }
-
   const handleDownloadFile = (file: FileAsset) => {
     const sourceUrl = authedPreviewUrl(file.sourceUrl)
     if (!sourceUrl) {
@@ -10378,8 +10356,6 @@ function App() {
               pdfTitle={pdfTitle}
               serviceCompanyName={serviceCompanyName}
               reports={reports}
-              onCopyShareLink={handleCopyShareLink}
-              onRotateReportToken={handleRotateReportToken}
               onReportDeleted={(reportId) => setReports((current) => current.filter((report) => report.id !== reportId))}
               onNotify={notify}
             />
@@ -17777,8 +17753,6 @@ function ReportsView({
   pdfTitle,
   serviceCompanyName,
   reports,
-  onCopyShareLink,
-  onRotateReportToken,
   onReportDeleted,
   onNotify,
 }: {
@@ -17799,13 +17773,10 @@ function ReportsView({
   pdfTitle: string
   serviceCompanyName: string
   reports: ReportRecord[]
-  onCopyShareLink: (token: string) => void
-  onRotateReportToken: (report: ReportRecord) => void
   onReportDeleted: (reportId: string) => void
   onNotify: (message: string, tone?: ToastTone) => void
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
-  const [selectedReportMonth, setSelectedReportMonth] = useState('')
   const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
   const [customExportEnd, setCustomExportEnd] = useState(() => isoDate())
   const [isCustomRangePreviewActive, setIsCustomRangePreviewActive] = useState(false)
@@ -17826,7 +17797,7 @@ function ReportsView({
       .then(({ records }) => setExportRecords(records))
       .catch((error) => console.error('读取导出记录失败', error))
   }, [])
-  const selectedMonth = selectedReportMonth || currentMonth.value
+  const selectedMonth = currentMonth.value
   const selectedMonthLabel = monthLabelOf(selectedMonth)
   const selectedReport = reports.find((report) => report.month === selectedMonth)
   const selectedTasks = selectedMonth === currentMonth.value
@@ -18067,8 +18038,8 @@ function ReportsView({
   const [isPdfExporting, setIsPdfExporting] = useState(false)
 
   const handleExportUserSheet = async (
-    options: { month?: string; startDate?: string; endDate?: string; label?: string; action?: 'download' | 'share' | 'pdf' } = { month: selectedMonth },
-  ) => {
+    options: { month?: string; startDate?: string; endDate?: string; label?: string; action?: 'download' | 'share' | 'pdf' | 'record' } = { month: selectedMonth },
+  ): Promise<SettlementExportRecord | null> => {
     try {
       const rangeStart = options.startDate ?? ''
       const rangeEnd = options.endDate ?? ''
@@ -18167,9 +18138,13 @@ function ReportsView({
       const snapshotEnd = isRangeExport
         ? rangeEnd
         : `${month}-${pad(new Date(exportYear, exportMonth, 0).getDate())}`
-      const createdExport = isRangeExport || options.action === 'share' || options.action === 'pdf'
+      const createdExport = isRangeExport || options.action === 'share' || options.action === 'pdf' || options.action === 'record'
         ? await api.createSettlementExport({ startDate: snapshotStart, endDate: snapshotEnd, receipt: receiptPayload })
         : null
+      if (options.action === 'record' && createdExport) {
+        setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
+        return createdExport.record
+      }
       if (options.action === 'share' && createdExport) {
         setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
         const shareUrl = `${window.location.origin}/settlement-share/${createdExport.record.publicToken}`
@@ -18179,7 +18154,7 @@ function ReportsView({
         } catch {
           onNotify(`已生成未锁定分享链接：${shareUrl}`)
         }
-        return
+        return createdExport.record
       }
       if (options.action === 'pdf' && createdExport) {
         setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
@@ -18190,7 +18165,7 @@ function ReportsView({
         link.click()
         link.remove()
         onNotify(`正在生成 ${createdExport.record.label} PDF`)
-        return
+        return createdExport.record
       }
       const buffer = await buildReceiptExcelBuffer(receiptPayload)
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
@@ -18206,9 +18181,11 @@ function ReportsView({
         setExportRecords((records) => [createdExport.record, ...records.filter((record) => record.id !== createdExport.record.id)].slice(0, 100))
         onNotify(`已导出 ${targetRows.length} 项，${totalHours.toFixed(1)}h · ¥${formatYuan(totalAmount)}`)
       }
+      return createdExport?.record ?? null
     } catch (error) {
       console.error('Excel 回单导出失败', error)
       onNotify(error instanceof Error ? `Excel 回单导出失败：${error.message}` : 'Excel 回单导出失败，请重试', 'error')
+      return null
     }
   }
 
@@ -18279,6 +18256,59 @@ function ReportsView({
     const url = `${window.location.origin}/settlement-share/${record.publicToken}`
     await navigator.clipboard.writeText(url)
     onNotify('线上回单链接已复制')
+  }
+
+  const previewSettlementExportRange = (record: SettlementExportRecord) => {
+    setCustomExportStart(record.startDate)
+    setCustomExportEnd(record.endDate)
+    setIsCustomRangePreviewActive(true)
+    setReportSectionTab('receipt')
+  }
+
+  const existingSettlementExportForRange = (startDate: string, endDate: string) =>
+    exportRecords.find((record) => record.startDate === startDate && record.endDate === endDate)
+
+  const ensureSettlementExportForReport = async (report: ReportRecord) => {
+    const { startDate, endDate } = monthDateRangeOf(report.month)
+    const existingRecord = existingSettlementExportForRange(startDate, endDate)
+    if (existingRecord) return existingRecord
+    return handleExportUserSheet({
+      startDate,
+      endDate,
+      label: `${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}`,
+      action: 'record',
+    })
+  }
+
+  const previewLockedReportRange = (report: ReportRecord) => {
+    const { startDate, endDate } = monthDateRangeOf(report.month)
+    setCustomExportStart(startDate)
+    setCustomExportEnd(endDate)
+    setIsCustomRangePreviewActive(true)
+    setReportSectionTab('receipt')
+  }
+
+  const copyLockedReportShareLink = async (report: ReportRecord) => {
+    const record = await ensureSettlementExportForReport(report)
+    if (!record) return
+    await copySettlementShareLink(record)
+  }
+
+  const openLockedReportSharePage = async (report: ReportRecord) => {
+    const record = await ensureSettlementExportForReport(report)
+    if (!record) return
+    const link = document.createElement('a')
+    link.href = `/settlement-share/${record.publicToken}`
+    link.target = '_blank'
+    link.rel = 'noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const openLockedReportAccessManager = async (report: ReportRecord) => {
+    const record = await ensureSettlementExportForReport(report)
+    if (record) openSettlementAccessManager(record)
   }
 
   const openSettlementAccessManager = (record: SettlementExportRecord) => {
@@ -18445,14 +18475,17 @@ function ReportsView({
                   <button className="icon-button" onClick={() => openSettlementAccessManager(record)} aria-label="链接管理" title="链接管理">
                     <Clock3 size={15} />
                   </button>
-                  <a className="icon-button" href={`/settlement-share/${record.publicToken}`} target="_blank" rel="noreferrer" aria-label="在线预览" title="在线预览">
-                    <ExternalLink size={15} />
-                  </a>
+                  <button className="icon-button" onClick={() => previewSettlementExportRange(record)} aria-label="查看回单" title="查看回单">
+                    <Eye size={15} />
+                  </button>
                   <a className="icon-button" href={`/api/shared-settlement/${record.publicToken}/excel`} aria-label="下载 Excel" title="下载 Excel">
                     <Download size={15} />
                   </a>
                   <a className="icon-button" href={`/api/shared-settlement/${record.publicToken}/pdf`} aria-label="下载 PDF" title="下载 PDF">
                     <FileTextIcon size={15} />
+                  </a>
+                  <a className="icon-button" href={`/settlement-share/${record.publicToken}`} target="_blank" rel="noreferrer" aria-label="打开合作伙伴页" title="打开合作伙伴页">
+                    <ExternalLink size={15} />
                   </a>
                   <button className="icon-button danger-text" aria-label="删除记录" title="删除记录" onClick={() => {
                     setDeleteExportRecord(record)
@@ -18490,25 +18523,42 @@ function ReportsView({
                   {report.viewCount > 0 ? ` · 合作伙伴已查看 ${report.viewCount} 次（最近 ${report.viewedAt}）` : ' · 合作伙伴尚未查看'}
                 </small>
                 <div className="report-history-actions">
-                  <button className="icon-button" onClick={() => {
-                    setSelectedReportMonth(report.month)
-                    setReportSectionTab('receipt')
-                    setIsCustomRangePreviewActive(false)
-                  }} aria-label={`查看 ${report.month} 回单`} title="查看回单">
-                    <Eye size={15} />
+                  <button className="icon-button" disabled aria-label="已锁定" title="已锁定">
+                    <Lock size={15} />
                   </button>
-                  <button className="icon-button" aria-label={`下载 ${report.month} Excel 回单`} title="下载 Excel" onClick={() => void handleExportUserSheet({ month: report.month })}>
-                    <Download size={15} />
-                  </button>
-                  <button className="icon-button" aria-label={`复制 ${report.month} 合作伙伴链接`} title="复制链接" onClick={() => onCopyShareLink(report.publicToken)}>
+                  <button className="icon-button" aria-label={`复制 ${report.month} 合作伙伴链接`} title="复制链接" onClick={() => void copyLockedReportShareLink(report)}>
                     <Copy size={15} />
                   </button>
-                  <button className="icon-button" aria-label={`重置 ${report.month} 合作伙伴链接`} title="重置链接" onClick={() => onRotateReportToken(report)}>
-                    <RotateCcw size={15} />
+                  <button className="icon-button" aria-label={`管理 ${report.month} 合作伙伴链接`} title="链接管理" onClick={() => void openLockedReportAccessManager(report)}>
+                    <Clock3 size={15} />
                   </button>
-                  <a className="icon-button" aria-label={`打开 ${report.month} 合作伙伴页面`} title="打开合作伙伴页" href={`/share/${report.publicToken}`} target="_blank" rel="noreferrer">
+                  <button className="icon-button" onClick={() => previewLockedReportRange(report)} aria-label={`查看 ${report.month} 回单`} title="查看回单">
+                    <Eye size={15} />
+                  </button>
+                  <button className="icon-button" aria-label={`下载 ${report.month} Excel 回单`} title="下载 Excel" onClick={() => {
+                    const { startDate, endDate } = monthDateRangeOf(report.month)
+                    void handleExportUserSheet({
+                      startDate,
+                      endDate,
+                      label: `${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}`,
+                    })
+                  }}>
+                    <Download size={15} />
+                  </button>
+                  <button className="icon-button" aria-label={`下载 ${report.month} PDF 回单`} title="下载 PDF" onClick={() => {
+                    const { startDate, endDate } = monthDateRangeOf(report.month)
+                    void handleExportUserSheet({
+                      startDate,
+                      endDate,
+                      label: `${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}`,
+                      action: 'pdf',
+                    })
+                  }}>
+                    <FileTextIcon size={15} />
+                  </button>
+                  <button className="icon-button" aria-label={`打开 ${report.month} 合作伙伴页面`} title="打开合作伙伴页" onClick={() => void openLockedReportSharePage(report)}>
                     <ExternalLink size={15} />
-                  </a>
+                  </button>
                   <button className="icon-button danger-text" aria-label={`删除 ${report.month} 结算历史`} title="删除" onClick={() => {
                     setDeleteReport(report)
                     setDeleteReportPassword('')
