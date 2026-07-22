@@ -117,6 +117,7 @@ import {
   type OpenRouterFreeModel,
   type WorkspaceSummary,
 } from './lib/api'
+import { DonutChart, type DonutChartItem } from './components/DonutChart'
 import { EmptyState } from './components/EmptyState'
 import { formatFileSize } from './lib/format'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
@@ -1821,7 +1822,7 @@ async function imageUrlBase64(url: string | undefined) {
 
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
 
-type DonutItem = { label: string; value: number; color: string }
+type DonutItem = DonutChartItem
 
 type TaskContextInsight = {
   tone: 'warning' | 'info'
@@ -8435,7 +8436,7 @@ function App() {
       totalHours: Number(rows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)),
       totalAmount: rows.reduce((sum, row) => sum + row.amount, 0),
     }
-  }, [activeTaskItems, currentMonth.value, hourlyRate, importedHoursMonth, importedMonthlyHours, reports])
+  }, [activeTaskItems, currentMonth.value, hourlyRate, reports])
 
   const dailyTrendData = useMemo(() => {
     const [year, month] = currentMonth.value.split('-').map(Number)
@@ -10738,63 +10739,6 @@ function App() {
         </div>
       )}
     </main>
-  )
-}
-
-function DonutChart({
-  items,
-  total,
-}: {
-  items: DonutItem[]
-  total: number
-}) {
-  if (total <= 0) {
-    return (
-      <div className="empty-state">
-        <strong>暂无工时数据</strong>
-        <p>记录任务工时后，这里会按设计类型自动汇总。</p>
-      </div>
-    )
-  }
-
-  const gradient = items
-    .reduce(
-      (result, item) => {
-        const start = result.cursor
-        const end = start + (item.value / total) * 100
-
-        return {
-          cursor: end,
-          segments: [...result.segments, `${item.color} ${start}% ${end}%`],
-        }
-      },
-      { cursor: 0, segments: [] as string[] },
-    )
-    .segments.join(', ')
-
-  return (
-    <div className="donut-layout">
-      <div className="donut-chart" style={{ '--donut-gradient': gradient } as CSSProperties}>
-        <div>
-          <strong>{total.toFixed(1)}h</strong>
-          <span>总计</span>
-        </div>
-      </div>
-      <div className="donut-legend">
-        {items.map((item) => {
-          const percent = Math.round((item.value / total) * 100)
-          return (
-            <div className="legend-row" key={item.label}>
-              <i style={{ background: item.color }} />
-              <span>{item.label}</span>
-              <strong>
-                {item.value.toFixed(1)}h ({percent}%)
-              </strong>
-            </div>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 
