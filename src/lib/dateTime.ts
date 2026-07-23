@@ -24,6 +24,21 @@ export function datePart(value: string) {
   return value.slice(0, 10)
 }
 
+export function toDateTimeInputValue(value: string) {
+  if (!value) {
+    return ''
+  }
+  return value.includes('T') ? value.slice(0, 16) : `${datePart(value)}T09:00`
+}
+
+export function formatPlanDateTime(value: string) {
+  if (!value) {
+    return ''
+  }
+  const date = datePart(value).replaceAll('-', '/')
+  return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
+}
+
 export function monthPart(value: string) {
   return datePart(value).slice(0, 7)
 }

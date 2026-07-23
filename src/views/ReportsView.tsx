@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Clock3, Copy, Download, ExternalLink, Eye, FileText as FileTextIcon, LoaderCircle, Lock, Trash2, X } from 'lucide-react'
 import { importedHoursMonth, importedMonthlyHours } from '../config/appConfig'
 import { ModalShell } from '../components/ModalShell'
+import { PlanDateTimeField } from '../components/PlanDateTimeField'
 import { SettlementReceipt } from '../components/SettlementReceipt'
 import { api, type ReportRecord, type SettlementExportRecord } from '../lib/api'
 import { datePart, isoDate, pad } from '../lib/dateTime'
@@ -27,22 +28,6 @@ import { hasAcceptanceProgress, taskDisplayProgress } from '../lib/taskProgress'
 import type { Task, TaskUpdate } from '../types/domain'
 
 type ToastTone = 'success' | 'error' | 'info'
-
-export type PlanDateTimeFieldProps = {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  isActive?: boolean
-  readOnly?: boolean
-  saved?: boolean
-  control?: ReactNode
-  includeTime?: boolean
-  pickerId?: string
-  activePickerId?: string | null
-  onActivePickerChange?: (pickerId: string | null) => void
-  afterInput?: ReactNode
-  commitValidInputOnChange?: boolean
-}
 
 function nowStamp() {
   const now = new Date()
@@ -78,7 +63,6 @@ export default function ReportsView({
   reports,
   onReportDeleted,
   onNotify,
-  PlanDateTimeField,
 }: {
   stats: {
     totalHours: number
@@ -99,7 +83,6 @@ export default function ReportsView({
   reports: ReportRecord[]
   onReportDeleted: (reportId: string) => void
   onNotify: (message: string, tone?: ToastTone) => void
-  PlanDateTimeField: ComponentType<PlanDateTimeFieldProps>
 }) {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
   const [customExportStart, setCustomExportStart] = useState(() => `${currentMonth.value}-01`)
