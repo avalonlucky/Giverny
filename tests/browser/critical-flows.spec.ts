@@ -112,6 +112,21 @@ test('任务日历仅在切换到日历视图时加载', async ({ page }) => {
   expect(calendarLoadedAfterNavigation).toBe(true)
 })
 
+test('结算页仅在进入时加载独立分包', async ({ page }) => {
+  const reportsLoadedOnDashboard = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('ReportsView-'))
+  ))
+  expect(reportsLoadedOnDashboard).toBe(false)
+
+  await page.getByRole('button', { name: '结算' }).click()
+  await expect(page).toHaveURL(/\/reports$/)
+  await expect(page.getByRole('region', { name: '月度结算回单' })).toBeVisible()
+  const reportsLoadedAfterNavigation = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('ReportsView-'))
+  ))
+  expect(reportsLoadedAfterNavigation).toBe(true)
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')
