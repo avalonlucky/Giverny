@@ -151,6 +151,8 @@
 - Shared date and time input component: `src/components/PlanDateTimeField.tsx`
 - Shared voice schedule recognition and start/end/duration review: `src/components/VoiceScheduleButton.tsx`
 - Shared attachment hover thumbnail and document fallback preview: `src/components/AttachmentHoverThumbnail.tsx`
+- Shared upload limits, attachment naming, image optimization worker and main-thread fallback: `src/lib/fileUpload.ts`
+- Shared upload-time PDF, PSD, video and Office preview generation: `src/lib/attachmentPreview.ts`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
 - Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
@@ -158,6 +160,8 @@
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
+- Shared task history sample insights and accepted-task normalization: `src/lib/taskContextInsights.ts`
+- Shared Agent task attachments, activity summaries and progress evidence: `src/lib/taskAssistantContext.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared progress time draft, derivation and overlap rules: `src/lib/timeEntryDraft.ts`
 - Shared duration input parsing and schedule derivation rules: `src/lib/durationInput.ts`

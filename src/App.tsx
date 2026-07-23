@@ -131,7 +131,6 @@ import {
   taskDueState,
 } from './lib/taskListPresentation'
 import {
-  acceptanceProgressEndDateTime,
   isSupplementalTask,
   isTaskBillable,
   minutesForTimeEntry,
@@ -149,7 +148,7 @@ import {
 } from './lib/taskAccounting'
 import { designTypeColorForIndex, validDesignTypeColor } from './lib/designTypes'
 import { providerSupportsVision } from './lib/aiProviders'
-import { canRecordNewProgress, hasAcceptanceProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
+import { canRecordNewProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
 import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, isAcceptanceFileAsset, partnerFacingText, sortTimeEntriesDesc } from './lib/taskPresentation'
 import type { ReceiptExcelOptions } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
@@ -215,10 +214,24 @@ import { aiProviderDisplayLabel, chatModelChoiceLabel } from './lib/chatModelPre
 import { ChatContent, ChatMarkdown, RichChatLine } from './components/ChatContent'
 import { splitFileName } from './lib/fileName'
 import { createOptionalPreviewFile, createTextPreviewFile } from './lib/attachmentPreview'
+import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
+import { taskAssistantActivity, taskAssistantFiles, taskAssistantProgressHistory, taskAssistantRequirementWithoutOutputFiles } from './lib/taskAssistantContext'
+import {
+  ensurePendingAttachmentPreparation,
+  ensurePendingAttachmentPreview,
+  imageFileBase64,
+  imageUrlBase64,
+  looksLikeUntidyFileName,
+  pastedImageName,
+  prepareImageFiles,
+  renamedFile,
+  sanitizeAttachmentName,
+  validateUploadFile,
+} from './lib/fileUpload'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
-import type { PendingProgressAttachment, ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from './types/taskUi'
+import type { PendingProgressAttachment, ProgressRecordMode, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
 
@@ -293,10 +306,6 @@ function nowStamp() {
   return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 
-// 大文件会自动拆成 8MB 分片写入 R2，不受 Worker 单次请求体 100MB 限制。
-const UPLOAD_HARD_LIMIT = 200 * 1024 * 1024
-const UPLOAD_SOFT_LIMIT = 50 * 1024 * 1024
-
 type AcceptancePayload = {
   actualHours: number
   acceptanceNote: string
@@ -335,238 +344,6 @@ function aiLearningAction(draft: AiLearningDraft, userFinal: string): AiLearning
   return 'edited'
 }
 
-function validateUploadFile(file: File) {
-  if (file.size > UPLOAD_HARD_LIMIT) {
-    throw new Error(`「${file.name}」超过 ${(UPLOAD_HARD_LIMIT / 1024 / 1024).toFixed(0)}MB，无法上传`)
-  }
-  if (file.size > UPLOAD_SOFT_LIMIT) {
-    return true
-  }
-  return false
-}
-
-function sanitizeAttachmentName(value: string, fallbackName: string) {
-  const fallback = splitFileName(fallbackName)
-  const candidate = splitFileName(value)
-  const base = candidate.base
-    .replace(/[\\/:*?"<>|]/g, '-')
-    .replace(/\s+/g, ' ')
-    .replace(/[.\s-]+$/g, '')
-    .trim()
-    .slice(0, 90)
-  const extension = fallback.extension || candidate.extension
-  return `${base || fallback.base || '过程附件'}${extension}`
-}
-
-function renamedFile(file: File, name: string) {
-  const normalizedName = sanitizeAttachmentName(name, file.name)
-  return normalizedName === file.name
-    ? file
-    : new File([file], normalizedName, { type: file.type, lastModified: file.lastModified })
-}
-
-function pastedImageName(file: File) {
-  const now = new Date()
-  const extension = splitFileName(file.name).extension || (file.type === 'image/jpeg' ? '.jpg' : '.png')
-  return `粘贴截图_${isoDate()}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}${extension}`
-}
-
-function looksLikeUntidyFileName(value: string) {
-  const base = splitFileName(value).base.toLowerCase()
-  return /^(img|dsc|pxl|screenshot|screen shot|截屏|截图|微信图片|ishot)[-_ ]?\d*/i.test(base)
-    || /^\d{8,}$/.test(base.replace(/\D/g, ''))
-    || /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(base)
-}
-
-async function imageFileBase64(file: File) {
-  if (!file.type.startsWith('image/') || file.size > 8 * 1024 * 1024) {
-    return ''
-  }
-  const dataUrl = await blobBase64(file)
-  return dataUrl.slice(dataUrl.indexOf(',') + 1)
-}
-
-type PreparedImageFiles = { uploadFile: File; previewFile?: File }
-
-const IMAGE_ARCHIVE_MAX_SIDE = 2400
-const IMAGE_THUMBNAIL_MAX_SIDE = 480
-const IMAGE_OPTIMIZATION_WORKER_SOURCE = `
-let queue = Promise.resolve();
-const render = async (bitmap, maxSide, type, quality) => {
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-  const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas unavailable');
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvas.convertToBlob({ type, quality });
-};
-const processImage = async ({ id, file }) => {
-  const bitmap = await createImageBitmap(file);
-  try {
-    const compressible = /image\\/(jpeg|jpg|png|webp)/i.test(file.type);
-    const archiveType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
-    const shouldOptimize = compressible && (file.size >= 900 * 1024 || Math.max(bitmap.width, bitmap.height) > ${IMAGE_ARCHIVE_MAX_SIDE});
-    const uploadBlob = shouldOptimize ? await render(bitmap, ${IMAGE_ARCHIVE_MAX_SIDE}, archiveType, 0.86) : null;
-    const previewBlob = await render(bitmap, ${IMAGE_THUMBNAIL_MAX_SIDE}, 'image/jpeg', 0.78);
-    self.postMessage({ id, uploadBlob: uploadBlob && uploadBlob.size < file.size ? uploadBlob : null, previewBlob });
-  } finally {
-    bitmap.close();
-  }
-};
-self.onmessage = (event) => {
-  queue = queue.then(() => processImage(event.data)).catch((error) => {
-    self.postMessage({ id: event.data.id, error: error instanceof Error ? error.message : 'Image optimization failed' });
-  });
-};
-`
-
-let imageOptimizationWorker: Worker | null = null
-let imageOptimizationRequestId = 0
-const imageOptimizationRequests = new Map<number, {
-  resolve: (value: { uploadBlob?: Blob; previewBlob?: Blob }) => void
-  reject: (reason?: unknown) => void
-}>()
-let mainThreadImageOptimizationQueue: Promise<void> = Promise.resolve()
-
-function getImageOptimizationWorker() {
-  if (imageOptimizationWorker) return imageOptimizationWorker
-  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return null
-  const workerUrl = URL.createObjectURL(new Blob([IMAGE_OPTIMIZATION_WORKER_SOURCE], { type: 'text/javascript' }))
-  const worker = new Worker(workerUrl)
-  window.setTimeout(() => URL.revokeObjectURL(workerUrl), 0)
-  worker.onmessage = (event: MessageEvent<{ id: number; uploadBlob?: Blob; previewBlob?: Blob; error?: string }>) => {
-    const request = imageOptimizationRequests.get(event.data.id)
-    if (!request) return
-    imageOptimizationRequests.delete(event.data.id)
-    if (event.data.error) {
-      request.reject(new Error(event.data.error))
-      return
-    }
-    request.resolve(event.data)
-  }
-  worker.onerror = (event) => {
-    imageOptimizationRequests.forEach((request) => request.reject(new Error(event.message || '图片后台优化失败')))
-    imageOptimizationRequests.clear()
-    worker.terminate()
-    imageOptimizationWorker = null
-  }
-  imageOptimizationWorker = worker
-  return worker
-}
-
-async function renderImageBitmapBlob(bitmap: ImageBitmap, maxSide: number, type: string, quality: number) {
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-  const context = canvas.getContext('2d')
-  if (!context) return undefined
-  context.fillStyle = 'white'
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  return new Promise<Blob | undefined>((resolve) => canvas.toBlob((blob) => resolve(blob ?? undefined), type, quality))
-}
-
-async function prepareImageOnMainThread(file: File): Promise<PreparedImageFiles> {
-  const bitmap = await createImageBitmap(file)
-  try {
-    const compressible = /image\/(jpeg|jpg|png|webp)/i.test(file.type)
-    const archiveType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg'
-    const shouldOptimize = compressible && (file.size >= 900 * 1024 || Math.max(bitmap.width, bitmap.height) > IMAGE_ARCHIVE_MAX_SIDE)
-    const uploadBlob = shouldOptimize ? await renderImageBitmapBlob(bitmap, IMAGE_ARCHIVE_MAX_SIDE, archiveType, 0.86) : undefined
-    const previewBlob = await renderImageBitmapBlob(bitmap, IMAGE_THUMBNAIL_MAX_SIDE, 'image/jpeg', 0.78)
-    return {
-      uploadFile: uploadBlob && uploadBlob.size < file.size
-        ? new File([uploadBlob], file.name, { type: uploadBlob.type, lastModified: file.lastModified })
-        : file,
-      previewFile: previewBlob
-        ? new File([previewBlob], `${splitFileName(file.name).base || '附件'}-thumbnail.jpg`, { type: 'image/jpeg' })
-        : undefined,
-    }
-  } finally {
-    bitmap.close()
-  }
-}
-
-async function prepareImageFiles(file: File): Promise<PreparedImageFiles> {
-  if (!file.type.startsWith('image/')) return { uploadFile: file }
-  const worker = getImageOptimizationWorker()
-  if (worker) {
-    try {
-      const id = ++imageOptimizationRequestId
-      const result = await new Promise<{ uploadBlob?: Blob; previewBlob?: Blob }>((resolve, reject) => {
-        imageOptimizationRequests.set(id, { resolve, reject })
-        worker.postMessage({ id, file })
-      })
-      return {
-        uploadFile: result.uploadBlob
-          ? new File([result.uploadBlob], file.name, { type: result.uploadBlob.type, lastModified: file.lastModified })
-          : file,
-        previewFile: result.previewBlob
-          ? new File([result.previewBlob], `${splitFileName(file.name).base || '附件'}-thumbnail.jpg`, { type: 'image/jpeg' })
-          : undefined,
-      }
-    } catch (error) {
-      console.warn('image worker optimization failed, using queued fallback', file.name, error)
-    }
-  }
-  const fallback = mainThreadImageOptimizationQueue
-    .then(() => new Promise<void>((resolve) => window.setTimeout(resolve, 0)))
-    .then(() => prepareImageOnMainThread(file))
-  mainThreadImageOptimizationQueue = fallback.then(() => undefined, () => undefined)
-  return fallback.catch((error) => {
-    console.warn('image main-thread optimization failed, using original file', file.name, error)
-    return { uploadFile: file }
-  })
-}
-
-function ensurePendingAttachmentPreparation(attachment: PendingProgressAttachment): Promise<PreparedImageFiles> {
-  if (!attachment.file.type.startsWith('image/')) return Promise.resolve({ uploadFile: attachment.file })
-  if (attachment.optimizedFile) {
-    return Promise.resolve({ uploadFile: attachment.optimizedFile, previewFile: attachment.previewFile })
-  }
-  if (attachment.preparationPromise) return attachment.preparationPromise
-  const preparationPromise = prepareImageFiles(attachment.file).then((prepared) => {
-    attachment.optimizedFile = prepared.uploadFile
-    attachment.previewFile = prepared.previewFile
-    return prepared
-  })
-  attachment.preparationPromise = preparationPromise
-  return preparationPromise
-}
-
-async function ensurePendingAttachmentPreview(attachment: PendingProgressAttachment) {
-  return (await ensurePendingAttachmentPreparation(attachment)).previewFile
-}
-
-async function blobBase64(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.onerror = () => reject(reader.error ?? new Error('图片读取失败'))
-    reader.readAsDataURL(blob)
-  })
-}
-
-async function imageUrlBase64(url: string | undefined) {
-  if (!url) {
-    return ''
-  }
-  try {
-    const response = await fetch(url)
-    const blob = await response.blob()
-    if (!blob.type.startsWith('image/') || blob.size > 8 * 1024 * 1024) {
-      return ''
-    }
-    const dataUrl = await blobBase64(blob)
-    return dataUrl.slice(dataUrl.indexOf(',') + 1)
-  } catch {
-    return ''
-  }
-}
-
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
 
 type DonutItem = DonutChartItem
@@ -588,107 +365,6 @@ function shiftMonthValue(value: string, offset: number) {
   const base = localDateFromIsoDate(`${value || isoDate().slice(0, 7)}-01`)
   base.setMonth(base.getMonth() + offset)
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
-}
-
-function normalizeTaskClosure(task: Task): Task {
-  if (!hasAcceptanceProgress(task)) {
-    return task
-  }
-  const acceptanceDate = acceptanceProgressEndDateTime(task)
-  return {
-    ...task,
-    status: '已验收',
-    stage: task.stage && task.stage !== '待验收' && task.stage !== '进行中' ? task.stage : '已验收',
-    progress: 100,
-    actualDeliveryDate: acceptanceDate || task.actualDeliveryDate,
-  }
-}
-
-function averageNumber(values: number[]) {
-  if (values.length === 0) {
-    return 0
-  }
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function buildTaskContextInsights(tasks: Task[], updates: TaskUpdate[]) {
-  const updatesByTask = new Map<number, TaskUpdate[]>()
-  updates.forEach((update) => {
-    updatesByTask.set(update.taskId, [...(updatesByTask.get(update.taskId) ?? []), update])
-  })
-  const activeTasks = tasks.filter((task) => !task.voidedAt && isTaskBillable(task))
-  const byType = new Map<string, Task[]>()
-  activeTasks.forEach((task) => {
-    const type = task.type || '未分类'
-    byType.set(type, [...(byType.get(type) ?? []), task])
-  })
-  const insights = new Map<number, TaskContextInsight>()
-
-  activeTasks.forEach((task) => {
-    if (['已验收', '终止', '不计费'].includes(task.status)) {
-      return
-    }
-    const type = task.type || '未分类'
-    const samples = (byType.get(type) ?? []).filter((item) => (
-      item.id !== task.id
-      && item.status === '已验收'
-      && !isSupplementalTask(item)
-      && item.actualHours > 0
-      && item.estimatedHours > 0
-    ))
-    if (samples.length < 3) {
-      return
-    }
-    const avgActualHours = averageNumber(samples.map((item) => item.actualHours))
-    const avgEstimateVariance = averageNumber(samples.map((item) => (item.actualHours - item.estimatedHours) / item.estimatedHours))
-    const revisionSignals = samples.reduce(
-      (sum, item) => sum + (updatesByTask.get(item.id) ?? []).filter((update) => /修改|调整|改稿|反馈|返工|revision/i.test(`${update.title} ${update.body}`)).length,
-      0,
-    )
-    const revisionSignalsPerTask = revisionSignals / samples.length
-    const candidates: Array<TaskContextInsight & { priority: number }> = []
-
-    if (avgEstimateVariance >= 0.15) {
-      const percent = Math.round(avgEstimateVariance * 100)
-      candidates.push({
-        tone: 'warning',
-        label: `同类历史平均超时 ${percent}%`,
-        detail: `基于 ${samples.length} 个已验收、非补录的同类样本，平均实际工时高于预估 ${percent}%，建议今天预留缓冲时间。`,
-        evidence: `${type} · ${samples.length} 个有效历史样本 · 平均实际 ${avgActualHours.toFixed(1)}h`,
-        priority: 90 + percent,
-      })
-    }
-    if (task.estimatedHours > 0 && avgActualHours > task.estimatedHours * 1.25) {
-      const gap = Number((avgActualHours - task.estimatedHours).toFixed(1))
-      candidates.push({
-        tone: 'warning',
-        label: `预估低于同类均值 ${gap.toFixed(1)}h`,
-        detail: `同类历史平均实际 ${avgActualHours.toFixed(1)}h，当前预估 ${task.estimatedHours.toFixed(1)}h，建议提前确认范围或补缓冲。`,
-        evidence: `${type} · ${samples.length} 个历史样本`,
-        priority: 85 + gap,
-      })
-    }
-    if (revisionSignalsPerTask >= 1.5) {
-      candidates.push({
-        tone: 'info',
-        label: '同类修改信号偏高',
-        detail: `同类历史平均每个任务出现 ${revisionSignalsPerTask.toFixed(1)} 次修改信号，建议先锁定尺寸、文案和色板。`,
-        evidence: `${type} · ${revisionSignals} 次修改信号 / ${samples.length} 个样本`,
-        priority: 70 + revisionSignalsPerTask,
-      })
-    }
-    const strongest = candidates.sort((left, right) => right.priority - left.priority)[0]
-    if (strongest) {
-      insights.set(task.id, {
-        tone: strongest.tone,
-        label: strongest.label,
-        detail: strongest.detail,
-        evidence: strongest.evidence,
-      })
-    }
-  })
-
-  return insights
 }
 
 const flattenDesignTypeGroups = (groups: DesignTypeGroup[]) => groups.flatMap((group) => group.items.map((item) => `${group.name} / ${item}`))
@@ -725,180 +401,6 @@ const normalizeDesignTypeGroups = (groups: DesignTypeGroup[]) => {
   return normalized.length > 0 ? normalized : defaultDesignTypeGroups
 }
 
-const taskFieldLabels: Record<string, string> = {
-  title: '任务名称',
-  type: '设计类型',
-  date: '预计开始时间',
-  estimatedDate: '预计交付时间',
-  requester: '需求人',
-  contact: '对接人',
-  reviewer: '验收人',
-  requirement: '需求描述',
-}
-
-/** 把审计日志条目翻译成时间轴文案 */
-function describeActivity(item: ActivityItem): string {
-  const payload = item.payload ?? {}
-  if (item.entityType === 'task') {
-    if (item.action === 'create') {
-      return '接受任务'
-    }
-    if (item.action === 'void') {
-      const reason = typeof payload.reason === 'string' ? payload.reason.trim() : ''
-      return reason ? `作废任务；原因：${reason}` : '作废任务'
-    }
-    if (item.action === 'delete') {
-      return '删除任务'
-    }
-    if (payload.status === '已验收') {
-      const acceptanceNote = typeof payload.acceptanceNote === 'string' ? payload.acceptanceNote.trim() : ''
-      const actualHours = Number(payload.actualHours)
-      const timeEntries = Array.isArray(payload.timeEntries) ? payload.timeEntries : []
-      const acceptanceFiles = Array.isArray(payload.acceptanceFiles) ? payload.acceptanceFiles.map(String).filter(Boolean) : []
-      const details: string[] = ['确认验收']
-      if (Number.isFinite(actualHours)) {
-        details.push(`系统计算工时 ${actualHours.toFixed(2)}h`)
-      }
-      if (acceptanceNote) {
-        details.push(`验收备注：${acceptanceNote}`)
-      } else if (timeEntries.length > 0) {
-        details.push(`包含 ${timeEntries.length} 段时间记录`)
-      }
-      if (acceptanceFiles.length > 0) {
-        details.push(`验收文件：${acceptanceFiles.slice(0, 3).join('、')}${acceptanceFiles.length > 3 ? ` 等 ${acceptanceFiles.length} 个` : ''}`)
-      }
-      return details.join('；')
-    }
-    const parts: string[] = []
-    if (typeof payload.status === 'string') {
-      parts.push(`状态更新为「${payload.status}」`)
-    }
-    if (payload.progress !== undefined) {
-      parts.push(`进度更新为 ${payload.progress}%`)
-    }
-    if (payload.actualHours !== undefined) {
-      parts.push(`实际工时改为 ${payload.actualHours}h`)
-    }
-    if (Array.isArray(payload.timeEntries)) {
-      parts.push(`记录了 ${payload.timeEntries.length} 段时间`)
-    }
-    if (typeof payload.estimatedDate === 'string') {
-      parts.push(`预计交付改为 ${formatPlanDateTime(payload.estimatedDate)}`)
-    }
-    Object.keys(taskFieldLabels).forEach((key) => {
-      if (payload[key] !== undefined) {
-        parts.push(`修改了${taskFieldLabels[key]}`)
-      }
-    })
-    return parts.length > 0 ? parts.join('；') : '更新了任务信息'
-  }
-  if (item.entityType === 'attachment') {
-    if (item.action === 'create') {
-      return '上传了文件'
-    }
-    if (item.action === 'delete') {
-      return `删除了文件「${String(payload.fileName ?? '')}」`
-    }
-  }
-  if (item.entityType === 'update') {
-    if (item.action === 'create') {
-      const hours = Number(payload.hours)
-      const title = String(payload.title ?? '').trim()
-      const body = String(payload.body ?? '').trim()
-      if (body) {
-        return body.startsWith('上传过程附件') ? '上传过程附件' : body
-      }
-      return `添加进展「${title}」${hours > 0 ? `（${hours}h）` : ''}`
-    }
-    if (item.action === 'update') {
-      return '修改了进展记录'
-    }
-    if (item.action === 'delete') {
-      return `删除了进展「${String(payload.title ?? '')}」`
-    }
-  }
-  return '其他操作'
-}
-
-function taskAssistantFiles(task: Task, files: FileAsset[], uploadedFiles: Array<FileAsset | string> = []) {
-  const taskFileNames = new Set([...(task.files ?? []), ...(task.acceptanceFiles ?? [])].map((name) => name.trim()).filter(Boolean))
-  const uploadedNames = uploadedFiles
-    .map((file) => (typeof file === 'string' ? file : file.name))
-    .map((name) => name.trim())
-    .filter(Boolean)
-  uploadedNames.forEach((name) => taskFileNames.add(name))
-
-  const relatedFiles = files.filter((file) => file.taskId === task.id || taskFileNames.has(file.name))
-  const fallbackFiles = [...taskFileNames].map((name) => ({
-    name,
-    type: '',
-    tag: task.acceptanceFiles?.includes(name) ? '验收文件' : '',
-    final: task.acceptanceFiles?.includes(name) ?? false,
-    visible: true,
-    uploadedAt: '',
-  }))
-
-  const seen = new Set<string>()
-  return [...relatedFiles, ...fallbackFiles]
-    .filter((file) => {
-      if (!file.name || seen.has(file.name)) {
-        return false
-      }
-      seen.add(file.name)
-      return true
-    })
-    .slice(0, 40)
-    .map((file) => ({
-      name: file.name,
-      type: file.type,
-      tag: file.tag,
-      final: file.final,
-      visible: file.visible,
-      uploadedAt: file.uploadedAt,
-    }))
-}
-
-function taskAssistantActivity(activity: ActivityItem[]) {
-  return activity.slice(0, 12).map((item) => ({
-    createdAt: item.createdAt,
-    summary: describeActivity(item),
-  }))
-}
-
-function taskAssistantProgressHistory(task: Task, files: FileAsset[]) {
-  const attachmentsByEntry = new Map<string, string[]>()
-  files.forEach((file) => {
-    if (file.taskId !== task.id || file.deletedAt || !file.entryId) {
-      return
-    }
-    const names = attachmentsByEntry.get(file.entryId) ?? []
-    if (!names.includes(file.name)) {
-      names.push(file.name)
-    }
-    attachmentsByEntry.set(file.entryId, names)
-  })
-
-  return (task.timeEntries ?? [])
-    .filter((entry) => !entry.isAcceptanceProgress)
-    .sort((left, right) => {
-      const leftKey = `${left.date ?? ''}T${left.start || '00:00'}`
-      const rightKey = `${right.date ?? ''}T${right.start || '00:00'}`
-      return leftKey.localeCompare(rightKey)
-    })
-    .map((entry, index) => ({
-      sequence: index + 1,
-      date: entry.date ?? '',
-      endDate: entry.endDate ?? entry.date ?? '',
-      start: entry.start,
-      end: entry.end,
-      note: entry.note?.trim() ?? '',
-      kind: entry.isClientFeedback ? 'client_feedback' as const : entry.isRevision ? 'revision' as const : 'progress' as const,
-      counted: !entry.isUncounted,
-      attachments: attachmentsByEntry.get(entry.id) ?? [],
-    }))
-    .filter((entry) => entry.note || entry.attachments.length > 0)
-}
-
 function renderTextAssistantBody(text: string) {
   return text.split('\n').map((line, index) => {
     const trimmed = line.trim()
@@ -907,32 +409,6 @@ function renderTextAssistantBody(text: string) {
     }
     return <span className="ai-suggestion-line" key={index}>{trimmed}</span>
   })
-}
-
-function taskAssistantRequirementWithoutOutputFiles(text: string) {
-  const lines = text.split('\n')
-  const result: string[] = []
-  let skippingOutputSection = false
-
-  lines.forEach((line) => {
-    const trimmed = line.trim()
-    const isNumberedSection = /^\d+[、.．]/.test(trimmed)
-    const isPlainOutputSection = /^(?:【)?\s*(输出文件|交付文件|文件格式|源文件)(?:】)?\s*[：:]/.test(trimmed)
-    const isOutputSection = /输出文件|交付文件|文件格式|源文件/.test(trimmed)
-
-    if ((isNumberedSection && isOutputSection) || isPlainOutputSection) {
-      skippingOutputSection = true
-      return
-    }
-    if (skippingOutputSection && isNumberedSection) {
-      skippingOutputSection = false
-    }
-    if (!skippingOutputSection) {
-      result.push(line)
-    }
-  })
-
-  return result.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
