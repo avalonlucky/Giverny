@@ -133,6 +133,7 @@
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
 - Lazy-loaded settlement receipt, export and sharing view: `src/views/ReportsView.tsx`
+- Lazy-loaded insights, risk review and hour calibration view: `src/views/InsightsView.tsx`
 - Lazy-loaded settings and AI operations entry: `src/views/SettingsView.tsx`
 - Lazy-loaded task calendar: `src/views/CalendarView.tsx`
 - Shared date, holiday and lunar-calendar rules: `src/lib/dateTime.ts`, `src/lib/calendar.ts`

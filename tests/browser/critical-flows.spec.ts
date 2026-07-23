@@ -127,6 +127,21 @@ test('结算页仅在进入时加载独立分包', async ({ page }) => {
   expect(reportsLoadedAfterNavigation).toBe(true)
 })
 
+test('洞察页仅在进入时加载独立分包', async ({ page }) => {
+  const insightsLoadedOnDashboard = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('InsightsView-'))
+  ))
+  expect(insightsLoadedOnDashboard).toBe(false)
+
+  await page.getByRole('button', { name: '洞察' }).click()
+  await expect(page).toHaveURL(/\/insights$/)
+  await expect(page.locator('.insights-view')).toBeVisible()
+  const insightsLoadedAfterNavigation = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('InsightsView-'))
+  ))
+  expect(insightsLoadedAfterNavigation).toBe(true)
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')

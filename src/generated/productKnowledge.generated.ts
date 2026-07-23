@@ -1647,11 +1647,19 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
+    "heading": "2026-07-23 · v0.32.48（洞察页拆分与按需加载）",
+    "content": "- **洞察页整体改为按需加载**：周期总结、风险复盘、附件分析、需求方画像、工时校准、历史洞察和校准弹窗整体迁入独立 `InsightsView`，工作台首屏不再加载洞察代码。\n- **洞察继续复用现有业务规则**：周期范围使用共享日期规则，任务生命周期、等待时长和计费判断使用既有共享计算源；没有复制任务、金额或工时口径。\n- **主入口继续减重**：`App.tsx` 从约 15,763 行降至约 14,423 行；洞察形成约 50.11KB 独立 chunk，主入口从 541.45KB 降至 492.15KB。\n- **按需加载门禁补齐**：新增桌面 / 移动端洞察分包测试，并回归财务对账、Agent 工作流和既有结算流程。\n- **维护项**：未修改当前任务工时、6 月 / 7 月金额、时薪、实际完成日期、补录归属、税务公式、结算回单或 Agent 路由。"
+  },
+  {
+    "id": "CHANGELOG.md#2",
+    "sourcePath": "CHANGELOG.md",
+    "sourceLabel": "Giverny 更新日志",
+    "category": "更新日志",
     "heading": "2026-07-23 · v0.32.47（结算视图拆分与按需加载）",
     "content": "- **结算页整体改为按需加载**：结算回单预览、自定义日期范围、Excel / PDF 导出、分享链接、导出记录、锁定与权限管理整体迁入独立 `ReportsView`，只有进入结算页时才加载。\n- **财务计算继续使用唯一来源**：独立结算视图直接调用共享 `taskAccounting`，没有复制月度工时、日期范围工时、补录归属、计费或金额公式。\n- **主入口继续减重**：`App.tsx` 从约 16,699 行降至约 15,763 行；结算页形成约 23.71KB 独立 chunk，主入口从 564.20KB 降至 541.45KB。\n- **按需加载与回单对账进入门禁**：新增桌面 / 移动端专项测试，确认工作台不加载结算分包、进入结算后才加载；同时回归收入金额、正式回单预览和 Excel 下载模板一致性。\n- **维护项**：未修改当前任务工时、6 月 / 7 月金额、时薪、实际完成日期、补录归属、税务公式、回单字段或分享权限行为。"
   },
   {
-    "id": "CHANGELOG.md#2",
+    "id": "CHANGELOG.md#3",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1659,7 +1667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **工时与结算计算收敛为单一来源**：月度工时、日期范围工时、补录归属、计费判断、等待时长、验收时间和金额汇总从巨型 `App.tsx` 迁入共享 `taskAccounting`，工作台、任务、收入和结算继续调用同一实现。\n- **财务口径先于结算页面拆分**：移除主应用内 300 余行计算定义，`App.tsx` 从约 16,995 行降至约 16,699 行；下一步迁移结算视图时不再需要复制工时或金额函数。\n- **对账测试进入正式发布门禁**：新增 16 条断言，覆盖跨月总工时守恒、补录只参与结算月筛选、合作伙伴反馈与不计时分段保持 0、整月与日期范围一致、非计费任务隔离及“工时 × 时薪”精确到分。\n- **补录边界被显式保护**：自动测试按生产筛选链路验证补录任务只属于所选结算月，不使用录入日期污染月份列表。\n- **维护项**：本次为现有计算逻辑的等价迁移，未修改当前任务工时、6 月 / 7 月金额、时薪、验收日期、补录数据、税务公式或回单内容。"
   },
   {
-    "id": "CHANGELOG.md#3",
+    "id": "CHANGELOG.md#4",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1667,7 +1675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **任务日历改为按需加载**：日 / 周 / 月视图、多日任务条、节假日与定时任务布局整体迁出巨型 `App.tsx`，只有切换到任务日历时才加载。\n- **日期规则形成共享基础层**：日期截取、月份读取、本地日期转换、月日格式化、农历、2026 节假日和补班日历迁入共享纯工具，任务排期与日历继续读取同一来源。\n- **结算拆分先做风险审计**：确认结算视图直接依赖 19 个工时与计费函数，本轮没有为了分包复制或搬动财务口径，避免架构优化影响现有金额。\n- **主入口继续减重**：`App.tsx` 从约 17,527 行降至约 16,995 行；任务日历形成约 6.67KB 独立 chunk，主入口从 570.13KB 降至 564.14KB。\n- **回归门禁补齐**：新增“工作台不加载日历分包、进入日历后加载并展示真实任务”的桌面与移动端专项测试。\n- **维护项**：未改动任务日期、验收日期、工时归属、金额、税务、结算回单或主模型路由口径。"
   },
   {
-    "id": "CHANGELOG.md#4",
+    "id": "CHANGELOG.md#5",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1675,7 +1683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **设置页整体按需加载**：将外观、结算、模型服务商、AI 运行中心、本机 CLI、设计类型、访问口令和系统设置整体迁出巨型 `App.tsx`，只有进入设置页时才加载。\n- **共享规则不再反向耦合**：AI 品牌图标与名称识别、服务商显示名称、默认模型路线和设计类型色板迁入共享模块，工作助手、任务表单和设置页继续读取同一份规则。\n- **主入口显著减重**：`App.tsx` 从约 19,618 行降至约 17,527 行；设置页形成约 61.71KB 独立 chunk，主入口从 630.50KB 降至 570.13KB，减少约 60.37KB。\n- **按需加载进入发布门禁**：新增“工作台不加载设置分包、进入设置后才加载”的桌面与移动端回归，并保留模型中心配置交互测试。\n- **维护项**：未改动主模型优先级、DeepSeek 思考模式、备用模型启用条件、API 密钥、任务、工时、金额、税务或结算计算口径。"
   },
   {
-    "id": "CHANGELOG.md#5",
+    "id": "CHANGELOG.md#6",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1683,7 +1691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **设置页迁移前置解耦**：将默认模型选择器、模型模态分类与服务商能力规则迁出巨型 `App.tsx`，设置页和工作助手继续读取同一份视觉能力、官方地址、网关地址及默认模型口径。\n- **每日知识弹窗独立维护**：正文解析、收藏状态与换一篇操作迁入共享组件，知识条目类型集中到独立类型文件，保留原有类名、文案和交互。\n- **回归覆盖补齐**：保留模型中心服务商配置回归，并新增每日知识正文打开、关闭专项测试，防止结构迁移后入口失效。\n- **主文件继续减负**：`App.tsx` 从约 19,937 行降至约 19,618 行；本轮完成依赖解耦，主入口仍为 630.50KB，下一阶段可直接迁移设置整页并形成独立分包。\n- **维护项**：未改动主模型优先级、备用模型启用条件、API 密钥、任务、工时、金额、结算回单或财务计算口径。"
   },
   {
-    "id": "CHANGELOG.md#6",
+    "id": "CHANGELOG.md#7",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1691,7 +1699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **收入页改为按需加载**：将年度收入趋势、月度 / 日收入明细、税务参数和预扣计算整体迁出巨型 `App.tsx`，只有进入收入页时才加载。\n- **金额精度形成共享单一来源**：前端金额保留到分与千分位显示迁入 `money` 工具，工作台、任务、验收、结算和收入继续共用同一实现，没有复制第二套金额格式。\n- **工时口径保持原路径**：日收入仍由主应用现有 `minutesForTimeEntry` 计算后传入收入视图，补录、跨日和不计时规则未改写。\n- **对账测试成为发布门禁**：新增收入页按需加载回归，并自动验证“年度税前收入 = 月度税前合计”以及每月“税前 - 预扣税 = 税后”，桌面与移动端专项测试均通过。\n- **主入口继续减重**：`App.tsx` 降至约 19,937 行；收入页形成约 8.67KB 独立 chunk，主入口由 638.70KB 降至 630.50KB。\n- **维护项**：未改动税率表、预扣公式、任务工时、时薪、金额、结算回单或后端财务口径。"
   },
   {
-    "id": "CHANGELOG.md#7",
+    "id": "CHANGELOG.md#8",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1699,7 +1707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **文件库成为独立视图分包**：将文件库项目归档、文件详情检查器、AI 解析结果和文件菜单整体迁出巨型 `App.tsx`，进入文件库时才按需加载。\n- **缩略图能力继续统一复用**：PDF 首页、PSD 合成图、Office、视频和普通图片缩略图抽成共享组件，文件库、工作助手和进展附件继续使用同一套预览入口。\n- **基础工具脱离主组件闭包**：文件标签解析、预览超时、月份展示和任务结算月份读取迁入独立纯工具模块，避免后续视图拆分复制业务规则。\n- **主入口继续减重**：`App.tsx` 从 20,982 行降至约 20,244 行；文件库形成约 13.19KB 独立 chunk，主入口由 651.28KB 降至 638.70KB。\n- **回归门禁补齐**：新增文件库按需加载、验收项目展示和文件详情打开测试，桌面与移动端专项回归均通过。\n- **维护项**：未改动文件筛选、上传、删除权限、AI 分析、任务数据、工时、金额和结算计算口径。"
   },
   {
-    "id": "CHANGELOG.md#8",
+    "id": "CHANGELOG.md#9",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1707,7 +1715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **React Router 接管后台导航**：后台页面改用 `BrowserRouter`、`useLocation` 和 `useNavigate` 管理路径，移除手写的 `pushState`、`replaceState` 与 `popstate` 监听。\n- **浏览器历史与任务视图保持同步**：任务列表 / 日历切换会更新 URL，浏览器前进、后退可准确恢复页面与视图；根路径和未知路径继续按现有映射规范化到有效页面。\n- **删除重复路由状态**：当前页面和任务视图直接由 URL 派生，不再额外维护两份 React state，减少状态不同步与陈旧闭包风险；公开回单分享页继续沿用原独立入口。\n- **构建体积如实记录**：引入 React Router 后，主入口产物由约 613KB 增至约 651KB；这是本轮获得标准路由能力的明确成本，后续继续通过视图级拆分与懒加载回收首屏体积。\n- **维护项**：已回归后台导航、任务列表 / 日历切换及浏览器前进后退；未改动任务数据、工时、金额、结算导出和 Agent 业务口径。"
   },
   {
-    "id": "CHANGELOG.md#9",
+    "id": "CHANGELOG.md#10",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1715,7 +1723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **本机 CLI 设置独立加载**：将设备配对、Bridge 状态轮询、CLI 扫描与选择迁出巨型 `App.tsx`，只有进入“本机 CLI”设置时才加载对应模块。\n- **CLI 工具集中复用**：浏览器设备键和 Bridge 版本兼容判断抽为共享工具，设置面板与工作助手使用同一套连接口径。\n- **吉维尼主题独立维护**：季节计算、偏好持久化、首帧主题初始化和设置面板分别迁入主题工具与独立组件，继续保持页面加载无闪烁。\n- **主包继续减重**：`App.tsx` 减少约 380 行，主入口产物由约 620KB 降至约 613KB；本机 CLI 设置形成独立按需分包。\n- **维护项**：未改动 Agent 路由行为、任务、工时、金额、结算导出和文件数据口径。"
   },
   {
-    "id": "CHANGELOG.md#10",
+    "id": "CHANGELOG.md#11",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1723,7 +1731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **前端异常自动上报**：React 渲染崩溃、全局脚本异常和未处理 Promise 会自动去重上报，不再只有用户看到白屏后才能被动排查。\n- **隐私最小化聚合**：后端按版本、页面和错误指纹聚合次数；只保留截断并去敏的错误摘要、组件栈和 pathname，不保存用户输入、附件、查询参数、邮箱、URL 或疑似密钥。\n- **运行中心可直接核对**：AI 运行中心新增“前端运行异常”，展示最近错误类型、版本、页面、发生次数和时间，数据按工作区隔离并保留 90 天。\n- **Cloudflare 原生可观测性**：开启 Workers Logs 及 10% 请求采样，后端结构化错误可在 Cloudflare Observability 中继续检索。\n- **维护项**：未改动任务、工时、金额、结算导出和文件数据口径。"
   },
   {
-    "id": "CHANGELOG.md#11",
+    "id": "CHANGELOG.md#12",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1731,7 +1739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **任务基础 UI 集中复用**：将统计卡、任务状态标签、搜索框、筛选摘要和状态点迁到共享 `TaskUi` 组件，工作台、任务管理、文件库和收入视图继续使用同一套表现。\n- **主要空状态完成统一**：工作台任务列表、任务管理列表和文件库均改用共享 `EmptyState`，标题、描述和操作入口不再各自手写重复结构。\n- **主文件继续减负**：`App.tsx` 本轮减少约 127 行；现有 CSS 类名、筛选动作和任务状态文案保持不变。\n- **维护项**：未改动任务数据、工时、金额、结算导出、文件预览和 Agent 业务口径。"
   },
   {
-    "id": "CHANGELOG.md#12",
+    "id": "CHANGELOG.md#13",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1739,7 +1747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **语义搜索独立加载**：将语义搜索弹窗从巨型 `App.tsx` 拆到独立组件，搜索、索引重建和结果展示保持原行为；附件继续复用现有缩略图预览链路。\n- **知识库页面独立加载**：将知识笔记、AI 收藏、编辑与删除流程迁到独立视图，进入知识库时再加载对应代码。\n- **首屏主包继续减重**：语义搜索与知识库分别形成独立构建分包，主入口产物由约 626KB 降至约 619KB。\n- **维护项**：未改动任务、工时、金额、结算导出、文件预览口径和 Agent 业务数据。"
   },
   {
-    "id": "CHANGELOG.md#13",
+    "id": "CHANGELOG.md#14",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1747,7 +1755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将命令面板、图片灯箱和快捷键帮助从巨型 `App.tsx` 拆到独立组件，保留原有交互和视觉类名，降低主文件解析与维护成本。\n- **接口保持兼容**：调用方仍使用原有属性和关闭 / 执行动作，未改变快捷键、图片预览或命令执行行为。\n- **维护项**：未改动任务、工时、金额、结算导出、文件上传和 Agent 数据口径。"
   },
   {
-    "id": "CHANGELOG.md#14",
+    "id": "CHANGELOG.md#15",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1755,7 +1763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **文件预览弹窗独立维护**：将正式文件预览弹窗 `FilePreviewModal` 从巨型 `App.tsx` 拆到独立组件，继续降低主文件体积。\n- **文件类型识别集中复用**：将文件类型推断、图片 / PDF / Office / 视频判断、AI 转 PDF 预览源地址和缩略图源地址等纯工具抽到 `fileTypes`，避免后续组件拆分时复制出多套文件判断口径。\n- **维护项**：未改动文件上传、缩略图生成、PDF / 图片 / Office 阅读器、AI 命名、工时、金额、结算导出和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#15",
+    "id": "CHANGELOG.md#16",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1763,7 +1771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **预览组件继续拆分**：将图片缩放阅读器、PDF 多页阅读器和 Office 文件预览阅读器抽到 `FilePreviewReaders`，附件预览、文件库和工作助手继续共用同一套入口。\n- **预览链路保持原口径**：保留原有 PDF worker、浏览器原生兜底、图片 `1:1 / 适合窗口`、Office 动态加载和 Excel 表格预览逻辑，避免重新写一套容易出错的文件预览方案。\n- **维护项**：未改动文件上传、缩略图生成、AI 命名、工时、金额、结算导出和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#16",
+    "id": "CHANGELOG.md#17",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1771,7 +1779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将管理员登录弹窗、通用确认弹窗、文件右键菜单和作废任务确认弹窗拆到独立组件，继续削减巨型 `App.tsx`。\n- **弹窗类型可复用**：确认弹窗状态类型随组件导出，后续删除、锁定、设置保存等确认流程可以继续复用同一套站内 modal。\n- **维护项**：本次只迁移 UI 组件位置；未改动工时、金额、结算导出、任务实际完成日期和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#17",
+    "id": "CHANGELOG.md#18",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1779,7 +1787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将任务右键菜单 `TaskContextMenu` 与新建任务右键入口拆到独立组件，继续削减巨型 `App.tsx`。\n- **进度规则集中复用**：将任务是否开始、是否已有验收进展、展示进度取整等纯判断抽到 `taskProgress` 工具文件，避免后续拆分时复制出多套状态口径。\n- **维护项**：未改动工时、金额、结算导出、实际完成日期和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#18",
+    "id": "CHANGELOG.md#19",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1787,7 +1795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将通用 `ModalShell` 从巨型 `App.tsx` 拆到独立组件，后续弹窗类功能可复用同一壳层。\n- **月份选择器独立维护**：将 `MonthYearPickerPanel` 拆到独立组件，保留原交互与样式，降低主文件体积。\n- **维护项**：继续削减 `App.tsx` 体积；未改动工时、金额、结算导出和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#19",
+    "id": "CHANGELOG.md#20",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1795,7 +1803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将年度 / 月度趋势图 `TrendChart` 和平滑曲线函数从巨型 `App.tsx` 拆到独立组件，保持图表展示逻辑不变。\n- **空状态继续统一**：趋势图无数据状态改用共享 `EmptyState`，减少重复 UI 片段，继续为全站空状态统一打底。\n- **维护项**：继续削减 `App.tsx` 体积；未改动工时、金额、结算导出和统计计算口径。"
   },
   {
-    "id": "CHANGELOG.md#20",
+    "id": "CHANGELOG.md#21",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1803,7 +1811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **组件拆分继续推进**：将年度统计使用的 `DonutChart` 从巨型 `App.tsx` 拆到独立组件，保持显示逻辑不变，为后续按视图拆分打底。\n- **空状态复用统一组件**：环形图无数据状态改用共享 `EmptyState`，减少重复 UI 片段。\n- **CI 运行环境升级**：Agent quality gate 的 GitHub Actions Node 版本升级到 24，避免官方运行时弃用提示反复发送失败邮件。\n- **清理 Hook 告警**：年度统计去掉不会变化的模块常量依赖，消除 lint 警告；未改动工时、金额和结算计算口径。"
   },
   {
-    "id": "CHANGELOG.md#21",
+    "id": "CHANGELOG.md#22",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1811,7 +1819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **运行兜底增强**：新增 React Error Boundary，局部组件异常时不再直接整站白屏，可提示刷新恢复。\n- **后端同步反馈更清楚**：D1/R2 连接超过 8 秒会提示同步偏慢，断网时显示离线状态并保留重试入口。\n- **本地快照更安全**：首屏秒开缓存增加 schema 版本和 30 分钟 TTL，避免旧缓存长期污染新数据结构。\n- **系统资源改读真实用量**：R2 文件空间从硬编码数字改为管理员接口汇总附件体积，并每 5 分钟刷新一次。\n- **登录与打包更轻**：Turnstile 只在打开管理员登录时动态加载；PDF、Excel、Canvas、PSD 和 Word 预览库拆成独立构建分包。\n- **提示与空状态统一**：Toast 队列改为错误优先保留，并新增可复用 `EmptyState` 基础组件，作为后续统一空状态的底座。"
   },
   {
-    "id": "CHANGELOG.md#22",
+    "id": "CHANGELOG.md#23",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1819,7 +1827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **补齐 901-1200px 断点**：中等屏幕自动切换为 72px icon-only 侧栏，释放工作区宽度，避免 280px 固定侧栏挤压结算、工作台和设置页面。\n- **侧栏收缩态完整化**：品牌 logo、导航、设置入口和账号菜单在收缩态保持可用，文字与快捷键提示自动收起，账号菜单从侧栏右侧展开。\n- **移动端不受影响**：手机端继续使用底部导航，新的中等屏幕规则仅覆盖 901-1200px。"
   },
   {
-    "id": "CHANGELOG.md#23",
+    "id": "CHANGELOG.md#24",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1827,7 +1835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **面板零圆角回收**：全站 `--radius-panel` 从 0 调整为 4px，弹窗、卡片、表格、菜单、输入区和普通按钮统一使用更柔和的轻微圆角。\n- **显式直角组件同步修正**：清理散落在文件库、进展弹窗、结算回单、工作助手、导出预览等区域的 `border-radius: 0`，避免局部组件继续显得生硬。\n- **正式域名入口缓存兜底**：HTML 入口页请求禁用边缘缓存，避免正式域名部署后继续命中旧资源文件。\n- **设计规范同步更新**：`docs/DESIGN.md` 已改为“业务容器默认 4px，品牌装饰线条与图表贴底元素可保留直角”，后续 UI 修改按新口径执行。"
   },
   {
-    "id": "CHANGELOG.md#24",
+    "id": "CHANGELOG.md#25",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1835,7 +1843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **导出记录图标顺序统一**：自定义导出与已锁定快照使用同一套操作顺序，锁定、复制、链接管理、查看回单、下载 Excel、下载 PDF、打开合作伙伴页与删除不再上下两套样式。\n- **历史快照查看锁定到真实日期范围**：点击 `2026/07/01 至 2026/07/31` 的查看按钮时，回单预览会切到该条记录自己的完整范围，不再误回到当前月或其他日期段。\n- **已锁定快照分享走新回单链路**：旧月度快照在复制、管理或打开合作伙伴页时会自动生成 / 复用同范围自定义快照，合作伙伴页与下载文件都使用对应起止日期。"
   },
   {
-    "id": "CHANGELOG.md#25",
+    "id": "CHANGELOG.md#26",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1843,7 +1851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **导出记录统一为自定义导出**：即使选择月初到月末，也仍按用户选择的真实日期范围展示和管理，不再拆出另一套导出口径。\n- **锁定快照改用日期范围展示**：历史锁定数据不再显示成“某年某月”，改为真实起止日期，避免和新的自定义导出记录混淆。\n- **记录操作改回线性图标**：锁定、复制链接、链接管理、在线预览、下载和删除只显示轻量图标，名称放在悬停提示里，避免右侧文字拥挤截断。\n- **减少导出记录分割线**：移除标题下方多余横线，仅在相邻记录之间保留发丝线，信息密度更轻。"
   },
   {
-    "id": "CHANGELOG.md#26",
+    "id": "CHANGELOG.md#27",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1851,7 +1859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **工作助手回单预览恢复完整操作**：预览弹窗现在始终位于工作助手之上，右上角可直接关闭；缩小、`1:1`、放大和适合窗口改为独立按钮，鼠标滚轮只负责上下滚动，`1:1` 下可使用横向滚动条查看整张表。\n- **结算操作收敛到自定义范围**：移除顶部重复的月度分享、PDF 和 Excel 入口；日期范围后统一提供 Excel、分享链接和 PDF 图标操作，顶部工时、计费工时、金额和验收数也随范围同步计算。\n- **导出记录独立管理**：结算回单与导出记录拆成水平选项卡；未锁定记录可删除，锁定记录需验证管理员密码。每条范围记录可管理分享有效期、永久有效或立即停用，过期链接会由服务端拒绝访问。\n- **合作伙伴回单补齐 PDF 链路**：公开回单页可自选下载 Excel 或 PDF；项目时间线中的 PDF 点击后直接打开完整源文件，不再把首页缩略图当成完整文档。\n- **Excel 结果使用官方标识**：工作助手的 XLSX 回单卡片改用 Microsoft Excel 官方品牌图标，文件类型与操作入口更容易辨认。\n- **浏览器评估启动时间放宽**：针对当前完整测试数据和模型服务初始化耗时，将浏览器质量门禁启动等待调整为 180 秒，避免功能尚未开始回归就被误判失败。"
   },
   {
-    "id": "CHANGELOG.md#27",
+    "id": "CHANGELOG.md#28",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1859,7 +1867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **时间线去掉系统重复记录**：合作伙伴预览不再显示已在项目卡片出现过的“项目名称 / 任务名称”归档行，只保留真实创建、进展、反馈、等待和验收节点。\n- **生命周期顺序固定**：验收进展始终位于最上方，项目创建始终位于最下方；其他节点按真实时间倒序排列，不再受空格与 `T` 两种日期格式影响。\n- **对外时间只显示日期**：合作伙伴时间线统一显示年月日，隐藏几点到几点；后台任务详情与工时记录继续保留完整时间。\n- **工作助手回单结果收敛**：导出结果以日期范围作为唯一标题，移除重复的“结算回单”文案，按钮统一为“预览 / 在线预览 / 下载”，并充分利用横向空间。\n- **预览改为完整正式回单**：工作助手的“预览”不再使用通用 XLSX 单元格读取器，而是打开与线上分享、Excel 下载同源的完整回单画布；支持关闭、滚轮缩放、适合窗口及横向浏览。"
   },
   {
-    "id": "CHANGELOG.md#28",
+    "id": "CHANGELOG.md#29",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1867,7 +1875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **项目卡片改为白底紧凑画廊**：取消大面积绿色填充，改为项目编号、类型、标题、主图、缩略图带和底部状态的紧凑层级；桌面端仍为四列。\n- **所有对外附件都会展示**：回单不再只查 `acceptance` scope，验收进展、普通进展和反馈节点中上传的对外可见文件都会归入对应项目。\n- **缩略图精确挂到时间线节点**：根据附件 `entryId` 与验收 / 进展 / 等待分段精确关联，时间线浮窗内可直接查看当次上传的图片与文件。\n- **修复验收文件 scope 错记**：用户先添附件、再切换验收模式时，保存会以当前验收模式为准；迁移会将历史上已绑定验收进展的错记附件回填为验收文件。\n- **项目分页控制页面长度**：每页最多展示 12 个项目，项目较多时使用轻量分页，不再无限拉长合作伙伴回单。"
   },
   {
-    "id": "CHANGELOG.md#29",
+    "id": "CHANGELOG.md#30",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1875,7 +1883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **桌面端每行展示四个项目**：项目与交付区从纵向长列表改为四列紧凑网格，充分使用回单宽度；项目块使用低饱和主题绿色底色，无描边、无多余按钮填充。\n- **附件直接收进项目块**：项目标题、日期、状态、文件数量和交付缩略图集中在同一块内，点击缩略图继续打开完整预览。\n- **时间线改为项目内浮层**：点击轻量「时间线」文字后，在当前项目块上方打开无描边浮层；浮层内部可用鼠标滚轮独立滚动，关闭后不改变画廊高度。\n- **响应式保持可读**：宽屏固定四列，中等屏幕两列，手机单列；文件缩略图按空间自动排布，不挤压标题和操作。"
   },
   {
-    "id": "CHANGELOG.md#30",
+    "id": "CHANGELOG.md#31",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1883,7 +1891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **交付文件不再脱离项目堆叠**：合作伙伴回单将项目作为一级结构，每个项目下直接显示自己对应的交付文件缩略图与文件名，点击即可预览，不会再猜附件属于哪项任务。\n- **项目支持正序与倒序**：分享范围内的项目可按新建时间选择「较早在前」或「较新在前」，范围筛选继续使用生成回单时选择的开始、结束日期。\n- **时间线收进项目二级内容**：每个项目可独立展开进展、验收、反馈、等待和项目创建记录；默认保持收起，避免长回单一次堆满所有过程信息。\n- **月度与自定义分享共用同一结构**：旧月度分享链接和新日期范围分享链接统一使用项目归档组件；新快照通过任务 ID 精确关联，升级前快照保留受工作区约束的兼容回查。"
   },
   {
-    "id": "CHANGELOG.md#31",
+    "id": "CHANGELOG.md#32",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1891,7 +1899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **范围结束日不再覆盖任务完成日期**：修复自定义日期导出后所有任务的「实际完成日期」都显示为导出截止日的问题；导出截止日现在只用于筛选和回单标题。\n- **已验收与未验收分别取真实日期**：已验收任务优先使用验收进展结束时间 / 验收日期，未验收任务使用最近一条真实进展或工时记录日期。\n- **四条回单链路统一**：结算页预览、下载 Excel、合作伙伴分享链接和 Agent 导出均使用同一任务级日期规则。"
   },
   {
-    "id": "CHANGELOG.md#32",
+    "id": "CHANGELOG.md#33",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1899,7 +1907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **生成合作伙伴链接不再自动锁定**：月度回单分享改为创建未锁定日期快照并复制链接；数据仍可继续调整，只有在导出记录中手动点击「锁定」才会进入锁定状态。\n- **任意日期范围可直接分享**：自定义导出区域新增「分享范围 Excel 链接」，可将 6 月 1 日至 7 月 22 日等跨月回单直接生成线上预览与 Excel 下载链接。\n- **月度与范围分享统一使用导出记录**：两种分享都会进入同一套后端快照与导出记录，支持在线预览、下载、复制链接、手动锁定和受控删除。"
   },
   {
-    "id": "CHANGELOG.md#33",
+    "id": "CHANGELOG.md#34",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1907,7 +1915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **爱丽丝可以真正导出 Excel 回单**：询问“导出 6 月 1 日到 6 月 10 日的结算回单”时，Agent 会调用确定性导出工具生成正式 `.xlsx`，回答下方直接提供下载与在线预览，不再只返回文字金额汇总。\n- **新增日期范围回单分享链接**：自定义范围导出后会生成独立线上链接，接收者无需登录即可查看与网站一致的回单预览，并可直接下载同一份 Excel。\n- **导出记录进入后端快照**：日期、任务明细、工时、金额和回单版式保存为不可变 D1 快照；后台预览、公开分享和 Excel 下载复用同一份数据，后续任务变化不会改写历史回单。\n- **导出记录支持安全删除**：未锁定记录确认后可删除；锁定记录不可直接解锁，删除时必须由 Worker 校验当前管理员登录密码，避免前端绕过。\n- **自定义范围改为“结算日期”**：跨月或任意日期导出不再显示“结算月份”，网页与 Excel 信息带统一展示真实开始、结束日期。"
   },
   {
-    "id": "CHANGELOG.md#34",
+    "id": "CHANGELOG.md#35",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1915,7 +1923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **自定义日期与回单预览联动**：选择任意开始、结束日期后，下方结算回单会立即切换到同一日期范围，并同步更新任务明细、工时、金额、回单编号和结算范围；不再只有下载文件变化。\n- **预览与导出共用跨日期口径**：网页预览和「导出范围 Excel」统一复用同一个跨日期任务与工时计算函数，避免两处结果再次分叉。\n- **任务需求与验收备注加宽**：网页回单整体最小宽度提升并保留横向滚动，两列占比进一步增加；下载 Excel 的对应列宽由 78 提升至 96。\n- **日期控件即时反馈**：自定义日期支持日历选择后立即刷新，键盘输入形成完整合法日期时也会实时提交；日期按钮补充完整日期的无障碍名称。"
   },
   {
-    "id": "CHANGELOG.md#35",
+    "id": "CHANGELOG.md#36",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1923,7 +1931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **线上与下载统一采用用户提供的正式回单模板**：后台结算预览、合作伙伴分享页和下载 Excel 现在共用同一份 14 列回单结构，不再保留“简约 / 编辑式”两套分叉版式。\n- **品牌与纸张结构按模板还原**：加入 `Giverny` 与「让创作在自己的花园里生长」品牌头，统一浅绿信息带、深绿表头、米白斑马纹、状态色列和深绿合计行。\n- **Excel 尺寸与格式按源文件校准**：列宽、行高、字体、日期格式、工时两位小数、单价引用公式、逐行小计公式和合计公式均按《结算回单_2026年7月_美化兼容版_v2.xlsx》实现。\n- **移除模板外信息**：回单纸张不再额外添加人民币大写、系统备注、印章或剪切线，保证线上预览和下载文件的内容层级一致。\n- **分享页不再使用六列摘要表**：锁定后的合作伙伴页面同步展示完整任务需求、日期、人员、工时、单价、小计和验收备注，与后台及下载文件一致。"
   },
   {
-    "id": "CHANGELOG.md#36",
+    "id": "CHANGELOG.md#37",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1931,7 +1939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **下载 Excel 不再是原始 User 工时表**：结算页、历史结算和合作伙伴分享页的下载入口统一输出「结算回单」工作簿，包含品牌头、回单编号、客户 / 服务 / 月份 / 单价信息带、任务明细、单价、小计、合计金额和人民币大写。\n- **Excel 结构对齐线上预览**：下载文件字段顺序与编辑式回单保持一致，保留「预计开始日期」「实际完成日期」「需求人」「对接人」「预估工时」「实际工时」「单价」「小计」「验收备注」，不再导出内部的「验收人/确认」和重复进展字段。\n- **金额公式进入工作簿**：每行小计使用 `实际工时 × 单价` 公式，合计行使用 `SUM` 汇总；历史已锁定回单会按锁定总额反推精确单价，避免下载后金额与锁定金额不一致。\n- **验收备注去重**：下载 Excel 只保留回单需要的验收备注；如果没有验收备注才使用最新进展兜底，不再拼出「验收备注；验收进展：同一段文字」的重复内容。\n- **统一下载入口文案**：后台与分享页按钮从「下载 User 表」改为「下载 Excel 回单」，降低对合作伙伴展示时的内部感。"
   },
   {
-    "id": "CHANGELOG.md#37",
+    "id": "CHANGELOG.md#38",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1939,7 +1947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复 GitHub 质量门禁移动端残留失败**：模型服务商配置弹窗头部和底部操作区改回通用 `modal-header` / `modal-footer` 结构，避免移动端把底部按钮区域误当作滚动正文并遮挡点击。\n- **统一弹窗复用规则**：模型设置弹窗不再自建一套头部 / 底部结构，后续会继承全站同一套弹窗滚动与操作区规则。"
   },
   {
-    "id": "CHANGELOG.md#38",
+    "id": "CHANGELOG.md#39",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1947,7 +1955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复模型设置弹窗移动端点击问题**：模型供应商配置弹窗明确拆分顶部、滚动正文和底部操作区，避免正文滚动层遮挡「取消」等操作按钮。\n- **修正反馈来源回归测试口径**：允许同一姓名反馈在历史数据中出现多条，测试只验证展示具体反馈人且不再回退为泛称「合作伙伴反馈」。"
   },
   {
-    "id": "CHANGELOG.md#39",
+    "id": "CHANGELOG.md#40",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1955,7 +1963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **新增 UI 复用守卫**：新增 `npm run ui:guard`，发布前自动拦截浏览器原生日期 / 时间 / 月份控件和系统弹窗，避免绕过既有组件规范。\n- **质量门禁接入守卫**：`npm run agent:quality:gate` 现在会先运行 UI 复用检查，再继续 build、lint、Agent 评测和浏览器回归。\n- **清理遗留原生月份控件**：工作助手待确认新建任务卡片里的「结算月份」改为复用站内 `MonthPicker`，不再使用 `input[type=\"month\"]`。"
   },
   {
-    "id": "CHANGELOG.md#40",
+    "id": "CHANGELOG.md#41",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1963,7 +1971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **回单字段顺序调整**：结算回单与 User Excel 的「预计开始日期」「实际完成日期」「需求人」「对接人」统一移到「任务需求」之后、「状态」之前，减少窄列挤压。\n- **自定义导出复用站内日期组件**：移除浏览器原生日期框和系统日历，改用全站统一的 Giverny 日期选择器。\n- **范围导出按钮轻量化**：去掉“导出范围 Excel”的描边框，改成无框轻按钮，保持结算页极简风格。"
   },
   {
-    "id": "CHANGELOG.md#41",
+    "id": "CHANGELOG.md#42",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1971,7 +1979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **结算回单移除“交付件理解”**：简约与编辑式 Excel 模板都不再展示交付件理解列，回单更聚焦任务、工时、验收备注和金额。\n- **回单字段补齐对接与日期**：任务表新增「预计开始日期」「实际完成日期」「预估工时」「实际工时」和「对接人」字段，需求人和对接人分开展示。\n- **实际完成日期口径明确**：已验收且验收发生在当前结算月的任务使用验收日期；跨月或未验收任务使用该月最后一条真实进展 / 等待 / 验收动态日期；自定义范围导出统一使用范围结束日。\n- **User 表支持自定义日期范围导出**：结算页新增开始 / 结束日期选择，可导出任意日期范围内有计费分段的 Excel 明细；范围内工时按真实计费分段日期汇总，不改动原月度金额口径。\n- **新增导出记录与锁定**：每次自定义范围导出会保留一条本地导出记录，显示任务数、工时和金额；记录可锁定，作为下次导出时避免漏算或重复结算的日期边界参考。"
   },
   {
-    "id": "CHANGELOG.md#42",
+    "id": "CHANGELOG.md#43",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1979,7 +1987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **项目入口放到工作助手主面板**：标题栏新增明确的「项目」按钮，可直接新建项目、切换项目、回到全部对话或进入临时对话，不再藏在历史记录抽屉里。\n- **当前项目状态更清楚**：按钮会显示当前项目名称，长项目名自动省略；选中项目后，工作助手状态栏同步显示项目模式。\n- **保留历史面板管理能力**：历史记录里仍可按项目筛选、搜索和新建项目，主面板入口负责日常快速切换。"
   },
   {
-    "id": "CHANGELOG.md#43",
+    "id": "CHANGELOG.md#44",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1987,7 +1995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **对话历史可以按项目收纳**：工作助手历史面板新增项目管理，可以创建“金额核对”等项目；后续相关提问会归入同一项目，像文件夹一样整理长期专题。\n- **新增临时对话**：点击「临时」后，本轮对话不会写入本地历史，也不会同步到云端会话索引；关闭或新建对话后即自然消失，适合一次性问题。\n- **修复历史记录被云端摘要覆盖**：历史面板现在会合并本地完整消息与云端摘要，云端详情读取失败时仍可打开本地保存的完整回答，不再出现刚问过的内容突然消失。\n- **修复历史时间集中显示错误**：本地原始 `savedAt` 会优先保留，并同步修复云端会话索引的 `created_at / updated_at`，避免旧对话统一变成某一次同步时间。\n- **历史搜索升级为混合检索**：对话记录支持本地关键词搜索；后端新增 `/api/ai/conversations/search`，在启用 Vectorize 与 Workers AI 时同时执行向量语义搜索，未启用时自动退回关键词检索。\n- **项目字段进入后端索引**：Agent 会话索引新增项目 ID 与项目名称，项目筛选、搜索和未来跨设备恢复都按当前工作区隔离。\n- **补齐回归测试**：新增历史合并、时间保真、本地详情兜底和临时对话不入库测试，覆盖桌面与移动端。"
   },
   {
-    "id": "CHANGELOG.md#44",
+    "id": "CHANGELOG.md#45",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -1995,7 +2003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **分析过程不再等待后一次性出现**：工作助手现在会在编排过程中通过 SSE 逐项推送“理解问题、制定计划、查找依据、执行工具、整理回答”等可核验步骤。\n- **最终答案等分析完成后再展示**：前端先持续展开过程，后端完成数据查询、模型分析和结论校验后，再输出最终回答，避免用户等待期间完全不知道系统在做什么。\n- **完成后保持分析面板可见**：分析结束后不再自动折叠，用户可以继续核对刚才的依据、事实和校验路径。\n- **补齐防退化回归**：隔离评估新增 SSE 顺序检查，要求产品知识与需求人画像回答必须先收到多条递增 trace，再收到最终 result，防止退回“答案出来后才展示过程”的体验。"
   },
   {
-    "id": "CHANGELOG.md#45",
+    "id": "CHANGELOG.md#46",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2003,7 +2011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **需求人画像不再由模型猜测**：新增 `get_requester_profile` 后台确定性工具，按当前工作区读取全部历史任务，聚合项目数、工时、验收率、准时率、工时偏差、改稿、等待和反馈特征。\n- **Agent 画像问题必须查后台**：用户询问某人的用户画像、需求人画像、合作画像、历史偏好或报价排期建议时，编排层会强制调用画像工具；规划模型漏调时会补查。\n- **结论会被工具事实校验**：如果模型初稿说“没有记录”或没有引用画像数据，后台会按画像工具结果纠正，避免页面有数据但 Agent 否认。\n- **MCP / 本机 CLI 共用同一工具**：画像工具已注册到只读 MCP，未来本机 CLI 只能通过签名工作区上下文读取聚合结果，不能直接拿数据库凭证或跨租户读取。\n- **新增回归测试**：隔离评测覆盖“给我一下陈义君的用户画像”，同时校验 MCP 工具列表、画像结果和工作助手回答，防止再次退化成关键词搜索。"
   },
   {
-    "id": "CHANGELOG.md#46",
+    "id": "CHANGELOG.md#47",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2011,7 +2019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **执行记录改为分析过程**：工作助手依次展示对用户目标的理解、任务计划、查找的依据、提取的关键事实与最终校验，让用户知道结论是如何得出的。\n- **去掉无意义的技术旁白**：用户面板不再显示“不经过本机 CLI”、英文工具名、模型规划类型和模型 ID；这些运行信息仍保留在管理员审计与运行指标中。\n- **证据与结论一一对应**：产品问题会显示命中的手册章节及提取事实；任务问题会显示实际查询的任务、进展和等待记录；金额与工时会明确由确定性计算核对。\n- **分析面板文案收敛**：运行中显示“分析中”，完成后收起为“分析过程 · 已核对”，用户可按需展开查看。\n- **路由回归改用结构化校验**：明确选择 DeepSeek 或豆包时，自动化不再靠界面文案猜测实际路由，而是核对模型服务收到的真实模型 ID 和 CLI 命令状态。"
   },
   {
-    "id": "CHANGELOG.md#47",
+    "id": "CHANGELOG.md#48",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2019,7 +2027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **产品问题不再依赖模型记忆**：工作助手询问主题、模型设置、最近更新、品牌名称或产品规则时，必须调用 `search_product_help`；规划模型漏调时，编排层会按高置信产品知识命中自动补查。\n- **模型设置给出完整操作路径**：回答会说明“设置 → 模型”、配置服务商、填写 API Key、加载模型、启用服务商、选择供应商默认模型及全站文字 / 图片模型，不再只返回一句“去设置里配置”。\n- **最近更新有确定版本依据**：产品知识记录当前版本与最近关键更新，并指向设置中的产品版本记录，不再由大模型凭训练记忆猜版本。\n- **品牌故事按作者原意入册**：明确 Giverny 是为致敬莫奈而命名，四季配色取自《睡莲》，整站主题是“莫奈花园”；同步品牌理念与 Slogan“让创作在自己的花园里生长”。\n- **产品知识纳入验真契约**：`product_help` 意图缺少官方产品知识证据时不会直接完成，会进入补查或明确失败；新增主题、模型设置、更新内容和品牌故事四条端到端回归。\n- **仓库手册自动成为 Agent 知识库**：每次构建会把《使用手册》、Agent 运营手册和完整 `CHANGELOG` 按标题生成检索索引；手册与代码一起提交发布后，Agent 自动获得最新产品说明和历史版本事实。"
   },
   {
-    "id": "CHANGELOG.md#48",
+    "id": "CHANGELOG.md#49",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2027,7 +2035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **工具失败不再直接滑向模板回答**：Agent 工具最多按同一计划重试三次；验真发现财务计算、任务详情等关键证据缺失时，会生成补查计划再执行，仍失败则明确停止，不输出未经验证的业务结论。\n- **计划、执行与验真状态打通**：每个工具记录待执行、成功、跳过或失败状态、尝试次数和耗时；无关工具可以被编排层主动跳过，不会因规划模型多选而制造错误结论。\n- **AI 运行中心新增 Agent 执行审计**：管理员可查看每轮意图、实际模型、工具、确定性证据数量、尝试次数、验真结果与备用模型原因；不保存用户问题或回答正文。\n- **主模型故障变得可追责**：正常成功会明确标记“主模型完成”；只有极端故障启用备用模型时才记录切换及原因，不能再把备用模型成功掩盖成主模型正常。\n- **运行指标按工作区真实隔离**：修复指标写入默认落到 `default` 工作区的问题；路由指标与 Agent 审计都绑定当前登录工作区和主体，自动化评测流量不进入真实运营视图。\n- **多租户审计底座补齐**：新增 `agent_turn_runs`，只保存匿名执行元数据并按工作区查询，为后续公开注册前的故障定位、权限审计和质量门禁提供依据。\n- **运行中心后端强制管理员权限**：未登录或非管理员即使直接访问接口也会被拒绝，不再依赖前端菜单隐藏保护运营数据。"
   },
   {
-    "id": "CHANGELOG.md#49",
+    "id": "CHANGELOG.md#50",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2035,7 +2043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **Agent 不再等同于一次大模型回答**：新增统一 `AgentTurn`，完整记录理解、计划、授权、工具执行、证据、分析、验真和完成状态；模型负责推理，程序负责执行与计算，业务规则负责约束，编排层负责组织和校准。\n- **业务问题强制证据闭环**：金额与工时必须经过财务计算工具；具体任务卡点、等待和延期必须读取任务详情。规划模型漏调工具时，编排层会补查；模型答案遗漏当前等待原因时，以 D1 等待记录纠正。\n- **三条推理链路共用同一安全契约**：Cloudflare AliceAgent、工作助手手选云模型和本机 CLI 共用工具注册表、租户上下文、权限和验真规则，模型或 CLI 不再自行决定可见数据范围。\n- **内部工具增加签名租户上下文**：每次调用绑定 `workspaceId`、登录主体、角色和本轮运行 ID，并使用 HMAC 签名；篡改工作区会直接拒绝，默认工作区无法搜索、读取或写入其他租户任务。\n- **会话、计划和任务记忆开始租户化**：Agent Durable Object、会话索引、持续计划和任务记忆按工作区隔离；生产老库通过惰性迁移补齐工作区字段。\n- **角色权限统一收口**：管理员与协作者可在人工确认后写入；只读与 MCP 口令只能读取；合作伙伴角色不能调用管理员财务工具；访客只允许产品帮助和公开能力说明。\n- **主模型优先级成为架构规则**：正常情况下始终使用用户所选主模型；只有同模型重试后仍遇到鉴权、额度、超时、供应商故障或无效结构等极端失败，才允许切换备用模型，并保留实际模型和原因。\n- **新增跨租户隔离门禁**：隔离评测加入默认工作区与租户 B 的机密任务测试，以及签名篡改 401 回归，阻止 Agent 工具再次退化为全局内部 Token。"
   },
   {
-    "id": "CHANGELOG.md#50",
+    "id": "CHANGELOG.md#51",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2043,7 +2051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **“卡在哪里”不再返回快捷键**：修复任务名与“在哪里”误触发产品导航帮助的路由冲突；具体任务的进展、交付、等待和延期查询现在永远优先读取业务数据。\n- **先理解再调用工具**：移除模型之前的产品帮助关键词直返；现在先由用户选择的模型理解完整语义，再决定调用任务详情、任务搜索、金额统计或产品说明工具。\n- **用证据回答阻塞原因**：询问某任务为什么未交付时，Agent 会先解析任务实体，再读取当前等待原因、开始时间、已等待时长、任务状态和进度；只有模型规划异常时才启动确定性安全护栏。\n- **任务名容错匹配**：支持“分套 / 封套”等转写或输入小偏差；匹配不唯一时不擅自选任务。\n- **云端模型与本机 CLI 共用同一事实**：手动选择 DeepSeek 或使用本机 CLI 时，都会先经过同一套受权限约束的任务阻塞查询；CLI 预取上下文也已补齐等待记录。"
   },
   {
-    "id": "CHANGELOG.md#51",
+    "id": "CHANGELOG.md#52",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2051,7 +2059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **Agent 可读取具体等待原因**：任务搜索和任务详情工具都会返回等待记录、原因、备注、开始时间、是否仍在等待及已等待分钟数；询问“卡在哪里”时可直接定位到“等待刘总的建议”等真实阻塞。\n- **等待中实时计时**：右侧等待记录按电脑本地时间每 30 秒刷新，显示“已等待 N 天 N 小时 N 分钟”；下一条工作进展开始后自动固定为最终等待时长。\n- **等待纳入搜索结果**：修复 `search_tasks` 查询遗漏 `waiting_entries_json` 的问题，即使 Agent 先搜索任务、尚未继续调用详情，也能看到当前等待节点。"
   },
   {
-    "id": "CHANGELOG.md#52",
+    "id": "CHANGELOG.md#53",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2059,7 +2067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **“两点半”正确识别**：语音排期会把“下午两点半”解析为 `14:30`，不再截断成 `14:00`；例如“6 月 11 号下午 2 点半，工时 20 分钟”会得到 `14:30–14:50`。\n- **补齐常见口语**：同一规则同时支持“一刻”和“三刻”，适用于新建任务、记录进展等共用语音时间入口。"
   },
   {
-    "id": "CHANGELOG.md#53",
+    "id": "CHANGELOG.md#54",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2067,7 +2075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **打开即粘贴**：记录验收进展弹窗打开后，无论当前焦点在验收备注、时间输入还是弹窗空白处，直接按 `Command+V` / `Ctrl+V` 都会把剪贴板图片加入验收附件。\n- **文字粘贴不受影响**：全局监听只接管图片文件；复制的文字仍粘贴到当前输入框，不会误生成附件。"
   },
   {
-    "id": "CHANGELOG.md#54",
+    "id": "CHANGELOG.md#55",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2075,7 +2083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **验收存档图后台压缩**：JPEG / PNG / WebP 超过 900KB 或最长边超过 2400px 时，在上传前压缩到最长边 2400px；本地保留的设计源文件不受影响，网站证明附件显著变轻。\n- **压缩移入 Web Worker**：每张图只解码一次，在后台同时产出存档图和最大 480px 的缩略图；多张图片在 Worker 中排队，避免 3–4 张设计稿同时压缩或占用页面主线程。\n- **上传进度降频**：进度条按 10% 档位刷新，避免 XHR 高频事件反复重渲染整张验收弹窗。\n- **移除重复活动刷新**：单个附件完成后不再各自请求任务活动，统一交给保存 / 验收流程刷新。\n- **AI 命名使用轻量图**：识别内容时使用缩略图，不再把验收原图整体转成 Base64，占用更少内存与传输时间。"
   },
   {
-    "id": "CHANGELOG.md#55",
+    "id": "CHANGELOG.md#56",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2083,7 +2091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **验收本段工时可直接键入**：记录 / 编辑验收进展时，本段工时支持 `15分钟`、`1小时`、`30分钟`、`1.5小时`、`0.25` 和 `1:30`。\n- **预计工时同步统一**：验收面板右侧的预计工时复用同一套自然时长输入，不再保留另一套数字控件。\n- **失焦后直观显示**：输入完成后统一显示为「15 分钟」「1 小时」「1 小时 30 分钟」，纯数字继续按小数小时解释。\n- **取消半小时强制步进**：本段工时改为 1 分钟精度，输入后准确联动开始 / 结束时间，并按实际分钟计入工时与结算。"
   },
   {
-    "id": "CHANGELOG.md#56",
+    "id": "CHANGELOG.md#57",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2091,7 +2099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **15 分钟可以直接填写**：新建 / 编辑任务的预估工时支持输入 `15分钟`、`1小时30分钟`、`1.5小时` 和 `1:30`，无需自行换算小数。\n- **保留原有小数小时**：纯数字仍按小时处理，例如 `0.25` 等于 15 分钟、`1.2` 等于 1 小时 12 分钟。\n- **按分钟精确推算交付**：预估工时精度由 6 分钟调整为 1 分钟，输入 15 分钟后预计交付会准确增加 15 分钟。\n- **显示口径更直观**：输入完成后统一显示为「15 分钟」「1 小时 30 分钟」，不再要求用户阅读小数工时。"
   },
   {
-    "id": "CHANGELOG.md#57",
+    "id": "CHANGELOG.md#58",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2099,7 +2107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **中文月份不再回落到当天**：语音中的「六月10号」「六月十号」现在会正确映射到 `2026/06/10`，不会只保留时间后错误套用录音当天的 `7 月 21 日`。\n- **中文年份统一支持**：日期解析同时支持「二〇二六年六月十号」、中文月份与阿拉伯日期混写，以及原有的 `6月10号` 格式。\n- **时间与工时继续自动推算**：截图原句「六月10号上午11点39，公司为15分钟」会得到开始 `2026/06/10 11:39`、工时 `15 分钟`、交付 `2026/06/10 11:54`。\n- **补充真实原句回归**：隔离评测以 `2026/07/21` 为参考日复现该转写文本，验证开始和交付日期均保持在 `6 月 10 日`。"
   },
   {
-    "id": "CHANGELOG.md#58",
+    "id": "CHANGELOG.md#59",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2107,7 +2115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **主模型保持 99% 优先级**：手动选择 DeepSeek、豆包、通义千问等模型后，系统始终先使用所选模型；首次调用失败不会立刻切换供应商，而是先用同一个模型重试。\n- **结构问题优先原模型修复**：JSON 截断或格式不完整时，继续由原模型整理修复；DeepSeek V4 仍保持思考模式和 `12000` Token 预算。\n- **极端故障保留业务连续性**：所选模型连续超时、额度故障、服务异常或多次返回不可用结果时，才启动文字主模型、备用模型与 Workers AI 应急链路，避免用户工作被完全阻断。\n- **回退不再被当作普通成功**：每次应急切换记录 `selected_model_emergency_fallback`，包含原模型、任务类型和连续失败原因；工作助手执行记录也会明确显示“应急备用模型”，便于持续排查主模型稳定性。\n- **双向故障回归**：自动测试同时覆盖“DeepSeek 坏 JSON 后原模型修复成功、不切换”与“豆包连续两次 503 后才启动应急备用”两条路径。"
   },
   {
-    "id": "CHANGELOG.md#59",
+    "id": "CHANGELOG.md#60",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2115,7 +2123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **选择哪个模型就使用哪个模型**：手动选择 DeepSeek、豆包、通义千问等云端模型后，普通文字与结构化任务不再因一次调用失败或 JSON 不完整而静默切换供应商；失败会明确说明当前模型未完成，并保留原选择。\n- **DeepSeek V4 强制保留思考模式**：所有 DeepSeek V4 文字请求显式开启 `thinking.enabled`，不再通过关闭思考换取速度。\n- **复杂任务预算提升到 12000 Token**：任务需求整理、验收备注、进展判断、工时建议和 Agent 规划等结构化请求，选中 DeepSeek 时统一获得最多 `12000` Token 输出预算，不再受原 `1200` Token 限制。\n- **坏 JSON 在同一模型内修复**：首轮结果不完整时，系统会把原始结果交回同一个 DeepSeek 再整理一次；只有用户选择「自动」时才允许使用文字主模型、备用模型与 Workers AI 的容错链路。\n- **错误提示反映真实原因**：移除“当前首选文字模型与备用模型均不可用”的误报，改为说明所选模型已响应但结构化结果不完整，并明确没有切换供应商。\n- **新增路由契约回归**：隔离评测会模拟 DeepSeek 首轮返回坏 JSON，逐次校验模型名、思考模式、`12000` Token、JSON 输出格式及零跨供应商调用。"
   },
   {
-    "id": "CHANGELOG.md#60",
+    "id": "CHANGELOG.md#61",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2123,7 +2131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **反馈人姓名直接成为时间轴标签**：反馈节点不再固定显示「合作伙伴反馈」，而是按实际填写的来源显示「李敏波反馈」「项目负责人反馈」等真实名称。\n- **改稿轮次信息合并到同一位置**：需要计入改稿统计时，标签直接显示「李敏波反馈 · 计入改稿轮次」，删除正文下方重复的一行说明，信息只出现一次。\n- **两个时间轴入口保持一致**：「分段计时」与「修改建议」中的反馈节点共用同一标签规则；仅调整展示层级，不改变反馈记录、改稿统计、工时或结算金额。"
   },
   {
-    "id": "CHANGELOG.md#61",
+    "id": "CHANGELOG.md#62",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2131,7 +2139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **验收汇总隐藏不计费反馈行**：确认验收弹窗的「计时与工时汇总」只展示计入结算且大于 0 的工作分段；反馈、修改建议等 0 小时不计费记录不再混入表格，避免误以为它参与结算。\n- **结算金额口径保持不变**：本次只调整验收弹窗展示数组，不改变 `minutesForTimeEntry`、实际工时、时薪或金额计算，现有金额不会被重新分摊。\n- **附件命名学习更快生效**：用户手动把 AI 建议改为最终文件名时，会记录为有效编辑样本；附件命名从 1 条样本即可开始归纳偏好。\n- **截图命名更贴近真实语义**：聊天记录、验收确认、审批通过和反馈截图会优先按内容命名，例如「验收通过截图」，避免只复述任务标题生成通用名称。\n- **补齐回归**：隔离评测覆盖单条附件命名学习样本影响下一次建议，防止“手动改名但系统学不到”的问题反复出现。"
   },
   {
-    "id": "CHANGELOG.md#62",
+    "id": "CHANGELOG.md#63",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2139,7 +2147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **全站称呼改为“合作伙伴”**：反馈节点、等待提示、文案附件、结算分享、只读角色、文件提示、知识库和 AI 输出等用户可见位置不再使用“甲方”，统一采用更平等的“合作伙伴”。\n- **反馈来源支持自由输入**：移除“甲方 / 需求人 / 验收人 / 其他”四个固定选项，改为普通输入框；默认填写“合作伙伴”，也可输入项目负责人、具体姓名或任意真实来源。\n- **历史记录兼容**：旧反馈来源和 AI 返回内容中的旧称呼在展示前自动转为“合作伙伴”，无需逐条修改历史数据。\n- **补齐响应式回归**：桌面与移动端均验证反馈来源默认值、自由编辑和弹窗称呼。"
   },
   {
-    "id": "CHANGELOG.md#63",
+    "id": "CHANGELOG.md#64",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2147,7 +2155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **普通进展也能查看完整任务资料**：无论是否启用「本次进展为验收进展」，记录进展弹窗都会显示可展开的「基础信息」，直接查看任务名称、分类、人员、需求描述、预计开始、预计交付与结算月份。\n- **工时参考补齐**：基础信息新增预估工时和当前实际工时，记录新进展时可直接核对原计划与累计投入。\n- **移除无效的记事本浮层**：删除右上角仅显示简略内容的记事本入口，普通进展与验收进展统一复用现有基础信息区块，避免两套交互和信息不完整。\n- **补齐响应式回归**：桌面与移动端均验证在验收开关关闭时仍可展开完整基础信息。"
   },
   {
-    "id": "CHANGELOG.md#64",
+    "id": "CHANGELOG.md#65",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2155,7 +2163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **记录进展右上角新增任务详情记事本**：悬停图标可快速查看，点击可固定展开；再次点击收起。\n- **信息直接复用任务原始排期**：速览显示任务需求、预计开始、预计交付和预估工时，帮助填写进展时核对范围与时间，不建立第二套数据。\n- **补齐响应式回归**：桌面与移动端均验证悬停、固定展开和收起流程。"
   },
   {
-    "id": "CHANGELOG.md#65",
+    "id": "CHANGELOG.md#66",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2163,7 +2171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复稳定封面遮住真实 PDF 缩略图**：PDF / AI 等文件的稳定封面只承担上传后的即时兜底，不再被前端误认为真实缩略图。进展、工作台、文件库与文件详情都会继续渲染源文件首页，成功后由现有后台机制持久化真实预览；完整打开始终直接读取源文件。\n- **已规范命名的文件不再被 AI 打扰**：中文主体完整且带明确版本号的文件，例如 `昂楷52315模型V1.0B01.pdf`，会直接保留原名，不调用模型也不显示建议卡。\n- **AI 命名界面只保留必要信息**：可改进的文件仅显示「建议文件名」与「采用」，不再展示模型名称、回退链路和内部命名理由。\n- **补齐回归**：验证 PDF 附件卡渲染真实首页、完整阅读器可用，以及版本化文件名不会触发模型请求。"
   },
   {
-    "id": "CHANGELOG.md#66",
+    "id": "CHANGELOG.md#67",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2171,7 +2179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **任务需求默认更高**：新建任务的「任务需求」输入框从 92px 提升到 156px，多行需求可直接阅读与编辑，仍支持局部滚动和手动调整。\n- **AI 建议直接就是操作入口**：移除「采用文案 / 采用分类 / 采用任务名称」三个重复按钮。直接点击推荐分类、建议任务名或建议文案即可分别采用；悬停提供轻量反馈。\n- **补齐回归**：桌面与移动端均验证分类、任务名称、文案三个建议区域的直接采用流程。"
   },
   {
-    "id": "CHANGELOG.md#67",
+    "id": "CHANGELOG.md#68",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2179,7 +2187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **补齐省略提示词的开始时间**：语音如“6 月 10 日下午 3 点，预估工时 5 小时”会同时提取开始时间与工时，并自动推算交付时间；不再只展示工时。\n- **录音结束语义明确**：移除表单右侧方形“停止录音”按钮。录音浮层中“正在听”旁新增无描边的「采集完成」，表示本段话已说完、可以开始分析；右上角 `X` 只负责取消并丢弃本次录音。\n- **新增回归**：隔离评测覆盖无提示词时间 + 工时句式；浏览器语音流程改为通过「采集完成」进入分析。"
   },
   {
-    "id": "CHANGELOG.md#68",
+    "id": "CHANGELOG.md#69",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2187,7 +2195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **默认粘贴可直接使用**：打开「新建任务」后无需先点击附件区域，直接按 `Command + V` / `Ctrl + V` 粘贴图片就会自动加入「甲方文案附件」。\n- **按内容分流**：未聚焦输入框时，纯文字会自动写入「任务需求」；用户主动将光标放进任务名称、需求或其他输入框后，粘贴完全交回该字段处理，不会被附件区抢走。\n- **补齐浏览器回归**：桌面与移动端均验证默认图片粘贴、默认文字粘贴以及现有表单关闭流程。"
   },
   {
-    "id": "CHANGELOG.md#69",
+    "id": "CHANGELOG.md#70",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2195,7 +2203,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **统一附件预览主链路**：文档源文件上传后，服务端立即写入持久化的 PDF / Office 等文档封面；即使真实首页缩略图尚未生成或客户端渲染失败，所有页面、刷新和不同租户设备都会有稳定缩略图，不再出现“没有预览图”。真实首页缩略图生成成功后会自动替换封面并回收旧占位文件。\n- **PDF 打开改为适配大文件的读取方式**：源文件接口现在支持标准 HTTP Range、`206 Partial Content`、`Content-Range` 和 `Accept-Ranges`，浏览器原生 PDF 阅读器可分段加载；站内 PDF.js 失败时仍自动切换原生阅读器并保留新窗口入口。\n- **历史附件兼容**：早期 PDF / 文档即使数据库没有预览键，预览接口也会即时返回同一套稳定封面，不需要人工补图。\n- **AI 命名容错改为多供应商链路**：识图主 / 备用模型失败后，会自动遍历已启用的豆包、通义千问、Kimi、OpenAI 兼容等可识图供应商默认模型；建议旁明确显示实际采用的模型或“文字模型回退 / 规则候选”。Gemini 额度耗尽不再成为单点故障。\n- **补齐真实存储回归**：隔离评测新增本地 R2 绑定，实际验证“上传 PDF → 稳定封面 → 预览读取 → Range 打开源文件”，不再只测试 API 参数。"
   },
   {
-    "id": "CHANGELOG.md#70",
+    "id": "CHANGELOG.md#71",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2203,7 +2211,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **PDF 完整预览不再依赖缩略图**：PDF 首页缩略图仅作为列表增强；PDF.js 解析失败时，弹窗会自动切到浏览器原生 PDF 阅读器，并始终保留新窗口打开源文件入口。复杂 PDF 的后台首页渲染时限从 8 秒调整为 20 秒，避免被过早误判失败。\n- **修正验收附件与普通附件的预览认知**：源 PDF 上传完成即为可打开状态；缩略图生成失败只显示简洁的“点击查看完整 PDF”，不再把辅助缩略图失败误报为整个预览不可用。\n- **AI 命名不会再被供应商额度拖垮**：Gemini 等视觉模型遇到额度、429 或网络错误时，服务端记录结构化原因，但界面不暴露英文账单信息；所有模型均不可用时，系统根据任务名称与原文件名返回可编辑的保守候选名。\n- **新增故障回归**：隔离评测主动模拟模型额度耗尽，验证命名接口仍返回候选；PDF / 图片统一阅读器桌面和移动端继续覆盖。"
   },
   {
-    "id": "CHANGELOG.md#71",
+    "id": "CHANGELOG.md#72",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2211,7 +2219,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复已识别文字却超时**：语音文字把结束日期重复带出时，例如“7 月 21 号下午 3 点到 7 月 21 号下午 5 点”，现在会立即填入开始与交付时间，并自动计算 2 小时，不再误走慢速 AI 整理。\n- **增加真实句式回归**：隔离评测覆盖上述重复日期表达，防止再次出现“正在识别”后又提示“语音录入未完成”。"
   },
   {
-    "id": "CHANGELOG.md#72",
+    "id": "CHANGELOG.md#73",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2219,7 +2227,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复“听到了却说未识别”**：语音排期现在支持“6 月 9 号下午 1 点到下午 3 点”这类自然时间范围，直接识别开始与结束并自动推算 2 小时；不再要求每句话都重复“开始时间 / 交付时间”。\n- **同类超时提示收紧样本条件**：只统计至少 3 个已验收、非补录、同时具备实际与预估工时的同类型历史任务；少量样本不再生成“平均超时”风险标签。\n- **核对授权牌历史数据**：此前 32% 来自 2 条记录（20 分钟预估→约 26 分钟实际、30 分钟预估→约 40 分钟实际），样本量不足，不再作为风险结论展示。\n- **增加回归覆盖**：隔离评测新增口语时间范围，验证 `6月9号下午1点到下午3点` 会返回开始 13:00、结束 15:00 与自动 2 小时。"
   },
   {
-    "id": "CHANGELOG.md#73",
+    "id": "CHANGELOG.md#74",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2227,7 +2235,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **取消固定“三段式”**：验收备注不再强制输出“需求达成 / 额外价值 / 项目价值”。现在必写可核实的需求达成，其余仅在任务详情、进展、原始备注或附件分析存在依据时才出现。\n- **拒绝虚构项目价值**：没有模板、复用、规范、标准、可编辑或后续沿用等明确证据时，服务端会删除“项目影响”；普通单次交付可以只保留一项或两项事实说明。\n- **补充与完善需有依据**：仅在输入明确提到额外、补充、新增，或存在已记录的调整、修改、反馈、迭代等内容时，才展示相应条目，不再为了凑满结构编造价值。\n- **建议面板更准确**：验收弹窗里的“AI 项目总结”改名为“AI 验收建议”，避免把每一次交付都包装为项目级总结。\n- **增加反向回归**：隔离评测故意返回无依据的项目价值、错误工时和重复附件，验证服务端仅保留有证据的动态条目。"
   },
   {
-    "id": "CHANGELOG.md#74",
+    "id": "CHANGELOG.md#75",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2235,7 +2243,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **优先改为实时中文听写**：支持的浏览器现在在说话时直接产出文字并显示在浮层内；停止后只提交转写文本给时间 / 工时解析器，不再先上传整段录音，因此不会被云端音频转写的 5 秒等待反复打断。\n- **保留兼容兜底**：不支持实时听写的浏览器仍可录音上传转写，但超时调整为 20 秒，且用户随时可以关闭；不会把慢速兼容路径误报为“录音未完成”。\n- **校准豆包接入边界**：当前“豆包 / Doubao”模型设置是方舟文本模型 API；豆包语音识别需要单独开通语音资源与专用凭证，不能把现有文本 API Key 直接当成语音服务密钥。后续可在设置中单独接入，不干扰当前实时听写主路径。\n- **增加回归覆盖**：浏览器测试覆盖桌面和移动端的实时中文听写、即时文字反馈和 JSON 文本提交，同时保留录音上传兼容路径回归。"
   },
   {
-    "id": "CHANGELOG.md#75",
+    "id": "CHANGELOG.md#76",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2243,7 +2251,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **语音弹窗可随时关闭**：录音中或识别中点击右上角关闭按钮会立即停止录音、取消识别请求并隐藏弹窗，不再出现识别阶段只能干等的问题。\n- **关闭按钮回归轻量图标**：去掉语音弹窗关闭按钮的描边和填充，只保留简单 `X` 图标，减少不必要的视觉重量。\n- **录音和识别有实时反馈**：正在听和正在整理时间与工时时显示声波动效；停止录音后如果 5 秒内没有整理出结果，会自动停止并提示重试或手动填写。\n- **增加回归覆盖**：浏览器测试新增“识别请求延迟时仍可立即关闭”的桌面和移动端用例，防止关闭按钮再次被禁用。"
   },
   {
-    "id": "CHANGELOG.md#76",
+    "id": "CHANGELOG.md#77",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2251,7 +2259,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **已验收任务以验收分段作为闭环上限**：任务列表左侧日期区间、排序和跨月归属不再被验收之后的录入时间、等待记录或后台更新时间抬高。\n- **修复“官网首页轮播图”日期显示**：6 月 3 日已验收的任务不会再因为 6 月 23 日补录 / 测试等待记录显示为 `06/23—06/03`，刷新后应显示真实验收日期 `06/03`。\n- **统一 actual_delivery_date 口径**：Worker 和前端都优先使用验收分段结束时间，不再优先读取历史保存的点击验收时间；正式 D1 会同步回填历史已验收任务的实际交付时间。\n- **结算口径保持分段月份**：金额和工时仍按真实分段发生月份计算，不使用 `created_at`、`updated_at` 或录入日期参与结算。\n- **增加回归覆盖**：浏览器回归加入“验收后存在 6 月 23 日脏等待记录，但列表仍显示 6 月 3 日验收日期”的样本。"
   },
   {
-    "id": "CHANGELOG.md#77",
+    "id": "CHANGELOG.md#78",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2259,7 +2267,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **时间字段支持语音录入**：新建 / 编辑任务、记录进展、记录等待、记录反馈、验收实际工时、验收预计工时，以及工作助手待确认的新建任务草稿，都新增麦克风入口。\n- **支持自然语言排期**：可以说“预计开始时间是 2026 年 7 月 20 号下午 4 点 10 分，预估工时是两小时”，系统会转写并结构化为开始时间、工时和交付时间。\n- **两项确定后自动推第三项**：说开始时间 + 工时会自动推交付时间；说交付时间 + 工时会倒推开始时间；说开始时间 + 交付时间会自动计算工时。\n- **应用前必须确认**：语音识别后先显示转写文本、识别到的时间与自动推算项，点击“应用到时间与工时”后才写入表单；存在冲突或低可信结果时不会直接覆盖。\n- **录音不入库**：音频只用于本次 Cloudflare Workers AI 转写，不保存为附件或任务数据；站点权限头已开放当前站点麦克风权限，浏览器仍会按系统规则请求用户授权。\n- **增加回归覆盖**：浏览器测试覆盖桌面和移动端的录音、停止、识别结果确认与三项自动填写；隔离评估新增语音排期解析检查。"
   },
   {
-    "id": "CHANGELOG.md#78",
+    "id": "CHANGELOG.md#79",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2267,7 +2275,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **PDF 完整预览不再依赖缩略图**：验收附件改用站内 PDF.js 全页阅读器，支持上下滚动、缩放和页数反馈；站内解析失败时仍保留浏览器原生预览与源文件入口，首页缩略图失败不再等同于整份 PDF 不可查看。\n- **图片预览自动回退源文件**：缩略图地址过期、缺失或读取失败时会自动切换到真实源图；只有预览图和源图都不可用时才显示明确错误。\n- **上传与缩略图解耦**：验收源文件优先上传，PDF、Office 等缩略图在后台生成并最多重试三次；历史缺图文件的自愈也改为有限重试。大图分片上传后会直接把源图登记为预览，不再丢失图片缩略图。\n- **查清 3 小时误写根因**：AI 过去读取的是任务数据库里已保存的第一段 3 小时，没有带上验收弹窗中新填但尚未保存的第二段 2 小时；现在请求会使用弹窗当前完整时间轴快照，工时上下文与页面汇总一致。\n- **验收备注固定为价值三段**：AI 只输出「需求达成 / 额外价值 / 项目价值」，最终文件只提一次；不再输出工时、金额、单价、改稿轮次、内部质量问题、风险、未来日期和清理建议。\n- **服务端增加确定性防线**：即使模型仍返回错误工时、重复附件或内部噪音，Worker 也会在展示前清洗并补齐三段结构；附件分析中的 `qualityIssues / risks / suggestions` 不再进入对客备注上下文。\n- **增加真实回归**：桌面与移动浏览器覆盖 PDF 画布渲染、图片预览和当前验收草稿工时快照；隔离评估用故意包含错误工时与重复文件的坏模型输出验证服务端防线。"
   },
   {
-    "id": "CHANGELOG.md#79",
+    "id": "CHANGELOG.md#80",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2275,7 +2283,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **日历不再被弹窗裁掉**：新建任务的预计开始与预计交付日历改为页面级浮层，不再受弹窗、表单滚动区的 `overflow` 限制，靠近弹窗左右边缘的日期仍能完整显示和点击。\n- **浮层自动避让视口**：日历会根据输入框位置自动左右收边；下方空间不足时自动显示到输入框上方，并在弹窗滚动或窗口尺寸变化时持续跟随。\n- **增加真实点击回归**：浏览器门禁覆盖从 7 月切换到 6 月并实际选择 6 月 8 日，防止仅视觉可见但点击区域仍被裁切的回归。"
   },
   {
-    "id": "CHANGELOG.md#80",
+    "id": "CHANGELOG.md#81",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2283,7 +2291,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **附件存在后仍可继续拖入**：甲方文案附件的整个字段区域持续接管文件拖放，已有缩略图、空白处和加号都能接收下一张图片或文档，不再只有空状态的大上传框支持拖动。\n- **阻止浏览器误开文件**：有效文件拖入附件区域时统一执行复制式接收，不会因第二次拖放落在缩略图旁边而触发浏览器新窗口或文件导航。\n- **数量限制保持一致**：支持一次拖入多份，也支持一张一张连续拖入；仍沿用最多 6 个附件及原有错误提示。\n- **增加连续拖放回归**：浏览器门禁覆盖先拖入第一张图片、界面切换为缩略图状态后再拖入第二张，并确认两张图片同时保留。"
   },
   {
-    "id": "CHANGELOG.md#81",
+    "id": "CHANGELOG.md#82",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2291,7 +2299,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复重启后 Codex 被误判不可用**：正式链路测试确认 Bridge 能领取命令，但开机首次扫描把已登录 Codex 暂存为“需要登录”，导致运行立即失败；此前 `v0.30.10` 的正式验证没有覆盖真实 Codex 子进程，本次补齐该验收缺口。\n- **当前 CLI 自动恢复**：Bridge 0.4.1 在心跳发现当前已选 CLI 不可用时，只复检该 CLI；收到真实命令时还会再做一次快速复检，避免把开机瞬间的临时认证状态永久缓存。\n- **保持启动速度**：正常可用时继续直接复用缓存，不重复扫描 Codex、Claude、Grok 和 Antigravity；自愈只发生在当前已选 CLI 被判不可用时。\n- **发布验收升级**：本机 CLI 版本今后必须在正式 D1 中留下部署后的 `completed` 运行记录，并核对 Bridge 版本、代理模式、隔离配置和首内容耗时，不能只用模拟回传测试宣告完成。\n- **正式机真实通过**：部署后 Bridge 自动从 0.4.0 升级并重启到 0.4.1；正式 D1 记录显示命令 3 秒内被领取、Codex 9.44 秒完成、首内容 6.40 秒，运行采用 macOS 系统代理和 Giverny 隔离配置，返回“本机 CLI 链路已成功”，没有云端回退。"
   },
   {
-    "id": "CHANGELOG.md#82",
+    "id": "CHANGELOG.md#83",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2299,7 +2307,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **查清 CLI 从未成功的真实原因**：生产记录中 6 次运行成功数为 0，但 Bridge 领取任务只需 0–3 秒；故障集中在 Codex 启动后的模型连接阶段。macOS 开机常驻进程未继承终端代理，导致请求反复 `Reconnecting` 并超时。\n- **自动读取系统代理**：Bridge 0.4.0 在环境变量没有代理时读取 macOS 系统网络代理，只向 Codex 子进程注入，不保存或上传代理地址；终端启动和开机自启使用同一网络条件。\n- **Codex 使用专用隔离环境**：为 Giverny 建立私有 Codex Runtime，只保留当前模型、模型服务商和登录配置，禁用无关插件、Apps 与其他 MCP，避免 Cloudflare、GitHub 等开发工具在每次问答前初始化或触发 OAuth 错误。\n- **12 / 45 秒预算真正对齐**：修复 Bridge 把普通问题的 12 秒预算强制抬高到 30 秒的问题；网站结束等待或用户取消后，Bridge 会同步停止 Codex，不再让已经回退的旧命令继续占用执行通道。\n- **轻量问答约 3 秒完成**：12 秒路线使用 Codex 低推理等级，真实本机基准从约 10.5 秒降到约 3.0 秒；本机文件和复杂多步任务继续使用用户原有推理等级，不牺牲复杂任务质量。\n- **执行时不再重复扫描全部 CLI**：修复每次领取问答后又同步检查 Codex、Claude、Grok 与 Antigravity 版本/登录态的问题，移除约 4 秒无效启动耗时；完整扫描只在 Bridge 启动或用户点击重新扫描时发生。\n- **区分执行与传输预算**：普通 Codex 子进程仍严格限制 12 秒，网页额外预留 3 秒给 Bridge 轮询领取与结果回传；修复答案已在 12.4 秒生成、却被网页在第 12 秒误判失败并丢弃的问题，最坏等待仍由原来的 30–189 秒压缩到 15 秒。\n- **完整答案不再等待进程退出**：Bridge 收到 Codex 的最终 `agent_message` 后会标记结构化答案已完成；Worker 立即把答案返回并原子完成命令，不再额外等待 CLI 退出和 D1 二次回写。迟到的退出状态或错误不能覆盖已经交付的答案。\n- **Bridge 可安全自动升级**：心跳会发布同源最新版与下载地址；0.4.0 起可校验版本、来源和文件内容后原子更新，并由 macOS 系统服务自动重启。现有 0.3.0 只需人工升级这一次。\n- **增加分段耗时诊断**：每次运行记录 Bridge 开始、CLI 启动、首事件、首内容、完成和总耗时，以及“系统代理 / 环境代理 / 直连”和“隔离 / 默认配置”模式；不记录代理值、Key 或 Token，后续可直接判断慢在队列、启动、网络还是生成阶段。"
   },
   {
-    "id": "CHANGELOG.md#83",
+    "id": "CHANGELOG.md#84",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2307,7 +2315,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **产品能力不再散落在 Prompt**：新增全站共享的产品能力注册表，快捷键面板、云端 Agent、站内工具和本机 CLI/MCP 使用同一份快捷键、入口、流程、模型路由与权限规则；后续更新功能时只维护一个权威来源。\n- **产品问题优先走站内工具**：快捷键、功能入口、操作方法、设置、模型路由和权限问题由 `search_product_help` 确定性检索，不再先启动 CLI 或让云端模型猜答案；“显示 / 隐藏金额”会直接返回 `Command + Shift + M` / `Ctrl + Shift + M`。\n- **手动云端模型也能读取产品知识**：DeepSeek、豆包、通义千问等显式模型路线共享产品帮助工具；确定性产品说明可由站内工具直接回答，需要综合说明时模型再基于工具结果组织内容。\n- **本机 CLI 等待分级**：普通问答和轻量分析 12 秒内未完成就停止本机命令并快速回退；明确的本机文件、代码和深度多步任务保留 45 秒窗口，不再所有请求一律等待 75 秒。\n- **租户权限继续由网站掌控**：CLI 不获得 D1 凭证，只能通过短期只读 MCP 调用当前工作区和角色允许的六个工具；命令超时、取消或完成后令牌立即撤销，迟到的 CLI 结果不会覆盖已回退状态。\n- **Agent 回归扩展到 82 条**：新增产品帮助、显式云端路线、MCP 权威答案和 CLI 快速 SLA 回归，避免以后再次出现“页面有功能但 Agent 不知道”的断层。"
   },
   {
-    "id": "CHANGELOG.md#84",
+    "id": "CHANGELOG.md#85",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2315,7 +2323,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **补录验收日期回归真实时间**：历史任务在 7 月补录、但验收分段实际发生于 6 月时，列表优先显示验收分段结束日，不再把补录操作日 `07/01` 当成项目完成日。\n- **预计交付不再冒充最新动态**：任务列表的日期区间只使用创建日期、真实进展、等待与验收记录；预计交付日期继续用于临期 / 逾期提示，不参与“最新动态”排序与展示。\n- **补录月份严格归属**：补录任务只出现在指定的 `settlement_month`，例如 5 月完成但补录到 6 月的任务只进入 6 月工作台，不再因原工作日期或补录验收日期混入其他月份。\n- **旧数据无需迁移**：接口会用已有验收进展自动规范实际完成时间，名片设计、倒计时海报、湖南展厅等同类历史任务刷新后同步修复。"
   },
   {
-    "id": "CHANGELOG.md#85",
+    "id": "CHANGELOG.md#86",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2323,7 +2331,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **一键跳到今年对应月份**：键盘 `1–9` 对应 1–9 月，`0` 对应 10 月，数字排后方的 `-` / `=` 对应 11 / 12 月；数字小键盘同步支持 `1–0`、减号和加号。\n- **不干扰正常输入**：输入框、文本域、下拉框、富文本编辑区、命令面板、快捷键帮助或业务弹窗打开时自动停用月份单键，填写工时和任务内容不会误跳月份。\n- **快捷键提示同步**：现有快捷键帮助面板新增月份映射，月份按钮悬停也会提示 11 / 12 月按键；原有 `[` / `]` 上下月切换继续保留。"
   },
   {
-    "id": "CHANGELOG.md#86",
+    "id": "CHANGELOG.md#87",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2331,7 +2339,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **消除 1.70 元显示差异**：任务分段分钟合计与已保存结算工时存在小数舍入差异时，工作台、收入页与后台统一优先采用已保存实际工时，不再出现页面 `3292.90 元`、后台 `3291.20 元` 两套结果。\n- **分段明细保持真实**：分段计时仍按实际起止时间展示，例如 151 分钟仍显示为 2 小时 31 分钟；结算总额则继续以任务保存的 2.50 小时为整单锚点，保证跨月总金额守恒。\n- **旧数据自动兼容**：只有已保存实际工时为 0 的历史任务才从有效分段补算，补录和已有结算数据不会被覆盖或清零。"
   },
   {
-    "id": "CHANGELOG.md#87",
+    "id": "CHANGELOG.md#88",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2339,7 +2347,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **补录工时恢复结算**：补录任务只要明确标记为补录，就会把可计费进展完整计入补录指定月份，不再因为分段发生在历史月份而显示为 `0h`。\n- **跨月任务按实际月份拆分**：普通任务会按分段计时发生月份拆分到 6 月、7 月等对应月份，甲方回单、PDF、月报锁定、收入统计和工作助手财务查询统一采用同一口径。\n- **总金额保持守恒**：分段月份只决定拆分位置，任务保存的实际工时仍是整单总量锚点；跨月拆分后，各月份金额相加仍等于原任务总额，避免因分钟四舍五入多出或少掉金额。\n- **甲方分享页同步修复**：月报分享链接中的任务明细也显示当月分摊后的工时，跨月任务不会在单月回单里重复展示整单工时。\n- **AI 财务查询口径一致**：工作助手查询本月收入、工时、近期历史时复用后端财务分摊规则，并排除甲方反馈和不计工时记录。"
   },
   {
-    "id": "CHANGELOG.md#88",
+    "id": "CHANGELOG.md#89",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2347,7 +2355,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **右侧进展统一局部滚动**：任务详情右侧「进展」页签恢复为稳定的局部滚动区，不再有的任务能滚、有的任务滚不动。\n- **滚动接力更自然**：鼠标停在右侧进展区域时优先滚动分段计时、修改建议或等待记录；局部内容滚到底后，再自然接力整页滚动。\n- **时间线不再抢滚动层级**：分段计时列表不再单独嵌套一层滚动条，避免内外滚动互相打架。"
   },
   {
-    "id": "CHANGELOG.md#89",
+    "id": "CHANGELOG.md#90",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2355,7 +2363,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **顶部任务提醒改为单条轮换**：不再横向滚动重复展示；每次只显示一个提醒，约 1 分钟切换到下一条，更接近轻量公告条。\n- **风险提醒可消除**：点击「今日任务风险提示已完成」后会标记为已读，刷新后不再重复提示当天已处理的风险任务。\n- **右侧分段计时恢复逐段展示**：同一任务有多段可结算记录时，每段都会独立展示，摘要里的「可结算 N 段」与下方明细数量保持一致。\n- **分段计时列表恢复滚动**：右侧进展面板内容较长时，可在分段计时区域内滚动查看历史记录，不再只卡在最后一段。"
   },
   {
-    "id": "CHANGELOG.md#90",
+    "id": "CHANGELOG.md#91",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2363,7 +2371,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **跨月任务按实际进展月份结算**：6 月记录的分段计时计入 6 月，7 月记录计入 7 月；工作台统计、结算单、回单明细和历史月份查看统一采用同一口径。\n- **任务列表按最新动态排序**：跨月任务显示「最新动态日—创建日」，例如 `07/10—06/24`，并按最新进展、验收或等待截止时间倒序排列。\n- **提醒与提示更轻**：后台分析完成不再在刷新时重复弹出，消息提示移到屏幕下方中间；当天风险与月末 / 月初复盘提醒并入顶部任务提醒条。\n- **侧栏可结算金额**：右侧分段计时摘要增加按小时单价计算的可结算金额，让单个任务当前收入更直观。\n- **任务详情去重**：详情弹窗移除重复的进展与反馈时间线，统一从右侧分段计时查看过程记录。"
   },
   {
-    "id": "CHANGELOG.md#91",
+    "id": "CHANGELOG.md#92",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2371,7 +2379,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **助手模型菜单改为服务商默认模型**：工作助手不再展示重复的 DeepSeek 固定项，而是读取「模型」设置中已启用、已加载并指定默认模型的服务商；每个服务商只显示当前默认模型。\n- **手动选择模型成为真实最高优先级**：在工作助手中选择通义千问、豆包、DeepSeek、Kimi、Gemini、OpenAI、OpenRouter 或兼容网关后，文字规划、工具选择与最终回答都优先调用该服务商默认模型，不再经过本机 CLI。\n- **文字与识图优先级保持一致**：所选服务商默认模型支持多模态时，图片 / PDF 页面 / 交付件分析也优先走同一模型；不支持视觉或调用失败时再回退到识图主 / 备用模型。\n- **设置保存即时同步助手**：模型中心里重新加载模型或切换某个服务商默认模型后，工作助手模型菜单会同步更新，避免设置页和助手入口显示不一致。"
   },
   {
-    "id": "CHANGELOG.md#92",
+    "id": "CHANGELOG.md#93",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2379,7 +2387,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **AI 运行中心可操作化**：设置页新增统一运行视图，集中展示真实模型路线、成功与回退情况、近期请求、后台任务状态和持续学习样本，并支持工作区切换、创建工作区和成员添加 / 邮箱邀请。\n- **工作区数据隔离落地**：任务、进展、附件、月报锁定、月报分享 token 与动态记录删除均按当前工作区校验；旧数据默认归属 `default`，原有使用方式不受影响。\n- **后台任务统一治理**：月度复盘、趋势分析等后台任务加入心跳、超时、重试和告警；失败或取消的任务可直接重试，进行中的任务可取消，并保留阶段、进度和错误原因。\n- **学习效果可量化**：新增建议采用率、修改后采用率、学习场景分布、拒绝原因、置信度与 AI 工时准确率摘要，开始用真实结果判断 AI 是否逐步贴近用户习惯。\n- **本机 CLI 与云端路由观测**：运行中心展示本机 CLI、站内工具和云端模型的真实路线、P95 耗时与回退次数；自动化评测流量会被排除，不污染真实运营指标。\n- **前端加载拆包**：AI 运行中心拆为懒加载组件，React、Markdown 和图标依赖继续独立缓存分块，降低主应用包的重复下载与解析成本。"
   },
   {
-    "id": "CHANGELOG.md#93",
+    "id": "CHANGELOG.md#94",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2387,7 +2395,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **桌面与移动端真实操作回归**：新增 Playwright 浏览器门禁，在隔离 D1 与模拟模型环境中覆盖管理员登录、工作台、工作助手、任务详情、新建任务小数工时、记录进展 / 验收和模型设置关键路径。\n- **修复移动端工作助手入口缺失**：窄屏顶部操作区现在保留带文字的「工作助手」按钮，不再因隐藏图标快捷操作而无法打开助手。\n- **发布失败可直接复现**：CI 门禁失败时自动保留截图、视频与 trace，并上传 Playwright 报告；业务 Agent 评测与页面操作回归统一由 `agent:quality:gate` 执行。"
   },
   {
-    "id": "CHANGELOG.md#94",
+    "id": "CHANGELOG.md#95",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2395,7 +2403,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **按模态分类 Tab**：模型列表新增「文字 / 视觉 / 图片 / 视频 / 语音 / 全模态 / 向量」分类（按命名规则推断，只显示非空分类），不再文字语音图片混在一起翻找。\n- **每个模型标注特点**：行内展示「旗舰，能力最强」「轻快，响应快成本低」「代码专长」「语音合成」「图片理解」「历史快照」等说明，悬停可看完整文字。\n- **推荐规则升级为动态滚动**：不再依赖固定黑名单剔除日期快照——凡是存在无日期主版本的快照/预览版自动折叠；版本号提取跳过参数规模（27b）和年份数字，新代际（如未来的 qwen3.8/qwen4）上线后重新「加载模型」即自动排到最前。\n- **推荐更聚焦**：数学、翻译、角色扮演、深度研究等小众文字模型不进推荐（可在「文字」分类里找到），通义千问推荐瘦身为 28 个。\n- **全站生效**：以上筛选、分类、标注对所有模型服务商（通义千问、豆包、DeepSeek、Kimi 等）通用。"
   },
   {
-    "id": "CHANGELOG.md#95",
+    "id": "CHANGELOG.md#96",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2403,7 +2411,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **「推荐 / 全部」筛选 Tab**：模型超过 12 个时，默认展示「推荐」视图——自动剔除老旧代际（qwen-1.8b/7b/72b-chat、qwen1.5/2/2.5、qwen3 开源小模型）、带日期后缀的历史快照版和非文字对话模型（语音、图片生成、embedding、翻译、数学等），通义千问 168 个瘦身为 30 个。\n- **按代际新旧排序**：推荐视图里 qwen3.7 系列排最前，一眼找到最新旗舰；「全部」保底可见完整列表。\n- **搜索联动**：搜索在当前视图内过滤；推荐视图搜不到时提示切换到「全部」。"
   },
   {
-    "id": "CHANGELOG.md#96",
+    "id": "CHANGELOG.md#97",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2411,7 +2419,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **彻底修复\"看起来只有一个模型\"**：服务商弹窗的默认模型从悬浮下拉改为内嵌滚动列表——原来的悬浮菜单被弹窗底部裁剪到只露出一行，没有任何滚动暗示，极易误以为只加载出一个模型。\n- **模型搜索**：模型超过 8 个时显示搜索框，输入关键词即时过滤（如\"qwen3.7\"），不用再在 168 个模型里滚动翻找。\n- **当前选择常驻显示**：标题行常驻\"当前：模型名\"，列表下方标注\"共 N 个模型，列表可滚动\"。"
   },
   {
-    "id": "CHANGELOG.md#97",
+    "id": "CHANGELOG.md#98",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2419,7 +2427,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **加载成功有提示**：点击「加载模型」成功后，明确显示\"加载成功，共 N 个模型\"，不再静默完成——此前加载成功与否没有任何反馈，预置的单个默认模型容易被误认为是加载结果。\n- **打开弹窗显示存量**：服务商设置弹窗打开时显示\"当前已保存 N 个模型\"，一眼区分\"从未加载过（只有预置默认模型）\"和\"已加载完整列表\"。"
   },
   {
-    "id": "CHANGELOG.md#98",
+    "id": "CHANGELOG.md#99",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2427,7 +2435,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **直接粘贴 API Host**：模型服务商配置支持直接粘贴裸域名；系统会自动补全协议，不再因缺少 `https://` 产生 `Invalid URL`。\n- **兼容地址自动识别**：通义千问业务空间 Host 自动补成 `/compatible-mode/v1`，豆包 Host 自动补成 `/api/v3`，完整地址仍保持原样。\n- **保存与加载保持一致**：模型发现、路由测试和配置保存统一使用规范化后的地址，避免界面与后台请求路径不一致。\n- **补充跨供应商回归**：新增通义千问与豆包裸域名模型发现测试，确保两类供应商都能返回实际模型列表。"
   },
   {
-    "id": "CHANGELOG.md#99",
+    "id": "CHANGELOG.md#100",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2435,7 +2443,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **阻止旧模型误报**：百炼只返回 `qwen-1.8b-chat` 且当前千问模型均无法调用时，不再将旧模型伪装为有效加载结果。\n- **明确修复路径**：模型配置会提示新版业务空间 Key 必须搭配创建密钥时提供的专属 API Host，并将错误放到加载区域直接展示。\n- **补充回归评测**：覆盖 API Host 与业务空间 Key 不匹配的失败场景，确保页面始终给出可执行的诊断信息。"
   },
   {
-    "id": "CHANGELOG.md#100",
+    "id": "CHANGELOG.md#101",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2443,7 +2451,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复千问模型遗漏**：当百炼 OpenAI 兼容接口只返回 `qwen-1.8b-chat` 等过期发现结果时，改为验证当前网站支持的千问文字模型并展示实际可调用型号。\n- **隔离不同模型能力**：语音与文生图模型不再混入文字模型和图片识别模型选择，避免协议不兼容导致调用失败。\n- **补充回归评测**：新增百炼旧模型列表响应的恢复测试，防止后续再次退化为只显示一个旧模型。"
   },
   {
-    "id": "CHANGELOG.md#101",
+    "id": "CHANGELOG.md#102",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2451,7 +2459,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置入口升级为供应商化「模型中心」：管理员可集中配置 DeepSeek、豆包、通义千问、Kimi、Gemini、OpenAI、OpenRouter、Anthropic 与兼容网关，API Key 加密保存，并通过官方入口获取密钥。\n- 每个供应商支持加载真实模型列表并指定一个默认模型；全站文字与图片模型下拉框只展示各供应商选定的默认项，供应商内切换默认模型后会同步更新现有路由，避免同一品牌出现多个重复候选。\n- 模型中心改用站内统一下拉、开关、按钮与弹窗语言，补齐官方品牌图标、启用状态、密钥预览和模型加载反馈，移除原生下拉、重复文案、无效描边与分割线。\n- 工作助手升级为右侧现代化抽屉，精简历史记录与任务中心入口，统一输入区底色、附件加号和圆形发送按钮，并明确显示自动路由、本机 CLI 或手动云端模型的实际回答路线。\n- 工作助手手动选择模型后继续保持全站文字与识图最高优先级；模型菜单按供应商默认项去重，图片粘贴、附件预览与执行时间线保持可用。\n- 本地预览登录兼容正式站导出的访问口令，并隔离本地限流状态；模型供应商配置接口兼容既有 AI 路由并自动迁移默认模型，无需新增 D1 迁移。"
   },
   {
-    "id": "CHANGELOG.md#102",
+    "id": "CHANGELOG.md#103",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2459,7 +2467,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手中手动选择的任意模型升级为当前站点统一首选，不再只影响聊天；任务需求优化、进展 / 验收备注、AI 工时、整体进度、洞察和附件命名都会优先使用同一模型。\n- 所选模型支持识图时同步覆盖视觉主路；不支持识图时保留原识图主 / 备用链路。任一首选调用失败后仍按后台主模型、备用模型和边缘模型顺序兜底。\n- 选择「自动」会清除运行时覆盖并恢复模型设置，不会改写长期主 / 备配置；助手重新打开时从服务端同步当前选择，避免不同浏览器显示与实际路由不一致。\n- 隔离回归新增全站文字与识图首请求校验，并继续通过 Agent 79/79 评测。"
   },
   {
-    "id": "CHANGELOG.md#103",
+    "id": "CHANGELOG.md#104",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2467,7 +2475,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手的最高优先级规则从豆包特例扩展为任意手动选择模型；设置中的文字主模型也直接出现在助手模型菜单，通义千问等配置模型可以被明确选择。\n- 手动模型支持多模态时，图片理解同样优先调用该模型，实现问题规划、工具选择、文字回答和识图的一致路由；失败或不支持视觉时才回退识图主 / 备用模型。\n- 隔离回归同时记录文字规划与图片请求的模型顺序，验证手动选择豆包后两类请求都首先命中豆包。"
   },
   {
-    "id": "CHANGELOG.md#104",
+    "id": "CHANGELOG.md#105",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2475,7 +2483,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手手动选择豆包、DeepSeek 等云端模型后，所选模型从“只负责最终回答”升级为整轮最高优先级：问题规划、工具选择和答案组织均优先调用它。\n- 所选模型只有在缺少 API Key、超时、报错或返回无效结构时，才回退到设置中的「文字主模型 → 文字备用模型 → Workers AI」，不再提前混用文字主模型。\n- 隔离评测新增模型请求顺序记录，验证复杂数据查询的第一次规划请求确实发往手动选择的豆包。"
   },
   {
-    "id": "CHANGELOG.md#105",
+    "id": "CHANGELOG.md#106",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2483,7 +2491,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复豆包获取到 DeepSeek 模型的问题**：点击「获取模型」时改为提交页面当前尚未保存的供应商、Base URL 和 API Key，不再读取 D1 中上一版已保存的旧路由。\n- 豆包与通义千问真正调用各自 OpenAI 兼容 `/models` 接口，并按供应商品牌过滤候选；前端同时校验响应供应商，阻止跨供应商模型被误填。\n- AI 模型设置新增「通义千问 / Qwen」，默认使用 DashScope 北京地域兼容地址和 `qwen3.7-plus`，支持租户加密保存 Key 或平台通过 `DASHSCOPE_API_KEY` 提供默认 Key。\n- API Key 配置旁新增「获取官方 API Key」入口，可直接前往 DeepSeek、豆包、通义千问、Kimi、Gemini、OpenAI、OpenRouter 或 Anthropic 官方控制台。\n- 隔离回归新增豆包与通义千问草稿配置模型发现校验，确保两个供应商的候选列表不会互相串线。"
   },
   {
-    "id": "CHANGELOG.md#106",
+    "id": "CHANGELOG.md#107",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2491,7 +2499,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **明确选择模型时不再经过 CLI**：选择 DeepSeek、豆包、Kimi、Gemini 或 Workers AI 后，工作助手直接调用所选云端模型；只有「自动 · 本机 CLI」路线会使用当前电脑连接的 CLI。\n- **多月趋势不再等待 75 秒**：月度趋势、跨月复盘等深度分析直接进入站内后台 Agent，由网站读取授权范围内的 D1 数据并生成结果，不再先启动不适合该流程的本机 CLI。\n- DeepSeek 官方直连默认模型升级为 `deepseek-v4-flash`，模型菜单新增 V4 Flash / V4 Pro；历史保存的 `deepseek-chat`、`deepseek-reasoner` 会在运行时自动迁移到 V4 Flash。\n- 修复 Kimi 彩色图标在浅色背景上几乎不可见的问题，改用清晰的官方单色标志。\n- 隔离 Agent 回归新增“明确模型绕过 CLI”和“多月趋势直达后台分析”校验，79 项评测继续全部通过。"
   },
   {
-    "id": "CHANGELOG.md#107",
+    "id": "CHANGELOG.md#108",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2499,7 +2507,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **确定性数据查询不再等待 CLI**：月份收入、工时合计等问题由 Worker 直接调用 Giverny 只读工具计算并返回，避免先冷启动 Codex 再回退云端。\n- **网站身体、CLI 大脑**：任务概览等复杂只读问题会先从 D1 预取当前权限可见的数据摘要，再交给本机 CLI 组织答案；数据不足时仍可使用短期 MCP 只读工具，CLI 不获得数据库凭证。\n- **移除 Codex 会话恢复重连**：每轮使用新的受控执行，并传入最近对话文本，避免 `codex exec resume` 在网络波动时出现 `Reconnecting 5/5`；单轮等待上限由 180 秒缩短为 75 秒。\n- **工作助手改为右侧抽屉**：桌面端从页面右侧展开 600px 全高助手，保留工作台上下文；900px 以下自动切换全屏。\n- Bridge 下载版本更新为 `0.3.1`，继续兼容现有 `0.3.0` 连接器；使用手册与 Bridge 架构文档同步更新。"
   },
   {
-    "id": "CHANGELOG.md#108",
+    "id": "CHANGELOG.md#109",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2507,7 +2515,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复已连接 Codex CLI 时回答自己基于 Claude 模型的身份幻觉；“当前使用哪个模型”改由网站根据真实配对设备直接回答，不再启动一次耗时 CLI 请求，也不猜测网页无法读取的精确底层型号。\n- 本机 CLI 提示词新增运行身份约束：只能声明当前 CLI Runtime，不能把自己说成 Claude、豆包或其他云端模型。\n- 工作助手输入框支持直接粘贴截图；图片自动进入附件预览，并继续由云端视觉模型处理。\n- 输入框模型入口在本机 CLI 在线时直接显示“Codex CLI · 本机”；模型菜单明确区分“当前回答路线”和“云端回退与识图模型”，避免把豆包误认为当前 Runtime。\n- Codex、Claude、Grok、豆包、DeepSeek、Kimi、Gemini、Cloudflare 和 OpenRouter 改用对应 AI 品牌图标，设置页本机 CLI 列表同步更新。\n- 隔离回归新增 Runtime 身份快速回答校验，确保返回 Codex CLI、不会出现 Claude 4，也不会额外排队本机命令。"
   },
   {
-    "id": "CHANGELOG.md#109",
+    "id": "CHANGELOG.md#110",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2515,7 +2523,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 普通进展、修改建议和等待记录通过时间冲突校验后立即关闭弹窗；附件收尾、文件名同步、工时更新、活动记录和 AI 进度重算改为后台执行。\n- 后台保存开始、成功或失败均通过全局提示反馈；只有成功后才清理进展草稿，失败时可重新打开任务重试。\n- Agent 时间线首态从“理解你的问题”改为更自然的“思考中…”，合并 Bridge 领取、CLI 启动、建会话等重复技术术语，只保留路由、数据读取和有意义的执行动作。\n- Bridge 升级为 `0.3.0`；Codex CLI 首次请求保留安全会话，同一工作助手会话后续使用 `codex exec resume`，避免反复传入全部历史上下文。\n- 继续保持“CLI 是大脑，网站是身体”的权限分层：CLI 选择只读 MCP 工具，Worker 执行真实数据查询和权限校验；站内写入仍使用现有预览确认与 Workflow。\n- 隔离回归新增 Codex 会话续接验证，Agent 79/79 质量门禁继续通过。"
   },
   {
-    "id": "CHANGELOG.md#110",
+    "id": "CHANGELOG.md#111",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2523,7 +2531,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手会优先把普通问答、任务/工时/收入/附件查询路由到当前登录账号、当前浏览器所配对电脑上已选中的 Codex CLI、Claude Code 或 Grok Build，不再只显示“已连接”而继续使用云端模型。\n- Bridge 升级为 `0.2.0`，新增 `run / stream / cancel`执行链路；页面时间线会逐步显示路由、领取、工具读取和生成状态，执行中发送按钮自动变为停止按钮。\n- 本机 CLI 通过 5 分钟一次性 `mcp-read` 令牌读取 Giverny 真实数据；命令被领取后即从队列载荷移除令牌，完成、失败或取消后立即撤销。\n- 本机文件只允许写入 `~/.giverny/workspace`；Codex 固定使用 `workspace-write + never approval`，不开启跳过权限的危险参数。\n- 创建任务、修改状态、记录进展/反馈、验收等站内写入仍自动转入云端 Agent 预览确认流程；图片理解、Bridge 离线/过旧、CLI 失败或超时会显式回退云端。\n- 设置页增加 Bridge 版本校验与真实路由说明；隔离回归新增本机执行、流式步骤、中途停止、临时 MCP 权限回收和评测指标隔离校验。"
   },
   {
-    "id": "CHANGELOG.md#111",
+    "id": "CHANGELOG.md#112",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2531,7 +2539,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 整体进度从“模型直接猜百分比”升级为五阶段里程碑识别：准备与启动、核心制作、首版完成、修改与定稿、验收闭环，最终只写入 `0 / 20 / 40 / 60 / 80 / 100`。\n- 评估输入新增甲方反馈、改稿轮次、版本号、过程与验收附件、终稿标记、等待记录、工时弱证据和同类型已验收轨迹，避免只理解进展文案关键词。\n- 新增业务保护：未验收不能到 100%、等待不加进度、反馈不自动加分、无返工证据不回退、低置信度单次最多前进一档。\n- 网页、Agent 工具和任务写入统一采用 20% 里程碑；首次记录进展进入 20%，待验收进入 80%，仅验收闭环进入 100%。\n- 修复同字数进展改写不触发重算的问题；保存进展、修改任务证据及查看进展面板时按完整语义签名自动评估。\n- 右侧整体进度下方新增可折叠 AI 判断依据，展示当前阶段、置信度、业务证据和缺失信息。\n- 人工修正进度会进入学习样本；同设计类型至少 3 次有效修正后才启用最多一档的受控校准，并新增隔离质量门禁覆盖 60% / 80% / 100% 阶段边界。"
   },
   {
-    "id": "CHANGELOG.md#112",
+    "id": "CHANGELOG.md#113",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2539,7 +2547,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收附件在选择后立即开始分片上传；点击「确认验收通过」后弹窗立即关闭，剩余上传、进展记录和任务验收在后台继续完成，不再让用户停留在「保存中」。\n- 后台验收开始、完成或失败均通过全局提示反馈；上传失败时保留验收草稿和已成功上传的文件，重新打开任务即可核对并重试。\n- 验收附件名称改为可自动换行的两行编辑区，长文件名可以完整查看、定位和重命名，扩展名继续由系统保护。\n- 验收面板中的本段实际工时与预计工时统一显示为「1 小时 50 分钟」等中文时长，底层仍按分钟和小数小时精确保存。\n- 新建任务的预估工时始终允许直接输入 `1.2` 等小数；手动输入时自动改为由预计开始和工时推算预计交付，修复默认推算态无法编辑的问题。"
   },
   {
-    "id": "CHANGELOG.md#113",
+    "id": "CHANGELOG.md#114",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2547,7 +2555,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页新增「本机 CLI」，可为当前登录账号和当前浏览器生成 10 分钟一次性配对码，识别命令来自哪位用户的哪台电脑。\n- 新增无入站端口的 Node 连接器，提供 macOS / Linux shell 与 Windows PowerShell 安装命令，可扫描 Codex CLI、Claude Code、Grok Build 和 Antigravity，回传版本、登录态、结构化输出能力及安全适配状态。\n- 支持「测试并重新扫描」和单 CLI 连接选择；界面区分可用、已连接、需要登录、待适配以及 Bridge 在线 / 离线状态。\n- 多租户安全边界落地：设备按 `principal_id + browser device key` 隔离，一次性配对码不可重放，Bridge 凭证服务端只保存哈希。\n- Antigravity 暂不调用跳过权限参数；未确认安全无头协议前明确显示待适配。\n- 当前阶段不切换工作助手执行路径，聊天仍由云端 `AliceAgent` 回答；本机 run / stream / cancel / resume 将在下一阶段接入。\n- 新增 migration `0022_local_cli_bridge.sql`、隔离 API 闭环测试和本机 CLI Bridge 使用 / 安全文档。"
   },
   {
-    "id": "CHANGELOG.md#114",
+    "id": "CHANGELOG.md#115",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2555,7 +2563,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 过程附件与验收附件的单文件上限由 95MB 提升到 200MB；12MB 以上继续自动使用 8MB R2 分片上传，不占用单次 Worker 大请求。\n- Worker 在普通上传、分片初始化和分片完成三个入口统一执行 200MB 服务端校验，避免只依赖前端提示。\n- 附件选择器新增 MP4、MOV、WebM、M4V、OGV 视频格式，并在上传区明确展示 200MB 上限和自动分片能力。\n- 隔离质量门禁新增服务端超限回归，确保 200MB + 1B 文件在创建分片任务前即被拒绝。\n- 新增大文件与媒体压缩方案文档：500MB 视频压缩建议由 Cloudflare Container + FFmpeg 异步完成；当前未展示不可用的压缩按钮。"
   },
   {
-    "id": "CHANGELOG.md#115",
+    "id": "CHANGELOG.md#116",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2563,7 +2571,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 选中任务行不再显示左侧绿色竖线，改为沿用当前状态色并提升整行饱和度；逾期粉色、进行中蓝色和已验收绿色都保持各自语义，不混入额外描边。\n- 已验收任务行与首页「小知识」统一复用同一个干净浅绿 token，替换此前由状态绿与灰底混合产生的偏脏绿色。\n- 「状态色」打开 / 关闭开关从设置页移回工作台「任务明细」标题旁，点击即可切换；选择继续通过本地设置同步到工作台和任务页。\n- 设置页「外观」只保留吉维尼模式与季节主题，不再重复承载高频任务行配色开关。\n- 构建、Lint 与 Agent 79/79 隔离评测全部通过。"
   },
   {
-    "id": "CHANGELOG.md#116",
+    "id": "CHANGELOG.md#117",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2571,7 +2579,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗由 640px 扩展到 960px 级桌面宽度，时间与工时在宽屏上改为三列并排，减少内容换行和纵向滚动。\n- 预估工时改为 `0.1h` 精度的可编辑小数输入，可直接填写 `1.2`；用户输入、AI 建议和排期反推不再强制吸附到 0.5 小时。\n- 计划中任务可直接打开「记录进展」；首次保存普通进展时后端会原子地将状态切换为「进行中」并建立起始进度，无需额外改状态。\n- 等待和甲方反馈仍可在开工前留痕，但不会误触发任务进入进行中；快速调整整体进度仍需等首次真实进展之后开放。\n- 隔离回归新增「1.2h 计划中任务 → 首次进展 → 进行中」真实 API 检查，Agent 79/79 用例继续全部通过。"
   },
   {
-    "id": "CHANGELOG.md#117",
+    "id": "CHANGELOG.md#118",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2579,7 +2587,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 全生命周期门禁：隔离评测继续真实执行“创建 → 进展 → 等待 → 记录维护 → 验收文件 → 完整验收”，并新增计划、记忆、失败学习和质量成本控制检查。\n- 计划中心：持续计划可展开查看步骤，支持人工勾选 / 重开步骤、暂停、继续和取消；主动提醒可直接发起下一步 Agent 草稿，所有写入仍需确认。\n- 可控记忆：任务中心新增记忆视图，可查看摘要与待办、添加人工纠正、忽略错误待办、恢复已忽略项，或清空并停止该任务记忆。\n- 提醒闭环：逾期、100% 未验收、等待阻塞、工时超限和缺验收备注提醒会根据类型生成针对性处理指令，不再只是静态通知。\n- 失败回归：设置页可查看匿名失败类别、工具、状态码与次数，并标记为待回归、已覆盖或忽略；不保存问题原文、回答和业务内容。\n- 质量成本：运行质量新增输入 / 输出 Token 估算、参考成本和分模型成功率 / 延迟 / 用量；参考成本仅用于趋势判断，不替代供应商账单。\n- 延迟调优：只有积累至少 7 天且 30 次真实请求后，系统才基于失败率、回落率、P95 和消歧率给出模型调优建议，避免少量样本导致频繁换模型。\n- 数据结构：新增 migration `0021_agent_production_controls.sql`，只扩展 Agent 计划、记忆、失败案例和运行指标字段，不修改任务、工时、验收或结算数据。"
   },
   {
-    "id": "CHANGELOG.md#118",
+    "id": "CHANGELOG.md#119",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2587,7 +2595,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 持续计划：爱丽丝可把“从当前状态跟到验收”等目标保存为 2–8 步跨会话计划；每次确认写入成功后自动勾选对应步骤，并在任务中心持续展示。\n- 任务记忆：为每个任务维护需求摘要、近期进展、甲方反馈偏好和未解决事项；业务写入后自动刷新，任务详情继续作为权威事实来源。\n- 主动提醒：每天识别逾期、100% 未验收、实际工时超预估 25%、持续等待和“已有验收文件但缺备注”等异常，统一进入 Agent 任务中心。\n- 全草稿编辑：新建、字段 / 状态修改、进展、反馈、等待、记录维护、验收文件和完整验收的确认卡均可在执行前修改并重新校验。\n- 聊天附件：输入框支持图片、文本、PDF、Office、压缩包和视频；问题中写明“任务 #ID”时，文件会先真实上传到 R2 并返回 attachment ID，再交给 Agent 使用。\n- 失败学习：匿名记录失败类别与工具指纹，同一失败出现两次后自动升级为必补回归类别；不保存问题原文、回答或业务内容。\n- Runtime 收敛：移除旧 Python/FastAPI Runtime、Cloudflare Container binding、外部 Runtime URL / Key 和 npm 依赖，生产只保留 `AliceAgent` Durable Object 主链路。\n- 自动回归：Agent 用例增至 79 条，新增持续计划、步骤推进和任务记忆真实 HTTP 检查；同时修复主动风险 SQL 使用错误交付日期字段的问题。"
   },
   {
-    "id": "CHANGELOG.md#119",
+    "id": "CHANGELOG.md#120",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2595,7 +2603,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 等待记录：爱丽丝可理解等待原因与时间段，生成不计工时的等待记录草稿；确认后由 Workflow 幂等写入。\n- 记录维护：支持按记录 ID 编辑或删除单条进展、甲方反馈和等待记录；删除进展时同步归档关联过程附件，并重新计算实际工时。\n- 验收文件：可从任务已有附件中选择文件并标记为验收文件，文件归属、甲方可见性和验收标签一次更新。\n- 完整验收：新增原子化验收包，在一次确认后统一写入验收备注、最终进展、可选工时、验收附件、100% 进度和已验收状态，避免多步执行只成功一半。\n- 确认体验：确认卡补齐记录类型、动作、记录 ID、附件清单、最终进展和字段变化等可读信息，所有写入继续坚持“预览 → 明确确认 → Workflow 执行”。\n- 安全边界：Agent 不能伪造或从用户电脑直接上传文件；整任务删除 / 作废 / 恢复、结算锁定、付款与部署继续不开放。\n- 自动回归：隔离评测增至 77 条，并新增真实写入链路检查，覆盖等待、编辑、删除、验收文件与完整验收；全部分类门禁 100% 通过。"
   },
   {
-    "id": "CHANGELOG.md#120",
+    "id": "CHANGELOG.md#121",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2603,7 +2611,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 真实观察期：以 20 条“健康验收 + 报价结果”完整生命周期样本为首轮门槛，明确区分采集期、校准期和就绪状态，不再用少量样本宣称模型已稳定提升。\n- 分类与漂移诊断：按设计类型及从零 / 复用基础拆解中位误差、低估率、高估率和集中因素；同类型最近 3 条相对此前 3 条真实工时变化超过 20% 时主动提醒复核。\n- 需求辅助补全：工时分析会根据缺失边界给出可点击的从零 / 复用、交付数量、素材状态、尺寸适配和改稿轮次选项；补入需求后旧结果立即失效，必须重新分析。\n- 报价策略：把工时准确度、客户接受状态、对外报价和最终结算交叉分析，区分“能成交但低估工时”“估得准但报价被拒”和“报价结算偏差较大”。\n- 建议变化审计：每次分析与同类型、同需求方的上一次建议比较，解释复杂度、需求质量、样本量和校准系数导致的工时变化，分析快照完整留存。\n- Agent 边界文档：明确爱丽丝目前可命令式完成创建、修改、反馈、进展和确认后验收，但附件上传、等待记录、记录编辑删除、作废恢复和结算锁定尚未纳入全流程工具。\n- 自动回归：隔离真实 HTTP 评测新增需求补全、建议变化、观察成熟度、分类误差、预测漂移和报价策略检查，Agent 质量门禁继续覆盖完整工具与安全用例。"
   },
   {
-    "id": "CHANGELOG.md#121",
+    "id": "CHANGELOG.md#122",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2611,7 +2619,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 可控估算：分析前新增 0–100 需求质量评分；信息不足时只给区间或请求补充，并禁用一键采用，避免伪精确工时进入任务。\n- 报价结果闭环：验收后可记录对外报价、实际结算和客户接受状态；仪表盘分开衡量工时准确率和定价结果。\n- 需求与样本治理：逐任务复盘新增需求变更时间线；历史样本质量中心可排除或恢复异常工时、过短需求和范围变更样本，不删除业务事实。\n- 个人效率画像：按设计类型对比较早 / 较近真实工时和模板复用率，自动排除需求扩张与人工屏蔽样本。\n- 无未来数据门禁：隔离评测新增按时间顺序的历史回放，候选版本中位误差不得超出线上基线 2 个百分点；闭环测试同时覆盖报价、样本治理、需求时间线、效率画像和可控拒答，Agent 门禁继续 74/74 通过。\n- 文档同步：使用手册和 AI 工时原理文档补齐 3.0 的使用入口、决策规则、学习生命周期和安全边界。"
   },
   {
-    "id": "CHANGELOG.md#122",
+    "id": "CHANGELOG.md#123",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2619,7 +2627,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 跨月准确率：洞察新增最近 12 个月命中率、中位误差、低估率和高估率趋势，持续学习不再只看单月快照。\n- 人工原因校正：近期工时复盘可补充或改正需求追加、改稿、素材、多版本、专项制作、沟通等待等真实原因，人工结果会参与后续同类复盘。\n- 需求变化隔离：自动对比分析时与验收时的需求范围；显著新增交付、页数、适配或专项处理时明确标记，并排除出预测偏差和需求人系数，避免错误学习。\n- 版本效果对照：每次建议保存算法、提示词和模型路由版本，洞察按真实验收结果比较样本数、20% 命中率和中位误差。\n- 错误样本反馈：参考任务新增「不相似」，后续同类型、复杂度相近的分析会降低其权重，同时保留可审计的人工校正依据。\n- 报价联动：按当前小时单价给出常规报价、稳妥报价、报价区间及风险预留说明；仅作参考，不自动写入任务或结算。\n- 自动回归：隔离真实 HTTP 评测覆盖报价、版本快照、样本反馈、需求扩张、跨月趋势和人工偏差校正，Agent 门禁继续 74/74 通过。"
   },
   {
-    "id": "CHANGELOG.md#123",
+    "id": "CHANGELOG.md#124",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2627,7 +2635,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收自动复盘：任务验收并回写真实工时后，自动记录 AI 常规值、稳妥值、最终采用值、真实工时、误差方向和事实偏差因素，不再只保存一个结果数字。\n- 准确率仪表盘：洞察新增「AI 工时学习 → 准确率与校准」，展示命中率、中位误差、采用后改善、不同采用方式的效果及最近任务复盘。\n- 多维校准：按设计类型和需求方 / 客户汇总样本量、命中率、校准系数、平均改稿轮次和需求完整率；独立系数仍坚持至少 3 条完整样本的门槛。\n- 语义样本闭环：Vectorize 语义召回继续与精确类型、复杂度画像、交付规模、近期性和需求人信息交叉重排，参考任务及匹配原因继续在工时建议中可解释展示。\n- 采用效果追踪：区分常规值、稳妥值和手工修改，比较各自相对真实工时的中位误差，并计算最终采用相对 AI 原建议的改善幅度。\n- 移动端修复：洞察目录改为横向导航并限制内部高度，准确率报表在窄屏使用完整单列布局，不再被目录压成竖排。\n- 自动回归：隔离工时学习评测新增“创建任务 → 采用建议 → 记录真实工时 → 验收 → 查询仪表盘与校准分组”的真实 HTTP 闭环。"
   },
   {
-    "id": "CHANGELOG.md#124",
+    "id": "CHANGELOG.md#125",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2635,7 +2643,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 近期样本加权：已验收历史任务加入时间衰减，90 天内样本保持完整权重，较早任务逐级降权；缺少实际交付时间时依次使用预计交付和开始时间。\n- 个人采用校准：任务保存时自动记录 AI 建议值与最终采用值，同一设计类型至少积累 3 次可比较结果后，才启用限制在 `0.85–1.2` 的个人上调 / 下调系数。\n- 准确性反馈：工时面板新增「偏低 / 合适 / 偏高」及偏差原因标签，同一次建议按 suggestion id 去重，不会因为重复点击放大权重。\n- 可靠性表达：结果新增常规预测区间、历史误差不超过 20% 的命中比例、中位误差和本次不确定因素，不再只给单点数值。\n- 学习边界：个人采用记录和即时反馈只在真实历史基线上受控调整，不能覆盖已验收实际工时，也不会修改任务、结算或权限。\n- 自动回归：隔离评测新增 AI 工时专项检查，覆盖三次采用门槛、近期样本识别、预测区间和可靠性字段；原有 Agent 门禁继续 74/74 通过。"
   },
   {
-    "id": "CHANGELOG.md#125",
+    "id": "CHANGELOG.md#126",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2643,7 +2651,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 复杂度画像：AI 工时建议不再只看任务类型和关键词，会从从零 / 复用、交付数量、页数、内容准备、多尺寸适配、专项处理、改稿和加急风险生成 0–100 复杂度画像。\n- 分层样本：历史任务先按精确同类、需求语义相似和同大类召回，再按复杂度画像、交付规模、专项处理与需求人重新排序；从零与复用相反的样本会显著降权。\n- 可解释拆分：常规建议拆为核心设计、批量制作、内容整理、版本适配、专项处理、沟通改稿和交付整理，所有模块工时合计与建议值一致。\n- 需求人校准：同一需求人至少积累 3 条完整结果后，才会参考历史实际 / 预估偏差、平均改稿轮次和需求完整率；样本不足时只展示观察，不调整结果。\n- 缺失信息：需求未说明设计基础、交付数量、素材准备、尺寸适配或确认轮次时，会返回待确认问题；任务信息变化后旧建议继续失效。\n- 学习快照：`hour_estimate_suggestions.basis_json` 保存当次画像、拆分、澄清问题、需求人校准与参考任务，验收后的真实工时继续回写并影响后续建议。\n- 使用文档：新增 `docs/AI_HOUR_ESTIMATE.md`，并在 `使用手册.md` 完整说明入口、原理、结果解读、生命周期、验证方式和安全边界；运营规范同步要求核心功能必须写明“怎么用、为什么、数据来自哪里”。\n- 验证：build、Lint、74/74 隔离 Agent 门禁、全新临时 D1、真实 HTTP 接口、无历史 / 高复杂度 / 低复杂度 / 需求人门槛、分析快照和桌面 / 窄屏视觉检查通过。"
   },
   {
-    "id": "CHANGELOG.md#126",
+    "id": "CHANGELOG.md#127",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2651,7 +2659,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 统一反馈学习：新增 `ai_learning_events`，持续记录原始输入、AI 建议、最终人工文本和“直接采用 / 采用后修改 / 未采用”结果，覆盖任务需求、任务名称、分类、进展、修改意见、验收备注和附件命名。\n- 需求交叉学习：新建或编辑任务时，只要生成过 AI 建议，最终提交都会与建议交叉比对；即使没有点击“采用建议”，人工最终文案也会成为后续需求整理的偏好样本。\n- 独立修改意见：甲方反馈不再混用普通进展提示词和风格画像，AI 会按待执行修改清单整理版本、来源、修改对象和关键约束，并单独学习用户的反馈记录习惯。\n- 工时校准补全：编辑已有任务时重新生成的 AI 工时建议也会绑定最终选定工时；任务验收后继续用真实实际工时校准同类型建议的高估或低估偏差。\n- 可控进化：学习采用“结构化反馈事件 + 增量风格蒸馏 + 历史结果校准”，不会让模型自行修改业务数据、提示词或结算口径；旧学习样本继续兼容。\n- 数据一致性：把此前由 Worker 懒创建的需求、标题、文本和分类学习表正式纳入 D1 schema 与 migration，避免环境初始化差异导致学习链路缺表。\n- 自动回归：完整 build、Lint、隔离 migration、真实 HTTP 落库回归和 Agent 门禁通过，74/74 用例全部通过。"
   },
   {
-    "id": "CHANGELOG.md#127",
+    "id": "CHANGELOG.md#128",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2659,7 +2667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 执行过程：工作助手改为消费服务端 SSE 执行事件，理解问题、规划路径、调用工具、工具返回和整理回答会沿时间线逐步出现；完成后自动折叠，失败时保留中断位置。\n- 可信轨迹：删除前端按固定间隔伪造的“运行 N 步”，改为展示 Agent 返回的可验证动作；工具机器标识继续供自动评测和审计使用，但不会暴露在界面文案中。\n- 报告排版：后台月度复盘和深度分析统一使用 GFM 富文本渲染，标题、列表与标准 Markdown 表格显示为正式排版；长说明自动引导到表格外，避免原始 `| --- |` 语法和拥挤单元格。\n- 长图阅读：图片附件预览新增内部横纵滚动、25% 至 300% 缩放、适合窗口和 1:1 原始尺寸；支持 Command/Ctrl + 滚轮缩放，桌面和移动端均不会撑破弹窗。\n- 会话恢复：真实执行轨迹随 Agent 云端会话保存，重新打开历史对话仍可展开核对。\n- 自动回归：构建、Lint 和隔离 Agent 门禁通过，74/74 Tool Calling、Workflow、MCP、附件与安全用例全部通过。"
   },
   {
-    "id": "CHANGELOG.md#128",
+    "id": "CHANGELOG.md#129",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2667,7 +2675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 完整适配：工作助手、文件库、进展和验收共用的图片预览改为同时受弹窗宽度与高度约束，横图、竖图和长图均按原比例完整显示。\n- 布局修复：预览区使用可收缩 Grid 轨道，图片不再按固有尺寸撑开弹窗或被视口裁切；调整弹窗尺寸时会实时重新适配。\n- 视觉一致：图片继续使用 `contain`，不拉伸、不裁剪，并复用现有纸张背景 token。"
   },
   {
-    "id": "CHANGELOG.md#129",
+    "id": "CHANGELOG.md#130",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2675,7 +2683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 真实附件：爱丽丝新增附件专用搜索工具，按任务、文件名、需求、标签和月份检索 D1 附件，并返回可预览、可打开的真实文件，不再只在正文里罗列文件名。\n- 精准召回：附件查询结合语义任务匹配与中文词组评分，过滤只因“海报”等单个泛词命中的无关文件；任务详情与附件搜索统一使用结构化文件协议。\n- 富文本回答：Agent 正文改用 GFM 渲染，标题、列表、引用、代码、链接和 Markdown 表格均显示为正式排版，不再暴露 `##`、`|---|` 等原始标记。\n- 附件卡片：搜索结果新增缩略图、任务归属、格式、大小、标签和预览/打开操作；桌面端双列、移动端单列，并随云端会话跨设备恢复。\n- 协议同步：OpenAPI、MCP 和站内 Tool Calling 共用 `search_attachments`，远程 MCP 只读工具扩展为 5 个。\n- 自动回归：隔离 Agent 用例扩展到 74 条，新增附件意图、结构化文件返回、误触发边界和 MCP 附件搜索检查。"
   },
   {
-    "id": "CHANGELOG.md#130",
+    "id": "CHANGELOG.md#131",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2683,7 +2691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 云端会话：爱丽丝的历史对话升级为 Durable Object 正文 + D1 索引，旧浏览器历史首次打开自动迁移，换设备后可恢复回答、确认卡、任务选择和分析任务卡。\n- 任务中心：助手顶部新增 Agent 任务中心，统一查看排队、分析中、完成、失败和取消的任务；来源、更新时间和最终报告不再依赖原聊天窗口存在。\n- 可靠通知：后台任务新增跨设备未读状态，关闭网页后完成的报告会在下次打开时继续通知；查看结果后才持久标记已读。\n- 主动 Agent：每周一生成工作摘要、每月 1 日复盘上月工作；存在逾期任务时每天生成风险提示，并使用去重键避免定时器重复创建。\n- 深度分析：新增周报、风险扫描、跨任务专题、批量附件汇总和多月趋势五类持久 Workflow，模型只负责归纳，任务、工时、状态、进展和附件结论仍来自 D1 权威快照。\n- 自动回归：隔离门禁扩展到 70 条 Tool Calling 用例，并增加云端会话导入/恢复/删除、任务未读状态和通用分析 Workflow 检查。"
   },
   {
-    "id": "CHANGELOG.md#131",
+    "id": "CHANGELOG.md#132",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2691,7 +2699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 后台复盘：向爱丽丝提出“做一份 7 月工作复盘”等请求后，Agent 会启动独立 Cloudflare Workflow，页面关闭或 Worker 重启不会中断分析。\n- 真实数据：Workflow 一次性汇总该月全部有效任务、状态、工时、进展、改稿、等待、反馈与附件分析，数量和金额以 D1 确定性统计为准。\n- 任务卡片：对话内显示收集数据、分析归纳、生成报告等真实阶段与进度；任务支持取消、失败重试，完成后自动展开结构化复盘结果。\n- 主动通知：分析结束后全站弹出完成或失败通知，可直接回到对应对话查看结果；普通打开助手不会残留上一次任务定位。\n- 数据最小化：原始月度快照仅在 Workflow 执行期间保存，生成成功后立即清除，只保留最终复盘报告与运行状态。\n- 自动回归：隔离门禁扩展到 65 条 Agent 用例，并新增后台复盘创建、完成、取消与重试的真实 Workflow 检查。"
   },
   {
-    "id": "CHANGELOG.md#132",
+    "id": "CHANGELOG.md#133",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2699,7 +2707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 持久执行：创建任务、记录反馈、修改状态、修改字段和追加进展改由 Cloudflare Workflows 在用户确认后执行，页面关闭或 Worker 重启不再中断已确认流程。\n- 人工审批：preview 阶段即创建等待中的 Workflow，只有站内确认卡明确批准后才进入业务写入步骤，10 分钟未确认自动失效。\n- 步骤恢复：写入步骤增加超时、指数退避和最多 3 次重试；执行轨迹会明确显示 Workflow 状态，不展示模型思维链。\n- 幂等保护：新增 `agent_write_operations`，按 Workflow instance ID 缓存成功结果；恢复或重复请求直接重放首次结果，避免重复创建任务或重复记录进展。\n- 自动回归：隔离门禁新增 Workflow 确认后真实写入和相同 operationId 重放测试，原有 63 条 Agent 用例与 MCP 回归继续全量执行。"
   },
   {
-    "id": "CHANGELOG.md#133",
+    "id": "CHANGELOG.md#134",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2707,7 +2715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 远程 MCP：新增 `https://mayeai.com/mcp` Streamable HTTP 入口，可供支持远程 MCP 的外部 AI 客户端查询 Giverny 数据。\n- 工具共享：爱丽丝与 MCP 共用同一份只读工具注册表，任务搜索、月份财务、任务详情和工作台能力不再维护两套 schema。\n- 独立权限：访问口令新增 `MCP 只读`类型，只能访问 MCP；不能登录网站、不能调用内部 Agent API，也不能执行任何写入。\n- 写入隔离：创建任务、记录反馈、修改状态、修改字段和追加进展继续只允许站内 Agent 走确认流程，不向 MCP 暴露。\n- 自动回归：隔离质量门禁新增 MCP 未授权、网页登录隔离、四工具白名单和真实协议调用检查，原有 63 条 Agent 用例继续全量执行。"
   },
   {
-    "id": "CHANGELOG.md#134",
+    "id": "CHANGELOG.md#135",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2715,7 +2723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 运行质量：管理员可在“设置 → AI”查看 7/30 天请求量、成功率、工具使用率、P95 耗时、意图分布、确认/消歧/回退和近期失败。\n- 隐私边界：运行指标只记录意图、工具名、耗时和结果状态，不保存用户问题、Agent 回答、任务标题或待确认草稿；90 天前指标自动清理。\n- 隔离评测：新增匿名任务夹具、临时 D1 和 OpenAI-compatible 模拟模型，63 条 Agent 查询、写入预览、消歧与安全场景可在本机完整执行，结束后自动删除环境。\n- 质量阈值：总体通过率不得低于 95%，创建/写入、消歧与安全分类必须 100%；工具非 200、缺少必要候选或评测数据混入真实统计均会阻断发布。\n- CI 门禁：新增 GitHub Actions，在 pull request 和主分支推送时执行 build、lint 与隔离 Agent 全链路回归。"
   },
   {
-    "id": "CHANGELOG.md#135",
+    "id": "CHANGELOG.md#136",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2723,7 +2731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务消歧：按标题读取或修改任务时，多个近似结果会返回结构化候选卡，由用户选择明确任务 ID 后再继续，Agent 不再自行猜测。\n- 确认卡升级：任务字段修改展示原值与新值；创建任务草稿可在卡内编辑日期、需求、工时与人员；执行成功后可直接打开对应任务。\n- 写入安全：编辑草稿会重新调用 preview 并生成新的服务端确认凭证，旧草稿和旧凭证不再继续执行。\n- 回归评测：新增 63 条 Agent 固定用例，覆盖月份任务、财务工时、任务详情、创建与修改预览、同名消歧和越权安全边界。\n- 发布门禁：新增 `agent:eval:check` 结构校验；支持配置正式地址与管理员鉴权后运行在线模型和工具回归，在线评测不会自动确认写操作。"
   },
   {
-    "id": "CHANGELOG.md#136",
+    "id": "CHANGELOG.md#137",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2731,7 +2739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 操作确认：创建任务、记录反馈、修改字段、修改状态和追加进展由 Tool Calling 生成结构化确认卡，直接展示待写入草稿。\n- 安全执行：确认卡只返回操作摘要，签名确认令牌继续私密保存在 Durable Object；浏览器和模型均无法读取或绕过确认。\n- 状态闭环：确认、取消、执行失败和令牌过期均回写原卡片状态，避免用户重复点击或误以为操作已经完成。\n- 风险提示：敏感状态变化等工具警告随草稿展示，任务名、时间、工时、状态、备注等字段按业务名称排版。\n- 协议方向：站内继续使用低延迟、强类型 Tool Calling；MCP 作为后续对外复用协议，待独立 OAuth 权限边界完成后优先开放只读工具。"
   },
   {
-    "id": "CHANGELOG.md#137",
+    "id": "CHANGELOG.md#138",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2739,7 +2747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent 内核：工作助手主链路迁移到 Cloudflare Agents SDK，每个对话使用独立 Durable Object，不再依赖关键词模板判断工作意图。\n- 会话记忆：对话历史持久保存到 Agent SQLite；新建对话、继续当前对话和打开旧历史均保持独立上下文。\n- 工具编排：DeepSeek 通过 AI SDK 的类型化工具调用访问任务、月份收入、工时、附件和任务详情，工具输入由 Zod 校验。\n- 写入确认：创建任务、记录反馈、修改字段、修改状态和追加进展只允许生成预览；签名 token 由 Agent 私密保存，用户明确确认后再确定性执行。\n- 安全边界：模型不再持有 execute 工具和 confirmation token，无法跳过确认直接写入；取消操作不会触碰业务数据。\n- 部署兼容：现有 Python Container 暂时保留为故障回退，新 Durable Object 主链路稳定后再单独移除旧镜像与配置。"
   },
   {
-    "id": "CHANGELOG.md#138",
+    "id": "CHANGELOG.md#139",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2747,7 +2755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 预估口径：工时只代表设计师实际投入，不再把预计开始到交付之间的自然时间差当作工作时长；无可信样本时保留当前手工预估。\n- 样本检索：只使用已验收任务作为权威样本，精确同类型与 Vectorize 语义相似任务分层计权，同大类任务仅在样本不足时弱补位。\n- 稳健统计：使用加权中位数与 P80 生成“常规预估 / 稳妥预留”，降低单个异常项目对平均值的干扰。\n- 置信度：按精确样本量、语义相似度和历史分布离散程度计算，并修复 BAML `Low / Medium / High` 与中文置信度的映射。\n- 需求上下文：工时分析同步读取需求人、甲方文案附件名称和已抽取文字，识别从零设计、复用、多尺寸、页数与交付数量等复杂度。\n- 结果界面：分开显示精确样本、相关参考、历史中位数和范围，可展开查看参考任务，并支持采用常规值或稳妥值。\n- 过期保护：任务名称、类型、需求、需求人或附件变化后，旧建议立即失效，必须重新分析后才能采用。\n- 学习闭环：记录建议值、最终选定工时与实际工时；同类型积累 3 条结果后自动校准系统性高估或低估偏差。\n- 运行保障：BAML Runtime 和文字模型均不可用时仍返回统计建议，不再让模型故障阻断新建任务。"
   },
   {
-    "id": "CHANGELOG.md#139",
+    "id": "CHANGELOG.md#140",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2755,7 +2763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件分析：修复队列失败后被错误确认、未触发自动重试的问题；暂时性错误最多重试 3 次，不支持的格式直接明确结束。\n- PDF 兼容：Gemini 原生 PDF 分析失败后，Kimi 改用已有首页预览图继续识别；超过 18MB 的 PDF 也可通过预览进入分析。\n- 模型稳定：文字和视觉调用增加独立超时、结构化 JSON 输出和一次结果修复，避免请求长期卡住或因摘要字段缺失直接失败。\n- 结果可信：分析记录实际使用的供应商与模型，并按文件来源、证据完整度和降级路径重新校准置信度，不再全部显示“高”。\n- 状态反馈：页面仅轮询仍在处理的附件分析，完成或失败后自动刷新结果，无需手动重开页面。\n- 洞察追踪：同一触发项改为持续更新最新记录，异常消失时自动结案；历史重复记录不再占满追踪列表。\n- 文件安全：长图切片读取隐藏附件时使用内部工具鉴权，并要求所有切片成功后才合并，避免部分结果冒充完整分析。"
   },
   {
-    "id": "CHANGELOG.md#140",
+    "id": "CHANGELOG.md#141",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2763,7 +2771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复 PDF 首页缩略图在浏览器渲染异常或文件较大时一直停留在“正在生成首页预览”的问题。\n- PDF 首页预览超过 8 秒未完成时改为明确提示，仍可点击缩略图打开完整 PDF。"
   },
   {
-    "id": "CHANGELOG.md#141",
+    "id": "CHANGELOG.md#142",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2771,7 +2779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件权限：源文件与预览图按角色重新校验，访客口令不能绕过列表过滤读取未公开附件；甲方仅可读取当月授权范围\n- 工时可信：任务更新后由 Worker 根据分段起止时间重算实际工时，不再盲信前端传入的合计值\n- 协作者边界：恢复协作者创建、编辑任务和记录进展的完整路径；验收、结算、状态回退与已验收任务继续保持管理员专属\n- 大文件清理：分片上传任一步失败时主动终止 R2 multipart upload；上传完成但数据库入库失败时自动删除源文件与预览图，避免孤儿对象\n- 并发 ID：任务、进展与附件 ID 增加毫秒内随机位，避免同一时刻并发创建发生主键冲突\n- 任务动态：D1 直接按任务查询动态，不再从全站最新日志二次过滤；快速切换任务时仅接纳最后一次请求，防止右侧动态串线\n- AI 附件内存：工作助手图片改用已有 base64 数据预览，需求附件被限额丢弃或读取失败时主动释放临时地址\n- 进度估算：进展内容即使修改前后字数相同，也会触发重新估算，不再误用旧结果"
   },
   {
-    "id": "CHANGELOG.md#142",
+    "id": "CHANGELOG.md#143",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2779,7 +2787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 待上传 PDF：首页缩略图改为只生成一次，列表小图与悬浮大图共用同一张 PNG，避免大文件并发解析导致失败\n- 预览状态：生成过程中显示轻量 PDF 占位与“正在生成首页预览”，不再同时启动多个 PDF.js 渲染任务\n- 失败提示：无法生成封面时明确说明“PDF 可正常打开”，缩略图失败不再被误解为原文件损坏"
   },
   {
-    "id": "CHANGELOG.md#143",
+    "id": "CHANGELOG.md#144",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2787,7 +2795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收总结：AI 生成验收备注时逐条读取项目从开始到验收前的全部分段进展，不再只参考当前输入和验收附件\n- 修改归纳：普通进展、改稿轮次、甲方反馈、不计时记录及其附件按时间排序输入，同类修改会合并为面向甲方的交付说明\n- 空白生成：只要项目已有历史进展，验收备注留空时也可以直接让 AI 汇总，输入框与按钮提示同步说明参考范围\n- 事实边界：验收备注优先交代完成与交付、主要更新、反馈响应和最终文件，不会凭空宣称甲方已确认或项目已上线\n- 运行保障：OpenAI-compatible Agent Runtime 超时或短暂不可用时自动回落备用文字模型，避免 AI 辅助长时间无响应"
   },
   {
-    "id": "CHANGELOG.md#144",
+    "id": "CHANGELOG.md#145",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2795,7 +2803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文字可读性：提升弱文字在纸张背景上的对比度，日期、说明和小字号元数据不再过浅\n- 搜索一致：工作台、任务页与文件库统一为同尺寸的底线式搜索，文件库同步增加一键清除\n- 工具栏减法：移除任务浏览区的状态配色开关与鼠标教学文案，只保留搜索、筛选和详情等当前操作\n- 外观设置：任务状态配色开关迁移到“设置 → 外观”，能力保留但不再占用高频浏览界面\n- 已验收精简：已验收任务行不再重复显示 `100%` 进度和“已验收 N 天”，保留状态、实际工时与必要排期"
   },
   {
-    "id": "CHANGELOG.md#145",
+    "id": "CHANGELOG.md#146",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2803,7 +2811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 详情联动：工作台右侧详情只从当前真正显示的任务行中选择，已折叠或尚未加载的任务不再与列表错位\n- 文件浏览：验收文件缩略图统一为 4:3 预览框，横版、竖版、PDF 与办公文档保持完整展示并获得稳定的网格节奏\n- 移动知识：每日知识分类、标题和摘要改为清晰的纵向层级，窄屏不再互相挤压\n- 移动交付：文件库最新交付说明在窄屏改为标题与正文分行，长说明更易阅读"
   },
   {
-    "id": "CHANGELOG.md#146",
+    "id": "CHANGELOG.md#147",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2811,7 +2819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 等待截止：等待开始后只要出现新的工作进展，即使该进展标记为“不计工时”，也会自动作为等待结束时间\n- 生命周期口径：不计工时仅影响结算，不再导致已经恢复工作的任务继续显示“等待中”\n- 展示修正：跨日等待显示完整起止日期与时间，例如 `07/03 23:55 - 07/09 17:43`，并同步计算等待时长\n- 反馈边界：甲方反馈 / 修改建议仍作为外部意见节点，不单独视为设计工作恢复"
   },
   {
-    "id": "CHANGELOG.md#147",
+    "id": "CHANGELOG.md#148",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2819,7 +2827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 列表扫读：任务需求统一收敛为两行，任务名保持唯一视觉焦点，选中任务增加稳定的左侧定位标记\n- 筛选工具：工作台与任务页统一搜索清除按钮、当前筛选摘要和一键重置，空结果不再需要逐项手动恢复\n- 详情浏览：详情标题和页签固定在侧栏顶部，信息与进展内容独立滚动，长记录浏览时不丢失任务上下文\n- 状态一致：任务状态、临期信号、进度和选中态继续集中在固定区域，状态底色与文字层级统一使用现有 token\n- 状态反馈：缓存首屏同步失败时显示明确的站内提示和重新同步入口，空任务与无匹配结果提供对应操作\n- 交互细节：补充列表 / 日历切换、筛选、搜索清除和任务行的键盘焦点，并为详情展开与筛选结果加入低干扰过渡\n- 响应式：任务工具栏、筛选摘要、同步提示与详情标题在窄屏重新排布，避免按钮和长文案互相挤压"
   },
   {
-    "id": "CHANGELOG.md#148",
+    "id": "CHANGELOG.md#149",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2827,7 +2835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务选中：切换月份、状态筛选或搜索后，右侧详情自动对齐当前可见的第一条任务，不再显示列表之外的旧选中项\n- 详情面板：工作台与任务页共用“显示详情 / 收起详情”状态，桌面端可释放更多横向空间浏览长标题和需求\n- 中屏适配：1181～1400px 下缩窄详情栏并减少主从间距，避免任务正文被固定侧栏过度挤压\n- 权限占位：游客的预计收入由大号“仅管理员”改为轻量锁定提示，真实数字继续保持统计区视觉焦点\n- 移动兼容：手机点击任务时会自动展开已收起的详情并定位，保留返回任务列表的完整往返"
   },
   {
-    "id": "CHANGELOG.md#149",
+    "id": "CHANGELOG.md#150",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2835,7 +2843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移动导航：将占据大块首屏的侧栏改为紧凑品牌页头与固定底部六项导航，主要页面单手即可切换\n- 工作台首屏：四项统计改为 2×2 排列，手机首屏可直接看到知识条、逾期提醒和任务入口\n- 任务筛选：状态标签支持横向滚动，窄屏不再截断“待验收 / 已验收”等选项\n- 任务详情：手机点击任务后自动定位到详情区，并提供“返回任务列表”入口，避免在长列表中反复手动滚动\n- 信息密度：隐藏仅适用于鼠标和右键的桌面提示，保留任务数量、主题开关与核心状态信息"
   },
   {
-    "id": "CHANGELOG.md#150",
+    "id": "CHANGELOG.md#151",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2843,7 +2851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 登录安全：管理员密码与访问口令不再保存在浏览器或拼进文件 URL，统一改为服务端 HttpOnly 会话；登出、改密、禁用口令会立即撤销对应会话\n- Agent 数据：任务搜索统一按验收进展归一化有效状态，修复已验收任务仍被统计为待验收或未完成；向量召回与结构化筛选共用同一口径\n- Agent 写入：确认令牌增加唯一编号和服务端一次性消费记录，避免重复提交导致任务、反馈或进展被执行两次\n- 附件可靠性：进展附件改为保存时上传，关闭表单不再产生孤儿文件；定时清理只处理 24 小时后仍未被进展引用的暂存附件\n- 公开预览：匿名访客可直接预览和打开标记为对客可见的文件，分享链接继续按 token 校验，修复缩略图可见但原文件 401\n- 只读体验：游客、甲方和只读口令隐藏编辑、记录、作废、删除、重命名与标签入口，只保留查看、预览和下载能力\n- 页面安全：补齐 CSP、禁止 MIME 嗅探、来源策略和浏览器权限策略，移除重复注入且持续触发 CORS 的旧版 Cloudflare Beacon\n- 依赖维护：升级存在安全公告的 ECharts 与 UUID 传递依赖，`npm audit` 恢复为 0 项漏洞\n- 发布一致性：版本号、发布时间、构建产物与正式部署统一在最后一次构建生成，避免线上资源晚于版本元数据"
   },
   {
-    "id": "CHANGELOG.md#151",
+    "id": "CHANGELOG.md#152",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2851,7 +2859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展附件：点击待上传 PDF 缩略图后，改为打开完整 PDF 阅读器，可查看全部页面并使用浏览器缩放、打印等能力\n- 附件预览：待上传图片、视频和 Office 文件统一沿用大尺寸站内预览窗口，并提供关闭与可用格式的新窗口打开入口\n- 资源管理：预览关闭后主动释放本地临时文件地址，避免多次打开附件造成浏览器内存持续占用"
   },
   {
-    "id": "CHANGELOG.md#152",
+    "id": "CHANGELOG.md#153",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2859,7 +2867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录进展：修正普通进展“计入工时”开关的视觉状态与保存口径，关闭时明确按 0 工时仅记录进展\n- 右键菜单：移除低频“改任务状态”入口，任务状态推进统一交给记录进展、验收和作废流程\n- 右侧详情：进展分组标题精简为“分段计时 / 修改建议 / 等待记录”，减少长标题挤压\n- 分段计时：移除“记录反馈”入口，反馈统一收进“修改建议”分组"
   },
   {
-    "id": "CHANGELOG.md#153",
+    "id": "CHANGELOG.md#154",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2867,7 +2875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：请求处理中不再只显示静态等待文案，改为逐步展示 6 个可验证执行步骤\n- 运行轨迹：结果返回前保持“正在运行 N / 6 步”展开态，避免用户误以为卡住或突然跳答案\n- 完成状态：后端真实 trace 返回后替换临时步骤，并默认折叠为“运行完成”，保留最终答案阅读焦点"
   },
   {
-    "id": "CHANGELOG.md#154",
+    "id": "CHANGELOG.md#155",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2875,7 +2883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent 工具：`search_tasks` 接入已有 Vectorize + Workers AI bge-m3 语义检索，不再只依赖 SQL `LIKE` 关键词匹配\n- 混合检索：普通自然语言任务查询会合并向量召回与关键词结果；月份/未完成/逾期等问题继续走 D1 结构化统计，保证数量准确\n- 工具输出：返回 `searchMode`、`semanticEnabled` 和 `semanticScore`，方便追踪本次回答是否使用语义召回"
   },
   {
-    "id": "CHANGELOG.md#155",
+    "id": "CHANGELOG.md#156",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2883,7 +2891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：修复“6 月份还有哪些工作没做完”等问题的工具口径，先按月份取任务全集，再按未完成/逾期/状态意图筛选\n- Agent 工具：`search_tasks` 返回月份范围总数、未完成数和逾期数，避免把“没做完”误当任务标题关键词\n- 聊天气泡：用户消息改为绿色气泡配白色文字，并覆盖气泡内强调文本，提升可读性"
   },
   {
-    "id": "CHANGELOG.md#156",
+    "id": "CHANGELOG.md#157",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2891,7 +2899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent 工具：新增创建任务、记录反馈、修改状态、修改任务字段、追加进展 5 组 preview/execute 工具，共 10 个写入工具\n- 安全确认：所有写入都必须先由 preview 工具生成草稿和 `confirmationToken`，用户明确确认后 execute 工具才会写入 D1\n- 工作助手：`/api/ai/chat` 传入最近对话上下文，支持用户在预览后回复“确认执行”并由 Agent 继续执行\n- Runtime：注册 10 个写入工具，模型可按“预览 → 确认 → 执行”流程创建任务、写反馈、改状态和记录进展"
   },
   {
-    "id": "CHANGELOG.md#157",
+    "id": "CHANGELOG.md#158",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2899,7 +2907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：移除前端“新建任务 / 记录反馈”的关键词拦截逻辑，所有聊天输入统一进入 `/api/ai/chat`，由 Agent Runtime 判断意图\n- Agent Runtime：工作数据、写入意图、反馈记录、确认执行等请求必须走 Runtime；Runtime 失败时显式报错，不再静默回落到本地模板\n- 写入边界：Runtime 系统提示明确当前只开放只读工具，遇到新建、修改、记录反馈等写入请求时不再假装执行，而是说明能力边界和下一步信息"
   },
   {
-    "id": "CHANGELOG.md#158",
+    "id": "CHANGELOG.md#159",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2907,7 +2915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent Runtime：移除对 `OPENAI_API_KEY` 的强依赖，容器默认使用 DeepSeek OpenAI-compatible Tool Calls\n- 工作助手：Runtime 采用自有 Tool Calling Loop，由模型选择 `month-finance`、`search-tasks`、`task-detail`、`context` 等只读工具，再由 Runtime 执行并总结\n- 配置：容器启动时注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，并保留 OpenAI provider 作为可选切换项\n- 文档：更新 Runtime 本地启动、Cloudflare Containers 部署和 provider 配置说明"
   },
   {
-    "id": "CHANGELOG.md#159",
+    "id": "CHANGELOG.md#160",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2915,7 +2923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent Runtime：将 `agent-runtime/` 接入 Cloudflare Containers，通过 `AGENT_RUNTIME_CONTAINER` 绑定由主站 Worker 内部调用\n- 工作助手：`/api/ai/chat` 优先调用容器 Runtime，再回退 `AGENT_RUNTIME_URL`，最后回退站内本地助手逻辑\n- 安全：容器启动时由 Worker 注入 `OPENAI_API_KEY`、`AGENT_TOOL_TOKEN`、`AGENT_RUNTIME_KEY`，前端不直接接触 Runtime\n- 部署：新增容器 Docker 构建上下文忽略规则，并更新 Runtime 部署说明"
   },
   {
-    "id": "CHANGELOG.md#160",
+    "id": "CHANGELOG.md#161",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2923,7 +2931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Agent 中台：移除 Dify 验证链路，长期方向改为自建 OpenAI Agents SDK Runtime，站内 `/api/ai/chat` 优先调用 `AGENT_RUNTIME_URL`\n- 只读工具：保留 `month-finance`、`search-tasks`、`task-detail`、`context` 四个 Agent 工具接口，支持查询收入、任务列表、任务详情和爱丽丝能力边界\n- OpenAPI：`/api/agent/openapi.json` 直接返回正式工具 schema，`/api/agent/dify-openapi.json` 退役，避免继续依赖外部编排平台的兼容 schema\n- 工作助手：Agent Runtime 未配置或调用失败时，自动回落到站内原有本地助手逻辑，不再回退到 Dify\n- 工作助手：模型输出 `<think>...</think>` 思考内容时，前端会自动折叠为「思考过程」，最终答案保持清爽可读\n- 安全：Agent 工具接口使用独立 `AGENT_TOOL_TOKEN` Bearer 鉴权，和网站登录口令隔离；本轮不开放任何写入型操作\n- 数据口径：月份金额工具复用 D1 确定性统计口径，返回总金额、计费工时、时薪和结构化任务明细，避免模型自由估算"
   },
   {
-    "id": "CHANGELOG.md#161",
+    "id": "CHANGELOG.md#162",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2931,7 +2939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：模型选择新增「豆包 Seed 2.1 Pro」，可在爱丽丝底部模型选择中直接切换\n- 模型配置：设置页新增「豆包 / Doubao」供应商，默认填入火山方舟 OpenAI 兼容地址和 Seed 2.1 Pro 模型 ID\n- 后端：Worker 新增 `DOUBAO_API_KEY`、`DOUBAO_BASE_URL`、`DOUBAO_MODEL` 环境变量支持，未配置 Key 时会回落到默认模型链路"
   },
   {
-    "id": "CHANGELOG.md#162",
+    "id": "CHANGELOG.md#163",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2939,7 +2947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：模型选择按钮移动到底部输入区右侧，靠近发送按钮，减少左侧工具区拥挤\n- 模型选择：点击模型后改为右侧独立浮层，不再嵌在输入框内部，避免输入区域被模型列表撑开\n- 体验：模型浮层保留纵向滚动和当前选择高亮，更接近主流 Agent 产品的模型切换方式"
   },
   {
-    "id": "CHANGELOG.md#163",
+    "id": "CHANGELOG.md#164",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2947,7 +2955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：移除聊天头像，将标题改为轻量 Agent 标识，弱化普通聊天工具感\n- 消息样式：用户消息改为圆角填充气泡，AI 回答改为无背景正文排版，重点内容保留加粗显示\n- 思考过程：Agent 执行轨迹改为“运行完成 N 步”的可折叠时间线，默认收起，只保留最终答案作为阅读焦点\n- 模型选择：模型列表改为输入框内部的纵向滚动选择器，不再浮层覆盖问题和答案\n- 输入体验：底部编辑区改为圆角矩形输入框，发送按钮更新为现代上箭头图标"
   },
   {
-    "id": "CHANGELOG.md#164",
+    "id": "CHANGELOG.md#165",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2955,7 +2963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：聊天入口改为“模型规划 → 工具调用 → 模型总结”的 Agent Loop，不再由金额关键词直接短路返回模板答案\n- 工具调用：新增 `query_month_finance` 和 `query_recent_tasks` 工具注册表，金额统计由 D1 工具确定性计算，模型负责理解、选择工具和组织回答\n- 可解释性：回答会展示规划、工具执行、数据来源和最终模型，若模型漏选工具会明确标注“工具补救”，避免黑箱式机械匹配\n- 模型选择：爱丽丝前端新增模型选择器，支持自动、文字主模型、文字备用、识图主模型、Workers AI，以及 OpenRouter 免费模型缓存\n- UI 升级：聊天面板放大，消息区和输入区更现代，支持对回答中的重点内容加粗，便于阅读复杂的统计与执行过程"
   },
   {
-    "id": "CHANGELOG.md#165",
+    "id": "CHANGELOG.md#166",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2963,7 +2971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：发送问题后先显示 Agent 工作状态，不再像关键词模板一样秒出答案\n- 可解释性：金额统计类问题会展示“理解问题 → 选择工具 → 查询 D1 → 计算口径 → 生成答复”的可验证执行轨迹\n- 体验：非流式工具结果会保留短暂可见的处理中状态，让用户知道助手正在调用工具而不是机械匹配\n- 架构：为后续接入更多工具型 Agent 打底，模型负责理解与表达，业务结果由工具链产出"
   },
   {
-    "id": "CHANGELOG.md#166",
+    "id": "CHANGELOG.md#167",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2971,7 +2979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：金额、收入、结算、月份合计等问题改为后端确定性统计，不再交给大模型自由估算\n- 多月统计：支持识别“6 月和 7 月加起来多少钱”等问法，并按 D1 任务、计费工时和当前时薪直接计算\n- 口径统一：金额按计费任务逐条精确到分后汇总，排除不计费和终止任务，避免历史月份被误判为无法计算\n- 智能体底座：聊天回答会优先引用确定性月份金额统计，为后续更多“查数据 + 执行动作”能力打基础"
   },
   {
-    "id": "CHANGELOG.md#167",
+    "id": "CHANGELOG.md#168",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2979,7 +2987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作助手：爱丽丝新增“操作计划 → 用户确认 → 写入任务”的执行层，不再只停留在聊天建议\n- 智能识别：支持把“给当前任务记录一条 B02 修改意见……”这类自然语言转换为甲方反馈记录计划\n- 数据写入：确认执行后会把反馈写入对应任务的进展与反馈时间线，默认不计工时、不进结算\n- 安全控制：AI 只生成计划，不直接改数据；必须回复「确认执行」后才会保存"
   },
   {
-    "id": "CHANGELOG.md#168",
+    "id": "CHANGELOG.md#169",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2987,7 +2995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 功能：右侧任务进展新增「甲方反馈 / 修改意见」页签和「记录反馈」入口，可单独记录 B01 / B02 等版本修改意见\n- 时间线：反馈记录作为 0 工时节点进入任务生命周期，显示反馈来源、版本号、甲方反馈标签和附件证据\n- 统计：反馈记录默认不计工时、不进结算，但可选择是否计入改稿轮次，继续服务需求人画像和后续 BI / AI 分析\n- 附件：反馈截图、聊天记录、批注 PDF 等可作为进展附件上传，且不会误显示「标为验收文件」操作"
   },
   {
-    "id": "CHANGELOG.md#169",
+    "id": "CHANGELOG.md#170",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -2995,7 +3003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展：编辑已有「不计工时」分段时，弹窗右上角的「不计工时」开关会默认保持开启\n- 口径：编辑初始化优先读取已保存的 `isUncounted` 标记，不再只靠工时分钟数反推状态\n- 体验：普通进展的计时开关视觉改为“当前是不计工时就点亮”，避免编辑时误以为会重新计入结算"
   },
   {
-    "id": "CHANGELOG.md#170",
+    "id": "CHANGELOG.md#171",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3003,7 +3011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 状态：只要任务已有「验收进展」分段，任务列表、详情、筛选和统计统一显示为「已验收」\n- 数据：历史遗留的“有验收进展但 status 仍为进行中/待验收”的任务会在读取和保存时自动归一\n- 交付：实际交付时间缺失时，优先使用最新验收进展的结束时间，避免右侧闭环与左侧状态不一致"
   },
   {
-    "id": "CHANGELOG.md#171",
+    "id": "CHANGELOG.md#172",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3011,7 +3019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件：PDF、AI、PSD、Office、视频和图片统一走同一套缩略图类型推断与源文件兜底\n- 类型：文件类型优先使用 MIME type，再使用可信扩展名白名单，避免 `V1.0B03.jpg` 这类版本号命名被误判\n- 后端：上传保存和返回文件时同步 `mimeType`，历史文件缺少预览图时也能用源文件生成可视缩略图"
   },
   {
-    "id": "CHANGELOG.md#172",
+    "id": "CHANGELOG.md#173",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3019,7 +3027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收：记录验收进展右侧「预计工时」不再被 0.5 小时步进吸附\n- 口径：预计开始与预计交付之间的分钟差会精确换算为小时，例如 17:05–17:25 显示为 0.33h\n- 文案：验收弹窗右侧参考栏字段从「本段工时」改为「预计工时」，避免和左侧本次验收计时混淆"
   },
   {
-    "id": "CHANGELOG.md#173",
+    "id": "CHANGELOG.md#174",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3027,7 +3035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收：记录验收进展时，验收备注标题右侧新增「参考任务详情」按钮\n- 交互：点击后会展开并定位到任务基础信息，便于参考任务名称、设计类型、需求描述、需求人、预计时间等内容编写验收备注\n- 复用：继续使用验收弹窗原有「基础信息」折叠块，不新增重复面板"
   },
   {
-    "id": "CHANGELOG.md#174",
+    "id": "CHANGELOG.md#175",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3035,7 +3043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务：打开新建任务面板后，`Command + V` / `Ctrl + V` 粘贴图片会直接加入「甲方文案附件」\n- 附件处理：粘贴图片复用原有甲方文案附件读取链路，会作为图片附件进入 AI 需求分析上下文\n- 体验：普通文字粘贴不受影响，只有剪贴板里识别到图片文件时才拦截并添加附件"
   },
   {
-    "id": "CHANGELOG.md#175",
+    "id": "CHANGELOG.md#176",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3043,7 +3051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 日历：月视图跨天任务改为同一周内合并成一整条，不再在每个日期格里重复画短线\n- 跨周：任务跨到下一周时会在新的一行重新起一条，并再次显示任务名称，方便识别连续周期\n- 视觉：跨天任务条覆盖周内连续单元格，保留设计类型大类配色和浅色任务条风格"
   },
   {
-    "id": "CHANGELOG.md#176",
+    "id": "CHANGELOG.md#177",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3051,7 +3059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 日历：任务不再只按新建 / 开始日期显示，而是从任务开始日期连续显示到验收结束日期\n- 口径：已验收任务优先使用验收进展或最后工作段的结束日期；未验收任务使用预计交付日期兜底\n- 视图：月视图和周 / 日视图顶部计划区都按任务持续周期显示，方便直观看到任务持续天数"
   },
   {
-    "id": "CHANGELOG.md#177",
+    "id": "CHANGELOG.md#178",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3059,7 +3067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 体验修复：首页 AI 科普刷新页面时不再优先恢复上一条 `current`，避免长期卡在同一篇内容\n- 轮换策略：刷新会优先消费本地预加载队列的下一条；队列为空时再从本地内容池排除最近历史后选择\n- 去重保护：旧 `current`、最近阅读历史和队列重复项都会被排除，减少反复出现「峰终定律」等同一条内容"
   },
   {
-    "id": "CHANGELOG.md#178",
+    "id": "CHANGELOG.md#179",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3067,7 +3075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 功能修复：普通进展里的某个附件被单独标记为「验收文件」后，右侧进展时间线会在对应进展后显示「验收文件」标签\n- 口径统一：进展时间线、任务详情分段计时和编辑弹窗共用同一套验收文件判断，不再只看整段是否为验收进展\n- 兼容历史：识别 `scope=acceptance`、文件标签里的「验收文件 / 验收附件」，以及任务验收文件清单中的文件名"
   },
   {
-    "id": "CHANGELOG.md#179",
+    "id": "CHANGELOG.md#180",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3075,7 +3083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 业务修复：记录验收进展时，等待记录会立即以本次验收进展的开始时间作为截止点\n- 场景修复：例如等待从 2026-07-06 16:36 开始，本次验收进展从 2026-07-07 12:45 开始，验收弹窗中会显示等待已结束，不再显示「等待中」\n- 口径统一：验收弹窗的工时表、等待记录和累计等待统一使用包含当前验收进展草稿的同一份时间轴预览"
   },
   {
-    "id": "CHANGELOG.md#180",
+    "id": "CHANGELOG.md#181",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3083,7 +3091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 功能修复：「记录进展」编辑已有进展时，已有附件重新显示「标为验收文件 / 验收文件」切换按钮\n- 业务逻辑：即使没有开启「本次进展为验收进展」，也可以把某一个具体附件单独标记为验收文件\n- 数据同步：标记时同步更新文件 `scope/tag` 与任务验收文件清单，取消标记时会从验收文件清单移除\n- 场景修复：分阶段交付封面、海报等多个设计物时，已验收的单个文件不需要在最终验收时重复上传"
   },
   {
-    "id": "CHANGELOG.md#181",
+    "id": "CHANGELOG.md#182",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3091,7 +3099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 视觉：日历节假日从日期头小字中拆出，改为类似 Google Calendar 的独立节日条\n- 视觉：节假日条使用固定主题色和白色字体，和设计任务条的类型浅色区分开\n- 交互：休假日节日条显示「休」标记，补班日单独显示为棕色系「补班」条，避免和节假日混淆\n- 信息层级：日期头回到只显示农历小字，节假日信息下沉到日程区域，月 / 周 / 日视图保持一致"
   },
   {
-    "id": "CHANGELOG.md#182",
+    "id": "CHANGELOG.md#183",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3099,7 +3107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 日历：月 / 周 / 日视图日期头新增农历小字，支持春节、除夕、元宵、端午、七夕、中元、中秋、重阳等传统节日显示\n- 节假日：按国务院办公厅 2026 年部分节假日安排内置官方休假 / 补班规则，元旦、春节、清明、劳动节、端午、中秋、国庆会显示「休」，补班日显示「补班」\n- 纪念日：补充植树节、国际妇女节、教师节、国庆节、圣诞节等常用节日提示，国庆假期非 10 月 1 日日期显示「黄金周」\n- 视觉：日历任务条不再直接使用高饱和原色填充，改为同色系低饱和高亮度浅底，黑色任务名阅读更稳"
   },
   {
-    "id": "CHANGELOG.md#183",
+    "id": "CHANGELOG.md#184",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3107,7 +3115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 快捷键：导航组从 `G + 字母` 序列改为 `Command + Option + 数字`，工作台到收入依次对应 `1` 到 `6`\n- 快捷键：设置改为 `Command + Shift + Option + ,`，知识库改为 `Command + Shift + Option + K`，避免右侧导航区出现不符合习惯的双字母组合\n- 兼容：实际监听同时支持 `Ctrl` 替代 `Command`，方便非 Mac 键盘环境使用\n- 文档：快捷键帮助、命令面板提示、侧边栏提示和 AI 助手内置快捷键说明已同步更新"
   },
   {
-    "id": "CHANGELOG.md#184",
+    "id": "CHANGELOG.md#185",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3115,7 +3123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 功能：设计类型大类新增颜色字段，设置页「设计类型」中可为每个大类选择日历颜色\n- 日历：任务日历按任务所属设计类型大类上色；支持「大类 / 子类」新格式，也兼容历史只保存子类名称的任务\n- 色板：内置柔和备选色库，参考用户提供的紫、蓝、粉、蜜黄、薄荷、珊瑚、桃、开心果、冬青等配色\n- 新增大类：自动匹配当前未使用的备选颜色；备选色用完后按色板顺序循环兜底\n- 后端：Worker 保存和读取设计类型时会自动补齐颜色字段，旧 D1 设置无需迁移即可兼容"
   },
   {
-    "id": "CHANGELOG.md#185",
+    "id": "CHANGELOG.md#186",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3123,7 +3131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 交互：任务日历顶部在年月和「日 / 周 / 月」下拉后方补回左右切换按钮，月视图按月切换，周视图按 7 天切换，日视图按 1 天切换\n- 视觉：任务日历事件条和选中日期格改用首页 AI 科普条同款浅绿色底色，避免此前偏灰的绿色与工作台色系不一致\n- 维护：日历选中日期由外层统一驱动，顶部周期切换与日历主体保持同步"
   },
   {
-    "id": "CHANGELOG.md#186",
+    "id": "CHANGELOG.md#187",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3131,7 +3139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 交互：任务页进入「日历视图」时，左上角不再重复显示「任务」，改为直接显示当前年月，并把「日 / 周 / 月」切换收敛为旁边的下拉选择\n- 视觉：移除日历内部重复的「今天」、前后切换、内部年月标题和「月视图」副标题，避免同一屏出现两套日期导航\n- 视觉：任务日历事件条统一使用工作台同源的主题绿色，不再使用独立的多色状态条，保持与首页主色系一致\n- 维护：清理日历旧工具栏、状态色映射和未使用图标，确保顶部下拉真正驱动日 / 周 / 月视图"
   },
   {
-    "id": "CHANGELOG.md#187",
+    "id": "CHANGELOG.md#188",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3139,7 +3147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 交互：任务日历新增「日 / 周 / 月」三种显示方式，可在同一页面快速切换，接近 Google Calendar 的查看习惯\n- 月视图：改为全宽 7 列大网格，补齐上月 / 下月相邻日期，任务以横向色条展示，不再使用原来的小卡片月历 + 右侧当天面板\n- 周视图：新增一周时间轴，顶部显示每天计划，下面按 GMT+08 展示上午 7 点到晚上 11 点的时间网格\n- 日视图：新增单日时间轴，方便聚焦某一天的任务安排；有具体开始时间的任务会落到对应时间段，没有时间的任务展示在顶部计划区\n- 数据范围：日历视图改用全部未作废任务参与渲染，跨月周视图和相邻日期不再因为只传本月任务而空掉\n- 验证：已按 UI 规范阅读 `docs/DESIGN.md` 和 `docs/UX_OPTIMIZATION_AUDIT.md`，并用 Playwright 本地验证月 / 周 / 日切换可渲染"
   },
   {
-    "id": "CHANGELOG.md#188",
+    "id": "CHANGELOG.md#189",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3147,7 +3155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 业务口径：记录等待不再手动填写结束时间，只记录等待开始；等待结束点自动取同一任务里下一段「工作进展分段计时」的开始时间，且必须晚于等待开始时间\n- 洞察口径：前端等待汇总、验收面板等待汇总和后端 AI 洞察统一使用「等待开始 → 下一段工作进展开始」计算，不再把等待记录自身的结束时间当作人工截止\n- 交互：记录等待弹窗改为只填写开始时间和备注，并提示当前等待会在下一段工作进展开始时自动截止；没有下一段工作进展时显示为等待中\n- 快捷键：工作台顶部预计收入脱敏新增 `Command + Shift + M` / `Ctrl + Shift + M` 快捷键，可快速显示或隐藏金额\n- AI 科普：每日小知识会记住当前展示项和预加载队列，历史去重范围扩展到最近 80 条；AI 返回重复标题时最多重试 3 次，刷新页面后也尽量避免反复展示同一条\n- 发布修复：同步补齐 `appConfig.ts`、`package.json`、`package-lock.json`、`CHANGELOG.md` 与版本规范中的版本号，避免线上版本和仓库记录不一致"
   },
   {
-    "id": "CHANGELOG.md#189",
+    "id": "CHANGELOG.md#190",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3155,7 +3163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：结算单备注把「有实际工时的计划中任务」说成未计费，而表格里实际照常计费金额，口径矛盾；现在备注只统计真正未进结算表（无实际工时）的计划中任务\n- 视觉：文件库 / 知识库（笔记、收藏）空状态统一为直角纸张 `.empty-state` 样式，标题 + 引导文案两层结构\n- 视觉：洞察页左侧树在「项目诊断 / 需求人画像」无数据时新增弱化占位说明，不再直接留白\n- 视觉：清理知识库输入框、笔记卡片、按钮等遗留圆角与裸 hex 色值，统一走 `--color-*` token，符合 DESIGN.md 直角纸张规范\n- 开发体验：本地 `wrangler dev` 因 host 被重写导致强制 HTTPS 301 死循环，新增 `.dev.vars` 的 `LOCAL_DEV=1` 标记跳过跳转\n- 代码质量：worker.ts 两处 lint 错误清零（prefer-const）"
   },
   {
-    "id": "CHANGELOG.md#190",
+    "id": "CHANGELOG.md#191",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3163,7 +3171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 预计参考字段内嵌到日期输入格的网格第 2 列（实际值与日历键之间），彻底消除中间大片空白\n- 工时行同样将「预计」紧跟「小时」标签之后，三列网格整齐对齐"
   },
   {
-    "id": "CHANGELOG.md#191",
+    "id": "CHANGELOG.md#192",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3171,7 +3179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收进展模式下，开始时间 / 本段工时 / 结束时间行各增加「预计」参考值\n- 直接在行内可编辑：修改后失焦自动保存至任务，方便验收时对齐甲方预期\n- 仅在「本次进展为验收进展」开启时显示，不影响常规进展记录体验"
   },
   {
-    "id": "CHANGELOG.md#192",
+    "id": "CHANGELOG.md#193",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3179,7 +3187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件 chip 删除按钮改为右上角悬停显示的小圆形 ×，不占布局空间\n- 「继续添加」按钮去掉填充背景和文字，只留裸 + 号图标"
   },
   {
-    "id": "CHANGELOG.md#193",
+    "id": "CHANGELOG.md#194",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3187,7 +3195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每次新建任务提交时，无论是否使用 AI 建议，都记录最终选择的设计类型到 `task_type_choices` 表\n- AI 分类建议时注入历史选择样本（按大类分组，每类最近 3 条），作为最重要的分类依据\n- 修复：设计类型选择器过滤掉无子类的大类，避免出现空下拉菜单导致「选不了分类」的困惑"
   },
   {
-    "id": "CHANGELOG.md#194",
+    "id": "CHANGELOG.md#195",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3195,7 +3203,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设计类型管理面板中，每个小类标签新增铅笔按钮，点击后切换为内联输入框\n- 回车或失焦保存，Esc 取消，名称与同大类重复则自动回滚\n- 大类重命名（已有）+ 小类重命名（新增），类型管理完整支持编辑操作"
   },
   {
-    "id": "CHANGELOG.md#195",
+    "id": "CHANGELOG.md#196",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3203,7 +3211,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：补录任务（结算月≠任务日期月）的工时条目因日期在原月份被日收入明细过滤掉\n- 修复后：补录任务工时归入结算月第一天作为虚拟显示节点，在六月明细中正确显示\n- 补录条目在任务名右侧标注绿色「补录」标签以便区分"
   },
   {
-    "id": "CHANGELOG.md#196",
+    "id": "CHANGELOG.md#197",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3211,7 +3219,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 实际工时后追加「/ 预估 X.XX h」及偏差百分比徽章\n- 超出预估显示红色 +X%，低于预估显示绿色 -X%，0 不显示徽章\n- 数据直接来自任务字段 estimatedHours，无需改动数据层"
   },
   {
-    "id": "CHANGELOG.md#197",
+    "id": "CHANGELOG.md#198",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3219,7 +3227,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：worker.ts 的 parseTimeEntries 字段映射未包含 groupId，导致存入 D1 后读回来 groupId 全部丢失\n- 根因：右侧面板合并逻辑依赖 groupId，但每次从服务端拉取数据时字段被裁掉，多段工时始终以独立条目显示\n- 现在同一面板提交的多段工时可以正确合并为一张卡片"
   },
   {
-    "id": "CHANGELOG.md#198",
+    "id": "CHANGELOG.md#199",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3227,7 +3235,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：从右侧面板删除全部工时后，再次打开「记录进展」弹窗仍提示时间重叠的问题\n- 根因：localStorage 草稿缓存里残留了删除前的 timeEntries，覆盖了已清空的 task 状态\n- 修复方式：每次弹窗初始化时，timeEntries/waitingEntries 始终从 task 取最新快照，不允许被缓存覆盖"
   },
   {
-    "id": "CHANGELOG.md#199",
+    "id": "CHANGELOG.md#200",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3235,7 +3243,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除弹窗「处理中」卡顿问题：将附件归档与任务更新并行执行，`refreshState` 改为后台静默刷新\n- `handleUpdateTask` 完成后 UI 立即更新，不再等待全量状态重载，删除确认近乎即时响应"
   },
   {
-    "id": "CHANGELOG.md#200",
+    "id": "CHANGELOG.md#201",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3243,7 +3251,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 同一次「记录进展」里提交的多段工时，在右侧任务面板合并为一条进展记录\n- 最新一段作为主卡片标题（时间范围 + 进展备注），计时徽章显示多段总时长\n- 其余段以紧凑列表附在徽章下方，每段可单独编辑或删除\n- 每段提交时自动生成 groupId，兼容历史单段数据（无 groupId 保持原样显示）"
   },
   {
-    "id": "CHANGELOG.md#201",
+    "id": "CHANGELOG.md#202",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3251,7 +3259,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 当前正在填写的段也并入暂存列表，与已暂存段一起按时间降序排列，标注「编辑中」\n- 合计行紧跟在列表最下方，去掉多余的状态文字\n- 视觉上所有段统一呈现，段序号随排序实时更新"
   },
   {
-    "id": "CHANGELOG.md#202",
+    "id": "CHANGELOG.md#203",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3259,7 +3267,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 提取 `fillTimeDraftFromDuration` 工具函数，统一处理「只有一端时间时自动补全另一端」\n- 新增 reactive useEffect 监听 activeDraft 变化，任何时候一端为空都即时补全\n- 修复 `updateProgressMinutes` 和 `applyProgressDerivedField` 的多处边界情况处理\n- 等待模式草稿同样做补全修复"
   },
   {
-    "id": "CHANGELOG.md#203",
+    "id": "CHANGELOG.md#204",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3267,7 +3275,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：从缓存恢复草稿后，结束时间（或开始时间）显示为空占位符的问题\n- 现在打开弹窗时会自动根据已有开始时间 + 工时补全结束时间（如开始 12:00 + 1h → 结束自动填 13:00）"
   },
   {
-    "id": "CHANGELOG.md#204",
+    "id": "CHANGELOG.md#205",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3275,7 +3283,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每个暂存段新增铅笔编辑按钮：点击后将该段装回输入框修改，当前草稿若有效自动暂存\n- 暂存后按开始时间降序自动排序（最新的排最上），再加一段后排序实时更新"
   },
   {
-    "id": "CHANGELOG.md#205",
+    "id": "CHANGELOG.md#206",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3283,7 +3291,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 时间选择器分钟列从 30 分钟步进改为 5 分钟步进（00、05、10...55），可精确选择 :05/:35 等时间\n- 工时输入最小粒度保持 0.5h（30 分钟）不变"
   },
   {
-    "id": "CHANGELOG.md#206",
+    "id": "CHANGELOG.md#207",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3291,7 +3299,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复：暂存第一段后或删除暂存段后，「再加一段」按钮消失的问题\n- 只要有暂存段，按钮就保持可见；当前段未填完时按钮变灰（disabled）\n- 去掉虚线边框，改为轻量加号图标 + 文字按钮，与网站整体风格一致"
   },
   {
-    "id": "CHANGELOG.md#207",
+    "id": "CHANGELOG.md#208",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3299,7 +3307,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗支持在一次进展中录入多个不连续时间段\n- 填好第一段后点「＋ 再加一段」，自动以上一段结束时间为下一段开始时间，快速连填\n- 已暂存的段以列表形式展示（可单独删除），底部显示总段数和合计工时\n- 保存时所有段一起写入，自动累计到任务工时"
   },
   {
-    "id": "CHANGELOG.md#208",
+    "id": "CHANGELOG.md#209",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3307,7 +3315,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台「预计收入」默认显示 `¥ ****` 星号遮挡，防止旁边有人时泄露隐私\n- 旁边小眼睛图标，点击切换显示/隐藏，页面刷新后自动恢复隐藏状态"
   },
   {
-    "id": "CHANGELOG.md#209",
+    "id": "CHANGELOG.md#210",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3315,7 +3323,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 请求时传入完整历史（去掉 30 条限制），确保 AI 生成的内容也不会与历史重复"
   },
   {
-    "id": "CHANGELOG.md#210",
+    "id": "CHANGELOG.md#211",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3323,7 +3331,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复重复显示 bug：初始化和队列补充时均排除已看过的标题（历史记录未正确传入导致重复）\n- 历史记录永久存储，不再有上限，保证长期使用也不重复\n- 本地内容池从 19 条扩充到 34 条，新增：百慕大、拿破仑身高、Nike Logo、GPS 相对论、章鱼三心脏、峰终定律、克里奥帕特拉、番茄历史、\"东西\"语源、马拉松距离、太阳光延迟、信用卡诞生、庞贝早餐、整理书桌心理学等"
   },
   {
-    "id": "CHANGELOG.md#211",
+    "id": "CHANGELOG.md#212",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3331,7 +3339,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 所有弹窗均支持拖动（不限于进展弹窗）：通过 native DOM 事件重写拖动逻辑，修复原实现无法拖动的 bug\n- 拖动区域：弹窗顶部 96px（即标题栏区域），点击按钮/输入框不触发拖动\n- 每日小知识弹窗：关闭按钮移至右上角（X 图标），底部不再有关闭按钮\n- 收藏按钮改为纯星星图标（⭐），去掉文字和描边，更轻量"
   },
   {
-    "id": "CHANGELOG.md#212",
+    "id": "CHANGELOG.md#213",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3339,7 +3347,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展记录弹窗支持拖拽：鼠标悬停在标题栏出现拖拽光标，可随意拖动至屏幕任意位置\n- 单附件验收标记：记录进展时无需开启「本次验收」开关，也能对单个附件点击「标为验收文件」，保存后该文件自动进入文件库并打上「验收文件」标签（适用于直播等多子设计场景）\n- 每日小知识新增收藏按钮：点击 ♥ 收藏感兴趣的内容，自动存入知识库\n- 知识库增加左右分类导航：「我的笔记」和「AI 收藏」独立展示，收藏内容与自写笔记有视觉区分（粉色边框背景）"
   },
   {
-    "id": "CHANGELOG.md#213",
+    "id": "CHANGELOG.md#214",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3347,7 +3355,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 爱丽丝头像换为猫咪图片（圆形裁剪），header 小头像和欢迎页大头像同步更新\n- 修复输入框点击后出现分割线的问题：对 `textarea:focus` 和 `:focus-visible` 强制清除 border/outline/box-shadow，覆盖 webkit 默认 focus 样式\n- 修复主题模式下「计划中」与「进行中」行填充色相同的 bug：计划中改为 `#e3fdfd`（青白色），与进行中明显区分"
   },
   {
-    "id": "CHANGELOG.md#214",
+    "id": "CHANGELOG.md#215",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3355,7 +3363,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除所有样本数量上限，需求文案和任务名称的修改记录永久保留，越积越多越准确\n- 归纳机制从「每次从头重读全量样本」改为「增量蒸馏」：只处理上次归纳之后的新增样本（每批最多 30 条），将新发现合并进现有风格指导，历史知识不丢失\n- 用 `last_processed_id` 追踪每个类型上次处理到的样本位置，新样本加入后下次建议请求时自动续上处理，无需任何手动操作\n- 兼容旧表结构（自动 ALTER TABLE 添加新列）"
   },
   {
-    "id": "CHANGELOG.md#215",
+    "id": "CHANGELOG.md#216",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3363,7 +3371,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 任务建议新增「建议名称」：在需求文案建议卡片顶部显示，可独立点击「采用」应用到任务名称字段\n- 名称建议同样走完整学习闭环：采用后若有修改，提交任务时自动记录「AI 建议名 → 用户最终名」差异\n- 名称命名习惯按设计类型独立归纳（如：用户做海报时喜欢什么格式的名称），达 3 条样本后生成「命名风格指导」，注入到下次建议中\n- 新增 `task_title_edits` 表和 `/api/ai/task-title-edits` 接口"
   },
   {
-    "id": "CHANGELOG.md#216",
+    "id": "CHANGELOG.md#217",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3371,7 +3379,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 重构用户行为学习机制：不再把原始样本扔进 prompt，而是让 AI 归纳出「风格指导」后再注入\n- 按设计类型独立学习：海报/PPT/画册各自积累样本、各自归纳偏好，不再混淆类型\n- 每类保留最近 60 条样本，样本达 3 条时自动触发归纳，生成简洁的「风格指导」（约 200 字）缓存到 D1\n- 样本增加时自动使缓存失效，下次建议请求时重新归纳，持续学习用户的措辞偏好和删减习惯\n- 类型样本不足时退而使用全类型通用归纳，确保早期也有学习效果\n- 新增 `task_style_summaries` 表存储各类型风格指导"
   },
   {
-    "id": "CHANGELOG.md#217",
+    "id": "CHANGELOG.md#218",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3379,7 +3387,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 图片理解升级为「全面理解图片 → 识别用户意图 → 主动补全」：先理解图片的产品定位、内容结构、视觉风格，再结合用户描述识别意图，用图片中的准确完整信息补全用户简写\n- 新增「用户编辑行为学习」：用户采用 AI 建议后如有修改，提交任务时自动记录差异到 D1；下次调用建议时注入历史差异\n- 新增 `/api/ai/task-edits` 管理员接口"
   },
   {
-    "id": "CHANGELOG.md#218",
+    "id": "CHANGELOG.md#219",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3387,7 +3395,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 任务建议新增图文交叉校对：当附件为图片识别内容时，自动用图片中的完整官方名称补全用户描述中的简写（如\"融合防勒索\"→\"融合防勒索与零信任的一体化办公终端安全软件—星点御河\"）\n- 设计要求轻量化：只写甲方明确指定的颜色/版式约束；无明确视觉要求时，写\"参考附件样式，具体视觉方向对接时确认\"，不再自行规定主色调或风格"
   },
   {
-    "id": "CHANGELOG.md#219",
+    "id": "CHANGELOG.md#220",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3395,7 +3403,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 工作助手更名为「爱丽丝」，界面全面升级为现代卡片风格\n- 弹窗尺寸增大（680px × 80vh），视野更宽敞\n- 首屏欢迎页：大头像 + 「嗨，来和爱丽丝聊一聊」+ 3 个建议提问快捷入口\n- Header 新增「新建对话」「历史记录」按钮\n- 历史对话：全屏覆盖层，展示历史对话列表，点击可恢复，支持逐条删除（存 localStorage）\n- 内容范围弹出选择器：点击 toolbar 滑块图标，可分别开关「个人知识库」「全网搜索」（双开关可同时启用）\n- 输入框改为大圆角卡片，内含自增高 textarea + 底部工具栏（附件、内容范围、发送按钮）\n- 快捷键改为 `⌥A`（Option+A）打开/关闭，`⌥K` 跳转知识库"
   },
   {
-    "id": "CHANGELOG.md#220",
+    "id": "CHANGELOG.md#221",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3403,7 +3411,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧导航新增「知识库」页（仅管理员可见），支持添加/编辑/删除笔记，全页布局更易用\n- AI 工作助手支持快捷键 `G A`（先按 G 再按 A）快速打开/关闭\n- 知识库导航快捷键 `G K`\n- AI 对话框 Header 增加「知识库」开关 chip，绿色=已开启，灰色=已关闭，关闭后 AI 仅用内部数据回答\n- 弹窗位置改为屏幕正中央（`inset:0; margin:auto` 方案，不受动画 transform 干扰）"
   },
   {
-    "id": "CHANGELOG.md#221",
+    "id": "CHANGELOG.md#222",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3411,7 +3419,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 对话框 Header 新增\"书本\"图标，点击切换到「个人知识库」管理界面\n- 知识库支持添加标题/内容/标签，AI 对话时自动将全部笔记纳入知识上下文\n- 支持 Tavily 联网搜索：在 wrangler secret 配置 `TAVILY_API_KEY` 后，AI 遇到非数据类问题（设计技巧、行业资讯等）会自动搜索补充信息\n- 知识库 API 路由 `/api/knowledge` 仅对管理员开放，数据存储在 D1 `knowledge_notes` 表"
   },
   {
-    "id": "CHANGELOG.md#222",
+    "id": "CHANGELOG.md#223",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3419,7 +3427,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复 AI 对话中「今日收入」始终显示 0 的问题\n- 根因：worker 内错误地用 `new Date(\"10:30\")` 解析时间字符串（应拼合日期+时间再解析）\n- 同步修复：近期任务查询补上 `time_entries_json` 字段，扩大今日扫描范围，兼容结算月不同的任务"
   },
   {
-    "id": "CHANGELOG.md#223",
+    "id": "CHANGELOG.md#224",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3427,7 +3435,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 管理员顶栏新增 Bot 图标，点击打开悬浮对话框\n- 可多轮对话，知识库为全站数据（本月任务明细、今日计时、时薪、近期历史）\n- AI 以流式打字输出（SSE 流），使用已配置的主力文字模型（DeepSeek/OpenRouter/Gemini 均支持）\n- 问法举例：「今天赚了多少」「本月收入分析」「哪个任务工时最多」「近期有什么拖延的项目」"
   },
   {
-    "id": "CHANGELOG.md#224",
+    "id": "CHANGELOG.md#225",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3435,7 +3443,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「收入」页底部新增「日收入明细」区块，按日列出当月每天的工时和估算收入\n- 顶部说明自动显示今日已记录工时和估算收入；今日行高亮\n- 数据来源：任务的分段计时记录（timeEntries）"
   },
   {
-    "id": "CHANGELOG.md#225",
+    "id": "CHANGELOG.md#226",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3443,7 +3451,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右上角月份文字改为日历线性图标，避免与左侧标题重复\n- 移除顶栏 ⌘K 文字按钮（快捷键本身保留）\n- 问号改为 HelpCircle 图标，点击弹出快捷键面板\n- 修复 `?` 快捷键：在搜索框获焦时按 `?` 也能弹出快捷键面板，不再被搜索框吞掉（textarea/富文本区域内仍正常打字）"
   },
   {
-    "id": "CHANGELOG.md#226",
+    "id": "CHANGELOG.md#227",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3451,7 +3459,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除「画布视图」及全部关联代码（约 2200 行），含类型定义、CSS 和 TaskCanvasView 组件\n- 任务视图模式恢复为「列表」和「日历」两种；快捷键面板同步移除画布分组"
   },
   {
-    "id": "CHANGELOG.md#227",
+    "id": "CHANGELOG.md#228",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3459,7 +3467,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **沉浸全屏（~ 键）修复**：改用 `position: fixed; inset: 0` 确保画布内容正常显示，不再\"消失\"\n- **去掉重复顶栏**：删除独立的\"任务画布\"标题区，统一为画布内嵌顶栏，含 ‹ 项目面包屑、项目名、统计条、视图切换和 `~` 提示；项目文件夹视图同步整合\n- **画布底色消除**：点阵背景移入可滚动画布区（不再污染外层卡片区域），`var(--color-surface)` 融合页面\n- **删除黑色 port 圆形按钮**：两侧大圆球全部去除；右键菜单已覆盖添加节点操作\n- **删除节点左侧状态色描边**：不再有彩色左边框\n- **甲方文案附件**：去掉椭圆虚线框，改为内联文字链接样式\n- **toggle 开关隐藏**：画布表单中排期推导开关不再显示（三项自动推算逻辑保留）\n- **textarea 统一**：背景改为透明+下划线，与其他 input 保持一致\n- **AI 按钮精简**：「AI 工时」「AI 整理」只保留 Sparkles 图标，不显示文字\n- **Cmd+滚轮 / Cmd++- / Cmd+0 画布缩放**（0.25x–2x），拖拽坐标随缩放同步校正"
   },
   {
-    "id": "CHANGELOG.md#228",
+    "id": "CHANGELOG.md#229",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3467,7 +3475,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 **`~` 键沉浸全屏**：在画布模式按 ~ (波浪键) 一键收起左侧导航 + 顶栏 + 工具栏，整个显示器变成画布；再按一次恢复。离开画布模式自动退出沉浸。\n- **节点卡改为亮色主题**：背景改为 `--color-surface`，文字颜色正常，告别深色节点；下拉选项背景修复（之前暗色看不清）。\n- **「新项目草稿」顶栏去重设计**：从深色重型 pill 改为边框圆角轻卡，与整体轻设计风格一致。\n- **右键菜单（添加 / 删除节点）**改为亮色浮层样式，统一为全局上下文菜单规范。\n- 清理画布已删除的 Inspector 面板、底部 Shift+N 工具栏、compact 草稿组件等孤立 CSS，减少 ~110 行样式冗余。\n- 快捷键帮助新增「画布模式」分组，收录 `~` 沉浸切换和右键操作说明。"
   },
   {
-    "id": "CHANGELOG.md#229",
+    "id": "CHANGELOG.md#230",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3475,7 +3483,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 模型设置支持 **OpenRouter**：一个 key 即可调 GPT / Claude / Gemini / DeepSeek / Kimi 等主流模型，以及大量 `:free` 免费模型。\n- 后端支持 `OPENROUTER_API_KEY` Worker secret；OpenRouter 默认官方直连。\n- 新增「OpenRouter 免费模型」面板：**每天自动拉取全部免费模型并逐个实测可用性**（可用/限流/已下架），标注文字/识图与上下文长度；可「立即扫描」手动刷新，可用模型一键「设为文字/识图备用」。解决免费模型经常变动、不知道哪个还能用的问题。"
   },
   {
-    "id": "CHANGELOG.md#230",
+    "id": "CHANGELOG.md#231",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3483,7 +3491,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 交付件 AI 分析接入 Cloudflare Queues：上传/重试时入队，由专用消费者用**独立 CPU 预算**逐条分析，不再占用上传请求自身的预算；分析更稳、不易因超时失败。\n- 失败**自动重试**（最多 3 次），cron 仍作兜底；无队列时安全回退到原请求内处理。"
   },
   {
-    "id": "CHANGELOG.md#231",
+    "id": "CHANGELOG.md#232",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3491,7 +3499,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「导出 PDF」改为 Cloudflare Browser Rendering 服务端无头浏览器渲染：**清晰矢量文字**，告别浏览器端 html2canvas 的模糊与错位。\n- A4 版式：居中抬头、虚线分隔、客户信息行、任务表（序号 / 项目+需求摘要 / 类型 / 状态 / 工时 / 金额）、合计、人民币大写、本月不计时、备注；内置中文金额大写转换。\n- 接口仅管理员可用；导出失败时优雅回退浏览器打印。"
   },
   {
-    "id": "CHANGELOG.md#232",
+    "id": "CHANGELOG.md#233",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3499,7 +3507,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 顶栏新增「语义搜索」：输入自然语言（如\"之前那张邀请函长图\"\"官网 banner\"）即可**按意思找回历史任务**，而非关键词匹配，中英文均可；结果按匹配度排名，点击直达任务详情。\n- 底层用 Cloudflare Vectorize（向量库）+ Workers AI bge-m3 多语向量，任务标题/类型/需求/验收备注自动入库；新建或编辑任务后自动更新索引，管理员可一键「重建索引」。\n- 接口仅管理员可用（GET /api/search、POST /api/search/reindex）。"
   },
   {
-    "id": "CHANGELOG.md#233",
+    "id": "CHANGELOG.md#234",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3507,7 +3515,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 画布模式第一屏改为「项目文件夹」：每个项目是一只文件夹，双击后进入该项目自己的工作流画布，避免在同一张画布里反复创建多个任务节点。\n- 单项目画布默认只保留一个「任务节点」，并自动串联「进展节点 → 验收节点 → 结算节点」，和现有 Web UI 的任务生命周期保持一致。\n- 任务节点补齐 Web UI 字段：需求人、对接人、验收人、预计开始、预估工时、预计交付、不计费、补录、补录月份与补录说明。\n- 任务需求区补齐 AI 整理和甲方文案附件读取；预估工时补齐 AI 工时建议，并沿用“三项同时只激活两项，第三项自动推算”的时间工时规则。\n- 任务节点新增删除入口；未保存的草稿节点可直接删除返回项目文件夹。\n- 修复深色画布中预计开始 / 预计交付右侧日期按钮显示成白色方块的问题，统一为轻量小日历入口。"
   },
   {
-    "id": "CHANGELOG.md#234",
+    "id": "CHANGELOG.md#235",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3515,7 +3523,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「任务」页新增「画布模式」，与列表视图 / 日历视图并列，地址为 `/tasks?taskView=canvas`。\n- 画布改为真正的空白节点画板：深色点阵背景，支持右键添加节点、底部工具栏添加节点，以及 `Shift + N` 快速创建任务节点。\n- 任务节点不再弹出旧的新建任务面板，而是在节点内直接填写任务名称、设计类型、需求人、对接人、需求说明和起止时间；保存后写入同一套 D1 任务数据，并同步到工作台、任务列表、结算和洞察。\n- 节点右侧端口可继续连接进展、验收和结算节点；进展 / 验收节点第一版先复用现有记录面板，底层数据与原流程完全一致，不新增第二套数据模型。\n- 任务节点新增 AI 整理入口，可在画布里直接优化任务需求并匹配现有设计类型；缺失分类时先采用文案，不自动污染分类库。\n- 过程节点补齐 Web UI 的核心信息：展示进展数、等待数、可结算工时、最近 3 条进展和过程附件缩略图，减少节点只像“入口按钮”的割裂感。"
   },
   {
-    "id": "CHANGELOG.md#235",
+    "id": "CHANGELOG.md#236",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3523,7 +3531,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "申请口令时可选 4 档权限，鼠标移到选项上展示该档具体权限：\n- **协作者**：看管理员所见全部数据，可记进展/传附件/改任务；不能删除作废、锁定结算、改 AI Key、管理口令、改密码、导出清空。\n- **只读全局**：看全部数据但完全只读（适合对接测试/老板审阅）。\n- **甲方**：只看当月任务/进展/交付件 + 当月结算回单（含金额），只读；看不到往月与全年财务、看不到后台配置。\n- **对客访客**：只看进展和对客可见交付件，只读。\n\n安全：删除/作废、结算锁定、AI Key、口令管理、改密码、数据导出清空等敏感操作一律仅管理员。后端为真正的鉴权边界（按角色限定数据范围 + 写入白名单），前端按能力分级显示对应视图与按钮。老口令默认保持原「对客访客」行为。"
   },
   {
-    "id": "CHANGELOG.md#236",
+    "id": "CHANGELOG.md#237",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3531,7 +3539,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 简约回单新增「验收状态」「交付件理解」两列；编辑式 Excel 末尾新增「交付件理解」列并收窄「任务需求」列。\n- 交付件理解取该任务验收交付件的 AI 分析摘要（来自文件库），限高省略 + 悬停看全文。"
   },
   {
-    "id": "CHANGELOG.md#237",
+    "id": "CHANGELOG.md#238",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3539,7 +3547,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 简约 / 编辑式 Excel 回单**全宽展示**：抬头标题、类型、结算月份等不再因窄屏折行。\n- 删除「正式函」模板（与简约重复）；模板只剩 简约 / 编辑式 Excel。\n- 去掉左上角公司名（与「客户名称」重复）；客户信息四项横排一行。\n- 简约表新增「具体任务需求」列、去掉冗余「结算月份」列。\n- 编辑式 Excel 全宽下「任务需求」列加宽，展示更多文字（约 5 行，悬停看全文）。\n- 「本月不计时」每条加工时/公式列。"
   },
   {
-    "id": "CHANGELOG.md#238",
+    "id": "CHANGELOG.md#239",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3547,7 +3555,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 简约回单**去白底**：背景透明，让页面奶油色透出，不再套白框；参考小票排版——抬头居中、分隔线全改虚线、客户信息左标右值、任务表虚线分隔。\n- 模板合并：删「编辑式·Excel」，把「明细表」结构重命名为「编辑式 Excel」；正式函保留。顶部四个统计卡去底色；Excel 文件标签去红绿灯圆点改图标+文件名。\n- 「本月不计时」纳入计费任务里「不计工时」的分段（如仅改名）：逐条标注所属任务 + 不计原因（取该段备注）。\n- Excel 导出：「进展」列自动换行；「具体任务需求」不换行（双击看全文）；按进展内容自适应行高。"
   },
   {
-    "id": "CHANGELOG.md#239",
+    "id": "CHANGELOG.md#240",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3555,7 +3563,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「洞察 → 总结报告」新增可直接复制到周报的三段式内容：完成事项、投入情况、下步计划。\n- 总结报告新增“盘点时刻”：最晚奋斗时间、最吃工时任务、深夜仍在线，自动从分段计时、验收进展和附件上传记录中提取。\n- 深夜 22:00 后或 06:00 前发生的新建任务、验收进展、过程附件 / 验收附件上传会进入「夜间小传记」，方便月底复盘时看到真实工作节奏。"
   },
   {
-    "id": "CHANGELOG.md#240",
+    "id": "CHANGELOG.md#241",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3563,7 +3571,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增本轮 UI 排查记录，覆盖颜色 token、按钮层级、组件复用和布局收敛；把后续需要继续拍平的页面区域列为优化清单。\n- 洞察总结报告延续参考 HTML 的极简文档式排版，用横线、留白和文字层级替代重卡片。"
   },
   {
-    "id": "CHANGELOG.md#241",
+    "id": "CHANGELOG.md#242",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3571,7 +3579,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除与主表重复的「工时明细附表」整块（它的超长「具体任务需求」把行撑得很高）；编辑式只保留一张主表。\n- 编辑式主表「任务需求」列限高 3 行省略 + 悬停看全文，行不再被撑高。\n- 不计费任务移出主表，统一只在末尾「本月不计时」板块展示（本月无不计费任务则不显示）。\n- 修复「下载 User 表」点击无反应：导出加 try/catch，失败弹出明确错误。\n- 简约/编辑式回单去掉卡片外框、圆角阴影与米白底色，纯白扁平。"
   },
   {
-    "id": "CHANGELOG.md#242",
+    "id": "CHANGELOG.md#243",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3579,7 +3587,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「查看详情」里的「最近进展」（基于审计流水，补录任务会误显示成\"补录当天确认验收\"）改为「进展分段计时」：按真实工作日期展示，消除对甲方的时间歧义。"
   },
   {
-    "id": "CHANGELOG.md#243",
+    "id": "CHANGELOG.md#244",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3587,7 +3595,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「口令管理 / 账号安全」拆成二级 Tab；「修改密码」默认收起。"
   },
   {
-    "id": "CHANGELOG.md#244",
+    "id": "CHANGELOG.md#245",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3595,7 +3603,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除「工作阶段」「风险/阻塞」「修改轮次上限」字段（状态列已足够表达）。\n- 末尾新增「本月不计时」板块：列出已完成但不计费的任务及原因，让甲方知道活做了、只是没计入工时。\n- 去掉回单「印章」；简约/编辑式回单卡片底色改纯白，更清爽。\n- User Excel 导出固定行高 + 关闭自动换行：长内容不撑高表格，双击单元格看全文。"
   },
   {
-    "id": "CHANGELOG.md#245",
+    "id": "CHANGELOG.md#246",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3603,7 +3611,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复部分键盘按 `?` 没有打开快捷键帮助的问题，同时兼容 `Shift + /`。\n- 顶栏新增可点击的 `?` 轻量入口，用户不用记组合键也能打开快捷键列表。"
   },
   {
-    "id": "CHANGELOG.md#246",
+    "id": "CHANGELOG.md#247",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3611,7 +3619,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 使用手册新增「对外介绍功能点」说明，方便向甲方解释任务、工时、验收、结算、文件归档、洞察和快捷操作的价值。\n- README 核心能力同步补充快捷操作，保持仓库说明与正式站功能一致。"
   },
   {
-    "id": "CHANGELOG.md#247",
+    "id": "CHANGELOG.md#248",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3619,7 +3627,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增直接快捷键：`N` 新建任务、`P` 记录选中任务进展、`F` 打开文件库、`,` 打开设置。\n- 命令面板与快捷键帮助同步更新；左侧导航和「新建任务」入口显示轻量快捷键提示，方便直接记忆。"
   },
   {
-    "id": "CHANGELOG.md#248",
+    "id": "CHANGELOG.md#249",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3627,7 +3635,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「洞察」左侧新增「总结报告」入口，汇总当前周期任务数、计费工时、验收、等待、可预览附件和异常信号。\n- 报告正文按「本期结论 / 下一步动作 / 优先复核」组织，减少纯统计堆叠，更接近复盘文档。"
   },
   {
-    "id": "CHANGELOG.md#249",
+    "id": "CHANGELOG.md#250",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3635,7 +3643,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增内容沿用极简横线与文档式排版，不新增重卡片、阴影或裸色值。"
   },
   {
-    "id": "CHANGELOG.md#250",
+    "id": "CHANGELOG.md#251",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3643,7 +3651,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页顶部 Tab 改为一行：**外观 · 结算设置 · AI 模型设置 · 设计类型 · 权限安全 · 系统**。原「业务设置」拆成结算设置 / AI 模型设置 / 设计类型三个独立 Tab，排在外观之后。\n- AI 模型设置、设计类型仅管理员可见；Tab 行超宽时可横向滑动。"
   },
   {
-    "id": "CHANGELOG.md#251",
+    "id": "CHANGELOG.md#252",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3651,7 +3659,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 大类（展会类/品牌类/传播类/文档类）从双列卡片改为**左右滑动的选项卡**：点选项卡切换，拖动选项卡重排顺序，行尾「+」内联添加大类。选中大类下方显示重命名 + 子类数 + 删除。\n- 子类去掉圆角框/底色，改为纯文字，删除按钮悬停才出现。\n- 取消独立的「新增子类输入框 + 添加按钮」，改为子类行尾一个「+」图标：点一下内联添加、回车即增、可连续添加，省空间。"
   },
   {
-    "id": "CHANGELOG.md#252",
+    "id": "CHANGELOG.md#253",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3659,7 +3667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 启用 Cloudflare Workers AI（边缘自带开源模型，无需任何外部厂商 Key），接成「文字主模型 → 文字备用模型 → Workers AI」三层链路：任一外部厂商全挂时 AI 也不全死。\n- 默认模型 Llama 3.3 70B（可经环境变量覆盖），事件洞察、洞察诊断、各类 JSON 生成统一接入该兜底。"
   },
   {
-    "id": "CHANGELOG.md#253",
+    "id": "CHANGELOG.md#254",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3667,7 +3675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 业务设置 / 权限安全 / 系统 / 外观 从「从上往下堆叠的折叠面板」改为「顶部切换卡」，一屏只看一类。"
   },
   {
-    "id": "CHANGELOG.md#254",
+    "id": "CHANGELOG.md#255",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3675,7 +3683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 页内动作按钮（保存 AI 设置 / 添加大类 / 申请口令）对齐「列表视图 / 日历视图」语言：无填充无描边 + 线性图标 + 绿色加粗文字。\n- Workers AI 说明卡改为「税务估算参数·展开参数」式浅绿色块底、无描边。"
   },
   {
-    "id": "CHANGELOG.md#255",
+    "id": "CHANGELOG.md#256",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3683,7 +3691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **修复**：「获取模型」后的候选改用原生下拉 `<select>`（替换 datalist），并给模型输入框加 `autocomplete=off`，修复下拉被浏览器密码自动填充弹窗遮挡导致无法选择的问题。\n- **Base URL 一键「改走网关 / 改为直连」**：网关支持的供应商（DeepSeek / Gemini / OpenAI / OpenRouter / Anthropic）可在「AI Gateway 路径」与「官方直连地址」间一键互换，配合「测试」按钮分别验证哪种可用；底部实时标注当前走网关还是直连。\n- **Workers AI 说明卡**：介绍 Cloudflare 自带模型（Llama / Qwen / Flux 文生图 / Whisper / Embedding）、Neurons 计费（$0.011/1000 Neurons、每天免费 1 万 Neurons），规划为「DeepSeek/Gemini → Kimi → Workers AI」的终极兜底与未来全量迁移。"
   },
   {
-    "id": "CHANGELOG.md#256",
+    "id": "CHANGELOG.md#257",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3691,7 +3699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增轻量主按钮样式，应用于「保存 AI 设置 / 添加大类 / 申请口令」，从实心重彩改为淡色描边 + 极浅底，贴合全站极简调性。\n- 设计类型大类的删除、添加子类按钮去掉外框与底色，只留图标/文字，hover 才显意图。"
   },
   {
-    "id": "CHANGELOG.md#257",
+    "id": "CHANGELOG.md#258",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3699,7 +3707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **按能力分「文字模型 / 识图模型」选项卡**：两个标签页（参考工作台切换卡）分别管理对应能力，界面从「四卡平铺」收敛为「当前类别下只看主力 + 备用」两张卡，找配置一眼到位。\n- **供应商 ↔ Base URL 自动联动**：选择供应商时自动把 Base URL 填成该供应商对应的接入地址——DeepSeek / Gemini / OpenAI 默认指向 **Cloudflare AI Gateway** 对应路径（继续享受缓存 / 重试 / 用量看板），Kimi / OpenRouter / Anthropic 回退官方直连，并顺带带出该供应商的默认模型名，免去逐字手填。\n- **「获取模型」一键拉取供应商最新模型列表**：点按钮实时调用供应商 `/models` 接口（OpenAI 兼容与 Gemini 两套协议都支持），把可用模型拉成下拉候选（输入框 datalist），换模型直接选、不用记型号；切换供应商后旧列表自动失效避免误选。\n- **运行模式区精简**：去掉与每路由重复的「供应商 / Base URL / 模型名称」顶部字段，只保留运行模式选择；BAML Runtime 相关字段仅在选了 BAML Runtime 时才出现，默认更干净。\n- 拉取模型接口受管理员权限保护，使用各路由已保存 / 环境变量中的 Key 调用，前端不暴露密钥。"
   },
   {
-    "id": "CHANGELOG.md#258",
+    "id": "CHANGELOG.md#259",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3707,7 +3715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 按来源 IP 的登录失败限流：10 分钟内失败 6 次即临时锁定该 IP 10 分钟，锁定期一律拒绝登录（HTTP 429），成功登录立即清零；失败与锁定写入审计日志。纯 Worker + D1 实现，不依赖后台配置。"
   },
   {
-    "id": "CHANGELOG.md#259",
+    "id": "CHANGELOG.md#260",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3715,7 +3723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **错别字逐字校对 + 文案一致性检查**：视觉模型逐字 OCR 图中文字，检出错别字/漏字/标点/拼写，并与原始需求+验收备注比对（时间/地点/人名/标题/必含元素等），结果列入「质量问题」。\n- **超长图切片并行分析**（依赖 Cloudflare Image Resizing）：超长海报按高宽比自动垂直切 2-3 段（段间 5% 重叠不切断文字行），各段并行分析后合并去重——小字不再糊、检查更准更快、不会因超长而截断失败；未开启时优雅回退整图。"
   },
   {
-    "id": "CHANGELOG.md#260",
+    "id": "CHANGELOG.md#261",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3723,7 +3731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **全部 AI 调用接入 Cloudflare AI Gateway**：相同输入命中缓存（更快更省）、网关侧失败自动重试 3 次（抗 503）、全量请求日志与 token/花费看板；「换一条冷知识」跳过缓存保证每次新内容。\n- **多模型容灾**：文本主用 DeepSeek、视觉主用 Gemini，均以 **Kimi K2.6** 作为统一兜底——主模型异常时自动切换，AI 功能更稳。"
   },
   {
-    "id": "CHANGELOG.md#261",
+    "id": "CHANGELOG.md#262",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3731,7 +3739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **整体进度 AI 自动估算**：依据进展记录文字自动推断完成度并填充进度条，弱化预计时间权重，无需手动点选。\n- **新建任务支持甲方文案附件**：上传 Word/PDF/txt，AI 结合附件与你写的需求生成结构化任务单（需求为主、附件低权重参考）。\n- 进展/验收 AI 优化输出改为结构化分点；工时建议读懂「基于已有方案/复用」等备注上下文。"
   },
   {
-    "id": "CHANGELOG.md#262",
+    "id": "CHANGELOG.md#263",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3739,7 +3747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "致敬莫奈的睡莲池与吉维尼小院：把\"致敬\"长进产品骨架（色彩、季节、氛围），而非贴在皮肤上。"
   },
   {
-    "id": "CHANGELOG.md#263",
+    "id": "CHANGELOG.md#264",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3747,7 +3755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 全站可选主题，**默认关闭**，在「设置 · 外观 · 吉维尼模式」里手动开启；冷静的工具模式不受影响。\n- 开启后整套色系切换到莫奈花园：暖润底色、湿润睡莲绿主色、暖墨文字、极淡画布纹理、logo 旁睡莲签名。\n- **主题随季节自然流转**——\"同一片池塘、不同时节的水色\"：整片\"水面\"（表面色）按季节换色调，默认跟随当前真实季节，也可在设置里手动锁定某一季。\n- 四季均为白底低饱和柔和色（对齐 Claude 干净调性）：春 `#6b8a6e`、夏 `#6f8f88`、秋 `#b3a096`（柔和陶土）、冬 `#7a929d`；换季 0.9s 柔和过渡，不生硬。"
   },
   {
-    "id": "CHANGELOG.md#264",
+    "id": "CHANGELOG.md#265",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3755,7 +3763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 登录弹窗加印象派睡莲池氛围带（纯 CSS 柔焦色斑画一池睡莲，缓慢浮动）+ Giverny 字标与「让创作在自己的花园里生长」。\n- 登录按钮改为印章式 + 悬停\"晨光在水面漫开\"。"
   },
   {
-    "id": "CHANGELOG.md#265",
+    "id": "CHANGELOG.md#266",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3763,7 +3771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工具模式主色固定 `#3c6b61`，不随季节漂移（季节只在吉维尼模式生效）。\n- 任务明细「开启主题」**默认关闭**，用户手动打开才生效。\n- 语义状态色（已验收绿/进行中蓝/待验收琥珀/临期橙/逾期红）始终钉死，不随季节或模式漂移。"
   },
   {
-    "id": "CHANGELOG.md#266",
+    "id": "CHANGELOG.md#267",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3771,7 +3779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每种状态独立低饱和行填充，底色即可区分：计划中/其他=中性浅灰 `#eef0f1`、进行中=淡蓝 `#eaf0f4`、待验收=淡米 `#f5f0e6`、已验收=淡绿（`--color-primary 8%`）。\n- 临期/逾期覆盖状态填充：临期=暖橙 `#cf8b3e 14%`、逾期=干净红 `#c25450 12%`。\n- 状态点与角标同步换色：计划中 `#7a8590` 钢灰、进行中 `#3a7bb5` 明蓝、待验收 `#b08438` 哑琥珀、临期 `#cf8b3e`、逾期 `#c25450`。"
   },
   {
-    "id": "CHANGELOG.md#267",
+    "id": "CHANGELOG.md#268",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3779,7 +3787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「任务」列表的行此前没有 `data-status/data-due`，也没接主题开关 → 状态配色完全失效。现已补上，和「工作台」用同一套配色。\n- 主题开关（关闭主题/开启主题）提升为全局共享状态：在「工作台」或「任务」任一处切换都会同步另一处；「任务」列表工具条也新增了同一个开关。"
   },
   {
-    "id": "CHANGELOG.md#268",
+    "id": "CHANGELOG.md#269",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3787,7 +3795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件改为**添加即后台预上传**：选好文件的瞬间就开始上传，卡片上显示细进度条，传完显示「已上传，保存即用」。\n- 点「保存 / 确认验收通过」时附件多已传完，**保存基本秒回**，不再卡 ~30 秒（验收流程原本是串行逐个同步上传，是卡顿主因）。\n- 改名不重传：上传后改文件名只改服务端显示名（PATCH），不重新上传文件。\n- 删除待传附件会**同步删除已上传的服务端文件**，避免孤儿文件；「重新上传」会先删旧的再传新的。\n- 草稿复用稳定 entryId：关闭后重开再保存，预上传的文件仍能正确挂到最终生成的进展条目上。\n- 仅 UI/上传时机优化，工时计算、结算、验收提交逻辑保持不变。"
   },
   {
-    "id": "CHANGELOG.md#269",
+    "id": "CHANGELOG.md#270",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3795,7 +3803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「计时 +Xh」胶囊改为实底深 sage 绿 + 反白字（对齐「60%」进度档样式），又深又明显；不计工时为实底中性灰胶囊。"
   },
   {
-    "id": "CHANGELOG.md#270",
+    "id": "CHANGELOG.md#271",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3803,7 +3811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务行默认复用「最近任务」那条的暖米色填充（`--color-alert-surface`）。\n- 已验收行复用「科普小知识」那条的绿色填充（`color-mix(--color-primary 8%, surface-strong)`）。\n- 统一、低饱和、无边框无标记；临期/逾期仍由右侧角标提示。"
   },
   {
-    "id": "CHANGELOG.md#271",
+    "id": "CHANGELOG.md#272",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3811,7 +3819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 去掉选中行的同色左竖条与悬停/选中描边；任务行只保留统一的低饱和度底色，无额外边框或标记。"
   },
   {
-    "id": "CHANGELOG.md#272",
+    "id": "CHANGELOG.md#273",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3819,7 +3827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 按需求统一为低饱和度单色填充：每个状态一个很浅的低饱和底色，整体再降饱和。\n- 不再区分深浅：悬停 / 选中不再加深底色；选中改用 3px 同色左标记 + 极淡边框区分（左标记用伪元素，避开全站无阴影基线）。"
   },
   {
-    "id": "CHANGELOG.md#273",
+    "id": "CHANGELOG.md#274",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3827,7 +3835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 按需求把暖色从粉红改为暖黄系递进：待验收=奶油黄（平静）、临期=橙（提醒）、逾期=红（紧迫）；不再偏粉。角标与圆点同步。"
   },
   {
-    "id": "CHANGELOG.md#274",
+    "id": "CHANGELOG.md#275",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3835,7 +3843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 待验收 / 临期 / 逾期的粉红色调重调为更干净明快的珊瑚红系（降低发灰发脏感）：待验收偏玫瑰、临期珊瑚、逾期更深更急；仍可用「关闭主题」一键还原中性绿。"
   },
   {
-    "id": "CHANGELOG.md#275",
+    "id": "CHANGELOG.md#276",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3843,7 +3851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 Word / PPT / Excel 缩略图：用 docx-preview / pptx-preview / exceljs 离屏渲染首页 / 首张幻灯片 / 首个工作表，再用 html2canvas 栅格化为 PNG 并持久化（自愈机制，旧文件也会补全）。生成失败或空白时回退到类型角标。\n- 至此 PDF / 图片 / 视频 / PSD / Word / PPT / Excel 均支持真实缩略图。"
   },
   {
-    "id": "CHANGELOG.md#276",
+    "id": "CHANGELOG.md#277",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3851,7 +3859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务明细标题旁新增「关闭主题 / 开启主题」按钮：关闭后任务行颜色还原为中性绿（不随状态联动），选择持久化到本地。"
   },
   {
-    "id": "CHANGELOG.md#277",
+    "id": "CHANGELOG.md#278",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3859,7 +3867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复选中/悬停行发脏：旧逻辑把填充色和深墨色 color-mix（粉+深绿=脏暗粉）。改为每个状态一组干净浅马卡龙 `--row-fill` 做底、`--row-strong` 做悬停/选中，绝不掺墨；选中再加 2px 同色左标记。"
   },
   {
-    "id": "CHANGELOG.md#278",
+    "id": "CHANGELOG.md#279",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3867,7 +3875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「计时 +Xh / 不计工时」改为胶囊标签，视觉更清爽。\n- 修复不计工时记录：① 时间不再被强制成当前时刻，可自己选；② 修复 0 时长记录被排到末尾的 bug（按开始时刻排序，最新在上）；③ 新增 `isUncounted` 标记，时间照常显示与排序，但计 0 工时、不进结算。"
   },
   {
-    "id": "CHANGELOG.md#279",
+    "id": "CHANGELOG.md#280",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3875,7 +3883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增视频（MP4/MOV/WebM 等）首帧缩略图；自愈机制扩展到视频、PSD/AI（PDF 已支持）。\n- Word / PPT / Excel 缩略图需要把渲染后的页面栅格化（较重），将作为单独一步实现。"
   },
   {
-    "id": "CHANGELOG.md#280",
+    "id": "CHANGELOG.md#281",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3883,7 +3891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 计划中改为 `#E6FBDA`（马卡龙薄荷绿）。\n- 临期 / 逾期改为红色系（紧迫感）：临期 `#FAD3CE`（浅，将到期），逾期 `#F4ABA2`（更红更急，已超期）；「临期 / 已逾期」角标也同步改红。\n- 行填充算法改为「直接用柔和马卡龙实色」，浅色（薄荷绿、浅粉）也能干净显示，悬停 / 选中混入少量墨色加深。\n- 已验收绿、进行中蓝、待验收玫瑰保持。"
   },
   {
-    "id": "CHANGELOG.md#281",
+    "id": "CHANGELOG.md#282",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3891,7 +3899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 待验收：改用 Nectarine `#D7897F`（马卡龙玫瑰）。\n- 临期：改用 Pêche `#F9B95C`（马卡龙蜜桃，浅，将到期）；逾期：改用 Marigold `#E59D2C`（马卡龙万寿菊，更深更急，已超期）。两者浓淡区分。\n- 已验收绿、进行中蓝、计划中紫保持不变。"
   },
   {
-    "id": "CHANGELOG.md#282",
+    "id": "CHANGELOG.md#283",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3899,7 +3907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 普通进展（非验收）新增「计入工时 / 不计工时」开关。关闭后本次计 0 工时、仅作进展记录，照常出现在时间轴（显示「不计工时」），适合「对方只给了点修改反馈，想留个记录但不算工时」的场景。\n- 关闭计时后无需填写时间段，有备注或附件即可保存；0 时长记录不参与时间段重叠校验，也不影响实际工时与结算。"
   },
   {
-    "id": "CHANGELOG.md#283",
+    "id": "CHANGELOG.md#284",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3907,7 +3915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 待验收换成低饱和马卡龙玫瑰 `#c79bb0`，比原来的赭色干净舒服。\n- 「临期」与「逾期」区分为两个概念、两种马卡龙色：临期=琥珀 `#d9b06a`（将到期），逾期=珊瑚 `#d98a78`（已超期）；行填充与「临期/已逾期」角标都同步。\n- 已验收绿、进行中蓝、计划中紫保持不变。"
   },
   {
-    "id": "CHANGELOG.md#284",
+    "id": "CHANGELOG.md#285",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3915,7 +3923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务行填充色与状态联动（低饱和、随悬停/选中加深）：已验收=绿、进行中=蓝、计划中=紫、待验收=赭；临期/逾期优先用低饱和橙。"
   },
   {
-    "id": "CHANGELOG.md#285",
+    "id": "CHANGELOG.md#286",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3923,7 +3931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复部分 PDF（多为早期上传或上传时预览生成失败的）只显示「PDF」角标、没有首页缩略图的问题。\n- 新增机制：对缺少预览图的 PDF，前端后台渲染首页为 PNG 并回传持久化（新增 `POST /api/files/:id/preview` 接口，仅管理员）。补全后时间轴、文件库、分享回单都会显示真实缩略图，且只生成一次。"
   },
   {
-    "id": "CHANGELOG.md#286",
+    "id": "CHANGELOG.md#287",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3931,7 +3939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 清理 git 仓库历史遗留的 loose objects 与 gc 告警。"
   },
   {
-    "id": "CHANGELOG.md#287",
+    "id": "CHANGELOG.md#288",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3939,7 +3947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已验收任务默认折叠：在「全部」筛选下，未完成任务（计划中/进行中/待验收）进主列表，已验收收进底部「已验收 N 个 ▾」可展开分区，滚动条不再被历史任务越拖越长。\n- 兜底分页：未完成与已验收列表都先展示一页（15 条），超出显示「展开剩余 N 条 / 收起」；选了具体状态时直接全量展示，不折叠。"
   },
   {
-    "id": "CHANGELOG.md#288",
+    "id": "CHANGELOG.md#289",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3947,7 +3955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 题材池扩容：新增财经/股票、商务礼仪、谈判沟通技巧、爱情故事、约会小技巧、关系心理、治愈系、各国历史、历史上的今天等方向，名人介绍明确包含生平与传说故事（如莫奈《睡莲》、黄仁勋）。\n- 篇幅放开：正文由固定 3 段改为 2-5 段、每段约 40-180 字，值得展开的题材可写更长更完整；阅读弹窗正文区独立滚动，长内容也能读完。\n- 不编造实时新闻/当日热点等可证伪的时效性内容（“历史上的今天”这类有定论的可以）。"
   },
   {
-    "id": "CHANGELOG.md#289",
+    "id": "CHANGELOG.md#290",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3955,7 +3963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件支持直接拖拽文件到附件框上传，拖拽时附件区高亮提示；原有点击选择与粘贴上传保留。\n\n> 合并说明：另一台机器的并行提交 `a9fba7e`（收入趋势叠层柱 + 结算分享统一回单，原 v0.11.93）已确认包含在当前主线中，无功能丢失。其要点：\n> - 收入趋势改为税前 / 税后叠层柱，只展示有工时 / 金额 / 已锁定结算的真实月份，不再显示空月份或预估柱。\n> - 移除后台独立「甲方查看」预览入口；公开分享链接展示同款结算回单（含 PDF / User 表下载、交付文件预览、进展附录）。"
   },
   {
-    "id": "CHANGELOG.md#290",
+    "id": "CHANGELOG.md#291",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3963,7 +3971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 旧逻辑用正则扫描进展备注里的「反馈/修改/调整/改稿/返工/第X轮」等词来数改稿轮次，会把「任务分阶段提交」误判为改稿。已废弃。\n- 新增显式开关：记录进展时可打开「本次为改稿轮次」。打开才计入需求人画像的改稿轮次；不打开仅视为分阶段提交。改稿数据只参与画像/AI 分析，**不影响计时与结算**。\n- 字段存于分段计时 JSON（`isRevision`），无需数据库迁移；画像的「平均改稿」与相关特征改为基于该显式标记统计。"
   },
   {
-    "id": "CHANGELOG.md#291",
+    "id": "CHANGELOG.md#292",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3971,7 +3979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 刷新页面不再每次都弹出整页「正在连接工作台 / 正在读取数据」卡片。改为：把上次成功加载的状态快照存入 localStorage，刷新时先用快照秒开当前界面，后台 refreshState 完成后无感更新（stale-while-revalidate）。\n- 退出登录会清除该快照，避免登出后短暂闪现管理员数据。首次冷启动（无快照）仍显示加载页。"
   },
   {
-    "id": "CHANGELOG.md#292",
+    "id": "CHANGELOG.md#293",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3979,7 +3987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复进展备注 / 附件没有和上方进度条右缘对齐的问题：分段项原本整体右内边距 48px，现仅给「时间行」预留躲避悬停按钮的空间，备注与附件用满整宽对齐右缘。\n- 进展正文字号统一为 13.5px。"
   },
   {
-    "id": "CHANGELOG.md#293",
+    "id": "CHANGELOG.md#294",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3987,7 +3995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 去卡片化：`本月洞察` 外层补丁底色（#f5f6f1）和描边全部去掉，内部「设计类型工时分布 / 工时趋势 / 年度统计」也去掉卡片边框与底色，与页面同色、靠留白和分区标题分隔，融为一体。"
   },
   {
-    "id": "CHANGELOG.md#294",
+    "id": "CHANGELOG.md#295",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -3995,7 +4003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复趋势全是 0.0 的 bug：旧逻辑读取进展记录的 `update.hours`（恒为 0，工时其实存在分段计时 timeEntries 里），改为汇总各任务 timeEntries 的实际分钟数。\n- 统计维度由「按周（5 段）」改为「按天」：本月有多少天就画多少个点，配合 Catmull-Rom 平滑曲线、稀疏坐标标签、仅峰值标数值，得到更平滑美观的日曲线。"
   },
   {
-    "id": "CHANGELOG.md#295",
+    "id": "CHANGELOG.md#296",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4003,7 +4011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展备注字号由 16px 调小为 13.5px，与全站正文一致，不再偏大。"
   },
   {
-    "id": "CHANGELOG.md#296",
+    "id": "CHANGELOG.md#297",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4011,7 +4019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 去掉右键菜单 / 子菜单 / 月份选择器 / 命令面板 / Toast 的发丝线描边，改用柔和投影做图底分离（无描边更干净）。"
   },
   {
-    "id": "CHANGELOG.md#297",
+    "id": "CHANGELOG.md#298",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4019,7 +4027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 按需求把所有浮层改回浅色：右键菜单 + 子菜单、月份选择器、命令面板 ⌘K、Toast 统一为浅色纸面 + 墨色文字 + 发丝线边框（命令面板原本是深色，本次也改浅）。\n- 移除 v0.11.107 为深色浮层加的圆角覆盖规则，浮层回到与全站一致的直角。\n- 深墨反白令牌（`--color-menu*`）保留在 `:root` 备用，留待后续暗黑模式统一启用，不在亮色模式渲染。"
   },
   {
-    "id": "CHANGELOG.md#298",
+    "id": "CHANGELOG.md#299",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4027,7 +4035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复左侧导航与右侧主区\"两个颜色\"的分裂感：`.app-shell` 与 `.sidebar` 统一为同一张纸面 `#FBFBF8`，移除侧栏右侧分隔线；只有凹陷分区（详情面板等）才用更深一档纸面。"
   },
   {
-    "id": "CHANGELOG.md#299",
+    "id": "CHANGELOG.md#300",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4035,7 +4043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右键菜单、子菜单、月份选择器由浅色面板改为「深墨反白」`#20302C`：浅色反白字、8px 圆角、无描边无阴影，靠明暗对比浮起；月份网格选中态用 menu-accent 绿。\n- Toast 由浅底卡片改为深墨反白条（8px 圆角、accent 圆点、无阴影），不再堆叠投影。\n- 修复全站「直角基线」误伤：`[class$='-menu'] / -popover` 的 `!important` 直角规则会把深墨浮层一起压成直角，已为这些浮层补回 8px / 命令面板 12px 圆角（用真实祖先选择器提优先级，避开 lightningcss 对重复类名的合并）。\n- 控件圆角令牌 `--radius-control` 恢复为 4px（按钮 / 输入），分区仍为 0。"
   },
   {
-    "id": "CHANGELOG.md#300",
+    "id": "CHANGELOG.md#301",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4043,7 +4051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "> 只更换视觉，不改任何业务、数据与功能。对照桌面 `giverny-redesign/DESIGN_SYSTEM.md` 完成换肤。"
   },
   {
-    "id": "CHANGELOG.md#301",
+    "id": "CHANGELOG.md#302",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4051,7 +4059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 基础调色板对齐设计规范：主色统一为单支鼠尾草绿 `#3C6B61`（sage），纸面三档 `#FBFBF8 / #F4F4EE / #ECEDE5`，墨色文字 `#1F2A27 / #586460 / #949C96`，发丝线改用墨色低对比 `rgba(31,42,39,.08/.14)`。\n- 状态色全面降饱和：进行中冷蓝 `#4B7BA8`、待办/逾期赭 `#94652F`、已验收 sage、挂起灰紫 `#7A6E94`、危险 `#97474A`。"
   },
   {
-    "id": "CHANGELOG.md#302",
+    "id": "CHANGELOG.md#303",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4059,7 +4067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务列表状态由彩色胶囊改为「降饱和 6px 小圆点 + 弱色文字」，不再五色齐飞。\n- 指标大数字（总工时 / 计费工时 / 预计收入）、任务行日期与工时改用衬线体（Iowan Old Style），呈现年报 / 杂志式高级感；指标标签加字距。"
   },
   {
-    "id": "CHANGELOG.md#303",
+    "id": "CHANGELOG.md#304",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4067,7 +4075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复「验收进展」分段在时间轴下方不显示验收附件缩略图的问题。根因：验收附件上传时这条验收进展尚未创建，文件 `entryId` 为空，又因 `task.acceptanceFiles` 未回填，名称兜底匹配同样落空，导致两条匹配路径都不命中。\n- 现改为：一个任务只有一条验收进展，凡 `scope=acceptance` 且未绑定到具体分段（entryId 为空）的验收附件，统一归属并显示在该验收进展下方；已按名称登记的附件仍照常兜底。"
   },
   {
-    "id": "CHANGELOG.md#304",
+    "id": "CHANGELOG.md#305",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4075,7 +4083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复字段重命名（对接人 → 需求人）后的遗留：结算回单与明细表中标着「需求人」的列实际仍在渲染 `contact`（对接人）字段，导致同一任务在任务明细列表显示 A、结算报表显示 B 的不一致。\n- 统一所有结算表（回单、月度明细、共享报表）的需求人列为 `requester || contact` 兜底顺序，与工作台任务列表、需求人画像和 SharedReport 一致；回单首表表头由「对接人」改为「需求人」。"
   },
   {
-    "id": "CHANGELOG.md#305",
+    "id": "CHANGELOG.md#306",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4083,7 +4091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除「历史视角」与「运行诊断」两个按钮及对应的 AI 诊断展示区，洞察页面更聚焦核心分析。\n- 需求人画像新增两个维度判断：\n - **修改轮次**：根据平均改稿轮次判断该需求人是否频繁要求改稿（>2 轮提示来回成本高，≤1 轮为定稿利落）。\n - **延迟率**：根据未按时交付占比（100% − 按时率）判断是否常拖期（≥40% 提示排期需多留缓冲，<10% 为节奏稳）。\n- 重申：洞察功能仅对管理员开放，游客与甲方成员访问时显示「仅管理员」提示面板。"
   },
   {
-    "id": "CHANGELOG.md#306",
+    "id": "CHANGELOG.md#307",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4091,7 +4099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复已验收任务右侧进展面板整体进度显示为 0% 的问题；已验收任务继续显示 100%，但进度档位保持锁定不可改。"
   },
   {
-    "id": "CHANGELOG.md#307",
+    "id": "CHANGELOG.md#308",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4099,7 +4107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收进展上传验收附件时同步绑定到对应时间记录，右侧时间线会直接显示缩略图。\n- 已经上传过但没有绑定时间记录的验收附件，会按验收文件名兜底回显到对应「验收进展」下方，无需重新上传。"
   },
   {
-    "id": "CHANGELOG.md#308",
+    "id": "CHANGELOG.md#309",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4107,7 +4115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已验收或已存在「验收进展」的任务不再允许新增普通进展，右侧「+ 记录进展」、任务行快捷入口、右键菜单和进度档位同步锁定。\n- 编辑已有「验收进展」时会显示「本次进展为验收进展」开关；关闭后保存会把该记录改回普通进展，并将任务回到「待验收」，方便继续补充进展后重新验收。"
   },
   {
-    "id": "CHANGELOG.md#309",
+    "id": "CHANGELOG.md#310",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4115,7 +4123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录 / 编辑验收进展弹窗不再渲染顶部重复说明，避免基础信息收起时出现被裁切的文字残影。"
   },
   {
-    "id": "CHANGELOG.md#310",
+    "id": "CHANGELOG.md#311",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4123,7 +4131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 编辑已有普通进展时，如果任务尚未验收且没有验收进展，会显示「本次进展为验收进展」开关，可直接把当前记录升级为验收进展并完成验收闭环。\n- 转为验收进展时复用当前分段记录，不新增重复时间轴；已有附件会一并纳入本次验收文件名记录。\n- 如果任务已经存在其他验收进展，编辑旧进展时不再提供该开关，保证一个项目只有一个验收进展。"
   },
   {
-    "id": "CHANGELOG.md#311",
+    "id": "CHANGELOG.md#312",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4131,7 +4139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「对接人画像」统一改为「需求人画像」，画像分组只按任务需求人统计，不再用对接人兜底。\n- 项目诊断中的人员展示同步改为需求人，保持“需求人主导项目、需求人即验收人”的业务口径。\n- 后台洞察追踪触发器同步改为按需求人判断综合时薪与主观反馈集中问题，避免 AI 分析继续沿用对接人口径。"
   },
   {
-    "id": "CHANGELOG.md#312",
+    "id": "CHANGELOG.md#313",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4139,7 +4147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 过程附件恢复后台 AI 分析：保存进展后继续上传并排队分析，不再因为分析过程阻塞弹窗保存。\n- 右侧“工作进展分段计时”的进展 / 验收 / 等待备注默认折叠为三行，点击备注正文可展开或收起，避免长备注撑满整个侧栏。"
   },
   {
-    "id": "CHANGELOG.md#313",
+    "id": "CHANGELOG.md#314",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4147,7 +4155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 过程附件改为后台上传：先保存进展文字与时间，弹窗无需等待大文件全部传完；上传失败仍会通过站内提示反馈。\n- 过程图片上传前会自动压缩，压缩后更小才替换原文件；验收附件保持原质量与原有严格上传流程。\n- 过程附件上传从保存动作里拆出，减少保存进展时的前台等待。"
   },
   {
-    "id": "CHANGELOG.md#314",
+    "id": "CHANGELOG.md#315",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4155,7 +4163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- PDF 新增本地缩略图生成兜底，已有 PDF 没有预览图时也会尝试从源文件渲染第一页。\n- 记录进展里的新增附件改为桌面图标式排列：缩略图与文件名在同一个附件项内上下对应，不再图和名称分离成两排。\n- 大文件上传分片从 90MB 阈值下调到 12MB，并使用更小分片，提高上传反馈与稳定性。"
   },
   {
-    "id": "CHANGELOG.md#315",
+    "id": "CHANGELOG.md#316",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4163,7 +4171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台和任务管理列表右侧人员字段改为优先显示「需求人」，没有填写需求人时再回退显示对接人，避免把对接人与需求人混用。"
   },
   {
-    "id": "CHANGELOG.md#316",
+    "id": "CHANGELOG.md#317",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4171,7 +4179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 收入趋势改为参考稿式的税前 / 税后叠层柱，只展示已有工时、金额或已锁定结算的真实月份，不再显示 7-12 月这类无数据月份，也不再做预估柱。\n- 月度收入明细同步收束为真实发生月份；税务累计计算仍保留全年口径，避免隐藏空月份影响累计税额。"
   },
   {
-    "id": "CHANGELOG.md#317",
+    "id": "CHANGELOG.md#318",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4179,7 +4187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 后台结算页移除独立“甲方查看”预览入口，结算核对统一围绕同一张回单进行。\n- 公开分享链接改为展示同款结算回单，并保留 PDF 下载、User 表下载、交付文件预览和进展附录，甲方看到的结算结构与后台保持一致。"
   },
   {
-    "id": "CHANGELOG.md#318",
+    "id": "CHANGELOG.md#319",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4187,7 +4195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧设置弹层进一步压平为导航内的信息面板，不再像独立卡片一样悬浮出来。"
   },
   {
-    "id": "CHANGELOG.md#319",
+    "id": "CHANGELOG.md#320",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4195,7 +4203,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗右上角新增「不计费」开关。打开后任务从创建起即为不计费：不计入计费工时与收入。\n- 但仍会出现在结算回单里——以 ¥0 行单独列出（标注「不计费」/「免费协助，不计入结算金额」），合计金额与计费工时不受影响。\n- 后端 createTask 支持以「不计费」状态创建（is_billable=0）。"
   },
   {
-    "id": "CHANGELOG.md#320",
+    "id": "CHANGELOG.md#321",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4203,7 +4211,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「已验收」不再允许通过右键「改任务状态」实现（该菜单本就不提供该项）；若有其他入口请求改为已验收，会提示「请在右侧『记录进展』里通过验收完成」，确保验收闭环（工时汇总、进度 100%）。"
   },
   {
-    "id": "CHANGELOG.md#321",
+    "id": "CHANGELOG.md#322",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4211,7 +4219,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 通过右键「改状态 → 已验收」快速验收时，只改了状态没把整体进度设为 100%（之前停留在 80% 等历史值）；现已在该路径补上 `progress: 100`。\n- `taskDisplayProgress` 增加兜底：任务状态为「已验收」时整体进度恒显示 100%，修正历史数据中「已验收但进度未到 100%」的展示（工作台列表、任务抽屉、详情一致生效）。"
   },
   {
-    "id": "CHANGELOG.md#322",
+    "id": "CHANGELOG.md#323",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4219,7 +4227,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 明确定位：对接人画像是对「这个对接人本身」的多维考察，而非交付文件内容洞察（后者属于「交付件理解」，不再混入画像）。\n- 移除上一版加入的「验收附件与甲方反馈分析」区（甲方关注点 / 质量问题 / 风险 / 改进建议——这些属于文件库交付件洞察）。\n- 新增「这位对接人的特征」区：把数据翻译成对人的判断，例如「验收通过率高，多数一次过」「需求表达明确，改稿少、工时贴近预估」「单项目耗时偏长 / 偏短（与你其他对接人对比）」「需求相对简单、好交付，较容易获得工时（性价比高）」「确认及时 / 偏慢」「工时可预估，报价风险低」等，按好 / 一般 / 注意三色标注。\n- 核心指标保留并补充「单项目均时」（与全体对接人均值对比，用于判断耗时偏长/偏短）。"
   },
   {
-    "id": "CHANGELOG.md#323",
+    "id": "CHANGELOG.md#324",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4227,7 +4235,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 核心指标从 6 项扩到 8 项，并改为可对账的真实维度：合作项目、计费工时、验收率、**准时交付率**、**平均工时偏差**、**平均改稿轮次**、等待耗时、验收附件数。\n- 新增「体感与配合」区：按验收时记录的「顺利 / 一般 / 有问题」做分布条，并把高频反馈标签（需求不清晰 / 沟通成本高 / 定价偏低 / 技术挑战大）按出现次数列出。\n- 新增「验收附件与甲方反馈分析」区：统计验收附件数、反馈/截图数、附件 AI 分析出的质量问题与风险数；并把 AI 从**甲方反馈截图 / 验收稿**里归纳的「甲方关注点」和「改进建议」直接列出——把对接过程中上传的验收人建议与截图纳入画像参考。\n- 综合评级（A/B/C）改为按验收率、准时率、工时偏差、改稿密度、等待、体感问题加权；责任标签按信号给「需重点跟进 / 确认偏慢 / 配合顺畅」。\n- 「报价 / 排期 / 协作建议」从单句升级为按命中的信号生成多条可执行建议（如需求易变→报价上浮、改稿成本高→约定反馈时限与改稿轮次上限、验收附件少→主动留存确认截图等）。"
   },
   {
-    "id": "CHANGELOG.md#324",
+    "id": "CHANGELOG.md#325",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4235,7 +4243,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 重新加载时若「本地存的是管理员凭证、但后端返回的角色被降级」（如密码已修改），主动清除旧凭证并提示「管理员登录已失效，请重新登录」，不再静默降级成只读（金额隐藏、附件预览 401）却毫无提示。\n- 登录时记录当时的角色用于该检测；旧版本地凭证无该字段时不会误触发。"
   },
   {
-    "id": "CHANGELOG.md#325",
+    "id": "CHANGELOG.md#326",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4243,7 +4251,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **颜色 token 收敛**：把 159 处与设计变量等值的硬编码色值替换回 `var(--color-*)`（纯等值替换，视觉零变化），消除「改一次主色却有几百处不跟着变」的漂移风险。\n- **字阶收敛**：把半步/杂散字号（9 / 10.5 / 11.5 / 13.5 / 14.5 / 17 / 19 / 21 / 23px 及冗余的 15px）归并到统一字阶；工作台正文字号种类从 18 降到 14，排版更成体系。"
   },
   {
-    "id": "CHANGELOG.md#326",
+    "id": "CHANGELOG.md#327",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4251,7 +4259,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 上传 PDF 附件时，前端用 pdfjs 渲染第一页为 PNG 作为预览图；进展/验收分段记录里的 PDF 现在显示真实首页缩略图，而不是「PDF」文字角标。\n- 仅对**新上传**的 PDF 生效；此前已上传的 PDF 需重新上传才会生成缩略图。"
   },
   {
-    "id": "CHANGELOG.md#327",
+    "id": "CHANGELOG.md#328",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4259,7 +4267,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「时间与工时」标题右侧新增「计入工时 / 不计入工时」开关，**默认计入**（保持原有开始/工时/结束三选二联动）。\n- 关闭后：本次验收不新增工时——开始/工时/结束三项整体置灰禁用，提示「本次验收不计入工时，已汇总工时保留不变，可直接保存 / 验收」，且「确认验收 / 保存修改」按钮保持可用。\n- 之前已汇总的工时记录原样保留，仅本次验收的这一两分钟小改动不计入总工时。\n- 解决「已验收任务点击编辑后，想把本次工时算 0 / 直接保存」无法实现的问题。"
   },
   {
-    "id": "CHANGELOG.md#328",
+    "id": "CHANGELOG.md#329",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4267,7 +4275,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 统一计费口径为单一来源 `isTaskBillable`：与后端 `is_billable` 完全一致——**任务状态不影响计费**，只有「不计费」任务被排除，其余一律按「计时与工时汇总」（实际工时）计费。\n- 修复结算回单、甲方分享页、User 工时 Excel 之前额外排除「计划中」导致的口径不一致：当月回单顶部总额（取自工作台 stats）与回单明细行此前可能对不上（明细少算了带工时的计划中任务）。现已对齐。\n- **金额不再四舍五入到元**：每行金额取真实值并精确到「分」（如 1.5h × ¥85 = ¥127.5，原来会被抹成 ¥128），中间过程不做整元取整；总额为各真实行金额之和，保证「明细金额之和 === 总额」，彻底消除「可能差几元对不上」。新增 `roundCents` / `formatYuan` / `sumBillableAmount`，并同步到工作台预计金额、验收预计金额、年度收入表、当月/历史回单、锁定结算（worker）与甲方分享页（分享页改用精确单价反推，保证每行加总恰好等于已锁定总额）。\n- 回单明细只展示「有工时的计费任务」（`actualHours > 0`），不再因放开计划中而混入金额为 0 的空行；计划中数量仍在备注中单独提示。"
   },
   {
-    "id": "CHANGELOG.md#329",
+    "id": "CHANGELOG.md#330",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4275,7 +4283,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 仅影响“显示与新锁定”的金额计算；已锁定的历史结算金额为冻结值，不受影响。\n- 含小数工时的金额现在如实显示小数（¥127.5 / ¥130.05），不再抹成整元；整元与半小时工时显示不变（例：2.5h × ¥85 = ¥212.5）。"
   },
   {
-    "id": "CHANGELOG.md#330",
+    "id": "CHANGELOG.md#331",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4283,7 +4291,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右键“改任务状态”不再提供“挂起”和“终止”，避免后续统计工时、周期和结算时产生额外分支。\n- 任务页状态筛选同步移除“挂起”和“终止”；底层状态兼容保留，用于读取历史数据。"
   },
   {
-    "id": "CHANGELOG.md#331",
+    "id": "CHANGELOG.md#332",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4291,7 +4299,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录 / 编辑验收进展时，时间与工时区域上移到备注前面，优先处理本次验收对应的时间段。\n- 验收备注和验收附件改为紧邻展示，保持验收说明与交付材料成组，不再被时间工时拆开。"
   },
   {
-    "id": "CHANGELOG.md#332",
+    "id": "CHANGELOG.md#333",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4299,7 +4307,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 作废任务弹窗去掉重复的顶部图标和“作废任务”小标题，只保留确认标题与必要说明。\n- 作废任务不再要求填写选填原因，减少低频字段对确认流程的干扰。\n- 作废、删除等确认弹窗的底部操作改为轻量文字式交互，取消和危险操作不再使用厚重按钮。"
   },
   {
-    "id": "CHANGELOG.md#333",
+    "id": "CHANGELOG.md#334",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4307,7 +4315,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已验收或已经存在“验收进展”的任务，不再显示右键“快速改进度”，避免验收后被改回 40% / 60% 等非闭环进度。\n- 删除右键菜单里的“更多操作”，保留查看、编辑、记录进展、验收、状态变更和作废等核心操作。"
   },
   {
-    "id": "CHANGELOG.md#334",
+    "id": "CHANGELOG.md#335",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4315,7 +4323,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧主导航改回参考稿的纯文字目录，去掉导航图标、白底选中块和账户设置卡片感。\n- 任务列表 hover 时不再浮出编辑 / 洞察 / 验收快捷图标，保留右键菜单作为主要快捷入口。\n- 洞察目录去掉右侧数量、“当前”和状态字样，去掉目录卡片外壳与多余分割线，长项目名继续保持不溢出。\n- 结算页操作按钮改为轻量文字操作，模板切换回归下划线式标签；收入页趋势图和参数区继续压平，减少卡片和重按钮观感。"
   },
   {
-    "id": "CHANGELOG.md#335",
+    "id": "CHANGELOG.md#336",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4323,7 +4331,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 洞察、收入、设置和结算页继续向参考 HTML 的极简平面分区靠拢，减少补丁式卡片、边框和块状输入框。\n- 修复洞察目录长任务名溢出、分割线越界和简约结算模板横向滚动问题；宽表只保留在编辑式 Excel / 明细模板中。\n- 结算页支持查看已锁定的历史月份，历史行可直接下载对应 User 工时 Excel；甲方分享页也新增 User 表下载入口。"
   },
   {
-    "id": "CHANGELOG.md#336",
+    "id": "CHANGELOG.md#337",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4331,7 +4339,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务统一从“计划中”开始，进度保持 0%；计划中任务的记录进展、记录等待和快速改进度入口会禁用，改为“进行中”后才进入真实执行。\n- 洞察与 AI 诊断排除“计划中”阶段，真实生命周期优先按分段进展计时推导，并以验收进展的时间段作为验收结束点，避免补录任务被系统流水时间误判。\n- 等待率只统计手动记录的等待时间，不再用自然日跨度减计费工时推断；没有等待记录时等待率为 0，避免出现凭空 99% 等待占比。"
   },
   {
-    "id": "CHANGELOG.md#337",
+    "id": "CHANGELOG.md#338",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4339,7 +4347,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 洞察页参考新版 HTML 改为「周期复盘 / 项目诊断 / 对接人画像」目录树，右侧展示数据、诊断、建议和项目链路，不再只是静态统计卡片。\n- 结算页新增模板切换：简约、编辑式 Excel、明细表、正式函；沿用现有任务、工时、验收和锁定分享数据，不改变表字段结构。\n- 收入页保留现有税前 / 预扣税 / 税后算法，视觉上改为更轻的指标横排和纸张式趋势区。\n- 设置页继续使用现有设置项和权限逻辑，外层改为参考稿的折叠分组与行式表单语言。"
   },
   {
-    "id": "CHANGELOG.md#338",
+    "id": "CHANGELOG.md#339",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4347,7 +4355,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧“工作进展分段计时”中的验收进展现在支持删除；删除带工时的验收进展会同步扣减实际工时与结算金额，并把任务回到待验收。\n- 编辑验收进展弹窗的顶部说明改为完整换行显示，不再被截断。\n- 开始时间和结束时间支持日期联动；直接改开始日期时，结束日期会同步到同一天并保留原结束时刻。\n- 手动输入开始/结束时间时按真实分钟计算，例如 10:00 到 10:10 会保存为 10 分钟；直接调整“本段工时/预估工时”数字时，步进保持 0.5 小时。"
   },
   {
-    "id": "CHANGELOG.md#339",
+    "id": "CHANGELOG.md#340",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4355,7 +4363,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已验收任务里的验收文件现在可以删除；删除前会明确提示这是“撤回验收文件”。\n- 删除验收文件后，任务状态会自动从“已验收”回到“待验收”，进度回到 80%，实际交付时间清空，方便补传文件后重新验收。\n- 后端同步放行两个受控修正通道：验收进展工时回修、验收文件删除后的状态撤回；普通已验收工时和状态仍保持锁定。"
   },
   {
-    "id": "CHANGELOG.md#340",
+    "id": "CHANGELOG.md#341",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4363,7 +4371,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧时间线中的“验收进展”点击编辑时，统一打开完整的记录验收进展面板，不再只弹出备注小窗。\n- 完整面板会回显验收备注、验收附件、附件改名/删除/补传、时间与工时公式、整体进度、工时汇总和任务体感反馈。\n- 已验收后通过该面板保存时，可修正验收进展工时并重新计算实际工时；无分段记录时保存备注/附件不会把原实际工时误清零。"
   },
   {
-    "id": "CHANGELOG.md#341",
+    "id": "CHANGELOG.md#342",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4371,7 +4379,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧时间线中的“验收进展”如果带有真实分段计时，点击编辑会重新打开记录进展弹窗，可修正开始时间、结束时间、本段工时和备注。\n- 保存验收进展公式修正后，会重新计算实际工时；仅验收进展记录开放该修正通道，普通已验收工时仍保持锁定。\n- 无新增计时的验收进展继续提供轻量备注编辑入口，不影响已锁定工时。"
   },
   {
-    "id": "CHANGELOG.md#342",
+    "id": "CHANGELOG.md#343",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4379,7 +4387,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收进展即使没有主动新增工时，也会在右侧“工作进展分段计时”顶部显示一条“验收进展”记录，展示验收备注和验收附件。\n- 通过验收进展新增了实际分段计时的记录，时间后标签统一显示为“验收进展”，保持右侧时间线表达一致。\n- 补显记录只作为验收闭环说明，不计入可结算工时，避免默认时间误改实际工时。"
   },
   {
-    "id": "CHANGELOG.md#343",
+    "id": "CHANGELOG.md#344",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4387,7 +4395,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 通过“本次进展为验收进展”保存出的分段计时，会在右侧进展时间后显示“本验收进展”标签。\n- 验收进展标记会随时间记录一起保存，后续刷新或重新打开任务时仍能识别，不依赖临时弹窗状态。"
   },
   {
-    "id": "CHANGELOG.md#344",
+    "id": "CHANGELOG.md#345",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4395,7 +4403,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 编辑已有分段进展时，已有附件从缩略图升级为可维护列表，完整显示文件名并保留悬停放大和点击预览。\n- 已有附件支持直接改名、AI 辅助命名、删除和重新添加；从桌面重新选择已改名文件时，会按新的本地文件名加入同一条进展。\n- 直接点击“保存修改”前会兜底保存附件改名草稿，避免文件名输入未失焦时漏同步。"
   },
   {
-    "id": "CHANGELOG.md#345",
+    "id": "CHANGELOG.md#346",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4403,7 +4411,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件悬停预览移到页面最外层渲染，不再被记录进展弹窗的滚动区域或右边界裁切。\n- 宽屏编辑弹窗优先把放大图放在附件区右侧空白位置，充分利用表单空间；窄屏或侧栏场景继续使用就近小预览。"
   },
   {
-    "id": "CHANGELOG.md#346",
+    "id": "CHANGELOG.md#347",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4411,7 +4419,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 编辑已有分段进展时，附件区会回显当前记录已绑定的全部附件，不再只显示文字与时间。\n- 已有附件继续支持缩略图、悬停放大和点击完整预览；本次新上传文件单独归组展示。\n- 保存修改继续沿用原分段记录 ID，既有附件关联不会被覆盖或解除，新附件会追加到同一条进展。"
   },
   {
-    "id": "CHANGELOG.md#347",
+    "id": "CHANGELOG.md#348",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4419,7 +4427,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 上传过程附件或验收附件后立即显示参考稿式缩略图；图片展示真实缩略图，其他文件展示文件类型。\n- 缩略图支持鼠标悬停放大预览和点击打开完整预览，保存后继续跟随对应分段显示在任务进展时间轴。"
   },
   {
-    "id": "CHANGELOG.md#348",
+    "id": "CHANGELOG.md#349",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4427,7 +4435,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收模式按参考源码重排为“验收开关 → 基础信息 → 验收备注 → 附件 → 时间与验收核对”，减少来回查找。\n- 基础信息默认折叠，需要核对任务名称、人员、排期、结算月份和需求描述时再展开。\n- 继续保留真实工时累计、等待记录、附件入库、AI 文案与文件命名、体感反馈和验收结算逻辑。"
   },
   {
-    "id": "CHANGELOG.md#349",
+    "id": "CHANGELOG.md#350",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4435,7 +4443,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- “确认验收”并入“记录进展”，可通过“本次进展为验收进展”直接进入收尾验收；任务列表和详情中的验收入口统一打开同一套界面。\n- 验收备注、验收附件与本次进展不再重复填写，提交时会一并记录最终进展、更新工时并完成验收闭环。\n- 验收模式默认不会把表单预填时间误计入工时；只有主动调整时间后，新增时段才会进入实际工时和结算。"
   },
   {
-    "id": "CHANGELOG.md#350",
+    "id": "CHANGELOG.md#351",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4443,7 +4451,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 合并界面继续展示任务基础信息、整体进度、分段工时、预计结算、等待记录和任务体感反馈，确认前可在同一处完成核对。\n- 验收区改为与现有纸张式弹窗一致的轻量分隔和按钮层级，并补齐窄屏单列排版。"
   },
   {
-    "id": "CHANGELOG.md#351",
+    "id": "CHANGELOG.md#352",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4451,7 +4459,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库搜索框复用全站轻量搜索语言，改为小图标、弱提示文字和单条发丝线，不再使用旧式带框输入控件。\n- 月份与项目树移除多余横线，项目使用轻量文件夹图标和常规字重，仅当前项目获得必要强调。\n- 验收文件卡按参考稿改为紧凑自适应画板；单个文件不再拉满页面高度，也不再重复显示“甲方可见”标签。"
   },
   {
-    "id": "CHANGELOG.md#352",
+    "id": "CHANGELOG.md#353",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4459,7 +4467,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件卡和右侧详情不再嵌入浏览器原生 PDF 工具栏，避免大面积黑边；优先展示生成的预览图，无预览时使用安静的文件类型占位。\n- 右侧检查器缩短预览高度，下载、重新分析、打开原文件和删除恢复为轻量操作层级。\n- AI 分析的置信度改为独立结论标签，需求匹配、质量分析、风险与建议继续保留在验收文件详情中。"
   },
   {
-    "id": "CHANGELOG.md#353",
+    "id": "CHANGELOG.md#354",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4467,7 +4475,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库继续只读取 `acceptance` 验收附件；补录说明与验收备注继续使用独立字段。\n- 验收草稿仍只缓存未保存的备注、附件和体感反馈，分段工时与等待记录始终实时读取任务数据。"
   },
   {
-    "id": "CHANGELOG.md#354",
+    "id": "CHANGELOG.md#355",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4475,7 +4483,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库改为参考稿的“月份树 → 项目 → 验收文件”层级，月份可折叠并直接显示项目数与文件数，项目切换不再依赖独立月份下拉框。\n- 搜索提升到文件库主区域，可统一检索文件、项目、标签和关联任务；搜索时自动展开匹配月份，减少额外操作。\n- 验收文件区恢复稳定四列画板，文件详情打开后不再压缩文件卡片；文件卡保留格式、甲方可见、验收文件和标签信息。"
   },
   {
-    "id": "CHANGELOG.md#355",
+    "id": "CHANGELOG.md#356",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4483,7 +4491,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件详情改为参考稿的覆盖式右侧纸张抽屉，支持遮罩、关闭按钮和 Escape 关闭，不再作为常驻第三列挤压页面。\n- 抽屉保留文件预览、重命名、标签、元数据、下载、打开原文件和删除操作。\n- 交付件理解继续在文件抽屉展示 AI 摘要、需求匹配、质量分析、风险与建议及重新分析能力。"
   },
   {
-    "id": "CHANGELOG.md#356",
+    "id": "CHANGELOG.md#357",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4491,7 +4499,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务新增独立的补录说明字段，创建、编辑、详情和验收核对均不再借用验收备注保存补录原因。\n- 现有未验收补录任务会把历史误存的验收备注迁回补录说明，并清空尚未发生验收的备注，避免验收时修改补录说明或影响结算信息。\n- 已验收历史任务不自动推断补录说明，并保留原验收备注，避免迁移误判或误删已经完成闭环的验收数据。"
   },
   {
-    "id": "CHANGELOG.md#357",
+    "id": "CHANGELOG.md#358",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4499,7 +4507,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗只读取独立验收备注；补录说明作为只读基础信息单独展示，方便核对但不会互相覆盖。\n- 验收本地草稿升级到新版本缓存键，隔离旧版曾混入补录说明的浏览器缓存。\n- 任务详情和编辑任务表单新增独立补录说明展示与编辑入口。"
   },
   {
-    "id": "CHANGELOG.md#358",
+    "id": "CHANGELOG.md#359",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4507,7 +4515,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库改为只展示验收环节上传的最终交付成果；记录进展中的截图和过程文件继续留在对应进展中，并继续参与 AI 洞察，但不再进入文件库。\n- 附件新增明确的 `acceptance / progress` 来源字段，不再依赖文件名或标签推测用途；验收上传会直接标记为最终验收文件。\n- 过程附件保留期设为两个月，Cloudflare 定时任务会分批清理过期的 D1 记录、分析结果、R2 源文件和预览文件；验收文件不参与自动清理。"
   },
   {
-    "id": "CHANGELOG.md#359",
+    "id": "CHANGELOG.md#360",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4515,7 +4523,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库排版向参考稿收敛为项目列表、验收文件画板和右侧纸张式检查器，去掉过程文件造成的视觉噪音。\n- 原洞察页“交付件理解”迁入文件库右侧详情，保留 AI 摘要、需求匹配、质量分析、风险与建议及重新分析能力。\n- 甲方月报和共享文件统一只读取验收文件，避免过程截图被误当成正式交付成果。"
   },
   {
-    "id": "CHANGELOG.md#360",
+    "id": "CHANGELOG.md#361",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4523,7 +4531,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展附件新增分段记录关联，后续上传时会明确记录所属的工作进展或等待记录。\n- 删除分段计时 / 等待记录时，关联附件会同步从文件库、任务附件和洞察分析中归档；撤回最近删除记录时，附件同步恢复。\n- 文件库、甲方共享、附件预览、源文件读取和洞察分析统一排除已归档附件，避免已删除进展的文件继续残留。"
   },
   {
-    "id": "CHANGELOG.md#361",
+    "id": "CHANGELOG.md#362",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4531,7 +4539,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 清理湖南展厅任务中已删除进展遗留的 4 个历史附件，仅保留当前进展截图与正式交付 PDF。\n- 两张同名进展截图经 R2 文件哈希核验内容完全一致，保留较新记录并关联到当前有效分段。"
   },
   {
-    "id": "CHANGELOG.md#362",
+    "id": "CHANGELOG.md#363",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4539,7 +4547,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗的本地草稿只保留验收备注、验收附件和任务体感反馈，不再携带任务基础信息、分段工时或等待记录。\n- 分段计时与等待记录在验收时始终实时读取当前任务数据，避免本地历史 / 测试草稿混入验收，影响实际工时和结算金额。\n- 旧草稿缓存读取时增加附件和反馈标签的结构校验，避免旧数据形状异常影响验收弹窗稳定性。"
   },
   {
-    "id": "CHANGELOG.md#363",
+    "id": "CHANGELOG.md#364",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4547,7 +4555,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Gemini / Kimi 视觉命名改为结构化 JSON 响应，并兼容数组内容与 tool call 参数，避免模型真实返回被前端误判为空。\n- Kimi K2.6 输出预算提高到可完整返回识别结果；视觉模型无结果时不再生成无效长兜底命名。\n- 发布前已使用真实图片在 Cloudflare 预览版本跑通 Gemini 主链路，返回可采纳短文件名“Giverny品牌Logo图标.png”。"
   },
   {
-    "id": "CHANGELOG.md#364",
+    "id": "CHANGELOG.md#365",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4555,7 +4563,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除分段计时 / 等待记录的确认弹窗去掉多余图标和小标题，保留关键确认信息。\n- 删除后增加“撤回”操作，可恢复最近一条误删的分段或等待记录。"
   },
   {
-    "id": "CHANGELOG.md#365",
+    "id": "CHANGELOG.md#366",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4563,7 +4571,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件 AI 命名的视觉模型等待时间从短超时调整为 30 秒，给 Gemini / Kimi 视觉识别、OCR 和推理留下完整响应时间。\n- 移除“按任务标题和进展内容硬拼文件名”的无效兜底；视觉模型没有返回可用短名称时，只提示失败原因，不再伪造建议。\n- AI 命名增加短名称校验，过滤超长句子、错误原因、超时提示和不可用文案，避免把无效信息展示成可采用文件名。"
   },
   {
-    "id": "CHANGELOG.md#366",
+    "id": "CHANGELOG.md#367",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4571,7 +4579,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 开始时间、本段工时、结束时间改为复用新建任务的三变量时间组件样式，统一开关、下划线输入、日期选择入口和灰显推算字段。\n- 本段工时移除突兀的大输入框，改为轻量行内工时输入；保留三变量推算、交换、重叠校验和保存前工时提示。"
   },
   {
-    "id": "CHANGELOG.md#367",
+    "id": "CHANGELOG.md#368",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4579,7 +4587,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 开始时间、结束时间、本段工时升级为三变量公式：三项同时只激活两项，第三项自动推算，支持直接锁定 1 小时并按结束时间反推开始时间。\n- 记录进展与记录等待共用同一套计时逻辑，保存前会继续校验结束时间、时间段重叠和跨类型冲突，避免计时或等待重复累计。\n- 交换按钮恢复为纯左右互换；如果互换后结束时间早于开始时间，保存按钮保持不可用，由用户自行修正结束时间。"
   },
   {
-    "id": "CHANGELOG.md#368",
+    "id": "CHANGELOG.md#369",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4587,7 +4595,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录进展附件文件名改为只编辑主文件名，原始扩展名独立显示并自动保留，避免误改扩展名导致文件不可用。\n- 记录进展弹窗保存前支持草稿保留：误关后再次打开会恢复进展内容、时间、附件和附件命名状态。\n- 全局弹窗支持 `Command + S` / `Control + S` 触发当前弹窗的保存按钮；双击弹窗外空白处可关闭，但未保存草稿仍会保留。"
   },
   {
-    "id": "CHANGELOG.md#369",
+    "id": "CHANGELOG.md#370",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4595,7 +4603,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复视觉模型已经配置且正常响应时，因返回格式不够标准而被错误提示为“API Key 未配置”的问题。\n- AI 文件命名增加容错解析：除标准 JSON 外，也能识别模型返回的文件名字段别名和单行名称，并继续保留原文件扩展名。\n- 模型确实请求失败、返回内容无效或密钥缺失时，现在分别显示对应原因，避免配置问题与输出格式问题混淆。"
   },
   {
-    "id": "CHANGELOG.md#370",
+    "id": "CHANGELOG.md#371",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4603,7 +4611,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 过程附件改为保存前本地草稿：支持删除、重新上传和直接修改文件名，确认记录后才统一写入 R2，误传文件不再提前进入文件库。\n- 附件上传区支持直接粘贴剪贴板图片，并自动生成可继续编辑的截图文件名。\n- 新增附件 AI 命名建议：视觉模型结合图片标题与场景、任务需求、进展内容和既有命名习惯给出建议，可单个分析、批量分析并一键采用。\n- AI 命名使用后台视觉主备链路，优先 Gemini，异常时自动切换 Kimi 2.6；非图片文件仍可基于任务上下文和历史文件名建议名称。"
   },
   {
-    "id": "CHANGELOG.md#371",
+    "id": "CHANGELOG.md#372",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4611,7 +4619,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复每日知识后台预加载完成后自动替换当前阅读内容的问题。\n- 后台补货现在只更新待用内容池；当前知识仅在用户主动点击「换一条 / 换一篇」时切换，阅读过程中不再突然跳走。"
   },
   {
-    "id": "CHANGELOG.md#372",
+    "id": "CHANGELOG.md#373",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4619,7 +4627,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务和编辑任务表单在「需求人」旁补齐「对接人」与「验收人」字段，三者并排呈现。\n- 验收人默认跟随需求人；用户手动修改验收人后，后续需求人变更不再覆盖自定义内容。\n- 表单保存、草稿缓存、任务审计字段和创建 / 编辑逻辑同步使用需求人、对接人、验收人三套字段。"
   },
   {
-    "id": "CHANGELOG.md#373",
+    "id": "CHANGELOG.md#374",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4627,7 +4635,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每日知识新增 10 条预加载队列，打开工作台后会先用本地内容池补足，保证「换一条」可以立即替换。\n- AI 每日知识改为后台补池：模型生成的新内容会逐步替换队列内容，刷新时不再让用户等待请求完成。"
   },
   {
-    "id": "CHANGELOG.md#374",
+    "id": "CHANGELOG.md#375",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4635,7 +4643,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「换一条」按钮和阅读弹窗里的「换一篇」统一走同一套秒切逻辑。\n- AI 不可用或额度波动时自动回退本地内容池，保持内容池至少 10 条可用。"
   },
   {
-    "id": "CHANGELOG.md#375",
+    "id": "CHANGELOG.md#376",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4643,7 +4651,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每日知识本地内容池继续扩展，新增乐器科普、冷笑话、名人介绍、名画故事、奇怪小知识、电影冷知识、日用品来历和未解之谜等方向。\n- 每日知识正文支持局部重点短语标记，延续参考稿“少量加粗、段落呼吸感”的阅读排版。"
   },
   {
-    "id": "CHANGELOG.md#376",
+    "id": "CHANGELOG.md#377",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4651,7 +4659,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 每日知识提示词改为“工作间隙随手翻到的一页杂志”定位，允许在艺术、人文、历史、科学、生活、音乐、电影、奇怪知识等更宽栏目中轮换。\n- 明确限制每段最多强调一个关键词，避免生成内容变成通篇加粗或设计类固定话题。"
   },
   {
-    "id": "CHANGELOG.md#377",
+    "id": "CHANGELOG.md#378",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4659,7 +4667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「编辑信息 / 编辑任务」入口统一复用当前「新建任务 / 补录」纸张式表单，不再弹出旧版卡片化编辑框。\n- 清理旧编辑表单专用组件与样式残留，避免后续入口再次回流到旧 UI。"
   },
   {
-    "id": "CHANGELOG.md#378",
+    "id": "CHANGELOG.md#379",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4667,7 +4675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航页改为和工作台一致的左列表、右详情布局。\n- 点击任务行只选中当前任务，并在右侧查看信息、进展、等待记录与操作入口，不再直接弹出详情面板。"
   },
   {
-    "id": "CHANGELOG.md#379",
+    "id": "CHANGELOG.md#380",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4675,7 +4683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 本月总工时、计费工时、预计收入和验收情况四个核心数字改为全站正文使用的无衬线字体，不再使用 Georgia 衬线体。\n- 数字字重由 700 收轻为 600，保留统计焦点，同时避免形成报纸标题般的视觉干扰。"
   },
   {
-    "id": "CHANGELOG.md#380",
+    "id": "CHANGELOG.md#381",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4683,7 +4691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每日知识阅读弹窗从通用任务弹窗规则中隔离：恢复参考 HTML 的 `580px` 直角纸张尺寸、无阴影表面、轻量标题与底部文字操作，避免再被圆角业务面板样式覆盖。\n- 扩充本地内容池与 AI 生成范围：除设计外，新增历史、科学、心理学、文学、哲学、神话、自然、音乐、饮食、世界未解之谜等方向；AI 会在多方向间轮换，并继续避开最近已经展示过的标题。"
   },
   {
-    "id": "CHANGELOG.md#381",
+    "id": "CHANGELOG.md#382",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4691,7 +4699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作分段计时和等待记录新增可见的「删除」入口，并统一接入站内危险操作确认框。\n- 删除工作分段后自动重算实际工时与结算基础；删除等待记录后，对应时长不再进入洞察分析。已验收任务的结算工时继续保持锁定，避免误改历史结算。"
   },
   {
-    "id": "CHANGELOG.md#382",
+    "id": "CHANGELOG.md#383",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4699,7 +4707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- `docs/DESIGN.md` 正式采用参考 HTML 的直角纸张体系：业务面板、弹窗、菜单和普通按钮默认直角无阴影，以纸张底色、发丝线和留白建立层级。\n- 全站基础圆角和阴影 token 收敛为直角 / 无投影，标题与普通按钮统一降低字重；分类、状态、进度档位和开关等有明确语义的胶囊仍保留。"
   },
   {
-    "id": "CHANGELOG.md#383",
+    "id": "CHANGELOG.md#384",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4707,7 +4715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- AI 每日知识条改回参考稿的一行阅读结构：类别胶囊、标题摘要、展开阅读、AI 来源和悬停换一条各自降权，减少功能按钮感。\n- 每日知识弹窗按参考 HTML 收敛为 580px 纸张式阅读框，降低标题字号和正文干扰，底部只保留「关闭 / 换一篇」。\n- 去掉每日知识弹窗右上角关闭图标，让阅读弹窗更接近原稿的轻量纸面排版。"
   },
   {
-    "id": "CHANGELOG.md#384",
+    "id": "CHANGELOG.md#385",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4715,7 +4723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复工作台左侧导航被权限状态过滤的问题，恢复「工作台、任务、文件库、洞察、结算、收入」完整入口。\n- 管理员专属内容继续在页面内部做权限提示，不再直接隐藏导航入口，避免误以为功能被删除。"
   },
   {
-    "id": "CHANGELOG.md#385",
+    "id": "CHANGELOG.md#386",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4723,7 +4731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 本月统计区改为无卡片横向指标带，去掉背景卡片，突出总工时、计费工时、预计收入和验收情况四个核心数字。\n- 新增 AI 每日知识模块：管理员打开工作台时会向文字模型请求一条不重复的设计知识；普通访问或 AI 不可用时回退到本地内容池。\n- AI 知识支持展开阅读和换一条，并记录最近标题，减少反复出现同一条内容。"
   },
   {
-    "id": "CHANGELOG.md#386",
+    "id": "CHANGELOG.md#387",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4731,7 +4739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务提醒改为两个维度：优先展示逾期任务；若本月没有逾期任务，则展示最近一条任务。\n- 同时补充最多两条 3 天内交付的任务，提醒栏最多聚合 3 个关键任务，避免首页提醒被单一口径占满。"
   },
   {
-    "id": "CHANGELOG.md#387",
+    "id": "CHANGELOG.md#388",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4739,7 +4747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- `Command / Ctrl + K` 改为真正的全局命令面板，可搜索任务、页面和操作，并支持方向键选择与回车执行。\n- `?` 可打开快捷键总览；新增 `G D / G T / G F / G I / G S / G R / G O` 页面导航，以及 `J / K / Enter / E / P / A / S` 任务操作快捷键。\n- `N` 新建任务，`Shift + N` 直接打开补录任务，`/` 聚焦任务搜索，`[` / `]` 切换月份。\n- 输入框、编辑区域和已有弹窗打开时自动停用单键快捷键，避免录入内容时误触操作。"
   },
   {
-    "id": "CHANGELOG.md#388",
+    "id": "CHANGELOG.md#389",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4747,7 +4755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 改为先部署正式站供用户在线验收，用户确认满意后再统一提交 GitHub、推送 tag 并创建 Release。"
   },
   {
-    "id": "CHANGELOG.md#389",
+    "id": "CHANGELOG.md#390",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4755,7 +4763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 补录月份仅保留当前月及向前 3 个月，共 4 个选项。\n- 移除未来月份与过久历史月份，避免出现尚未到来的结算月份被补录的错误入口。"
   },
   {
-    "id": "CHANGELOG.md#390",
+    "id": "CHANGELOG.md#391",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4763,7 +4771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗宽度调整为 640px，给补录月份与开关预留稳定空间。\n- 补录开启和关闭时，补录文字、记录月份和开关均强制保持水平单行，不再出现“补录”竖排换行。"
   },
   {
-    "id": "CHANGELOG.md#391",
+    "id": "CHANGELOG.md#392",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4771,7 +4779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复补录月份与补录开关被旧的换行规则拆成两排的问题，恢复与参考稿一致的单行头部布局。\n- 修复通用字段文字规则穿透分类胶囊：一级分类恢复常规字重，选中状态为墨绿色底配浅色文字。\n- 修复日期字段被通用控件覆盖后出现绿色弯曲边线的问题，恢复参考稿的灰色直线输入边界，仅在聚焦时强调。\n- AI 分析与取消按钮按原稿收敛为轻量尺寸和无边框次级操作。"
   },
   {
-    "id": "CHANGELOG.md#392",
+    "id": "CHANGELOG.md#393",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4779,7 +4787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 重新逐项对照原型 HTML，恢复「父分类胶囊 + 悬浮深色子菜单」的二级分类交互，不再把子分类平铺成两排胶囊。\n- 补录月份与补录开关恢复为两个独立头部元素，修复宽泛 CSS 选择器造成的右上角大胶囊变形。\n- 标题改为原型使用的衬线字体，并使用原型的纸张色、正文色、墨绿色和深色菜单色 token。\n- 时间与工时恢复为三项同时开启两项、第三项灰显自动推算；默认开启预计开始和预估工时，预计交付自动计算。\n- 预估工时恢复为直接数值输入，保留 AI 工时分析作为右侧辅助入口。"
   },
   {
-    "id": "CHANGELOG.md#393",
+    "id": "CHANGELOG.md#394",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4787,7 +4795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗按参考稿收窄为 580px 级别，改为方正白底和轻量排版，减少宽面板、大字号与粗体造成的干扰。\n- 设计类型改为胶囊分类与子分类选择，并保留清晰的已选结果；任务名称、需求人和时间字段统一使用底线输入样式。\n- 任务需求和附件类输入区域统一使用浅底色块；时间与工时改为三行轻量排列，保留补录开关、AI 需求优化和 AI 工时建议。\n- 底部操作收敛为「取消 / 创建任务」，移动端自动切换为单列布局。"
   },
   {
-    "id": "CHANGELOG.md#394",
+    "id": "CHANGELOG.md#395",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4795,7 +4803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗按参考稿重新收敛：宽度从大面板改回 860px 级别，避免弹窗横向过宽、信息铺得太散。\n- 标题、字段、表格、按钮和输入区整体降低字号与字重，减少粗体和大号文字造成的干扰，更接近终审确认单的克制阅读节奏。\n- 保留验收备注 AI 优化入口，但视觉上回到辅助操作层级，不再抢占验收核对内容的主焦点。"
   },
   {
-    "id": "CHANGELOG.md#395",
+    "id": "CHANGELOG.md#396",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4803,7 +4811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收面板进一步贴近终审确认单样式：加大顶部留白，采用更方正的白底弹窗、三列基础信息和更正式的分隔线节奏。\n- 基础信息、整体进度、计时与工时汇总、等待记录、验收附件与备注、任务体感反馈保持同一张确认单的阅读顺序，减少组件拼接感。\n- 可结算分段计时改为更清晰的表格排版，工时统一显示为 `2.0h` 这类结算单格式，并保留后台时薪和预计结算金额。\n- 等待记录继续单独作为洞察数据展示，不计入结算；验收备注的 AI 优化入口保留，方便在终审前整理说明。"
   },
   {
-    "id": "CHANGELOG.md#396",
+    "id": "CHANGELOG.md#397",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4811,7 +4819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收面板重构为终审核对视图：按基础信息、整体进度、计时与工时汇总、验收附件与备注、任务体感反馈分区展示。\n- 进度、分段计时和等待记录只从「记录进展」读取，验收阶段不再临时新增或修改过程数据，避免验收动作和过程记录混在一起。\n- 分段计时改为表格汇总，显示日期、时间段、内容和工时，并补充后台时薪和本次预计结算金额。\n- 等待记录单独汇总为不计结算的洞察数据，验收时能看到累计等待时长，但不会写入工资结算。\n- 验收备注保留 AI 优化入口，新增任务体感反馈和体感评价，后续可用于 BI / AI 分析沟通成本、等待时间和任务主观体验。"
   },
   {
-    "id": "CHANGELOG.md#397",
+    "id": "CHANGELOG.md#398",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4819,7 +4827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务数据新增 `feedback_note` 字段，用于保存验收阶段填写的体感评价；正式 D1 已补齐字段迁移。\n- Worker 状态读写、洞察快照和任务详情均同步支持体感评价字段。"
   },
   {
-    "id": "CHANGELOG.md#398",
+    "id": "CHANGELOG.md#399",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4827,7 +4835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧详情面板的进展滚动条改为细窄浅绿色样式，降低原生深色滚动条对内容的视觉干扰。\n- 保留滚动接力行为，面板滚到底后继续滚动仍会带动整页。"
   },
   {
-    "id": "CHANGELOG.md#399",
+    "id": "CHANGELOG.md#400",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4835,7 +4843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 中间交换按钮改为纯左右互换开始时间和结束时间；互换后如果结束时间早于开始时间，保存按钮会保持禁用并提示用户手动修正。\n- 新建记录弹窗打开时，开始时间默认读取本地电脑当前时间，结束时间默认顺延 1 小时；编辑历史记录时继续读取原记录时间。\n- 时间段重叠校验改为工作进展和等待记录统一校验，且采用左闭右开区间，允许 13:00-14:00 与 14:00-14:05 首尾接续。\n- 时间段重叠时新增智能空档建议，可一键切换到最近可用时间段。\n- 日期时间选择器点击外部空白处会收起；同一弹窗内仍只允许同时打开一个选择器。"
   },
   {
-    "id": "CHANGELOG.md#400",
+    "id": "CHANGELOG.md#401",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4843,7 +4851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧详情面板滚动恢复浏览器默认接力行为：面板滚到底后继续滚动会带动整页。"
   },
   {
-    "id": "CHANGELOG.md#401",
+    "id": "CHANGELOG.md#402",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4851,7 +4859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧栏「工作进展分段计时」和「等待记录不计结算」改为按开始时间倒序展示，最新记录在上、旧记录在下。\n- 跨天记录不再因为结束时间较晚而错误前置，例如 06/19 22:00 到 06/20 12:02 会按 06/19 的开始时间参与排序。"
   },
   {
-    "id": "CHANGELOG.md#402",
+    "id": "CHANGELOG.md#403",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4859,7 +4867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 在「开始时间」和「结束时间」中间新增续接按钮，可一键把当前结束时间作为下一段开始时间。\n- 点击续接后结束时间会自动顺延 1 小时，避免形成开始和结束相同的无效时间段。\n- 续接按钮沿用主题绿色和极简图标样式，记录进展与记录等待共用。"
   },
   {
-    "id": "CHANGELOG.md#403",
+    "id": "CHANGELOG.md#404",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4867,7 +4875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台右侧栏的「进展」下新增二级切换：「工作进展分段计时」和「等待记录不计结算」，避免两类记录堆在同一长页面里。\n- 进展和等待记录默认只展示最新 5 条，超过 5 条时显示醒目的展开入口，点击后再展开全部。\n- 右侧进展区域改为独立滚动，鼠标停留在右侧栏内时只滚动当前面板，不带动整个页面。"
   },
   {
-    "id": "CHANGELOG.md#404",
+    "id": "CHANGELOG.md#405",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4875,7 +4883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展分段和等待记录支持二次编辑，忘写内容或误填时间时可以直接从右侧栏重新打开记录弹窗修改。\n- 新增时间段重叠校验：同类记录不能重复覆盖已有时间段；首尾相接的时间段仍允许连续记录。"
   },
   {
-    "id": "CHANGELOG.md#405",
+    "id": "CHANGELOG.md#406",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4883,7 +4891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 日期时间选择器只允许同一弹窗内同时打开一个面板，切换开始 / 结束时间时会自动收起上一个。\n- 选择日期、小时或分钟后不再自动关闭日历面板，方便继续微调。\n- 隐藏小时、分钟列的原生滚动条和分隔线，保留滚动能力但减少多余视觉组件。"
   },
   {
-    "id": "CHANGELOG.md#406",
+    "id": "CHANGELOG.md#407",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4891,7 +4899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除「等待原因」预设按钮，等待原因与补充信息统一直接写入备注。\n- 保留历史等待记录的原因字段兼容读取；新增记录不再强制或默认写入分类。"
   },
   {
-    "id": "CHANGELOG.md#407",
+    "id": "CHANGELOG.md#408",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4899,7 +4907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 日期时间、工作台月份和结算月份统一复用同一份年月面板逻辑，避免不同位置出现不同的年份/月度选择方式。\n- 日期组件增加仅日期模式：不需要时间时隐藏右侧小时、分钟列，仍保留年月切换、日历、今天、清除与手写输入。\n- 日历浮层默认优先在所属弹窗内完整展示；空间不足时允许越界显示，不裁切关键操作。"
   },
   {
-    "id": "CHANGELOG.md#408",
+    "id": "CHANGELOG.md#409",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4907,7 +4915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录进展、记录等待及其他共用日期时间字段升级为统一选择器：顶部可直接切换月份，上下箭头可跳转前后月份。\n- 点击顶部年月可进入年份与月份选择面板，快速跨年、跨月定位。\n- 日历右侧新增小时与分钟双滚动选项列，日期、小时和分钟均可直接点击选择。\n- 底部新增「清除」「今天」操作，同时保留日期时间手写输入。\n- 选择器全面沿用 Giverny 的主题绿色、表面色和控件圆角，不采用参考图的蓝色视觉。"
   },
   {
-    "id": "CHANGELOG.md#409",
+    "id": "CHANGELOG.md#410",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4915,7 +4923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 点击右侧栏「记录等待」后，打开独立的轻量等待表单，不再显示进展附件和 AI 文案功能。\n- 表单保留完整起止日期时间，新增「等待甲方意见 / 等待补充资料 / 等待排期 / 其他」四类结构化原因和选填备注。\n- 等待原因和时长写入任务等待数据，用于后续洞察分析；等待时长不进入实际工时和结算。"
   },
   {
-    "id": "CHANGELOG.md#410",
+    "id": "CHANGELOG.md#411",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4923,7 +4931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展内容和附件上传区统一为比弹窗背景略深的输入表面，保持输入控件的视觉一致性。\n- 开始时间和结束时间改为可手写、也可点击日历图标的站内日期时间选择器。\n- 工时按完整的起止日期时间计算，支持跨天记录；保存前会显示本段时长，无效时间不允许写入结算。\n- Worker 读取时保留每条分段的开始日期和结束日期，同时兼容旧版只有时分的历史记录。"
   },
   {
-    "id": "CHANGELOG.md#411",
+    "id": "CHANGELOG.md#412",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4931,7 +4939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务栏点击「记录进展」后，弹窗改为轻量记录表单，只保留进展内容、起止时间、选填附件和保存操作。\n- 「进展内容」继续保留 AI 优化入口，可结合当前输入、任务附件和最近进展优化文案。\n- 「记录等待」复用同一套轻量弹窗进入等待模式，等待时间不计入结算，但继续进入后续洞察分析。"
   },
   {
-    "id": "CHANGELOG.md#412",
+    "id": "CHANGELOG.md#413",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4939,7 +4947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务栏「可结算 · 段数 · 工时」汇总改为主题绿色。\n- 加粗可结算汇总文字，让分段计时的结算结果更容易识别。"
   },
   {
-    "id": "CHANGELOG.md#413",
+    "id": "CHANGELOG.md#414",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4947,7 +4955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复右侧任务栏「记录进展」「记录等待」被通用文字按钮样式覆盖的问题，确保线上显示为主题绿色。\n- 将这两个次级操作入口进一步收小到 11px，并同步缩小加号图标。"
   },
   {
-    "id": "CHANGELOG.md#414",
+    "id": "CHANGELOG.md#415",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4955,7 +4963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务栏「记录进展」「记录等待」入口字号收小，并改为主题绿色。\n- 次级操作入口保持可见但不再抢过分段计时和等待记录正文的视觉焦点。"
   },
   {
-    "id": "CHANGELOG.md#415",
+    "id": "CHANGELOG.md#416",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4963,7 +4971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除右侧任务栏「附件与动态」板块，避免与「记录进展」时间轴重复。\n- 右侧栏进展区只保留整体进度、分段计时和等待记录；过程附件统一在「记录进展」时间轴中查看。"
   },
   {
-    "id": "CHANGELOG.md#416",
+    "id": "CHANGELOG.md#417",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4971,7 +4979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台右侧栏的 0 / 20 / 40 / 60 / 80 / 100 进度刻度改为可点击按钮，点击后直接保存对应进度。\n- 整体进度统一以 20% 为单位吸附；滑杆拖动、快捷菜单、右侧栏点击和状态流转都不会再生成 21%、88% 这类非标准进度。\n- 旧数据中的非标准进度在界面展示时会按 20% 档位归整，避免视觉上继续出现不规范数值。"
   },
   {
-    "id": "CHANGELOG.md#417",
+    "id": "CHANGELOG.md#418",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4979,7 +4987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务栏标题下新增任务副信息行，展示新建日期、设计分类和需求人，例如「06-18 · 展会类 / 邀请函长图 · 需求人 黄媚」。\n- 将工作台搜索、右侧栏信息和新建任务必填字段里的「对接人」口径调整为「需求人」。\n- 新建任务创建时会把必填的需求人同步写入需求人字段，兼容旧任务仍保留原有联系人数据。"
   },
   {
-    "id": "CHANGELOG.md#418",
+    "id": "CHANGELOG.md#419",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4987,7 +4995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务栏改为方正矩形面板，取消圆角卡片感，更接近当前原型。\n- 顶部区域只保留任务名称，移除头部操作按钮和冗余信息。\n- 右侧栏新增「信息 / 进展」选项卡切换，信息字段与进展链路不再同时展开。"
   },
   {
-    "id": "CHANGELOG.md#419",
+    "id": "CHANGELOG.md#420",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -4995,7 +5003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 恢复任务列表右侧上下文栏，选中任务后展示任务名称、信息与进展两块内容。\n- 进展区新增整体进度、分段计时、附件动态和等待记录展示；交付件不再单独成块，统一沉到进展链路中。\n- 分段计时和等待记录新增日期字段，新记录会保存记录日期；等待记录保持不计结算但可进入洞察分析。"
   },
   {
-    "id": "CHANGELOG.md#420",
+    "id": "CHANGELOG.md#421",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5003,7 +5011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「任务明细」分类从胶囊筛选改为轻量文字导航，当前分类使用下划线强调。\n- 工作台分类保留「全部 / 计划中 / 进行中 / 待验收 / 已验收」，减少低频状态对主列表的干扰。"
   },
   {
-    "id": "CHANGELOG.md#421",
+    "id": "CHANGELOG.md#422",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5011,7 +5019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 将「任务明细」搜索框提示词降为辅助信息字号，避免 placeholder 比标题更抢眼。\n- 搜索图标同步收小并使用弱化灰色，保持标题是任务明细区的唯一主焦点。"
   },
   {
-    "id": "CHANGELOG.md#422",
+    "id": "CHANGELOG.md#423",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5019,7 +5027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「任务明细」标题降为 18px，与「本月洞察」保持同级字号，避免误读为上级容器。\n- 任务明细区从提醒条下方再下沉，标题与搜索框之间的空隙同时收紧。\n- 搜索框聚焦时不再出现绿色描边或变色，仅保留文本输入光标。"
   },
   {
-    "id": "CHANGELOG.md#423",
+    "id": "CHANGELOG.md#424",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5027,7 +5035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「任务明细」头部改为开放式排版：标题靠左、汇总说明靠右，移除外围卡片感。\n- 搜索框下沉到标题下方，改为带搜索图标的底部细线输入，减轻工具控件的视觉重量。\n- 保留原有筛选 Tab 和任务列表交互，移动端自动切换为纵向标题布局。"
   },
   {
-    "id": "CHANGELOG.md#424",
+    "id": "CHANGELOG.md#425",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5035,7 +5043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 顶部逾期 / 临期提醒改为平直通知带：浅色背景、左侧强调线和右侧箭头，取消圆角卡片感。\n- 逾期和临期改为直接文本层级，不再使用重复的状态胶囊，让任务名称成为提醒条的主要信息。"
   },
   {
-    "id": "CHANGELOG.md#425",
+    "id": "CHANGELOG.md#426",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5043,7 +5051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进一步加大顶部信息区与主体工作区之间的留白，形成更清晰的上下分区。\n- 左侧品牌到导航、右侧标题到统计卡片同步增加间距，继续保持导航与统计卡片水平对齐。\n- 大间距仅应用于桌面工作台，移动端继续使用紧凑布局。"
   },
   {
-    "id": "CHANGELOG.md#426",
+    "id": "CHANGELOG.md#427",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5051,7 +5059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 增大顶部标题区与下方统计区之间的留白，让品牌 / 标题区和主要内容区更容易区分。\n- 桌面端将左侧「工作台」导航项与右侧第一排统计卡片调整到同一水平基线。\n- 对齐规则只作用于工作台桌面布局，不影响任务、文件库等其他页面和移动端紧凑排版。"
   },
   {
-    "id": "CHANGELOG.md#427",
+    "id": "CHANGELOG.md#428",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5059,7 +5067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 顶部月份选择器移除日历图标、填充色和边框，只保留当前年月与下拉符号。\n- 新建任务按钮移除加号图标，减少重复视觉信号。\n- 月份与新建任务之间新增 `⌘K` 快捷入口；点击入口或按下 Command / Ctrl + K 均可打开新建任务。"
   },
   {
-    "id": "CHANGELOG.md#428",
+    "id": "CHANGELOG.md#429",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5067,7 +5075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 在月份工作台标题下新增「本月 X 条任务 · X 个待验收」摘要，进入页面即可了解当前月份的任务总量和待验收数量。\n- 摘要与当前月份任务列表共用统计口径，切换月份时同步更新。"
   },
   {
-    "id": "CHANGELOG.md#429",
+    "id": "CHANGELOG.md#430",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5075,7 +5083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复工作台顶部逾期 / 临期提醒统计全量活跃任务的问题；现在只统计当前工作台月份内的任务，和下方「任务明细」列表保持一致。\n- 避免出现当前月份列表只有 1 条任务，但顶部提示跨月任务逾期数量的误导。"
   },
   {
-    "id": "CHANGELOG.md#430",
+    "id": "CHANGELOG.md#431",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5083,7 +5091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗新增「分段计时」区块，可直接记录可结算工作时间，并在保存进展时同步更新任务实际工时。\n- 「记录进展」弹窗现在统一承接整体进度、分段计时、等待记录、进展文案和过程附件。"
   },
   {
-    "id": "CHANGELOG.md#431",
+    "id": "CHANGELOG.md#432",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5091,7 +5099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗中的「进度」和「分段计时」改为只读核对，不再提供修改、添加或删除入口。\n- 验收不再默认生成 09:00-10:00 的时间段；未记录分段计时时会提示先到「记录进展」补充。"
   },
   {
-    "id": "CHANGELOG.md#432",
+    "id": "CHANGELOG.md#433",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5099,7 +5107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除已经不可达的旧 `TaskEditor` 右侧详情组件，避免后续误判产品仍存在右侧任务详情入口。\n- 清理 `.task-editor-*` 等旧样式，以及只被旧组件使用的 helper。\n- 保留当前正式使用的「记录进展」「查看任务详情」「确认验收」弹窗路径不变。"
   },
   {
-    "id": "CHANGELOG.md#433",
+    "id": "CHANGELOG.md#434",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5107,7 +5115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗新增「等待记录」区块，可直接记录等待甲方意见、补资料、等确认等非计费占用。\n- 只新增等待记录时也可以点击「保存进展」；等待记录写入任务的 `waiting_entries_json`，不进入实际工时和结算金额。\n- 等待记录草稿会跟随进展弹窗一起保留，避免误关闭后丢失。"
   },
   {
-    "id": "CHANGELOG.md#434",
+    "id": "CHANGELOG.md#435",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5115,7 +5123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗新增极轻反馈入口，可选「顺利 / 一般 / 有问题」，并在需要时补充原因标签：需求不清晰、沟通成本高、定价偏低、技术挑战大。\n- 反馈为可选项，不阻断验收；弹窗草稿会保存已选体感，避免误关闭后丢失。\n- 任务详情会显示已记录的体感和标签，作为设计师内部可见信息，不对甲方分享页开放。"
   },
   {
-    "id": "CHANGELOG.md#435",
+    "id": "CHANGELOG.md#436",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5123,7 +5131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务进展页新增「等待记录」入口，可记录等待甲方意见、补资料、等确认等非计费时间段。\n- 等待记录和计费「时间记录」分开保存：计费分段继续汇总为实际工时，等待记录只用于洞察，不进入结算工时。\n- 验收弹窗会同步显示等待记录汇总，任务详情也会显示等待记录合计，作为管理员内部可见信息。"
   },
   {
-    "id": "CHANGELOG.md#436",
+    "id": "CHANGELOG.md#437",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5131,7 +5139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- D1 任务表新增 `feedback_rating`、`feedback_tags_json` 和 `waiting_entries_json`，让主观感受与等待占用都能沉淀为结构化数据。\n- AI 异常侦查和事件触发现在会读取任务体感分布与原因标签，后续可识别“客观工时正常但体感痛苦”的任务模式。\n- 后台事件触发新增“对接人主观问题集中”信号，例如某个对接人近期多次被标记为「沟通成本高」时会进入洞察追踪。\n- 洞察聚合新增总周期小时、周期占用等待、明确等待小时和等待占比；等待占比过高时会触发效率类专项洞察。"
   },
   {
-    "id": "CHANGELOG.md#437",
+    "id": "CHANGELOG.md#438",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5139,7 +5147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台和任务管理列表的任务行新增轻量内嵌洞察，帮助在排期、推进和验收前直接看到当前任务的历史风险信号。\n- 洞察会基于同类型历史任务的实际工时、预估偏差和进展中的修改信号计算，不需要打开「洞察」页，也不会为每一行实时调用 AI。\n- 当前只在历史样本至少 2 条且信号明显时显示，避免把列表变成泛化建议墙。"
   },
   {
-    "id": "CHANGELOG.md#438",
+    "id": "CHANGELOG.md#439",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5147,7 +5155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 内嵌洞察作为管理员内部提示展示，使用较弱的辅助样式，不抢任务名称的主视觉焦点。\n- 提示标题保持短句，悬停可查看更完整的建议和数据依据，例如历史样本数、平均实际工时或修改信号数量。"
   },
   {
-    "id": "CHANGELOG.md#439",
+    "id": "CHANGELOG.md#440",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5155,7 +5163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `insights_history`：每条洞察会保存发现、建议、当时关键数据、状态和触发指纹，不再只是一次性诊断结果。\n- 「异常侦查」运行后会把 AI 结论拆成可追踪历史；后续诊断会读取这些历史，判断建议是否改善、持续或解决，避免每次从零开始重复说同一句话。\n- 洞察页右侧新增「追踪中的洞察」，展示最近的效率、报价、能力空缺和客户相关建议，以及 open / improved / resolved / ignored 状态。"
   },
   {
-    "id": "CHANGELOG.md#440",
+    "id": "CHANGELOG.md#441",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5163,7 +5171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Worker 定时任务新增低成本事件触发器：先用站内数据规则找异常，命中后再调用文字模型生成专项洞察。\n- 当前内置触发条件包括：同类任务修改信号偏高、本月工时较上月下降超过 20%、某个对接人综合时薪连续低于均值、某类设计类型超过 3 个月没有新任务。\n- 每个触发事件都会记录数据指纹，同一数据不会反复调用模型；数据变化后才继续追踪并生成新的评估。"
   },
   {
-    "id": "CHANGELOG.md#441",
+    "id": "CHANGELOG.md#442",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5171,7 +5179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 事件触发与手动诊断共用任务、进展、附件分析和历史基线聚合口径，减少前后端洞察结论不一致。\n- 修改轮次仍不伪造为精确值；当前继续使用进展文本中的修改 / 调整 / 反馈 / 返工等词作为“修改信号”代理。"
   },
   {
-    "id": "CHANGELOG.md#442",
+    "id": "CHANGELOG.md#443",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5179,7 +5187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「数据结论」升级为「异常侦查」：AI 不再输出单期工时、占比等静态汇报，改为同时比较当前周期、上一对照周期和同类型历史基线。\n- 每条诊断固定包含异常信号、数据证据和一个具体可执行动作；没有明显异常时会明确返回「本期无明显异常」，不再凑泛化建议。\n- 新增上次诊断记忆：同一数据不重复调用模型；后续诊断会避开已说过的建议，只有问题仍未解决时才标记为「持续问题」，数据改善时标记为「已有改善」。"
   },
   {
-    "id": "CHANGELOG.md#443",
+    "id": "CHANGELOG.md#444",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5187,7 +5195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 每类任务的对照数据新增实际 / 预估工时、预估偏差、加权结算时薪、交付周期、交付风险、附件质量问题与修改信号。\n- 「修改信号」按进展记录中出现“修改、调整、改稿、反馈、返工”等词统计，是可追溯代理指标；在未录入明确修改轮次前，系统不会伪装为精确人工轮次。\n- D1 新增 `insight_diagnoses`，保存每次诊断的数据指纹、结构化结果和生成时间，为后续多租户洞察记忆提供基础。"
   },
   {
-    "id": "CHANGELOG.md#444",
+    "id": "CHANGELOG.md#445",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5195,7 +5203,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件上传到 R2 并写入 D1 后，现在会自动创建附件分析任务；Worker 会在后台读取文件、解析可识别内容并调用识图模型，分析结果统一写回 D1。\n- 图片直接进入视觉分析，PDF 使用 Gemini 原生文档理解；PPTX、DOCX、XLSX 会提取文档文字和内嵌图片后进行综合分析。\n- 识图默认优先使用 Gemini 3 Flash，主模型失败时自动切换 Kimi K2.6；失败任务最多自动尝试 3 次，并由每 5 分钟运行的 Cron 继续处理未完成任务。\n- Gemini 遇到临时高负载、限流或服务异常时会先短暂重试一次；PDF 因 Kimi 当前不能直接读取文档，会保留任务并由后续 Cron 继续尝试 Gemini，不会退化成只看文件名的假分析。"
   },
   {
-    "id": "CHANGELOG.md#445",
+    "id": "CHANGELOG.md#446",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5203,7 +5211,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「历史样本」升级为「交付件理解」，展示真实的附件分析状态、模型摘要、需求匹配、质量问题、风险和改进建议。\n- 新增历史附件补分析入口，以及失败 / 暂不支持附件的单独重试入口；页面会明确区分已分析、分析中、需处理和待建任务。\n- 当前不会伪造源文件理解：PSD / AI 等无法直接解析且没有预览图的格式会明确提示补充 PNG/JPG 预览；PPTX / DOCX / XLSX 当前基于文字和内嵌图片，不等同于完整页面渲染。"
   },
   {
-    "id": "CHANGELOG.md#446",
+    "id": "CHANGELOG.md#447",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5211,7 +5219,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- D1 新增 `attachment_analyses` 表，记录解析方式、模型、置信度、摘要、质量问题、风险、建议、错误和重试状态。\n- Worker 增加后台分析与定时恢复机制；当前 Cloudflare Free plan 每次 Cron 处理 1 个附件，避免批量解压和模型调用互相抢占资源。"
   },
   {
-    "id": "CHANGELOG.md#447",
+    "id": "CHANGELOG.md#448",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5219,7 +5227,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页「AI 模型设置」新增四路模型配置：文字主模型、文字备用模型、识图主模型、识图备用模型。\n- 默认策略调整为：文字任务继续优先使用 DeepSeek，失败或无效时使用 Kimi K2.6 兜底；识图能力优先使用 Gemini 3 Flash，失败或额度不足时使用 Kimi K2.6 兜底。\n- 每一路模型都支持独立配置供应商、Base URL、模型名称和 API Key，为后续多租户自带模型 Key 做准备。"
   },
   {
-    "id": "CHANGELOG.md#448",
+    "id": "CHANGELOG.md#449",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5227,7 +5235,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增管理员可用的模型测试接口，并在设置页提供「测试」按钮，可分别验证文字模型和识图模型是否可用。\n- API Key 可继续通过 Cloudflare Secret 提供平台默认值，也可在设置页加密保存到 D1；前端只显示保存状态，不返回明文。"
   },
   {
-    "id": "CHANGELOG.md#449",
+    "id": "CHANGELOG.md#450",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5235,7 +5243,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务文案优化、进展 / 验收文案优化、工时建议保留 DeepSeek 主路径，同时增加 Kimi 备用文字模型兜底，减少单一模型异常导致 AI 功能不可用的风险。\n- 当前版本先完成模型能力底座和测试入口；交付件 PDF / PPT / 图片的正式分析管线仍需后续接入附件读取和结果沉淀。"
   },
   {
-    "id": "CHANGELOG.md#450",
+    "id": "CHANGELOG.md#451",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5243,7 +5251,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 将「洞察」页分区调整为「周期复盘 / 历史样本 / 异常诊断 / 数据结论」，强调基于站内真实字段复盘，而不是泛化 AI 建议。\n- 移除无法成立的交付件内容分析表达；当前不会声称已经读懂 PDF、PPT、图片或设计源文件内容。\n- 「数据结论」改为基于当前周期、上一周期、历史同类型样本、进展记录、验收状态、附件完整度和异常任务输出判断。"
   },
   {
-    "id": "CHANGELOG.md#451",
+    "id": "CHANGELOG.md#452",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5251,7 +5259,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增按任务类型聚合的历史样本表，展示历史任务数、已验收数、附件数、平均工时、中位工时、平均周期、估算准确率和附件率。\n- 同类型样本不足时会明确提示继续积累，不再把没有数据支撑的方向包装成建议。"
   },
   {
-    "id": "CHANGELOG.md#452",
+    "id": "CHANGELOG.md#453",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5259,7 +5267,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增当前周期异常任务诊断，识别工时超预估、交付逾期、缺少进展记录和缺少交付附件等可复盘问题。\n- 移除「集中拓展剪辑类 / 动效类」这类无历史数据支撑的固定建议，避免洞察变成摆设。"
   },
   {
-    "id": "CHANGELOG.md#453",
+    "id": "CHANGELOG.md#454",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5267,7 +5275,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 根据新的洞察框架参考稿，将「洞察」页整理为「周期分析 / 交付件分析 / 能力画像 / AI 洞察」四个分区 Tab。\n- 周期分析保留日、周、月、季度、半年和年度切换，并继续展示周期统计、类型工时结构和进展投入趋势。\n- 交付件分析独立展示任务全链路和文件标签，点击文件类型标签仍沿用现有文件预览弹窗。"
   },
   {
-    "id": "CHANGELOG.md#454",
+    "id": "CHANGELOG.md#455",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5275,7 +5283,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增能力覆盖区，按平台默认设计类型标记已覆盖和待拓展方向。\n- 新增工时估算准确率、平均交付周期和对接人集中度，用于观察效率稳定性与客户来源集中风险。"
   },
   {
-    "id": "CHANGELOG.md#455",
+    "id": "CHANGELOG.md#456",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5283,7 +5291,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增「AI 洞察」分区，展示洞察师建议和后续可接入的快速提问方向；当前不新增未对齐的 Worker SQL 路由，正式站仍使用现有 DeepSeek 能力。"
   },
   {
-    "id": "CHANGELOG.md#456",
+    "id": "CHANGELOG.md#457",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5291,7 +5299,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧导航新增「洞察」独立页面，支持按日、周、月、季度、半年和年度切换分析周期。\n- 洞察页会汇总周期任务数、验收率、实际工时、预估偏差、交付件数量和可预览交付件数量，帮助快速完成个人复盘。\n- 新增类型工时结构和进展投入趋势图，把工作台原有局部洞察扩展为更完整的数据分析入口。"
   },
   {
-    "id": "CHANGELOG.md#457",
+    "id": "CHANGELOG.md#458",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5299,7 +5307,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增「交付件全链路」列表，按任务串起接收、进展、上传、验收和文件状态，支持直接预览关联交付件。\n- 交付件会以 PDF、JPG、PPT 等轻量标签展示，并标记是否具备基础质量复核条件。\n- 新增「洞察建议」侧栏，基于当前任务类型、预估与实际工时偏差、文件完整度和缺少分类，给出效率优化与承接方向建议。"
   },
   {
-    "id": "CHANGELOG.md#458",
+    "id": "CHANGELOG.md#459",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5307,7 +5315,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 洞察页明确保留 DeepSeek 识图 / 质量分析入口；BAML Runtime 继续作为多租户模型路由预留，不影响当前正式站 DeepSeek 直连能力。"
   },
   {
-    "id": "CHANGELOG.md#459",
+    "id": "CHANGELOG.md#460",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5315,7 +5323,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `ai-runtime/` 独立 Node.js 服务，用于真正运行 BAML client；主站 Cloudflare Worker 不再尝试直接加载 BAML runtime，避免原生 Node 模块导致 Worker 打包失败。\n- BAML 生成流程现在会同时生成主站契约 client 和 `ai-runtime` 专用 client，保证提示词、输入输出结构和 runtime 执行口径一致。\n- Worker 的三类 AI 能力（新建任务需求优化、进展 / 验收文案优化、工时建议）现在会优先尝试调用 BAML Runtime，失败或未配置时自动回退现有 DeepSeek 直连。"
   },
   {
-    "id": "CHANGELOG.md#460",
+    "id": "CHANGELOG.md#461",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5323,7 +5331,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页新增「AI 模型设置」，可配置运行模式、模型供应商、Base URL、模型名称、BAML Runtime URL 和租户模型 API Key。\n- 模型 API Key 通过 `AI_SETTINGS_SECRET` 加密后写入 D1，前端只显示是否已保存和掩码预览，不返回明文。\n- 新增 `AI_RUNTIME_URL`、`AI_RUNTIME_KEY`、`AI_SETTINGS_SECRET` 环境变量预留位，为后续多租户自带模型 Key 和模型路由打基础。"
   },
   {
-    "id": "CHANGELOG.md#461",
+    "id": "CHANGELOG.md#462",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5331,7 +5339,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 更新 `docs/AI_MODEL_ROUTING.md`、项目结构文档和版本规范，明确 BAML Runtime、密钥保存和多租户迁移路线。"
   },
   {
-    "id": "CHANGELOG.md#462",
+    "id": "CHANGELOG.md#463",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5339,7 +5347,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 引入 BAML 工程结构，新增 `baml_src/ai_assistants.baml`，将任务需求优化、进展 / 验收文案优化、工时建议三类 AI 能力整理为结构化函数契约。\n- 新增 BAML TypeScript 生成客户端目录 `src/baml_client/baml_client/`，并新增 `npm run baml:generate` 脚本；正式构建会先自动生成 BAML client。\n- 新增 `docs/AI_MODEL_ROUTING.md`，记录当前 DeepSeek 生产适配器、BAML 契约层和后续多租户模型选择路线。"
   },
   {
-    "id": "CHANGELOG.md#463",
+    "id": "CHANGELOG.md#464",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5347,7 +5355,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Wrangler dry-run 验证当前 BAML TypeScript runtime 会依赖 Node 原生 `.node` 模块，无法直接打包进 Cloudflare Worker；因此正式 Worker 暂不 import BAML runtime，继续使用现有 DeepSeek 直连适配器，保证线上稳定。\n- 后续多租户版本建议将 BAML runtime 放在独立 Node AI Runtime / AI Gateway 中运行，由 Worker 负责鉴权、租户配置和数据查询。"
   },
   {
-    "id": "CHANGELOG.md#464",
+    "id": "CHANGELOG.md#465",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5355,7 +5363,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG、项目结构文档和使用手册；本次不改变数据库结构、权限或结算口径。"
   },
   {
-    "id": "CHANGELOG.md#465",
+    "id": "CHANGELOG.md#466",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5363,7 +5371,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 在「预计开始时间 / 预估工时 / 预计交付时间」下方新增「工时建议」面板，可点击 AI 分析生成建议预估工时。\n- 工时建议会读取同类型历史任务的实际工时、交付周期、任务需求和验收备注，返回建议小时数、置信度、样本数、平均值、中位数和分析依据。\n- 同类型样本不足时，会降级参考相近类型或现有历史任务，并在面板中提示置信度较低，避免把不充分的数据说得过满。"
   },
   {
-    "id": "CHANGELOG.md#466",
+    "id": "CHANGELOG.md#467",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5371,7 +5379,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `/api/ai/hour-estimate` Worker 接口，继续使用 Cloudflare Secret 中的 DeepSeek 密钥；历史统计由后端先完成，AI 只负责基于结构化样本给出解释和微调建议。\n- 本次未引入 BAML 作为运行依赖；BAML 更适合作为后续多模型路由和结构化提示编排层，不是 DeepSeek 的替代模型。"
   },
   {
-    "id": "CHANGELOG.md#467",
+    "id": "CHANGELOG.md#468",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5379,7 +5387,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#468",
+    "id": "CHANGELOG.md#469",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5387,7 +5395,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 底部「展开 N 条」按钮改为红色提示样式，让隐藏历史进展更容易被注意到。\n- 移除展开按钮旁的「隐藏记录含附件，展开查看」说明文案，减少底部噪音。\n- 当折叠的历史进展中包含附件时，在标题右侧、记录数前显示「附件」标签。"
   },
   {
-    "id": "CHANGELOG.md#469",
+    "id": "CHANGELOG.md#470",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5395,7 +5403,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#470",
+    "id": "CHANGELOG.md#471",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5403,7 +5411,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗的展开入口从标题右侧移动到第 5 条记录下方，更贴近继续浏览历史记录的操作位置。\n- 折叠的历史记录中如果包含附件，会在展开入口旁提示「隐藏记录含附件，展开查看」。"
   },
   {
-    "id": "CHANGELOG.md#471",
+    "id": "CHANGELOG.md#472",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5411,7 +5419,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#472",
+    "id": "CHANGELOG.md#473",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5419,7 +5427,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」时间轴里的附件从文件名 chip 升级为小预览卡，图片类文件优先显示真实缩略图。\n- PDF 显示小型文档预览；Word、Excel、PPT、PSD、AI 等格式显示对应类型封面卡。\n- 点击缩略卡会打开现有文件预览弹窗，保持和文件库一致的放大查看体验。"
   },
   {
-    "id": "CHANGELOG.md#473",
+    "id": "CHANGELOG.md#474",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5427,7 +5435,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#474",
+    "id": "CHANGELOG.md#475",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5435,7 +5443,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗默认只显示最新 5 条进展记录，减少历史动态撑高弹窗。\n- 超过 5 条时在标题右侧显示「展开」入口，可一次查看全部历史记录，并支持再次收起。"
   },
   {
-    "id": "CHANGELOG.md#475",
+    "id": "CHANGELOG.md#476",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5443,7 +5451,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#476",
+    "id": "CHANGELOG.md#477",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5451,7 +5459,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复「记录进展」弹窗把时间移到左侧后，具体时分没有继续使用棕色管理员专属样式的问题。\n- 日期仍作为单条动态标题显示；日期后的时分重新使用 `admin-only-data`，保持和设计规范一致。"
   },
   {
-    "id": "CHANGELOG.md#477",
+    "id": "CHANGELOG.md#478",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5459,7 +5467,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#478",
+    "id": "CHANGELOG.md#479",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5467,7 +5475,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗里的单条动态标题从「任务动态」改为该条记录自己的时间，例如「2026年6月18日 22:55」。\n- 右侧不再常驻显示时间；只有该条动态关联文件时，才显示 `PDF`、`JPG` 等轻量文件类型标签。"
   },
   {
-    "id": "CHANGELOG.md#479",
+    "id": "CHANGELOG.md#480",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5475,7 +5483,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#480",
+    "id": "CHANGELOG.md#481",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5483,7 +5491,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗里的单条时间轴记录不再重复显示左侧「任务动态」标题，正文内容成为主要阅读焦点。\n- 右侧原本显示具体时间的位置改为「任务动态」类型标记，保留右键删除和悬停删除按钮能力。"
   },
   {
-    "id": "CHANGELOG.md#481",
+    "id": "CHANGELOG.md#482",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5491,7 +5499,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#482",
+    "id": "CHANGELOG.md#483",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5499,7 +5507,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「去验收」打开的确认验收弹窗宽度调整为和查看任务详情弹窗一致，减少从详情进入验收时的视觉跳变。\n- 保留原有响应式收窄规则，小屏幕下仍按可用宽度展示，不影响移动端阅读。"
   },
   {
-    "id": "CHANGELOG.md#483",
+    "id": "CHANGELOG.md#484",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5507,7 +5515,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#484",
+    "id": "CHANGELOG.md#485",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5515,7 +5523,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 全站弹窗默认不再因为点击遮罩空白处或按 Esc 关闭，避免误点导致表单内容丢失。\n- 「记录进展」弹窗新增本地草稿：未保存前关闭再打开，会保留进展文字和进度草稿；保存成功后自动清空草稿。\n- 「确认验收」终审弹窗新增本地草稿：未确认前关闭再打开，会保留验收备注、基础信息临时修改、进度、分段时间和本次已上传验收文件记录；确认验收后自动清空草稿。"
   },
   {
-    "id": "CHANGELOG.md#485",
+    "id": "CHANGELOG.md#486",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5523,7 +5531,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗里的进展时间轴支持右键删除单条任务动态，并复用站内删除确认弹窗。\n- 时间轴单条动态悬停时显示删除图标；删除只移除动态记录，不回滚任务字段、文件或工时数据。"
   },
   {
-    "id": "CHANGELOG.md#486",
+    "id": "CHANGELOG.md#487",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5531,7 +5539,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收终审弹窗的字段标签、正文、输入框和章节标题字号上调，和「记录进展」弹窗保持更一致的阅读尺度。\n- 新建任务表单的必填标识从「必填」文字改为行业通用红色星号，降低表单噪音。"
   },
   {
-    "id": "CHANGELOG.md#487",
+    "id": "CHANGELOG.md#488",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5539,7 +5547,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#488",
+    "id": "CHANGELOG.md#489",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5547,7 +5555,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复任务页列表下方大面积空白处右键仍显示浏览器原生菜单的问题；现在整个任务页列表视图的空白区域都能弹出「新建任务」菜单。\n- 修复工作台任务区域空白处右键范围不完整的问题；现在工作台统计卡、任务面板附近和下方空白区域都能触发同一套「新建任务」菜单。\n- 任务行、按钮、搜索框、筛选项等可操作元素仍保留原有行为，不会误触发空白新建菜单。"
   },
   {
-    "id": "CHANGELOG.md#489",
+    "id": "CHANGELOG.md#490",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5555,7 +5563,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#490",
+    "id": "CHANGELOG.md#491",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5563,7 +5571,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「记录进展」弹窗新增 AI 优化入口，会结合当前输入、已上传过程附件、任务相关文件和最近进展记录，生成可直接写入时间轴的进展文案。\n- 「确认验收」终审弹窗的「验收备注」新增 AI 优化入口，会结合任务需求、任务附件、验收附件和当前备注，整理成更专业的验收说明。\n- 新增通用 `/api/ai/text-assistant` Worker 接口，继续使用 Cloudflare Secret 中的 DeepSeek 密钥；提示词限制 AI 只能基于现有备注、文件名、标签和时间轴整理，不编造交付物、文件内容或客户确认。\n- AI 建议只展示预览，需要手动点击「采用建议」才会覆盖原文，避免误改已经填写的备注或进展。"
   },
   {
-    "id": "CHANGELOG.md#491",
+    "id": "CHANGELOG.md#492",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5571,7 +5579,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台任务列表和任务页列表空白处支持右键打开「新建任务」菜单，减少鼠标移动到顶部按钮的距离。\n- 空白右键菜单复用现有任务右键菜单视觉和权限逻辑；未登录管理员时仍会进入管理员登录提示。"
   },
   {
-    "id": "CHANGELOG.md#492",
+    "id": "CHANGELOG.md#493",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5579,7 +5587,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#493",
+    "id": "CHANGELOG.md#494",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5587,7 +5595,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 查看任务详情弹窗底部移除「文件」按钮，文件上传入口只保留在「进展」过程附件和「验收」验收文件两个真实场景里。\n- 查看任务详情弹窗底部移除重复的「关闭」按钮，关闭只保留右上角图标入口，减少底部操作噪音。\n- 详情弹窗右上角的「待验收」状态改为可交互 badge：鼠标悬停或键盘聚焦时显示「去验收」，点击后直接打开现有验收面板。\n- 同步清理已废弃的独立任务文件上传弹窗和对应样式，避免后续误用第三种上传路径。"
   },
   {
-    "id": "CHANGELOG.md#494",
+    "id": "CHANGELOG.md#495",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5595,7 +5603,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#495",
+    "id": "CHANGELOG.md#496",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5603,7 +5611,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务列表底部新增排期状态说明，标注「临期」「逾期」「进行中」「正常 / 已验收」对应的颜色含义，方便理解任务行里的倒计时 chip。\n- 日期列和任务内容列之间增加留白，任务日期、类型标签和任务名称不再贴得过近，列表扫读更清楚。\n- 中等屏和窄屏下同步调整列间距，保证新增留白不挤压右侧对接人、工时和状态区。"
   },
   {
-    "id": "CHANGELOG.md#496",
+    "id": "CHANGELOG.md#497",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5611,7 +5619,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#497",
+    "id": "CHANGELOG.md#498",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5619,7 +5627,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务管理工具栏去掉多余层级，搜索框移到标题行右侧，状态筛选和「显示作废」保持同一操作区，减少列表上方的纵向占位。\n- 任务列表表头改为「任务 · 预计时间」，任务行在任务名称下方直接展示预计开始、预计交付和倒计时，不打开详情也能判断排期压力。\n- 日期块的时间、设计类型和补录标记改为可换行的轻量标签，长类型名称不再被截断成省略号。\n- 倒计时按任务排期自动区分「距开始」「距交付」「今日 / 明日到期」「已逾期」和「已验收」状态，使用现有状态色 token，不新增裸色值。"
   },
   {
-    "id": "CHANGELOG.md#498",
+    "id": "CHANGELOG.md#499",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5627,7 +5635,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务右键菜单的「更多操作」进一步收敛，只保留甲方分享链接等低频辅助操作，减少复制任务名称和补录改月份等重复入口对主菜单的干扰。"
   },
   {
-    "id": "CHANGELOG.md#499",
+    "id": "CHANGELOG.md#500",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5635,7 +5643,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已同步版本号、CHANGELOG 和使用手册；本次更新不涉及数据库结构、权限或结算口径变更。"
   },
   {
-    "id": "CHANGELOG.md#500",
+    "id": "CHANGELOG.md#501",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5643,7 +5651,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「进度」点击修改后，改为复用记录进展弹窗同款进度滑杆和档位快选按钮，不再出现浏览器默认样式的原始按钮组。\n- 验收前进度编辑继续保持草稿逻辑：只调整验收弹窗里的核对值，确认验收后仍自动将项目进度设为 100%。"
   },
   {
-    "id": "CHANGELOG.md#501",
+    "id": "CHANGELOG.md#502",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5651,7 +5659,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗与记录进展弹窗统一使用 `.progress-slider-row` 与 `.progress-quick-options`，避免同一功能出现两套视觉语言。"
   },
   {
-    "id": "CHANGELOG.md#502",
+    "id": "CHANGELOG.md#503",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5659,7 +5667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进一步降低「确认验收」弹窗里的字段标签、基础字段值、任务需求正文、附件标签和备注标签字重，避免所有信息同时加粗造成视觉疲劳。\n- 拆分任务名称与任务需求的样式层级：任务名称保留轻度强调，任务需求改为次级阅读文本，减少大段正文抢焦点。\n- 验收弹窗的章节编号、章节标题、进度百分比和工时合计同步减重，只保留确认按钮与必要状态为主要视觉焦点。\n- 基础信息网格增加少量行列间距，让核对字段更容易逐项扫读。"
   },
   {
-    "id": "CHANGELOG.md#503",
+    "id": "CHANGELOG.md#504",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5667,7 +5675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录进展弹窗的进度滑杆对齐查看详情的样式：从原生 accent-color（4px 粗条 + 26px 巨大字号）改为自定义 track/thumb（6px 渐变填充 + 16px 圆形拖柄 + 15px 字号），三处进度滑杆视觉完全一致。"
   },
   {
-    "id": "CHANGELOG.md#504",
+    "id": "CHANGELOG.md#505",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5675,7 +5683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗内多处 font-weight 从 800（粗体）降到 500-600：section 标题、字段标签、字段值、元信息标签、eyebrow、折叠触发器、ghost 链接按钮。\n- 只保留确认按钮和 section-index 圆圈数字的粗体，其余降权，消除「全是粗体」的视觉噪音。"
   },
   {
-    "id": "CHANGELOG.md#505",
+    "id": "CHANGELOG.md#506",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5683,7 +5691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **默认逻辑**：非补录任务的结算月份一律以验收时间为准。验收发生在几月，结算月份就是几月。\n- **激活条件**：只有打开「补录」开关，或任务已是补录状态时，才能手动修改结算月份。"
   },
   {
-    "id": "CHANGELOG.md#506",
+    "id": "CHANGELOG.md#507",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5691,7 +5699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收确认时，非补录任务自动写入 `settlementMonth = 验收当月`（两个验收入口都已覆盖）。\n- 新建任务补录开关关闭时，不再预填当前月份，改为留空（待验收时自动确定）。\n- 右键菜单「改结算月份」只在补录状态下显示；非补录任务在「更多操作」里看不到此项。\n- 任务编辑器结算月份字段：补录任务显示可编辑的月份选择器；非补录任务显示「验收时自动归属」的锁定提示，不可手动修改。\n- 新增 `.field-locked` / `.field-locked-value` 样式，用虚线边框 + 灰字表达\"系统自动、不可改\"。"
   },
   {
-    "id": "CHANGELOG.md#507",
+    "id": "CHANGELOG.md#508",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5699,7 +5707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复「快速改进度」无效的问题：此前点档位只是暂存，需要再点「确认」才生效，流程容易漏掉。现在改为点档位直接保存。\n- 删除「导出工时记录」：工时已纳入月度结算，单独导出 CSV 无实际价值。\n- 删除「复制为本月新任务」：低频操作，且容易产生混淆任务。\n- 删除「上传 / 查看文件」独立菜单项：文件上传归入「记录进展」和「验收」两个场景，不在右键单独入口。\n- 「改结算月份」从一级菜单折叠进「更多操作」二级菜单：补录才用的小概率功能，不再占主菜单位置。\n- 「复制任务名称」「复制甲方分享链接」也归入「更多操作」二级菜单，主菜单更精简。"
   },
   {
-    "id": "CHANGELOG.md#508",
+    "id": "CHANGELOG.md#509",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5707,7 +5715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台和任务导航的任务行悬停图标区删除「文件」图标（📎），保留编辑 / 进展 / 验收三个高频操作。文件上传在进展弹窗和验收弹窗里完成。"
   },
   {
-    "id": "CHANGELOG.md#509",
+    "id": "CHANGELOG.md#510",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5715,7 +5723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除 handleDuplicateTask / handleExportTaskCsv 两个不再使用的处理函数。\n- 移除 TaskContextMenu 和 TasksView 中废弃的 onOpenFiles / onDuplicateTask / onExportTaskCsv 属性。"
   },
   {
-    "id": "CHANGELOG.md#510",
+    "id": "CHANGELOG.md#511",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5723,7 +5731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复任务导航行（management-row）的 hover/selected 背景色与工作台不一致的问题：此前 management-row 用 color-mix 算出一个带绿色调的浅色，与工作台的 #eef2ea 不一致。现在删掉覆盖，完全走 task-row 的配色。\n- 清理残留的 management-row 独立规则块（align-items 覆盖、strong 颜色覆盖），确保两视图视觉零差异。"
   },
   {
-    "id": "CHANGELOG.md#511",
+    "id": "CHANGELOG.md#512",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5731,7 +5739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航列表行（management-row）重构为与工作台（task-row）完全一致的 4 列结构：日期块 / 任务主体 / 对接+工时 / 状态区。\n- 任务导航补上进度条（mini-meter）和百分比，此前只在工作台能看到进度，任务导航缺失。\n- 任务导航补上虚线分隔的状态区，和工作台统一，状态信号（临期/验收/进度）收敛成右侧一组。\n- 表头从 2 列（任务/预计交付）改为 4 列（日期/任务/对接·工时/状态·交付），与新的行结构对齐。\n- 任务导航的悬停快捷图标区补上交付日期内联显示（task-row-due），悬停时与图标一起出现，常态隐藏。\n- 清理废弃的 management-title-line / inline-meta / row-end / deliver / hours 等 CSS 类，减少样式冗余。"
   },
   {
-    "id": "CHANGELOG.md#512",
+    "id": "CHANGELOG.md#513",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5739,7 +5747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- management-row 的 hover/selected 状态统一走 CSS 变量（color-mix + token），不再和工作台用两套配色逻辑。\n- 窄屏断点合并：task-row 与 management-row 在 900px / 680px 断点共用同一套列模板，避免两个视图响应式行为不一致。"
   },
   {
-    "id": "CHANGELOG.md#513",
+    "id": "CHANGELOG.md#514",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5747,7 +5755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库的 PDF / AI 文件恢复为真实内容预览：缩略图、右侧检查器和预览弹窗都会直接加载源文件内容，不再只显示文件类型占位图。\n- Office 文件在文件库中明确标记为可预览入口，双击或空格仍会进入站内预览弹窗。\n- 文件预览弹窗去掉底部重复元信息卡片，预览时只保留文件内容本身，避免遮挡阅读重点。\n- 文件预览弹窗支持拖拽缩放，PDF、图片和 Office 预览区域会跟随弹窗大小调整。"
   },
   {
-    "id": "CHANGELOG.md#514",
+    "id": "CHANGELOG.md#515",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5755,7 +5763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台移除常驻右侧详情卡，把完整任务详情统一交给任务详情弹窗，主任务列表不再被右侧摘要挤压。\n- 任务导航列表行改回与工作台一致的绿色系行底、边框和留白，减少两个视图之间的视觉割裂。\n- 任务导航行去掉左侧无语义的绿色细线，悬停和选中状态改用整行反馈，避免被误认为状态标识。"
   },
   {
-    "id": "CHANGELOG.md#515",
+    "id": "CHANGELOG.md#516",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5763,7 +5771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录进展弹窗和任务详情统一显示任务真实进度值，例如 89% 不再被弹窗预先四舍五入成 90%。\n- 进度仍保留 10% 档位吸附，但只在用户拖动滑杆或点击档位后生效，未操作前不改写显示值。"
   },
   {
-    "id": "CHANGELOG.md#516",
+    "id": "CHANGELOG.md#517",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5771,7 +5779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已锁定结算月份增加后端写保护：对应任务不能再修改明细、删除任务或删除文件，避免月报锁定后数据被静默改动。\n- 已验收任务的状态和实际工时增加前后端双层保护，避免验收后的结算工时被误改。\n- 结算历史新增「重置甲方链接」，确认后生成新的只读链接，旧链接立即失效，结算金额和工时快照不变。"
   },
   {
-    "id": "CHANGELOG.md#517",
+    "id": "CHANGELOG.md#518",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5779,7 +5787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务补上必填校验：设计类型、任务名称、任务需求和对接人缺失时会在字段下方直接提示，不再自动写入“待填写”类占位内容。\n- 编辑任务弹窗在关闭前会检查未保存改动，避免误点关闭导致草稿丢失。\n- 批量上传过程附件时，单个文件失败不会中断后续文件，并会在弹窗内列出失败文件和原因。"
   },
   {
-    "id": "CHANGELOG.md#518",
+    "id": "CHANGELOG.md#519",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5787,7 +5795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务日历视图支持通过 URL 保持 `taskView=calendar` 状态，刷新、前进后退和切换页面时不会丢失当前视图。\n- 日历视图补上上一月/下一月切换入口，方便直接检查跨月任务。\n- 甲方分享页的文件预览支持 PDF 内嵌查看；其他非图片文件提供打开源文件入口，图片预览改为懒加载。"
   },
   {
-    "id": "CHANGELOG.md#519",
+    "id": "CHANGELOG.md#520",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5795,7 +5803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 输入框、下拉框、月份和工时选择器统一补上清晰 focus 状态，键盘操作时更容易定位当前字段。\n- 年度统计和收入柱状图在窄屏下改为横向滚动，避免月份柱被挤压变形。\n- 文件库在中等宽度下打开右侧检查器时会自动下沉，避免列表和检查器互相挤压。\n- 项目结构文档同步更新：预发布站和独立 staging D1/R2 已移除，后续本地验证后直接部署正式站。"
   },
   {
-    "id": "CHANGELOG.md#520",
+    "id": "CHANGELOG.md#521",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5803,7 +5811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复工作台「工时趋势」在空数据月份可能访问空折线点并导致图表区白屏的问题。\n- 趋势图无数据时改为显示空状态说明，避免用户误以为页面加载失败。"
   },
   {
-    "id": "CHANGELOG.md#521",
+    "id": "CHANGELOG.md#522",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5811,7 +5819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 通用任务弹窗改为固定头部和底部操作区，长表单滚动时标题与保存/确认按钮不会被推出视口。\n- 弹窗容器复用现有圆角、背景和浮层阴影 token，减少最高层浮窗和其他浮层的视觉断层。"
   },
   {
-    "id": "CHANGELOG.md#522",
+    "id": "CHANGELOG.md#523",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5819,7 +5827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台逾期提醒条、任务管理行和验收终审弹窗统一使用 `due-tag` 展示临期/已逾期状态。\n- 任务管理行右侧预计交付日期恢复为辅助信息样式，只保留状态圆点，不再重复用彩色粗体日期抢焦点。"
   },
   {
-    "id": "CHANGELOG.md#523",
+    "id": "CHANGELOG.md#524",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5827,7 +5835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库切换选中文件时会同步重置文件名、标签和临时输入，避免把上一个文件的名称或标签静默保存到下一个文件。\n- 本月洞察的工时趋势补录归集改为同时识别任务结算月份，补录到本月的进展工时不再被周趋势图漏掉。"
   },
   {
-    "id": "CHANGELOG.md#524",
+    "id": "CHANGELOG.md#525",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5835,7 +5843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收终审弹窗的「进度 · 修改」不再关闭整个验收弹窗，改为展开当前进度的档位调整。\n- 验收通过后仍会按规则把进度设为 100%，终审里的进度调整仅用于确认前核对当前完成度。"
   },
   {
-    "id": "CHANGELOG.md#525",
+    "id": "CHANGELOG.md#526",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5843,7 +5851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收附件批量上传时，单个文件失败不会中断后续文件。\n- 上传失败的文件会在弹窗内显示具体文件名和错误原因，方便重新补传。"
   },
   {
-    "id": "CHANGELOG.md#526",
+    "id": "CHANGELOG.md#527",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5851,7 +5859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务日历工具栏补上月份选择器，可以直接切换查看其他结算月份的任务安排。\n- 月份选择器沿用工作台顶部的交互，会标记已有任务的月份，避免日历视图只能停留在当前月份。"
   },
   {
-    "id": "CHANGELOG.md#527",
+    "id": "CHANGELOG.md#528",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5859,7 +5867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 甲方只读报告里的任务明细日期改为只显示年月日，不再展示预计开始或交付的具体小时分钟。\n- 进展记录继续保持日期级展示，避免公开链接泄露管理员才需要看的精确操作时间。"
   },
   {
-    "id": "CHANGELOG.md#528",
+    "id": "CHANGELOG.md#529",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5867,7 +5875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务编辑面板里的普通字段保存不再弹出全局 toast，减少连续编辑任务名称、设计类型、对接人、需求和排期时的提示噪音。\n- 任务名称、设计类型、对接人、需求人、验收人、任务需求、预计开始、预计交付、预估工时和结算月份保存后，会在对应输入框上短暂闪现绿色微反馈。"
   },
   {
-    "id": "CHANGELOG.md#529",
+    "id": "CHANGELOG.md#530",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5875,7 +5883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 状态变更、验收、删除、登录等关键操作继续保留全局 toast，普通字段保存则用字段级反馈表达。\n- 字段保存微反馈复用现有 `--color-primary` 和 `--color-supplement-bg`，没有新增裸色值。"
   },
   {
-    "id": "CHANGELOG.md#530",
+    "id": "CHANGELOG.md#531",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5883,7 +5891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增全局任务状态色：计划中灰色、进行中蓝色、待验收琥珀色、已验收绿色、挂起紫色、终止红色。\n- 任务列表日期点、详情状态、状态 badge 和日历状态提示统一读取同一套状态色，避免同一状态在不同视图里颜色不一致。"
   },
   {
-    "id": "CHANGELOG.md#531",
+    "id": "CHANGELOG.md#532",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5891,7 +5899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 动态时间轴圆点缩小为 6px，并改回主色绿色，减少时间轴视觉噪音。\n- 时间轴日期保持普通灰色；精确到分钟的时间继续使用管理员专属棕色，方便管理员识别哪些信息不会对普通成员或甲方公开。\n- 进度条轨道和滑块统一减薄减小，保留 10% 档位吸附和确认后写入时间轴的机制。"
   },
   {
-    "id": "CHANGELOG.md#532",
+    "id": "CHANGELOG.md#533",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5899,7 +5907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台和任务导航的悬停快捷操作统一为「编辑、进展、文件、验收」四个高频入口。\n- 移除重复的悬停「查看详情」入口，任务详情继续通过点击任务行或右键菜单打开。\n- 右键菜单移除「改设计类型」快捷项，设计类型统一回到编辑任务弹窗中维护，避免菜单过载。"
   },
   {
-    "id": "CHANGELOG.md#533",
+    "id": "CHANGELOG.md#534",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5907,7 +5915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台任务行补上悬停快捷操作，支持直接查看详情、记录进展和去验收，和任务导航的操作语言保持一致。\n- 工作台任务行从整行 `button` 改为可键盘聚焦的任务条，内部快捷图标不再嵌套按钮，键盘回车和空格仍可选中任务。\n- 补录标记从右上角绝对定位改为日期区域内联展示，避免与右侧状态、进度和快捷操作重叠。"
   },
   {
-    "id": "CHANGELOG.md#534",
+    "id": "CHANGELOG.md#535",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5915,7 +5923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右键菜单「快速改进度」改为先暂存再确认，点击 20 / 40 / 60 / 80 / 100 只更新菜单内草稿，点「确认」后才写入任务和时间轴。\n- 验收终审弹窗的基础信息支持就地修改，任务名称、设计类型、对接人、需求人、验收人、任务需求、预计开始和预计交付可在确认验收前直接修正。\n- 确认验收时会把基础信息修正、分段工时、验收备注和验收附件一并提交，避免关掉验收弹窗再去编辑任务。"
   },
   {
-    "id": "CHANGELOG.md#535",
+    "id": "CHANGELOG.md#536",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5923,7 +5931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台右侧常驻详情卡减重为摘要卡，只保留实际工时、整体进度、交付、结算和最近一条动态。\n- 完整任务信息继续通过「查看完整详情」弹窗打开，减少工作台右侧重复展示造成的空间浪费。"
   },
   {
-    "id": "CHANGELOG.md#536",
+    "id": "CHANGELOG.md#537",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5931,7 +5939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务页列表右侧常态改为只显示预计交付日期和状态小点，参考 Gmail 式轻量日期列；快捷操作继续在悬停时出现。\n- 任务标题行改为「任务名 + 需求摘要」并列展示，需求摘要不再挤在设计类型后面。\n- 设计类型下沉到元信息行，并与补录月份、对接人、实际工时并列，减少标题区换行和拥挤感。"
   },
   {
-    "id": "CHANGELOG.md#537",
+    "id": "CHANGELOG.md#538",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5939,7 +5947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务详情里的任务状态改为「状态小点 + 状态文字」，不再使用大 badge。\n- 状态点按状态区分颜色：待验收、已验收、进行中等状态在右侧日期列中更轻量地提示。"
   },
   {
-    "id": "CHANGELOG.md#538",
+    "id": "CHANGELOG.md#539",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5947,7 +5955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右键菜单项和右侧辅助值改为单行展示，过长的结算月份、设计类型自动省略，避免菜单被挤成两行。"
   },
   {
-    "id": "CHANGELOG.md#539",
+    "id": "CHANGELOG.md#540",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5955,7 +5963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 压缩任务详情弹窗字段区高度，减少预计时间、状态、进度等普通字段的纵向占位。\n- 保持弹窗宽度不变，只调整字段行内距、标签间距和正文行高，让信息更接近轻量表格式扫读。"
   },
   {
-    "id": "CHANGELOG.md#540",
+    "id": "CHANGELOG.md#541",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5963,7 +5971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 动态时间轴里的附件标签优先按真实文件 ID 匹配文件，上传后点击附件即可直接打开预览。\n- 进展弹窗中的附件标签也支持点击预览，避免只能去文件库里再找。"
   },
   {
-    "id": "CHANGELOG.md#541",
+    "id": "CHANGELOG.md#542",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5971,7 +5979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务详情弹窗的「最近进展」现在会在对应动态下方显示附件标签，不再只把上传文件写成一行文字。\n- 进展弹窗的「进展时间轴」同步显示附件标签，过程附件、验收附件都能在动态里直接看到。\n- 新增进展记录优先展示真实进展正文；如果本次只是上传过程附件，则显示「上传过程附件」并在下方列出文件名。"
   },
   {
-    "id": "CHANGELOG.md#542",
+    "id": "CHANGELOG.md#543",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5979,7 +5987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附件标签复用现有 `file-chip` 样式，保持轻量，不额外套卡片。\n- 任务详情中的附件标签可点击预览已存在的文件。"
   },
   {
-    "id": "CHANGELOG.md#543",
+    "id": "CHANGELOG.md#544",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5987,7 +5995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 详情弹窗保持当前宽度不变，只继续调整字体轻重。\n- 弹窗标题、面包屑、字段值、进度数字和底部按钮整体减重，避免所有内容同时抢焦点。\n- 普通字段值恢复为常规字重，只保留任务名、关键强调文字和进度数字的轻度强调。"
   },
   {
-    "id": "CHANGELOG.md#544",
+    "id": "CHANGELOG.md#545",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -5995,7 +6003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 最近进展标题和正文按阅读层级重新分配字重，减少“整块文字都很粗”的压迫感。\n- 本次未新增颜色，继续复用现有样式 token。"
   },
   {
-    "id": "CHANGELOG.md#545",
+    "id": "CHANGELOG.md#546",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6003,7 +6011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 保持任务详情弹窗当前宽度不变，只调整内部文字层级和阅读节奏。\n- 详情标题字号和字重下调，避免标题区域过重造成压迫感。\n- 字段标签和字段值整体降权，普通字段不再全部粗体显示，只保留任务名等关键内容略重。\n- 字段行距、分隔线间距和上下留白增加，让详情内容更接近轻量表格式扫读。"
   },
   {
-    "id": "CHANGELOG.md#546",
+    "id": "CHANGELOG.md#547",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6011,7 +6019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 详情进度数值下调字号和字重，避免进度条抢走基础信息的视觉焦点。\n- 新增样式继续复用现有 CSS token，没有引入新的裸色值。"
   },
   {
-    "id": "CHANGELOG.md#547",
+    "id": "CHANGELOG.md#548",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6019,7 +6027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务详情弹窗改为只读汇总视图，进入后直接展示任务名称、设计类型、对接人、需求人、验收人、任务需求、预计开始、预计交付、任务状态、当前进度、实际工时和结算月份。\n- 详情弹窗中的整体进度只读取当前任务真实 `progress`，不再出现上方 0% 与下方进度条不一致的问题。\n- 最近进展保留在详情底部，管理员仍可看到精确时间，普通只读角色继续按公开规则弱化时间信息。"
   },
   {
-    "id": "CHANGELOG.md#548",
+    "id": "CHANGELOG.md#549",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6027,7 +6035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增独立“编辑任务”弹窗，对接人、设计类型、需求详情、需求人、验收人、任务状态、预计时间、预估工时和结算月份都在编辑弹窗中维护。\n- 任务列表 hover 快捷操作补上“编辑任务”图标，和“查看详情、记录进展、上传 / 查看文件、交付验收”一起形成清晰的常用动作入口。\n- 详情弹窗底部提供“文件”“进展”“去编辑”入口，用户无需在只读详情里猜测字段如何修改。"
   },
   {
-    "id": "CHANGELOG.md#549",
+    "id": "CHANGELOG.md#550",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6035,7 +6043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务右键菜单新增“编辑任务”，并继续保留记录进展、上传 / 查看文件、去验收、快速改进度、改任务状态、改结算月份、改设计类型、复制、导出和作废等完整操作。\n- 工作台右键菜单不再把进展、文件、验收都导向详情弹窗，而是分别打开对应站内弹窗，与任务页交互保持一致。\n- “改任务状态”二级菜单补回“计划中”，覆盖完整常用状态切换。"
   },
   {
-    "id": "CHANGELOG.md#550",
+    "id": "CHANGELOG.md#551",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6043,7 +6051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除进入网站前的全屏登录门禁，游客和甲方成员现在可以直接进入正式网页浏览公开任务、进展和甲方可见文件。\n- 管理员权限与访问入口解耦：未登录状态默认为游客只读，编辑、新建、上传、验收、结算锁定和系统配置仍需管理员身份。\n- 非管理员访问时隐藏侧边栏里的「结算」「收入」入口；如通过旧路由进入敏感页面，会显示站内管理员登录提示，不暴露结算和收入数据。"
   },
   {
-    "id": "CHANGELOG.md#551",
+    "id": "CHANGELOG.md#552",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6051,7 +6059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 底部设置菜单新增「登录管理员」入口，点击后在原网页内打开登录弹窗，不再跳转到独立登录页。\n- 已登录管理员仍可在设置菜单进入全站设置、查看 R2 文件空间和退出登录；退出后会回到游客只读状态，无需刷新页面。\n- 工作台「预计收入」在非管理员状态下改为“仅管理员”，避免游客和甲方看到内部金额口径。"
   },
   {
-    "id": "CHANGELOG.md#552",
+    "id": "CHANGELOG.md#553",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6059,7 +6067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- API 的 GET 读取请求支持无登录访问，写入请求继续要求管理员权限。\n- 非管理员读取状态时，文件列表只返回 `visible_to_client = 1` 的甲方可见文件，同时过滤已作废任务相关文件。\n- 访问口令或管理员登录失效时，前端会自动切换为游客只读并继续加载公开数据。"
   },
   {
-    "id": "CHANGELOG.md#553",
+    "id": "CHANGELOG.md#554",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6067,7 +6075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务列表进一步对齐 Gmail 式交互：单击任务行直接在原页面打开任务详情弹窗，右侧不再依赖常驻详情栏承接主要操作。\n- 任务行 hover 快捷操作改为“查看详情、记录进展、上传 / 查看文件、交付验收”，常态仍优先显示交付时间，减少列表常驻信息占位。\n- 任务行顶部多余描边已移除，列表视觉更轻，任务名仍作为唯一主焦点，补录、对接人、交付时间、工时和状态统一沉到元信息行。"
   },
   {
-    "id": "CHANGELOG.md#554",
+    "id": "CHANGELOG.md#555",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6075,7 +6083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务右键菜单补齐完整快捷操作：查看任务详情、记录进展、上传 / 查看文件、去验收、快速改进度、改任务状态、改结算月份、改设计类型、复制为本月新任务、导出工时记录、作废 / 恢复 / 删除。\n- hover 图标只保留高频动作，右键菜单提供更多管理能力，符合“常态简洁、右键完整”的操作分层。\n- 工作台共用任务右键菜单的入口已同步适配，避免共享组件参数不一致。"
   },
   {
-    "id": "CHANGELOG.md#555",
+    "id": "CHANGELOG.md#556",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6083,7 +6091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增“任务文件”弹窗：上传入口先打开站内弹窗，再在弹窗内选择文件；文件按“验收文件 / 过程附件”归类展示，不再从任务行直接弹出系统文件选择框。\n- 新增“记录进展”弹窗：支持 10% 进度档位、0/20/40/60/80/100 快选、未保存提示、撤销和确认进度，避免拖动误操作直接写入时间轴。\n- 进展弹窗支持填写过程说明、添加过程附件，并展示当前任务进展时间轴；时间轴节点使用主绿色，避免与管理员专属棕色含义混淆。"
   },
   {
-    "id": "CHANGELOG.md#556",
+    "id": "CHANGELOG.md#557",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6091,7 +6099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 恢复任务进展写入接口调用，进展说明确认后会写入动态时间轴。\n- 新增任务工时 CSV 导出和“复制为本月新任务”快捷入口，方便管理员做轻量复用和对账。\n- 本次未新增浏览器原生 `alert` / `confirm` / `prompt`，确认和上传流程继续走站内组件。"
   },
   {
-    "id": "CHANGELOG.md#557",
+    "id": "CHANGELOG.md#558",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6099,7 +6107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除任务页右侧常驻详情 / 折叠详情栏，任务列表恢复为单列全宽布局，不再浪费右侧空间。\n- 保留任务行双击、hover 快捷图标和右键菜单作为主要操作入口，详情、验收和附件等动作都在原页面上通过站内弹窗承接。\n- 任务列表空状态文案同步调整，引导用户通过双击、快捷图标或右键菜单管理任务。"
   },
   {
-    "id": "CHANGELOG.md#558",
+    "id": "CHANGELOG.md#559",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6107,7 +6115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除右侧折叠栏相关样式，减少页面横向占用和视觉干扰。\n- 清理任务页不再使用的右侧进展面板 handler，构建后的主 JS 体积随之下降。"
   },
   {
-    "id": "CHANGELOG.md#559",
+    "id": "CHANGELOG.md#560",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6115,7 +6123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务管理列表改为更轻量的 Gmail 式行布局：右侧不再常驻“对接 / 交付 / 工时 / 状态”四个窄列，改为在任务标题下方的元信息行集中展示，列表可用宽度更大。\n- 右侧任务详情面板默认折叠为窄条，点击后再展开，减少任务列表常态浏览时的视觉占用。\n- 任务行常态只显示交付时间；鼠标悬停时切换为 4 个快捷操作图标：打开详情、上传附件、标记待验收、交付验收。\n- 任务行支持双击打开详情，右键菜单保留更多管理动作，包含上传过程附件、交付验收、状态切换、复制标题、结算月份调整、作废 / 恢复等。"
   },
   {
-    "id": "CHANGELOG.md#560",
+    "id": "CHANGELOG.md#561",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6123,7 +6131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 快捷图标和右键菜单动作都在当前页面内打开站内弹窗或操作面板，不打开新窗口，也不使用浏览器原生弹窗。\n- 交付验收可直接从任务行快捷入口或右键菜单进入终审弹窗。\n- 附件上传入口从任务行可直接触发，计划中任务上传过程附件后会自动转为进行中。"
   },
   {
-    "id": "CHANGELOG.md#561",
+    "id": "CHANGELOG.md#562",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6131,7 +6139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 列表、右键菜单和详情折叠入口减少卡片嵌套和背景叠加，整体更接近工具型界面的轻量操作感。\n- 右键菜单颜色和阴影改用统一 CSS token，避免新增裸色值。\n- 中窄屏下详情折叠入口会自动变成横向条，避免两列布局挤压内容。"
   },
   {
-    "id": "CHANGELOG.md#562",
+    "id": "CHANGELOG.md#563",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6139,7 +6147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 将交互式多语言 README 发布为正式站静态页面：`https://mayeai.com/readme-multilingual`，顶部语言按钮可直接切换整篇 README 内容。\n- 主 README 顶部“多语言版 README”入口改为正式站在线页面，避免 GitHub 直接打开 HTML 只显示源码的问题。\n- 主 README 开头补入项目维护者提供的“一句话”简介，让访问者第一眼就理解 Giverny 要解决的实际问题。"
   },
   {
-    "id": "CHANGELOG.md#563",
+    "id": "CHANGELOG.md#564",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6147,7 +6155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `public/readme-multilingual.html` 及 `public/readme/screenshots/`，让多语言页面在正式站可直接加载真实产品截图。\n- 保留 `docs/README_MULTILINGUAL.html` 作为仓库内源文件和本地预览版本。"
   },
   {
-    "id": "CHANGELOG.md#564",
+    "id": "CHANGELOG.md#565",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6155,7 +6163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `docs/README_MULTILINGUAL.html`，基于项目维护者提供的多语言版本整理，支持简体中文、繁體中文、English、日本語、한국어。\n- 多语言 README 页面补入当前三张正式站真实截图：工作台、任务导航和收入，让不同语言读者先看到真实产品界面。\n- 主 README 顶部和目录新增“多语言版本”入口，并说明 GitHub 直接打开 HTML 可能显示源码，可本地浏览器预览。"
   },
   {
-    "id": "CHANGELOG.md#565",
+    "id": "CHANGELOG.md#566",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6163,7 +6171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 多语言版同步关键业务规则：实际工时是唯一结算依据、预计时间只用于排期、补录是公开标记、管理员专属信息用棕色识别。\n- 多语言版同步正式更新纪律：每次更新需完成 commit、tag、Release 和必要截图附件。"
   },
   {
-    "id": "CHANGELOG.md#566",
+    "id": "CHANGELOG.md#567",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6171,7 +6179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- README 首屏和“真实产品截图”章节改用项目维护者提供的 3 张真实界面截图：工作台、任务导航和收入。\n- 移除上一版示例化替换截图，不再使用灰条或示例文案处理，保留截图中的真实信息密度和产品视觉状态。\n- 截图展示范围收敛到当前最能说明产品体验的三个页面，避免 README 图片过多影响阅读节奏。"
   },
   {
-    "id": "CHANGELOG.md#567",
+    "id": "CHANGELOG.md#568",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6179,7 +6187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 更新 `docs/assets/readme/screenshots/dashboard.png`、`tasks.png`、`income.png` 为维护者提供的原图。\n- 移除未继续展示的 `files.png` 和 `reports.png` 截图资产。"
   },
   {
-    "id": "CHANGELOG.md#568",
+    "id": "CHANGELOG.md#569",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6187,7 +6195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- README 首屏改为正式站真实工作台截图，不再使用虚拟示意图作为产品主视觉。\n- 新增“真实产品截图”章节，展示工作台、任务导航、文件库、结算和收入 5 个页面的真实界面截图。\n- 所有公开截图均保留真实布局和视觉设计，同时将任务名称、需求、人名和动态细节替换为示例数据，避免灰条脱敏影响产品可读性。"
   },
   {
-    "id": "CHANGELOG.md#569",
+    "id": "CHANGELOG.md#570",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6195,7 +6203,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `docs/assets/readme/screenshots/` 截图库，用于 GitHub README 和 Release 展示。\n- 原 `product-overview.svg` 仍保留为补充图示，但不再作为 README 首屏主图。"
   },
   {
-    "id": "CHANGELOG.md#570",
+    "id": "CHANGELOG.md#571",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6203,7 +6211,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- README 继续扩展为更详细的产品说明页，新增目录、项目定位、为什么需要 Giverny、典型使用场景、模块详解、角色与权限、数据口径、文件生命周期、FAQ 和更完整的 English Overview。\n- 模块说明从“有哪些功能”升级为“每个模块解决什么问题、使用路径是什么、会影响哪些数据”，方便新用户和接手开发者理解真实业务。\n- 明确实际工时、结算月份、预计开始 / 预计交付、补录、管理员专属信息、文件删除和甲方只读链接等关键规则。"
   },
   {
-    "id": "CHANGELOG.md#571",
+    "id": "CHANGELOG.md#572",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6211,7 +6219,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- `README.md` 增加开发入口、部署发布流程和正式更新闭环说明，和 `docs/VERSIONING.md` 的发布纪律保持一致。"
   },
   {
-    "id": "CHANGELOG.md#572",
+    "id": "CHANGELOG.md#573",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6219,7 +6227,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- README 从简短备忘升级为完整项目首页，补充产品定位、适用人群、核心工作流、功能总览、业务规则、技术架构、快速开始、部署说明和文档索引。\n- 新增中文主文与 English Overview，方便中文用户、英文读者和后续协作者快速理解项目。\n- README 增加 logo、版本徽章、产品界面概览图、任务生命周期图和 Cloudflare 架构图，不再是纯文字介绍。"
   },
   {
-    "id": "CHANGELOG.md#573",
+    "id": "CHANGELOG.md#574",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6227,7 +6235,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `docs/assets/readme/product-overview.svg`、`workflow.svg`、`architecture.svg` 三张仓库内图示，GitHub README 可直接展示。"
   },
   {
-    "id": "CHANGELOG.md#574",
+    "id": "CHANGELOG.md#575",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6235,7 +6243,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 明确以后每次正式更新都必须完成代码提交、推送、版本 tag 和 GitHub Release 更新日志。\n- Release notes 与 `CHANGELOG.md` 统一按“大更新 → 小更新”排序，先写用户最关心的流程、功能和数据影响，再写样式、文案与维护项。\n- 有明显 UI / 交互变化时，Release 需要按需附截图或动图，帮助用户直观看到更新内容和使用方式。"
   },
   {
-    "id": "CHANGELOG.md#575",
+    "id": "CHANGELOG.md#576",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6243,7 +6251,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- `docs/VERSIONING.md` 更新到当前版本，并补充 GitHub Release 闭环要求。\n- `AGENTS.md` 新增发布纪律，避免后续 AI 或开发者只部署不留痕。"
   },
   {
-    "id": "CHANGELOG.md#576",
+    "id": "CHANGELOG.md#577",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6251,7 +6259,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除任务动态不再调用浏览器原生 `confirm`，统一改为站内确认弹窗。\n- 删除确认明确提示“只移除时间轴记录，不回滚任务当前进度、状态、工时或文件数据”。"
   },
   {
-    "id": "CHANGELOG.md#577",
+    "id": "CHANGELOG.md#578",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6259,7 +6267,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- `AGENTS.md` 与 `docs/DESIGN.md` 已补充硬规则：禁止使用 `window.alert` / `window.confirm` / `window.prompt`。"
   },
   {
-    "id": "CHANGELOG.md#578",
+    "id": "CHANGELOG.md#579",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6267,7 +6275,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 整体进展滑杆、圆形滑块、百分比和档位按钮整体缩小，降低视觉重量。\n- 进展时间轴去掉每条动态的白色卡片底，改为轻量列表；左侧节点改为主绿色。\n- 进展时间轴增加一键折叠/展开，动态多时不再挡住后续信息。"
   },
   {
-    "id": "CHANGELOG.md#579",
+    "id": "CHANGELOG.md#580",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6275,7 +6283,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增管理员删除任务动态能力：时间轴右侧快捷删除按钮，或在动态上右键删除。\n- 删除动态只移除时间轴记录，不回滚任务当前数据。"
   },
   {
-    "id": "CHANGELOG.md#580",
+    "id": "CHANGELOG.md#581",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6283,7 +6291,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航右侧“整体进展”改为 10% 档位吸附，拖动时只会停在 0/10/20/.../100。\n- 新增 0/20/40/60/80/100 快选按钮，当前档位高亮。\n- 进度调整改为“草稿 + 确认”机制：拖动或点档位只产生未保存状态，点击确认后才写入 D1 并记录到时间轴，点击撤销则回到已保存值。"
   },
   {
-    "id": "CHANGELOG.md#581",
+    "id": "CHANGELOG.md#582",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6291,7 +6299,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航右侧“整体进展”滑块改为自定义轨道：已完成段为深绿色，未完成段为浅灰，贴近原型图。\n- 滑块改为白底绿描边圆点，并放大百分比数字，让拖动反馈更清晰。"
   },
   {
-    "id": "CHANGELOG.md#582",
+    "id": "CHANGELOG.md#583",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6299,7 +6307,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航右侧“进展记录”恢复为完整时间轴，进展更新、任务状态、预计交付调整、附件等任务动态统一显示在同一组。\n- 管理员视角下时间轴的具体时分继续使用棕色 `admin-only-data` 标记；普通成员和甲方视角仍只显示日期。\n- 整体进展和任务状态维护收进“进展记录”模块内，不再单独散落到外层。"
   },
   {
-    "id": "CHANGELOG.md#583",
+    "id": "CHANGELOG.md#584",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6307,7 +6315,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 「补录」是需要甲方看见的公开解释标记，不再使用接近管理员专属信息的棕色。\n- 新增 `--color-supplement` / `--color-supplement-bg`，工作台角标、详情卡补录标签和任务管理补录标签统一改为绿色公开提示样式。\n- 将“补录不是管理员专属信息”的规则写入 `AGENTS.md` 与 `docs/DESIGN.md`，避免后续误用棕色。"
   },
   {
-    "id": "CHANGELOG.md#584",
+    "id": "CHANGELOG.md#585",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6315,7 +6323,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务导航右侧面板改为更接近原型的结构：顶部“任务详情”摘要、信息/进展下划线页签，以及进展工作流分区。\n- 进展页按“进展记录 / 时间记录 / 整体进展 / 交付验收”重排，过程记录卡片、附件入口、时间段、进度条和验收入口保持同一套轻量密度。\n- 保留状态维护和最近操作记录，但降低视觉权重，避免干扰主要进展流程。"
   },
   {
-    "id": "CHANGELOG.md#585",
+    "id": "CHANGELOG.md#586",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6323,7 +6331,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `--color-admin-only` 与 `admin-only-data` 规则：普通成员、甲方预览、公开只读链接不可见的内部信息，在管理员视角统一用棕色标记。\n- 动态时间轴中仅管理员可见的具体时分改为棕色；对外仍只显示日期。\n- 将该规则写入 `AGENTS.md` 与 `docs/DESIGN.md`，便于后续 AI 或开发者接手时延续同一套权限视觉语言。"
   },
   {
-    "id": "CHANGELOG.md#586",
+    "id": "CHANGELOG.md#587",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6331,7 +6339,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 动态时间轴和进展记录的时间展示按受众区分：管理员继续显示完整日期与具体时间，普通成员、甲方预览和公开只读报告只显示日期。\n- 该调整仅影响前端展示格式，原始操作记录仍保留完整时间，方便管理员审计。"
   },
   {
-    "id": "CHANGELOG.md#587",
+    "id": "CHANGELOG.md#588",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6339,7 +6347,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 终审验收弹窗最大宽度从 700px 调整为 760px，让长需求和分段工时区域更舒展。"
   },
   {
-    "id": "CHANGELOG.md#588",
+    "id": "CHANGELOG.md#589",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6347,7 +6355,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 终审验收弹窗最大宽度从 620px 调整为 700px，减少长任务名和需求说明换行，同时保留轻量核对表比例。"
   },
   {
-    "id": "CHANGELOG.md#589",
+    "id": "CHANGELOG.md#590",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6355,7 +6363,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 终审验收弹窗按原型 HTML 细化字号、字重、间距和弹窗宽度，减少粗重卡片感。\n- 分节编号、修改按钮、基础信息字段、进度条、分段工时行、上传区和底部锁定提示改为更轻量的核对表样式。\n- 分段工时和备注输入控件收窄并降低视觉权重，让任务名称、实际工时合计和最终确认动作成为主要焦点。"
   },
   {
-    "id": "CHANGELOG.md#590",
+    "id": "CHANGELOG.md#591",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6363,7 +6371,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 终审弹窗重做为「任务验收 · 终审」核对表，标题明确展示当前验收任务名称。\n- 弹窗内按基础信息、进度、分段工时、验收附件、验收备注五项逐项核对。\n- 基础信息汇总新建任务录入的数据，进度展示当前百分比并提示验收后自动设为 100%。\n- 分段工时支持修改开始/结束时间和说明，底部实时显示实际工时合计。\n- 底部新增锁定提示：确认验收后状态变为已验收、工时计入结算、进度设为 100%、项目结束。"
   },
   {
-    "id": "CHANGELOG.md#591",
+    "id": "CHANGELOG.md#592",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6371,7 +6379,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 进展 Tab 底部「交付验收」改为触发条 → 展开核对卡 → 去验收 → 终审弹窗的完整流程。\n- 「去验收」只打开终审弹窗，不再提前变更任务状态；确认验收后才把状态改为已验收、进度设为 100%、实际工时计入结算。\n- 已验收任务的触发条灰显为「已验收」，不再展开，表示工时已经锁定。\n- 展开核对卡补充实际工时、验收人、结算月份、当前进度、进展/附件/时间记录摘要。"
   },
   {
-    "id": "CHANGELOG.md#592",
+    "id": "CHANGELOG.md#593",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6379,7 +6387,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 本月洞察的设计类型工时分布只统计实际工时，不再把实际工时为 0 的任务回退成预估工时。\n- 工时趋势改为按进展记录中的实际工时日期分周，不再用预计开始时间分配周数据。\n- 新建任务默认计入顶部当前结算月份；修改预计开始时间、预计交付时间或预估工时不再自动改结算月份。\n- Worker 月报、甲方分享和共享附件查询只按 `settlement_month` 归属任务，不再用 `start_date` 兜底。"
   },
   {
-    "id": "CHANGELOG.md#593",
+    "id": "CHANGELOG.md#594",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6387,7 +6395,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 结算回单摘要日期改为展示结算月份；工时明细中的预估/预计字段标为“参考”，并取消预估工时合计。\n- 明确预计开始时间、预计交付时间和预估工时只用于排期参考，不参与本月洞察、收入统计、月报或结算。"
   },
   {
-    "id": "CHANGELOG.md#594",
+    "id": "CHANGELOG.md#595",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6395,7 +6403,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 右侧任务编辑器重新分层：信息 Tab 只保留基础信息、排期和结算；进展 Tab 承载过程记录、附件、时间、进度和验收。\n- 进展 Tab 新增「进展记录」发布区，接入现有 D1 进展记录接口，记录会进入任务动态时间轴。\n- 过程附件上传、时间段添加、整体进度滑条和状态维护集中到进展 Tab。\n- 「交付验收」移到底部并默认折叠，展开后再进入终审验收弹窗，避免日常记录和收尾动作混在一起。"
   },
   {
-    "id": "CHANGELOG.md#595",
+    "id": "CHANGELOG.md#596",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6403,7 +6411,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台默认不再显示已作废任务；任务页默认隐藏作废任务，并新增「显示作废」开关。\n- 已作废任务在任务页显示「已作废」标签和作废原因，并从工作台、日历、统计、收入、月报预览和甲方预览中排除。\n- 永久删除只在已作废任务上可用；普通任务右键危险操作为「作废任务」。\n- 作废任务可从右键菜单恢复，文件库仍保留关联文件记录。"
   },
   {
-    "id": "CHANGELOG.md#596",
+    "id": "CHANGELOG.md#597",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6411,7 +6419,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务右键菜单统一为：查看详情、状态二级菜单、复制任务名称、复制甲方分享链接、改归属月份、作废 / 永久删除。\n- 挂起和终止从右键菜单触发时，会先弹出站内原因填写框。\n- 文件右键菜单新增「下载源文件」。"
   },
   {
-    "id": "CHANGELOG.md#597",
+    "id": "CHANGELOG.md#598",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6419,7 +6427,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务 AI 文案改为固定输出「设计背景 / 设计要求 / 输出文件」三段。\n- 提示词明确要求将口语化需求改为专业可执行任务单语言，模糊内容只基于原文整理，不凭空编造。"
   },
   {
-    "id": "CHANGELOG.md#598",
+    "id": "CHANGELOG.md#599",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6427,7 +6435,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 删除 Cloudflare 测试 Worker、测试域名 Route、测试域名 DNS、测试 D1 数据库和测试 R2 bucket。\n- `wrangler.toml` 只保留正式站配置，后续本地验证后直接部署 `mayeai.com`。\n- 部署文档改为 `docs/DEPLOYMENT.md`，README、使用手册和 handoff 同步移除预发布站维护规则。"
   },
   {
-    "id": "CHANGELOG.md#599",
+    "id": "CHANGELOG.md#600",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6435,7 +6443,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 作废任务不再使用浏览器原生 `prompt`，改为站内危险操作弹窗，并支持填写作废原因。\n- 文件过大提示不再使用浏览器原生 `alert`，改为上传入口下方的站内错误提示。\n- 任务时间轴补充作废任务文案，作废原因会显示在操作记录中。\n- 全源码已排查，不再包含 `window.prompt`、`window.alert`、`window.confirm`。"
   },
   {
-    "id": "CHANGELOG.md#600",
+    "id": "CHANGELOG.md#601",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6443,7 +6451,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务详情连续修改预计开始时间、预计交付时间、预估工时等字段时，不再丢弃保存中的后续修改。\n- 同一任务如果已有保存请求在进行中，后续变更会先合并到待保存队列；当前保存完成后，系统自动再提交最新一轮变更。\n- 任务排期字段仍写入同一组 D1 字段：预计开始时间写入 `start_date`，预计交付时间写入 `estimated_delivery_date`，后续第三次、第四次修改以最后一次保存为准。"
   },
   {
-    "id": "CHANGELOG.md#601",
+    "id": "CHANGELOG.md#602",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6451,7 +6459,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务页右侧详情编辑器和任务详情弹窗的「预计开始时间 / 预计交付时间」统一增加排期锚点开关。\n- 打开开始时间开关时，系统按「预计开始时间 + 预估工时」推算预计交付时间。\n- 打开交付时间开关时，系统按「预计交付时间 - 预估工时」倒推预计开始时间，和新建任务弹窗保持一致。"
   },
   {
-    "id": "CHANGELOG.md#602",
+    "id": "CHANGELOG.md#603",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6459,7 +6467,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台「任务明细」里的补录任务不再把「补录至某月」塞进左侧日期信息区，避免挤压设计类型导致换行。\n- 补录任务改为在任务行右上角显示轻量「补录」角标，悬停可查看具体计入月份。\n- 调整工作台任务行列宽和单行省略规则，让任务标题和需求摘要在宽屏下获得更多横向空间。"
   },
   {
-    "id": "CHANGELOG.md#603",
+    "id": "CHANGELOG.md#604",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6467,7 +6475,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务的 AI 助手只在点击「任务具体需求」右侧星星图标时触发。\n- 任务具体需求输入区不再包裹在表单 label 内，避免点击输入框、文本区域或周边空白时误触发 AI 请求。"
   },
   {
-    "id": "CHANGELOG.md#604",
+    "id": "CHANGELOG.md#605",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6475,7 +6483,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务排期不再通过点击时间输入框隐式切换锚点，避免误操作导致开始 / 交付时间计算方向变化。\n- 「预计开始时间」和「预计交付时间」标题旁新增极简开关，哪个开关打开，哪个时间就是当前排期锚点。\n- 未激活的时间字段改为只读展示；日历面板恢复为无描边日期网格，只保留选中日期的绿色底色。"
   },
   {
-    "id": "CHANGELOG.md#605",
+    "id": "CHANGELOG.md#606",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6483,7 +6491,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务的排期支持双锚点：激活「预计开始时间」时，系统按开始时间 + 预估工时推算交付时间。\n- 激活「预计交付时间」时，系统按交付时间 - 预估工时倒推开始时间，适合先知道截止时间再安排开始时间的场景。\n- 调整预估工时时会沿用当前激活的时间锚点，只重算另一端时间，避免开始 / 交付时间互相抢控制权。"
   },
   {
-    "id": "CHANGELOG.md#606",
+    "id": "CHANGELOG.md#607",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6491,7 +6499,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 所有文件上传入口（侧栏附件、进展附件、详情附件、验收附件）统一加入文件类型 `accept` 约束和大小校验：单文件超过 95MB 时前端直接拦截并提示，避免撞到 Cloudflare Workers 100MB 请求体上限后用户不知道原因。\n- 上传按钮文案统一显示实时进度百分比（「上传中 73%」），底层复用已有的 `onProgress` 链路，大文件上传不再像卡死。\n- 验收附件、侧栏附件和详情附件原先只显示「上传中…」，现与验收附件一致展示百分比。"
   },
   {
-    "id": "CHANGELOG.md#607",
+    "id": "CHANGELOG.md#608",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6499,7 +6507,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- Toast 从单条覆盖改为队列堆叠：连续操作产生的多条提示会依次堆叠显示（最多 3 条），互不覆盖，各自计时消失，不再丢反馈。\n- 任务状态变更（右键菜单进行中 / 待验收等）增加「正在保存…」即时提示，保存完成后变为「任务已同步到 D1」；保存期间对同一任务的重复状态变更会被忽略，避免用户以为没反应而连点。"
   },
   {
-    "id": "CHANGELOG.md#608",
+    "id": "CHANGELOG.md#609",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6507,7 +6515,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 首页补全 `<title>`、`meta description` 和 Open Graph / Twitter Card 标签：甲方收到结算分享链接时，微信 / iMessage 预览卡片将显示标题、描述和 logo，不再是空白。"
   },
   {
-    "id": "CHANGELOG.md#609",
+    "id": "CHANGELOG.md#610",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6515,7 +6523,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧主导航移除「设置」，只保留工作台、任务、文件库、结算和收入等高频业务入口。\n- 左下角新增账号设置菜单，点击「设置」后集中展示管理员身份、全站设置入口、R2 文件空间和退出登录。\n- 版本号收纳到左下角菜单内，减少侧边栏常驻信息，让导航更接近 Codex 式底部账户菜单结构。"
   },
   {
-    "id": "CHANGELOG.md#610",
+    "id": "CHANGELOG.md#611",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6523,7 +6531,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修正上一版补录月份仍使用网格选择器的问题：新建任务打开补录后，不再渲染独立月份面板。\n- 将「计入月份」改为补录开关旁的一行下拉选择，和表单字段保持一致，垂直空间基本不增加。\n- 补录月份默认跟随当前顶栏结算月份；下拉提供近期月份选项，保留跨月补录能力。\n- 删除补录专用的 3×4 月份网格及相关 CSS，避免低频功能再次占据主表单黄金位置。"
   },
   {
-    "id": "CHANGELOG.md#611",
+    "id": "CHANGELOG.md#612",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6531,7 +6539,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务打开「补录」后，结算月份选择器改为紧凑小面板，不再横向撑满弹窗。\n- 将“实际日期按真实发生时间填写”的说明合并到小面板标题区，减少低频功能占用空间。\n- 缩小补录月份网格、年份切换和确认按钮尺寸，确认后仍收起并在开关旁显示已记录月份。"
   },
   {
-    "id": "CHANGELOG.md#612",
+    "id": "CHANGELOG.md#613",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6539,7 +6547,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 统一 toast 反馈体系：成功、错误、信息三类状态使用不同视觉样式和图标，错误提示停留更久，避免用户错过失败原因。\n- 启动加载页改为明确的连接状态卡片，说明正在读取任务、文件和结算数据。\n- 侧边栏品牌副标题增加后端状态点，正常、连接中和异常状态可快速识别。\n- 空状态提示统一为轻背景提示块，减少不同页面“暂无内容”样式不一致的问题。"
   },
   {
-    "id": "CHANGELOG.md#613",
+    "id": "CHANGELOG.md#614",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6547,7 +6555,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 验收弹窗增加未保存保护：修改验收备注、调整时间段或上传验收附件后，关闭前会提示确认，避免误触遮罩 / Esc / 关闭按钮导致本次填写丢失。\n- 验收附件上传中关闭弹窗时增加提示，避免上传过程中的反馈丢失。\n- 验收确认按钮在附件上传中或系统计算工时为 0 时不可提交，减少无效验收。\n- 任务详情附件上传中关闭弹窗时增加确认提示，避免用户误以为上传已经完成。"
   },
   {
-    "id": "CHANGELOG.md#614",
+    "id": "CHANGELOG.md#615",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6555,7 +6563,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 管理员密码改为平台内部密码：密码哈希保存到 D1 `app_settings`，不再把 Cloudflare Secret `ADMIN_TOKEN` 作为日常登录密码来源。\n- 首次上线时会使用旧 `ADMIN_TOKEN` 自动迁移生成平台密码哈希；之后管理员可在设置页「账号安全」里自行修改密码。\n- 登录页新增「忘记密码」入口和重置密码视图；邮件找回需要配置发信服务 `RESEND_API_KEY` 后才会真正发出重置邮件。\n- 管理员密码使用 PBKDF2 哈希存储，并兼容旧版本超迭代哈希的重迁移，避免 Cloudflare Workers 运行时异常。"
   },
   {
-    "id": "CHANGELOG.md#615",
+    "id": "CHANGELOG.md#616",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6563,7 +6571,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 保留 v0.10.35 的危险操作确认：设计类型大类 / 子类、任务时间段和验收时间段删除都必须二次确认。\n- 危险删除弹窗补充影响说明和元信息，避免误删配置或实际工时后才发现数据被重算。"
   },
   {
-    "id": "CHANGELOG.md#616",
+    "id": "CHANGELOG.md#617",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6571,7 +6579,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页删除设计类型大类 / 子类时接入统一确认弹窗，避免误点垃圾桶后直接修改设计类型库。\n- 删除设计类型大类时明确提示会同时移除其子类，并说明只影响后续新建任务选项，不删除历史任务。\n- 任务详情和验收弹窗中的「删除时间段」接入统一确认弹窗，避免误删导致实际工时被重新计算。\n- 删除类弹窗统一使用危险色、元信息和明确确认按钮，减少不同模块危险操作的认知差异。"
   },
   {
-    "id": "CHANGELOG.md#617",
+    "id": "CHANGELOG.md#618",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6579,7 +6587,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗打开后，点击空白遮罩和按 Esc 不再关闭面板，避免误触导致已填写内容丢失。\n- 新建任务弹窗只保留右上角关闭入口和「创建任务」主按钮；底部取消按钮移除，关闭意图更明确。\n- 新建任务表单增加本地草稿缓存，关闭后重新打开会恢复任务名称、需求、设计类型、联系人、排期、补录月份和补录说明等未提交内容。\n- 创建任务成功后自动清除草稿；如果保存失败或主动关闭，草稿继续保留。"
   },
   {
-    "id": "CHANGELOG.md#618",
+    "id": "CHANGELOG.md#619",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6587,7 +6595,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 管理员登录明确为账号密码制：账号使用 `bh141425@gmail.com`，密码使用 Cloudflare Secret `ADMIN_TOKEN`。\n- 访问口令登录继续保留：邮箱留空并输入后台发放的访问口令，仍按普通访问口令用户权限处理。\n- 修正先前试运营免密方案，避免仅凭邮箱获得管理员权限。"
   },
   {
-    "id": "CHANGELOG.md#619",
+    "id": "CHANGELOG.md#620",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6595,7 +6603,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 管理员密码不写入前端代码，只保存在 Cloudflare Worker Secret 中；后续如需修改密码，只需要更新 `ADMIN_TOKEN`。"
   },
   {
-    "id": "CHANGELOG.md#620",
+    "id": "CHANGELOG.md#621",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6603,7 +6611,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页改为「业务设置」「权限安全」「系统信息」三组折叠分区，业务设置默认展开，权限和系统低频信息默认收起。\n- 结算设置和设计类型归入业务设置；口令管理和退出登录归入权限安全；数据备份、产品版本和系统资源归入系统信息。\n- 移除设置页原有的四宫格低频工具布局，避免后台配置页面继续呈现碎片化小卡片堆叠。"
   },
   {
-    "id": "CHANGELOG.md#621",
+    "id": "CHANGELOG.md#622",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6611,7 +6619,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增统一浮层层级变量：普通浮层、日期 / 月份 / 级联选择器、模态框和覆盖特效使用语义化 z-index，减少菜单与弹窗遮挡问题。\n- 任务详情弹窗拆分为「排期与状态」「附件」「动态时间轴」折叠区，默认优先展示排期和状态，降低详情页信息噪音。\n- 任务页右侧详情编辑区拆分为「基础信息与排期」「验收与进展」折叠区，让创建 / 排期信息和验收维护信息边界更清楚。\n- 全站补充原生控件兜底：checkbox、radio、range、选中文本和文件按钮统一使用站点绿色，降低浏览器默认蓝色控件再次出现的概率。"
   },
   {
-    "id": "CHANGELOG.md#622",
+    "id": "CHANGELOG.md#623",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6619,7 +6627,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 已将 `DEEPSEEK_API_KEY` 写入 Cloudflare 正式环境 Worker Secret，AI 任务助手具备线上调用 DeepSeek 的密钥条件。\n- 历史备注：当时也曾配置测试环境 Secret；该测试环境现已删除。"
   },
   {
-    "id": "CHANGELOG.md#623",
+    "id": "CHANGELOG.md#624",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6627,7 +6635,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 线上 AI 接口仍需要有效管理员登录凭证；当前本地备份口令与线上 `ADMIN_TOKEN` 不一致，因此本次完成 Secret 层验证，完整业务调用需先同步管理员口令后再验收。"
   },
   {
-    "id": "CHANGELOG.md#624",
+    "id": "CHANGELOG.md#625",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6635,7 +6643,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台任务列表下方的「设计类型工时分布」「工时趋势」「年度统计」合并为默认收起的「本月洞察」，优先呈现任务和待办，降低首次进入工作台的信息噪音。\n- 新增一层基础视觉变量，先接入主按钮、面板、搜索框和导航选中态，后续颜色与容器规范可逐步迁移，避免再出现零散不一致的样式。"
   },
   {
-    "id": "CHANGELOG.md#625",
+    "id": "CHANGELOG.md#626",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6643,7 +6651,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台和任务页搜索框默认宽度从 150px 调整为 360px 自适应，完整显示「搜索本月任务、需求、对接人」占位文案。\n- 面板工具区允许搜索框利用右侧空白空间，小屏下仍保持全宽布局。"
   },
   {
-    "id": "CHANGELOG.md#626",
+    "id": "CHANGELOG.md#627",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6651,7 +6659,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库页面标题从「R2 文件库」改为「文件库」，技术资源信息只保留在设置页系统资源中。\n- 工作台任务搜索占位文案统一为「搜索本月任务、需求、对接人」，避免和任务页搜索范围产生认知差异。\n- 甲方查看页增加「返回结算」入口，避免从结算预览进入后失去导航归属。\n- 主按钮和 toast 通知从深色渐变改为纯色深绿，保持工具界面更安静统一。\n- 分段计时和验收时间输入替换为站内 `HH:mm` 文本输入，移除浏览器原生时间选择控件，避免系统默认蓝色控件再次出现。"
   },
   {
-    "id": "CHANGELOG.md#627",
+    "id": "CHANGELOG.md#628",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6659,7 +6667,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗的「任务具体需求」旁新增 AI 助手图标，可调用后端 DeepSeek Tool Calls 优化需求文案并推荐设计类型。\n- AI 返回结构化建议：优化后的需求、大类、子类、推荐理由，以及当前分类是否已存在。\n- 若推荐分类不存在，前端只展示「新增分类并采用」入口；必须由管理员确认后，才会写入设计类型库。"
   },
   {
-    "id": "CHANGELOG.md#628",
+    "id": "CHANGELOG.md#629",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6667,7 +6675,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- DeepSeek API Key 只允许配置在 Cloudflare Worker Secret：`DEEPSEEK_API_KEY`，前端不会暴露密钥。\n- 未配置密钥时，AI 助手显示明确提示，不影响普通新建任务流程。"
   },
   {
-    "id": "CHANGELOG.md#629",
+    "id": "CHANGELOG.md#630",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6675,7 +6683,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务补录月份选择不再使用浏览器原生 `input[type=\"month\"]`，改为站内自定义绿色月份网格，避免出现系统默认蓝色选中态。\n- 任务详情中的「结算月份」同步替换为自定义月份选择器，彻底移除前端源码中的原生月份输入。"
   },
   {
-    "id": "CHANGELOG.md#630",
+    "id": "CHANGELOG.md#631",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6683,7 +6691,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧底部移除 R2 文件空间卡片，只保留轻量版本号，避免侧边栏常驻低频信息。\n- 移除界面中的「试运营」阶段展示；阶段信息只保留在版本规范文档中，不再占用产品界面。\n- 设置页的口令管理、数据备份、产品版本、账号安全和系统资源改为图标化折叠入口，点击后再展开详情。\n- 系统资源中集中展示 Cloudflare Worker、D1、R2 信息，避免把 R2 存储信息放在全局侧边栏。"
   },
   {
-    "id": "CHANGELOG.md#631",
+    "id": "CHANGELOG.md#632",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6691,7 +6699,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 记录 AI Agent 下一版方向：用 DeepSeek Tool Calls 处理需求润色、设计类型推荐和经确认后的分类创建，不在本修订版本中直接接入。"
   },
   {
-    "id": "CHANGELOG.md#632",
+    "id": "CHANGELOG.md#633",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6699,7 +6707,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务打开「补录」后，结算月份选择从右上角悬浮卡片改为表单内联面板，打开时会自然推开下方内容，不再遮挡设计类型、任务名称等关键字段。\n- 保留右上角补录开关、已记录月份提示和修改入口；点击「确定」后仍自动收起月份面板。"
   },
   {
-    "id": "CHANGELOG.md#633",
+    "id": "CHANGELOG.md#634",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6707,7 +6715,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗将「设计类型」提前到表单顶部并占满一行，符合导出明细中设计类型靠前的阅读顺序，也避免二级选项卡被下方字段遮挡。\n- 「需求人」和「对接人」保持同一行展示；「预计开始时间 / 预估工时 / 预计交付时间」在桌面端合并为一行，减少纵向滚动。\n- 新建任务中的预估工时菜单改为向下展开，并降低其弹层层级，避免误叠到设计类型选择器上出现“2 h”遮挡。"
   },
   {
-    "id": "CHANGELOG.md#634",
+    "id": "CHANGELOG.md#635",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6715,7 +6723,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 恢复任务状态图例、日历任务点和状态徽章的多色区分：计划中为紫色、进行中为蓝色、已验收为绿色，挂起 / 待验收 / 终止 / 不计费保留各自语义色。\n- 明确视觉规则：站点通用操作控件和日期时间选择器统一使用绿色强调；任务状态颜色属于业务信息编码，不纳入单色统一。"
   },
   {
-    "id": "CHANGELOG.md#635",
+    "id": "CHANGELOG.md#636",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6723,7 +6731,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页「设计类型」大类改为桌面端双列排布，减少大类增多后的纵向滚动；窄屏自动退回单列，避免内容挤压。\n- 大类排序拖拽柄保留在卡片左侧，折叠按钮、名称和子类数量拆开显示，降低误点。"
   },
   {
-    "id": "CHANGELOG.md#636",
+    "id": "CHANGELOG.md#637",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6731,7 +6739,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设计类型大类名称支持直接编辑，回车或失焦后保存；空名称和重复名称会自动回退，避免破坏二级分类结构。\n- 新增大类时会阻止重复名称，减少后台配置脏数据。"
   },
   {
-    "id": "CHANGELOG.md#637",
+    "id": "CHANGELOG.md#638",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6739,7 +6747,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 预计开始时间选择器改为站内自定义日期时间浮层，移除浏览器原生 `datetime-local` 弹层，避免出现蓝色默认选中态。\n- 自定义日期时间浮层统一使用绿色选中态、轻边框和站内按钮样式。\n- 替换非状态视觉中的蓝色/紫蓝色，统一为绿色、橄榄、琥珀等当前站点色系；任务状态语义色在 v0.10.21 恢复多色区分。"
   },
   {
-    "id": "CHANGELOG.md#638",
+    "id": "CHANGELOG.md#639",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6747,7 +6755,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务、任务详情和详情弹窗中的「预计交付时间」改为只读展示，不再允许手动输入。\n- 「预计交付时间」统一由「预计开始时间」和「预估工时」自动推算。\n- 任务创建后，管理员可修改预计开始时间或预估工时，系统同步重算预计交付时间。"
   },
   {
-    "id": "CHANGELOG.md#639",
+    "id": "CHANGELOG.md#640",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6755,7 +6763,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 预计开始时间、预估工时、预计交付时间仍然只作为排期计划数据，不影响实际开始、实际交付、实际工时和最终结算。"
   },
   {
-    "id": "CHANGELOG.md#640",
+    "id": "CHANGELOG.md#641",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6763,7 +6771,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 读取用户提供的《昂楷科技平面设计兼职工时评估表6月V1.0B01.xlsx》，确认有效工作表名为「6月」，第 5 行为 A-P 共 16 列工时明细字段。\n- 月度结算回单新增「工时明细附表」，按 Excel「6月」表结构展示：序号、开始日期、设计类型、项目/任务名称、具体任务需求、对接人、工作阶段、预估工时、实际工时、预计交付日期、实际交付日期、修改轮次上限、状态、验收人/确认、风险/阻塞、进展。"
   },
   {
-    "id": "CHANGELOG.md#641",
+    "id": "CHANGELOG.md#642",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6771,7 +6779,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 附表数据由平台任务、验收备注、时间记录和进展记录生成，不写死 Excel 中的历史行。\n- 「进展」优先展示验收备注，其次展示任务最新进展；「风险/阻塞」展示挂起或终止原因，无异常时显示“无”。\n- 当前平台暂无独立「修改轮次上限」字段，附表该列先显示“—”，避免凭空生成数据。"
   },
   {
-    "id": "CHANGELOG.md#642",
+    "id": "CHANGELOG.md#643",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6779,7 +6787,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 打印 PDF 时结算回单使用 A4 横向版式，明细附表使用紧凑字号，兼容 16 列明细。"
   },
   {
-    "id": "CHANGELOG.md#643",
+    "id": "CHANGELOG.md#644",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6787,7 +6795,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务的「预计开始时间」和「预计交付时间」支持精确到时、分，可手动输入 `2026/06/13 10:10`，也可通过右侧日期时间选择器填写。\n- 新建任务中，填写预计开始时间并调整预估工时后，系统会自动推算预计交付时间。例如 10:10 + 1 h 自动得到 11:10。"
   },
   {
-    "id": "CHANGELOG.md#644",
+    "id": "CHANGELOG.md#645",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6795,7 +6803,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 预计开始时间、预计交付时间和预估工时仅作为排期计划数据，不写入实际工时，也不影响最终结算金额。\n- 任务详情和详情弹窗支持管理员后续修改预计开始时间、预计交付时间。\n- 列表、日历、月报和甲方分享页兼容旧日期数据与新日期时间数据，避免出现原始 `T` 字符。"
   },
   {
-    "id": "CHANGELOG.md#645",
+    "id": "CHANGELOG.md#646",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6803,7 +6811,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 设置页「结算设置」卡片改为跨满整行，避免右侧无意义留白。\n- 小时单价、服务公司名称、计税方式、PDF 抬头改为四列等宽布局，在桌面端铺满卡片宽度。\n- 「默认客户」改名为「服务公司名称」，并改为可编辑输入项。"
   },
   {
-    "id": "CHANGELOG.md#646",
+    "id": "CHANGELOG.md#647",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6811,7 +6819,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `serviceCompanyName` 后端设置项，保存到 D1 的 `app_settings`。\n- 月度结算回单和分享查看页同步读取服务公司名称，不再硬编码公司名。"
   },
   {
-    "id": "CHANGELOG.md#647",
+    "id": "CHANGELOG.md#648",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6819,7 +6827,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除左侧导航的高频 / 低频分割线，恢复 6 个导航项的整体连续感。\n- 移除「结算」「收入」的悬停说明，保留更轻、更自用的导航表达。\n- 设置页「结算设置」改为一行紧凑布局：小时单价、默认客户、计税方式和 PDF 抬头同排展示，减少右侧空白和纵向占位。"
   },
   {
-    "id": "CHANGELOG.md#648",
+    "id": "CHANGELOG.md#649",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6827,7 +6835,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧导航增加高频 / 低频分隔线，并为「结算」「收入」补充悬停语义，区分对甲方出账和个人税后收入。\n- 工作台和任务页空状态增加「新建任务」入口，减少空数据时的无操作感。\n- 任务详情保留状态下拉和「确认验收」主按钮，移除底部重复的快捷状态按钮，降低误操作和重复入口。\n- 收入页「税务估算参数」默认折叠，优先展示税后结果和趋势。\n- 设置页通过视觉顺序将「结算设置」「设计类型」前置，Cloudflare 绑定改为默认折叠，降低低频技术信息干扰。"
   },
   {
-    "id": "CHANGELOG.md#649",
+    "id": "CHANGELOG.md#650",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6835,7 +6843,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 暂不采纳“减少任务状态数量”的建议：挂起、终止、不计费仍承担结算和审计语义，本次只收敛入口，不改业务状态。"
   },
   {
-    "id": "CHANGELOG.md#650",
+    "id": "CHANGELOG.md#651",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6843,7 +6851,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗移除「当前阶段」字段，降低创建任务时的决策成本。\n- 新任务由系统自动进入初始状态，后续「进行中 / 待验收 / 确认验收」统一在任务详情或任务列表中处理。"
   },
   {
-    "id": "CHANGELOG.md#651",
+    "id": "CHANGELOG.md#652",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6851,7 +6859,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务打开补录后，结算月份浮层改为显式确认后收起；确认后只保留“已记录到 YYYY 年 MM 月”和小型修改入口，避免重复信息遮挡项目 / 任务名称。\n- 新建任务阶段选项移除「已验收」，验收动作统一回到任务详情中的「确认验收」流程。\n- 新建任务不再把预估工时写入实际工时，避免未验收任务提前影响结算金额。"
   },
   {
-    "id": "CHANGELOG.md#652",
+    "id": "CHANGELOG.md#653",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6859,7 +6867,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务里的「补录 / 验收备注」收敛为仅补录时出现的「补录说明」，不再跟随待验收 / 已验收状态展示。\n- 补录任务在任务详情确认验收时，会在验收弹窗中显示补录结算月份，并使用更贴合补录场景的备注占位文案。"
   },
   {
-    "id": "CHANGELOG.md#653",
+    "id": "CHANGELOG.md#654",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6867,7 +6875,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 结算页的「结算历史」默认只展示最近一条记录，多条历史可手动展开 / 收起。\n- 减少历史记录对当前月结算单核对和锁定操作的视觉干扰。"
   },
   {
-    "id": "CHANGELOG.md#654",
+    "id": "CHANGELOG.md#655",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6875,7 +6883,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 侧边导航「月报」改名为「结算」，更贴近月底锁定结算和甲方分享的业务流程。\n- 顶栏移除重复的「月度结算单」按钮，保留月份选择和「新建任务」主操作，减少顶栏决策负担。"
   },
   {
-    "id": "CHANGELOG.md#655",
+    "id": "CHANGELOG.md#656",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6883,7 +6891,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `docs/PRODUCT_UX_UI_REVIEW_2026-06-13.md`，从信息架构、导航、内容折叠、按钮交互、视觉系统、UX 路径和实施计划七个维度完成全面审查。"
   },
   {
-    "id": "CHANGELOG.md#656",
+    "id": "CHANGELOG.md#657",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6891,7 +6899,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台任务明细移除重复的筛选图标菜单，保留状态分段 Tab 作为唯一筛选入口，降低操作决策成本。"
   },
   {
-    "id": "CHANGELOG.md#657",
+    "id": "CHANGELOG.md#658",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6899,7 +6907,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 修复新建任务弹窗打开后，背景顶栏月份选择器仍浮在遮罩上方、看起来异常高亮的问题。"
   },
   {
-    "id": "CHANGELOG.md#658",
+    "id": "CHANGELOG.md#659",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6907,7 +6915,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务打开「补录」后，选择结算月份会自动收起月份浮层，并在开关旁显示“已记录到 YYYY 年 MM 月”。\n- 预计开始日期和预计交付改为可手动输入，也保留日历按钮；支持 `2026/04/21`、`2026-04-21` 等格式并自动规范化。\n- 补录或直接选择待验收 / 已验收时，新增「补录 / 验收备注」输入，用于说明历史完成但本月补结算等情况。\n- 补录状态选择旁新增提示：已完成任务可直接选已验收；需要补验收文件时，创建后到任务详情上传。"
   },
   {
-    "id": "CHANGELOG.md#659",
+    "id": "CHANGELOG.md#660",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6915,7 +6923,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库文件卡片新增右键菜单，支持预览、打开、重命名、添加标签和删除。\n- 重命名和添加标签会选中对应文件并聚焦右侧信息栏输入框，避免重复做一套编辑浮层。\n- 文件右键菜单复用任务右键菜单的轻量样式，删除仍走原有站内二次确认。"
   },
   {
-    "id": "CHANGELOG.md#660",
+    "id": "CHANGELOG.md#661",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6923,7 +6931,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 重写 `README.md`，同步当时的 Cloudflare 全栈架构、环境规则、任务不可删除、文件库自动归档等关键规则。\n- 重写 `docs/PROJECT_STRUCTURE.md`，补齐当前目录、调试入口、认证方式和业务注意事项。\n- 新增 `handoff/NEXT_WINDOW_BRIEF.md`，作为重新开窗口后的短版接手说明。\n- 更新 `handoff/HANDOFF.md`，整理 Cloudflare 资源、部署命令、业务规则和 UI 偏好。"
   },
   {
-    "id": "CHANGELOG.md#661",
+    "id": "CHANGELOG.md#662",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6931,7 +6939,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 平台版本升级到 `v0.10.4`，用于标记本次交接整理批次。"
   },
   {
-    "id": "CHANGELOG.md#662",
+    "id": "CHANGELOG.md#663",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6939,7 +6947,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 全站弹窗右上角关闭按钮去掉圆形底色，只保留关闭图标。\n- hover 时仅保留轻量背景反馈，避免常态下出现不必要的装饰容器。"
   },
   {
-    "id": "CHANGELOG.md#663",
+    "id": "CHANGELOG.md#664",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6947,7 +6955,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 补录月份浮层说明文案缩短为“实际日期按真实发生时间填写。”。\n- 浮层宽度从 210px 调整为 250px，避免 1920×1080 等常规桌面宽度下说明文字换行。"
   },
   {
-    "id": "CHANGELOG.md#664",
+    "id": "CHANGELOG.md#665",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6955,7 +6963,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗右上角的「补录」从复合按钮改为静态文字 + 独立开关。\n- 去掉补录开关外层圆角矩形，只保留内部滑动开关本体，减少“框套框”的视觉复杂度。"
   },
   {
-    "id": "CHANGELOG.md#665",
+    "id": "CHANGELOG.md#666",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6963,7 +6971,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增平台版本号配置：`appVersion`、`appReleaseDate`、`appReleaseStage`。\n- 左侧底部轻量显示当前版本号和发布阶段，方便截图反馈和快速确认上线批次。\n- 设置页新增「产品版本」面板，显示完整版本号、发布阶段和发布时间。\n- 新增 `docs/VERSIONING.md`，规定主版本、次版本、修订版本的递增规则。"
   },
   {
-    "id": "CHANGELOG.md#666",
+    "id": "CHANGELOG.md#667",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6971,7 +6979,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 后续每次更新都需要同步递增版本号，并更新 `CHANGELOG.md`、`使用手册.md` 及必要的运营文档。\n- 版本完整信息放在设置页，首页不展示大号版本信息，避免干扰工作台核心数据。"
   },
   {
-    "id": "CHANGELOG.md#667",
+    "id": "CHANGELOG.md#668",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6979,7 +6987,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台任务列表和任务页列表的右键菜单合并为同一个共用组件，减少重复逻辑。\n- 任务右键菜单增加「状态」二级菜单，把“进行中 / 待验收”等快捷动作收进二级层级，减少主界面按钮占用。\n- 文件预览弹窗去掉底部重复的“完成”按钮，只保留右上角关闭图标。"
   },
   {
-    "id": "CHANGELOG.md#668",
+    "id": "CHANGELOG.md#669",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6987,7 +6995,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 `docs/UX_OPTIMIZATION_AUDIT.md`，记录后续图标化、折叠、右键菜单和组件复用的产品优化清单。"
   },
   {
-    "id": "CHANGELOG.md#669",
+    "id": "CHANGELOG.md#670",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -6995,7 +7003,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务弹窗里的「补录」从表单大字段移到弹窗右上角，改为低频使用的小开关；关闭为灰色，打开为绿色。\n- 只有打开补录后才显示「计入结算月份」，并以浮层形式出现，不再占用表单主体空间。\n- 全站弹窗右上角的「关闭」文字按钮统一替换为圆形关闭图标，减少弹窗顶部空间占用。"
   },
   {
-    "id": "CHANGELOG.md#670",
+    "id": "CHANGELOG.md#671",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7003,7 +7011,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新建任务新增「补录」开关，支持手动选择任务计入哪个结算月份。\n- 任务详情新增「结算月份」字段，可在任务创建后继续修正归属月份。"
   },
   {
-    "id": "CHANGELOG.md#671",
+    "id": "CHANGELOG.md#672",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7011,7 +7019,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工作台、任务列表、年度收入统计、月报锁定和甲方分享页统一按结算月份归属任务。（旧版曾用开始日期兜底；v0.10.52 起已改为只按 `settlement_month`。）\n- 补录任务在任务列表、详情卡和结算单日期旁显示补录标识，保留真实发生日期。\n- 文件库和甲方月报附件查询同步支持补录任务，避免补录任务附件漏出对应结算月。"
   },
   {
-    "id": "CHANGELOG.md#672",
+    "id": "CHANGELOG.md#673",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7019,7 +7027,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 左侧品牌副标题改为“让创作在自己的花园里生长”，避免在侧边栏中换行。"
   },
   {
-    "id": "CHANGELOG.md#673",
+    "id": "CHANGELOG.md#674",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7027,7 +7035,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增品牌图片资源 `public/giverny-logo.png`，替换网站左侧品牌位、加载页和登录页的旧图标。\n- 新增 `public/favicon.png`，浏览器标签页图标同步替换为 Giverny 品牌 Logo。"
   },
   {
-    "id": "CHANGELOG.md#674",
+    "id": "CHANGELOG.md#675",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7035,7 +7043,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 网站品牌名统一改为 `Giverny`。\n- 左侧品牌副标题改为“每一次创作，都在自己的花园里生长”。\n- 浏览器标签标题、登录页标题、甲方分享页页脚和使用手册标题同步更新。"
   },
   {
-    "id": "CHANGELOG.md#675",
+    "id": "CHANGELOG.md#676",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7043,7 +7051,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库恢复删除入口，用于管理员清理误传文件。\n- 删除操作使用站内二次确认弹窗，确认后才会删除 D1 文件记录、R2 源文件和预览图。\n- 删除提示文案强调：已验收、已发给甲方、可能用于回溯的文件建议保留。"
   },
   {
-    "id": "CHANGELOG.md#676",
+    "id": "CHANGELOG.md#677",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7051,7 +7059,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件库右侧信息栏移除“删除”按钮，只保留“预览”和“打开”，避免误删影响甲方回溯、验收记录和历史月报。\n- 后端同步禁用 `DELETE /api/files/:id`，旧页面或手动请求会返回 405，不会删除 D1 记录或 R2 文件。\n- 补充任务排序说明：补录历史月份任务时，排序按任务填写的预计开始日期 / 开始日期倒序；同一天内才按创建时间倒序。"
   },
   {
-    "id": "CHANGELOG.md#677",
+    "id": "CHANGELOG.md#678",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7059,7 +7067,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 历史记录：当时曾建立预发布环境；该测试域名、测试 Worker、测试 D1 和测试 R2 现已删除。\n- 历史记录：当时曾新增预发布部署文档；现已改为 `docs/DEPLOYMENT.md`。\n- 新增本地文档 `docs/OPERATION_POLICIES.md`，记录任务排序规则、文件库清理策略、数据安全原则和每次更新后的文档维护要求。"
   },
   {
-    "id": "CHANGELOG.md#678",
+    "id": "CHANGELOG.md#679",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7067,7 +7075,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 移除前端硬编码的 2026 年 5 月导入工时 `9.5h`，正式统计改为只从 D1 任务和锁定月报计算，避免 5 月及年度统计出现非正式数据。\n- 清空正式站测试任务、进展、文件和月报数据；关闭“任务为空时自动注入测试数据”的逻辑。"
   },
   {
-    "id": "CHANGELOG.md#679",
+    "id": "CHANGELOG.md#680",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7075,7 +7083,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 正式站 `mayeai.com` 进入试运营后，只录入真实任务与真实文件；当前预发布环境已删除，改版完成本地验证后直接部署正式站。\n- 任务不允许删除，避免影响工时统计、收入结算和审计链路；异常任务通过“挂起”或“终止”处理。\n- 文件库暂不做自动定期删除；建议采用“锁定月报 → 导出备份 → 归档冷数据 → 人工复核后清理”的保守策略。"
   },
   {
-    "id": "CHANGELOG.md#680",
+    "id": "CHANGELOG.md#681",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7083,7 +7091,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 统计卡改横排：图标在左、文字块（标签/数值/说明）在右，消除右侧大片空白，卡片高度更紧凑（甲方分享页同步）。\n- 工作台右侧任务明细卡重做：移除深色封面图块；结构改为 类型+标题+状态徽章 → 预计交付（带临期/逾期标签）/实际工时/对接人/验收人 2×2 → 整体进展条 → 上传附件入口 → 动态时间轴（最近 4 条）→「查看更多」按钮。\n- 交互调整：工作台点任务行改回更新右侧明细卡（自动加载该任务时间轴）；「查看更多」才展开完整详情弹窗。"
   },
   {
-    "id": "CHANGELOG.md#681",
+    "id": "CHANGELOG.md#682",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7091,7 +7099,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **任务详情弹窗**：工作台任务行点击弹出，可编辑状态/预计交付/实际工时/进度（数字输入 + 滑块），内置图片/附件快速上传；下方为**动态时间轴**——基于审计日志生成，记录创建、状态变更、进度更新、文件上传、进展增删等所有操作（北京时间）。新增 `GET /api/tasks/:id/activity`。\n- **进展编辑/删除**：`PATCH/DELETE /api/updates/:id`，工时变化自动按差额回写任务累计工时；进展卡片右侧新增编辑/删除按钮，编辑复用进展弹窗（预填）。\n- **大文件分片上传**：>90MB 自动走 R2 multipart（init/part/complete 三个接口，40MB 分片），绕开 Workers 请求体上限；所有上传改用 XHR 显示实时进度条。\n- **交付日期提醒**：`estimatedDate` 字段全链路打通（建任务时落库、编辑器/详情弹窗可改）；未完成任务临期（≤3 天）黄标、逾期红标；工作台顶部跨月提醒条，点击跳任务页；任务管理「交付」列改显预计交付日期。\n- **甲方查看回执**：分享页每次打开记录 viewed_at/view_count（D1 迁移 0002）；结算历史显示「甲方已查看 N 次（最近时间）/ 尚未查看」。\n- **年度统计**：工作台底部 12 个月计费工时柱状图 + 累计工时/收入；已锁定月份按快照金额计（🔒 标记），未锁定按当前时薪。"
   },
   {
-    "id": "CHANGELOG.md#682",
+    "id": "CHANGELOG.md#683",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7099,7 +7107,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 工时分布环形图：所有类型纳入统计。（旧版曾把计划中预估工时纳入；v0.10.52 起已改为只统计实际工时。）\n- 任务明细筛选改为点击弹出下拉菜单（全部/计划中/进行中/待验收/已验收），筛选生效时图标高亮。\n- 全站时间显示统一转北京时间（原来文件上传时间、锁定时间等显示的是 UTC，差 8 小时）。\n- 删除文件的审计日志补记任务 ID 和文件名（时间轴可显示）。"
   },
   {
-    "id": "CHANGELOG.md#683",
+    "id": "CHANGELOG.md#684",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7107,7 +7115,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **去掉单一管理口令**，改为两种登录方式：\n - 管理员：邮箱 `bh141425@gmail.com`（写入后台）+ 管理密码 → 最高权限\n - 访问口令：管理员在后台生成的口令，邮箱留空直接登录 → 可正常使用工作台，但不能管理口令\n- 登录页改为「邮箱 + 口令」双字段，新增 `POST /api/auth/login` 校验；旧版 `x-admin-token` 请求头全部失效。"
   },
   {
-    "id": "CHANGELOG.md#684",
+    "id": "CHANGELOG.md#685",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7115,7 +7123,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **申请口令**：填备注（如\"手机 / iPad / 协作设计师\"），选有效期（永久 / 7 天 / 30 天 / 90 天），生成后自动复制。\n- **管理口令**：列表展示状态（有效 / 已停用 / 已过期）、创建时间、到期时间、最近使用时间；支持停用、启用、删除（删除/停用后该口令立即失效）。\n- 新增 D1 表 `access_tokens`（已应用到线上）；口令每次使用会记录 last_used_at；登录/生成/停用/删除均写入审计日志。"
   },
   {
-    "id": "CHANGELOG.md#685",
+    "id": "CHANGELOG.md#686",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7123,7 +7131,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 文件预览鉴权同步升级为新凭证体系（支持管理员和访问口令）。\n- 口令被停用/过期后，已登录设备的下一次请求会收到 401 并被退回登录页。"
   },
   {
-    "id": "CHANGELOG.md#686",
+    "id": "CHANGELOG.md#687",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7131,7 +7139,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **后台加锁**：读取业务数据的所有接口（含 `/api/state`）现在都需要管理口令，工时、金额、联系人不再对全网公开；前端增加锁屏登录页，口令错误会提示并要求重新输入。\n- **文件预览鉴权**：`/api/files/:id/preview` 增加权限校验——管理口令可看全部；甲方分享 token 只能看「甲方可见」的文件；其余一律 401。\n- 设置页新增「退出登录」（清除本机口令），公共电脑可用；前端不再把任务/文件等业务数据缓存到 localStorage。"
   },
   {
-    "id": "CHANGELOG.md#687",
+    "id": "CHANGELOG.md#688",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7139,7 +7147,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **锁定结算 → 生成真实分享链接**：月报页点「锁定结算并生成甲方链接」后金额快照写入 D1，自动复制 `mayeai.com/share/<token>` 链接；同一月份重复锁定会更新数据但保留原 token，已发出的链接不失效。\n- **甲方只读分享页** `/share/:token`：无需口令，展示锁定的工时与金额快照、任务明细、可在线预览的交付文件和进展记录（仅「甲方可见」内容），支持打印 PDF。\n- **结算历史**：月报页新增历史列表（月份、工时、金额、锁定时间），每条可复制链接或直接打开甲方页面。\n- 修复 `wrangler.toml` 缺少 `binding = \"ASSETS\"` 导致 `/share/*` 等非静态路径线上 500 的问题。"
   },
   {
-    "id": "CHANGELOG.md#688",
+    "id": "CHANGELOG.md#689",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7147,7 +7155,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **月份动态生成**：月份下拉根据任务数据 + 当前月份自动生成，不再写死 5–7 月（修复 8 月起无法切换月份的隐患）。\n- **任务完整编辑**：任务名称、设计类型、日期、对接人、验收人、需求描述全部可改，离开输入框自动保存（不再每个按键发请求）。\n- **文件删除**：文件库每个文件新增删除按钮，连同 R2 源文件和预览图一并删除。\n- **数据备份**：设置页新增「导出备份 JSON」，一键下载全部任务、进展、文件记录和结算历史。\n- 新建任务时落库当前小时单价（原来写死默认值）；上传失败现在有明确提示。"
   },
   {
-    "id": "CHANGELOG.md#689",
+    "id": "CHANGELOG.md#690",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7155,7 +7163,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- **任务日历视图**：任务页左侧导航新增「列表视图 / 日历视图」二级导航；日历按月展示任务（状态色点 + 任务条），点击日期查看当天「进行中 / 计划中 / 已完成」分组，右侧附「接下来待完成」列表，点任务跳回列表编辑。\n- **「计划中」任务状态**：新建任务默认计划中（工时为 0、进度 0%），筛选标签、状态下拉、快捷按钮、状态徽章全部支持；计划中任务不进入结算单。\n- **月份真正过滤数据**：切换月份后任务、统计、图表、进展、文件库、月报、甲方页全部按所选月份过滤；月份选择器改为真实下拉；默认打开当前月份；新建任务自动跳到任务所在月份；导入工时只计入 2026-05。\n- **甲方在线预览文件**：甲方查看页文件列表可点击，直接弹窗预览；上传 PSD / AI / PDF 等源文件时可附一张「效果预览图」（2.5MB 内），甲方点击即看图，无需下载源文件。\n- 工时趋势图改为按任务日期每周实时汇总（原为写死数据）。"
   },
   {
-    "id": "CHANGELOG.md#690",
+    "id": "CHANGELOG.md#691",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7163,7 +7171,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 月报改为**银行回执单样式**：回单编号、出单时间、双线分隔、客户/单价信息栏、带边框明细表、合计行、人民币大写金额、红色电子印章、裁剪虚线、品牌水印。\n- 布局改为全宽：顶部为统计 + 操作条，回执单居中展示（原来侧栏布局显示奇怪）。\n- 理顺 PDF 流程：页面给出「核对 → 导出 PDF → 另存为 PDF」引导；导出时自动把 PDF 文件名设为「昂楷科技工时结算单_2026-06」；打印时只输出回执单本体。"
   },
   {
-    "id": "CHANGELOG.md#691",
+    "id": "CHANGELOG.md#692",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7171,7 +7179,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 新增 6 月示例任务（含计划中）、进展和文件，便于体验日历与月份切换（旧浏览器数据需在设置页「重置示例数据」后可见）。"
   },
   {
-    "id": "CHANGELOG.md#692",
+    "id": "CHANGELOG.md#693",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7179,7 +7187,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 公司名错字：「昴楷科技」统一改为「昂楷科技」（顶栏、月报封面、甲方查看页、设置页），公开链接路径同步改为 `ankki-2026-05`。\n- 新建任务 / 添加进展的默认日期改为当天（原来写死 2026-05-30），预计交付默认 +3 天，上传文件时间改为实际时间。\n- 上传图片预览改用 dataURL 持久化（≤2.5MB），刷新页面后预览不再失效（原 blob URL 刷新即失效）。\n- 进展列表 React key 由标题改为 id，标题重复不再渲染错乱。\n- 工作台「设计类型工时分布」环形图改为根据实际任务工时动态计算（原数据写死 24.2h）。\n- 工时趋势图纵轴上限动态计算（原固定 12h，超出会画出图表外）。\n- 「本月总工时」与「计费工时」区分统计；删除假的「较上月 +12%」文案，改为显示导入工时。\n- 任务全部删除后不再白屏（空状态保护）。\n- localStorage 写入加 try/catch，存储满时不再抛错。"
   },
   {
-    "id": "CHANGELOG.md#693",
+    "id": "CHANGELOG.md#694",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
@@ -7187,7 +7195,7 @@ export const productKnowledgeDocuments: ProductKnowledgeDocument[] = [
     "content": "- 任务管理页支持删除任务（带确认）。\n- 设置页「小时单价」可编辑并持久化，预计收入随单价自动重算。\n- 弹窗支持按 ESC 或点击遮罩关闭（统一 ModalShell 组件）。\n- 任务列表筛选无结果时显示空状态提示；无任务时「添加进展 / 上传文件」给出引导提示。\n- 月报、甲方查看页月份跟随顶栏选择的月份。"
   },
   {
-    "id": "CHANGELOG.md#694",
+    "id": "CHANGELOG.md#695",
     "sourcePath": "CHANGELOG.md",
     "sourceLabel": "Giverny 更新日志",
     "category": "更新日志",
