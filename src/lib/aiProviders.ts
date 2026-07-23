@@ -1,10 +1,29 @@
-import type { AiModelConfig, AiModelProvider } from './api'
+import type { AiModelConfig, AiModelEndpointConfig, AiModelProvider, AiModelRouteKey } from './api'
 
 const AI_GATEWAY_BASE = 'https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e33758c6d/mayeai-gateway'
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
 const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const QWEN_DEFAULT_MODEL = 'qwen3.7-plus'
+
+export const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string }> = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'doubao', label: '豆包 / Doubao' },
+  { value: 'qwen', label: '通义千问 / Qwen' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'custom-openai', label: 'OpenAI 兼容网关' },
+]
+
+export const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> = {
+  textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
+  textFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
+  visionPrimary: { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3-flash-preview' },
+  visionFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
+}
 
 export function providerSupportsVision(provider: AiModelProvider) {
   return provider === 'gemini' || provider === 'kimi' || provider === 'doubao' || provider === 'qwen' || provider === 'openai' || provider === 'openrouter' || provider === 'custom-openai'

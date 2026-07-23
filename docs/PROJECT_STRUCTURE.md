@@ -76,8 +76,10 @@
 │   │   └── initialData.ts
 │   ├── lib/
 │   │   ├── api.ts
+│   │   ├── aiBrands.ts
 │   │   ├── aiModels.ts
 │   │   ├── aiProviders.ts
+│   │   ├── designTypes.ts
 │   │   ├── fileMetadata.ts
 │   │   ├── format.ts
 │   │   ├── money.ts
@@ -88,8 +90,10 @@
 │   ├── views/
 │   │   ├── FilesView.tsx
 │   │   ├── IncomeView.tsx
-│   │   └── KnowledgeView.tsx
+│   │   ├── KnowledgeView.tsx
+│   │   └── SettingsView.tsx
 │   ├── components/
+│   │   ├── AiBrandIcon.tsx
 │   │   ├── DailyKnowledgeModal.tsx
 │   │   └── GivernySelect.tsx
 │   ├── types/
@@ -125,7 +129,9 @@
 - Client share page: `src/SharedReport.tsx`
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
+- Lazy-loaded settings and AI operations entry: `src/views/SettingsView.tsx`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
+- Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
 - Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`
 - Frontend API client and auth headers: `src/lib/api.ts`
 - PSD preview helper: `src/lib/psdPreview.ts`

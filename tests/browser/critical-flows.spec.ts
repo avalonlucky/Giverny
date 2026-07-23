@@ -80,6 +80,21 @@ test('收入页按需加载且年度与月度金额保持对账', async ({ page 
   })
 })
 
+test('设置页仅在进入时加载独立分包', async ({ page }) => {
+  const settingsLoadedOnDashboard = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('SettingsView-'))
+  ))
+  expect(settingsLoadedOnDashboard).toBe(false)
+
+  await page.goto('/settings')
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(page.getByRole('heading', { name: '默认模型' })).toBeVisible()
+  const settingsLoadedAfterNavigation = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('SettingsView-'))
+  ))
+  expect(settingsLoadedAfterNavigation).toBe(true)
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')
