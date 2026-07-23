@@ -112,7 +112,9 @@ import { ConfirmDialogModal, type ConfirmDialogState } from './components/Confir
 import { VoidTaskModal } from './components/VoidTaskModal'
 import { ImagePreviewReader, OfficePreview, PdfPreviewReader } from './components/FilePreviewReaders'
 import { FilePreviewModal } from './components/FilePreviewModal'
-import { FileThumbnailPreview, PsdThumbnail } from './components/FileThumbnailPreview'
+import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
+import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
+import { FileThumbnailPreview } from './components/FileThumbnailPreview'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, StatusDotLabel, TaskSearchBox } from './components/TaskUi'
 import { EmptyState } from './components/EmptyState'
@@ -124,21 +126,18 @@ import { formatFileSize } from './lib/format'
 import { datePart, formatDurationZh, formatMonthDay, formatPlanDateTime, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad, planDateTimeFromMinuteStamp, toDateTimeInputValue } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
 import { formatYuan, roundCents } from './lib/money'
-import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
+import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
 import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from './lib/previewTimeout'
 import { taskSettlementMonth } from './lib/taskSettlement'
 import {
   acceptanceProgressEndDateTime,
-  billableTimeEntries,
   dateTimeMinuteStamp,
   isSupplementalTask,
   isTaskBillable,
-  isWaitingEntryActive,
   latestTaskActivityValue,
   minutesForTimeEntry,
   minutesForWaitingEntry,
-  nextWorkStartForWaiting,
   normalizeClockInput,
   sortTasksByLatestActivity,
   sumBillableAmountForMonth,
@@ -153,13 +152,16 @@ import {
 } from './lib/taskAccounting'
 import { designTypeColorForIndex, validDesignTypeColor } from './lib/designTypes'
 import { aiProviderOptions, aiRouteDefaults, providerSupportsVision } from './lib/aiProviders'
-import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
+import { canRecordNewProgress, hasAcceptanceProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
+import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, isAcceptanceFileAsset, partnerFacingText, sortTimeEntriesDesc } from './lib/taskPresentation'
 import type { ReceiptExcelOptions } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
+import { createPdfPreviewFile } from './lib/pdfPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
+import type { ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -722,14 +724,6 @@ function isTaskListBlankContextTarget(target: EventTarget | null) {
   return !target.closest('.task-row, .task-context-menu, button, a, input, textarea, select, [role="button"]')
 }
 
-function formatMonthDayDash(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = datePart(value)
-  return `${date.slice(5, 7)}-${date.slice(8, 10)}`
-}
-
 function formatDueDateCompact(value: string) {
   if (!value) {
     return ''
@@ -1022,33 +1016,6 @@ async function createTextPreviewFile(fileName: string, text: string) {
   return new File([blob], `${splitFileName(fileName).base || 'attachment'}-preview.png`, { type: 'image/png' })
 }
 
-async function createPdfPreviewFile(file: File) {
-  const data = await file.arrayBuffer()
-  const pdfjs = await import('pdfjs-dist')
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-  const doc = await pdfjs.getDocument({ data }).promise
-  const page = await doc.getPage(1)
-  const base = page.getViewport({ scale: 1 })
-  const targetWidth = 600
-  const viewport = page.getViewport({ scale: targetWidth / base.width })
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.ceil(viewport.width)
-  canvas.height = Math.ceil(viewport.height)
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('Canvas 不可用')
-  }
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  await page.render({ canvasContext: context, viewport }).promise
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), 'image/png'))
-  if (!blob) {
-    throw new Error('PDF 预览生成失败')
-  }
-  const baseName = file.name.replace(/\.[^.]+$/, '')
-  return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
-}
-
 // 把视频首帧渲染成 PNG 预览图（MP4 / MOV / WebM 等）
 async function createVideoPreviewFile(file: File) {
   const url = URL.createObjectURL(file)
@@ -1242,14 +1209,6 @@ function stringifyCellValue(value: unknown): string {
   return String(value)
 }
 
-function isAcceptanceFileAsset(file: FileAsset, acceptanceFileNames?: Set<string>) {
-  const fileTags = parseFileTags(file.tag)
-  return file.scope === 'acceptance'
-    || fileTags.includes('验收文件')
-    || fileTags.includes('验收附件')
-    || Boolean(acceptanceFileNames?.has(file.name.trim()))
-}
-
 function nowStamp() {
   const now = new Date()
   return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
@@ -1269,12 +1228,6 @@ type AcceptancePayload = {
   waitingEntries?: WaitingEntry[]
   acceptanceFiles?: string[]
   taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'estimatedHours' | 'progress'>>
-}
-
-type TaskUpdateChanges = Partial<Task> & {
-  allowAcceptedTimeEdit?: boolean
-  allowAcceptanceRollback?: boolean
-  startFromProgress?: boolean
 }
 
 type AiLearningDraft = {
@@ -1572,13 +1525,6 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 
 type DonutItem = DonutChartItem
 
-type TaskContextInsight = {
-  tone: 'warning' | 'info'
-  label: string
-  detail: string
-  evidence: string
-}
-
 const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
@@ -1715,40 +1661,6 @@ function formatDuration(minutes: number) {
   return `${hours} h ${restMinutes} min`
 }
 
-function formatSignedHours(minutes: number) {
-  const safeMinutes = Math.max(0, minutes)
-  const hours = safeMinutes / 60
-  return `+${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`
-}
-
-function formatEntryDateTimeRange(task: Task, entry: TimeEntry) {
-  const startDate = entry.date || datePart(task.date)
-  const endDate = entry.endDate || startDate
-  const startLabel = `${formatMonthDay(startDate)} ${entry.start}`
-  return startDate === endDate ? `${startLabel}-${entry.end}` : `${startLabel} - ${formatMonthDay(endDate)} ${entry.end}`
-}
-
-function formatWaitingElapsed(minutes: number) {
-  const safeMinutes = Math.max(0, Math.round(minutes))
-  const days = Math.floor(safeMinutes / 1440)
-  const hours = Math.floor((safeMinutes % 1440) / 60)
-  const restMinutes = safeMinutes % 60
-  return [days > 0 ? `${days} 天` : '', hours > 0 ? `${hours} 小时` : '', `${restMinutes} 分钟`].filter(Boolean).join(' ')
-}
-
-function formatWaitingEntryDateTimeRange(task: Task, entry: WaitingEntry) {
-  const startDate = entry.date || datePart(task.date)
-  const startLabel = `${formatMonthDay(startDate)} ${entry.start}`
-  const nextStart = nextWorkStartForWaiting(task, entry)
-  if (!Number.isFinite(nextStart)) {
-    return `${startLabel} 起 · 等待中`
-  }
-  const endValue = planDateTimeFromMinuteStamp(nextStart)
-  const endDate = datePart(endValue)
-  const endTime = endValue.slice(11, 16)
-  return startDate === endDate ? `${startLabel}-${endTime}` : `${startLabel} - ${formatMonthDay(endDate)} ${endTime}`
-}
-
 function formatTaskActivityDateRange(task: Task) {
   const start = datePart(task.date || '')
   const latest = datePart(latestTaskActivityValue(task))
@@ -1825,15 +1737,6 @@ function findNearestAvailableTimeSlot<T extends Pick<TimeEntry, 'date' | 'endDat
   return { start, end }
 }
 
-function sortTimeEntriesDesc<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(entries: T[]) {
-  // 按开始时间戳倒序（最新在上）。直接取 start 时刻，避免 0 时长记录（end==start）被当成无效排到末尾。
-  return [...entries].sort((a, b) => {
-    const aStart = dateTimeMinuteStamp(a.date || '', a.start)
-    const bStart = dateTimeMinuteStamp(b.date || '', b.start)
-    return (Number.isFinite(bStart) ? bStart : 0) - (Number.isFinite(aStart) ? aStart : 0)
-  })
-}
-
 function defaultTimeEntryDraft() {
   const start = snapPlanDateTime(isoDateTime(), 'up')
   const end = addMinutesToPlanDateTime(start, 60)
@@ -1877,14 +1780,6 @@ function fillTimeDraftFromDuration(draft: TimeEntryDraft, minutes: number) {
     end: endVal || draft.end,
   }
 }
-
-type ProgressRecordMode = 'progress' | 'waiting' | 'feedback'
-
-const partnerFacingText = (value: string | undefined, fallback = '合作伙伴') =>
-  (value?.trim() || fallback).replaceAll('甲方', '合作伙伴')
-
-const feedbackEntryLabel = (entry: Pick<TimeEntry, 'feedbackSource' | 'isRevision'>) =>
-  `${partnerFacingText(entry.feedbackSource)}反馈${entry.isRevision ? ' · 计入改稿轮次' : ''}`
 
 type ProgressModalTarget = {
   taskId: number
@@ -2353,170 +2248,6 @@ const writeStateCache = (state: BackendState) => {
 
 const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
 
-function AttachmentHoverThumbnail({
-  name,
-  type,
-  previewUrl,
-  previewFallback = false,
-  sourceUrl,
-  sourceFile,
-  compact = false,
-  onOpen,
-}: {
-  name: string
-  type?: string
-  previewUrl?: string
-  previewFallback?: boolean
-  sourceUrl?: string
-  sourceFile?: File
-  compact?: boolean
-  onOpen?: () => void
-}) {
-  const [hoverPreview, setHoverPreview] = useState<{ style: CSSProperties; fieldPlacement: boolean } | null>(null)
-  const [generatedPdfPreview, setGeneratedPdfPreview] = useState<{
-    source: string
-    status: 'ready' | 'failed'
-    url?: string
-  } | null>(null)
-  const inferred = inferFileType({ name, type })
-  const extension = inferred.type
-  const hasUsablePreview = Boolean(previewUrl && !previewFallback)
-  const pdfSourceUrl = !hasUsablePreview && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceUrl : ''
-  const pdfSourceFile = !hasUsablePreview && (inferred.kind === 'pdf' || inferred.kind === 'ai') ? sourceFile : undefined
-  const pdfSourceKey = pdfSourceFile
-    ? `file:${pdfSourceFile.name}:${pdfSourceFile.size}:${pdfSourceFile.lastModified}`
-    : pdfSourceUrl
-  const psdSourceUrl = !hasUsablePreview && inferred.kind === 'psd' ? sourceUrl : ''
-  const officeSourceUrl = !hasUsablePreview && inferred.kind === 'office' ? sourceUrl : ''
-  const videoSourceUrl = !hasUsablePreview && inferred.kind === 'video' ? sourceUrl : ''
-  const currentPdfPreview = generatedPdfPreview?.source === pdfSourceKey ? generatedPdfPreview : null
-  const effectivePreviewUrl = hasUsablePreview ? previewUrl : (currentPdfPreview?.status === 'ready' ? currentPdfPreview.url ?? '' : '')
-  const pdfPreviewFailed = currentPdfPreview?.status === 'failed'
-
-  useEffect(() => {
-    if ((!pdfSourceUrl && !pdfSourceFile) || hasUsablePreview || !pdfSourceKey) {
-      return
-    }
-    let cancelled = false
-    let objectUrl = ''
-    const generatePreview = async () => {
-      try {
-        let source = pdfSourceFile
-        if (!source) {
-          const remoteSourceUrl = pdfSourceUrl
-          if (!remoteSourceUrl) {
-            throw new Error('PDF 来源不可用')
-          }
-          const controller = new AbortController()
-          const response = await withPreviewTimeout(
-            fetch(remoteSourceUrl, { credentials: 'same-origin', signal: controller.signal }),
-            PDF_PREVIEW_TIMEOUT_MS,
-            'PDF 读取超时',
-          ).catch((error) => {
-            controller.abort()
-            throw error
-          })
-          if (!response.ok) {
-            throw new Error('PDF 读取失败')
-          }
-          source = new File([await response.blob()], name, { type: 'application/pdf' })
-        }
-        const generated = await withPreviewTimeout(createPdfPreviewFile(source), PDF_PREVIEW_TIMEOUT_MS, 'PDF 首页渲染超时')
-        if (cancelled) {
-          return
-        }
-        objectUrl = URL.createObjectURL(generated)
-        setGeneratedPdfPreview({ source: pdfSourceKey, status: 'ready', url: objectUrl })
-      } catch (error) {
-        console.warn('PDF shared thumbnail generation failed', name, error)
-        if (!cancelled) {
-          setGeneratedPdfPreview({ source: pdfSourceKey, status: 'failed' })
-        }
-      }
-    }
-    void generatePreview()
-    return () => {
-      cancelled = true
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
-      }
-    }
-  }, [hasUsablePreview, name, pdfSourceFile, pdfSourceKey, pdfSourceUrl])
-
-  const media = effectivePreviewUrl
-    ? <img src={effectivePreviewUrl} alt="" loading="lazy" />
-    : pdfSourceUrl
-      ? <span className="attachment-hover-thumb-ext">PDF</span>
-      : psdSourceUrl
-        ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
-        : officeSourceUrl
-          ? <OfficePreview fileType={extension} sourceUrl={officeSourceUrl} compact />
-          : videoSourceUrl
-            ? <video src={videoSourceUrl} muted playsInline preload="metadata" />
-            : <span className="attachment-hover-thumb-ext">{extension}</span>
-  const hoverMedia = effectivePreviewUrl
-    ? <img src={effectivePreviewUrl} alt="" />
-    : pdfSourceUrl
-      ? <><FileText size={42} /><strong>PDF</strong><span>{pdfPreviewFailed ? '点击查看完整 PDF' : '正在生成首页预览'}</span></>
-      : psdSourceUrl
-        ? <PsdThumbnail sourceUrl={psdSourceUrl} label={name} />
-        : officeSourceUrl
-          ? <OfficePreview fileType={extension} sourceUrl={officeSourceUrl} compact />
-          : videoSourceUrl
-            ? <video src={videoSourceUrl} muted playsInline preload="metadata" />
-            : <strong>{extension}</strong>
-  const showPreview = (element: HTMLElement) => {
-    const rect = element.getBoundingClientRect()
-    const attachmentField = element.closest('.progress-attachment-field')?.getBoundingClientRect()
-    if (attachmentField && attachmentField.width >= 560) {
-      const width = Math.min(360, Math.max(280, attachmentField.width - 150))
-      const height = Math.min(340, Math.max(260, attachmentField.bottom - rect.top - 10))
-      setHoverPreview({
-        fieldPlacement: true,
-        style: {
-          left: Math.min(rect.right + 24, attachmentField.right - width),
-          top: Math.max(8, Math.min(rect.top - 12, window.innerHeight - height - 8)),
-          width,
-          height,
-        },
-      })
-      return
-    }
-    const width = 220
-    const height = 246
-    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 8)
-    const top = rect.top - height - 10 >= 8 ? rect.top - height - 10 : rect.bottom + 10
-    setHoverPreview({ fieldPlacement: false, style: { left, top, width, height } })
-  }
-
-  return (
-    <span
-      className={`attachment-hover-thumb-wrap ${compact ? 'compact' : ''}`}
-      onMouseEnter={(event) => showPreview(event.currentTarget)}
-      onMouseLeave={() => setHoverPreview(null)}
-    >
-      <button
-        type="button"
-        className="attachment-hover-thumb"
-        title={onOpen ? `预览 ${name}` : name}
-        aria-label={onOpen ? `预览 ${name}` : name}
-        onClick={onOpen}
-      >
-        {media}
-      </button>
-      {hoverPreview && createPortal(
-        <span className={`attachment-hover-preview ${hoverPreview.fieldPlacement ? 'field-placement' : ''}`} style={hoverPreview.style} aria-hidden="true">
-          <span className="attachment-hover-preview-media">
-            {hoverMedia}
-          </span>
-          <span className="attachment-hover-preview-name">{name}</span>
-        </span>,
-        document.body,
-      )}
-    </span>
-  )
-}
-
 const PendingAttachmentThumbnail = memo(function PendingAttachmentThumbnail({
   attachment,
   onOpen,
@@ -2565,6 +2296,8 @@ const PendingAttachmentThumbnail = memo(function PendingAttachmentThumbnail({
   previous.attachment.file === next.attachment.file
   && previous.attachment.name === next.attachment.name
 ))
+
+
 
 function PendingAttachmentPreview({
   attachment,
@@ -2632,21 +2365,6 @@ function PendingAttachmentPreview({
     </ModalShell>,
     document.body,
   )
-}
-
-const progressStageLabels: Record<TaskProgressAssessment['stage'], string> = {
-  not_started: '尚未开始',
-  preparation: '准备与启动',
-  production: '核心制作',
-  first_version: '首版完成',
-  finalizing: '修改与定稿',
-  accepted: '验收闭环',
-}
-
-const progressConfidenceLabels: Record<TaskProgressAssessment['confidence'], string> = {
-  low: '低置信度',
-  medium: '中置信度',
-  high: '高置信度',
 }
 
 type ToastTone = 'success' | 'error' | 'info'
@@ -8314,530 +8032,6 @@ function Fireworks() {
         <span key={index} style={{ '--i': index } as CSSProperties} />
       ))}
     </div>
-  )
-}
-
-function DashboardTaskSidebar({
-  task,
-  files,
-  progressAssessment,
-  hourlyRate,
-  onPreviewFile,
-  onUpdateTask,
-  onOpenProgress,
-  onDeleteEntry,
-  onDeleteAcceptanceProgress,
-  onOpenEdit,
-  onOpenAcceptance,
-  onAutoEstimateProgress,
-  canWrite,
-  canDelete,
-}: {
-  task: Task | undefined
-  files: FileAsset[]
-  progressAssessment?: TaskProgressAssessment
-  hourlyRate: number
-  onPreviewFile: (file: FileAsset) => void
-  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
-  onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
-  onDeleteEntry: (taskId: number, mode: ProgressRecordMode, entryId: string) => void
-  onDeleteAcceptanceProgress: (taskId: number, entryId?: string) => void
-  onOpenEdit: (taskId: number) => void
-  onOpenAcceptance: (taskId: number) => void
-  onAutoEstimateProgress?: (task: Task) => void
-  canWrite: boolean
-  canDelete: boolean
-}) {
-  const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
-  const [expandedEntryNotes, setExpandedEntryNotes] = useState<Record<string, boolean>>({})
-  const [waitingNowStamp, setWaitingNowStamp] = useState(() => Math.floor(Date.now() / 60000))
-  const [progressUiState, setProgressUiState] = useState({
-    taskId: 0,
-    pane: 'progress' as ProgressRecordMode,
-    expandedProgress: false,
-    expandedFeedback: false,
-    expandedWaiting: false,
-  })
-
-  // 查看「进展」时按完整生命周期证据重算；语义签名去重，避免重复调用。
-  const taskId = task?.id
-  const evidenceSignature = task ? JSON.stringify({
-    status: task.status,
-    requirement: task.requirement,
-    timeEntries: task.timeEntries ?? [],
-    waitingEntries: task.waitingEntries ?? [],
-    files: files.filter((file) => file.taskId === task.id && !file.deletedAt).map((file) => [file.id, file.name, file.scope, file.final, file.tag, file.entryId]),
-  }) : ''
-  useEffect(() => {
-    if (!task || activeTab !== 'progress' || !onAutoEstimateProgress || !evidenceSignature) {
-      return
-    }
-    onAutoEstimateProgress(task)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, activeTab, evidenceSignature])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setWaitingNowStamp(Math.floor(Date.now() / 60000)), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  if (!task) {
-    return (
-      <aside className="dashboard-task-sidebar">
-        <div className="dashboard-task-sidebar-empty">
-          <strong>选择一条任务</strong>
-          <p>右侧会显示任务信息、进度、分段计时和等待记录。</p>
-        </div>
-      </aside>
-    )
-  }
-
-  const timeEntries = task.timeEntries ?? []
-  const waitingEntries = task.waitingEntries ?? []
-  const progressBillableEntries = billableTimeEntries(task)
-  const billableMinutes = progressBillableEntries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
-  const billableHours = billableMinutes > 0 ? billableMinutes / 60 : (isTaskBillable(task) ? task.actualHours : 0)
-  const billableAmount = roundCents(billableHours * hourlyRate)
-  const waitingMinutes = sumWaitingEntries(task, waitingNowStamp)
-  const canAcceptTask = task.status === '待验收'
-  const canRecordProgress = canRecordNewProgress(task)
-  const canAdjustProgress = canRecordProgress && isTaskStarted(task)
-  const demandPerson = task.requester || task.contact || '待确认'
-  const snappedProgress = taskDisplayProgress(task)
-  const displayedProgress = task.status === '计划中' ? 0 : snappedProgress
-  const scopedProgressUiState = progressUiState.taskId === task.id
-    ? progressUiState
-    : { taskId: task.id, pane: 'progress' as ProgressRecordMode, expandedProgress: false, expandedFeedback: false, expandedWaiting: false }
-  const progressPane = scopedProgressUiState.pane
-  const expandedProgressEntries = scopedProgressUiState.expandedProgress
-  const expandedFeedbackEntries = scopedProgressUiState.expandedFeedback
-  const expandedWaitingEntries = scopedProgressUiState.expandedWaiting
-  const setProgressPane = (pane: ProgressRecordMode) => {
-    setProgressUiState({ taskId: task.id, pane, expandedProgress: false, expandedFeedback: false, expandedWaiting: false })
-  }
-  const toggleProgressEntries = () => {
-    setProgressUiState((current) => {
-      const scoped = current.taskId === task.id ? current : scopedProgressUiState
-      return { ...scoped, expandedProgress: !scoped.expandedProgress }
-    })
-  }
-  const toggleWaitingEntries = () => {
-    setProgressUiState((current) => {
-      const scoped = current.taskId === task.id ? current : scopedProgressUiState
-      return { ...scoped, expandedWaiting: !scoped.expandedWaiting }
-    })
-  }
-  const toggleFeedbackEntries = () => {
-    setProgressUiState((current) => {
-      const scoped = current.taskId === task.id ? current : scopedProgressUiState
-      return { ...scoped, expandedFeedback: !scoped.expandedFeedback }
-    })
-  }
-  const toggleEntryNote = (noteKey: string) => {
-    setExpandedEntryNotes((current) => ({ ...current, [noteKey]: !current[noteKey] }))
-  }
-  const renderEntryNote = (noteKey: string, text: string) => {
-    const expanded = Boolean(expandedEntryNotes[noteKey])
-    return (
-      <button
-        type="button"
-        className={`dashboard-side-entry-note ${expanded ? 'expanded' : ''}`}
-        aria-expanded={expanded}
-        title={expanded ? '点击收起备注' : '点击查看完整备注'}
-        onClick={() => toggleEntryNote(noteKey)}
-      >
-        {text}
-      </button>
-    )
-  }
-  const sortedTimeEntries = sortTimeEntriesDesc(timeEntries)
-  const sortedFeedbackEntries = sortedTimeEntries.filter((entry) => entry.isClientFeedback)
-  const sortedWaitingEntries = sortTimeEntriesDesc(waitingEntries)
-  const hasAcceptanceProgressEntry = sortedTimeEntries.some((entry) => entry.isAcceptanceProgress)
-  const shouldShowAcceptanceSummary = task.status === '已验收' && !hasAcceptanceProgressEntry && Boolean(task.acceptanceNote?.trim() || (task.acceptanceFiles?.length ?? 0) > 0)
-  const acceptanceSummaryFiles = shouldShowAcceptanceSummary
-    ? files.filter((file) => file.taskId === task.id && file.scope === 'acceptance' && !file.deletedAt).slice(0, 6)
-    : []
-  const groupedTimeEntries: Array<{ primary: TimeEntry; siblings: TimeEntry[]; totalMinutes: number }> = sortedTimeEntries.map((entry) => ({ primary: entry, siblings: [], totalMinutes: minutesForTimeEntry(entry) }))
-  const shownGroups = expandedProgressEntries ? groupedTimeEntries : groupedTimeEntries.slice(0, 5)
-  const shownFeedbackEntries = expandedFeedbackEntries ? sortedFeedbackEntries : sortedFeedbackEntries.slice(0, 5)
-  const shownWaitingEntries = expandedWaitingEntries ? sortedWaitingEntries : sortedWaitingEntries.slice(0, 5)
-  return (
-    <aside className="dashboard-task-sidebar">
-      <header className="dashboard-task-sidebar-header">
-        <button
-          type="button"
-          className="dashboard-side-mobile-back"
-          onClick={() => document.querySelector('.task-management-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        >
-          <ChevronLeft size={15} />
-          返回任务列表
-        </button>
-        <h2>{task.title}</h2>
-        <p className="dashboard-task-sidebar-meta">
-          <span>{formatMonthDayDash(task.date)}</span>
-          <span>{task.type || '未分类'}</span>
-          <span>需求人 {demandPerson}</span>
-        </p>
-      </header>
-
-      <div className="dashboard-side-tabs" role="tablist" aria-label="任务侧栏">
-        <button type="button" className={activeTab === 'info' ? 'active' : ''} onClick={() => setActiveTab('info')} role="tab" aria-selected={activeTab === 'info'}>
-          信息
-        </button>
-        <button type="button" className={activeTab === 'progress' ? 'active' : ''} onClick={() => setActiveTab('progress')} role="tab" aria-selected={activeTab === 'progress'}>
-          进展
-        </button>
-      </div>
-
-      {activeTab === 'info' ? (
-        <section className="dashboard-side-section" role="tabpanel">
-          <dl className="dashboard-side-info">
-            <div>
-              <dt>计划开始</dt>
-              <dd>{task.date ? formatPlanDateTime(task.date) : '未设置'}</dd>
-            </div>
-            <div>
-              <dt>预计交付</dt>
-              <dd>{task.estimatedDate ? formatPlanDateTime(task.estimatedDate) : '未设置'}</dd>
-            </div>
-            <div>
-              <dt>类型</dt>
-              <dd>{task.type || '未填写'}</dd>
-            </div>
-            <div>
-              <dt>需求人</dt>
-              <dd>{demandPerson}</dd>
-            </div>
-            <div>
-              <dt>状态</dt>
-              <dd><StatusDotLabel status={task.status} /></dd>
-            </div>
-            <div>
-              <dt>结算</dt>
-              <dd>
-                {monthLabelOf(taskSettlementMonth(task))}
-                {isSupplementalTask(task) ? <span className="supplement-inline">补录</span> : null}
-              </dd>
-            </div>
-          </dl>
-          {canWrite && <div className="dashboard-side-info-actions">
-            {canDelete && canAcceptTask && (
-              <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
-                去验收
-              </button>
-            )}
-            <button type="button" className="ghost-button compact-button" onClick={() => onOpenEdit(task.id)}>
-              <Pencil size={15} />
-              编辑信息
-            </button>
-          </div>}
-        </section>
-      ) : (
-        <section className="dashboard-side-section dashboard-side-progress-section" role="tabpanel">
-          <div className="dashboard-side-progress">
-            <div className="dashboard-side-progress-head">
-              <span>整体进度</span>
-              <strong>{displayedProgress}%</strong>
-            </div>
-            <div className="dashboard-side-progress-track">
-              <span style={{ width: `${displayedProgress}%` }} />
-            </div>
-            <div className="dashboard-side-progress-scale">
-              {[0, 20, 40, 60, 80, 100].map((value) => (
-                <button
-                  type="button"
-                  className={displayedProgress === value ? 'active' : ''}
-                  key={value}
-                  aria-label={`设置进度为 ${value}%`}
-                  aria-pressed={displayedProgress === value}
-                  disabled={!canWrite || !canAdjustProgress}
-                  title={!canWrite ? '当前为只读访问' : canAdjustProgress ? `设置进度为 ${value}%` : task.status === '计划中' ? '首次记录进展后可调整整体进度' : '任务已进入验收闭环，需先编辑或删除验收进展'}
-                  onClick={() => onUpdateTask(task.id, { progress: value })}
-                >
-                  {value}%
-                </button>
-              ))}
-            </div>
-            {progressAssessment && (
-              <details className="dashboard-side-progress-assessment">
-                <summary>
-                  <span><Sparkles size={13} />AI 判断 · {progressStageLabels[progressAssessment.stage]}</span>
-                  <em>{progressConfidenceLabels[progressAssessment.confidence]}</em>
-                </summary>
-                <p>{progressAssessment.reason}</p>
-                {progressAssessment.evidence.length > 0 && (
-                  <ul>
-                    {progressAssessment.evidence.map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                )}
-                {progressAssessment.missingInfo.length > 0 && (
-                  <small>待补证据：{progressAssessment.missingInfo.join('；')}</small>
-                )}
-              </details>
-            )}
-            {task.status === '计划中' && (
-              <p className="dashboard-side-muted dashboard-side-planned-note">
-                首次保存「记录进展」后，任务会自动进入进行中，无需手动改状态。
-              </p>
-            )}
-            {!canRecordProgress && task.status !== '计划中' && (
-              <p className="dashboard-side-muted dashboard-side-planned-note">
-                任务已进入验收闭环。如需继续记录，请先编辑或删除右侧的验收进展。
-              </p>
-            )}
-          </div>
-
-          <div className="dashboard-side-record-tabs" role="tablist" aria-label="进展记录类型">
-            <button type="button" className={progressPane === 'progress' ? 'active' : ''} onClick={() => setProgressPane('progress')} role="tab" aria-selected={progressPane === 'progress'}>
-              分段计时
-            </button>
-            <button type="button" className={progressPane === 'feedback' ? 'active' : ''} onClick={() => setProgressPane('feedback')} role="tab" aria-selected={progressPane === 'feedback'}>
-              修改建议
-            </button>
-            <button type="button" className={progressPane === 'waiting' ? 'active' : ''} onClick={() => setProgressPane('waiting')} role="tab" aria-selected={progressPane === 'waiting'}>
-              等待记录
-            </button>
-          </div>
-
-          {progressPane === 'progress' ? (
-            <div className="dashboard-side-subsection dashboard-side-record-pane" role="tabpanel">
-              <div className="dashboard-side-subsection-title">
-                <span>分段计时</span>
-                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? (task.status === '计划中' ? '记录进展并自动进入进行中' : '记录进展') : '已进入验收闭环，需先编辑或删除验收进展'} onClick={() => onOpenProgress(task.id, 'progress')}>
-                  <Plus size={15} />
-                  记录进展
-                </button>}
-              </div>
-              <p className="dashboard-side-subsection-meta">可结算 · {progressBillableEntries.length} 段 · {billableHours.toFixed(1)}h · ¥{formatYuan(billableAmount)}</p>
-              {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
-                <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
-              ) : (
-                <>
-                  <div className="dashboard-side-timeline">
-                    {shouldShowAcceptanceSummary && (
-                      <article className="dashboard-side-time-item dashboard-side-acceptance-item">
-                        <span className="dot" />
-                        {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
-                          {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'progress', undefined, true)}>编辑</button>}
-                          {canDelete && <button type="button" className="danger" onClick={() => onDeleteAcceptanceProgress(task.id)}>删除</button>}
-                        </div>}
-                        <div className="dashboard-side-entry-time-row">
-                          <time>{task.actualDeliveryDate ? formatPlanDateTime(task.actualDeliveryDate) : formatPlanDateTime(isoDateTime())}</time>
-                          <span className="progress-entry-tag acceptance">验收进展</span>
-                        </div>
-                        {renderEntryNote(`${task.id}:acceptance-summary`, task.acceptanceNote?.trim() || '已完成验收确认。')}
-                        <em>不新增计时 · 已进入验收闭环</em>
-                        {acceptanceSummaryFiles.length > 0 && (
-                          <div className="dashboard-side-entry-files" aria-label="验收附件">
-                            {acceptanceSummaryFiles.map((file) => {
-                              const fileType = fileTypeForAsset(file).type
-                              const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                              const documentSourceUrl = fileThumbnailSource(file)
-                              return (
-                                <AttachmentHoverThumbnail
-                                  key={file.id}
-                                  name={file.name}
-                                  type={fileType}
-                                  previewUrl={previewUrl}
-                                  previewFallback={Boolean(file.previewFallback)}
-                                  sourceUrl={documentSourceUrl}
-                                  compact
-                                  onOpen={() => onPreviewFile(file)}
-                                />
-                              )
-                            })}
-                          </div>
-                        )}
-                      </article>
-                    )}
-                    {shownGroups.map(({ primary: entry, siblings, totalMinutes }) => {
-                      const isGrouped = siblings.length > 0
-                      const displayMinutes = isGrouped ? totalMinutes : minutesForTimeEntry(entry)
-                      const acceptanceFileNames = new Set((task.acceptanceFiles ?? []).map((name) => name.trim()).filter(Boolean))
-                      const groupEntryIds = new Set([entry.id, ...siblings.map((s) => s.id)])
-                      const entryFiles = files.filter((file) => {
-                        if (file.taskId !== task.id || file.deletedAt) {
-                          return false
-                        }
-                        if (groupEntryIds.has(file.entryId ?? '')) {
-                          return true
-                        }
-                        return entry.isAcceptanceProgress && isAcceptanceFileAsset(file, acceptanceFileNames) && (!file.entryId || acceptanceFileNames.has(file.name.trim()))
-                      })
-                      const entryNote = entry.isAcceptanceProgress ? (task.acceptanceNote?.trim() || entry.note || '已完成验收确认。') : (entry.note || '未填写具体内容')
-                      const hasAcceptanceFiles = entryFiles.some((file) => isAcceptanceFileAsset(file, acceptanceFileNames))
-                      return (
-                        <article className="dashboard-side-time-item" key={entry.id}>
-                          <span className="dot" />
-                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
-                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'progress', entry.id)}>编辑</button>}
-                            {canDelete && <button
-                              type="button"
-                              className="danger"
-                              onClick={() => entry.isAcceptanceProgress
-                                ? onDeleteAcceptanceProgress(task.id, entry.id)
-                                : onDeleteEntry(task.id, 'progress', entry.id)}
-                            >
-                              删除
-                            </button>}
-                          </div>}
-                          <div className="dashboard-side-entry-time-row">
-                            <time>{formatEntryDateTimeRange(task, entry)}</time>
-                            {isGrouped && siblings.map((sib) => (
-                              <span key={sib.id} className="progress-group-inline-sib">
-                                <span className="progress-group-inline-sep">·</span>
-                                <span className="progress-group-inline-time">{sib.start}–{sib.end}</span>
-                                {canWrite && <button type="button" className="progress-group-sibling-edit" onClick={() => onOpenProgress(task.id, 'progress', sib.id)} aria-label="编辑此段"><Pencil size={10} /></button>}
-                              </span>
-                            ))}
-                            {entry.isAcceptanceProgress && <span className="progress-entry-tag acceptance">验收进展</span>}
-                            {entry.isClientFeedback && <span className="progress-entry-tag client-feedback">{feedbackEntryLabel(entry)}</span>}
-                            {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
-                            {hasAcceptanceFiles && <span className="progress-entry-tag acceptance-file">验收文件</span>}
-                          </div>
-                          {renderEntryNote(`${task.id}:progress:${entry.id}`, entryNote)}
-                          <em className={`progress-time-pill ${displayMinutes > 0 ? '' : 'is-uncounted'}`}>{displayMinutes > 0 ? `计时 ${formatSignedHours(displayMinutes)}` : '不计工时'}</em>
-                          {entryFiles.length > 0 && (
-                            <div className="dashboard-side-entry-files" aria-label="本段进展附件">
-                              {entryFiles.map((file) => {
-                                const fileType = fileTypeForAsset(file).type
-                                const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                                const documentSourceUrl = fileThumbnailSource(file)
-                                return (
-                                  <AttachmentHoverThumbnail
-                                    key={file.id}
-                                    name={file.name}
-                                    type={fileType}
-                                    previewUrl={previewUrl}
-                                    previewFallback={Boolean(file.previewFallback)}
-                                    sourceUrl={documentSourceUrl}
-                                    compact
-                                    onOpen={() => onPreviewFile(file)}
-                                  />
-                                )
-                              })}
-                            </div>
-                          )}
-                        </article>
-                      )
-                    })}
-                  </div>
-                  {groupedTimeEntries.length > 5 && (
-                    <button type="button" className="dashboard-side-expand" onClick={toggleProgressEntries}>
-                      {expandedProgressEntries ? '收起记录' : `展开 ${groupedTimeEntries.length - 5} 条`}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          ) : progressPane === 'feedback' ? (
-            <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-feedback" role="tabpanel">
-              <div className="dashboard-side-subsection-title">
-                <span>修改建议</span>
-                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录合作伙伴反馈 / 修改意见' : '改为进行中后可记录反馈'} onClick={() => onOpenProgress(task.id, 'feedback')}>
-                  <Plus size={15} />
-                  记录反馈
-                </button>}
-              </div>
-              <p className="dashboard-side-subsection-meta">用于追溯 B01 / B02 等每轮修改意见，默认不计工时。</p>
-              {sortedFeedbackEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无合作伙伴反馈；收到批注、聊天截图或版本意见时可单独记录。</p>
-              ) : (
-                <>
-                  <div className="dashboard-side-timeline">
-                    {shownFeedbackEntries.map((entry) => {
-                      const entryFiles = files.filter((file) => file.taskId === task.id && !file.deletedAt && file.entryId === entry.id)
-                      return (
-                        <article className="dashboard-side-time-item dashboard-side-feedback-item" key={entry.id}>
-                          <span className="dot" />
-                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
-                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'feedback', entry.id)}>编辑</button>}
-                            {canDelete && <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'feedback', entry.id)}>删除</button>}
-                          </div>}
-                          <div className="dashboard-side-entry-time-row">
-                            <time>{formatEntryDateTimeRange(task, entry)}</time>
-                            <span className="progress-entry-tag client-feedback">{feedbackEntryLabel(entry)}</span>
-                            {entry.feedbackVersion && <span className="progress-entry-tag feedback-version">{entry.feedbackVersion}</span>}
-                          </div>
-                          {renderEntryNote(`${task.id}:feedback:${entry.id}`, entry.note || '未填写修改意见')}
-                          <em className="progress-time-pill is-uncounted">不计工时</em>
-                          {entryFiles.length > 0 && (
-                            <div className="dashboard-side-entry-files" aria-label="反馈附件">
-                              {entryFiles.map((file) => {
-                                const fileType = fileTypeForAsset(file).type
-                                const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                                const documentSourceUrl = fileThumbnailSource(file)
-                                return (
-                                  <AttachmentHoverThumbnail
-                                    key={file.id}
-                                    name={file.name}
-                                    type={fileType}
-                                    previewUrl={previewUrl}
-                                    previewFallback={Boolean(file.previewFallback)}
-                                    sourceUrl={documentSourceUrl}
-                                    compact
-                                    onOpen={() => onPreviewFile(file)}
-                                  />
-                                )
-                              })}
-                            </div>
-                          )}
-                        </article>
-                      )
-                    })}
-                  </div>
-                  {sortedFeedbackEntries.length > 5 && (
-                    <button type="button" className="dashboard-side-expand" onClick={toggleFeedbackEntries}>
-                      {expandedFeedbackEntries ? '收起记录' : `展开 ${sortedFeedbackEntries.length - 5} 条`}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="dashboard-side-subsection dashboard-side-record-pane dashboard-side-waiting" role="tabpanel">
-              <div className="dashboard-side-subsection-title">
-                <span>等待记录</span>
-                {canWrite && <button type="button" className="text-button dashboard-side-action" disabled={!canRecordProgress} title={canRecordProgress ? '记录等待' : '改为进行中后可记录等待'} onClick={() => onOpenProgress(task.id, 'waiting')}>
-                  <Plus size={15} />
-                  记录等待
-                </button>}
-              </div>
-              {waitingMinutes > 0 && <p className="dashboard-side-subsection-meta">等待合计 {(waitingMinutes / 60).toFixed(1)}h · 仅进入洞察分析</p>}
-              {waitingEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无等待记录；等待合作伙伴意见、补资料或确认时可单独记录。</p>
-              ) : (
-                <>
-                  <div className="dashboard-side-waiting-list">
-                    {shownWaitingEntries.map((entry) => {
-                      const active = isWaitingEntryActive(task, entry)
-                      const minutes = minutesForWaitingEntry(task, entry, waitingNowStamp)
-                      return (
-                        <article className="dashboard-side-waiting-item" key={entry.id}>
-                          {(canWrite || canDelete) && <div className="dashboard-side-entry-actions">
-                            {canWrite && <button type="button" onClick={() => onOpenProgress(task.id, 'waiting', entry.id)}>编辑</button>}
-                            {canDelete && <button type="button" className="danger" onClick={() => onDeleteEntry(task.id, 'waiting', entry.id)}>删除</button>}
-                          </div>}
-                          <time>{formatWaitingEntryDateTimeRange(task, entry)}</time>
-                          {renderEntryNote(`${task.id}:waiting:${entry.id}`, partnerFacingText(entry.note || entry.reason, '等待合作伙伴确认'))}
-                          <em>{active ? `已等待 ${formatWaitingElapsed(minutes)}` : `等待 ${formatWaitingElapsed(minutes)}`} · 不计结算</em>
-                        </article>
-                      )
-                    })}
-                  </div>
-                  {waitingEntries.length > 5 && (
-                    <button type="button" className="dashboard-side-expand" onClick={toggleWaitingEntries}>
-                      {expandedWaitingEntries ? '收起记录' : `展开 ${waitingEntries.length - 5} 条`}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-    </aside>
   )
 }
 
