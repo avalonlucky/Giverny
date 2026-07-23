@@ -163,6 +163,7 @@
 - Shared Agent write-preview editing and durable confirmation card: `src/components/AgentApprovalCard.tsx`
 - Shared Agent task disambiguation choices: `src/components/AgentTaskSelectionCard.tsx`
 - Shared progressive Agent execution trace: `src/components/AgentExecutionTimeline.tsx`
+- Lazy-loaded work assistant conversation, projects, history, local CLI and task center: `src/components/ChatPanel.tsx`
 - Shared prioritized toast queue and icon presentation: `src/lib/toastQueue.ts`, `src/components/ToastIcon.tsx`
 - Shared editable-target and month keyboard shortcut rules: `src/lib/keyboardShortcuts.ts`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
