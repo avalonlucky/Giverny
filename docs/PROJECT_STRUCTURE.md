@@ -82,6 +82,7 @@
 │   │   ├── calendar.ts
 │   │   ├── dateTime.ts
 │   │   ├── designTypes.ts
+│   │   ├── durationInput.ts
 │   │   ├── fileMetadata.ts
 │   │   ├── format.ts
 │   │   ├── money.ts
@@ -159,6 +160,7 @@
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared progress time draft, derivation and overlap rules: `src/lib/timeEntryDraft.ts`
+- Shared duration input parsing and schedule derivation rules: `src/lib/durationInput.ts`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
 - Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`
