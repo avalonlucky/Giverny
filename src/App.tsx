@@ -1,8 +1,6 @@
-import { Fragment, lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import {
   AlarmClock,
   AlertTriangle,
@@ -75,7 +73,6 @@ import {
   type AiLearningAction,
   type AiModelConfig,
   type AiModelEndpointConfig,
-  type AiModelProvider,
   type AiModelRouteKey,
   type AiProviderConfig,
   type AttachmentNameSuggestion,
@@ -152,7 +149,7 @@ import {
   timeEntryMonth,
 } from './lib/taskAccounting'
 import { designTypeColorForIndex, validDesignTypeColor } from './lib/designTypes'
-import { aiProviderOptions, aiRouteDefaults, providerSupportsVision } from './lib/aiProviders'
+import { providerSupportsVision } from './lib/aiProviders'
 import { canRecordNewProgress, hasAcceptanceProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
 import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, isAcceptanceFileAsset, partnerFacingText, sortTimeEntriesDesc } from './lib/taskPresentation'
 import type { ReceiptExcelOptions } from './lib/receiptExcel'
@@ -194,6 +191,7 @@ import {
   writeStoredDailyKnowledgeQueue,
 } from './lib/dailyKnowledgeCache'
 import { createDailyKnowledgeCatalog } from './lib/dailyKnowledgeCatalog'
+import { dailyKnowledgePool } from './data/dailyKnowledgePool'
 import {
   clearNewTaskDraftCache,
   newTaskDraftFromTask,
@@ -216,6 +214,8 @@ import {
   type ConversationRecord,
 } from './lib/conversationCache'
 import { extractAttachmentText } from './lib/attachmentText'
+import { aiProviderDisplayLabel, chatModelChoiceLabel } from './lib/chatModelPresentation'
+import { ChatContent, ChatMarkdown, RichChatLine } from './components/ChatContent'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
@@ -259,371 +259,6 @@ const viewRoutes: Record<AppView, string> = {
 
 const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
 
-const dailyKnowledgePool: DailyKnowledgeItem[] = [
-  {
-    category: '人物・设计师',
-    source: '原研哉',
-    title: '把「空」做成一种设计',
-    teaser: '留白不是没有内容，而是给观看者留下参与和想象的位置。',
-    body: [
-      '原研哉把 **Emptiness（空）** 理解为一种容器：它并不急着替用户说完所有话，而是让不同的人把自己的经验放进去。',
-      '无印良品常用克制的图像、材料和文字建立这种空间。它不宣称“这样最好”，而是提供一种“这样就好”的平静感。',
-      '在日常设计里，留白并不等于浪费版面。**真正有效的留白会帮助信息分级**，让标题、正文和操作各自拥有清晰的位置。',
-    ],
-  },
-  {
-    category: '视觉科学',
-    source: '视觉科学',
-    title: '为什么人眼对绿色格外敏感？',
-    teaser: '黄绿色附近正处于人眼明视觉灵敏度的高峰区域。',
-    body: [
-      '人眼在明亮环境中的亮度感知峰值大约位于 **555nm**，接近黄绿色。因此在相同物理亮度下，绿色往往更容易被看见。',
-      '医院手术服常使用青绿色，还有一个原因：长时间注视红色后容易产生互补色残像，绿色可以帮助缓解视觉疲劳。',
-      '但高可见度不意味着应该大面积使用高饱和绿色。界面中的绿色更适合承担 **进度、确认和可操作提示**，背景则应保持克制。',
-    ],
-  },
-  {
-    category: '科普',
-    source: '比例之美',
-    title: '黄金比例并不是审美的法律',
-    teaser: '1.618 是一种好用的比例工具，但并不会自动让作品变得高级。',
-    body: [
-      '黄金比例常被用于版面、网格和图形结构，因为它能形成一种 **不完全对称、又保持秩序** 的关系。',
-      '许多著名建筑和绘画被事后套上黄金比例，但测量方式稍有变化，结论往往也会变化。',
-      '设计中真正重要的仍是 **内容、层级和观看距离**。比例能辅助判断，却不能替代设计师对具体场景的观察。',
-    ],
-  },
-  {
-    category: '心理学',
-    source: '认知偏差',
-    title: '为什么高手常常更谦逊？',
-    teaser: '知道得越多，越能看见自己尚未抵达的边界。',
-    body: [
-      '心理学中的 **达克效应** 提醒我们：能力尚不足时，人往往也缺少判断自身不足的参照，因此更容易高估自己。',
-      '真正熟练的人见过更多路径、问题和失败案例，视野里反而会出现更多未知，所以判断会更谨慎。',
-      '谦逊不是故作姿态，而是对复杂度有了更准确的感知。**先承认不知道，才有空间继续学习。**',
-    ],
-  },
-  {
-    category: '每天一本好书',
-    source: '尤瓦尔・赫拉利',
-    title: '小麦可能驯化了人类',
-    teaser: '农业让粮食更多，也让许多人被固定在更漫长的劳动里。',
-    body: [
-      '《人类简史》提出了一个反直觉的观察：人类看似驯化了小麦，实际上却为了照顾小麦而 **定居、除草、劳作并不断增加人口**。',
-      '从物种扩张看，农业非常成功；从单个人的日常幸福看，它却可能带来了更单调、更沉重的劳动。',
-      '这个视角提醒我们，**效率和进步并不总是同义词**。判断一件事时，值得同时看系统收益与个体感受。',
-    ],
-  },
-  {
-    category: '历史・冷知识',
-    source: '时间的褶皱',
-    title: '牛津大学比阿兹特克帝国更早',
-    teaser: '当牛津已授课两百多年，阿兹特克的都城才刚刚建立。',
-    body: [
-      '牛津大学约在 **1096 年** 便开始授课，而阿兹特克帝国的首都特诺奇蒂特兰大约在 **1325 年** 才建立。',
-      '这类时间错位会打破我们对“古老”的直觉：同一段历史里，不同地区的文明进程并不总在同步发生。',
-      '历史的魅力正在于这些褶皱。它提醒我们，**熟悉的时间线其实远比教科书里的直线复杂**。',
-    ],
-  },
-  {
-    category: '神话・哲学',
-    source: '阿尔贝・加缪',
-    title: '西西弗斯为什么可以幸福？',
-    teaser: '意义不只在抵达山顶，也在清醒地走完每一次下山路。',
-    body: [
-      '在希腊神话里，西西弗斯被罚不断把巨石推上山顶，石头又会立刻滚回山脚。这象征着 **永远无法完成的劳动**。',
-      '加缪却在《西西弗斯神话》中重新理解了他：当西西弗斯走下山去时，他清醒地知道自己的命运，也拥有了自己的意识。',
-      '重复并不必然让人失去意义。重要的是在重复之中，仍能保留 **判断、节奏和一点属于自己的从容**。',
-    ],
-  },
-  {
-    category: '自然・植物',
-    source: '草木观察',
-    title: '红茶绿茶原来是一种叶子',
-    teaser: '它们的差别不在树种，而在采摘后被氧化到了哪一步。',
-    body: [
-      '红茶、绿茶、乌龙茶都来自茶树。它们看起来截然不同，关键差别其实来自制作中对氧化过程的控制。',
-      '绿茶在采下后很快杀青，保留清爽的草本气味；红茶充分氧化，颜色变深、口感也更醇厚；乌龙则停在中间。',
-      '同一片叶子因为停在不同阶段，呈现出完全不同的性格。很多变化并不是换了材料，而是改变了过程。',
-    ],
-  },
-  {
-    category: '音乐・工艺',
-    source: '克雷莫纳',
-    title: '小提琴为什么会有天价？',
-    teaser: '材料、气候、手艺与三百年的时间，共同构成了一把琴的声音。',
-    body: [
-      '斯特拉迪瓦里和瓜奈里的名琴出自十七至十八世纪的意大利克雷莫纳，许多至今仍被演奏家和收藏家珍视。',
-      '关于独特音色的来源，研究者提出过木材密度、涂层化学和小冰期气候等解释，但没有单一答案能解释全部。',
-      '极致作品往往不是某个秘诀的结果，而是材料、时代与人的长期协作。这种不可复制性本身就是工艺的价值。',
-    ],
-  },
-  {
-    category: '咖啡冷知识',
-    source: '风味起源',
-    title: '美式咖啡为什么叫美式？',
-    teaser: '它据说来自美军把浓缩咖啡兑入热水的习惯。',
-    body: [
-      'Espresso 不是一种咖啡豆，而是一种高压萃取方式。细研磨咖啡粉在短时间内被热水穿过，得到浓缩而强烈的一小杯。',
-      '二战时期，驻意大利的美军常觉得浓缩太浓，便加入热水稀释。意大利人把这种喝法称作 Americano。',
-      '一杯饮品的名称，也会留下迁徙、战争与日常习惯的痕迹。食物和饮料往往是历史最轻盈的入口。',
-    ],
-  },
-  {
-    category: '世界未解之谜',
-    source: '纳斯卡线条',
-    title: '谁画下了巨大的纳斯卡线？',
-    teaser: '荒漠中的蜂鸟和猴子图案，只有从高处才能看清全貌。',
-    body: [
-      '秘鲁南部荒漠保留着数百幅巨型地画，创作者移开表层深色砾石，让浅色地面构成蜂鸟、猴子和蜘蛛等图案。',
-      '这些图案尺度很大，从地面难以辨识全貌，因此它们的用途至今仍有争议：可能和祭祀、水源或天文观测有关。',
-      '人类常会为暂时看不见结果的事投入极大耐心。那些留给远方、未来或天空的作品，也是一种创造力。',
-    ],
-  },
-  {
-    category: '乐器科普',
-    source: '声音原理',
-    title: '钢琴为什么也算打击乐？',
-    teaser: '琴键按下去的瞬间，真正发声的是小槌敲击琴弦。',
-    body: [
-      '钢琴常被放在键盘乐器里讨论，但从发声机制看，它也带着 **打击乐器** 的性格：手指按下琴键，小槌会击打琴弦。',
-      '这也是钢琴能同时拥有清晰颗粒感和悠长共鸣的原因。它不是单纯拨弦，也不是持续拉弦，而是一次精确的敲击。',
-      '有些事物的分类并不只有一个答案。换一个观察角度，熟悉的东西会露出另一套结构。',
-    ],
-  },
-  {
-    category: '冷笑话',
-    source: '乙方词典',
-    title: '“马上确认”到底有多马上？',
-    teaser: '它可能是五分钟，也可能是五天，取决于对方突然忙不忙。',
-    body: [
-      '乙方词典里，“马上确认”是一种 **弹性时间单位**：短则一杯咖啡，长则跨过一个周末。',
-      '“就改一个小地方”也类似。它听起来像局部修补，实际常常会牵动标题、留白、比例和导出规格。',
-      '冷笑话的用处不是抱怨，而是提醒自己把等待记录下来。沉默不计费，但它确实占用了一段真实时间。',
-    ],
-  },
-  {
-    category: '名人介绍',
-    source: '居里夫人',
-    title: '居里夫人为什么拒绝专利？',
-    teaser: '她把镭的提炼方法公开，让更多研究者能继续使用。',
-    body: [
-      '居里夫人和皮埃尔・居里发现镭之后，没有为提炼方法申请专利。他们认为科学成果应当 **服务公共研究**。',
-      '这个选择让他们失去了可能的商业收入，却让实验室和医院更容易接触相关技术，推动了后续研究。',
-      '一个人的价值判断，常常藏在“可以拿走但没有拿走”的地方。科学史里也有很多这样的安静决定。',
-    ],
-  },
-  {
-    category: '名画故事',
-    source: '梵高',
-    title: '《星月夜》不是安静的夜晚',
-    teaser: '旋涡般的天空，来自疗养院窗口外的观察与想象。',
-    body: [
-      '梵高在圣雷米疗养院期间画下《星月夜》。画面里的村庄并非完全来自实景，而是 **观察、记忆和想象** 的混合。',
-      '天空中的旋涡让夜晚像在流动，柏树则像火焰一样向上伸展。它不是宁静的风景，更像内心能量的外化。',
-      '名画不一定只记录眼前所见。有时它真正保存的是一个人看世界时的强度。',
-    ],
-  },
-  {
-    category: '奇怪小知识',
-    source: '生活物理',
-    title: '纸为什么很难对折八次？',
-    teaser: '厚度会指数级增长，手里的纸很快就不再像纸。',
-    body: [
-      '一张纸每对折一次，厚度都会翻倍。看似轻薄的纸，在几次折叠后会迅速变成 **越来越硬的厚块**。',
-      '普通 A4 纸通常很难手工对折到八次以上，不只是因为面积变小，也因为折痕处需要克服更大的材料阻力。',
-      '很多限制不是来自第一步，而是来自不断累积后的结构变化。小问题叠起来，常常会变成完全不同的问题。',
-    ],
-  },
-  {
-    category: '电影冷知识',
-    source: '片场工具',
-    title: '场记板不是只用来喊开始',
-    teaser: '那一下清脆的合板声，是画面和声音同步的重要标记。',
-    body: [
-      '电影拍摄时，画面和声音常由不同设备记录。场记板合上的一瞬间，会留下清楚的视觉动作和声音峰值。',
-      '后期剪辑时，剪辑师可以通过这两个信号对齐素材。那声“啪”其实是 **同步画面与声音** 的技术锚点。',
-      '一些看起来很仪式化的小动作，背后往往是为了让复杂流程更稳定。',
-    ],
-  },
-  {
-    category: '小知识',
-    source: '日用品来历',
-    title: '便利贴来自一次失败胶水',
-    teaser: '黏不牢的胶，后来变成了可以反复撕贴的工具。',
-    body: [
-      '3M 研究员曾做出一种黏性不强、却能反复贴上的胶。它一开始不像成功产品，更像一次 **不够完美的实验**。',
-      '后来有人想到把它用于书签和便条，于是便利贴出现了。失败特性没有被消灭，而是换了一个合适场景。',
-      '创新有时不是把缺点修掉，而是找到一个地方，让缺点变成刚刚好的优点。',
-    ],
-  },
-  {
-    category: '未解之谜',
-    source: '深海声音',
-    title: '海底传来的”Bloop”是什么？',
-    teaser: '它曾被误认为神秘生物，后来被解释为冰裂声。',
-    body: [
-      '1997 年，美国海洋探测设备记录到一个极低频、传播距离很远的声音，后来被称为 Bloop。',
-      '它一度激发许多猜测：有人想象它来自未知巨型生物。后续研究更倾向认为，它是 **冰山破裂或摩擦** 产生的声音。',
-      '未解之谜吸引人的地方，不只是答案神秘，也在于它让我们意识到世界还有很多尺度超出日常经验。',
-    ],
-  },
-  {
-    category: '世界未解之谜',
-    source: '百慕大三角',
-    title: '百慕大三角真的更危险吗？',
-    teaser: '数据显示它并不比其他繁忙航线更危险，但传说已经深入人心。',
-    body: [
-      '百慕大三角位于佛罗里达、百慕大和波多黎各之间，数十年来与船只和飞机失踪的故事紧密绑定。',
-      '然而，当研究者对比世界各地航线的事故数据后，**这片区域并没有统计上的异常**。它只是一条繁忙的交通要道。',
-      '许多”神秘失踪”案例在重新梳理后，都能找到天气、导航错误或人为因素的解释。集中讲述一个地方的故事，会让普通事件看起来不寻常。',
-    ],
-  },
-  {
-    category: '历史・冷知识',
-    source: '拿破仑身高',
-    title: '拿破仑其实不矮',
-    teaser: '他被叫做小个子，很可能是一场英国宣传战的遗产。',
-    body: [
-      '拿破仑的身高约 1.68 米，在 19 世纪法国男性中属于中等偏上。但英国漫画家将他画得很矮小，配合夸张的表情，讽刺效果极强。',
-      '这些形象广泛流传，以至于后人真的以为他是个矮子。这是历史上 **宣传战改写形象** 的典型案例。',
-      '我们接收到的许多”事实”，在第一次传播时就已经带有目的。历史印象值得多问一句：这个故事最初是谁讲的？',
-    ],
-  },
-  {
-    category: '商业故事',
-    source: '耐克',
-    title: 'Nike 的”√”只花了 35 美元',
-    teaser: '世界上最著名的商标之一，来自一个大学生的课堂作业。',
-    body: [
-      '1971 年，耐克创始人菲尔·奈特委托设计系学生卡洛琳·戴维森设计一个标志，预算极为有限，最终支付了 35 美元。',
-      '那个向右扬起的”√”形——Swoosh——后来成为全球最知名的品牌符号之一。卡洛琳后来也获得了额外的股票作为补偿。',
-      '创意的价值很难在诞生之初就被准确评估。有些作品之所以伟大，是因为它遇见了合适的时代和产品。',
-    ],
-  },
-  {
-    category: '科技冷知识',
-    source: 'GPS',
-    title: 'GPS 卫星每天都在”说谎”',
-    teaser: '如果不修正相对论效应，你的导航会每天偏移 10 公里。',
-    body: [
-      'GPS 卫星在高空高速运动，根据相对论，它们的时钟比地面走得略快。这个误差看似微小，但累积一天后会导致 **定位偏差约 10 公里**。',
-      '工程师在卫星出发前就对时钟做了预置调慢，让它在轨道上运行时”刚好正确”。爱因斯坦的方程式因此悄悄进入了每一次导航。',
-      '物理学并不总是存在于实验室里。它在你每次打开地图时就已经在运作了。',
-    ],
-  },
-  {
-    category: '动物冷知识',
-    source: '章鱼研究',
-    title: '章鱼有三个心脏和蓝色血液',
-    teaser: '它的血液用铜而不是铁来携带氧气，因此是蓝色的。',
-    body: [
-      '章鱼拥有三个心脏：两个负责把血液泵向鳃，一个负责向全身供血。当它游泳时，主心脏会停跳，所以它们不喜欢长途游动。',
-      '它的血液含有 **血蓝蛋白**，用铜原子来结合氧气，这让血液在氧合状态下呈蓝色。人类血液用铁来结合氧，因此是红色的。',
-      '进化给出了不止一种解决方案。我们习以为常的结构，换一种生命形式就完全不同了。',
-    ],
-  },
-  {
-    category: '心理学',
-    source: '峰终定律',
-    title: '人记住的不是全程，而是最高点和结尾',
-    teaser: '这解释了为什么旅行的最后一天很重要。',
-    body: [
-      '心理学家卡尼曼提出了 **峰终定律**：人们对一段体验的记忆，主要由两个时刻决定——情绪最强烈的峰值时刻，以及体验结束时的感受。',
-      '过程有多漫长、大部分时间有多平淡，对记忆的影响反而有限。这也是为什么差评常常来自最后一次互动体验不佳。',
-      '如果你想让别人对一段经历留下好印象，最值得用心的不是全程均衡，而是 **制造一个令人难忘的高点，并以好的方式结束**。',
-    ],
-  },
-  {
-    category: '爱情故事',
-    source: '克里奥帕特拉',
-    title: '埃及艳后不是埃及人',
-    teaser: '她是希腊裔，却是第一个真正学会古埃及语的托勒密王朝法老。',
-    body: [
-      '克里奥帕特拉七世出身于亚历山大大帝去世后建立的托勒密王朝，家族实际上是马其顿希腊裔。她之前的历代法老都不学埃及语，只说希腊语。',
-      '她却精通至少九种语言，包括古埃及语、阿拉伯语、希伯来语等，这让她能与各国使节直接交流。与凯撒和马克·安东尼的关系，也与她的外交才能密不可分。',
-      '历史上的传奇人物，往往有一项被忽视的普通才能：极度努力地工作和学习。',
-    ],
-  },
-  {
-    category: '食物史',
-    source: '番茄旅程',
-    title: '番茄曾在欧洲被当毒药',
-    teaser: '它原产南美洲，传入欧洲后用了两百年才被接受为食物。',
-    body: [
-      '番茄在 16 世纪随殖民者传入欧洲，但因为属于颠茄科，外观又鲜艳，欧洲人长期把它当作观赏植物或毒草。',
-      '有贵族用锡制餐具吃番茄后中毒，但原因是 **锡中的铅被番茄的酸性析出**，并非番茄本身有毒。穷人用木制餐具吃，反而安然无事。',
-      '偏见和误解常常有一个”不完全错误”的起源。理解它的来历，比直接否定它更有意义。',
-    ],
-  },
-  {
-    category: '语言・文化',
-    source: '汉字来历',
-    title: '为什么”东西”可以表示”物品”？',
-    teaser: '一个常见的说法把它和集市的方位联系在一起。',
-    body: [
-      '汉语里用”东西”来指代一切物品，这个用法流传已久，来历众说纷纭。',
-      '流传较广的一种说法是：古代长安有东市和西市，买卖物品都集中在这两个方向的市场里。去买东西，慢慢就代指了买卖行为本身，进而代指物品。',
-      '语言里的词语，像化石一样保存着历史的痕迹。很多我们每天说的话，背后藏着已经消失的场景。',
-    ],
-  },
-  {
-    category: '体育冷知识',
-    source: '马拉松',
-    title: '马拉松 42.195 公里从哪来的？',
-    teaser: '这个奇怪的数字源自 1908 年英国王室的一个临时请求。',
-    body: [
-      '马拉松项目在 1896 年首届现代奥运会时约为 40 公里，并不统一。直到 1908 年伦敦奥运会，距离才被固定下来。',
-      '当时的路线设计本为 26 英里（约 42 公里），但为了让终点对准王室包厢，**路线被调整延长了 385 码**，也就是约 352 米。这个”将就”的数字就此沿用下来。',
-      '很多我们视为标准的东西，都来自某个历史瞬间的偶然妥协。',
-    ],
-  },
-  {
-    category: '天文小知识',
-    source: '光的旅程',
-    title: '我们看到的太阳，是 8 分钟前的太阳',
-    teaser: '光从太阳到地球需要大约 8 分 20 秒。',
-    body: [
-      '光在真空中的速度约为每秒 30 万公里，但太阳距地球约 1.5 亿公里，所以阳光抵达地球需要大约 **8 分 20 秒**。',
-      '这意味着我们永远看不到”现在”的太阳——而是 8 分钟之前的它。如果太阳此刻消失，我们还要再过 8 分多钟才会察觉。',
-      '宇宙的尺度让”现在”变得复杂。我们仰望星空时，看到的是光出发时那一刻，而不是它到达时的样子。',
-    ],
-  },
-  {
-    category: '金融冷知识',
-    source: '信用卡历史',
-    title: '信用卡诞生于一次忘带现金的尴尬',
-    teaser: '1950 年，一位商人餐后发现没带钱包，由此催生了第一张通用信用卡。',
-    body: [
-      '弗兰克·麦克纳马拉在纽约请客吃饭，结账时发现钱包忘在家里，场面相当难堪。这件事让他萌生了一个想法：用一张卡片来代替现金。',
-      '1950 年，他和合伙人创立了 **大莱俱乐部卡（Diners Club）**，最初只被 27 家餐厅接受，持卡人仅 200 人左右。',
-      '一次社交上的尴尬，推动了改变整个消费金融体系的发明。很多大事的起点，都比想象中普通。',
-    ],
-  },
-  {
-    category: '考古发现',
-    source: '庞贝古城',
-    title: '庞贝人留下的最后一顿饭',
-    teaser: '火山灰封存了一座城市，也封存了一个普通早晨的细节。',
-    body: [
-      '公元 79 年，维苏威火山爆发，将庞贝城覆盖在厚厚的火山灰之下。这场灾难同时也成为一次无意的”封存”——街道、壁画、食物，甚至面包炉里的碳化面包都保留下来了。',
-      '考古学家发现了快餐店（thermopolium）遗址，里面有用于盛汤和热食的陶罐凹槽。人们在这里买现做的食物，类似今天的外卖窗口。',
-      '历史不总是由大事件组成的。**那些保留下来的普通早晨，让两千年前的生活变得具体可感。**',
-    ],
-  },
-  {
-    category: '治愈系',
-    source: '小事的力量',
-    title: '为什么整理书桌会让人感觉好一点？',
-    teaser: '控制小事，能在混乱中找到一点可以掌控的感觉。',
-    body: [
-      '当生活里有很多无法控制的事情时，人们常常会去做一件很小但能完全掌控的事——整理一个角落、叠好一件衣服、清洗一个杯子。',
-      '心理学上这叫 **补偿性控制**：通过掌控小事，恢复一点对生活的掌控感。这不是逃避，而是一种低成本的自我调节。',
-      '不需要等到状态好了再行动。行动本身就会带来一点好转。',
-    ],
-  },
-]
 
 const {
   fallbackDailyKnowledge,
@@ -1640,154 +1275,6 @@ type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; d
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
 
-function chatRouteLabel(route: AiModelRouteKey) {
-  if (route === 'textPrimary') return '文字主模型'
-  if (route === 'textFallback') return '文字备用'
-  if (route === 'visionPrimary') return '识图主模型'
-  return '识图备用'
-}
-
-function aiProviderDisplayLabel(provider: AiModelProvider) {
-  return aiProviderOptions.find((option) => option.value === provider)?.label || provider
-}
-
-function chatModelChoiceLabel(choice: ChatModelChoice, aiModelConfig: AiModelConfig | null, aiProviderConfigs?: AiProviderConfig[]) {
-  if (choice === 'auto') return '自动'
-  if (choice === 'workers-ai') return 'Workers AI'
-  if (choice === 'doubao-seed-2-1-pro') return '豆包 Seed 2.1 Pro'
-  if (choice === 'deepseek-v4-flash') return 'DeepSeek V4 Flash'
-  if (choice === 'deepseek-v4-pro') return 'DeepSeek V4 Pro'
-  if (choice.startsWith('openrouter:')) return choice.replace(/^openrouter:/, '').replace(/:free$/, '').split('/').pop() || 'OpenRouter'
-  if (choice.startsWith('provider:')) {
-    const provider = choice.replace(/^provider:/, '') as AiModelProvider
-    const config = aiProviderConfigs?.find((item) => item.provider === provider)
-    return config?.defaultModel || aiProviderDisplayLabel(provider)
-  }
-  const route = choice.replace(/^route:/, '') as AiModelRouteKey
-  const model = aiModelConfig?.[route]?.model || aiRouteDefaults[route]?.model || chatRouteLabel(route)
-  return model
-}
-
-function renderRichChatLine(line: string) {
-  const parts = line.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>
-    }
-    return <Fragment key={index}>{part}</Fragment>
-  })
-}
-
-function ChatMarkdown({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-        table: ({ children }) => <div className="chat-markdown-table-wrap"><table>{children}</table></div>,
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  )
-}
-
-function trimEmptyChatLines(lines: string[]) {
-  const next = [...lines]
-  while (next.length > 0 && next[0].trim() === '') next.shift()
-  while (next.length > 0 && next[next.length - 1].trim() === '') next.pop()
-  return next
-}
-
-function splitChatThinkingLines(lines: string[]) {
-  const thinkingLines: string[] = []
-  const answerLines: string[] = []
-  let isInsideThinking = false
-  let hasThinkingBlock = false
-
-  lines.forEach((line) => {
-    let rest = line
-
-    if (rest === '') {
-      ;(isInsideThinking ? thinkingLines : answerLines).push(rest)
-      return
-    }
-
-    while (rest.length > 0) {
-      if (isInsideThinking) {
-        const closeIndex = rest.search(/<\/think>/i)
-        if (closeIndex < 0) {
-          thinkingLines.push(rest)
-          rest = ''
-          continue
-        }
-        const closeMatch = rest.slice(closeIndex).match(/^<\/think>/i)
-        thinkingLines.push(rest.slice(0, closeIndex))
-        rest = rest.slice(closeIndex + (closeMatch?.[0].length ?? '</think>'.length))
-        isInsideThinking = false
-        continue
-      }
-
-      const openIndex = rest.search(/<think>/i)
-      if (openIndex < 0) {
-        answerLines.push(rest)
-        rest = ''
-        continue
-      }
-      const openMatch = rest.slice(openIndex).match(/^<think>/i)
-      if (openIndex > 0) answerLines.push(rest.slice(0, openIndex))
-      rest = rest.slice(openIndex + (openMatch?.[0].length ?? '<think>'.length))
-      isInsideThinking = true
-      hasThinkingBlock = true
-    }
-  })
-
-  return {
-    thinkingLines: trimEmptyChatLines(thinkingLines),
-    answerLines: trimEmptyChatLines(hasThinkingBlock ? answerLines : lines),
-  }
-}
-
-function renderChatContent(content: string) {
-  const lines = content.split('\n')
-  const liveTraceMatch = lines[0]?.match(/^我正在这样处理：(\d+)$/)
-  const isLiveAgentTrace = Boolean(liveTraceMatch)
-  if (lines[0] === '我按这个过程处理：' || isLiveAgentTrace) {
-    const dividerIndex = lines.findIndex((line, index) => index > 0 && line.trim() === '')
-    const traceLines = lines
-      .slice(1, dividerIndex > 0 ? dividerIndex : lines.length)
-      .map((line) => line.replace(/^- /, '').trim())
-      .filter(Boolean)
-    const { answerLines } = splitChatThinkingLines(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
-    const liveTotalSteps = liveTraceMatch ? Number(liveTraceMatch[1]) : traceLines.length
-    return (
-      <>
-        <details className="chat-agent-timeline" open={isLiveAgentTrace}>
-          <summary>
-            <span>{isLiveAgentTrace ? '正在运行' : '运行完成'}</span>
-            <small>{isLiveAgentTrace ? `${traceLines.length} / ${liveTotalSteps} 步` : `${traceLines.length} 步`}</small>
-            <ChevronDown size={13} />
-          </summary>
-          <ol>
-            {traceLines.map((line, index) => (
-              <li key={`${index}-${line}`}>{renderRichChatLine(line)}</li>
-            ))}
-          </ol>
-        </details>
-        {answerLines.length > 0 && (
-          <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>
-        )}
-      </>
-    )
-  }
-  const { answerLines } = splitChatThinkingLines(lines)
-  return (
-    <>
-      {answerLines.length > 0 && <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>}
-    </>
-  )
-}
-
 function AgentExecutionTimeline({
   trace,
   status,
@@ -1811,7 +1298,7 @@ function AgentExecutionTimeline({
           const completed = !running || index < trace.length - 1
           return (
             <li key={`${index}-${line}`} className={`${active ? 'active' : ''} ${completed ? 'complete' : ''}`} aria-current={active ? 'step' : undefined}>
-              {renderRichChatLine(displayTraceLine(line))}
+              <RichChatLine line={displayTraceLine(line)} />
             </li>
           )
         })}
@@ -3356,7 +2843,7 @@ function ChatPanel({
                 {msg.role === 'assistant' && msg.trace?.length ? (
                   <AgentExecutionTimeline trace={msg.trace} status={msg.traceStatus ?? 'completed'} />
                 ) : null}
-                {msg.content ? renderChatContent(msg.content) : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
+                {msg.content ? <ChatContent content={msg.content} /> : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
                 {msg.role === 'assistant' && msg.approval && (
                   <AgentApprovalCard
                     approval={msg.approval}
