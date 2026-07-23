@@ -100,6 +100,7 @@
 │   │   ├── AiBrandIcon.tsx
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
+│   │   ├── TaskDetailModal.tsx
 │   │   ├── DailyKnowledgeModal.tsx
 │   │   ├── GivernySelect.tsx
 │   │   └── VoiceScheduleButton.tsx
@@ -146,6 +147,7 @@
 - Shared voice schedule recognition and start/end/duration review: `src/components/VoiceScheduleButton.tsx`
 - Shared attachment hover thumbnail and document fallback preview: `src/components/AttachmentHoverThumbnail.tsx`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
+- Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
