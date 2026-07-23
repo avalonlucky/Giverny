@@ -30,7 +30,6 @@ import {
   HelpCircle,
   KeyRound,
   LayoutDashboard,
-  List,
   LoaderCircle,
   Lock,
   LogOut,
@@ -114,6 +113,7 @@ import { ImagePreviewReader, OfficePreview, PdfPreviewReader } from './component
 import { FilePreviewModal } from './components/FilePreviewModal'
 import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
 import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
+import { TaskContextInsightBadge } from './components/TaskContextInsightBadge'
 import { FileThumbnailPreview } from './components/FileThumbnailPreview'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, StatusDotLabel, TaskSearchBox } from './components/TaskUi'
@@ -131,11 +131,16 @@ import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from './lib/previewTimeout'
 import { taskSettlementMonth } from './lib/taskSettlement'
 import {
+  formatTaskActivityDateRange,
+  formatTaskActivityTime,
+  isTaskListBlankContextTarget,
+  taskDueState,
+} from './lib/taskListPresentation'
+import {
   acceptanceProgressEndDateTime,
   dateTimeMinuteStamp,
   isSupplementalTask,
   isTaskBillable,
-  latestTaskActivityValue,
   minutesForTimeEntry,
   minutesForWaitingEntry,
   normalizeClockInput,
@@ -146,7 +151,6 @@ import {
   taskBillableHoursInMonth,
   taskHasMonthActivity,
   taskHoursInMonth,
-  taskLifecycleDate,
   taskRelatedMonths,
   timeEntryMonth,
 } from './lib/taskAccounting'
@@ -173,7 +177,7 @@ const IncomeView = lazy(() => import('./views/IncomeView'))
 const ReportsView = lazy(() => import('./views/ReportsView'))
 const InsightsView = lazy(() => import('./views/InsightsView'))
 const SettingsView = lazy(() => import('./views/SettingsView'))
-const CalendarView = lazy(() => import('./views/CalendarView'))
+const TasksView = lazy(() => import('./views/TasksView'))
 import microsoftExcelIcon from './assets/microsoft-excel.svg?url'
 import './App.css'
 
@@ -715,99 +719,6 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
   }
   if (mode === '日历') return `${viewRoutes[view]}?taskView=calendar`
   return viewRoutes[view]
-}
-
-function isTaskListBlankContextTarget(target: EventTarget | null) {
-  if (!(target instanceof Element)) {
-    return false
-  }
-  return !target.closest('.task-row, .task-context-menu, button, a, input, textarea, select, [role="button"]')
-}
-
-function formatDueDateCompact(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = datePart(value)
-  const time = formatTimePart(value)
-  return date === isoDate() ? ['今日', time].filter(Boolean).join(' ') : formatMonthDay(value)
-}
-
-function formatTimePart(value: string) {
-  const match = value.match(/(?:T|\s)(\d{2}:\d{2})/)
-  return match?.[1] ?? ''
-}
-
-function formatTaskRowDateTime(value: string) {
-  if (!value) {
-    return '未设置'
-  }
-  const date = datePart(value)
-  const monthDay = `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
-  const time = formatTimePart(value)
-  return time ? `${monthDay} ${time}` : monthDay
-}
-
-function parsePlanDateTime(value: string) {
-  const normalized = toDateTimeInputValue(value)
-  const date = new Date(normalized)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function formatRemainingTime(minutes: number) {
-  const safeMinutes = Math.max(0, minutes)
-  const days = Math.floor(safeMinutes / 1440)
-  const hours = Math.floor((safeMinutes % 1440) / 60)
-  if (days > 0 && hours > 0) {
-    return `${days} 天 ${hours} 小时`
-  }
-  if (days > 0) {
-    return `${days} 天`
-  }
-  if (hours > 0) {
-    return `${hours} 小时`
-  }
-  return '1 小时内'
-}
-
-function formatTaskScheduleSignal(task: Task) {
-  if (task.status === '已验收') {
-    return { tone: 'done', label: '已验收' }
-  }
-  if (task.status === '终止' || task.status === '不计费') {
-    return { tone: 'normal', label: task.status }
-  }
-
-  const now = new Date()
-  const start = parsePlanDateTime(task.date)
-  const due = parsePlanDateTime(task.estimatedDate || task.date)
-  if (!start || !due) {
-    return { tone: 'normal', label: '时间待确认' }
-  }
-
-  if (now < start) {
-    const minutes = Math.ceil((start.getTime() - now.getTime()) / 60000)
-    return { tone: 'normal', label: `距开始还剩 ${formatRemainingTime(minutes)}` }
-  }
-
-  if (now > due) {
-    const days = Math.max(1, Math.floor((now.getTime() - due.getTime()) / 86400000))
-    return { tone: 'overdue', label: `已逾期 ${days} 天` }
-  }
-
-  const minutesToDue = Math.ceil((due.getTime() - now.getTime()) / 60000)
-  const today = isoDate()
-  const tomorrow = isoDate(1)
-  const dueDate = datePart(task.estimatedDate || task.date)
-  const dueTime = formatTimePart(task.estimatedDate || task.date)
-  if (dueDate === today) {
-    return { tone: 'imminent', label: `今日${dueTime ? ` ${dueTime}` : ''} 到期` }
-  }
-  if (dueDate === tomorrow) {
-    return { tone: 'imminent', label: `明日${dueTime ? ` ${dueTime}` : ''} 到期` }
-  }
-
-  return { tone: 'started', label: `距交付还剩 ${formatRemainingTime(minutesToDue)}` }
 }
 
 function addMinutesToPlanDateTime(value: string, minutes: number) {
@@ -1528,7 +1439,6 @@ const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7
 
 type DonutItem = DonutChartItem
 
-const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
 const taskFeedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
@@ -1664,18 +1574,6 @@ function formatDuration(minutes: number) {
   return `${hours} h ${restMinutes} min`
 }
 
-function formatTaskActivityDateRange(task: Task) {
-  const start = datePart(task.date || '')
-  const latest = datePart(latestTaskActivityValue(task))
-  if (!latest || latest === start) return formatMonthDay(start || task.date)
-  return `${formatMonthDay(latest)}—${formatMonthDay(start)}`
-}
-
-function formatTaskActivityTime(task: Task) {
-  const latest = latestTaskActivityValue(task)
-  return formatTimePart(latest || task.date)
-}
-
 function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
   const startDate = entry.date || ''
   const endDate = entry.endDate || startDate
@@ -1803,26 +1701,6 @@ const normalizeDesignTypeGroups = (groups: DesignTypeGroup[]) => {
   return normalized.length > 0 ? normalized : defaultDesignTypeGroups
 }
 
-function designTypeGroupForTaskType(type: string, groups: DesignTypeGroup[]) {
-  const normalizedType = type.trim()
-  if (!normalizedType) {
-    return null
-  }
-  const explicitGroupName = normalizedType.includes(' / ') ? normalizedType.split(' / ')[0].trim() : ''
-  if (explicitGroupName) {
-    const matched = groups.find((group) => group.name === explicitGroupName)
-    if (matched) {
-      return matched
-    }
-  }
-  return groups.find((group) => group.items.includes(normalizedType)) ?? null
-}
-
-function designTypeColorForTask(type: string, groups: DesignTypeGroup[]) {
-  const group = designTypeGroupForTaskType(type, groups)
-  return validDesignTypeColor(group?.color) || designTypeColorForIndex(0)
-}
-
 function MonthPicker({
   value,
   taskMonthValues,
@@ -1943,23 +1821,6 @@ function NewTaskDesignTypeSelector({
       <div className="new-task-type-picked">已选 <b>{value || '未选择'}</b></div>
     </div>
   )
-}
-
-type DueState = 'overdue' | 'soon' | null
-
-/** 未完成任务的交付提醒状态：已过预计交付日 → 逾期；3 天内到期 → 临期 */
-function taskDueState(task: Task, today: string, soonDate: string): DueState {
-  if (!task.estimatedDate || task.status === '已验收' || task.status === '终止' || task.status === '不计费') {
-    return null
-  }
-  const estimatedDate = datePart(task.estimatedDate)
-  if (estimatedDate < today) {
-    return 'overdue'
-  }
-  if (estimatedDate <= soonDate) {
-    return 'soon'
-  }
-  return null
 }
 
 const taskFieldLabels: Record<string, string> = {
@@ -7611,6 +7472,7 @@ function App() {
         )}
 
         {activeView === '任务' && (
+          <Suspense fallback={<p className="calendar-empty-hint">正在载入任务管理…</p>}>
           <TasksView
             viewMode={taskViewMode}
             onViewModeChange={(mode) => routerNavigate(taskViewRoute('任务', mode), {
@@ -7631,7 +7493,6 @@ function App() {
             taskQuery={taskQuery}
             showVoidedTasks={showVoidedTasks}
             voidedTaskCount={voidedMonthTaskCount}
-            onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : readOnlyUploadFile}
             onFilterChange={setTaskFilter}
             onQueryChange={setTaskQuery}
             onShowVoidedChange={setShowVoidedTasks}
@@ -7647,14 +7508,7 @@ function App() {
             files={fileItems}
             progressAssessments={progressAssessments}
             onPreviewFile={setPreviewFile}
-            activity={taskActivity}
             hourlyRate={hourlyRate}
-            onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
-            onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
-            onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
-            onNotify={notify}
-            onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
             onCreateTask={() => openCreateTask(false)}
             rowThemeOn={rowThemeOn}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
@@ -7662,7 +7516,29 @@ function App() {
             canDelete={isAdmin}
             detailCollapsed={isTaskDetailCollapsed}
             onToggleDetail={toggleTaskDetail}
+            renderProgressModal={(target, onClose) => (
+              <TaskProgressModal
+                task={target.task}
+                mode={target.mode}
+                editEntryId={target.editEntryId}
+                files={fileItems}
+                activity={taskActivity}
+                onClose={onClose}
+                onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+                onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+                onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
+                onPreviewFile={setPreviewFile}
+                onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+                onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
+                onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+                onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : readOnlyUploadFile}
+                onNotify={notify}
+                initialAcceptanceMode={target.initialAcceptanceMode}
+                hourlyRate={hourlyRate}
+              />
+            )}
           />
+          </Suspense>
         )}
 
         {activeView === '文件库' && (
@@ -8016,18 +7892,6 @@ function App() {
   )
 }
 
-function TaskContextInsightBadge({ insight }: { insight?: TaskContextInsight }) {
-  if (!insight) {
-    return null
-  }
-  return (
-    <span className={`task-context-insight admin-only-data ${insight.tone}`} title={`${insight.detail}｜依据：${insight.evidence}`}>
-      <Info size={12} />
-      {insight.label}
-    </span>
-  )
-}
-
 function Fireworks() {
   return (
     <div className="fireworks" aria-hidden="true">
@@ -8035,492 +7899,6 @@ function Fireworks() {
         <span key={index} style={{ '--i': index } as CSSProperties} />
       ))}
     </div>
-  )
-}
-
-function TasksView({
-  viewMode,
-  onViewModeChange,
-  calendarMode,
-  calendarFocusDate,
-  onCalendarFocusDateChange,
-  monthValue,
-  onMonthChange,
-  designTypeGroups,
-  activeMonthTasks,
-  selectedTask,
-  tasks,
-  contextInsights,
-  taskFilter,
-  taskQuery,
-  showVoidedTasks,
-  voidedTaskCount,
-  onUploadAcceptanceFile,
-  onFilterChange,
-  onQueryChange,
-  onShowVoidedChange,
-  onSelectTask,
-  onUpdateTask,
-  onVoidTask,
-  onRestoreTask,
-  onDeleteTask,
-  onDeleteEntry,
-  onDeleteAcceptanceProgress,
-  onOpenTask,
-  onOpenEditTask,
-  files,
-  progressAssessments,
-  onPreviewFile,
-  activity,
-  hourlyRate,
-  onUploadImage,
-  onUpdateFile,
-  onDeleteFile,
-  onConfirmAcceptance,
-  onNotify,
-  onCreateTaskUpdate,
-  onCreateTask,
-  rowThemeOn,
-  onAutoEstimateProgress,
-  canWrite,
-  canDelete,
-  detailCollapsed,
-  onToggleDetail,
-}: {
-  viewMode: TaskViewMode
-  onViewModeChange: (mode: TaskViewMode) => void
-  calendarMode: CalendarDisplayMode
-  calendarFocusDate: string
-  onCalendarFocusDateChange: (value: string) => void
-  monthValue: string
-  onMonthChange: (month: string) => void
-  designTypeGroups: DesignTypeGroup[]
-  activeMonthTasks: Task[]
-  selectedTask: Task | undefined
-  tasks: Task[]
-  contextInsights: Map<number, TaskContextInsight>
-  taskFilter: TaskFilter
-  taskQuery: string
-  showVoidedTasks: boolean
-  voidedTaskCount: number
-  onUploadAcceptanceFile: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string, preview?: File) => Promise<FileAsset>
-  onFilterChange: (filter: TaskFilter) => void
-  onQueryChange: (query: string) => void
-  onShowVoidedChange: (value: boolean) => void
-  onSelectTask: (id: number) => void
-  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
-  onVoidTask: (taskId: number) => void
-  onRestoreTask: (taskId: number) => void
-  onDeleteTask: (taskId: number) => void
-  onDeleteEntry: (taskId: number, mode: ProgressRecordMode, entryId: string) => void
-  onDeleteAcceptanceProgress: (taskId: number, entryId?: string) => void
-  onOpenTask: (taskId: number) => void
-  onOpenEditTask: (taskId: number) => void
-  files: FileAsset[]
-  progressAssessments: Record<number, TaskProgressAssessment>
-  onPreviewFile: (file: FileAsset) => void
-  activity: ActivityItem[]
-  hourlyRate: number
-  onUploadImage: (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string) => Promise<void>
-  onUpdateFile: (fileId: number, changes: { name?: string; tag?: string }) => Promise<FileAsset>
-  onDeleteFile: (fileId: number) => void
-  onConfirmAcceptance?: (task: Task, payload: AcceptancePayload) => Promise<void>
-  onNotify: (message: string, tone?: ToastTone) => void
-  onCreateTaskUpdate: (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => Promise<void>
-  onCreateTask: () => void
-  onAutoEstimateProgress?: (task: Task) => void
-  canWrite: boolean
-  canDelete: boolean
-  detailCollapsed: boolean
-  onToggleDetail: () => void
-  rowThemeOn: boolean
-}) {
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
-  const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
-  const [progressTarget, setProgressTarget] = useState<{ task: Task; mode?: ProgressRecordMode; editEntryId?: string; initialAcceptanceMode?: boolean } | null>(null)
-  const viewTabs = (
-    <div className="view-mode-tabs" aria-label="任务视图切换">
-      <button className={viewMode === '列表' ? 'active' : ''} aria-pressed={viewMode === '列表'} title="切换到列表视图" onClick={() => onViewModeChange('列表')}>
-        <List size={15} />
-        列表视图
-      </button>
-      <button className={viewMode === '日历' ? 'active' : ''} aria-pressed={viewMode === '日历'} title="切换到日历视图" onClick={() => onViewModeChange('日历')}>
-        <CalendarDays size={15} />
-        日历视图
-      </button>
-    </div>
-  )
-
-  useEffect(() => {
-    if (!contextMenu && !createMenu) {
-      return
-    }
-    const closeMenu = () => {
-      setContextMenu(null)
-      setCreateMenu(null)
-    }
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeMenu()
-      }
-    }
-    window.addEventListener('click', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
-    window.addEventListener('keydown', handleKeydown)
-    return () => {
-      window.removeEventListener('click', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
-      window.removeEventListener('keydown', handleKeydown)
-    }
-  }, [contextMenu, createMenu])
-
-  const openContextMenu = (event: React.MouseEvent, task: Task) => {
-    event.preventDefault()
-    setCreateMenu(null)
-    onSelectTask(task.id)
-    setContextMenu({ x: event.clientX, y: event.clientY, task })
-  }
-
-  const openCreateMenu = (event: React.MouseEvent) => {
-    if (!canWrite || !isTaskListBlankContextTarget(event.target)) {
-      return
-    }
-    event.preventDefault()
-    setContextMenu(null)
-    setCreateMenu({ x: event.clientX, y: event.clientY })
-  }
-
-  const createTaskFromMenu = () => {
-    setCreateMenu(null)
-    onCreateTask()
-  }
-
-  const openAcceptance = (task: Task) => {
-    onSelectTask(task.id)
-    setProgressTarget({ task, mode: 'progress', initialAcceptanceMode: true })
-  }
-
-  const openProgress = (task: Task, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode = false) => {
-    if ((mode ?? 'progress') === 'progress' && !editEntryId && !initialAcceptanceMode && !canRecordNewProgress(task)) {
-      return
-    }
-    onSelectTask(task.id)
-    setProgressTarget({ task, mode, editEntryId, initialAcceptanceMode })
-  }
-
-  const selectTaskAndReveal = (taskId: number) => {
-    onSelectTask(taskId)
-    if (window.matchMedia('(max-width: 680px)').matches) {
-      if (detailCollapsed) {
-        onToggleDetail()
-      }
-      window.setTimeout(() => {
-        document.querySelector('.management-grid .dashboard-task-sidebar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, detailCollapsed ? 80 : 0)
-    }
-  }
-
-  if (viewMode === '日历') {
-    return (
-      <section className="view-stack">
-        <section className="panel view-toolbar">
-          <div className="panel-header compact">
-            <div>
-              <h2>任务日历</h2>
-              <p>按日期查看已完成与待完成任务，点击日期查看当天安排</p>
-            </div>
-            <div className="panel-tools calendar-toolbar-actions">
-              {viewTabs}
-            </div>
-          </div>
-        </section>
-        <Suspense fallback={<p className="calendar-empty-hint">正在载入任务日历…</p>}>
-          <CalendarView
-            key={monthValue}
-            monthValue={monthValue}
-            mode={calendarMode}
-            focusDate={calendarFocusDate}
-            tasks={tasks}
-            getTaskLifecycleDate={taskLifecycleDate}
-            getTaskColor={(type) => designTypeColorForTask(type, designTypeGroups)}
-            onOpenTask={onOpenTask}
-            onFocusDateChange={onCalendarFocusDateChange}
-            onMonthChange={onMonthChange}
-          />
-        </Suspense>
-      </section>
-    )
-  }
-
-return (
-    <section className="view-stack task-create-context-surface" onContextMenu={openCreateMenu}>
-      <section className="panel view-toolbar">
-        <div className="panel-header compact task-panel-header">
-          <div>
-            <h2>任务管理</h2>
-            <p>集中维护任务字段、验收状态、工时与交付文件</p>
-          </div>
-          <TaskSearchBox
-            value={taskQuery}
-            onChange={onQueryChange}
-            placeholder="搜索任务、需求、需求人"
-            className="task-search-inline"
-          />
-          {viewTabs}
-        </div>
-        <div className="task-toolbar-row">
-          <div className="segment-tabs">
-            {taskFilters.map((filter) => (
-              <button className={taskFilter === filter ? 'active' : ''} aria-pressed={taskFilter === filter} key={filter} onClick={() => onFilterChange(filter)}>
-                {filter === '全部' ? '全部任务' : filter}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className={`voided-toggle ${showVoidedTasks ? 'active' : ''}`}
-            onClick={() => {
-              const nextValue = !showVoidedTasks
-              onShowVoidedChange(nextValue)
-              if (nextValue) {
-                onFilterChange('全部')
-              }
-            }}
-            title="作废任务默认隐藏，不参与统计、月报和工时"
-          >
-            <Archive size={15} />
-            {showVoidedTasks ? '隐藏作废' : `显示作废${voidedTaskCount ? ` ${voidedTaskCount}` : ''}`}
-          </button>
-        </div>
-        <ActiveTaskFilters
-          query={taskQuery}
-          filter={taskFilter}
-          onClearQuery={() => onQueryChange('')}
-          onClearFilter={() => onFilterChange('全部')}
-        />
-      </section>
-
-      <section className={`management-grid ${detailCollapsed ? 'detail-collapsed' : ''}`}>
-        <div className={`panel task-management-list ${rowThemeOn ? '' : 'no-row-theme'}`}>
-          <div className="management-list-toolbar">
-            <span>共 {tasks.length} 条</span>
-            <div className="management-list-toolbar-end">
-              <button
-                type="button"
-                className="detail-pane-toggle"
-                aria-pressed={!detailCollapsed}
-                title={detailCollapsed ? '显示任务详情' : '收起任务详情'}
-                onClick={onToggleDetail}
-              >
-                {detailCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
-                {detailCollapsed ? '显示详情' : '收起详情'}
-              </button>
-            </div>
-          </div>
-          <div className="table-head">
-            <span>日期</span>
-            <span>任务 · 预计时间</span>
-            <span>对接 · 工时</span>
-            <span>状态 · 交付</span>
-          </div>
-          {tasks.map((task) => {
-            const dueState = taskDueState(task, isoDate(), isoDate(3))
-            const dueDateLabel = formatDueDateCompact(task.estimatedDate || task.date)
-            const scheduleSignal = formatTaskScheduleSignal(task)
-            const canAcceptTask = task.status === '待验收'
-            const canRecordProgress = canRecordNewProgress(task)
-            const contextInsight = contextInsights.get(task.id)
-            return (
-            <article
-              className={`task-row management-row ${selectedTask?.id === task.id ? 'selected' : ''} ${task.voidedAt ? 'voided' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
-              data-status={task.status}
-              data-due={dueState || undefined}
-              key={task.id}
-              role="button"
-              aria-pressed={selectedTask?.id === task.id}
-              tabIndex={0}
-              onClick={() => {
-                selectTaskAndReveal(task.id)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  selectTaskAndReveal(task.id)
-                }
-              }}
-              onContextMenu={(event) => openContextMenu(event, task)}
-            >
-              <div className="task-date">
-                <b>{formatTaskActivityDateRange(task)}</b>
-                <span className="task-date-meta">
-                  {formatTaskActivityTime(task) && <span>{formatTaskActivityTime(task)}</span>}
-                  <em>{task.type || '未分类'}</em>
-                  {isSupplementalTask(task) && (
-                    <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
-                      补录
-                    </em>
-                  )}
-                </span>
-              </div>
-              <div className="task-main">
-                <strong>{task.title}</strong>
-                <p>{task.requirement}{task.voidedAt ? ` · 已作废${task.voidReason ? `：${task.voidReason}` : ''}` : ''}</p>
-                <div className={`task-schedule-row ${task.status === '已验收' ? 'done' : ''}`}>
-                  <span className="time-chip">
-                    <span>开始</span>
-                    <strong>{formatTaskRowDateTime(task.date)}</strong>
-                  </span>
-                  <span className="time-chip">
-                    <span>交付</span>
-                    <strong>{formatTaskRowDateTime(task.estimatedDate || task.date)}</strong>
-                  </span>
-                  {task.status !== '已验收' && (
-                    <span className={`schedule-countdown ${scheduleSignal.tone}`}>{scheduleSignal.label}</span>
-                  )}
-                  <TaskContextInsightBadge insight={contextInsight} />
-                </div>
-              </div>
-              <div className="task-meta">
-                <b>{task.requester || task.contact || '待确认'}</b>
-                <span>
-                  实际 <strong>{taskHoursInMonth(task, monthValue).toFixed(1)}h</strong>
-                </span>
-              </div>
-              <div className="task-row-end">
-                <div className="task-state">
-                  <div className="task-state-badges">
-                    {task.voidedAt && <span className="voided-tag">作废</span>}
-                    {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
-                    <StatusBadge status={task.status} />
-                  </div>
-                  {task.status !== '已验收' && (
-                    <div className="progress-cell">
-                      <div className="mini-meter">
-                        <span style={{ width: `${taskDisplayProgress(task)}%` }} />
-                      </div>
-                      <small>{taskDisplayProgress(task)}%</small>
-                    </div>
-                  )}
-                </div>
-                {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
-                  <span className="task-row-due">{dueDateLabel}</span>
-                  <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}>
-                    <Pencil size={15} />
-                  </button>
-                  <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); openProgress(task) }}>
-                    <BarChart3 size={15} />
-                  </button>
-                  {canDelete && <button
-                    type="button"
-                    className="icon-button"
-                    title={canAcceptTask ? '去验收' : '当前不是待验收'}
-                    aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
-                    disabled={!canAcceptTask}
-                    onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}
-                  >
-                    <ClipboardCheck size={15} />
-                  </button>}
-                </div>}
-              </div>
-            </article>
-            )
-          })}
-          {tasks.length === 0 && (
-            <EmptyState
-              role="status"
-              title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
-              description={activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}
-              action={canWrite && activeMonthTasks.length === 0 ? (
-                <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
-                  <Plus size={15} />
-                  新建任务
-                </button>
-              ) : activeMonthTasks.length > 0 ? (
-                <button className="ghost-button compact-button empty-state-action" onClick={() => { onQueryChange(''); onFilterChange('全部') }}>
-                  <RotateCcw size={15} />
-                  清除筛选
-                </button>
-              ) : null}
-            />
-          )}
-          <div className="task-schedule-legend" aria-label="排期状态说明">
-            <span><i className="imminent" />临期：今日 / 明日到期</span>
-            <span><i className="overdue" />逾期：超过交付日</span>
-            <span><i className="started" />进行中：距交付倒计时</span>
-            <span><i className="normal" />正常 / 已验收：灰显</span>
-          </div>
-          {contextMenu && (
-            <TaskContextMenu
-              menu={contextMenu}
-              onClose={() => setContextMenu(null)}
-              onOpenTask={onOpenTask}
-              onOpenEditTask={onOpenEditTask}
-              onOpenAcceptance={openAcceptance}
-              onOpenProgress={openProgress}
-              onUpdateTask={onUpdateTask}
-              onVoidTask={onVoidTask}
-              onRestoreTask={onRestoreTask}
-              onDeleteTask={onDeleteTask}
-              canWrite={canWrite}
-              canDelete={canDelete}
-            />
-          )}
-          {canWrite && createMenu && (
-            <CreateTaskContextMenu
-              menu={createMenu}
-              onCreate={createTaskFromMenu}
-            />
-          )}
-        </div>
-        {!detailCollapsed && <DashboardTaskSidebar
-          task={selectedTask}
-          files={files}
-          progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
-          hourlyRate={hourlyRate}
-          onPreviewFile={onPreviewFile}
-          onUpdateTask={onUpdateTask}
-          onOpenProgress={(taskId, mode, editEntryId, initialAcceptanceMode) => {
-            const task = tasks.find((item) => item.id === taskId)
-            if (task) {
-              openProgress(task, mode, editEntryId, initialAcceptanceMode)
-            }
-          }}
-          onDeleteEntry={onDeleteEntry}
-          onDeleteAcceptanceProgress={onDeleteAcceptanceProgress}
-          onOpenEdit={onOpenEditTask}
-          onOpenAcceptance={(taskId) => {
-            const task = tasks.find((item) => item.id === taskId)
-            if (task) {
-              openAcceptance(task)
-            }
-          }}
-          onAutoEstimateProgress={onAutoEstimateProgress}
-          canWrite={canWrite}
-          canDelete={canDelete}
-        />}
-      </section>
-      {progressTarget && (
-        <TaskProgressModal
-          task={tasks.find((task) => task.id === progressTarget.task.id) ?? progressTarget.task}
-          mode={progressTarget.mode}
-          editEntryId={progressTarget.editEntryId}
-          files={files}
-          activity={activity}
-          onClose={() => setProgressTarget(null)}
-          onUpdateTask={onUpdateTask}
-          onCreateTaskUpdate={onCreateTaskUpdate}
-          onUploadImage={onUploadImage}
-          onPreviewFile={onPreviewFile}
-          onUpdateFile={onUpdateFile}
-          onDeleteFile={onDeleteFile}
-          onConfirmAcceptance={onConfirmAcceptance}
-          onUploadAcceptanceFile={onUploadAcceptanceFile}
-          onNotify={onNotify}
-          initialAcceptanceMode={progressTarget.initialAcceptanceMode}
-          hourlyRate={hourlyRate}
-        />
-      )}
-    </section>
   )
 }
 

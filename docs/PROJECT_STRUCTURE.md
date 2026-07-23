@@ -91,6 +91,7 @@
 │   │   └── taskSettlement.ts
 │   ├── views/
 │   │   ├── CalendarView.tsx
+│   │   ├── TasksView.tsx
 │   │   ├── FilesView.tsx
 │   │   ├── IncomeView.tsx
 │   │   ├── KnowledgeView.tsx
@@ -139,12 +140,14 @@
 - Lazy-loaded insights, risk review and hour calibration view: `src/views/InsightsView.tsx`
 - Lazy-loaded settings and AI operations entry: `src/views/SettingsView.tsx`
 - Lazy-loaded task calendar: `src/views/CalendarView.tsx`
+- Lazy-loaded task management list and calendar entry: `src/views/TasksView.tsx`
 - Shared date, holiday and lunar-calendar rules: `src/lib/dateTime.ts`, `src/lib/calendar.ts`
 - Shared date and time input component: `src/components/PlanDateTimeField.tsx`
 - Shared voice schedule recognition and start/end/duration review: `src/components/VoiceScheduleButton.tsx`
 - Shared attachment hover thumbnail and document fallback preview: `src/components/AttachmentHoverThumbnail.tsx`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
+- Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
