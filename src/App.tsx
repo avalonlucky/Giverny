@@ -122,7 +122,7 @@ import { aiBrandForValue, type AiBrandKey } from './lib/aiBrands'
 import { localCliBrowserDeviceKey, localCliRuntimeReady } from './lib/localCli'
 import { monthLabelOf } from './lib/month'
 import { formatFileSize } from './lib/format'
-import { datePart, formatDurationZh, formatMonthDay, formatPlanDateTime, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad, planDateTimeFromMinuteStamp, toDateTimeInputValue } from './lib/dateTime'
+import { datePart, formatDurationZh, formatMonthDay, formatPlanDateTime, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad, toDateTimeInputValue } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
 import { formatYuan, roundCents } from './lib/money'
 import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType } from './lib/fileTypes'
@@ -137,7 +137,6 @@ import {
 } from './lib/taskListPresentation'
 import {
   acceptanceProgressEndDateTime,
-  dateTimeMinuteStamp,
   isSupplementalTask,
   isTaskBillable,
   minutesForTimeEntry,
@@ -161,6 +160,14 @@ import type { ReceiptExcelOptions } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import { createPdfPreviewFile } from './lib/pdfPreview'
+import {
+  addMinutesToPlanDateTime,
+  defaultTimeEntryDraft,
+  fillTimeDraftFromDuration,
+  findNearestAvailableTimeSlot,
+  timeEntriesOverlap,
+  type TimeEntryDraft,
+} from './lib/timeEntryDraft'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
@@ -720,17 +727,6 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
   return viewRoutes[view]
 }
 
-function addMinutesToPlanDateTime(value: string, minutes: number) {
-  const normalized = toDateTimeInputValue(value)
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  date.setMinutes(date.getMinutes() + minutes)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const TIME_STEP_MINUTES = 5   // 时间选择器分钟列步进（5分钟）
 const DURATION_STEP_MINUTES = 30  // 工时输入最小粒度（30分钟 = 0.5h）
 const ESTIMATED_HOURS_STEP_MINUTES = 1 // 新建任务支持直接输入分钟，按 1 分钟精度保存
 
@@ -789,23 +785,6 @@ function withDatePart(value: string, nextDate: string) {
   }
   const normalized = toDateTimeInputValue(value)
   return `${nextDate}T${normalized.slice(11, 16)}`
-}
-
-function snapPlanDateTime(value: string, direction: 'nearest' | 'up' | 'down' = 'nearest') {
-  const normalized = toDateTimeInputValue(value)
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  const totalMinutes = date.getHours() * 60 + date.getMinutes()
-  const quotient = totalMinutes / TIME_STEP_MINUTES
-  const snappedTotal = direction === 'up'
-    ? Math.ceil(quotient) * TIME_STEP_MINUTES
-    : direction === 'down'
-      ? Math.floor(quotient) * TIME_STEP_MINUTES
-      : Math.round(quotient) * TIME_STEP_MINUTES
-  date.setHours(0, snappedTotal, 0, 0)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 type ScheduleAnchor = 'start' | 'hours' | 'end'
@@ -1549,114 +1528,6 @@ function formatDuration(minutes: number) {
     return `${hours} h`
   }
   return `${hours} h ${restMinutes} min`
-}
-
-function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
-  const startDate = entry.date || ''
-  const endDate = entry.endDate || startDate
-  const start = dateTimeMinuteStamp(startDate, entry.start)
-  const end = dateTimeMinuteStamp(endDate, entry.end)
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return null
-  }
-  return { start, end }
-}
-
-function timeEntriesOverlap(
-  current: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
-  existing: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
-) {
-  const currentBounds = timeEntryBounds(current)
-  const existingBounds = timeEntryBounds(existing)
-  if (!currentBounds || !existingBounds) {
-    return false
-  }
-  return currentBounds.start < existingBounds.end && currentBounds.end > existingBounds.start
-}
-
-function findNearestAvailableTimeSlot<T extends Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>>(
-  current: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>,
-  existingEntries: T[],
-) {
-  const currentBounds = timeEntryBounds(current)
-  if (!currentBounds) {
-    return null
-  }
-  const duration = currentBounds.end - currentBounds.start
-  if (duration <= 0) {
-    return null
-  }
-  const existingBounds = existingEntries
-    .map(timeEntryBounds)
-    .filter((bounds): bounds is { start: number; end: number } => Boolean(bounds))
-    .sort((a, b) => a.start - b.start)
-  const conflictBounds = existingBounds.find((bounds) => currentBounds.start < bounds.end && currentBounds.end > bounds.start)
-  if (!conflictBounds) {
-    return null
-  }
-  const candidates = [
-    { start: conflictBounds.end, end: conflictBounds.end + duration },
-    { start: conflictBounds.start - duration, end: conflictBounds.start },
-  ].filter((candidate) => candidate.start >= 0)
-
-  const availableCandidate = candidates
-    .filter((candidate) => !existingBounds.some((bounds) => candidate.start < bounds.end && candidate.end > bounds.start))
-    .sort((a, b) => Math.abs(a.start - currentBounds.start) - Math.abs(b.start - currentBounds.start))[0]
-
-  if (!availableCandidate) {
-    return null
-  }
-
-  const start = planDateTimeFromMinuteStamp(availableCandidate.start)
-  const end = planDateTimeFromMinuteStamp(availableCandidate.end)
-  if (!start || !end) {
-    return null
-  }
-  return { start, end }
-}
-
-function defaultTimeEntryDraft() {
-  const start = snapPlanDateTime(isoDateTime(), 'up')
-  const end = addMinutesToPlanDateTime(start, 60)
-  return {
-    date: datePart(start),
-    endDate: datePart(end),
-    start: start.slice(11, 16),
-    end: end.slice(11, 16),
-    note: '',
-  }
-}
-
-type TimeEntryDraft = ReturnType<typeof defaultTimeEntryDraft>
-
-function fillTimeDraftFromDuration(draft: TimeEntryDraft, minutes: number) {
-  const safeMinutes = Math.max(1, Math.round(minutes))
-  const startVal = normalizeClockInput(draft.start)
-  const endVal = normalizeClockInput(draft.end)
-  if (!endVal && startVal && draft.date) {
-    const computed = addMinutesToPlanDateTime(`${draft.date}T${startVal}`, safeMinutes)
-    return {
-      ...draft,
-      start: startVal,
-      endDate: computed.slice(0, 10),
-      end: computed.slice(11, 16),
-    }
-  }
-  if (!startVal && endVal && (draft.endDate || draft.date)) {
-    const computed = addMinutesToPlanDateTime(`${draft.endDate || draft.date}T${endVal}`, -safeMinutes)
-    return {
-      ...draft,
-      date: computed.slice(0, 10),
-      start: computed.slice(11, 16),
-      endDate: draft.endDate || draft.date,
-      end: endVal,
-    }
-  }
-  return {
-    ...draft,
-    start: startVal || draft.start,
-    end: endVal || draft.end,
-  }
 }
 
 type ProgressModalTarget = {

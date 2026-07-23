@@ -88,7 +88,8 @@
 │   │   ├── month.ts
 │   │   ├── previewTimeout.ts
 │   │   ├── psdPreview.ts
-│   │   └── taskSettlement.ts
+│   │   ├── taskSettlement.ts
+│   │   └── timeEntryDraft.ts
 │   ├── views/
 │   │   ├── CalendarView.tsx
 │   │   ├── TasksView.tsx
@@ -157,6 +158,7 @@
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
+- Shared progress time draft, derivation and overlap rules: `src/lib/timeEntryDraft.ts`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
 - Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`
