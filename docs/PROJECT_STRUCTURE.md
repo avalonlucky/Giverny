@@ -158,6 +158,10 @@
 - Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
 - Shared new-task design type selector: `src/components/NewTaskDesignTypeSelector.tsx`
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
+- Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
+- Shared Agent attachment results and settlement receipt preview: `src/components/AgentAttachmentResults.tsx`
+- Shared prioritized toast queue and icon presentation: `src/lib/toastQueue.ts`, `src/components/ToastIcon.tsx`
+- Shared editable-target and month keyboard shortcut rules: `src/lib/keyboardShortcuts.ts`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task history sample insights and accepted-task normalization: `src/lib/taskContextInsights.ts`

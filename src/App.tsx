@@ -1,5 +1,4 @@
 import { lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
 import {
   AlarmClock,
@@ -15,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Download,
   Eye,
   EyeOff,
   FileText,
@@ -28,14 +26,12 @@ import {
   LoaderCircle,
   Lock,
   LogOut,
-  Maximize2,
   Pencil,
   Plus,
   RotateCcw,
   Search,
   Settings,
   Sparkles,
-  Info,
   Trash2,
   UserCircle,
   X,
@@ -45,8 +41,6 @@ import {
   Globe,
   SlidersHorizontal,
   Star,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react'
 import {
   appReleaseDate,
@@ -109,7 +103,6 @@ import { TaskDetailModal } from './components/TaskDetailModal'
 import { MonthPicker } from './components/MonthPicker'
 import { NewTaskDesignTypeSelector } from './components/NewTaskDesignTypeSelector'
 import { PendingAttachmentPreview, PendingAttachmentThumbnail } from './components/PendingAttachmentPreview'
-import { FileThumbnailPreview } from './components/FileThumbnailPreview'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from './components/TaskUi'
 import { EmptyState } from './components/EmptyState'
@@ -150,8 +143,6 @@ import { designTypeColorForIndex, validDesignTypeColor } from './lib/designTypes
 import { providerSupportsVision } from './lib/aiProviders'
 import { canRecordNewProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
 import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, isAcceptanceFileAsset, partnerFacingText, sortTimeEntriesDesc } from './lib/taskPresentation'
-import type { ReceiptExcelOptions } from './lib/receiptExcel'
-import { SettlementReceipt } from './components/SettlementReceipt'
 import {
   DURATION_STEP_MINUTES,
   exactDurationMinutesBetween,
@@ -211,7 +202,13 @@ import {
 } from './lib/conversationCache'
 import { extractAttachmentText } from './lib/attachmentText'
 import { aiProviderDisplayLabel, chatModelChoiceLabel } from './lib/chatModelPresentation'
-import { ChatContent, ChatMarkdown, RichChatLine } from './components/ChatContent'
+import { ChatContent, RichChatLine } from './components/ChatContent'
+import { AgentAnalysisTaskCard } from './components/AgentAnalysisTaskCard'
+import { AgentAttachmentResults, AgentResultPreviewModal } from './components/AgentAttachmentResults'
+import { ToastIcon } from './components/ToastIcon'
+import { agentAnalysisStatusLabel } from './lib/agentAnalysisPresentation'
+import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShortcuts'
+import { inferToastTone, trimToastQueue, type ToastState, type ToastTone } from './lib/toastQueue'
 import { splitFileName } from './lib/fileName'
 import { createOptionalPreviewFile, createTextPreviewFile } from './lib/attachmentPreview'
 import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
@@ -243,7 +240,6 @@ const ReportsView = lazy(() => import('./views/ReportsView'))
 const InsightsView = lazy(() => import('./views/InsightsView'))
 const SettingsView = lazy(() => import('./views/SettingsView'))
 const TasksView = lazy(() => import('./views/TasksView'))
-import microsoftExcelIcon from './assets/microsoft-excel.svg?url'
 import './App.css'
 
 initializeGivernyTheme()
@@ -412,91 +408,6 @@ function renderTextAssistantBody(text: string) {
 }
 
 const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
-
-type ToastTone = 'success' | 'error' | 'info'
-
-type ToastState = {
-  id: number
-  message: string
-  tone: ToastTone
-  actionLabel?: string
-  onAction?: () => void | Promise<void>
-  durationMs?: number
-}
-
-const MAX_VISIBLE_TOASTS = 4
-
-const toastTonePriority = (tone: ToastTone) => {
-  if (tone === 'error') return 3
-  if (tone === 'info') return 1
-  return 0
-}
-
-const trimToastQueue = (items: ToastState[]) =>
-  items
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => toastTonePriority(b.item.tone) - toastTonePriority(a.item.tone) || b.item.id - a.item.id)
-    .slice(0, MAX_VISIBLE_TOASTS)
-    .sort((a, b) => a.index - b.index)
-    .map(({ item }) => item)
-
-const inferToastTone = (message: string): ToastTone => {
-  if (/(失败|异常|不正确|失效|错误|不可用|无效)/.test(message)) {
-    return 'error'
-  }
-  if (/(正在|上传中|加载)/.test(message)) {
-    return 'info'
-  }
-  return 'success'
-}
-
-function ToastIcon({ tone }: { tone: ToastTone }) {
-  if (tone === 'error') {
-    return <AlertTriangle size={17} />
-  }
-  if (tone === 'info') {
-    return <Info size={17} />
-  }
-  return <CheckCircle2 size={17} />
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
-}
-
-const monthShortcutByCode: Record<string, number> = {
-  Digit1: 1,
-  Digit2: 2,
-  Digit3: 3,
-  Digit4: 4,
-  Digit5: 5,
-  Digit6: 6,
-  Digit7: 7,
-  Digit8: 8,
-  Digit9: 9,
-  Digit0: 10,
-  Minus: 11,
-  Equal: 12,
-  Numpad1: 1,
-  Numpad2: 2,
-  Numpad3: 3,
-  Numpad4: 4,
-  Numpad5: 5,
-  Numpad6: 6,
-  Numpad7: 7,
-  Numpad8: 8,
-  Numpad9: 9,
-  Numpad0: 10,
-  NumpadSubtract: 11,
-  NumpadAdd: 12,
-}
-
-function monthFromShortcut(event: KeyboardEvent) {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-    return 0
-  }
-  return monthShortcutByCode[event.code] ?? 0
-}
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
@@ -912,232 +823,6 @@ function AgentTaskSelectionCard({
             </span>
           </button>
         ))}
-      </div>
-    </section>
-  )
-}
-
-const AGENT_ANALYSIS_PHASES: Array<{ phase: AgentBackgroundTask['phase']; label: string }> = [
-  { phase: 'queued', label: '排队等待' },
-  { phase: 'collecting', label: '汇总工作资料' },
-  { phase: 'analyzing', label: '生成可核对报告' },
-  { phase: 'completed', label: '保存分析结果' },
-]
-
-function agentAnalysisStatusLabel(status: AgentBackgroundTask['status']) {
-  if (status === 'running') return '分析中'
-  if (status === 'completed') return '已完成'
-  if (status === 'failed') return '分析失败'
-  if (status === 'cancelled') return '已取消'
-  return '已排队'
-}
-
-function AgentAnalysisTaskCard({
-  task,
-  busy,
-  onCancel,
-  onRetry,
-}: {
-  task: AgentBackgroundTask
-  busy: boolean
-  onCancel: () => void
-  onRetry: () => void
-}) {
-  const activePhaseIndex = AGENT_ANALYSIS_PHASES.findIndex((item) => item.phase === task.phase)
-  const terminal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
-  return (
-    <section className={`agent-analysis-card status-${task.status}`} aria-label={`${task.title}后台分析`}>
-      <header className="agent-analysis-header">
-        <div>
-          <small>后台分析任务</small>
-          <strong>{task.title}</strong>
-        </div>
-        <span className="agent-analysis-status">{agentAnalysisStatusLabel(task.status)}</span>
-      </header>
-      {!terminal && (
-        <div className="agent-analysis-progress" aria-label={`分析进度 ${task.progress}%`}>
-          <div><span style={{ width: `${task.progress}%` }} /></div>
-          <small>{task.progress}%</small>
-        </div>
-      )}
-      <ol className="agent-analysis-steps">
-        {AGENT_ANALYSIS_PHASES.map((item, index) => {
-          const completed = task.status === 'completed' || activePhaseIndex > index
-          const active = !terminal && item.phase === task.phase
-          return <li key={item.phase} className={`${completed ? 'complete' : ''} ${active ? 'active' : ''}`}>{item.label}</li>
-        })}
-      </ol>
-      {task.result && (
-        <div className="agent-analysis-result chat-final-answer">
-          <ChatMarkdown content={task.result} />
-        </div>
-      )}
-      {task.error && <p className="agent-analysis-error">{task.error}</p>}
-      {(task.status === 'queued' || task.status === 'running' || task.status === 'failed' || task.status === 'cancelled') && (
-        <footer className="agent-analysis-actions">
-          {(task.status === 'queued' || task.status === 'running') && (
-            <button type="button" className="ghost-button compact-button" disabled={busy} onClick={onCancel}>取消分析</button>
-          )}
-          {(task.status === 'failed' || task.status === 'cancelled') && (
-            <button type="button" className="primary-button compact-button" disabled={busy} onClick={onRetry}>重新分析</button>
-          )}
-        </footer>
-      )}
-    </section>
-  )
-}
-
-function agentResultAttachmentToFile(file: AgentResultAttachment): FileAsset {
-  return {
-    id: typeof file.id === 'number' ? file.id : 0,
-    taskId: file.taskId,
-    scope: file.scope,
-    name: file.name,
-    task: file.taskTitle,
-    type: file.type,
-    mimeType: file.mimeType,
-    size: file.size,
-    uploadedAt: file.uploadedAt,
-    final: file.scope === 'acceptance',
-    visible: false,
-    tag: file.tag,
-    previewUrl: file.previewUrl,
-    sourceUrl: file.downloadUrl || file.sourceUrl,
-  }
-}
-
-function settlementReceiptRangeLabel(name: string) {
-  const matched = name.match(/_(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/)
-  if (!matched) return name.replace(/\.xlsx$/i, '')
-  const [, startYear, startMonth, startDay, endYear, endMonth, endDay] = matched
-  const start = `${startYear}/${startMonth}/${startDay}`
-  const end = `${endYear}/${endMonth}/${endDay}`
-  return `${start} 至 ${end}`
-}
-
-function AgentSettlementReceiptPreview({
-  attachment,
-  onClose,
-}: {
-  attachment: AgentResultAttachment
-  onClose: () => void
-}) {
-  const viewportRef = useRef<HTMLDivElement | null>(null)
-  const [receipt, setReceipt] = useState<ReceiptExcelOptions | null>(null)
-  const [error, setError] = useState('')
-  const [scale, setScale] = useState(0.42)
-  const shareToken = attachment.shareUrl?.split('/').filter(Boolean).at(-1) ?? ''
-
-  const fitReceipt = useCallback(() => {
-    const viewport = viewportRef.current
-    if (!viewport) return
-    setScale(Math.max(0.25, Math.min(1, (viewport.clientWidth - 32) / 2200)))
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const loadReceipt = async () => {
-      if (!shareToken) {
-        setError('该回单缺少在线预览地址，请重新导出。')
-        return
-      }
-      try {
-        const response = await fetch(`/api/shared-settlement/${encodeURIComponent(shareToken)}`, { signal: controller.signal })
-        const payload = await response.json().catch(() => null) as { receipt?: ReceiptExcelOptions; error?: string } | null
-        if (!response.ok || !payload?.receipt) throw new Error(payload?.error || '回单读取失败')
-        setReceipt(payload.receipt)
-        window.requestAnimationFrame(fitReceipt)
-      } catch (caughtError) {
-        if (!controller.signal.aborted) setError(caughtError instanceof Error ? caughtError.message : '回单读取失败')
-      }
-    }
-    void loadReceipt()
-    return () => controller.abort()
-  }, [fitReceipt, shareToken])
-
-  const changeScale = (delta: number) => setScale((current) => Math.max(0.25, Math.min(1.5, Number((current + delta).toFixed(2)))))
-
-  return createPortal(
-    <ModalShell className="agent-receipt-preview-modal" labelledBy="agent-receipt-preview-title" onClose={onClose} closeOnEscape>
-      <header className="modal-header agent-receipt-preview-header">
-        <div>
-          <p className="eyebrow">回单预览</p>
-          <h2 id="agent-receipt-preview-title">{settlementReceiptRangeLabel(attachment.name)}</h2>
-        </div>
-        <div className="modal-header-actions">
-          <button type="button" className="icon-button" onClick={() => changeScale(-0.08)} disabled={scale <= 0.25} aria-label="缩小" title="缩小"><ZoomOut size={16} /></button>
-          <button type="button" className="agent-receipt-scale" onClick={() => setScale(1)} aria-label="按 1 比 1 显示" title="1:1 原始尺寸">1:1</button>
-          <button type="button" className="icon-button" onClick={() => changeScale(0.08)} disabled={scale >= 1.5} aria-label="放大" title="放大"><ZoomIn size={16} /></button>
-          <button type="button" className="icon-button" onClick={fitReceipt} aria-label="适合窗口" title="适合窗口"><Maximize2 size={16} /></button>
-          <button type="button" className="icon-button modal-close-button" onClick={onClose} aria-label="关闭" title="关闭"><X size={18} /></button>
-        </div>
-      </header>
-      <div ref={viewportRef} className="agent-receipt-preview-viewport">
-        {!receipt && !error && <div className="office-preview-status">正在加载完整回单…</div>}
-        {error && <div className="file-preview-placeholder"><FileText size={38} /><strong>暂时无法预览</strong><span>{error}</span></div>}
-        {receipt && (
-          <div className="agent-receipt-preview-sheet" style={{ zoom: scale } as CSSProperties}>
-            <SettlementReceipt options={receipt} />
-          </div>
-        )}
-      </div>
-    </ModalShell>,
-    document.body,
-  )
-}
-
-function AgentResultPreviewModal({ attachment, onClose }: { attachment: AgentResultAttachment; onClose: () => void }) {
-  if (attachment.kind === 'settlement-receipt') return <AgentSettlementReceiptPreview attachment={attachment} onClose={onClose} />
-  return <FilePreviewModal file={agentResultAttachmentToFile(attachment)} onClose={onClose} />
-}
-
-function AgentAttachmentResults({
-  attachments,
-  onPreview,
-}: {
-  attachments: AgentResultAttachment[]
-  onPreview: (attachment: AgentResultAttachment) => void
-}) {
-  const isSettlementBatch = attachments.every((item) => item.kind === 'settlement-receipt')
-  return (
-    <section className={`agent-attachment-results ${isSettlementBatch ? 'is-settlement-receipt' : ''}`} aria-label={`附件结果，共 ${attachments.length} 个`}>
-      <header className="agent-attachment-results-header">
-        <div>
-          <small>{isSettlementBatch ? '已生成文件' : '找到的真实文件'}</small>
-          <strong>{isSettlementBatch ? '导出结果' : '附件'}</strong>
-        </div>
-        <span>{attachments.length} 个</span>
-      </header>
-      <div className="agent-attachment-grid">
-        {attachments.map((attachment) => {
-          const file = agentResultAttachmentToFile(attachment)
-          const isSettlementReceipt = attachment.kind === 'settlement-receipt'
-          return (
-            <article className={`agent-attachment-card ${isSettlementReceipt ? 'is-settlement-receipt' : ''}`} key={attachment.id}>
-              <button type="button" className="agent-attachment-preview" onClick={() => onPreview(attachment)} aria-label={`预览 ${attachment.name}`} title="预览附件">
-                {isSettlementReceipt ? <span className="agent-receipt-file-mark"><img src={microsoftExcelIcon} alt="Microsoft Excel" /></span> : <FileThumbnailPreview file={file} />}
-              </button>
-              <div className="agent-attachment-info">
-                <strong title={attachment.name}>{isSettlementReceipt ? settlementReceiptRangeLabel(attachment.name) : attachment.name}</strong>
-                <span title={attachment.taskTitle}>{isSettlementReceipt ? 'Excel 工作簿' : attachment.taskTitle}</span>
-                <small>{isSettlementReceipt ? '可预览、在线查看或下载' : [attachment.type, attachment.size, attachment.tag || (attachment.scope === 'acceptance' ? '验收附件' : '进展附件')].filter(Boolean).join(' · ')}</small>
-              </div>
-              <div className="agent-attachment-actions">
-                <button type="button" className="ghost-button compact-button" onClick={() => onPreview(attachment)}>
-                  <Eye size={13} />预览
-                </button>
-                {attachment.shareUrl && (
-                  <a className="ghost-button compact-button" href={attachment.shareUrl} target="_blank" rel="noreferrer">
-                    <Eye size={13} />在线预览
-                  </a>
-                )}
-                <a className="ghost-button compact-button" href={authedPreviewUrl(attachment.downloadUrl || attachment.sourceUrl)} target="_blank" rel="noreferrer">
-                  <Download size={13} />{isSettlementReceipt ? '下载' : '打开'}
-                </a>
-              </div>
-            </article>
-          )
-        })}
       </div>
     </section>
   )
