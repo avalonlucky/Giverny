@@ -127,6 +127,8 @@ import { VoidTaskModal } from './components/VoidTaskModal'
 import { ImagePreviewReader, OfficePreview, PdfPreviewReader } from './components/FilePreviewReaders'
 import { FilePreviewModal } from './components/FilePreviewModal'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
+import { ActiveTaskFilters, StatCard, StatusBadge, StatusDotLabel, TaskSearchBox } from './components/TaskUi'
+import { EmptyState } from './components/EmptyState'
 import { formatFileSize } from './lib/format'
 import { fileDocumentPreviewSource, fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, isInlineDocumentFileType, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
 import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
@@ -9474,10 +9476,11 @@ function App() {
 
               <div className={`task-list ${rowThemeOn ? '' : 'no-row-theme'}`} onContextMenu={openDashboardCreateMenu}>
                 {visibleTasks.length === 0 && (
-                  <div className="empty-state" role="status">
-                    <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
-                    <p>{activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}</p>
-                    {activeMonthTasks.length === 0 ? (
+                  <EmptyState
+                    role="status"
+                    title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
+                    description={activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}
+                    action={activeMonthTasks.length === 0 ? (
                       <button className="ghost-button compact-button empty-state-action" onClick={() => openCreateTask(false)}>
                         <Plus size={15} />
                         新建任务
@@ -9488,7 +9491,7 @@ function App() {
                         清除筛选
                       </button>
                     )}
-                  </div>
+                  />
                 )}
                 {dashboardPendingVisible.map(renderDashboardTaskRow)}
                 {dashboardPendingTasks.length > DASHBOARD_PAGE_SIZE && (
@@ -10029,119 +10032,6 @@ function App() {
       )}
     </main>
   )
-}
-
-function StatCard({
-  label,
-  value,
-  trend,
-  icon,
-}: {
-  label: string
-  value: string
-  trend: string
-  icon: React.ReactNode
-}) {
-  return (
-    <article className="stat-card">
-      <div className="stat-icon">{icon}</div>
-      <div className="stat-text">
-        <p>{label}</p>
-        <strong>{value}</strong>
-        <span>{trend}</span>
-      </div>
-    </article>
-  )
-}
-
-function StatusBadge({ status }: { status: TaskStatus }) {
-  return <span className={`status-badge status-${status}`}>{status}</span>
-}
-
-function TaskSearchBox({
-  value,
-  onChange,
-  placeholder,
-  className = '',
-}: {
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  className?: string
-}) {
-  return (
-    <label className={`search-box task-search-box ${className}`.trim()}>
-      <Search size={18} />
-      <input aria-label={placeholder} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
-      {value && (
-        <button
-          type="button"
-          className="search-clear-button"
-          aria-label="清除搜索内容"
-          title="清除搜索"
-          onClick={(event) => {
-            event.preventDefault()
-            onChange('')
-          }}
-        >
-          <X size={14} />
-        </button>
-      )}
-    </label>
-  )
-}
-
-function ActiveTaskFilters({
-  query,
-  filter,
-  onClearQuery,
-  onClearFilter,
-}: {
-  query: string
-  filter: TaskFilter
-  onClearQuery: () => void
-  onClearFilter: () => void
-}) {
-  const normalizedQuery = query.trim()
-  if (!normalizedQuery && filter === '全部') {
-    return null
-  }
-
-  return (
-    <div className="task-active-filters" aria-live="polite">
-      <span>当前筛选</span>
-      {normalizedQuery && (
-        <button type="button" title="清除搜索关键词" onClick={onClearQuery}>
-          “{normalizedQuery}”
-          <X size={12} />
-        </button>
-      )}
-      {filter !== '全部' && (
-        <button type="button" title="清除状态筛选" onClick={onClearFilter}>
-          {filter}
-          <X size={12} />
-        </button>
-      )}
-      {normalizedQuery && filter !== '全部' && (
-        <button type="button" className="task-filter-reset" onClick={() => { onClearQuery(); onClearFilter() }}>
-          清除全部
-        </button>
-      )}
-    </div>
-  )
-}
-
-function StatusDotLabel({ status }: { status: TaskStatus }) {
-  return (
-    <span className={`status-dot-label status-dot-${status}`}>
-      <StatusDot status={status} />
-      {status}
-    </span>
-  )
-}
-
-function StatusDot({ status }: { status: TaskStatus }) {
-  return <i className={`status-dot status-dot-${status}`} aria-hidden="true" />
 }
 
 function TaskContextInsightBadge({ insight }: { insight?: TaskContextInsight }) {
@@ -11172,10 +11062,11 @@ return (
             )
           })}
           {tasks.length === 0 && (
-            <div className="empty-state" role="status">
-              <strong>{activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}</strong>
-              <p>{activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}</p>
-              {canWrite && activeMonthTasks.length === 0 ? (
+            <EmptyState
+              role="status"
+              title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
+              description={activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}
+              action={canWrite && activeMonthTasks.length === 0 ? (
                 <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}>
                   <Plus size={15} />
                   新建任务
@@ -11186,7 +11077,7 @@ return (
                   清除筛选
                 </button>
               ) : null}
-            </div>
+            />
           )}
           <div className="task-schedule-legend" aria-label="排期状态说明">
             <span><i className="imminent" />临期：今日 / 明日到期</span>
@@ -14663,10 +14554,10 @@ function FilesView({
       <section className="file-library-layout">
         <aside className="file-project-list">
           {monthGroups.length === 0 && (
-            <div className="empty-state">
-              <strong>还没有验收交付件</strong>
-              <p>任务提交验收时上传的交付文件会按项目自动归档到这里，AI 也会同步解析内容供搜索。</p>
-            </div>
+            <EmptyState
+              title="还没有验收交付件"
+              description="任务提交验收时上传的交付文件会按项目自动归档到这里，AI 也会同步解析内容供搜索。"
+            />
           )}
           {monthGroups.map((group) => {
             const isOpen = Boolean(fileQuery.trim()) || openMonths.has(group.month)
