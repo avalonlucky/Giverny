@@ -1,5 +1,6 @@
 import { Fragment, lazy, memo, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -695,7 +696,7 @@ function viewFromPath(pathname: string): AppView {
   return routeViews[pathname] ?? '工作台'
 }
 
-function taskViewModeFromSearch(search = window.location.search): TaskViewMode {
+function taskViewModeFromSearch(search: string): TaskViewMode {
   const value = new URLSearchParams(search).get('taskView')
   if (value === 'calendar' || value === '日历') return '日历'
   return '列表'
@@ -6695,8 +6696,10 @@ function ChatPanel({
 }
 
 function App() {
-  const [activeView, setActiveView] = useState<AppView>(() => viewFromPath(window.location.pathname))
-  const [taskViewMode, setTaskViewMode] = useState<TaskViewMode>(() => taskViewModeFromSearch())
+  const location = useLocation()
+  const routerNavigate = useNavigate()
+  const activeView = viewFromPath(location.pathname)
+  const taskViewMode = taskViewModeFromSearch(location.search)
   const [calendarDisplayMode, setCalendarDisplayMode] = useState<CalendarDisplayMode>('月')
   const [calendarFocusDate, setCalendarFocusDate] = useState(() => isoDate())
   const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
@@ -7076,10 +7079,9 @@ function App() {
 
   const navigateView = (view: AppView) => {
     setIsAccountMenuOpen(false)
-    setActiveView(view)
     const nextPath = taskViewRoute(view, taskViewMode)
-    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
-      window.history.pushState({ view, taskViewMode }, '', nextPath)
+    if (`${location.pathname}${location.search}` !== nextPath) {
+      routerNavigate(nextPath, { state: { view, taskViewMode } })
     }
   }
 
@@ -7111,24 +7113,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (window.location.pathname === '/') {
-      window.history.replaceState({ view: activeView, taskViewMode }, '', taskViewRoute(activeView, taskViewMode))
+    const canonicalPath = taskViewRoute(activeView, taskViewMode)
+    if (`${location.pathname}${location.search}` !== canonicalPath) {
+      routerNavigate(canonicalPath, { replace: true, state: { view: activeView, taskViewMode } })
     }
-    const handlePopState = () => {
-      setActiveView(viewFromPath(window.location.pathname))
-      setTaskViewMode(taskViewModeFromSearch(window.location.search))
-    }
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    const nextPath = taskViewRoute(activeView, taskViewMode)
-    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
-      window.history.replaceState({ view: activeView, taskViewMode }, '', nextPath)
-    }
-  }, [activeView, taskViewMode])
+  }, [activeView, location.pathname, location.search, routerNavigate, taskViewMode])
 
 
   const refreshState = async () => {
@@ -9609,7 +9598,10 @@ function App() {
         {activeView === '任务' && (
           <TasksView
             viewMode={taskViewMode}
-            onViewModeChange={setTaskViewMode}
+            onViewModeChange={(mode) => routerNavigate(taskViewRoute('任务', mode), {
+              replace: true,
+              state: { view: '任务', taskViewMode: mode },
+            })}
             calendarMode={calendarDisplayMode}
             calendarFocusDate={effectiveCalendarFocusDate}
             onCalendarFocusDateChange={setCalendarFocusDate}
