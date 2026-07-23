@@ -79,6 +79,8 @@
 │   │   ├── aiBrands.ts
 │   │   ├── aiModels.ts
 │   │   ├── aiProviders.ts
+│   │   ├── calendar.ts
+│   │   ├── dateTime.ts
 │   │   ├── designTypes.ts
 │   │   ├── fileMetadata.ts
 │   │   ├── format.ts
@@ -88,6 +90,7 @@
 │   │   ├── psdPreview.ts
 │   │   └── taskSettlement.ts
 │   ├── views/
+│   │   ├── CalendarView.tsx
 │   │   ├── FilesView.tsx
 │   │   ├── IncomeView.tsx
 │   │   ├── KnowledgeView.tsx
@@ -130,6 +133,8 @@
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
 - Lazy-loaded settings and AI operations entry: `src/views/SettingsView.tsx`
+- Lazy-loaded task calendar: `src/views/CalendarView.tsx`
+- Shared date, holiday and lunar-calendar rules: `src/lib/dateTime.ts`, `src/lib/calendar.ts`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
 - Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`

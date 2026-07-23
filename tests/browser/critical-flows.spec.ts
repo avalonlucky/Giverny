@@ -95,6 +95,23 @@ test('设置页仅在进入时加载独立分包', async ({ page }) => {
   expect(settingsLoadedAfterNavigation).toBe(true)
 })
 
+test('任务日历仅在切换到日历视图时加载', async ({ page }) => {
+  const calendarLoadedOnDashboard = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('CalendarView-'))
+  ))
+  expect(calendarLoadedOnDashboard).toBe(false)
+
+  await page.goto('/tasks?taskView=calendar')
+  await expect(page.getByRole('heading', { name: '任务日历' })).toBeVisible()
+  await expect(page.locator('.google-calendar-panel')).toBeVisible()
+  const calendarTaskSegments = page.getByRole('button', { name: '公司产品封套修改', exact: true })
+  await expect(calendarTaskSegments.first()).toBeVisible()
+  const calendarLoadedAfterNavigation = await page.evaluate(() => (
+    performance.getEntriesByType('resource').some((entry) => entry.name.includes('CalendarView-'))
+  ))
+  expect(calendarLoadedAfterNavigation).toBe(true)
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')

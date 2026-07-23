@@ -125,6 +125,8 @@ import { aiBrandForValue, type AiBrandKey } from './lib/aiBrands'
 import { localCliBrowserDeviceKey, localCliRuntimeReady } from './lib/localCli'
 import { monthLabelOf } from './lib/month'
 import { formatFileSize } from './lib/format'
+import { datePart, formatMonthDay, formatMonthDayTime, isoDate, isoDateFromLocalDate, isoDateTime, localDateFromIsoDate, monthPart, pad, planDateTimeFromMinuteStamp } from './lib/dateTime'
+import { addIsoDays, calendarDaysForMonth, weekdayLabels } from './lib/calendar'
 import { formatYuan, roundCents } from './lib/money'
 import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, isInlineDocumentFileType, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
 import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
@@ -140,6 +142,7 @@ import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, InsightH
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
 import type { SettingsTab } from './views/SettingsView'
+import type { CalendarDisplayMode } from './views/CalendarView'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 const SemanticSearchModal = lazy(() => import('./components/SemanticSearchModal'))
@@ -147,6 +150,7 @@ const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
 const FilesView = lazy(() => import('./views/FilesView'))
 const IncomeView = lazy(() => import('./views/IncomeView'))
 const SettingsView = lazy(() => import('./views/SettingsView'))
+const CalendarView = lazy(() => import('./views/CalendarView'))
 import microsoftExcelIcon from './assets/microsoft-excel.svg?url'
 import './App.css'
 
@@ -697,36 +701,6 @@ function isTaskListBlankContextTarget(target: EventTarget | null) {
   return !target.closest('.task-row, .task-context-menu, button, a, input, textarea, select, [role="button"]')
 }
 
-const pad = (value: number) => String(value).padStart(2, '0')
-
-function isoDate(offsetDays = 0) {
-  const date = new Date()
-  date.setDate(date.getDate() + offsetDays)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-function isoDateTime(offsetMinutes = 0) {
-  const date = new Date()
-  date.setMinutes(date.getMinutes() + offsetMinutes)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function planDateTimeFromMinuteStamp(stamp: number) {
-  const date = new Date(stamp * 60000)
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function datePart(value: string) {
-  return value.slice(0, 10)
-}
-
-function monthPart(value: string) {
-  return datePart(value).slice(0, 7)
-}
-
 function toDateTimeInputValue(value: string) {
   if (!value) {
     return ''
@@ -740,23 +714,6 @@ function formatPlanDateTime(value: string) {
   }
   const date = datePart(value).replaceAll('-', '/')
   return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
-}
-
-function formatMonthDayTime(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = datePart(value)
-  const monthDay = `${date.slice(5, 7)}/${date.slice(8, 10)}`
-  return value.includes('T') ? `${monthDay} ${value.slice(11, 16)}` : monthDay
-}
-
-function formatMonthDay(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = datePart(value)
-  return `${date.slice(5, 7)}/${date.slice(8, 10)}`
 }
 
 function formatMonthDayDash(value: string) {
@@ -1646,153 +1603,6 @@ const taskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验�
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 const taskFeedbackRatings: TaskFeedbackRating[] = ['顺利', '一般', '有问题']
 const taskFeedbackTags: TaskFeedbackTag[] = ['需求不清晰', '沟通成本高', '定价偏低', '技术挑战大']
-
-const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
-const lunarDayLabels = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十', '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十']
-const lunarMonthNumbers: Record<string, number> = {
-  正月: 1,
-  一月: 1,
-  二月: 2,
-  三月: 3,
-  四月: 4,
-  五月: 5,
-  六月: 6,
-  七月: 7,
-  八月: 8,
-  九月: 9,
-  十月: 10,
-  冬月: 11,
-  十一月: 11,
-  腊月: 12,
-  十二月: 12,
-}
-const solarFestivalLabels: Record<string, string> = {
-  '01-01': '元旦',
-  '02-14': '情人节',
-  '03-08': '妇女节',
-  '03-12': '植树节',
-  '05-01': '劳动节',
-  '06-01': '儿童节',
-  '09-10': '教师节',
-  '10-01': '国庆节',
-  '12-25': '圣诞节',
-}
-const lunarFestivalLabels: Record<string, string> = {
-  '1-1': '春节',
-  '1-15': '元宵节',
-  '2-2': '龙抬头',
-  '5-5': '端午节',
-  '7-7': '七夕',
-  '7-15': '中元节',
-  '8-15': '中秋节',
-  '9-9': '重阳节',
-  '12-8': '腊八节',
-  '12-23': '小年',
-  '12-24': '小年',
-}
-const officialHolidayRanges2026 = [
-  { name: '元旦', start: '2026-01-01', end: '2026-01-03' },
-  { name: '春节', start: '2026-02-15', end: '2026-02-23' },
-  { name: '清明节', start: '2026-04-04', end: '2026-04-06' },
-  { name: '劳动节', start: '2026-05-01', end: '2026-05-05' },
-  { name: '端午节', start: '2026-06-19', end: '2026-06-21' },
-  { name: '中秋节', start: '2026-09-25', end: '2026-09-27' },
-  { name: '国庆节', start: '2026-10-01', end: '2026-10-07' },
-]
-const officialWorkdays2026: Record<string, string> = {
-  '2026-01-04': '元旦补班',
-  '2026-02-14': '春节补班',
-  '2026-02-28': '春节补班',
-  '2026-05-09': '劳动节补班',
-  '2026-09-20': '国庆补班',
-  '2026-10-10': '国庆补班',
-}
-
-const chineseCalendarFormatter = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
-  month: 'long',
-  day: 'numeric',
-})
-
-function isoDateFromLocalDate(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-function localDateFromIsoDate(value: string) {
-  const [year, month, day] = datePart(value || isoDate()).split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function dateRangeValues(start: string, end: string) {
-  const values: string[] = []
-  const current = localDateFromIsoDate(start)
-  const last = localDateFromIsoDate(end)
-  while (current.getTime() <= last.getTime()) {
-    values.push(isoDateFromLocalDate(current))
-    current.setDate(current.getDate() + 1)
-  }
-  return values
-}
-
-const officialHolidayMeta: Record<string, { name: string; kind: 'holiday' | 'workday' }> = {
-  ...officialHolidayRanges2026.reduce<Record<string, { name: string; kind: 'holiday' | 'workday' }>>((acc, range) => {
-    dateRangeValues(range.start, range.end).forEach((value) => {
-      acc[value] = { name: range.name, kind: 'holiday' }
-    })
-    return acc
-  }, {}),
-  ...Object.fromEntries(Object.entries(officialWorkdays2026).map(([value, name]) => [value, { name, kind: 'workday' as const }])),
-}
-
-function getLunarDateParts(value: string) {
-  const parts = chineseCalendarFormatter.formatToParts(localDateFromIsoDate(value))
-  const month = parts.find((part) => part.type === 'month')?.value ?? ''
-  const dayValue = Number(parts.find((part) => part.type === 'day')?.value ?? '')
-  return {
-    month,
-    day: Number.isFinite(dayValue) ? dayValue : 0,
-  }
-}
-
-function isChineseNewYearEve(value: string) {
-  const next = getLunarDateParts(addIsoDays(value, 1))
-  return next.month.replace('闰', '') === '正月' && next.day === 1
-}
-
-function calendarDayMeta(value: string) {
-  const lunar = getLunarDateParts(value)
-  const official = officialHolidayMeta[value]
-  const solarFestival = solarFestivalLabels[value.slice(5, 10)]
-  const lunarMonth = lunarMonthNumbers[lunar.month.replace('闰', '')]
-  const lunarFestival = lunarMonth ? lunarFestivalLabels[`${lunarMonth}-${lunar.day}`] : undefined
-  const festival = solarFestival ?? lunarFestival ?? (isChineseNewYearEve(value) ? '除夕' : undefined)
-  const holidayLabel = festival
-    ?? (official?.kind === 'holiday' ? (official.name === '国庆节' ? '黄金周' : official.name) : undefined)
-  const officialLabel = official?.kind === 'workday' ? '补班' : official?.kind === 'holiday' ? '休' : undefined
-  const lunarLabel = lunar.day === 1 ? lunar.month : lunarDayLabels[lunar.day - 1] ?? ''
-  return {
-    label: lunarLabel,
-    holidayLabel,
-    officialLabel,
-    isFestival: Boolean(holidayLabel),
-    officialKind: official?.kind,
-  }
-}
-
-function calendarDaysForMonth(monthValue: string) {
-  const [year, month] = monthValue.split('-').map(Number)
-  const firstDay = new Date(year, month - 1, 1)
-  const startOffset = (firstDay.getDay() + 6) % 7
-  const start = new Date(year, month - 1, 1 - startOffset)
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(start)
-    date.setDate(start.getDate() + index)
-    return {
-      value: isoDateFromLocalDate(date),
-      day: date.getDate(),
-      inMonth: date.getMonth() === month - 1,
-    }
-  })
-}
 
 function monthDateRangeLabelOf(value: string) {
   const [year, month] = value.split('-').map(Number)
@@ -10443,17 +10253,20 @@ function TasksView({
             </div>
           </div>
         </section>
-        <CalendarView
-          key={monthValue}
-          monthValue={monthValue}
-          mode={calendarMode}
-          focusDate={calendarFocusDate}
-          designTypeGroups={designTypeGroups}
-          tasks={tasks}
-          onOpenTask={onOpenTask}
-          onFocusDateChange={onCalendarFocusDateChange}
-          onMonthChange={onMonthChange}
-        />
+        <Suspense fallback={<p className="calendar-empty-hint">正在载入任务日历…</p>}>
+          <CalendarView
+            key={monthValue}
+            monthValue={monthValue}
+            mode={calendarMode}
+            focusDate={calendarFocusDate}
+            tasks={tasks}
+            getTaskLifecycleDate={taskLifecycleDate}
+            getTaskColor={(type) => designTypeColorForTask(type, designTypeGroups)}
+            onOpenTask={onOpenTask}
+            onFocusDateChange={onCalendarFocusDateChange}
+            onMonthChange={onMonthChange}
+          />
+        </Suspense>
       </section>
     )
   }
@@ -13583,351 +13396,6 @@ function TaskDetailModal({
   )
 }
 
-
-type CalendarDisplayMode = '日' | '周' | '月'
-
-const calendarHours = Array.from({ length: 17 }, (_, index) => index + 7)
-const calendarHourHeight = 54
-
-function addIsoDays(value: string, amount: number) {
-  const date = localDateFromIsoDate(value)
-  date.setDate(date.getDate() + amount)
-  return isoDateFromLocalDate(date)
-}
-
-function startOfCalendarWeek(value: string) {
-  const date = localDateFromIsoDate(value)
-  const offset = (date.getDay() + 6) % 7
-  date.setDate(date.getDate() - offset)
-  return isoDateFromLocalDate(date)
-}
-
-function calendarTaskStartsAt(task: Task) {
-  if (!task.date.includes('T')) {
-    return null
-  }
-  const hour = Number(task.date.slice(11, 13))
-  const minute = Number(task.date.slice(14, 16))
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-    return null
-  }
-  return hour * 60 + minute
-}
-
-function calendarTaskDurationMinutes(task: Task) {
-  const hours = task.actualHours > 0 ? task.actualHours : task.estimatedHours
-  return Math.max(30, Math.round((Number.isFinite(hours) && hours > 0 ? hours : 1) * 60))
-}
-
-function calendarTaskRange(task: Task) {
-  const start = datePart(task.date || task.settlementMonth || isoDate())
-  const lifecycleEnd = datePart(taskLifecycleDate(task) || '')
-  const plannedEnd = datePart(task.estimatedDate || '')
-  const rawEnd = task.status === '已验收'
-    ? lifecycleEnd || plannedEnd || start
-    : plannedEnd || lifecycleEnd || start
-  const end = rawEnd >= start ? rawEnd : start
-  return { start, end }
-}
-
-function compareCalendarTasks(a: Task, b: Task) {
-  const rangeCompare = calendarTaskRange(a).start.localeCompare(calendarTaskRange(b).start)
-  if (rangeCompare !== 0) {
-    return rangeCompare
-  }
-  return a.title.localeCompare(b.title)
-}
-
-function chunkCalendarWeeks(days: ReturnType<typeof calendarDaysForMonth>) {
-  const weeks: typeof days[] = []
-  for (let index = 0; index < days.length; index += 7) {
-    weeks.push(days.slice(index, index + 7))
-  }
-  return weeks
-}
-
-function CalendarView({
-  monthValue,
-  mode,
-  focusDate,
-  designTypeGroups,
-  tasks,
-  onOpenTask,
-  onFocusDateChange,
-  onMonthChange,
-}: {
-  monthValue: string
-  mode: CalendarDisplayMode
-  focusDate: string
-  designTypeGroups: DesignTypeGroup[]
-  tasks: Task[]
-  onOpenTask: (taskId: number) => void
-  onFocusDateChange: (value: string) => void
-  onMonthChange: (value: string) => void
-}) {
-  const selectedDate = focusDate || `${monthValue}-01`
-  const today = isoDate()
-  const visibleTasks = useMemo(() => tasks.filter((task) => !task.voidedAt), [tasks])
-  const taskRanges = useMemo(() => new Map(visibleTasks.map((task) => [task.id, calendarTaskRange(task)])), [visibleTasks])
-  const tasksByDate = useMemo(() => {
-    const map = new Map<string, Task[]>()
-    visibleTasks.forEach((task) => {
-      const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
-      dateRangeValues(range.start, range.end).forEach((key) => {
-        map.set(key, [...(map.get(key) ?? []), task].sort(compareCalendarTasks))
-      })
-    })
-    return map
-  }, [taskRanges, visibleTasks])
-
-  const weekStart = startOfCalendarWeek(selectedDate)
-  const weekDays = Array.from({ length: 7 }, (_, index) => addIsoDays(weekStart, index))
-  const monthDays = calendarDaysForMonth(monthValue)
-  const monthWeeks = useMemo(() => chunkCalendarWeeks(monthDays), [monthDays])
-
-  const setCalendarDate = (value: string) => {
-    onFocusDateChange(value)
-    if (monthPart(value) !== monthValue) {
-      onMonthChange(monthPart(value))
-    }
-  }
-
-  const calendarTaskColorStyle = (task: Task) => ({
-    '--calendar-type-color': designTypeColorForTask(task.type, designTypeGroups),
-  }) as CSSProperties
-
-  const rangeSegmentClass = (task: Task, day: string) => {
-    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
-    const isStart = day === range.start
-    const isEnd = day === range.end
-    return `${isStart ? 'span-start' : 'span-middle'} ${isEnd ? 'span-end' : ''}`
-  }
-
-  const monthSegmentsForWeek = (week: typeof monthDays) => {
-    const weekStartValue = week[0]?.value ?? selectedDate
-    const weekEndValue = week[week.length - 1]?.value ?? selectedDate
-    const slots: boolean[][] = []
-    return visibleTasks
-      .map((task) => {
-        const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
-        const segmentStart = range.start > weekStartValue ? range.start : weekStartValue
-        const segmentEnd = range.end < weekEndValue ? range.end : weekEndValue
-        if (segmentEnd < weekStartValue || segmentStart > weekEndValue || segmentStart > segmentEnd) {
-          return null
-        }
-        const startIndex = week.findIndex((day) => day.value === segmentStart)
-        const endIndex = week.findIndex((day) => day.value === segmentEnd)
-        if (startIndex < 0 || endIndex < 0) {
-          return null
-        }
-        return { task, range, segmentStart, segmentEnd, startIndex, endIndex }
-      })
-      .filter((segment): segment is NonNullable<typeof segment> => !!segment)
-      .sort((a, b) => compareCalendarTasks(a.task, b.task))
-      .map((segment) => {
-        let slot = slots.findIndex((items) => {
-          for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
-            if (items[index]) return false
-          }
-          return true
-        })
-        if (slot < 0) {
-          slot = slots.length
-          slots.push([])
-        }
-        for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
-          slots[slot][index] = true
-        }
-        return { ...segment, slot }
-      })
-      .filter((segment) => segment.slot < 4)
-  }
-
-  const renderAllDayTask = (task: Task, day: string) => {
-    const range = taskRanges.get(task.id) ?? calendarTaskRange(task)
-    return (
-    <button
-      type="button"
-      className={`calendar-allday-chip ${rangeSegmentClass(task, day)}`}
-      key={task.id}
-      style={calendarTaskColorStyle(task)}
-      onClick={() => onOpenTask(task.id)}
-      title={`${task.title} · ${formatMonthDay(range.start)} - ${formatMonthDay(range.end)}`}
-    >
-      {task.title}
-    </button>
-    )
-  }
-
-  const renderTimedTask = (task: Task) => {
-    const startsAt = calendarTaskStartsAt(task)
-    if (startsAt === null) {
-      return null
-    }
-    const firstMinute = calendarHours[0] * 60
-    const lastMinute = (calendarHours.at(-1) ?? 23) * 60
-    const top = Math.max(0, ((startsAt - firstMinute) / 60) * calendarHourHeight)
-    const height = Math.max(30, Math.min(180, (calendarTaskDurationMinutes(task) / 60) * calendarHourHeight))
-    const isOutside = startsAt < firstMinute || startsAt > lastMinute + 59
-    return (
-      <button
-        type="button"
-        className={`calendar-timed-event ${isOutside ? 'outside-hours' : ''}`}
-        key={task.id}
-        style={{
-          ...calendarTaskColorStyle(task),
-          '--event-top': `${top}px`,
-          '--event-height': `${height}px`,
-        } as CSSProperties}
-        onClick={() => onOpenTask(task.id)}
-        title={`${formatMonthDayTime(task.date)} · ${task.title}`}
-      >
-        <strong>{task.title}</strong>
-        <span>{task.type}</span>
-      </button>
-    )
-  }
-
-  const renderHolidayPill = (dayMeta: ReturnType<typeof calendarDayMeta>, key: string) => {
-    if (dayMeta.holidayLabel) {
-      return (
-        <span className="calendar-holiday-pill" key={key}>
-          {dayMeta.holidayLabel}
-          {dayMeta.officialLabel === '休' && <em>休</em>}
-        </span>
-      )
-    }
-    if (dayMeta.officialLabel === '补班') {
-      return (
-        <span className="calendar-workday-pill" key={key}>
-          补班
-        </span>
-      )
-    }
-    return null
-  }
-
-  const renderScheduleGrid = (days: string[]) => (
-    <div className="calendar-schedule">
-      <div className="calendar-schedule-header" style={{ '--day-count': days.length } as CSSProperties}>
-        <div className="calendar-timezone">GMT+08</div>
-        {days.map((day) => {
-          const date = localDateFromIsoDate(day)
-          const dayMeta = calendarDayMeta(day)
-          return (
-            <button
-              type="button"
-              className={`calendar-schedule-day ${day === today ? 'today' : ''} ${day === selectedDate ? 'selected' : ''} ${dayMeta.isFestival ? 'festival' : ''} ${dayMeta.officialKind ? `official-${dayMeta.officialKind}` : ''}`}
-              key={day}
-              onClick={() => setCalendarDate(day)}
-            >
-              <span>{weekdayLabels[(date.getDay() + 6) % 7]}</span>
-              <strong>{date.getDate()}</strong>
-              <small>{dayMeta.label}</small>
-            </button>
-          )
-        })}
-      </div>
-      <div className="calendar-allday-row" style={{ '--day-count': days.length } as CSSProperties}>
-        <div className="calendar-time-label">计划</div>
-        {days.map((day) => {
-          const dayTasks = tasksByDate.get(day) ?? []
-          const dayMeta = calendarDayMeta(day)
-          return (
-            <div className="calendar-allday-cell" key={day}>
-              {renderHolidayPill(dayMeta, `${day}-holiday`)}
-              {dayTasks.slice(0, dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4).map((task) => renderAllDayTask(task, day))}
-              {dayTasks.length > (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4) && <span className="calendar-overflow">+{dayTasks.length - (dayMeta.holidayLabel || dayMeta.officialLabel ? 3 : 4)} 项</span>}
-            </div>
-          )
-        })}
-      </div>
-      <div className="calendar-time-grid" style={{ '--day-count': days.length } as CSSProperties}>
-        <div className="calendar-time-axis">
-          {calendarHours.map((hour) => (
-            <span key={hour}>{hour < 12 ? `上午${hour}点` : hour === 12 ? '下午12点' : `下午${hour - 12}点`}</span>
-          ))}
-        </div>
-        {days.map((day) => {
-          const dayTasks = (tasksByDate.get(day) ?? []).filter((task) => datePart(task.date) === day)
-          return (
-            <div className="calendar-time-column" key={day}>
-              {calendarHours.map((hour) => <span className="calendar-hour-line" key={hour} />)}
-              {dayTasks.map(renderTimedTask)}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-
-  return (
-    <section className="panel google-calendar-panel">
-      {mode === '月' ? (
-        <div className="google-month-view">
-          <div className="google-month-weekdays">
-            {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label) => <span key={label}>{label}</span>)}
-          </div>
-          <div className="google-month-grid">
-            {monthWeeks.map((week) => (
-              <div className="google-month-week" key={week[0]?.value}>
-                <div className="google-month-week-cells">
-                  {week.map((day) => {
-                    const dayMeta = calendarDayMeta(day.value)
-                    return (
-                      <button
-                        type="button"
-                        className={`google-month-cell ${day.inMonth ? '' : 'outside'} ${day.value === today ? 'today' : ''} ${day.value === selectedDate ? 'selected' : ''} ${dayMeta.isFestival ? 'festival' : ''} ${dayMeta.officialKind ? `official-${dayMeta.officialKind}` : ''}`}
-                        key={day.value}
-                        onClick={() => setCalendarDate(day.value)}
-                      >
-                        <span className="google-month-date">
-                          <span className="google-month-day">{day.day}</span>
-                          <span className="google-month-lunar">
-                            {dayMeta.label}
-                          </span>
-                        </span>
-                        <span className="google-month-events">
-                          {renderHolidayPill(dayMeta, `${day.value}-holiday`)}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="google-month-week-events" aria-hidden={false}>
-                  {monthSegmentsForWeek(week).map((segment) => {
-                    const isRangeStart = segment.segmentStart === segment.range.start
-                    const isRangeEnd = segment.segmentEnd === segment.range.end
-                    return (
-                      <button
-                        type="button"
-                        className={`calendar-event-pill month-span ${isRangeStart ? 'span-start' : 'span-middle'} ${isRangeEnd ? 'span-end' : ''}`}
-                        key={`${segment.task.id}-${segment.segmentStart}`}
-                        style={{
-                          ...calendarTaskColorStyle(segment.task),
-                          '--span-column': segment.startIndex + 1,
-                          '--span-days': segment.endIndex - segment.startIndex + 1,
-                          '--span-slot': segment.slot,
-                        } as CSSProperties}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onOpenTask(segment.task.id)
-                        }}
-                        title={`${segment.task.title} · ${formatMonthDay(segment.range.start)} - ${formatMonthDay(segment.range.end)}`}
-                      >
-                        {segment.task.title}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : renderScheduleGrid(mode === '周' ? weekDays : [selectedDate])}
-    </section>
-  )
-}
 
 function HourCalibrationTable({ title, rows }: { title: string; rows: HourEstimateMetrics['byType'] }) {
   return (
