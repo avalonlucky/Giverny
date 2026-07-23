@@ -12,7 +12,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   BarChart3,
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -99,7 +98,6 @@ import {
 } from './lib/api'
 import { DonutChart, type DonutChartItem } from './components/DonutChart'
 import { TrendChart } from './components/TrendChart'
-import { MonthYearPickerPanel } from './components/MonthYearPickerPanel'
 import { PlanDateTimeField } from './components/PlanDateTimeField'
 import { ScheduleAnchorSwitch, VoiceScheduleButton } from './components/VoiceScheduleButton'
 import { ModalShell } from './components/ModalShell'
@@ -115,6 +113,8 @@ import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
 import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
 import { TaskContextInsightBadge } from './components/TaskContextInsightBadge'
 import { TaskDetailModal } from './components/TaskDetailModal'
+import { MonthPicker } from './components/MonthPicker'
+import { NewTaskDesignTypeSelector } from './components/NewTaskDesignTypeSelector'
 import { FileThumbnailPreview } from './components/FileThumbnailPreview'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from './components/TaskUi'
@@ -1700,128 +1700,6 @@ const normalizeDesignTypeGroups = (groups: DesignTypeGroup[]) => {
     .filter((group) => group.name)
 
   return normalized.length > 0 ? normalized : defaultDesignTypeGroups
-}
-
-function MonthPicker({
-  value,
-  taskMonthValues,
-  onChange,
-  minimal = false,
-  iconOnly = false,
-}: {
-  value: string
-  taskMonthValues: Set<string>
-  onChange: (value: string) => void
-  minimal?: boolean
-  iconOnly?: boolean
-}) {
-  const [isOpen, setIsOpen] = useState(false)
-  const selectedYear = Number(value.slice(0, 4)) || new Date().getFullYear()
-  const selectedMonth = Number(value.slice(5, 7))
-  const [displayYear, setDisplayYear] = useState(selectedYear)
-
-  const chooseMonth = (month: number) => {
-    onChange(`${displayYear}-${pad(month)}`)
-    setIsOpen(false)
-  }
-
-  return (
-    <div
-      className="month-picker"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setIsOpen(false)
-        }
-      }}
-    >
-      <button
-        type="button"
-        className={iconOnly
-          ? `topbar-shortcut month-trigger ${isOpen ? 'active' : ''}`.trim()
-          : `select-button month-trigger ${minimal ? 'minimal' : ''} ${isOpen ? 'active' : ''}`.trim()
-        }
-        aria-label="选择年份和月份"
-        aria-expanded={isOpen}
-        title={iconOnly ? `${monthLabelOf(value)}（数字键快速跳月，- / = 为 11 / 12 月）` : '数字键快速跳月，- / = 为 11 / 12 月'}
-        onClick={() => {
-          if (!isOpen) {
-            setDisplayYear(selectedYear)
-          }
-          setIsOpen((open) => !open)
-        }}
-      >
-        {iconOnly
-          ? <CalendarDays size={16} />
-          : (
-            <>
-              {!minimal && <CalendarDays size={17} />}
-              <span>{monthLabelOf(value)}</span>
-              <ChevronDown size={16} />
-            </>
-          )
-        }
-      </button>
-
-      {isOpen && (
-        <div className="month-popover" role="dialog" aria-label="选择年份和月份">
-          <MonthYearPickerPanel
-            year={displayYear}
-            month={displayYear === selectedYear ? selectedMonth : undefined}
-            yearOptions={Array.from({ length: 11 }, (_, index) => displayYear - 5 + index)}
-            taskMonthValues={taskMonthValues}
-            onYearChange={setDisplayYear}
-            onMonthChange={chooseMonth}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function NewTaskDesignTypeSelector({
-  groups,
-  value,
-  onChange,
-}: {
-  groups: DesignTypeGroup[]
-  value: string
-  onChange: (value: string) => void
-}) {
-  const availableGroups = normalizeDesignTypeGroups(groups).filter((g) => g.items.length > 0)
-  const selectedGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value))
-
-  return (
-    <div className="new-task-type-selector">
-      <div className="new-task-type-chips" role="listbox" aria-label="设计类型">
-        {availableGroups.map((group) => (
-          <div
-            className={`new-task-type-category ${group.name === selectedGroup?.name ? 'active' : ''}`}
-            key={group.name}
-            tabIndex={0}
-          >
-            <span>{group.name}</span>
-            <div className="new-task-type-menu" role="group" aria-label={`${group.name} 子分类`}>
-              {group.items.map((item) => {
-                const optionValue = `${group.name} / ${item}`
-                return (
-                  <button
-                    type="button"
-                    className={optionValue === value ? 'active' : ''}
-                    key={item}
-                    aria-selected={optionValue === value}
-                    onClick={() => onChange(optionValue)}
-                  >
-                    {item}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="new-task-type-picked">已选 <b>{value || '未选择'}</b></div>
-    </div>
-  )
 }
 
 const taskFieldLabels: Record<string, string> = {

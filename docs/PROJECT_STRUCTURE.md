@@ -100,6 +100,8 @@
 │   │   ├── AiBrandIcon.tsx
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
+│   │   ├── MonthPicker.tsx
+│   │   ├── NewTaskDesignTypeSelector.tsx
 │   │   ├── TaskDetailModal.tsx
 │   │   ├── DailyKnowledgeModal.tsx
 │   │   ├── GivernySelect.tsx
@@ -148,6 +150,8 @@
 - Shared attachment hover thumbnail and document fallback preview: `src/components/AttachmentHoverThumbnail.tsx`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
+- Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
+- Shared new-task design type selector: `src/components/NewTaskDesignTypeSelector.tsx`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
