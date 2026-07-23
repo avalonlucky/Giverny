@@ -80,7 +80,6 @@ import {
   type AiProviderConfig,
   type AttachmentNameSuggestion,
   type AuthRole,
-  type BackendState,
   type DailyKnowledgeSuggestion,
   type HourEstimateSuggestion,
   type ReportRecord,
@@ -162,7 +161,6 @@ import { createPsdPreviewFile } from './lib/psdPreview'
 import { createPdfPreviewFile } from './lib/pdfPreview'
 import {
   DURATION_STEP_MINUTES,
-  ESTIMATED_HOURS_STEP_MINUTES,
   exactDurationMinutesBetween,
   formatEstimatedDurationInputValue,
   normalizeEstimatedMinutes,
@@ -178,6 +176,31 @@ import {
   timeEntriesOverlap,
   type TimeEntryDraft,
 } from './lib/timeEntryDraft'
+import {
+  clearProgressDraft,
+  getOrCreateStagedProgressEntryId,
+  getPendingProgressAttachments,
+  progressDraftKey,
+  readProgressDraft,
+  setPendingProgressAttachments,
+  writeProgressDraft,
+} from './lib/progressDraftCache'
+import { clearStateCache, readStateCache, writeStateCache } from './lib/stateCache'
+import {
+  DAILY_KNOWLEDGE_QUEUE_SIZE,
+  readDailyKnowledgeHistory,
+  readStoredDailyKnowledgeItem,
+  readStoredDailyKnowledgeQueue,
+  rememberDailyKnowledgeTitle,
+  writeStoredDailyKnowledgeItem,
+  writeStoredDailyKnowledgeQueue,
+} from './lib/dailyKnowledgeCache'
+import {
+  clearNewTaskDraftCache,
+  newTaskDraftFromTask,
+  readNewTaskDraftCache,
+  writeNewTaskDraftCache,
+} from './lib/newTaskDraftCache'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
@@ -588,72 +611,6 @@ const dailyKnowledgePool: DailyKnowledgeItem[] = [
   },
 ]
 
-const dailyKnowledgeHistoryKey = 'giverny-daily-knowledge-history-v1'
-const dailyKnowledgeCurrentKey = 'giverny-daily-knowledge-current-v1'
-const dailyKnowledgeQueueKey = 'giverny-daily-knowledge-queue-v1'
-const dailyKnowledgeQueueSize = 10
-
-function isDailyKnowledgeItem(value: unknown): value is DailyKnowledgeItem {
-  const item = value as Partial<DailyKnowledgeItem> | null
-  return Boolean(
-    item
-    && typeof item.category === 'string'
-    && typeof item.source === 'string'
-    && typeof item.title === 'string'
-    && typeof item.teaser === 'string'
-    && Array.isArray(item.body)
-    && item.body.length > 0,
-  )
-}
-
-function readDailyKnowledgeHistory() {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeHistoryKey) ?? '[]') as unknown
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
-  } catch {
-    return []
-  }
-}
-
-function rememberDailyKnowledgeTitle(title: string) {
-  const history = readDailyKnowledgeHistory().filter((item) => item !== title)
-  window.localStorage.setItem(dailyKnowledgeHistoryKey, JSON.stringify([...history, title].slice(-80)))
-}
-
-function readStoredDailyKnowledgeItem() {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeCurrentKey) ?? 'null') as unknown
-    return isDailyKnowledgeItem(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function writeStoredDailyKnowledgeItem(item: DailyKnowledgeItem) {
-  try {
-    window.localStorage.setItem(dailyKnowledgeCurrentKey, JSON.stringify(item))
-  } catch {
-    // localStorage may be unavailable in private mode; losing the cache only affects variety after refresh.
-  }
-}
-
-function readStoredDailyKnowledgeQueue() {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(dailyKnowledgeQueueKey) ?? '[]') as unknown
-    return Array.isArray(parsed) ? parsed.filter(isDailyKnowledgeItem) : []
-  } catch {
-    return []
-  }
-}
-
-function writeStoredDailyKnowledgeQueue(items: DailyKnowledgeItem[]) {
-  try {
-    window.localStorage.setItem(dailyKnowledgeQueueKey, JSON.stringify(items.slice(0, dailyKnowledgeQueueSize)))
-  } catch {
-    // Best-effort cache only.
-  }
-}
-
 function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
   const excludedList = Array.isArray(excludedTitles) ? excludedTitles.filter(Boolean) : [excludedTitles].filter(Boolean)
   const excluded = new Set(excludedList)
@@ -712,7 +669,7 @@ function prepareDailyKnowledgeSession() {
   const current = fallbackDailyKnowledge([storedCurrent?.title ?? '', ...history])
   return {
     current,
-    queue: fallbackDailyKnowledgeBatch(dailyKnowledgeQueueSize, [current.title, storedCurrent?.title ?? '', ...history]),
+    queue: fallbackDailyKnowledgeBatch(DAILY_KNOWLEDGE_QUEUE_SIZE, [current.title, storedCurrent?.title ?? '', ...history]),
   }
 }
 
@@ -1099,11 +1056,6 @@ function validateUploadFile(file: File) {
   }
   return false
 }
-
-const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
-// 同一份草稿（task+mode+entry）复用同一个 entryId，保证「关闭后重开再保存」时
-// 预上传文件仍能正确挂到最终生成的进展条目上。
-const stagedEntryIdCache = new Map<string, string>()
 
 function splitFileName(value: string) {
   const trimmed = value.trim()
@@ -1702,83 +1654,6 @@ function taskAssistantRequirementWithoutOutputFiles(text: string) {
   })
 
   return result.join('\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
-const readDraftCache = <T,>(key: string, fallback: T): T => {
-  if (typeof window === 'undefined') {
-    return fallback
-  }
-  try {
-    const raw = window.localStorage.getItem(key)
-    return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<T>) } : fallback
-  } catch {
-    return fallback
-  }
-}
-
-const writeDraftCache = (key: string, value: unknown) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.setItem(key, JSON.stringify(value))
-}
-
-const clearDraftCache = (key: string) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.removeItem(key)
-}
-
-// 静默刷新：把上次成功加载的后端状态快照存入 localStorage，刷新时先用它秒开首屏，
-// 后台 refreshState 完成后再无感更新，避免每次刷新都弹出「正在连接工作台」整页卡片。
-const STATE_CACHE_KEY = 'designer-worklog-state-cache-v2'
-const STATE_CACHE_SCHEMA_VERSION = 2
-const STATE_CACHE_TTL_MS = 30 * 60 * 1000
-
-type StateCacheEnvelope = {
-  version: number
-  cachedAt: number
-  state: BackendState
-}
-
-const readStateCache = (): BackendState | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const raw = window.localStorage.getItem(STATE_CACHE_KEY)
-    if (!raw) {
-      return null
-    }
-    const parsed = JSON.parse(raw) as Partial<StateCacheEnvelope>
-    if (parsed.version !== STATE_CACHE_SCHEMA_VERSION || typeof parsed.cachedAt !== 'number' || !parsed.state) {
-      window.localStorage.removeItem(STATE_CACHE_KEY)
-      return null
-    }
-    if (Date.now() - parsed.cachedAt > STATE_CACHE_TTL_MS) {
-      window.localStorage.removeItem(STATE_CACHE_KEY)
-      return null
-    }
-    return parsed.state
-  } catch {
-    return null
-  }
-}
-
-const writeStateCache = (state: BackendState) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    window.localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({
-      version: STATE_CACHE_SCHEMA_VERSION,
-      cachedAt: Date.now(),
-      state,
-    } satisfies StateCacheEnvelope))
-  } catch {
-    // 配额超限等忽略：快照仅用于加速首屏，缺失只是退回到原来的加载态
-  }
 }
 
 const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
@@ -4341,7 +4216,7 @@ function App() {
     const currentTitle = dailyKnowledgeRef.current.title
     const excluded = [currentTitle, ...history]
     const merged = mergeDailyKnowledgeQueue(baseQueue, excluded)
-    const missingCount = dailyKnowledgeQueueSize - merged.length
+    const missingCount = DAILY_KNOWLEDGE_QUEUE_SIZE - merged.length
     const filled = missingCount > 0
       ? mergeDailyKnowledgeQueue(
         [
@@ -4351,7 +4226,7 @@ function App() {
         excluded,
       )
       : merged
-    const nextQueue = filled.slice(0, dailyKnowledgeQueueSize)
+    const nextQueue = filled.slice(0, DAILY_KNOWLEDGE_QUEUE_SIZE)
     dailyKnowledgeQueueRef.current = nextQueue
     setDailyKnowledgeQueue(nextQueue)
     return nextQueue
@@ -4390,7 +4265,7 @@ function App() {
     setIsDailyKnowledgePrefetching(true)
     try {
       const fetchedItems: DailyKnowledgeItem[] = []
-      const fetchTargetCount = Math.min(3, dailyKnowledgeQueueSize)
+      const fetchTargetCount = Math.min(3, DAILY_KNOWLEDGE_QUEUE_SIZE)
       for (let index = 0; index < fetchTargetCount; index += 1) {
         const nextItem = await fetchDailyKnowledgeItem(fetchedItems.map((item) => item.title))
         if (!nextItem) {
@@ -4400,7 +4275,7 @@ function App() {
         const nextQueue = mergeDailyKnowledgeQueue(
           [nextItem, ...dailyKnowledgeQueueRef.current],
           [dailyKnowledgeRef.current.title],
-        ).slice(0, dailyKnowledgeQueueSize)
+        ).slice(0, DAILY_KNOWLEDGE_QUEUE_SIZE)
         dailyKnowledgeQueueRef.current = nextQueue
         setDailyKnowledgeQueue(nextQueue)
       }
@@ -5973,7 +5848,7 @@ function App() {
   const handleSignOut = () => {
     void api.logout().catch(() => {})
     clearStoredAuth()
-    clearDraftCache(STATE_CACHE_KEY)
+    clearStateCache()
     setAuth(null)
     setRole('guest')
     setAccessTokens([])
@@ -7511,7 +7386,7 @@ function TaskProgressModal({
     return initialAcceptanceFlag && task.status === '已验收' && file.scope === 'acceptance'
   })
   const existingAttachmentSignature = existingEntryAttachments.map((file) => `${file.id}:${file.name}`).join('|')
-  const progressDraftKey = `giverny:task-progress-draft:${task.id}:${mode}:${editEntryId ?? 'new'}:v2`
+  const progressDraftStorageKey = progressDraftKey(task.id, mode, editEntryId)
   const initialProgressDraft = useMemo(
     () => {
       const currentDefault = defaultTimeEntryDraft()
@@ -7524,7 +7399,7 @@ function TaskProgressModal({
             note: editingEntry.note ?? '',
           }
         : currentDefault
-      const cachedDraft = readDraftCache(progressDraftKey, {
+      const cachedDraft = readProgressDraft(progressDraftStorageKey, {
         note: initialAcceptanceFlag ? task.acceptanceNote ?? editingEntry?.note ?? '' : editingEntry?.note ?? '',
         timeDraft: isWaitingMode ? currentDefault : entryDraft,
         timeEntries: (task.timeEntries ?? []) as TimeEntry[],
@@ -7556,7 +7431,7 @@ function TaskProgressModal({
         scheduleAnchor: resolvedAnchor,
       }
     },
-    [editingEntry, initialAcceptanceFlag, isWaitingMode, progressDraftKey, task.acceptanceNote, task.feedbackNote, task.feedbackRating, task.feedbackTags, task.timeEntries, task.waitingEntries],
+    [editingEntry, initialAcceptanceFlag, isWaitingMode, progressDraftStorageKey, task.acceptanceNote, task.feedbackNote, task.feedbackRating, task.feedbackTags, task.timeEntries, task.waitingEntries],
   )
   const [note, setNote] = useState(initialProgressDraft.note)
   const [timeDraft, setTimeDraft] = useState<TimeEntryDraft>(initialProgressDraft.timeDraft)
@@ -7572,15 +7447,12 @@ function TaskProgressModal({
   const [timeEntryError, setTimeEntryError] = useState('')
   const [activeDatePickerId, setActiveDatePickerId] = useState<string | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<PendingProgressAttachment[]>(
-    () => progressAttachmentDraftCache.get(progressDraftKey) ?? [],
+    () => getPendingProgressAttachments(progressDraftStorageKey),
   )
   // 本次草稿对应的稳定 entryId：预上传与最终生成的进展条目共用，确保文件挂到正确条目。
   const stagedEntryIdRef = useRef<string>(
-    editEntryId ?? stagedEntryIdCache.get(progressDraftKey) ?? crypto.randomUUID(),
+    getOrCreateStagedProgressEntryId(progressDraftStorageKey, editEntryId),
   )
-  if (!editEntryId && !stagedEntryIdCache.has(progressDraftKey)) {
-    stagedEntryIdCache.set(progressDraftKey, stagedEntryIdRef.current)
-  }
   // 进行中的预上传 Promise（按附件 id 索引），保存时若仍在传则等待其完成。
   const [existingAttachmentDrafts, setExistingAttachmentDrafts] = useState<Record<number, string>>({})
   const [existingAttachmentAiState, setExistingAttachmentAiState] = useState<Record<number, {
@@ -7737,7 +7609,7 @@ function TaskProgressModal({
   }
 
   useEffect(() => {
-    writeDraftCache(progressDraftKey, {
+    writeProgressDraft(progressDraftStorageKey, {
       note,
       timeDraft,
       timeEntries: draftTimeEntries,
@@ -7749,7 +7621,7 @@ function TaskProgressModal({
       feedbackTags,
       feedbackNote,
     })
-  }, [draftTimeEntries, draftWaitingEntries, feedbackNote, feedbackRating, feedbackTags, note, progressDraftKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
+  }, [draftTimeEntries, draftWaitingEntries, feedbackNote, feedbackRating, feedbackTags, note, progressDraftStorageKey, scheduleDerivedField, segmentMinutes, timeDraft, waitingDraft])
 
   // mount 后修复：若派生字段（结束/开始时间）为空，立即补全并写回 state
   const initRepairRef = useRef(false)
@@ -7763,8 +7635,8 @@ function TaskProgressModal({
   }, [])
 
   useEffect(() => {
-    progressAttachmentDraftCache.set(progressDraftKey, pendingAttachments)
-  }, [pendingAttachments, progressDraftKey])
+    setPendingProgressAttachments(progressDraftStorageKey, pendingAttachments)
+  }, [pendingAttachments, progressDraftStorageKey])
 
   useEffect(() => {
     setExistingAttachmentDrafts((current) => {
@@ -8480,9 +8352,7 @@ function TaskProgressModal({
             visible: false,
           })
         }
-        clearDraftCache(progressDraftKey)
-        progressAttachmentDraftCache.delete(progressDraftKey)
-        stagedEntryIdCache.delete(progressDraftKey)
+        clearProgressDraft(progressDraftStorageKey)
         onNotify(isWaitingMode ? '等待记录已同步' : isFeedbackMode ? '修改建议已同步' : '进展与附件已同步', 'success')
       } catch (error) {
         onNotify(error instanceof Error ? `后台保存进展失败：${error.message}` : '后台保存进展失败，请重新打开任务重试', 'error')
@@ -8553,9 +8423,7 @@ function TaskProgressModal({
           acceptanceFiles: Array.from(new Set([...(task.acceptanceFiles ?? []), ...existingEntryAttachments.map((file) => file.name), ...finalizedUploadedNames])),
           taskChanges: planScheduleChanges,
         })
-        clearDraftCache(progressDraftKey)
-        progressAttachmentDraftCache.delete(progressDraftKey)
-        stagedEntryIdCache.delete(progressDraftKey)
+        clearProgressDraft(progressDraftStorageKey)
         onNotify('验收已完成，附件与任务状态均已同步', 'success')
       } catch (error) {
         onNotify(error instanceof Error ? `后台验收失败：${error.message}` : '后台验收失败，请重新打开任务重试', 'error')
@@ -10133,106 +10001,6 @@ function TaskProgressModal({
       {previewAttachment && <PendingAttachmentPreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />}
     </ModalShell>
   )
-}
-
-type NewTaskDraftCache = {
-  title: string
-  requirement: string
-  type: string
-  startDate: string
-  estimatedMinutes: number
-  estimatedDate: string
-  scheduleAnchor: ScheduleAnchor
-  isSupplemental: boolean
-  settlementMonth: string
-  requester: string
-  contact: string
-  reviewer: string
-  supplementalNote: string
-}
-
-const newTaskDraftStorageKey = 'giverny:new-task-draft:v1'
-
-const readNewTaskDraftCache = (fallbackStartDate: string, fallbackType: string, fallbackSettlementMonth = monthPart(fallbackStartDate)): NewTaskDraftCache => {
-  const fallbackMinutes = 120
-  const fallbackDraft: NewTaskDraftCache = {
-    title: '',
-    requirement: '',
-    type: fallbackType,
-    startDate: fallbackStartDate,
-    estimatedMinutes: fallbackMinutes,
-    estimatedDate: addMinutesToPlanDateTime(fallbackStartDate, fallbackMinutes),
-    scheduleAnchor: 'end',
-    isSupplemental: false,
-    settlementMonth: fallbackSettlementMonth,
-    requester: '黄媚',
-    contact: '黄媚',
-    reviewer: '黄媚',
-    supplementalNote: '',
-  }
-  if (typeof window === 'undefined') {
-    return fallbackDraft
-  }
-  try {
-    const raw = window.localStorage.getItem(newTaskDraftStorageKey)
-    if (!raw) {
-      return fallbackDraft
-    }
-    const parsed = JSON.parse(raw) as Partial<NewTaskDraftCache>
-    const startDate = parsed.startDate || fallbackDraft.startDate
-    const estimatedMinutes = Number.isFinite(parsed.estimatedMinutes) && Number(parsed.estimatedMinutes) > 0 ? Number(parsed.estimatedMinutes) : fallbackMinutes
-    return {
-      title: parsed.title ?? '',
-      requirement: parsed.requirement ?? '',
-      type: parsed.type || fallbackType,
-      startDate,
-      estimatedMinutes,
-      estimatedDate: parsed.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
-      scheduleAnchor: 'end',
-      isSupplemental: Boolean(parsed.isSupplemental),
-      settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
-      requester: parsed.requester || parsed.contact || '黄媚',
-      contact: parsed.contact || '黄媚',
-      reviewer: parsed.reviewer || parsed.requester || parsed.contact || '黄媚',
-      supplementalNote: parsed.supplementalNote ?? '',
-    }
-  } catch {
-    return fallbackDraft
-  }
-}
-
-const writeNewTaskDraftCache = (draft: NewTaskDraftCache) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.setItem(newTaskDraftStorageKey, JSON.stringify(draft))
-}
-
-const clearNewTaskDraftCache = () => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.removeItem(newTaskDraftStorageKey)
-}
-
-const newTaskDraftFromTask = (task: Task, fallbackType: string, fallbackSettlementMonth: string): NewTaskDraftCache => {
-  const startDate = task.date || isoDateTime()
-  const estimatedMinutes = Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round((Number(task.estimatedHours) || 2) * 60))
-  return {
-    title: task.title ?? '',
-    requirement: task.requirement ?? '',
-    type: task.type || fallbackType,
-    startDate,
-    estimatedMinutes,
-    estimatedDate: task.estimatedDate || addMinutesToPlanDateTime(startDate, estimatedMinutes),
-    scheduleAnchor: 'end',
-    isSupplemental: isSupplementalTask(task),
-    settlementMonth: taskSettlementMonth(task) || fallbackSettlementMonth,
-    requester: task.requester || task.contact || '黄媚',
-    contact: task.contact || task.requester || '黄媚',
-    reviewer: task.reviewer || task.requester || task.contact || '黄媚',
-    supplementalNote: task.supplementalNote ?? '',
-  }
 }
 
 function NewTaskModal({

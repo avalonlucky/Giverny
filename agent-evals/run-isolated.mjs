@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { runWranglerD1 } from './run-wrangler-d1.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-agent-eval-'))
@@ -1978,8 +1979,8 @@ async function runHourEstimateLearningCheck(cookie) {
 }
 
 try {
-  await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
-  await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root })
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root })
   start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: '8898' })
   start('npx', ['wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--port', '8798'])
   await waitForHealth('http://127.0.0.1:8798/api/health')

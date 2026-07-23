@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { runWranglerD1 } from './run-wrangler-d1.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-browser-eval-'))
@@ -11,52 +12,6 @@ const appPort = 8799
 const modelPort = 8899
 const children = []
 let stopping = false
-
-function run(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: root,
-      detached: true,
-      env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let settled = false
-    let completionTimer
-    const stopProcessGroup = () => {
-      try {
-        process.kill(-child.pid, 'SIGTERM')
-      } catch {
-        child.kill('SIGTERM')
-      }
-    }
-    const settle = (error) => {
-      if (settled) return
-      settled = true
-      if (completionTimer) clearTimeout(completionTimer)
-      if (error) reject(error)
-      else resolve()
-    }
-    const forward = (stream, target) => {
-      stream.on('data', (chunk) => {
-        target.write(chunk)
-        if (!settled && /commands executed successfully/i.test(String(chunk))) {
-          completionTimer = setTimeout(() => {
-            stopProcessGroup()
-            settle()
-          }, 500)
-        }
-      })
-    }
-    forward(child.stdout, process.stdout)
-    forward(child.stderr, process.stderr)
-    child.on('error', (error) => settle(error))
-    child.on('exit', (code, signal) => {
-      if (settled) return
-      if (code === 0 || (signal === 'SIGTERM' && completionTimer)) settle()
-      else settle(new Error(`${command} exited with ${code ?? signal}`))
-    })
-  })
-}
 
 function start(command, args, env = {}) {
   const child = spawn(command, args, {
@@ -115,8 +70,8 @@ process.on('exit', () => {
 })
 
 try {
-  await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'])
-  await run('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'])
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root })
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root })
   const model = start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: String(modelPort) })
   const worker = start('npx', [
     'wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml',
