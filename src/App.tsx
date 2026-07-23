@@ -189,25 +189,39 @@ import { clearStateCache, readStateCache, writeStateCache } from './lib/stateCac
 import {
   DAILY_KNOWLEDGE_QUEUE_SIZE,
   readDailyKnowledgeHistory,
-  readStoredDailyKnowledgeItem,
-  readStoredDailyKnowledgeQueue,
   rememberDailyKnowledgeTitle,
   writeStoredDailyKnowledgeItem,
   writeStoredDailyKnowledgeQueue,
 } from './lib/dailyKnowledgeCache'
+import { createDailyKnowledgeCatalog } from './lib/dailyKnowledgeCatalog'
 import {
   clearNewTaskDraftCache,
   newTaskDraftFromTask,
   readNewTaskDraftCache,
   writeNewTaskDraftCache,
 } from './lib/newTaskDraftCache'
+import {
+  loadChatHistory,
+  loadChatProjects,
+  mergeConversationHistory,
+  normalizeChatModelChoice,
+  readChatModelChoice,
+  saveChatHistory,
+  saveChatProjects,
+  upsertChatHistory,
+  writeChatModelChoice,
+  type ChatMessage,
+  type ChatModelChoice,
+  type ConversationProject,
+  type ConversationRecord,
+} from './lib/conversationCache'
+import { extractAttachmentText } from './lib/attachmentText'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
 import type { PendingProgressAttachment, ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 const SemanticSearchModal = lazy(() => import('./components/SemanticSearchModal'))
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
@@ -611,67 +625,12 @@ const dailyKnowledgePool: DailyKnowledgeItem[] = [
   },
 ]
 
-function fallbackDailyKnowledge(excludedTitles: string | string[] = '') {
-  const excludedList = Array.isArray(excludedTitles) ? excludedTitles.filter(Boolean) : [excludedTitles].filter(Boolean)
-  const excluded = new Set(excludedList)
-  const candidates = dailyKnowledgePool.filter((item) => !excluded.has(item.title))
-  if (candidates.length > 0) {
-    return candidates[Math.floor(Math.random() * candidates.length)]
-  }
-  const history = readDailyKnowledgeHistory()
-  const currentTitle = excludedList[0] ?? ''
-  const leastRecent = dailyKnowledgePool
-    .filter((item) => item.title !== currentTitle)
-    .sort((left, right) => history.indexOf(left.title) - history.indexOf(right.title))
-  const pool = leastRecent.length > 0 ? leastRecent.slice(0, Math.max(1, Math.ceil(leastRecent.length / 3))) : dailyKnowledgePool
-  return pool[Math.floor(Math.random() * pool.length)]
-}
-
-function fallbackDailyKnowledgeBatch(count: number, excludedTitles: string[] = []) {
-  const items: DailyKnowledgeItem[] = []
-  const excluded = new Set(excludedTitles)
-  let attempts = 0
-  while (items.length < count && attempts < dailyKnowledgePool.length * 3) {
-    attempts += 1
-    const next = fallbackDailyKnowledge([...excluded])
-    if (excluded.has(next.title)) {
-      break
-    }
-    items.push(next)
-    excluded.add(next.title)
-  }
-  return items
-}
-
-function mergeDailyKnowledgeQueue(items: DailyKnowledgeItem[], excludedTitles: string[] = []) {
-  const excluded = new Set(excludedTitles)
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    if (!item.title || excluded.has(item.title) || seen.has(item.title)) {
-      return false
-    }
-    seen.add(item.title)
-    return true
-  })
-}
-
-function prepareDailyKnowledgeSession() {
-  const history = readDailyKnowledgeHistory()
-  const storedCurrent = readStoredDailyKnowledgeItem()
-  const storedQueue = mergeDailyKnowledgeQueue(readStoredDailyKnowledgeQueue(), [storedCurrent?.title ?? '', ...history])
-  const [queuedCurrent, ...remainingQueue] = storedQueue
-  if (queuedCurrent) {
-    return {
-      current: queuedCurrent,
-      queue: remainingQueue,
-    }
-  }
-  const current = fallbackDailyKnowledge([storedCurrent?.title ?? '', ...history])
-  return {
-    current,
-    queue: fallbackDailyKnowledgeBatch(DAILY_KNOWLEDGE_QUEUE_SIZE, [current.title, storedCurrent?.title ?? '', ...history]),
-  }
-}
+const {
+  fallbackDailyKnowledge,
+  fallbackDailyKnowledgeBatch,
+  mergeDailyKnowledgeQueue,
+  prepareDailyKnowledgeSession,
+} = createDailyKnowledgeCatalog(dailyKnowledgePool)
 
 function viewFromPath(pathname: string): AppView {
   if (pathname === '/updates') {
@@ -692,76 +651,6 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
   }
   if (mode === '日历') return `${viewRoutes[view]}?taskView=calendar`
   return viewRoutes[view]
-}
-
-const ATTACHMENT_TEXT_LIMIT = 16000
-
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-}
-
-async function extractAttachmentText(file: File): Promise<string> {
-  const name = file.name.toLowerCase()
-  if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') || file.type.startsWith('text/')) {
-    return (await file.text()).slice(0, ATTACHMENT_TEXT_LIMIT)
-  }
-  if (name.endsWith('.docx')) {
-    const JSZip = (await import('jszip')).default
-    const zip = await JSZip.loadAsync(await file.arrayBuffer())
-    const docXml = await zip.file('word/document.xml')?.async('string')
-    if (!docXml) {
-      return ''
-    }
-    const withBreaks = docXml
-      .replace(/<\/w:p>/g, '\n')
-      .replace(/<w:tab\b[^>]*\/>/g, '\t')
-      .replace(/<w:br\b[^>]*\/>/g, '\n')
-    return decodeXmlEntities(withBreaks.replace(/<[^>]+>/g, ''))
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-      .slice(0, ATTACHMENT_TEXT_LIMIT)
-  }
-  if (name.endsWith('.pdf')) {
-    const data = await file.arrayBuffer()
-    const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-    const doc = await pdfjs.getDocument({ data }).promise
-    const maxPages = Math.min(doc.numPages, 20)
-    const parts: string[] = []
-    for (let i = 1; i <= maxPages; i += 1) {
-      const page = await doc.getPage(i)
-      const content = await page.getTextContent()
-      parts.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' '))
-    }
-    return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, ATTACHMENT_TEXT_LIMIT)
-  }
-  if (name.endsWith('.pptx')) {
-    const JSZip = (await import('jszip')).default
-    const zip = await JSZip.loadAsync(await file.arrayBuffer())
-    const slideFiles = Object.keys(zip.files)
-      .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
-      .sort((a, b) => {
-        const na = Number(a.match(/\d+/)?.[0] ?? 0)
-        const nb = Number(b.match(/\d+/)?.[0] ?? 0)
-        return na - nb
-      })
-    const parts: string[] = []
-    for (const path of slideFiles) {
-      const xml = await zip.file(path)?.async('string') ?? ''
-      const withBreaks = xml.replace(/<\/a:p>/g, '\n').replace(/<\/a:r>/g, ' ')
-      const text = decodeXmlEntities(withBreaks.replace(/<[^>]+>/g, '')).replace(/\n{3,}/g, '\n\n').trim()
-      if (text) parts.push(text)
-    }
-    return parts.join('\n\n').slice(0, ATTACHMENT_TEXT_LIMIT)
-  }
-  // .doc/.ppt（旧二进制）等无法可靠在前端解析
-  return ''
 }
 
 async function createTextPreviewFile(fileName: string, text: string) {
@@ -1745,123 +1634,11 @@ function monthFromShortcut(event: KeyboardEvent) {
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
-type ChatMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  trace?: string[]
-  traceStatus?: 'running' | 'completed' | 'failed'
-  approval?: AgentApproval
-  selection?: AgentTaskSelection
-  backgroundTask?: AgentBackgroundTask
-  attachments?: AgentResultAttachment[]
-}
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
-type ConversationProject = { id: string; name: string; savedAt: number }
-type ConversationRecord = {
-  id: string
-  title: string
-  messages: ChatMessage[]
-  savedAt: number
-  agentConversationId?: string
-  cloud?: boolean
-  projectId?: string
-  projectName?: string
-}
-type ChatModelChoice = 'auto' | `route:${AiModelRouteKey}` | `provider:${AiModelProvider}` | 'doubao-seed-2-1-pro' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'workers-ai' | `openrouter:${string}`
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
-
-const CHAT_HISTORY_KEY = 'alice_chat_history'
-const CHAT_PROJECTS_KEY = 'alice_chat_projects'
-const CHAT_MODEL_CHOICE_KEY = 'alice_chat_model_choice'
-
-function loadChatHistory(): ConversationRecord[] {
-  try { return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) ?? '[]') as ConversationRecord[] }
-  catch { return [] }
-}
-
-function loadChatProjects(): ConversationProject[] {
-  try { return JSON.parse(localStorage.getItem(CHAT_PROJECTS_KEY) ?? '[]') as ConversationProject[] }
-  catch { return [] }
-}
-
-function saveChatProjects(projects: ConversationProject[]) {
-  localStorage.setItem(CHAT_PROJECTS_KEY, JSON.stringify(projects.slice(0, 50)))
-}
-
-function conversationRecordKey(record: Pick<ConversationRecord, 'id' | 'agentConversationId'>) {
-  return record.agentConversationId || record.id
-}
-
-function mergeConversationHistory(local: ConversationRecord[], cloud: ConversationRecord[]) {
-  const merged = new Map<string, ConversationRecord>()
-  local.forEach((record) => {
-    merged.set(conversationRecordKey(record), record)
-  })
-  cloud.forEach((record) => {
-    const key = conversationRecordKey(record)
-    const localRecord = merged.get(key)
-    merged.set(key, {
-      ...record,
-      messages: localRecord?.messages.length ? localRecord.messages : record.messages,
-      savedAt: localRecord ? localRecord.savedAt : record.savedAt,
-      agentConversationId: record.agentConversationId || localRecord?.agentConversationId || record.id,
-      cloud: true,
-    })
-  })
-  return Array.from(merged.values()).sort((a, b) => b.savedAt - a.savedAt).slice(0, 50)
-}
-
-function upsertChatHistory(recordId: string, msgs: ChatMessage[], agentConversationId?: string, project?: ConversationProject | null) {
-  const userMsgs = msgs.filter((m) => m.role === 'user')
-  if (userMsgs.length === 0) return
-  const title = userMsgs[0].content.slice(0, 30) + (userMsgs[0].content.length > 30 ? '…' : '')
-  const record: ConversationRecord = {
-    id: recordId,
-    title,
-    messages: msgs,
-    savedAt: Date.now(),
-    agentConversationId,
-    projectId: project?.id,
-    projectName: project?.name,
-  }
-  writeChatHistoryRecord(record)
-}
-
-function writeChatHistoryRecord(record: ConversationRecord) {
-  const recordKey = conversationRecordKey(record)
-  const prev = loadChatHistory()
-    .filter((item) => item.id !== record.id && conversationRecordKey(item) !== recordKey)
-    .slice(0, 49)
-  localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([record, ...prev]))
-}
 
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
-
-function normalizeChatModelChoice(value: unknown): ChatModelChoice {
-  const raw = String(value ?? '').trim()
-  if (raw === 'doubao-seed-2-1-pro') return 'provider:doubao'
-  if (raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro') return 'provider:deepseek'
-  if (raw === 'auto' || raw === 'workers-ai' || raw === 'doubao-seed-2-1-pro' || raw === 'deepseek-v4-flash' || raw === 'deepseek-v4-pro' || raw.startsWith('route:') || raw.startsWith('openrouter:')) {
-    return raw as ChatModelChoice
-  }
-  if (raw.startsWith('provider:')) {
-    const provider = raw.replace(/^provider:/, '')
-    if (['deepseek', 'gemini', 'kimi', 'doubao', 'qwen', 'openai', 'openrouter', 'anthropic', 'custom-openai'].includes(provider)) {
-      return `provider:${provider}` as ChatModelChoice
-    }
-  }
-  return 'auto'
-}
-
-function readChatModelChoice(): ChatModelChoice {
-  try {
-    return normalizeChatModelChoice(window.localStorage.getItem(CHAT_MODEL_CHOICE_KEY))
-  } catch {
-    return 'auto'
-  }
-}
 
 function chatRouteLabel(route: AiModelRouteKey) {
   if (route === 'textPrimary') return '文字主模型'
@@ -2874,11 +2651,7 @@ function ChatPanel({
   }, [showModelPopup])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(CHAT_MODEL_CHOICE_KEY, selectedModelChoice)
-    } catch {
-      // ignore
-    }
+    writeChatModelChoice(selectedModelChoice)
   }, [selectedModelChoice])
 
   useEffect(() => {
@@ -2989,7 +2762,7 @@ function ChatPanel({
     const target = historyList.find((r) => r.id === id || r.agentConversationId === id)
     const cloudId = target?.agentConversationId || id
     const updatedLocal = loadChatHistory().filter((r) => r.id !== id && r.agentConversationId !== id && r.id !== cloudId && r.agentConversationId !== cloudId)
-    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(updatedLocal))
+    saveChatHistory(updatedLocal)
     setHistoryList((current) => current.filter((r) => r.id !== id && r.agentConversationId !== id && r.id !== cloudId && r.agentConversationId !== cloudId))
     await fetch(`/api/ai/conversations/${encodeURIComponent(cloudId)}`, { method: 'DELETE' }).catch(() => undefined)
   }
