@@ -107,6 +107,7 @@
 │   │   ├── NewTaskDesignTypeSelector.tsx
 │   │   ├── PendingAttachmentPreview.tsx
 │   │   ├── TaskDetailModal.tsx
+│   │   ├── TaskProgressModal.tsx
 │   │   ├── DailyKnowledgeModal.tsx
 │   │   ├── GivernySelect.tsx
 │   │   └── VoiceScheduleButton.tsx
@@ -156,6 +157,7 @@
 - Shared upload-time PDF, PSD, video and Office preview generation: `src/lib/attachmentPreview.ts`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
+- Progress, waiting, feedback and acceptance workflow modal: `src/components/TaskProgressModal.tsx`
 - Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
 - New/edit task form, requirement attachments, AI suggestions and voice scheduling: `src/components/NewTaskModal.tsx`
 - Shared new-task design type selector: `src/components/NewTaskDesignTypeSelector.tsx`
@@ -177,6 +179,7 @@
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared progress time draft, derivation and overlap rules: `src/lib/timeEntryDraft.ts`
 - Shared duration input parsing and schedule derivation rules: `src/lib/durationInput.ts`
+- Shared compact duration presentation: `src/lib/durationDisplay.ts`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
 - Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`

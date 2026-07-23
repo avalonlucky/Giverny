@@ -1,5 +1,4 @@
-import type { Task } from './domain'
-import type { FileAsset } from './domain'
+import type { FileAsset, Task, TaskFeedbackRating, TaskFeedbackTag, TimeEntry, WaitingEntry } from './domain'
 import type { AttachmentNameSuggestion } from '../lib/api'
 
 export type TaskUpdateChanges = Partial<Task> & {
@@ -9,6 +8,18 @@ export type TaskUpdateChanges = Partial<Task> & {
 }
 
 export type ProgressRecordMode = 'progress' | 'waiting' | 'feedback'
+
+export type AcceptancePayload = {
+  actualHours: number
+  acceptanceNote: string
+  feedbackRating?: TaskFeedbackRating | ''
+  feedbackTags?: TaskFeedbackTag[]
+  feedbackNote?: string
+  timeEntries: TimeEntry[]
+  waitingEntries?: WaitingEntry[]
+  acceptanceFiles?: string[]
+  taskChanges?: Partial<Pick<Task, 'title' | 'type' | 'contact' | 'requester' | 'reviewer' | 'requirement' | 'date' | 'estimatedDate' | 'estimatedHours' | 'progress'>>
+}
 
 export type TaskContextInsight = {
   tone: 'warning' | 'info'
