@@ -39,6 +39,19 @@ export function formatPlanDateTime(value: string) {
   return value.includes('T') ? `${date} ${value.slice(11, 16)}` : date
 }
 
+export function formatDurationZh(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(safeMinutes / 60)
+  const restMinutes = safeMinutes % 60
+  if (hours === 0) {
+    return `${restMinutes} 分钟`
+  }
+  if (restMinutes === 0) {
+    return `${hours} 小时`
+  }
+  return `${hours} 小时 ${restMinutes} 分钟`
+}
+
 export function monthPart(value: string) {
   return datePart(value).slice(0, 7)
 }

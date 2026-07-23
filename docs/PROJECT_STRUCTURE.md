@@ -98,7 +98,8 @@
 │   ├── components/
 │   │   ├── AiBrandIcon.tsx
 │   │   ├── DailyKnowledgeModal.tsx
-│   │   └── GivernySelect.tsx
+│   │   ├── GivernySelect.tsx
+│   │   └── VoiceScheduleButton.tsx
 │   ├── types/
 │   │   ├── agent.ts
 │   │   ├── domain.ts
@@ -138,6 +139,7 @@
 - Lazy-loaded task calendar: `src/views/CalendarView.tsx`
 - Shared date, holiday and lunar-calendar rules: `src/lib/dateTime.ts`, `src/lib/calendar.ts`
 - Shared date and time input component: `src/components/PlanDateTimeField.tsx`
+- Shared voice schedule recognition and start/end/duration review: `src/components/VoiceScheduleButton.tsx`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
 - Shared AI brand and design-type rules: `src/components/AiBrandIcon.tsx`, `src/lib/aiBrands.ts`, `src/lib/designTypes.ts`
