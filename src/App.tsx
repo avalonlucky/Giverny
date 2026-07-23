@@ -59,7 +59,6 @@ import {
   History,
   Globe,
   SlidersHorizontal,
-  Heart,
   Star,
   ZoomIn,
   ZoomOut,
@@ -118,7 +117,6 @@ import {
 } from './lib/api'
 import { DonutChart, type DonutChartItem } from './components/DonutChart'
 import { TrendChart } from './components/TrendChart'
-import { EmptyState } from './components/EmptyState'
 import { MonthYearPickerPanel } from './components/MonthYearPickerPanel'
 import { ModalShell } from './components/ModalShell'
 import { CreateTaskContextMenu, TaskContextMenu } from './components/TaskContextMenu'
@@ -141,6 +139,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import antigravityBrandIcon from '@lobehub/icons-static-svg/icons/antigravity-color.svg?url'
 
 const AiOperationsCenterPanel = lazy(() => import('./components/AiOperationsCenterPanel'))
+const SemanticSearchModal = lazy(() => import('./components/SemanticSearchModal'))
+const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
 import claudeBrandIcon from '@lobehub/icons-static-svg/icons/claude-color.svg?url'
 import cloudflareBrandIcon from '@lobehub/icons-static-svg/icons/cloudflare-color.svg?url'
 import codexBrandIcon from '@lobehub/icons-static-svg/icons/codex-color.svg?url'
@@ -4463,312 +4463,6 @@ function monthFromShortcut(event: KeyboardEvent) {
     return 0
   }
   return monthShortcutByCode[event.code] ?? 0
-}
-
-function SemanticSearchModal({
-  isAdmin,
-  files,
-  tasks,
-  onClose,
-  onOpenTask,
-  onJumpToFile,
-}: {
-  isAdmin: boolean
-  files: FileAsset[]
-  tasks: Task[]
-  onClose: () => void
-  onOpenTask: (taskId: number) => void
-  onJumpToFile: (file: FileAsset) => void
-}) {
-  // 文件库只收录「已验收」任务的验收文件，故搜索里的「文件库」缩略图也只展示这些，确保点击能跳到库里对应位置。
-  const acceptedTaskIds = new Set(tasks.filter((task) => task.status === '已验收').map((task) => task.id))
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<Array<{ taskId: number; score: number; title: string; month: string; type: string }>>([])
-  const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
-  const [note, setNote] = useState('')
-  const [reindexing, setReindexing] = useState(false)
-
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeydown)
-    return () => window.removeEventListener('keydown', handleKeydown)
-  }, [onClose])
-
-  const runSearch = async () => {
-    const q = query.trim()
-    if (!q || loading) {
-      return
-    }
-    setLoading(true)
-    setNote('')
-    setSearched(true)
-    try {
-      const res = await api.searchTasks(q)
-      setResults(res.results)
-    } catch (error) {
-      setNote(error instanceof Error ? error.message : '搜索失败')
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const runReindex = async () => {
-    if (reindexing) {
-      return
-    }
-    setReindexing(true)
-    setNote('正在重建索引…')
-    try {
-      const res = await api.reindexSearch()
-      setNote(`已重建索引：${res.indexed} / ${res.total} 条任务（约 1 分钟后生效）`)
-    } catch (error) {
-      setNote(error instanceof Error ? error.message : '重建索引失败')
-    } finally {
-      setReindexing(false)
-    }
-  }
-
-  return (
-    <div className="command-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="semantic-search" role="dialog" aria-modal="true" aria-labelledby="semantic-search-title">
-        <header>
-          <div>
-            <p className="eyebrow">语义搜索</p>
-            <h2 id="semantic-search-title">按意思找回历史任务</h2>
-          </div>
-          <button type="button" className="shortcut-close" aria-label="关闭" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </header>
-        <div className="semantic-search-input">
-          <Search size={16} />
-          <input
-            autoFocus
-            value={query}
-            placeholder="例如：之前那张邀请函长图 / 官网 banner / 文化墙矢量图"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void runSearch()
-              }
-            }}
-          />
-          <button className="soft-primary-button" type="button" onClick={() => void runSearch()} disabled={loading || !query.trim()}>
-            {loading ? '搜索中…' : '搜索'}
-          </button>
-        </div>
-        {note && <p className="semantic-search-note">{note}</p>}
-        <div className="semantic-search-results">
-          {searched && !loading && results.length === 0 && !note && (
-            <p className="calendar-empty-hint">没有找到相关任务。如果是刚新建的任务，可点下方「重建索引」后再搜。</p>
-          )}
-          {results.map((item) => {
-            const libraryFiles = files.filter(
-              (file) => file.taskId === item.taskId && !file.deletedAt && file.scope === 'acceptance' && acceptedTaskIds.has(item.taskId),
-            )
-            return (
-              <div className="semantic-search-result" key={item.taskId}>
-                <button type="button" className="semantic-search-result-main" onClick={() => onOpenTask(item.taskId)}>
-                  <div>
-                    <strong>{item.title || '未命名任务'}</strong>
-                    <span>{item.type || '未分类'}{item.month ? ` · ${item.month}` : ''}</span>
-                  </div>
-                  <em>{Math.round(item.score * 100)}%</em>
-                </button>
-                {libraryFiles.length > 0 && (
-                  <div className="semantic-search-result-files">
-                    <span className="semantic-search-files-label">文件库</span>
-                    <div className="semantic-search-files-row">
-                      {libraryFiles.map((file) => {
-                        const fileType = fileTypeForAsset(file).type
-                        const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-                        const documentSourceUrl = fileThumbnailSource(file)
-                        return (
-                          <AttachmentHoverThumbnail
-                            key={file.id}
-                            name={file.name}
-                            type={fileType}
-                            previewUrl={previewUrl}
-                            previewFallback={Boolean(file.previewFallback)}
-                            sourceUrl={documentSourceUrl}
-                            compact
-                            onOpen={() => onJumpToFile(file)}
-                          />
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <footer className="semantic-search-footer">
-          <span>按语义匹配，非关键词；中英文均可。</span>
-          {isAdmin && (
-            <button type="button" className="ghost-button compact-button" onClick={() => void runReindex()} disabled={reindexing}>
-              <RotateCcw size={14} />
-              {reindexing ? '重建中…' : '重建索引'}
-            </button>
-          )}
-        </footer>
-      </section>
-    </div>
-  )
-}
-
-// ─── 知识库全页 ────────────────────────────────────────────────────────────────
-
-type KnowledgeNote = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
-
-function KnowledgeView() {
-  const [notes, setNotes] = useState<KnowledgeNote[]>([])
-  const [loading, setLoading] = useState(true)
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-  const [tags, setTags] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [editId, setEditId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'user' | 'ai-tip'>('user')
-
-  const authHeaders = useCallback((): Record<string, string> => {
-    return { 'content-type': 'application/json' }
-  }, [])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/knowledge', { headers: authHeaders() })
-      if (res.ok) setNotes((await res.json()) as KnowledgeNote[])
-    } finally { setLoading(false) }
-  }, [authHeaders])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch('/api/knowledge', { headers: authHeaders() })
-        if (res.ok) {
-          const items = (await res.json()) as KnowledgeNote[]
-          if (!cancelled) setNotes(items)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [authHeaders])
-
-  const reset = () => { setTitle(''); setContent(''); setTags(''); setEditId(null) }
-
-  const save = async () => {
-    if (!content.trim() || saving) return
-    setSaving(true)
-    try {
-      const body: Record<string, string> = { title: title.trim(), content: content.trim(), tags: tags.trim() }
-      if (editId) body.id = editId
-      const res = await fetch('/api/knowledge', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
-      if (res.ok) { reset(); await load() }
-    } finally { setSaving(false) }
-  }
-
-  const startEdit = (n: KnowledgeNote) => {
-    setEditId(n.id); setTitle(n.title); setContent(n.content); setTags(n.tags)
-    setActiveTab('user')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const remove = async (id: string) => {
-    await fetch(`/api/knowledge/${id}`, { method: 'DELETE', headers: authHeaders() })
-    setNotes((prev) => prev.filter((n) => n.id !== id))
-    if (editId === id) reset()
-  }
-
-  const userNotes = notes.filter((n) => !n.source || n.source === 'user')
-  const aiTipNotes = notes.filter((n) => n.source === 'ai-tip')
-
-  return (
-    <div className="knowledge-page">
-      {activeTab === 'user' && (
-        <div className="knowledge-page-form">
-          <h2 className="knowledge-page-title">{editId ? '编辑笔记' : '添加笔记'}</h2>
-          <input className="knowledge-input" placeholder="标题（可选）" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea
-            className="knowledge-textarea"
-            placeholder="写下你的知识、定价逻辑、合作伙伴沟通方式、行业笔记… AI 对话时会自动参考"
-            value={content}
-            rows={6}
-            onChange={(e) => setContent(e.target.value)}
-          />
-          <div className="knowledge-add-footer">
-            <input className="knowledge-input knowledge-tags" placeholder="标签（逗号分隔，可选）" value={tags} onChange={(e) => setTags(e.target.value)} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              {editId && <button type="button" className="knowledge-cancel-btn" onClick={reset}>取消</button>}
-              <button type="button" className="knowledge-save-btn" disabled={!content.trim() || saving} onClick={() => void save()}>
-                {saving ? '保存中…' : editId ? '保存修改' : '添加'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="knowledge-page-list">
-        <div className="settings-tabs view-mode-tabs knowledge-source-tabs">
-          <button type="button" className={activeTab === 'user' ? 'active' : ''} onClick={() => setActiveTab('user')}>
-            <BookOpen size={14} />
-            我的笔记
-            {userNotes.length > 0 && <span className="knowledge-tab-count">{userNotes.length}</span>}
-          </button>
-          <button type="button" className={activeTab === 'ai-tip' ? 'active' : ''} onClick={() => setActiveTab('ai-tip')}>
-            <Heart size={14} />
-            AI 收藏
-            {aiTipNotes.length > 0 && <span className="knowledge-tab-count">{aiTipNotes.length}</span>}
-          </button>
-        </div>
-
-        {loading && <p className="knowledge-empty">加载中…</p>}
-        {!loading && activeTab === 'user' && userNotes.length === 0 && (
-          <EmptyState
-            title="还没有笔记"
-            description="写下定价逻辑、合作伙伴沟通方式、行业心得，AI 工作助手对话时会自动参考这里的内容。"
-          />
-        )}
-        {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
-          <EmptyState
-            title="还没有收藏"
-            description="在工作台的每日小知识里点击收藏，感兴趣的内容会收进这里。"
-          />
-        )}
-        {(activeTab === 'user' ? userNotes : aiTipNotes).map((n) => (
-          <div key={n.id} className={`knowledge-item ${n.source === 'ai-tip' ? 'knowledge-item-ai-tip' : ''}`}>
-            <div className="knowledge-item-header">
-              <span className="knowledge-item-title">{n.title || '无标题'}</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {n.source !== 'ai-tip' && (
-                  <button type="button" className="knowledge-item-delete" onClick={() => startEdit(n)} aria-label="编辑" title="编辑">
-                    <Pencil size={13} />
-                  </button>
-                )}
-                <button type="button" className="knowledge-item-delete" onClick={() => void remove(n.id)} aria-label="删除" title="删除">
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-            {n.tags && <div className="knowledge-item-tags">{n.tags}</div>}
-            <p className="knowledge-item-content">{n.content}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
@@ -10069,7 +9763,9 @@ function App() {
         )}
 
         {activeView === '知识库' && isAdmin && (
-          <KnowledgeView />
+          <Suspense fallback={<p className="calendar-empty-hint">正在载入知识库…</p>}>
+            <KnowledgeView />
+          </Suspense>
         )}
 
         {activeView === '设置' && (
@@ -10179,21 +9875,37 @@ function App() {
         </>
       )}
       {isSemanticSearchOpen && (
-        <SemanticSearchModal
-          isAdmin={isAdmin}
-          files={fileItems}
-          tasks={taskItems}
-          onClose={() => setIsSemanticSearchOpen(false)}
-          onOpenTask={(taskId) => {
-            setIsSemanticSearchOpen(false)
-            handleOpenTaskDetail(taskId)
-          }}
-          onJumpToFile={(file) => {
-            setIsSemanticSearchOpen(false)
-            setFileLibraryFocusId(file.id)
-            navigateView('文件库')
-          }}
-        />
+        <Suspense fallback={<div className="command-overlay"><p className="calendar-empty-hint">正在载入语义搜索…</p></div>}>
+          <SemanticSearchModal
+            isAdmin={isAdmin}
+            files={fileItems}
+            tasks={taskItems}
+            onClose={() => setIsSemanticSearchOpen(false)}
+            onOpenTask={(taskId) => {
+              setIsSemanticSearchOpen(false)
+              handleOpenTaskDetail(taskId)
+            }}
+            renderFileThumbnail={(file) => {
+              const fileType = fileTypeForAsset(file).type
+              const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
+              return (
+                <AttachmentHoverThumbnail
+                  name={file.name}
+                  type={fileType}
+                  previewUrl={previewUrl}
+                  previewFallback={Boolean(file.previewFallback)}
+                  sourceUrl={fileThumbnailSource(file)}
+                  compact
+                  onOpen={() => {
+                    setIsSemanticSearchOpen(false)
+                    setFileLibraryFocusId(file.id)
+                    navigateView('文件库')
+                  }}
+                />
+              )
+            }}
+          />
+        </Suspense>
       )}
       {isModalOpen && (
         <NewTaskModal
