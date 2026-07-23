@@ -8,6 +8,26 @@ export type TaskViewMode = '列表' | '日历'
 
 export type TaxMode = 'salary' | 'labor'
 
+export type AnnualIncomeRow = {
+  month: string
+  hours: number
+  amount: number
+  locked: boolean
+}
+
+export type IncomeDailyGroup = {
+  day: string
+  totalHours: number
+  totalIncome: number
+  entries: Array<{
+    id: number
+    title: string
+    hours: number
+    income: number
+    isSupplemental: boolean
+  }>
+}
+
 export type TaskFeedbackRating = '顺利' | '一般' | '有问题'
 export type TaskFeedbackTag = '需求不清晰' | '沟通成本高' | '定价偏低' | '技术挑战大'
 

@@ -78,12 +78,14 @@
 │   │   ├── api.ts
 │   │   ├── fileMetadata.ts
 │   │   ├── format.ts
+│   │   ├── money.ts
 │   │   ├── month.ts
 │   │   ├── previewTimeout.ts
 │   │   ├── psdPreview.ts
 │   │   └── taskSettlement.ts
 │   ├── views/
 │   │   ├── FilesView.tsx
+│   │   ├── IncomeView.tsx
 │   │   └── KnowledgeView.tsx
 │   ├── types/
 │   │   ├── agent.ts
@@ -116,6 +118,7 @@
 - Visual system and layout: `src/App.css`
 - Client share page: `src/SharedReport.tsx`
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
+- Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
 - Frontend API client and auth headers: `src/lib/api.ts`
 - PSD preview helper: `src/lib/psdPreview.ts`
 - Worker API backend: `src/worker.ts`

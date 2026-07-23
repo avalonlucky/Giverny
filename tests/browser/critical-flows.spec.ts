@@ -61,6 +61,25 @@ test('文件库按需加载并可打开验收文件详情', async ({ page }) => 
   await expect(page.getByRole('complementary', { name: '当天邀请V1.0B01.jpg 文件详情' })).toBeVisible()
 })
 
+test('收入页按需加载且年度与月度金额保持对账', async ({ page }) => {
+  await page.getByRole('button', { name: '切换到收入' }).click()
+  await expect(page).toHaveURL(/\/income$/)
+
+  const stats = page.getByRole('region', { name: '年度收入统计' })
+  await expect(stats).toBeVisible()
+  const annualGrossText = await stats.locator('.stat-card').filter({ hasText: '年度税前收入' }).locator('strong').innerText()
+  const monthlyRows = await page.locator('.income-table-panel').filter({ hasText: '月度收入明细' }).locator('tbody tr').evaluateAll((rows) =>
+    rows.map((row) => Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent?.trim() ?? '')),
+  )
+
+  const amount = (value: string) => Number(value.replace(/[¥,]/g, '')) || 0
+  const monthlyGrossTotal = monthlyRows.reduce((sum, row) => sum + amount(row[2]), 0)
+  expect(monthlyGrossTotal).toBeCloseTo(amount(annualGrossText), 2)
+  monthlyRows.forEach((row) => {
+    expect(amount(row[2]) - amount(row[5])).toBeCloseTo(amount(row[6]), 2)
+  })
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')
