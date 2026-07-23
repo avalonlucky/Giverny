@@ -160,6 +160,9 @@
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
 - Shared Agent attachment results and settlement receipt preview: `src/components/AgentAttachmentResults.tsx`
+- Shared Agent write-preview editing and durable confirmation card: `src/components/AgentApprovalCard.tsx`
+- Shared Agent task disambiguation choices: `src/components/AgentTaskSelectionCard.tsx`
+- Shared progressive Agent execution trace: `src/components/AgentExecutionTimeline.tsx`
 - Shared prioritized toast queue and icon presentation: `src/lib/toastQueue.ts`, `src/components/ToastIcon.tsx`
 - Shared editable-target and month keyboard shortcut rules: `src/lib/keyboardShortcuts.ts`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
