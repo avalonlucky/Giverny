@@ -8,32 +8,23 @@ import {
   PanelRightOpen,
   BarChart3,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   Eye,
   EyeOff,
   FileText,
   FolderKanban,
-  Bot,
-  HelpCircle,
   KeyRound,
   LayoutDashboard,
   LoaderCircle,
   Lock,
-  LogOut,
   Pencil,
   Plus,
   RotateCcw,
-  Search,
-  Settings,
   Sparkles,
-  UserCircle,
   BookOpen,
 } from 'lucide-react'
 import {
-  appReleaseDate,
-  appVersion,
   defaultDesignTypeGroups,
   defaultDesignTypes,
   defaultHourlyRate,
@@ -79,7 +70,8 @@ import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
 import { TaskContextInsightBadge } from './components/TaskContextInsightBadge'
 import { TaskDetailModal } from './components/TaskDetailModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
-import { MonthPicker } from './components/MonthPicker'
+import { AppSidebar } from './components/AppSidebar'
+import { AppTopbar } from './components/AppTopbar'
 import { NewTaskModal } from './components/NewTaskModal'
 import { CommandPalette, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from './components/TaskUi'
@@ -233,8 +225,6 @@ type ProgressModalTarget = {
   editEntryId?: string
   initialAcceptanceMode?: boolean
 }
-
-const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
@@ -2629,209 +2619,47 @@ function App() {
 
   return (
     <main className={`app-shell ${activeView === '工作台' ? 'dashboard-layout' : ''}`.trim()}>
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <img className="brand-logo" src="/giverny-logo.png" alt="" />
-          </div>
-          <div>
-            <strong>
-              Giverny
-              <span className="brand-watermark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.2">
-                  <path d="M12 8C9 8 6 9 6 12C6 14 8 15 12 15C16 15 18 14 18 12C18 9 15 8 12 8Z" />
-                  <path d="M12 8C12 6 13 5 14 5" />
-                  <circle cx="12" cy="11" r="1.2" fill="currentColor" stroke="none" />
-                </svg>
-              </span>
-            </strong>
-            <span className={`brand-status ${backendStatus === '后端异常' ? 'error' : backendStatus === '已接入 D1/R2' ? 'ok' : 'pending'}`} title={backendStatus}>
-              <i aria-hidden="true" />
-              让创作在自己的花园里生长
-            </span>
-          </div>
-        </div>
-
-        <nav className="nav-list" aria-label="主导航">
-          {visibleNavItems.map((item) => {
-            const shortcut = navShortcutHints[item.label as AppView]
-            const ariaShortcut = navAriaShortcutHints[item.label as AppView]
-            const NavIcon = item.icon
-            return (
-              <div key={item.label}>
-                <button
-                  className={`nav-item ${activeView === item.label ? 'active' : ''}`}
-                  aria-label={`切换到${item.label}`}
-                  aria-keyshortcuts={ariaShortcut}
-                  title={shortcut ? `${item.label}（${shortcut}）` : item.label}
-                  onClick={() => navigateView(item.label as AppView)}
-                >
-                  <NavIcon size={17} aria-hidden="true" />
-                  <span>{item.label}</span>
-                </button>
-              </div>
-            )
-          })}
-        </nav>
-
-        <div className="sidebar-account" ref={accountMenuRef}>
-          {isAccountMenuOpen && (
-            <div className="sidebar-account-menu" role="menu" aria-label="管理员菜单">
-              <div className="account-menu-identity">
-                <UserCircle size={18} />
-                <div>
-                  <strong>{auth?.email || '游客访问'}</strong>
-                  <span>{
-                    isAdmin ? '最终管理员'
-                      : role === 'collaborator' ? '协作者（可录入）'
-                      : role === 'viewer' ? '只读全局'
-                      : role === 'client' ? '合作伙伴（当月可见）'
-                      : auth ? '访问口令（只读）' : '游客只读'
-                  }</span>
-                </div>
-              </div>
-              {isAdmin ? (
-                <>
-                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => { setSettingsEntry({ tab: 'settlement', nonce: Date.now() }); navigateView('设置') }}>
-                    <Settings size={17} />
-                    <span>全站设置</span>
-                  </button>
-                  <div
-                    className="account-menu-storage"
-                    title={storageUsage ? `Cloudflare R2 文件空间 · ${storageUsage.objectCount} 个对象` : 'Cloudflare R2 文件空间'}
-                  >
-                    <Archive size={17} />
-                    <div>
-                      <span>R2 文件空间</span>
-                      <strong>{formatStorageUsage(storageUsage)}</strong>
-                    </div>
-                  </div>
-                  <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
-                    <LogOut size={17} />
-                    <span>退出登录</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="account-menu-note">当前只能查看公开任务、进展和合作伙伴可见文件；编辑、上传、验收和结算需要管理员身份。</p>
-                  <button className="account-menu-item" type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); setIsLoginModalOpen(true) }}>
-                    <KeyRound size={17} />
-                    <span>登录管理员</span>
-                  </button>
-                  {auth && (
-                    <button className="account-menu-item danger" type="button" role="menuitem" onClick={handleSignOut}>
-                      <LogOut size={17} />
-                      <span>退出访问口令</span>
-                    </button>
-                  )}
-                </>
-              )}
-              <div className="account-menu-version" title={`发布于 ${appReleaseDate}`}>v{appVersion}</div>
-            </div>
-          )}
-          <button
-            className={`sidebar-account-trigger ${isAccountMenuOpen || activeView === '设置' ? 'active' : ''}`}
-            type="button"
-            title="设置（,）"
-            aria-keyshortcuts=","
-            onClick={() => {
-              if (activeView === '设置') {
-                setIsAccountMenuOpen((value) => !value)
-                return
-              }
-              setIsAccountMenuOpen(false)
-              setSettingsEntry({ tab: 'ai', nonce: Date.now() })
-              navigateView('设置')
-            }}
-          >
-            <Settings size={17} aria-hidden="true" />
-            <span>设置</span>
-          </button>
-        </div>
-      </aside>
+      <AppSidebar
+        activeView={activeView}
+        backendStatus={backendStatus}
+        navItems={visibleNavItems}
+        navShortcutHints={navShortcutHints}
+        navAriaShortcutHints={navAriaShortcutHints}
+        accountMenuRef={accountMenuRef}
+        isAccountMenuOpen={isAccountMenuOpen}
+        auth={auth}
+        role={role}
+        isAdmin={isAdmin}
+        storageUsage={storageUsage}
+        onNavigate={navigateView}
+        onAccountMenuOpenChange={setIsAccountMenuOpen}
+        onOpenSettings={(tab) => { setSettingsEntry({ tab, nonce: Date.now() }); navigateView('设置') }}
+        onLogin={() => setIsLoginModalOpen(true)}
+        onSignOut={handleSignOut}
+      />
 
       <section className="workspace">
-        <header className="topbar">
-          <div className="topbar-heading">
-            {isTaskCalendarView ? (
-              <div className="task-calendar-titlebar">
-                <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={handleTaskCalendarMonthChange} minimal />
-                <select
-                  className="calendar-mode-select"
-                  value={calendarDisplayMode}
-                  aria-label="选择日历显示方式"
-                  onChange={(event) => setCalendarDisplayMode(event.target.value as CalendarDisplayMode)}
-                >
-                  <option value="日">日</option>
-                  <option value="周">周</option>
-                  <option value="月">月</option>
-                </select>
-                <div className="calendar-period-nav" aria-label="切换日历周期">
-                  <button type="button" aria-label="上一周期" title="上一周期" onClick={() => shiftTaskCalendarPeriod(-1)}>
-                    <ChevronLeft size={24} />
-                  </button>
-                  <button type="button" aria-label="下一周期" title="下一周期" onClick={() => shiftTaskCalendarPeriod(1)}>
-                    <ChevronRight size={24} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <h1>{viewTitle}</h1>
-            )}
-            {activeView === '工作台' && (
-              <p className="topbar-summary">
-                本月 {activeMonthTasks.length} 条任务 · {stats.pending} 个待验收
-              </p>
-            )}
-          </div>
-          <div className="topbar-actions">
-            {!isTaskCalendarView && <MonthPicker value={currentMonth.value} taskMonthValues={taskMonthValues} onChange={setMonthValue} iconOnly />}
-            {canSeeFull && (
-              <button
-                type="button"
-                className="topbar-shortcut"
-                title="语义搜索：按意思找回历史任务"
-                aria-label="语义搜索"
-                onClick={() => setIsSemanticSearchOpen(true)}
-              >
-                <Search size={16} />
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                type="button"
-                className={`topbar-shortcut topbar-assistant-button ${isChatOpen ? 'active' : ''}`}
-                title="工作助手 AI 对话"
-                aria-label="打开工作助手"
-                onClick={toggleChat}
-              >
-                <Bot size={16} />
-                <span>工作助手</span>
-              </button>
-            )}
-            <button
-              type="button"
-              className="topbar-shortcut"
-              title="查看键盘快捷键（?）"
-              aria-label="查看快捷键"
-              aria-keyshortcuts="Shift+/"
-              onClick={() => setIsShortcutHelpOpen(true)}
-            >
-              <HelpCircle size={16} />
-            </button>
-            {canWrite && (
-              <button
-                className="primary-button topbar-create-button"
-                title="新建任务（N）"
-                aria-keyshortcuts="N"
-                onClick={() => openCreateTask(false)}
-              >
-                <span>新建任务</span>
-                <kbd>N</kbd>
-              </button>
-            )}
-          </div>
-        </header>
+        <AppTopbar
+          activeView={activeView}
+          viewTitle={viewTitle}
+          isTaskCalendarView={isTaskCalendarView}
+          currentMonthValue={currentMonth.value}
+          taskMonthValues={taskMonthValues}
+          calendarDisplayMode={calendarDisplayMode}
+          taskCount={activeMonthTasks.length}
+          pendingCount={stats.pending}
+          canSeeFull={canSeeFull}
+          isAdmin={isAdmin}
+          isChatOpen={isChatOpen}
+          canWrite={canWrite}
+          onMonthChange={isTaskCalendarView ? handleTaskCalendarMonthChange : setMonthValue}
+          onCalendarDisplayModeChange={setCalendarDisplayMode}
+          onCalendarPeriodShift={shiftTaskCalendarPeriod}
+          onOpenSemanticSearch={() => setIsSemanticSearchOpen(true)}
+          onToggleChat={toggleChat}
+          onOpenShortcutHelp={() => setIsShortcutHelpOpen(true)}
+          onCreateTask={() => openCreateTask(false)}
+        />
 
         {(backendStatus !== '已接入 D1/R2' || effectiveBackendSyncSlow || isOffline) && (
           <div

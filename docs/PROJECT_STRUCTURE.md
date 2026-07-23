@@ -100,6 +100,8 @@
 │   │   └── SettingsView.tsx
 │   ├── components/
 │   │   ├── AiBrandIcon.tsx
+│   │   ├── AppSidebar.tsx
+│   │   ├── AppTopbar.tsx
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
 │   │   ├── MonthPicker.tsx
@@ -140,6 +142,8 @@
 ## Debug Entry Points
 
 - Main admin UI and route state: `src/App.tsx`
+- Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
+- Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Visual system and layout: `src/App.css`
 - Client share page: `src/SharedReport.tsx`
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
