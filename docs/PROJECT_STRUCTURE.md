@@ -76,6 +76,8 @@
 │   │   └── initialData.ts
 │   ├── lib/
 │   │   ├── api.ts
+│   │   ├── aiModels.ts
+│   │   ├── aiProviders.ts
 │   │   ├── fileMetadata.ts
 │   │   ├── format.ts
 │   │   ├── money.ts
@@ -87,9 +89,13 @@
 │   │   ├── FilesView.tsx
 │   │   ├── IncomeView.tsx
 │   │   └── KnowledgeView.tsx
+│   ├── components/
+│   │   ├── DailyKnowledgeModal.tsx
+│   │   └── GivernySelect.tsx
 │   ├── types/
 │   │   ├── agent.ts
-│   │   └── domain.ts
+│   │   ├── domain.ts
+│   │   └── knowledge.ts
 │   ├── App.css
 │   ├── App.tsx
 │   ├── agentToolRegistry.ts
@@ -119,6 +125,8 @@
 - Client share page: `src/SharedReport.tsx`
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
+- Shared AI provider/model rules: `src/lib/aiProviders.ts`, `src/lib/aiModels.ts`
+- Shared settings selector and daily knowledge reader: `src/components/GivernySelect.tsx`, `src/components/DailyKnowledgeModal.tsx`
 - Frontend API client and auth headers: `src/lib/api.ts`
 - PSD preview helper: `src/lib/psdPreview.ts`
 - Worker API backend: `src/worker.ts`

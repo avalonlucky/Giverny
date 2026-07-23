@@ -954,6 +954,18 @@ test('模型中心展示默认模型和服务商配置入口', async ({ page }) 
   await dialog.getByRole('button', { name: '取消' }).click({ force: true })
 })
 
+test('每日知识卡片可打开正文并关闭弹窗', async ({ page }) => {
+  await page.goto('/dashboard')
+  const knowledgeCard = page.locator('button.daily-knowledge-main')
+  await expect(knowledgeCard).toBeVisible()
+  await knowledgeCard.click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('.daily-knowledge-article p').first()).toBeVisible()
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(dialog).toBeHidden()
+})
+
 test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({ page }) => {
   await page.goto('/settings')
   const chatResult = await page.evaluate(async () => {

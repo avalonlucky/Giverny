@@ -120,6 +120,8 @@ import { MonthYearPickerPanel } from './components/MonthYearPickerPanel'
 import { ModalShell } from './components/ModalShell'
 import { CreateTaskContextMenu, TaskContextMenu } from './components/TaskContextMenu'
 import { AdminLoginModal } from './components/AdminLoginModal'
+import { DailyKnowledgeModal } from './components/DailyKnowledgeModal'
+import { GivernySelect } from './components/GivernySelect'
 import { ConfirmDialogModal, type ConfirmDialogState } from './components/ConfirmDialogModal'
 import { VoidTaskModal } from './components/VoidTaskModal'
 import { ImagePreviewReader, OfficePreview, PdfPreviewReader } from './components/FilePreviewReaders'
@@ -138,12 +140,15 @@ import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, 
 import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from './lib/previewTimeout'
 import { taskSettlementMonth } from './lib/taskSettlement'
+import { aiModelCategoryLabels, aiModelCategoryOrder, classifyAiModel, type AiModelCategory } from './lib/aiModels'
+import { baseUrlForProvider, defaultModelForProvider, directBaseUrlForProvider, gatewayBaseUrlForProvider, isGatewayBaseUrl, officialApiKeyUrlForProvider, providerSupportsVision } from './lib/aiProviders'
 import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import { SettlementReceipt } from './components/SettlementReceipt'
 import { createPsdPreviewFile } from './lib/psdPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, InsightHistoryItem, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
+import type { DailyKnowledgeItem } from './types/knowledge'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import antigravityBrandIcon from '@lobehub/icons-static-svg/icons/antigravity-color.svg?url'
 
@@ -192,14 +197,6 @@ const viewRoutes: Record<AppView, string> = {
 }
 
 const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
-
-type DailyKnowledgeItem = {
-  category: string
-  source: string
-  title: string
-  teaser: string
-  body: string[]
-}
 
 const dailyKnowledgePool: DailyKnowledgeItem[] = [
   {
@@ -2588,133 +2585,6 @@ function designTypeGroupForTaskType(type: string, groups: DesignTypeGroup[]) {
 function designTypeColorForTask(type: string, groups: DesignTypeGroup[]) {
   const group = designTypeGroupForTaskType(type, groups)
   return validDesignTypeColor(group?.color) || designTypeColorForIndex(0)
-}
-
-type GivernySelectOption = {
-  value: string
-  label: string
-  group?: string
-  icon?: ReactNode
-}
-
-type AiModelCategory = 'text' | 'vision' | 'image' | 'video' | 'audio' | 'omni' | 'embedding'
-
-const aiModelCategoryLabels: Record<AiModelCategory, string> = {
-  text: '文字',
-  vision: '视觉',
-  image: '图片',
-  video: '视频',
-  audio: '语音',
-  omni: '全模态',
-  embedding: '向量',
-}
-
-const aiModelCategoryOrder: AiModelCategory[] = ['text', 'vision', 'image', 'video', 'audio', 'omni', 'embedding']
-
-// 按模型命名规则推断模态分类和特点描述；对所有服务商通用。
-function classifyAiModel(model: string): { category: AiModelCategory; note: string } {
-  const m = model.toLowerCase()
-  const has = (re: RegExp) => re.test(m)
-  let category: AiModelCategory = 'text'
-  if (has(/embedding|embed(?![a-z])|rerank/)) category = 'embedding'
-  else if (has(/omni/)) category = 'omni'
-  else if (has(/tts|asr|audio|s2s|-vc-|-vd-|livetranslate|realtime|speech|voice/)) category = 'audio'
-  else if (has(/video|seedance|veo|keling|kling/)) category = 'video'
-  else if (has(/image|seedream|dall|wanx|flux/)) category = 'image'
-  else if (has(/-vl|vision|ocr/)) category = 'vision'
-  const notes: string[] = []
-  if (category === 'text') {
-    if (has(/max/)) notes.push('旗舰，能力最强')
-    else if (has(/plus|pro(?![a-z])/)) notes.push('均衡，性能成本兼顾')
-    else if (has(/turbo|flash|lite|mini|nano/)) notes.push('轻快，响应快成本低')
-    if (has(/coder|-code(?![a-z])/)) notes.push('代码专长')
-    if (has(/thinking|reason|qwq|deep-research|deep-search|-r\d/)) notes.push('深度推理')
-    if (has(/long/)) notes.push('超长上下文')
-    if (has(/(^|-)mt-|translate/)) notes.push('翻译')
-    if (has(/math/)) notes.push('数学专长')
-    if (has(/character/)) notes.push('角色扮演')
-  }
-  if (category === 'vision') notes.push(has(/ocr/) ? '图片文字识别' : '图片理解')
-  if (category === 'image') notes.push(has(/edit/) ? '图片编辑' : '图片生成')
-  if (category === 'audio') notes.push(has(/tts/) ? '语音合成' : has(/asr/) ? '语音识别' : has(/livetranslate/) ? '同声传译' : '实时语音')
-  if (category === 'video') notes.push('视频生成')
-  if (category === 'omni') notes.push('全模态，文字语音图像通吃')
-  if (category === 'embedding') notes.push('向量检索，不用于对话')
-  if (has(/-(20\d{2}-\d{2}-\d{2}|\d{3,6})$/)) notes.push('历史快照')
-  else if (has(/preview/)) notes.push('预览版')
-  if (notes.length === 0) notes.push('通用对话')
-  return { category, note: notes.slice(0, 2).join(' · ') }
-}
-
-function GivernySelect({
-  value,
-  options,
-  placeholder,
-  ariaLabel,
-  onChange,
-}: {
-  value: string
-  options: GivernySelectOption[]
-  placeholder: string
-  ariaLabel: string
-  onChange: (value: string) => void
-}) {
-  const [isOpen, setIsOpen] = useState(false)
-  const selected = options.find((option) => option.value === value)
-  const groups = Array.from(new Set(options.map((option) => option.group || '')))
-
-  return (
-    <div
-      className="giverny-select"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setIsOpen(false)
-      }}
-    >
-      <button
-        type="button"
-        className={`giverny-select-trigger ${isOpen ? 'active' : ''}`}
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        disabled={options.length === 0}
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span className={`giverny-select-value ${selected ? '' : 'placeholder'}`}>
-          {selected?.icon}
-          <span>{selected?.label || placeholder}</span>
-        </span>
-        <ChevronDown size={16} />
-      </button>
-      {isOpen && (
-        <div className="giverny-select-menu" role="listbox" aria-label={ariaLabel}>
-          {groups.map((group) => (
-            <div className="giverny-select-group" key={group || 'default'}>
-              {group && <span className="giverny-select-group-label">{group}</span>}
-              {options.filter((option) => (option.group || '') === group).map((option) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={option.value === value}
-                  className={option.value === value ? 'active' : ''}
-                  key={option.value}
-                  onClick={() => {
-                    onChange(option.value)
-                    setIsOpen(false)
-                  }}
-                >
-                  <span className="giverny-select-option-main">
-                    {option.icon}
-                    <span>{option.label}</span>
-                  </span>
-                  {option.value === value && <CheckCircle2 size={15} />}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function MonthPicker({
@@ -16310,21 +16180,12 @@ const aiRouteMeta: Array<{ key: AiModelRouteKey; title: string; description: str
   { key: 'visionFallback', title: '识图备用模型', description: 'Gemini 额度不足或识别失败时自动兜底', capability: 'vision' },
 ]
 
-const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
-const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
-const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-const QWEN_DEFAULT_MODEL = 'qwen3.7-plus'
-
 const aiRouteDefaults: Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> = {
   textPrimary: { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
   textFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
   visionPrimary: { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3-flash-preview' },
   visionFallback: { provider: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
 }
-
-// AI 调用统一走 Cloudflare AI Gateway（缓存 / 失败重试 / 用量看板 / 抗 503）。
-// 选择供应商时自动把 Base URL 填成该供应商对应的网关路径；网关未代理的供应商回退官方直连。
-const AI_GATEWAY_BASE = 'https://gateway.ai.cloudflare.com/v1/ccd312f47f0dca574199fa6e33758c6d/mayeai-gateway'
 
 const aiProviderOptions: Array<{ value: AiModelConfig['provider']; label: string }> = [
   { value: 'deepseek', label: 'DeepSeek' },
@@ -16347,108 +16208,6 @@ const aiProviderIconMap: Partial<Record<AiModelProvider, string>> = {
   openai: openaiBrandIcon,
   openrouter: openrouterBrandIcon,
   anthropic: anthropicBrandIcon,
-}
-
-function providerSupportsVision(provider: AiModelProvider) {
-  return provider === 'gemini' || provider === 'kimi' || provider === 'doubao' || provider === 'qwen' || provider === 'openai' || provider === 'openrouter' || provider === 'custom-openai'
-}
-
-// 该供应商在 Cloudflare AI Gateway 上的命名路径；网关不支持的供应商返回 ''（只能直连）。
-function gatewayBaseUrlForProvider(provider: AiModelConfig['provider']): string {
-  switch (provider) {
-    case 'deepseek':
-      return `${AI_GATEWAY_BASE}/deepseek`
-    case 'gemini':
-      return `${AI_GATEWAY_BASE}/google-ai-studio/v1beta`
-    case 'openai':
-      return `${AI_GATEWAY_BASE}/openai`
-    case 'anthropic':
-      return `${AI_GATEWAY_BASE}/anthropic`
-    default:
-      // Kimi/Moonshot、豆包/火山方舟、OpenRouter 等：直连最稳（OpenRouter 自身已是聚合路由），不强制走网关。
-      return ''
-  }
-}
-
-// 该供应商的官方直连地址。
-function directBaseUrlForProvider(provider: AiModelConfig['provider']): string {
-  switch (provider) {
-    case 'deepseek':
-      return 'https://api.deepseek.com'
-    case 'gemini':
-      return 'https://generativelanguage.googleapis.com/v1beta'
-    case 'openai':
-      return 'https://api.openai.com/v1'
-    case 'kimi':
-      return 'https://api.moonshot.cn/v1'
-    case 'doubao':
-      return DOUBAO_BASE_URL
-    case 'qwen':
-      return QWEN_BASE_URL
-    case 'openrouter':
-      return 'https://openrouter.ai/api/v1'
-    case 'anthropic':
-      return 'https://api.anthropic.com/v1'
-    case 'custom-openai':
-    default:
-      return ''
-  }
-}
-
-// 切换供应商时默认优先走网关（拿缓存/重试/用量看板），网关不支持的回退直连。
-function baseUrlForProvider(provider: AiModelConfig['provider']): string {
-  return gatewayBaseUrlForProvider(provider) || directBaseUrlForProvider(provider)
-}
-
-function isGatewayBaseUrl(url: string): boolean {
-  return url.includes('gateway.ai.cloudflare.com')
-}
-
-function defaultModelForProvider(provider: AiModelConfig['provider']): string {
-  switch (provider) {
-    case 'deepseek':
-      return 'deepseek-v4-flash'
-    case 'gemini':
-      return 'gemini-3-flash-preview'
-    case 'kimi':
-      return 'kimi-k2.6'
-    case 'doubao':
-      return DOUBAO_SEED_PRO_MODEL
-    case 'qwen':
-      return QWEN_DEFAULT_MODEL
-    case 'openai':
-      return 'gpt-4o-mini'
-    case 'openrouter':
-      return 'deepseek/deepseek-chat-v3-0324:free'
-    case 'anthropic':
-      return 'claude-sonnet-4-6'
-    case 'custom-openai':
-    default:
-      return ''
-  }
-}
-
-function officialApiKeyUrlForProvider(provider: AiModelConfig['provider']): string {
-  switch (provider) {
-    case 'deepseek':
-      return 'https://platform.deepseek.com/api_keys'
-    case 'gemini':
-      return 'https://aistudio.google.com/app/apikey'
-    case 'kimi':
-      return 'https://platform.moonshot.cn/console/api-keys'
-    case 'doubao':
-      return 'https://console.volcengine.com/ark/region:ark+cn-beijing/apikey'
-    case 'qwen':
-      return 'https://bailian.console.aliyun.com/cn-beijing?tab=globalset'
-    case 'openai':
-      return 'https://platform.openai.com/api-keys'
-    case 'openrouter':
-      return 'https://openrouter.ai/settings/keys'
-    case 'anthropic':
-      return 'https://console.anthropic.com/settings/keys'
-    default:
-      return ''
-  }
 }
 
 function aiRoutesFromConfig(config: AiModelConfig | null): Record<AiModelRouteKey, Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>> {
@@ -18429,84 +18188,6 @@ function SettingsView({
         />
       )}
     </section>
-  )
-}
-
-function renderKnowledgeParagraph(text: string) {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>
-    }
-    return <Fragment key={`${part}-${index}`}>{part}</Fragment>
-  })
-}
-
-function DailyKnowledgeModal({
-  item,
-  isLoading,
-  canRefresh,
-  onRefresh,
-  onClose,
-  onFavorite,
-}: {
-  item: DailyKnowledgeItem
-  isLoading: boolean
-  canRefresh: boolean
-  onRefresh: () => void
-  onClose: () => void
-  onFavorite?: (item: DailyKnowledgeItem) => Promise<boolean>
-}) {
-  const sourceLabel = item.source.startsWith('AI · ') ? `AI 生成（${item.source.replace('AI · ', '')}）` : item.source
-  const [favorited, setFavorited] = useState(false)
-  const [favoriteSaving, setFavoriteSaving] = useState(false)
-
-  const handleFavorite = async () => {
-    if (!onFavorite || favoriteSaving || favorited) return
-    setFavoriteSaving(true)
-    try {
-      const ok = await onFavorite(item)
-      if (ok) setFavorited(true)
-    } finally {
-      setFavoriteSaving(false)
-    }
-  }
-
-  return (
-    <ModalShell className="daily-knowledge-modal" labelledBy="daily-knowledge-title" onClose={onClose}>
-      <header className="daily-knowledge-modal-header">
-        <div>
-          <h2 id="daily-knowledge-title">{item.title}</h2>
-          <p>{item.category} · {sourceLabel}</p>
-        </div>
-        <button className="icon-button daily-knowledge-close-btn" type="button" aria-label="关闭" onClick={onClose}>
-          <X size={16} />
-        </button>
-      </header>
-      <div className="daily-knowledge-article">
-        {item.body.map((paragraph, index) => (
-          <p key={`${item.title}-${index}`}>{renderKnowledgeParagraph(paragraph)}</p>
-        ))}
-      </div>
-      <footer className="daily-knowledge-modal-footer">
-        {onFavorite && (
-          <button
-            className={`daily-knowledge-favorite-btn ${favorited ? 'favorited' : ''}`}
-            type="button"
-            disabled={favoriteSaving || favorited}
-            onClick={() => void handleFavorite()}
-            title={favorited ? '已收藏到知识库' : '收藏到知识库'}
-            aria-label={favorited ? '已收藏' : '收藏'}
-          >
-            <Star size={15} fill={favorited ? 'currentColor' : 'none'} />
-          </button>
-        )}
-        {canRefresh && (
-          <button className="daily-knowledge-primary" type="button" disabled={isLoading} onClick={onRefresh}>
-            {isLoading ? '生成中' : '换一篇'}
-          </button>
-        )}
-      </footer>
-    </ModalShell>
   )
 }
 
