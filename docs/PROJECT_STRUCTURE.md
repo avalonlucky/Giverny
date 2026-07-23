@@ -103,6 +103,7 @@
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
 │   │   ├── MonthPicker.tsx
+│   │   ├── NewTaskModal.tsx
 │   │   ├── NewTaskDesignTypeSelector.tsx
 │   │   ├── PendingAttachmentPreview.tsx
 │   │   ├── TaskDetailModal.tsx
@@ -156,6 +157,7 @@
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
 - Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
+- New/edit task form, requirement attachments, AI suggestions and voice scheduling: `src/components/NewTaskModal.tsx`
 - Shared new-task design type selector: `src/components/NewTaskDesignTypeSelector.tsx`
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
@@ -170,6 +172,8 @@
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task history sample insights and accepted-task normalization: `src/lib/taskContextInsights.ts`
 - Shared Agent task attachments, activity summaries and progress evidence: `src/lib/taskAssistantContext.ts`
+- Shared AI suggestion learning classification: `src/lib/aiLearning.ts`
+- Shared design-type group flattening and normalization: `src/lib/designTypeGroups.ts`
 - Shared task time attribution, billing and reconciliation rules: `src/lib/taskAccounting.ts`, `scripts/test-task-accounting.mjs`
 - Shared progress time draft, derivation and overlap rules: `src/lib/timeEntryDraft.ts`
 - Shared duration input parsing and schedule derivation rules: `src/lib/durationInput.ts`
