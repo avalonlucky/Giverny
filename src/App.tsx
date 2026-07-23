@@ -1,4 +1,4 @@
-import { Fragment, lazy, memo, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
 import ReactMarkdown from 'react-markdown'
@@ -20,8 +20,6 @@ import {
   Download,
   Eye,
   EyeOff,
-  ExternalLink,
-  FileArchive,
   FileText,
   Folder,
   FolderKanban,
@@ -107,7 +105,6 @@ import { DailyKnowledgeModal } from './components/DailyKnowledgeModal'
 import { AiBrandIcon } from './components/AiBrandIcon'
 import { ConfirmDialogModal, type ConfirmDialogState } from './components/ConfirmDialogModal'
 import { VoidTaskModal } from './components/VoidTaskModal'
-import { ImagePreviewReader, OfficePreview, PdfPreviewReader } from './components/FilePreviewReaders'
 import { FilePreviewModal } from './components/FilePreviewModal'
 import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
 import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
@@ -115,6 +112,7 @@ import { TaskContextInsightBadge } from './components/TaskContextInsightBadge'
 import { TaskDetailModal } from './components/TaskDetailModal'
 import { MonthPicker } from './components/MonthPicker'
 import { NewTaskDesignTypeSelector } from './components/NewTaskDesignTypeSelector'
+import { PendingAttachmentPreview, PendingAttachmentThumbnail } from './components/PendingAttachmentPreview'
 import { FileThumbnailPreview } from './components/FileThumbnailPreview'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from './components/TaskUi'
@@ -127,7 +125,7 @@ import { formatFileSize } from './lib/format'
 import { datePart, formatDurationZh, formatMonthDay, formatPlanDateTime, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad, planDateTimeFromMinuteStamp, toDateTimeInputValue } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
 import { formatYuan, roundCents } from './lib/money'
-import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
+import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType } from './lib/fileTypes'
 import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from './lib/previewTimeout'
 import { taskSettlementMonth } from './lib/taskSettlement'
@@ -166,7 +164,7 @@ import { createPdfPreviewFile } from './lib/pdfPreview'
 import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFeedbackRating, TaskFeedbackTag, TaskFilter, TaskStatus, TaskUpdate, TaskViewMode, TaxMode, TimeEntry, WaitingEntry } from './types/domain'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
-import type { ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from './types/taskUi'
+import type { PendingProgressAttachment, ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -1178,28 +1176,6 @@ function validateUploadFile(file: File) {
   return false
 }
 
-type PendingProgressAttachment = {
-  id: string
-  file: File
-  name: string
-  originalName: string
-  aiSuggestion?: AttachmentNameSuggestion
-  aiLoading?: boolean
-  aiError?: string
-  // 边添加边上传：文件一加入即后台上传，保存时直接复用，无需再等。
-  uploadStatus?: 'uploading' | 'done' | 'error'
-  uploadProgress?: number // 0..1
-  uploadedFile?: FileAsset
-  uploadPromise?: Promise<FileAsset | undefined>
-  uploadError?: string
-  uploadScope?: 'acceptance' | 'progress'
-  discarded?: boolean
-  isAcceptanceFile?: boolean
-  previewFile?: File
-  optimizedFile?: File
-  preparationPromise?: Promise<{ uploadFile: File; previewFile?: File }>
-}
-
 const progressAttachmentDraftCache = new Map<string, PendingProgressAttachment[]>()
 // 同一份草稿（task+mode+entry）复用同一个 entryId，保证「关闭后重开再保存」时
 // 预上传文件仍能正确挂到最终生成的进展条目上。
@@ -1990,125 +1966,6 @@ const writeStateCache = (state: BackendState) => {
 }
 
 const formatStorageUsage = (usage: StorageUsage | null) => usage?.label ?? '同步中'
-
-const PendingAttachmentThumbnail = memo(function PendingAttachmentThumbnail({
-  attachment,
-  onOpen,
-}: {
-  attachment: PendingProgressAttachment
-  onOpen: () => void
-}) {
-  const inferred = fileTypeForFile(attachment.file)
-  const isImage = inferred.kind === 'image'
-  const canUseSourceFallback = ['pdf', 'ai', 'psd', 'office', 'video'].includes(inferred.kind)
-  const sourcePreviewUrl = useMemo(() => canUseSourceFallback ? URL.createObjectURL(attachment.file) : undefined, [attachment.file, canUseSourceFallback])
-  const [thumbnailUrl, setThumbnailUrl] = useState('')
-
-  useEffect(() => {
-    if (!isImage) return
-    let active = true
-    let objectUrl = ''
-    void ensurePendingAttachmentPreview(attachment).then((preview) => {
-      if (!active || !preview) return
-      objectUrl = URL.createObjectURL(preview)
-      setThumbnailUrl(objectUrl)
-    })
-    return () => {
-      active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [attachment, isImage])
-
-  useEffect(() => () => {
-    if (sourcePreviewUrl) {
-      URL.revokeObjectURL(sourcePreviewUrl)
-    }
-  }, [sourcePreviewUrl])
-
-  return (
-    <AttachmentHoverThumbnail
-      name={attachment.name}
-      type={inferred.type}
-      previewUrl={isImage ? thumbnailUrl : undefined}
-      sourceUrl={sourcePreviewUrl}
-      sourceFile={isImage ? undefined : attachment.file}
-      onOpen={onOpen}
-    />
-  )
-}, (previous, next) => (
-  previous.attachment.file === next.attachment.file
-  && previous.attachment.name === next.attachment.name
-))
-
-
-
-function PendingAttachmentPreview({
-  attachment,
-  onClose,
-}: {
-  attachment: PendingProgressAttachment
-  onClose: () => void
-}) {
-  const sourceUrl = useMemo(() => URL.createObjectURL(attachment.file), [attachment.file])
-  const fileType = fileTypeForFile(attachment.file).type
-  const isImage = isInlineImageFileType(fileType)
-  const isPdf = fileType === 'PDF'
-  const isVideo = videoFileTypes.has(fileType)
-  const isOffice = isOfficeFileType(fileType)
-
-  useEffect(() => () => URL.revokeObjectURL(sourceUrl), [sourceUrl])
-
-  return createPortal(
-    <ModalShell
-      className="file-preview-modal pending-attachment-preview-modal"
-      labelledBy="pending-attachment-preview-title"
-      onClose={onClose}
-      closeOnEscape
-    >
-      <header className="modal-header">
-        <div>
-          <p className="eyebrow">进展附件预览</p>
-          <h2 id="pending-attachment-preview-title">{attachment.name}</h2>
-        </div>
-        <div className="modal-header-actions">
-          {(isPdf || isImage || isVideo) && (
-            <a
-              className="icon-button"
-              href={sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="在新窗口打开"
-              title="在新窗口打开"
-            >
-              <ExternalLink size={17} />
-            </a>
-          )}
-          <button className="icon-button modal-close-button" type="button" aria-label="关闭" title="关闭" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-      </header>
-      <div className="file-preview-body">
-        {isImage ? (
-          <ImagePreviewReader src={sourceUrl} alt={attachment.name} />
-        ) : isPdf ? (
-          <PdfPreviewReader sourceUrl={sourceUrl} sourceFile={attachment.file} label={attachment.name} />
-        ) : isVideo ? (
-          <video className="file-preview-video" src={sourceUrl} controls preload="metadata" />
-        ) : isOffice ? (
-          <OfficePreview fileType={fileType} sourceUrl={sourceUrl} />
-        ) : (
-          <div className="file-preview-placeholder">
-            <FileArchive size={42} />
-            <strong>{fileType}</strong>
-            <span>该格式暂不支持站内完整预览，保存进展后仍可从文件记录打开源文件。</span>
-          </div>
-        )}
-      </div>
-    </ModalShell>,
-    document.body,
-  )
-}
 
 type ToastTone = 'success' | 'error' | 'info'
 
@@ -10178,6 +10035,7 @@ function TaskProgressModal({
                         <PendingAttachmentThumbnail
                           attachment={attachment}
                           onOpen={() => setPreviewAttachment(attachment)}
+                          ensurePreview={ensurePendingAttachmentPreview}
                         />
                         <div className="progress-attachment-name-field">
                           <textarea
