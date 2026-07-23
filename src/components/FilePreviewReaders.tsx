@@ -79,8 +79,8 @@ export function PdfPreviewReader({
       renderTasksRef.current = []
       const document = documentRef.current
       documentRef.current = null
-      if (document) void document.destroy()
-      else if (loadingTask?.destroy) void loadingTask.destroy()
+      if (document) void document.destroy().catch(() => {})
+      else if (loadingTask?.destroy) void loadingTask.destroy().catch(() => {})
     }
   }, [sourceFile, sourceUrl])
 

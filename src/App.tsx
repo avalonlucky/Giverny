@@ -1473,7 +1473,10 @@ async function prepareImageFiles(file: File): Promise<PreparedImageFiles> {
     .then(() => new Promise<void>((resolve) => window.setTimeout(resolve, 0)))
     .then(() => prepareImageOnMainThread(file))
   mainThreadImageOptimizationQueue = fallback.then(() => undefined, () => undefined)
-  return fallback
+  return fallback.catch((error) => {
+    console.warn('image main-thread optimization failed, using original file', file.name, error)
+    return { uploadFile: file }
+  })
 }
 
 function ensurePendingAttachmentPreparation(attachment: PendingProgressAttachment): Promise<PreparedImageFiles> {
