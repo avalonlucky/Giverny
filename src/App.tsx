@@ -132,6 +132,34 @@ import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, 
 import { parseFileTags, serializeFileTags } from './lib/fileMetadata'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from './lib/previewTimeout'
 import { taskSettlementMonth } from './lib/taskSettlement'
+import {
+  acceptanceProgressEndDateTime,
+  billableTimeEntries,
+  dateTimeMinuteStamp,
+  isDateValueInRange,
+  isSupplementalTask,
+  isTaskBillable,
+  isWaitingEntryActive,
+  latestTaskActivityValue,
+  minutesForTimeEntry,
+  minutesForWaitingEntry,
+  nextWorkStartForWaiting,
+  normalizeClockInput,
+  safeMonthPart,
+  sortTasksByLatestActivity,
+  sumBillableAmountForMonth,
+  sumTimeEntries,
+  sumWaitingEntries,
+  taskBillableHoursInDateRange,
+  taskBillableHoursInMonth,
+  taskHasMonthActivity,
+  taskHoursInDateRange,
+  taskHoursInMonth,
+  taskLifecycleDate,
+  taskRelatedMonths,
+  timeEntryActivityValue,
+  timeEntryMonth,
+} from './lib/taskAccounting'
 import { designTypeColorForIndex, validDesignTypeColor } from './lib/designTypes'
 import { aiProviderOptions, aiRouteDefaults, providerSupportsVision } from './lib/aiProviders'
 import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
@@ -1634,24 +1662,6 @@ function shiftMonthValue(value: string, offset: number) {
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
 }
 
-function isSupplementalTask(task: Task) {
-  return Boolean(task.isSupplemental)
-}
-
-function acceptanceProgressEndDateTime(task: Pick<Task, 'date' | 'timeEntries'>) {
-  const acceptanceEntries = (task.timeEntries ?? [])
-    .filter((entry) => entry.isAcceptanceProgress)
-    .map((entry) => {
-      const endDate = entry.endDate || entry.date || datePart(task.date)
-      const end = normalizeClockInput(entry.end)
-      const stamp = dateTimeMinuteStamp(endDate, end || '')
-      return Number.isFinite(stamp) ? { stamp, value: planDateTimeFromMinuteStamp(stamp) } : null
-    })
-    .filter((item): item is { stamp: number; value: string } => Boolean(item))
-    .sort((a, b) => b.stamp - a.stamp)
-  return acceptanceEntries[0]?.value ?? ''
-}
-
 function normalizeTaskClosure(task: Task): Task {
   if (!hasAcceptanceProgress(task)) {
     return task
@@ -1680,26 +1690,6 @@ function isDateInRange(value: string | undefined, range: { start: Date; end: Dat
     return false
   }
   return date >= range.start && date <= range.end
-}
-
-function taskLifecycleDate(task: Task) {
-  const entries = task.timeEntries ?? []
-  if (entries.length > 0) {
-    const withBounds = entries
-      .map((entry) => {
-        const start = dateTimeMinuteStamp(entry.date || datePart(task.date), entry.start)
-        const end = dateTimeMinuteStamp(entry.endDate || entry.date || datePart(task.date), entry.end)
-        return Number.isFinite(start) && Number.isFinite(end) ? { entry, start, end } : null
-      })
-      .filter((item): item is { entry: TimeEntry; start: number; end: number } => Boolean(item))
-    const acceptanceBounds = withBounds.filter(({ entry }) => entry.isAcceptanceProgress)
-    const targetBounds = acceptanceBounds.length > 0 ? acceptanceBounds : withBounds
-    const endStamp = targetBounds.reduce((latest, item) => Math.max(latest, item.end), 0)
-    if (endStamp > 0) {
-      return planDateTimeFromMinuteStamp(endStamp)
-    }
-  }
-  return task.actualDeliveryDate || task.date || (task.settlementMonth ? `${task.settlementMonth}-01` : '')
 }
 
 function isTaskInAnalysisRange(task: Task, range: { start: Date; end: Date }) {
@@ -1882,112 +1872,6 @@ function formatEntryDateTimeRange(task: Task, entry: TimeEntry) {
   return startDate === endDate ? `${startLabel}-${entry.end}` : `${startLabel} - ${formatMonthDay(endDate)} ${entry.end}`
 }
 
-function minutesBetween(start: string, end: string) {
-  if (!start || !end) {
-    return 0
-  }
-  const [startHour, startMinute] = start.split(':').map(Number)
-  const [endHour, endMinute] = end.split(':').map(Number)
-  if ([startHour, startMinute, endHour, endMinute].some((value) => !Number.isFinite(value))) {
-    return 0
-  }
-  return Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute))
-}
-
-function dateTimeMinuteStamp(date: string, time: string) {
-  const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  const normalizedTime = normalizeClockInput(time)
-  if (!dateMatch || !normalizedTime) {
-    return Number.NaN
-  }
-  const [, year, month, day] = dateMatch.map(Number)
-  const [hour, minute] = normalizedTime.split(':').map(Number)
-  const value = new Date(year, month - 1, day, hour, minute)
-  if (
-    value.getFullYear() !== year
-    || value.getMonth() + 1 !== month
-    || value.getDate() !== day
-    || value.getHours() !== hour
-    || value.getMinutes() !== minute
-  ) {
-    return Number.NaN
-  }
-  return Math.round(value.getTime() / 60000)
-}
-
-function minutesForTimeEntry(
-  entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'> & Partial<Pick<TimeEntry, 'isUncounted' | 'isClientFeedback'>>,
-) {
-  // 不计工时的分段：时间仅用于记录与排序，工时恒为 0
-  if (entry.isUncounted || entry.isClientFeedback) {
-    return 0
-  }
-  const startDate = entry.date
-  const endDate = entry.endDate || startDate
-  if (!startDate || !endDate) {
-    return minutesBetween(entry.start, entry.end)
-  }
-  const startStamp = dateTimeMinuteStamp(startDate, entry.start)
-  const endStamp = dateTimeMinuteStamp(endDate, entry.end)
-  if (!Number.isFinite(startStamp) || !Number.isFinite(endStamp)) {
-    return 0
-  }
-  return Math.max(0, endStamp - startStamp)
-}
-
-function normalizeClockInput(value: string) {
-  const raw = value.trim()
-  const colonMatch = raw.match(/^(\d{1,2})(?::(\d{1,2}))?$/)
-  const compactMatch = raw.match(/^(\d{1,2})(\d{2})$/)
-  const hour = colonMatch ? Number(colonMatch[1]) : compactMatch ? Number(compactMatch[1]) : Number.NaN
-  const minute = colonMatch ? Number(colonMatch[2] ?? '0') : compactMatch ? Number(compactMatch[2]) : Number.NaN
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return ''
-  }
-  return `${pad(hour)}:${pad(minute)}`
-}
-
-function sumTimeEntries(entries: TimeEntry[]) {
-  return entries.reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
-}
-
-function timeEntryStartStamp(entry: Pick<TimeEntry, 'date' | 'start'>) {
-  return dateTimeMinuteStamp(entry.date || '', entry.start)
-}
-
-function nextWorkStartForWaiting(task: Task, waitingEntry: WaitingEntry) {
-  const waitingStart = timeEntryStartStamp(waitingEntry)
-  if (!Number.isFinite(waitingStart)) {
-    return Number.NaN
-  }
-  const nextStart = (task.timeEntries ?? [])
-    // “不计工时”只影响结算，不影响任务生命周期；只要后续重新记录了工作进展，等待就应截止。
-    // 甲方反馈是外部意见节点，不代表设计工作已经恢复，因此不作为等待结束时间。
-    .filter((entry) => !entry.isClientFeedback)
-    .map(timeEntryStartStamp)
-    .filter((stamp) => Number.isFinite(stamp) && stamp > waitingStart)
-    .sort((a, b) => a - b)[0]
-  return nextStart ?? Number.NaN
-}
-
-function minutesForWaitingEntry(task: Task, entry: WaitingEntry, ongoingUntilStamp?: number) {
-  const waitingStart = timeEntryStartStamp(entry)
-  const nextStart = nextWorkStartForWaiting(task, entry)
-  const waitingEnd = Number.isFinite(nextStart) ? nextStart : ongoingUntilStamp
-  if (!Number.isFinite(waitingStart) || !Number.isFinite(waitingEnd) || Number(waitingEnd) <= waitingStart) {
-    return 0
-  }
-  return Number(waitingEnd) - waitingStart
-}
-
-function sumWaitingEntries(task: Task, ongoingUntilStamp?: number) {
-  return (task.waitingEntries ?? []).reduce((sum, entry) => sum + minutesForWaitingEntry(task, entry, ongoingUntilStamp), 0)
-}
-
-function isWaitingEntryActive(task: Task, entry: WaitingEntry) {
-  return !Number.isFinite(nextWorkStartForWaiting(task, entry))
-}
-
 function formatWaitingElapsed(minutes: number) {
   const safeMinutes = Math.max(0, Math.round(minutes))
   const days = Math.floor(safeMinutes / 1440)
@@ -2009,61 +1893,6 @@ function formatWaitingEntryDateTimeRange(task: Task, entry: WaitingEntry) {
   return startDate === endDate ? `${startLabel}-${endTime}` : `${startLabel} - ${formatMonthDay(endDate)} ${endTime}`
 }
 
-// 计费口径的唯一来源：与后端 is_billable 保持一致——状态不影响计费，
-// 计费口径唯一来源：以持久的 billable 标记为准（新建任务时选「不计费」即永久不计费，
-// 状态/验收/工时都不会改变它）；同时兼容历史的「不计费」状态。
-function isTaskBillable(task: Pick<Task, 'status' | 'billable'>) {
-  return task.billable !== false && task.status !== '不计费'
-}
-
-function safeMonthPart(value?: string) {
-  const valueDate = value ? datePart(value) : ''
-  return /^\d{4}-\d{2}-\d{2}$/.test(valueDate) ? valueDate.slice(0, 7) : ''
-}
-
-function timeEntryActivityValue(entry: TimeEntry, task?: Pick<Task, 'date'>) {
-  const endDate = entry.endDate || entry.date || datePart(task?.date ?? '')
-  const end = normalizeClockInput(entry.end)
-  if (endDate && end) return `${endDate}T${end}`
-  const startDate = entry.date || datePart(task?.date ?? '')
-  const start = normalizeClockInput(entry.start)
-  return startDate && start ? `${startDate}T${start}` : startDate
-}
-
-function timeEntryMonth(entry: TimeEntry, task?: Pick<Task, 'date'>) {
-  return safeMonthPart(entry.endDate || entry.date || task?.date)
-}
-
-function waitingEntryActivityValue(task: Task, entry: WaitingEntry) {
-  const nextStart = nextWorkStartForWaiting(task, entry)
-  if (Number.isFinite(nextStart)) return planDateTimeFromMinuteStamp(nextStart)
-  const startDate = entry.date || datePart(task.date)
-  const start = normalizeClockInput(entry.start)
-  return startDate && start ? `${startDate}T${start}` : startDate
-}
-
-function waitingEntryMonth(task: Task, entry: WaitingEntry) {
-  return safeMonthPart(waitingEntryActivityValue(task, entry))
-}
-
-function latestTaskActivityValue(task: Task) {
-  const acceptanceValue = acceptanceProgressEndDateTime(task)
-  const acceptanceStamp = dateTimeMinuteStamp(datePart(acceptanceValue), formatTimePart(acceptanceValue))
-  const candidates = [
-    acceptanceValue || task.actualDeliveryDate,
-    task.date,
-    ...(task.timeEntries ?? []).map((entry) => timeEntryActivityValue(entry, task)),
-    ...(task.waitingEntries ?? [])
-      .map((entry) => waitingEntryActivityValue(task, entry))
-      .filter((value) => {
-        if (!acceptanceValue || !Number.isFinite(acceptanceStamp)) return true
-        const stamp = dateTimeMinuteStamp(datePart(value), formatTimePart(value))
-        return Number.isFinite(stamp) && stamp <= acceptanceStamp
-      }),
-  ].filter(Boolean)
-  return candidates.sort().at(-1) ?? ''
-}
-
 function formatTaskActivityDateRange(task: Task) {
   const start = datePart(task.date || '')
   const latest = datePart(latestTaskActivityValue(task))
@@ -2074,131 +1903,6 @@ function formatTaskActivityDateRange(task: Task) {
 function formatTaskActivityTime(task: Task) {
   const latest = latestTaskActivityValue(task)
   return formatTimePart(latest || task.date)
-}
-
-function sortTasksByLatestActivity(tasks: Task[]) {
-  return [...tasks].sort((a, b) => {
-    const byActivity = latestTaskActivityValue(b).localeCompare(latestTaskActivityValue(a))
-    return byActivity !== 0 ? byActivity : b.id - a.id
-  })
-}
-
-function billableTimeEntries(task: Pick<Task, 'timeEntries'>) {
-  return (task.timeEntries ?? []).filter((entry) => minutesForTimeEntry(entry) > 0)
-}
-
-function taskTimeEntriesInMonth(task: Task, month: string) {
-  if (isSupplementalTask(task) && taskSettlementMonth(task) === month) {
-    return billableTimeEntries(task)
-  }
-  return billableTimeEntries(task).filter((entry) => timeEntryMonth(entry, task) === month)
-}
-
-function taskRelatedMonths(task: Task) {
-  const months = new Set<string>()
-  const settlement = taskSettlementMonth(task)
-  if (isSupplementalTask(task) && /^\d{4}-\d{2}$/.test(settlement)) {
-    months.add(settlement)
-    return months
-  }
-  const acceptanceValue = acceptanceProgressEndDateTime(task)
-  const acceptanceMonth = safeMonthPart(acceptanceValue)
-  const acceptanceStamp = dateTimeMinuteStamp(datePart(acceptanceValue), formatTimePart(acceptanceValue))
-  ;(task.timeEntries ?? []).forEach((entry) => {
-    const value = timeEntryMonth(entry, task)
-    if (value) months.add(value)
-  })
-  ;(task.waitingEntries ?? []).forEach((entry) => {
-    if (acceptanceValue && Number.isFinite(acceptanceStamp)) {
-      const activityValue = waitingEntryActivityValue(task, entry)
-      const stamp = dateTimeMinuteStamp(datePart(activityValue), formatTimePart(activityValue))
-      if (!Number.isFinite(stamp) || stamp > acceptanceStamp) return
-    }
-    const value = waitingEntryMonth(task, entry)
-    if (value) months.add(value)
-  })
-  const deliveryMonth = acceptanceMonth || safeMonthPart(task.actualDeliveryDate)
-  if (deliveryMonth) months.add(deliveryMonth)
-  if (months.size === 0) {
-    if (/^\d{4}-\d{2}$/.test(settlement)) months.add(settlement)
-    const created = safeMonthPart(task.date)
-    if (created) months.add(created)
-  }
-  return months
-}
-
-function taskHasMonthActivity(task: Task, month: string) {
-  return taskRelatedMonths(task).has(month)
-}
-
-function taskMinutesInMonth(task: Task, month: string) {
-  const minutes = taskTimeEntriesInMonth(task, month).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
-  if (minutes > 0) return minutes
-  if (billableTimeEntries(task).length === 0 && taskSettlementMonth(task) === month) {
-    return Math.round(task.actualHours * 60)
-  }
-  return 0
-}
-
-function taskHoursInMonth(task: Task, month: string) {
-  const roundedEntryHours = Number((taskMinutesInMonth(task, month) / 60).toFixed(2))
-  const settlement = taskSettlementMonth(task)
-  const totalHours = roundCents(Number(task.actualHours) || 0)
-  if (!isSupplementalTask(task) && settlement === month && billableTimeEntries(task).length > 0 && totalHours > 0) {
-    const otherHours = Array.from(taskRelatedMonths(task))
-      .filter((relatedMonth) => relatedMonth !== month)
-      .reduce((sum, relatedMonth) => sum + Number((taskMinutesInMonth(task, relatedMonth) / 60).toFixed(2)), 0)
-    return Math.max(0, roundCents(totalHours - otherHours))
-  }
-  return roundedEntryHours
-}
-
-function taskBillableHoursInMonth(task: Task, month: string) {
-  return isTaskBillable(task) ? taskHoursInMonth(task, month) : 0
-}
-
-function billableTaskAmountInMonth(task: Task, month: string, hourlyRate: number) {
-  return roundCents(taskBillableHoursInMonth(task, month) * hourlyRate)
-}
-
-function sumBillableAmountForMonth(tasks: Task[], month: string, hourlyRate: number, importedHours = 0) {
-  const taskAmount = tasks.reduce((sum, task) => sum + billableTaskAmountInMonth(task, month, hourlyRate), 0)
-  const importedAmount = importedHours > 0 ? roundCents(importedHours * hourlyRate) : 0
-  return roundCents(taskAmount + importedAmount)
-}
-
-function isDateValueInRange(value: string, startDate: string, endDate: string) {
-  const day = datePart(value || '')
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= startDate && day <= endDate
-}
-
-function taskTimeEntriesInDateRange(task: Task, startDate: string, endDate: string) {
-  return billableTimeEntries(task).filter((entry) => isDateValueInRange(timeEntryActivityValue(entry, task), startDate, endDate))
-}
-
-function taskBillableHoursInDateRange(task: Task, startDate: string, endDate: string) {
-  if (!isTaskBillable(task)) {
-    return 0
-  }
-  const minutes = taskTimeEntriesInDateRange(task, startDate, endDate).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
-  if (minutes > 0) {
-    return Number((minutes / 60).toFixed(2))
-  }
-  if (billableTimeEntries(task).length === 0 && isDateValueInRange(task.actualDeliveryDate || task.date, startDate, endDate)) {
-    return roundCents(Number(task.actualHours) || 0)
-  }
-  return 0
-}
-
-function taskHoursInDateRange(task: Task, startDate: string, endDate: string) {
-  const minutes = taskTimeEntriesInDateRange(task, startDate, endDate).reduce((sum, entry) => sum + minutesForTimeEntry(entry), 0)
-  if (minutes > 0) {
-    return Number((minutes / 60).toFixed(2))
-  }
-  if (billableTimeEntries(task).length === 0 && isDateValueInRange(task.actualDeliveryDate || task.date, startDate, endDate)) {
-    return roundCents(Number(task.actualHours) || 0)
-  }
-  return 0
 }
 
 function timeEntryBounds(entry: Pick<TimeEntry, 'date' | 'endDate' | 'start' | 'end'>) {
