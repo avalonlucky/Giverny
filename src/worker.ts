@@ -16798,6 +16798,105 @@ async function updateAiOperationAlert(env: Env, alertId: string, request: Reques
   return Number(result.meta?.changes) ? ok({ updated: true }) : fail('告警不存在', 404)
 }
 
+const CLIENT_ERROR_BODY_LIMIT = 16 * 1024
+
+async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<Record<string, unknown> | null> {
+  if (!request.body) return null
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function sanitizeClientErrorText(value: unknown, maxLength: number) {
+  const sanitized = String(value ?? '')
+    .replace(/https?:\/\/[^\s)]+/gi, '[url]')
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[email]')
+    .replace(/\b(?:sk|key|token)[-_][a-z0-9_-]{12,}\b/gi, '[secret]')
+  return Array.from(sanitized)
+    .filter((character) => character === '\n' || character === '\r' || character === '\t' || character.charCodeAt(0) >= 32)
+    .join('')
+    .slice(0, maxLength)
+}
+
+async function clientErrorFingerprint(parts: string[]) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(parts.join('|')))
+  return Array.from(new Uint8Array(digest).slice(0, 12), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function recordClientError(env: Env, request: Request) {
+  const requestUrl = new URL(request.url)
+  const origin = request.headers.get('origin')
+  const fetchSite = request.headers.get('sec-fetch-site')
+  if (!origin || fetchSite === 'cross-site') return fail('仅允许站内上报', 403)
+  try {
+    if (new URL(origin).host !== requestUrl.host) return fail('仅允许站内上报', 403)
+  } catch {
+    return fail('来源无效', 403)
+  }
+  if (!request.headers.get('content-type')?.includes('application/json')) return fail('请求格式无效', 415)
+  const body = await readLimitedJsonBody(request, CLIENT_ERROR_BODY_LIMIT)
+  if (!body) return fail('错误信息无效或过大', 413)
+
+  const kind = ['render', 'window-error', 'unhandled-rejection'].includes(String(body.kind)) ? String(body.kind) : 'window-error'
+  const message = sanitizeClientErrorText(body.message, 500) || '未知前端异常'
+  const stack = sanitizeClientErrorText(body.stack, 1600)
+  const componentStack = sanitizeClientErrorText(body.componentStack, 1200)
+  const rawPath = String(body.path || '/')
+  const path = (rawPath.startsWith('/') ? rawPath : '/').split(/[?#]/)[0].slice(0, 200) || '/'
+  const appVersion = sanitizeClientErrorText(body.appVersion, 40)
+  const userAgent = sanitizeClientErrorText(body.userAgent, 300)
+  const fingerprint = await clientErrorFingerprint([kind, message, componentStack.slice(0, 300)])
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
+  const principalId = principal?.principalId || 'anonymous'
+
+  await env.DB.prepare(
+    `INSERT INTO client_error_events (
+       id, workspace_id, principal_id, fingerprint, error_kind, message, stack,
+       component_stack, path, app_version, user_agent
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(workspace_id, fingerprint, app_version, path) DO UPDATE SET
+       occurrence_count = occurrence_count + 1,
+       principal_id = excluded.principal_id,
+       message = excluded.message,
+       stack = excluded.stack,
+       component_stack = excluded.component_stack,
+       user_agent = excluded.user_agent,
+       last_seen_at = CURRENT_TIMESTAMP`,
+  ).bind(
+    crypto.randomUUID(), workspaceId, principalId, fingerprint, kind, message, stack,
+    componentStack, path, appVersion, userAgent,
+  ).run()
+  console.error({ event: 'client_error', workspaceId, fingerprint, kind, path, appVersion })
+  return ok({ accepted: true }, 202)
+}
+
+async function purgeClientErrorEvents(env: Env) {
+  await env.DB.prepare("DELETE FROM client_error_events WHERE last_seen_at < datetime('now', '-90 days')").run()
+}
+
 async function getAiOperationsCenter(env: Env, request: Request) {
   await Promise.all([ensureAgentRunMetricsTable(env), ensureTaskLearningTables(env)])
   const requestedDays = Number(new URL(request.url).searchParams.get('days'))
@@ -16807,7 +16906,7 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   if (principal.role !== 'admin') return fail('仅管理员可以查看 AI 运行中心', 403)
   const workspaceId = principalWorkspaceId(principal)
   await recoverAgentAnalysisJobs(env, workspaceId)
-  const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows] = await Promise.all([
+  const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows, clientErrorRows] = await Promise.all([
     env.DB.prepare(
       `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
               selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
@@ -16848,6 +16947,15 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       `SELECT suggested_hours, actual_hours FROM hour_estimate_suggestions
        WHERE actual_hours IS NOT NULL AND actual_hours > 0 AND requested_at >= datetime('now', ?)`,
     ).bind(`-${Math.max(periodDays, 30)} days`).all<{ suggested_hours: number; actual_hours: number }>(),
+    env.DB.prepare(
+      `SELECT fingerprint, error_kind, message, path, app_version, occurrence_count, first_seen_at, last_seen_at
+       FROM client_error_events
+       WHERE workspace_id = ? AND last_seen_at >= datetime('now', ?)
+       ORDER BY last_seen_at DESC LIMIT 30`,
+    ).bind(workspaceId, `-${periodDays} days`).all<{
+      fingerprint: string; error_kind: string; message: string; path: string; app_version: string
+      occurrence_count: number; first_seen_at: string; last_seen_at: string
+    }>(),
   ])
   const metrics = metricRows.results ?? []
   const turns = (turnRows.results ?? []).map((item) => {
@@ -17005,6 +17113,20 @@ async function getAiOperationsCenter(env: Env, request: Request) {
         rejectedCount: Number(item.rejected_count) || 0,
         averageConfidence: Number(item.average_confidence) || 0,
         topReasonCategory: item.top_reason_category,
+      })),
+    },
+    clientErrors: {
+      totalOccurrences: (clientErrorRows.results ?? []).reduce((sum, item) => sum + (Number(item.occurrence_count) || 0), 0),
+      uniqueErrors: (clientErrorRows.results ?? []).length,
+      recent: (clientErrorRows.results ?? []).map((item) => ({
+        fingerprint: item.fingerprint,
+        kind: item.error_kind,
+        message: item.message,
+        path: item.path,
+        appVersion: item.app_version,
+        occurrences: Number(item.occurrence_count) || 1,
+        firstSeenAt: item.first_seen_at,
+        lastSeenAt: item.last_seen_at,
       })),
     },
     alerts: (alertRows.results ?? []).map((item) => ({
@@ -18256,6 +18378,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   // 公开接口：健康检查、登录、甲方分享页、文件预览（预览内部自行校验权限）
   const isPublic =
     path === '/api/health' ||
+    (path === '/api/client-errors' && request.method === 'POST') ||
     path.startsWith('/api/agent/') ||
     path.startsWith('/api/local-cli/bridge/') ||
     path === '/api/auth/login' ||
@@ -18340,6 +18463,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
 
   if (path === '/api/health') {
     return ok({ ok: true, storage: 'D1/R2', checkedAt: nowIso() })
+  }
+  if (path === '/api/client-errors' && request.method === 'POST') {
+    return recordClientError(env, request)
   }
   if (path === '/api/storage/usage') {
     return getStorageUsage(env)
@@ -18801,6 +18927,9 @@ export default {
     await processPendingAttachmentAnalyses(env, 1)
     await purgeAgentWriteOperations(env).catch((error) => {
       console.error('agent write operation cleanup failed', error)
+    })
+    await purgeClientErrorEvents(env).catch((error) => {
+      console.error('client error retention cleanup failed', error)
     })
     await runEventDrivenInsights(env, 1).catch((error) => {
       console.error('insight event trigger failed', error)

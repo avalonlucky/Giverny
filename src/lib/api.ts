@@ -266,6 +266,20 @@ export type AiOperationsCenter = {
       topReasonCategory: string
     }>
   }
+  clientErrors: {
+    totalOccurrences: number
+    uniqueErrors: number
+    recent: Array<{
+      fingerprint: string
+      kind: string
+      message: string
+      path: string
+      appVersion: string
+      occurrences: number
+      firstSeenAt: string
+      lastSeenAt: string
+    }>
+  }
   alerts: Array<{
     id: string
     type: string

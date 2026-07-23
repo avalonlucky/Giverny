@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { reportClientError } from '../lib/clientErrorReporter'
 
 type AppErrorBoundaryProps = {
   children: ReactNode
@@ -17,6 +18,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[Giverny] render failed', error, errorInfo)
+    reportClientError({ kind: 'render', error, componentStack: errorInfo.componentStack || '' })
   }
 
   render() {

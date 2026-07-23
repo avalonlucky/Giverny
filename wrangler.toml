@@ -17,6 +17,10 @@ routes = [
   { pattern = "www.mayeai.com/*", zone_name = "mayeai.com" }
 ]
 
+[observability]
+enabled = true
+head_sampling_rate = 0.1
+
 # AI 调用统一走 Cloudflare AI Gateway（缓存提速 / 失败重试 / 用量看板 / 抗 503）。
 # 只改 base URL 指向网关对应 provider；API key 由网关透传给上游，无需额外网关鉴权。
 [vars]

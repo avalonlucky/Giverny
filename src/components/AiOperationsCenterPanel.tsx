@@ -191,6 +191,34 @@ export default function AiOperationsCenterPanel({
               </div>
             ) : <p className="calendar-empty-hint">新的 Agent 请求完成后，这里会显示可核对的执行记录。</p>}
           </section>
+          <section className="ai-agent-audit-section" aria-label="前端运行异常">
+            <div className="ai-agent-audit-heading">
+              <div>
+                <h3>前端运行异常</h3>
+                <p>最近 {operations.periodDays} 天 {operations.clientErrors.uniqueErrors} 类 · 累计 {operations.clientErrors.totalOccurrences} 次</p>
+              </div>
+              <small>不保存输入内容、附件或 URL 查询参数</small>
+            </div>
+            {operations.clientErrors.recent.length ? (
+              <div className="ai-operations-list ai-agent-audit-list">
+                {operations.clientErrors.recent.slice(0, 10).map((item) => (
+                  <details key={`${item.fingerprint}-${item.appVersion}-${item.path}`}>
+                    <summary>
+                      <div>
+                        <strong>{item.message}</strong>
+                        <small>{item.path} · v{item.appVersion || '未知'} · 最近 {item.lastSeenAt}</small>
+                      </div>
+                      <span className="status-failed">{item.occurrences} 次</span>
+                    </summary>
+                    <div className="ai-agent-audit-detail">
+                      <p>类型：{item.kind} · 首次：{item.firstSeenAt}</p>
+                      <p>指纹：{item.fingerprint}</p>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : <p className="calendar-empty-hint">当前周期没有记录到前端运行异常。</p>}
+          </section>
           <div className="ai-operations-columns">
             <section>
               <h3>最近路由</h3>

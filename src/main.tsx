@@ -5,6 +5,9 @@ import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import SharedReport from './SharedReport.tsx'
 import SharedSettlementExport from './SharedSettlementExport.tsx'
+import { installGlobalErrorReporting } from './lib/clientErrorReporter'
+
+installGlobalErrorReporting()
 
 const shareMatch = window.location.pathname.match(/^\/share\/([\w-]+)/)
 const settlementShareMatch = window.location.pathname.match(/^\/settlement-share\/([\w-]+)/)
