@@ -101,7 +101,6 @@ import {
   type DailyKnowledgeSuggestion,
   type HourEstimateSuggestion,
   type HourEstimateMetrics,
-  type LocalCliDevice,
   type ReportRecord,
   type SettlementExportRecord,
   type StorageUsage,
@@ -129,6 +128,9 @@ import { FilePreviewModal } from './components/FilePreviewModal'
 import { CommandPalette, ImageLightbox, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
 import { ActiveTaskFilters, StatCard, StatusBadge, StatusDotLabel, TaskSearchBox } from './components/TaskUi'
 import { EmptyState } from './components/EmptyState'
+import { GivernyModeSettings } from './components/GivernyModeSettings'
+import { initializeGivernyTheme } from './lib/givernyTheme'
+import { localCliBrowserDeviceKey, localCliRuntimeReady } from './lib/localCli'
 import { formatFileSize } from './lib/format'
 import { fileDocumentPreviewSource, fileThumbnailSource, fileTypeForAsset, fileTypeForFile, inferFileType, isInlineDocumentFileType, isInlineImageFileType, isOfficeFileType, videoFileTypes } from './lib/fileTypes'
 import { canRecordNewProgress, hasAcceptanceProgress, isTaskStarted, snapProgress, taskDisplayProgress } from './lib/taskProgress'
@@ -143,6 +145,7 @@ import antigravityBrandIcon from '@lobehub/icons-static-svg/icons/antigravity-co
 const AiOperationsCenterPanel = lazy(() => import('./components/AiOperationsCenterPanel'))
 const SemanticSearchModal = lazy(() => import('./components/SemanticSearchModal'))
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
+const LocalCliConnectionPanel = lazy(() => import('./components/LocalCliConnectionPanel'))
 import claudeBrandIcon from '@lobehub/icons-static-svg/icons/claude-color.svg?url'
 import cloudflareBrandIcon from '@lobehub/icons-static-svg/icons/cloudflare-color.svg?url'
 import codexBrandIcon from '@lobehub/icons-static-svg/icons/codex-color.svg?url'
@@ -158,46 +161,7 @@ import anthropicBrandIcon from '@lobehub/icons-static-svg/icons/anthropic.svg?ur
 import microsoftExcelIcon from './assets/microsoft-excel.svg?url'
 import './App.css'
 
-// 吉维尼模式：可选的莫奈花园整套色系（默认关，用户在设置里手动开启）。开启后主题随季节走，
-// 季节默认「跟随当前日期」，也可手动指定。仅吉维尼模式下季节才影响主题；工具模式主色恒定。
-type SeasonKey = 'spring' | 'summer' | 'autumn' | 'winter'
-type SeasonPref = 'auto' | SeasonKey
-const GIVERNY_MODE_KEY = 'giverny-mode'
-const GIVERNY_SEASON_KEY = 'giverny-season'
-
-// 北半球：3-5 春、6-8 夏、9-11 秋、12/1/2 冬。
-function seasonOfMonth(month1to12: number): SeasonKey {
-  if (month1to12 >= 3 && month1to12 <= 5) return 'spring'
-  if (month1to12 >= 6 && month1to12 <= 8) return 'summer'
-  if (month1to12 >= 9 && month1to12 <= 11) return 'autumn'
-  return 'winter'
-}
-function currentSeason(): SeasonKey {
-  return seasonOfMonth(new Date().getMonth() + 1)
-}
-function readSeasonPref(): SeasonPref {
-  try {
-    const raw = window.localStorage.getItem(GIVERNY_SEASON_KEY)
-    if (raw === 'spring' || raw === 'summer' || raw === 'autumn' || raw === 'winter') return raw
-  } catch {
-    // 忽略
-  }
-  return 'auto'
-}
-function resolveSeason(pref: SeasonPref = readSeasonPref()): SeasonKey {
-  return pref === 'auto' ? currentSeason() : pref
-}
-// 模块加载即执行，先于首帧渲染，无闪烁。
-if (typeof document !== 'undefined') {
-  document.documentElement.dataset.season = resolveSeason()
-  try {
-    if (window.localStorage.getItem(GIVERNY_MODE_KEY) === 'on') {
-      document.documentElement.dataset.giverny = 'on'
-    }
-  } catch {
-    // 忽略隐私模式下的 localStorage 异常
-  }
-}
+initializeGivernyTheme()
 
 const navItems = [
   { label: '工作台', icon: LayoutDashboard },
@@ -10056,103 +10020,6 @@ function Fireworks() {
   )
 }
 
-// 设置页 · 吉维尼模式：默认关闭，用户手动开启。开启后主题随季节自动流转，也可手动指定季节。
-function GivernyModeSettings() {
-  const [on, setOn] = useState<boolean>(() =>
-    typeof document !== 'undefined' && document.documentElement.dataset.giverny === 'on',
-  )
-  const [seasonPref, setSeasonPref] = useState<SeasonPref>(() => readSeasonPref())
-  const applyMode = (next: boolean) => {
-    setOn(next)
-    if (next) {
-      document.documentElement.dataset.giverny = 'on'
-    } else {
-      delete document.documentElement.dataset.giverny
-    }
-    try {
-      window.localStorage.setItem(GIVERNY_MODE_KEY, next ? 'on' : 'off')
-    } catch {
-      // 忽略持久化失败
-    }
-  }
-  const applySeason = (pref: SeasonPref) => {
-    setSeasonPref(pref)
-    try {
-      if (pref === 'auto') {
-        window.localStorage.removeItem(GIVERNY_SEASON_KEY)
-      } else {
-        window.localStorage.setItem(GIVERNY_SEASON_KEY, pref)
-      }
-    } catch {
-      // 忽略
-    }
-    document.documentElement.dataset.season = resolveSeason(pref)
-  }
-  const seasons: Array<[SeasonKey, string]> = [
-    ['spring', '春 · 萌芽'],
-    ['summer', '夏 · 盛放'],
-    ['autumn', '秋 · 暮光'],
-    ['winter', '冬 · 冷静'],
-  ]
-  const autoLabel: Record<SeasonKey, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
-  return (
-    <details className="settings-group-panel" open>
-      <summary className="settings-group-summary">
-        <div>
-          <h2>外观 · 吉维尼模式</h2>
-          <p>莫奈花园主题，随季节自然流转</p>
-        </div>
-        <ChevronDown size={18} />
-      </summary>
-      <div className="settings-group-body">
-        <section className="panel giverny-settings-panel">
-          <div className="panel-header compact">
-            <div>
-              <h2>吉维尼模式</h2>
-              <p>致敬莫奈的睡莲池。开启后整站切换到莫奈花园色系，主题随季节流转。默认关闭，冷静的工具模式不受影响。</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={on}
-              className={`giverny-toggle ${on ? 'on' : ''}`}
-              onClick={() => applyMode(!on)}
-            >
-              <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
-              <span className="giverny-toggle-label">{on ? '已开启' : '已关闭'}</span>
-            </button>
-          </div>
-          {on && (
-            <div className="giverny-season-pref">
-              <span className="giverny-season-pref-title">季节</span>
-              <div className="giverny-season-options" role="group" aria-label="季节选择">
-                <button
-                  type="button"
-                  className={seasonPref === 'auto' ? 'active' : ''}
-                  onClick={() => applySeason('auto')}
-                >
-                  跟随当前季节（{autoLabel[currentSeason()]}）
-                </button>
-                {seasons.map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={seasonPref === key ? 'active' : ''}
-                    onClick={() => applySeason(key)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <p className="giverny-season-hint">默认跟随当前真实季节；也可手动锁定某一季。</p>
-            </div>
-          )}
-        </section>
-      </div>
-    </details>
-  )
-}
-
 function DashboardTaskSidebar({
   task,
   files,
@@ -17671,247 +17538,6 @@ function formatAgentMetricDuration(value: number) {
   return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s`
 }
 
-const LOCAL_CLI_BROWSER_KEY = 'giverny-local-cli-browser-device'
-const LOCAL_CLI_RUNTIME_VERSION = '0.4.0'
-
-function localCliRuntimeReady(version: string) {
-  const current = String(version || '').split('.').map((item) => Number(item.replace(/\D.*$/, '')) || 0)
-  const required = LOCAL_CLI_RUNTIME_VERSION.split('.').map(Number)
-  for (let index = 0; index < Math.max(current.length, required.length); index += 1) {
-    if ((current[index] || 0) > (required[index] || 0)) return true
-    if ((current[index] || 0) < (required[index] || 0)) return false
-  }
-  return true
-}
-
-function localCliBrowserDeviceKey() {
-  try {
-    const existing = window.localStorage.getItem(LOCAL_CLI_BROWSER_KEY)
-    if (existing) return existing
-    const created = crypto.randomUUID()
-    window.localStorage.setItem(LOCAL_CLI_BROWSER_KEY, created)
-    return created
-  } catch {
-    return crypto.randomUUID()
-  }
-}
-
-function LocalCliConnectionPanel() {
-  const [browserDeviceKey] = useState(localCliBrowserDeviceKey)
-  const [devices, setDevices] = useState<LocalCliDevice[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  const [pairing, setPairing] = useState<{ code: string; expiresAt: string; bridgeUrl: string } | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [installTarget, setInstallTarget] = useState<'unix' | 'windows'>(() => /Windows/i.test(window.navigator.userAgent) ? 'windows' : 'unix')
-
-  const loadDevices = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true)
-    try {
-      const result = await api.getLocalCliDevices(browserDeviceKey)
-      setDevices(result.devices)
-      setError('')
-      if (result.devices.length > 0) setPairing(null)
-    } catch (reason) {
-      if (!quiet) setError(reason instanceof Error ? reason.message : '读取本机 CLI 状态失败')
-    } finally {
-      if (!quiet) setLoading(false)
-    }
-  }, [browserDeviceKey])
-
-  useEffect(() => {
-    const initialTimer = window.setTimeout(() => void loadDevices(), 0)
-    const timer = window.setInterval(() => void loadDevices(true), 8_000)
-    return () => {
-      window.clearTimeout(initialTimer)
-      window.clearInterval(timer)
-    }
-  }, [loadDevices])
-
-  const startPairing = async () => {
-    setBusy('pair')
-    setError('')
-    try {
-      setPairing(await api.createLocalCliPairing(browserDeviceKey))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '创建配对码失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const installCommand = pairing
-    ? installTarget === 'windows'
-      ? `$dir = Join-Path $HOME '.giverny'; New-Item -ItemType Directory -Force -Path $dir | Out-Null; Invoke-WebRequest -Uri '${pairing.bridgeUrl}' -OutFile (Join-Path $dir 'bridge.mjs'); node (Join-Path $dir 'bridge.mjs') pair ${pairing.code} --server ${window.location.origin}; node (Join-Path $dir 'bridge.mjs') start`
-      : `mkdir -p ~/.giverny && curl -fsSL ${pairing.bridgeUrl} -o ~/.giverny/bridge.mjs && node ~/.giverny/bridge.mjs pair ${pairing.code} --server ${window.location.origin} && node ~/.giverny/bridge.mjs start`
-    : ''
-
-  const copyInstallCommand = async () => {
-    if (!installCommand) return
-    await navigator.clipboard.writeText(installCommand)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
-  }
-
-  const waitForCommand = async (commandId: string) => {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 900))
-      const result = await api.getLocalCliCommand(commandId)
-      if (result.status === 'completed') return
-      if (result.status === 'failed' || result.status === 'expired') throw new Error(result.error || '扫描未完成，请确认 Bridge 仍在运行')
-    }
-    throw new Error('扫描超时，请确认本机 Bridge 仍在运行')
-  }
-
-  const scanDevice = async (device: LocalCliDevice) => {
-    setBusy(`scan:${device.id}`)
-    setError('')
-    try {
-      const queued = await api.scanLocalCliDevice(device.id)
-      await waitForCommand(queued.commandId)
-      await loadDevices(true)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'CLI 扫描失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const selectCli = async (device: LocalCliDevice, cliId: string) => {
-    setBusy(`select:${device.id}:${cliId}`)
-    setError('')
-    try {
-      const result = await api.selectLocalCliAdapter(device.id, cliId)
-      setDevices((current) => current.map((item) => item.id === result.device.id ? result.device : item))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'CLI 连接失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const statusLabel = (status: LocalCliDevice['clis'][number]['status']) => {
-    if (status === 'available') return '可用'
-    if (status === 'needs_auth') return '需要登录'
-    if (status === 'unsupported') return '待适配'
-    if (status === 'not_installed') return '未安装'
-    return '不可用'
-  }
-
-  return (
-    <div className="settings-group-body settings-tab-body">
-      <section className="panel local-cli-panel">
-        <div className="panel-header compact local-cli-panel-header">
-          <div>
-            <h2>本机 CLI 连接</h2>
-            <p>识别当前网页登录电脑上的 Agent CLI；设备按登录账号隔离，不会把合作伙伴的命令发送到其他人的电脑。</p>
-          </div>
-          <div className="local-cli-header-actions">
-            <a className="ghost-button compact-button" href="/giverny-bridge.mjs" download>下载连接器</a>
-            {devices.length === 0 ? (
-              <button type="button" className="soft-primary-button compact-button" onClick={() => void startPairing()} disabled={busy === 'pair'}>
-                <Search size={14} />
-                {busy === 'pair' ? '准备中…' : '扫描这台电脑'}
-              </button>
-            ) : (
-              <button type="button" className="soft-primary-button compact-button" onClick={() => void scanDevice(devices[0])} disabled={!devices[0].online || busy.startsWith('scan:')}>
-                <RotateCcw size={14} />
-                {busy.startsWith('scan:') ? '测试中…' : '测试并重新扫描'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {error && <p className="settings-inline-error local-cli-error">{error}</p>}
-        {loading && <p className="calendar-empty-hint">正在读取本机连接状态…</p>}
-
-        {!loading && devices.length === 0 && !pairing && (
-          <div className="local-cli-empty">
-            <Bot size={25} />
-            <strong>尚未连接这台电脑</strong>
-            <p>点击「扫描这台电脑」生成一次性配对码。连接器只向 Giverny 发起出站请求，不开放本机端口。</p>
-          </div>
-        )}
-
-        {pairing && (
-          <div className="local-cli-pairing">
-            <div className="local-cli-pairing-code">
-              <span>10 分钟一次性配对码</span>
-              <strong>{pairing.code.slice(0, 4)} {pairing.code.slice(4)}</strong>
-              <small>过期时间：{new Date(pairing.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</small>
-            </div>
-            <div className="local-cli-pairing-command">
-              <div className="local-cli-install-target">
-                <span>在当前电脑的终端运行</span>
-                <div role="group" aria-label="选择电脑系统">
-                  <button type="button" className={installTarget === 'unix' ? 'active' : ''} onClick={() => setInstallTarget('unix')}>macOS / Linux</button>
-                  <button type="button" className={installTarget === 'windows' ? 'active' : ''} onClick={() => setInstallTarget('windows')}>Windows</button>
-                </div>
-              </div>
-              <code>{installCommand}</code>
-              <button type="button" className="ghost-button compact-button" onClick={() => void copyInstallCommand()}>
-                <Copy size={14} /> {copied ? '已复制' : '复制命令'}
-              </button>
-            </div>
-            <p>命令运行后，本页会自动识别当前浏览器对应的电脑。关闭终端会离线；后续将提供系统开机自启安装器。</p>
-          </div>
-        )}
-
-        {devices.map((device) => (
-          <article className="local-cli-device" key={device.id}>
-            <header>
-              <div>
-                <span className={`local-cli-online-dot ${device.online ? 'online' : ''}`} />
-                <strong>{device.name}</strong>
-                <small>{device.platform} · {device.arch} · Bridge {device.bridgeVersion || '未知版本'}</small>
-              </div>
-              <em className={device.online ? 'online' : ''}>{device.online ? 'Bridge 已在线' : 'Bridge 已离线'}</em>
-            </header>
-            {device.online && !localCliRuntimeReady(device.bridgeVersion) && (
-              <p className="settings-inline-error local-cli-error">连接器版本过旧。请重新下载并启动 Bridge {LOCAL_CLI_RUNTIME_VERSION}，否则工作助手会继续回退云端。</p>
-            )}
-            <div className="local-cli-list">
-              {device.clis.map((cli) => {
-                const runtimeReady = localCliRuntimeReady(device.bridgeVersion)
-                const connected = device.online && runtimeReady && cli.selected
-                const selectedNeedsUpdate = device.online && cli.selected && !runtimeReady
-                const selectable = device.online && runtimeReady && cli.status === 'available'
-                return (
-                  <div className={`local-cli-row ${connected ? 'connected' : ''}`} key={cli.id}>
-                    <div className="local-cli-row-icon"><AiBrandIcon brand={aiBrandForValue(cli.id)} size={20} /></div>
-                    <div className="local-cli-row-main">
-                      <strong>{cli.name}</strong>
-                      <span>{cli.version || cli.detail}</span>
-                      {cli.version && <small>{cli.detail}</small>}
-                    </div>
-                    <div className="local-cli-row-capabilities">
-                      {cli.supportsStreaming && <span>流式步骤</span>}
-                      {cli.supportsMcp && <span>MCP</span>}
-                    </div>
-                    <div className="local-cli-row-status">
-                      <em className={`status-${cli.status}`}>{connected ? '已连接并用于工作助手' : selectedNeedsUpdate ? '需更新 Bridge' : statusLabel(cli.status)}</em>
-                      <button
-                        type="button"
-                        className={connected ? 'ghost-button compact-button' : 'primary-button compact-button'}
-                        disabled={!selectable || connected || selectedNeedsUpdate || busy.startsWith('select:')}
-                        onClick={() => void selectCli(device, cli.id)}
-                      >
-                        {connected ? <><CheckCircle2 size={14} /> 已连接</> : selectedNeedsUpdate ? '需更新' : '连接'}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </article>
-        ))}
-        <p className="settings-tool-note local-cli-note">连接后，工作助手的普通问答、站内只读查询和本机文件任务会优先使用当前电脑的 CLI；创建、修改、记录进展和验收等站内写入仍交给云端 Agent 生成确认草稿。本机离线、超时或执行失败时会自动回退云端。</p>
-      </section>
-    </div>
-  )
-}
-
 type SettingsTab = 'appearance' | 'settlement' | 'ai' | 'local-cli' | 'design' | 'security' | 'system'
 
 function SettingsView({
@@ -18806,7 +18432,11 @@ function SettingsView({
           </section>
         </div>
       )}
-      {settingsTab === 'local-cli' && <LocalCliConnectionPanel />}
+      {settingsTab === 'local-cli' && (
+        <Suspense fallback={<p className="calendar-empty-hint">正在载入本机 CLI 设置…</p>}>
+          <LocalCliConnectionPanel renderCliIcon={(cliId) => <AiBrandIcon brand={aiBrandForValue(cliId)} size={20} />} />
+        </Suspense>
+      )}
       {settingsTab === 'ai' && role === 'admin' && (
         <div className="settings-group-body settings-tab-body">
             <section className="panel model-provider-dashboard">
