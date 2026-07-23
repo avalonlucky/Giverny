@@ -76,8 +76,15 @@
 │   │   └── initialData.ts
 │   ├── lib/
 │   │   ├── api.ts
+│   │   ├── fileMetadata.ts
 │   │   ├── format.ts
-│   │   └── psdPreview.ts
+│   │   ├── month.ts
+│   │   ├── previewTimeout.ts
+│   │   ├── psdPreview.ts
+│   │   └── taskSettlement.ts
+│   ├── views/
+│   │   ├── FilesView.tsx
+│   │   └── KnowledgeView.tsx
 │   ├── types/
 │   │   ├── agent.ts
 │   │   └── domain.ts
@@ -108,6 +115,7 @@
 - Main admin UI and route state: `src/App.tsx`
 - Visual system and layout: `src/App.css`
 - Client share page: `src/SharedReport.tsx`
+- Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Frontend API client and auth headers: `src/lib/api.ts`
 - PSD preview helper: `src/lib/psdPreview.ts`
 - Worker API backend: `src/worker.ts`

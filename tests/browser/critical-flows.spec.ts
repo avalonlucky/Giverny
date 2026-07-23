@@ -49,6 +49,18 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('文件库按需加载并可打开验收文件详情', async ({ page }) => {
+  await page.getByRole('button', { name: '切换到文件库' }).click()
+  await expect(page).toHaveURL(/\/files$/)
+  await expect(page.getByText('按项目归档 · 点进项目查看验收交付件，AI 已自动解析', { exact: true })).toBeVisible()
+
+  await page.getByText('直播设计', { exact: true }).click()
+  const fileCard = page.locator('[data-file-id="101"]')
+  await expect(fileCard.getByText('当天邀请V1.0B01.jpg', { exact: true })).toBeVisible()
+  await fileCard.click()
+  await expect(page.getByRole('complementary', { name: '当天邀请V1.0B01.jpg 文件详情' })).toBeVisible()
+})
+
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const input = page.getByPlaceholder('向爱丽丝提问…')
