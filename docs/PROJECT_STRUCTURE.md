@@ -155,6 +155,11 @@
 │   │   └── knowledge.ts
 │   ├── App.css
 │   ├── App.tsx
+│   ├── router.tsx
+│   ├── routes/
+│   │   ├── AdminRoute.tsx
+│   │   ├── SharedReportRoute.tsx
+│   │   └── SharedSettlementRoute.tsx
 │   ├── agentToolRegistry.ts
 │   ├── agentOrchestrator.ts
 │   ├── agentScope.ts
@@ -177,7 +182,8 @@
 
 ## Debug Entry Points
 
-- Main admin UI and route state: `src/App.tsx`
+- Browser route tree, redirects and public/admin lazy boundaries: `src/router.tsx`, `src/routes/`
+- Main admin shell, route-derived view composition and business orchestration: `src/App.tsx`
 - Cross-view UI state and persisted view preferences: `src/stores/uiStore.ts`
 - Authentication, role and access-token state: `src/stores/authStore.ts`
 - Task, progress-update and settlement-report entities: `src/stores/taskStore.ts`
@@ -262,6 +268,8 @@
 - Main-entry size regression guard: `scripts/check-app-entry-size.mjs` (`App.tsx` maximum 1,000 lines)
 - State-ownership regression guard: `scripts/check-state-architecture.mjs` (six Zustand stores; no cross-view `useState / useReducer` in `App` or workspace hydration)
 - CSS architecture regression guard: `scripts/check-css-architecture.mjs` (`App.css` import-only; 13 ordered domains; 4,500-line module cap)
+- Routing architecture regression guard: `scripts/check-routing-architecture.mjs` (single RouterProvider; no pathname regex dispatch; public share routes lazy-loaded)
+- Deployment architecture regression guard: `scripts/check-deployment-architecture.mjs` (production deploy scripts must use Cloudflare HTTP API Direct Upload and must not invoke Wrangler)
 - AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation
@@ -294,6 +302,7 @@
 - Frontend state is split into six Zustand business domains. Component-local form drafts remain local React state; cross-view UI and server-mirrored entities must use the appropriate store.
 - Backend hydration commits auth, task, file and settings snapshots atomically by domain. The existing versioned 30-minute boot cache remains an acceleration layer, not a second source of truth.
 - CSS keeps one public entry (`App.css`) while implementation rules live in 13 ordered business-domain modules under `src/styles/`. This preserves the existing global class contract and cascade while preventing another 25K-line stylesheet.
+- React Router owns one declarative route tree for admin and public share pages. Route metadata selects the active admin view, while public reports and settlement receipts load through independent route chunks; root, legacy and unknown paths use explicit redirects.
 - Production data is stored in Cloudflare D1 `designer-worklog-db`.
 - Production files are stored in Cloudflare R2 `designer-worklog-uploads`.
 - The former staging site and its separate D1/R2 resources have been removed. Validate locally, then deploy the production Worker directly.

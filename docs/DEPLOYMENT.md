@@ -50,16 +50,14 @@
 npm run lint
 npm run build
 npm run agent:quality:gate
-mkdir -p /private/tmp/giverny-npm-cache
-env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u http_proxy \
-  npm_config_cache=/private/tmp/giverny-npm-cache \
-  WRANGLER_LOG_PATH=/private/tmp/giverny-wrangler.log \
-  npx wrangler deploy
+npm run deploy:production
 ```
 
-桌面沙箱下不要直接使用用户级 `~/.npm` 缓存或 `~/.wrangler/logs`：这些目录可能因旧权限或沙箱写入限制导致 `EPERM`。正式部署统一把临时 npm 缓存和 Wrangler 日志都指向 `/private/tmp`，无需修改系统权限。
+### 禁止 Wrangler
 
-如果直连 Cloudflare API 在 DNS 或网络层面超时，而默认代理可以访问 `https://api.cloudflare.com/client/v4/`，可以保留代理环境变量重试部署，但仍要保留上面的 `npm_config_cache=/private/tmp/giverny-npm-cache` 和 `WRANGLER_LOG_PATH=/private/tmp/giverny-wrangler.log`，便于排查。
+用户已明确要求永久停用 Wrangler。不得执行 `wrangler` / `npx wrangler`，也不得在 Direct Upload 失败时回退 Wrangler。`scripts/deploy-cloudflare-api.mjs` 使用 Cloudflare 官方 Workers Scripts 与 Static Assets HTTP API，自动继承线上已有绑定并上传新 Worker 模块和 `dist` 资源。
+
+发布凭证优先读取 `CLOUDFLARE_API_TOKEN`；首次运行可把旧 OAuth 凭证迁移到 `~/.config/giverny/cloudflare-auth.json`（权限 `0600`），迁移后发布器不再读取旧目录。API 认证失败时应更新 Giverny 凭证，不能恢复 Wrangler。
 
 ## 数据安全
 

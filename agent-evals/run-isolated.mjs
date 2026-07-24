@@ -10,10 +10,21 @@ import { runWranglerD1 } from './run-wrangler-d1.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-agent-eval-'))
 const children = []
+const proxyEnvKeys = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+const localProcessEnv = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !proxyEnvKeys.has(key))),
+  NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost',
+}
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: 'inherit', ...options })
+    const { env = {}, ...spawnOptions } = options
+    const child = spawn(command, args, {
+      cwd: root,
+      stdio: 'inherit',
+      ...spawnOptions,
+      env: { ...localProcessEnv, ...env },
+    })
     child.on('error', reject)
     child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with ${code}`)))
   })
@@ -22,7 +33,7 @@ function run(command, args, options = {}) {
 function start(command, args, env = {}) {
   const child = spawn(command, args, {
     cwd: root,
-    env: { ...process.env, ...env },
+    env: { ...localProcessEnv, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   })
@@ -1979,8 +1990,8 @@ async function runHourEstimateLearningCheck(cookie) {
 }
 
 try {
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root })
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root })
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root, env: localProcessEnv })
+  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root, env: localProcessEnv })
   start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: '8898' })
   start('npx', ['wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--port', '8798'])
   await waitForHealth('http://127.0.0.1:8798/api/health')

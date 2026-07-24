@@ -51,4 +51,4 @@ for (const [index, suite] of suites.entries()) {
   }
 }
 
-console.log('\n浏览器回归全部通过：桌面 36/36，移动 36/36。')
+console.log(`\n浏览器回归全部通过：桌面 ${testTitles.length}/${testTitles.length}，移动 ${testTitles.length}/${testTitles.length}。`)

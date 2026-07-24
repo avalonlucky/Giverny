@@ -41,6 +41,7 @@ Giverny —— 设计兼职任务管理与结算工具。
 
 ## 发布纪律
 
+- **永久禁止使用 Wrangler CLI**：本项目的本地检修和正式部署都不要再执行 `wrangler` / `npx wrangler`。正式发布只允许使用 `npm run deploy:production`（Cloudflare 官方 HTTP API Direct Upload）；如该链路失败，应修复 API 发布器，禁止回退 Wrangler 重试。
 - 只有影响网站本体的正式更新才需要版本记录：包括功能、UI、交互、数据口径、部署配置、数据库 / R2 / Worker 行为、用户可见文案等。
 - README、仓库首页、多语言说明、handoff、内部协作说明这类不影响网站运行的文档调整，只需要普通 commit / push，不需要递增版本号、不需要 tag、不需要 GitHub Release。
 - 网站更新默认一次闭环：完成本地验证后部署正式站，线上关键路径回归通过即继续完成代码提交、推送、版本 tag 和 GitHub Release，不再额外等待用户验收确认。

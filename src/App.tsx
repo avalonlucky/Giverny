@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { Outlet, useLocation, useMatches, useNavigate } from 'react-router'
 import {
   AlertTriangle,
   Archive,
@@ -38,7 +38,8 @@ import { useSettingsOperations } from './hooks/useSettingsOperations'
 import { useTaskOperations } from './hooks/useTaskOperations'
 import { useAppShortcuts } from './hooks/useAppShortcuts'
 import { useUiStore } from './stores/uiStore'
-import type { AppView, FileAsset, Task, TaskFilter, TaskViewMode } from './types/domain'
+import { appViewPath, taskViewModeFromSearch, type AppRouteHandle } from './lib/appRoutes'
+import type { AppView, FileAsset, Task, TaskFilter } from './types/domain'
 
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
 const FilesView = lazy(() => import('./views/FilesView'))
@@ -61,42 +62,6 @@ const navItems = [
   { label: '知识库', icon: BookOpen, adminOnly: true },
 ]
 
-const viewRoutes: Record<AppView, string> = {
-  工作台: '/dashboard',
-  任务: '/tasks',
-  文件库: '/files',
-  洞察: '/insights',
-  收入: '/income',
-  结算: '/reports',
-  设置: '/settings',
-  知识库: '/knowledge',
-}
-
-const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
-
-
-function viewFromPath(pathname: string): AppView {
-  if (pathname === '/updates') {
-    return '任务'
-  }
-  return routeViews[pathname] ?? '工作台'
-}
-
-function taskViewModeFromSearch(search: string): TaskViewMode {
-  const value = new URLSearchParams(search).get('taskView')
-  if (value === 'calendar' || value === '日历') return '日历'
-  return '列表'
-}
-
-function taskViewRoute(view: AppView, mode: TaskViewMode) {
-  if (view !== '任务') {
-    return viewRoutes[view]
-  }
-  if (mode === '日历') return `${viewRoutes[view]}?taskView=calendar`
-  return viewRoutes[view]
-}
-
-
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
 
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
@@ -106,8 +71,12 @@ const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', 
 
 function App() {
   const location = useLocation()
+  const matches = useMatches()
   const routerNavigate = useNavigate()
-  const activeView = viewFromPath(location.pathname)
+  const activeView = matches.reduce<AppView>((view, match) => {
+    const handle = match.handle as AppRouteHandle | undefined
+    return handle?.appView ?? view
+  }, '工作台')
   const taskViewMode = taskViewModeFromSearch(location.search)
   const {
     calendarDisplayMode, setCalendarDisplayMode, calendarFocusDate, setCalendarFocusDate,
@@ -233,7 +202,7 @@ function App() {
 
   const navigateView = (view: AppView) => {
     setIsAccountMenuOpen(false)
-    const nextPath = taskViewRoute(view, taskViewMode)
+    const nextPath = appViewPath(view, taskViewMode)
     if (`${location.pathname}${location.search}` !== nextPath) {
       routerNavigate(nextPath, { state: { view, taskViewMode } })
     }
@@ -261,14 +230,6 @@ function App() {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [isAccountMenuOpen, setIsAccountMenuOpen])
-
-  useEffect(() => {
-    const canonicalPath = taskViewRoute(activeView, taskViewMode)
-    if (`${location.pathname}${location.search}` !== canonicalPath) {
-      routerNavigate(canonicalPath, { replace: true, state: { view: activeView, taskViewMode } })
-    }
-  }, [activeView, location.pathname, location.search, routerNavigate, taskViewMode])
-
 
   const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
 
@@ -639,8 +600,7 @@ function App() {
           <Suspense fallback={<p className="calendar-empty-hint">正在载入任务管理…</p>}>
           <TasksView
             viewMode={taskViewMode}
-            onViewModeChange={(mode) => routerNavigate(taskViewRoute('任务', mode), {
-              replace: true,
+            onViewModeChange={(mode) => routerNavigate(appViewPath('任务', mode), {
               state: { view: '任务', taskViewMode: mode },
             })}
             calendarMode={calendarDisplayMode}
@@ -925,6 +885,7 @@ function App() {
         toastQueue={toastQueue}
         onDismissToast={dismissToast}
       />
+      <Outlet />
     </main>
   )
 }

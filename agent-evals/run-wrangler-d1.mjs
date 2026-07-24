@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process'
 import process from 'node:process'
 
-export function runWranglerD1(command, args, { cwd }) {
+export function runWranglerD1(command, args, { cwd, env = process.env }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       detached: true,
-      env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
+      env: { ...env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let settled = false

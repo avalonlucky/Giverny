@@ -43,6 +43,45 @@ test.beforeEach(async ({ page }) => {
 })
 
 test.describe('基础流程分片', () => {
+test('正式路由树处理重定向、未知地址与任务视图历史', async ({ page }) => {
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByRole('heading', { name: /2026 年 7 月工作台/ })).toBeVisible()
+
+  await page.goto('/updates')
+  await expect(page).toHaveURL(/\/tasks$/)
+  await expect(page.getByRole('heading', { name: '任务管理' })).toBeVisible()
+
+  await page.goto('/route-that-does-not-exist')
+  await expect(page).toHaveURL(/\/dashboard$/)
+
+  await page.getByRole('button', { name: '切换到任务' }).click()
+  await page.getByRole('button', { name: '日历视图', exact: true }).click()
+  await expect(page).toHaveURL(/\/tasks\?taskView=calendar$/)
+  await expect(page.getByRole('heading', { name: '任务日历' })).toBeVisible()
+  await page.getByRole('button', { name: '列表视图', exact: true }).click()
+  await expect(page).toHaveURL(/\/tasks$/)
+
+  await page.goBack()
+  await expect(page).toHaveURL(/\/tasks\?taskView=calendar$/)
+  await expect(page.getByRole('heading', { name: '任务日历' })).toBeVisible()
+  await page.goForward()
+  await expect(page).toHaveURL(/\/tasks$/)
+  await expect(page.getByRole('heading', { name: '任务管理' })).toBeVisible()
+})
+
+test('公开分享深链接由独立路由按需加载', async ({ page }) => {
+  await page.goto('/share/missing-route-token')
+  await expect(page).toHaveURL(/\/share\/missing-route-token$/)
+  await expect(page.getByText('无法打开该报告', { exact: true })).toBeVisible()
+  await expect(page.locator('.sidebar')).toHaveCount(0)
+
+  await page.goto('/settlement-share/missing-route-token')
+  await expect(page).toHaveURL(/\/settlement-share\/missing-route-token$/)
+  await expect(page.getByText('无法打开该回单', { exact: true })).toBeVisible()
+  await expect(page.locator('.sidebar')).toHaveCount(0)
+})
+
 test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('公司产品封套修改', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '打开工作助手' }).click()

@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.78",
+  "version": "0.32.79",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "npm run product-knowledge:generate && npm run baml:generate && tsc -b && vite build",
     "ui:guard": "node scripts/check-ui-reuse.mjs",
-    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs",
+    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs && node scripts/check-routing-architecture.mjs && node scripts/check-deployment-architecture.mjs",
     "accounting:test": "node scripts/test-task-accounting.mjs",
     "lint": "eslint .",
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
@@ -18,8 +18,8 @@
     "browser:eval": "node scripts/run-browser-eval.mjs",
     "agent:quality:gate": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
-    "deploy:pages": "npm run build && npx wrangler pages deploy dist --project-name designer-worklog",
-    "deploy:worker": "npm run build && npx wrangler deploy"
+    "deploy:production": "npm run build && node scripts/deploy-cloudflare-api.mjs",
+    "deploy:worker": "npm run deploy:production"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.59",

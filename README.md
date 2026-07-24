@@ -387,7 +387,7 @@ Giverny 的目标是把这些分散信息收敛成一条可追溯链路：
 | 层级 | 技术 | 说明 |
 | --- | --- | --- |
 | 前端 | React 19、TypeScript、Vite | 后台主应用和甲方分享页 |
-| 样式 | `src/App.css` | 单文件样式，颜色和布局规则见 `docs/DESIGN.md` |
+| 样式 | `src/App.css` + `src/styles/` | 单一入口、按业务域拆分，颜色和布局规则见 `docs/DESIGN.md` |
 | 后端 | Cloudflare Worker | API、鉴权、AI 助手、月报和静态资源路由 |
 | 数据库 | Cloudflare D1 | 任务、进展、附件、月报、设置、审计日志 |
 | 文件存储 | Cloudflare R2 | 原始文件、预览图、交付附件 |
@@ -398,8 +398,9 @@ Giverny 的目标是把这些分散信息收敛成一条可追溯链路：
 
 | 文件 | 用途 |
 | --- | --- |
-| `src/App.tsx` | 后台主应用、路由状态、任务管理、设置页 |
-| `src/App.css` | 全站样式和组件视觉规则 |
+| `src/router.tsx` | 全站声明式路由、重定向与公开页懒加载边界 |
+| `src/App.tsx` | 后台应用外壳、业务编排与按路由组合视图 |
+| `src/App.css` / `src/styles/` | 全站样式入口和业务域视觉规则 |
 | `src/SharedReport.tsx` | 甲方只读分享页 |
 | `src/worker.ts` | Cloudflare Worker API 和鉴权 |
 | `src/lib/api.ts` | 前端 API client |
