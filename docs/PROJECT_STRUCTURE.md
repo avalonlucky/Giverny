@@ -100,6 +100,8 @@
 │   │   ├── KnowledgeView.tsx
 │   │   └── SettingsView.tsx
 │   ├── hooks/
+│   │   ├── useAgentJobNotifications.ts
+│   │   ├── useDailyKnowledge.ts
 │   │   └── useWorkspaceAnalytics.ts
 │   ├── components/
 │   │   ├── AppOverlayLayer.tsx
@@ -148,6 +150,8 @@
 - Main admin UI and route state: `src/App.tsx`
 - Dashboard task presentation, menus, detail sidebar, daily knowledge and insights: `src/views/DashboardView.tsx`
 - Shared dashboard, income and annual settlement analytics: `src/hooks/useWorkspaceAnalytics.ts`
+- Daily knowledge cache, queue, fallback and background prefetch state: `src/hooks/useDailyKnowledge.ts`
+- Agent background-job polling, transition notifications and read state: `src/hooks/useAgentJobNotifications.ts`
 - Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
 - Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Global modal, search, assistant, preview, toast and celebration composition: `src/components/AppOverlayLayer.tsx`

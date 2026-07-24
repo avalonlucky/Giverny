@@ -38,7 +38,6 @@ import {
   type AiModelRouteKey,
   type AiProviderConfig,
   type AuthRole,
-  type DailyKnowledgeSuggestion,
   type ReportRecord,
   type StorageUsage,
   type StoredAuth,
@@ -74,15 +73,6 @@ import { canRecordNewProgress, snapProgress, taskDisplayProgress } from './lib/t
 import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, sortTimeEntriesDesc } from './lib/taskPresentation'
 import { clearStateCache, readStateCache, writeStateCache } from './lib/stateCache'
 import {
-  DAILY_KNOWLEDGE_QUEUE_SIZE,
-  readDailyKnowledgeHistory,
-  rememberDailyKnowledgeTitle,
-  writeStoredDailyKnowledgeItem,
-  writeStoredDailyKnowledgeQueue,
-} from './lib/dailyKnowledgeCache'
-import { createDailyKnowledgeCatalog } from './lib/dailyKnowledgeCatalog'
-import { dailyKnowledgePool } from './data/dailyKnowledgePool'
-import {
   clearNewTaskDraftCache,
 } from './lib/newTaskDraftCache'
 import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShortcuts'
@@ -90,13 +80,13 @@ import { inferToastTone, trimToastQueue, type ToastState, type ToastTone } from 
 import { createOptionalPreviewFile } from './lib/attachmentPreview'
 import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
 import { useWorkspaceAnalytics } from './hooks/useWorkspaceAnalytics'
+import { useDailyKnowledge } from './hooks/useDailyKnowledge'
+import { useAgentJobNotifications } from './hooks/useAgentJobNotifications'
 import {
   prepareImageFiles,
   validateUploadFile,
 } from './lib/fileUpload'
 import type { AppView, AttachmentAnalysis, FileAsset, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
-import type { AgentBackgroundTask } from './types/agent'
-import type { DailyKnowledgeItem } from './types/knowledge'
 import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
@@ -135,13 +125,6 @@ const viewRoutes: Record<AppView, string> = {
 
 const routeViews = Object.fromEntries(Object.entries(viewRoutes).map(([view, path]) => [path, view])) as Record<string, AppView>
 
-
-const {
-  fallbackDailyKnowledge,
-  fallbackDailyKnowledgeBatch,
-  mergeDailyKnowledgeQueue,
-  prepareDailyKnowledgeSession,
-} = createDailyKnowledgeCatalog(dailyKnowledgePool)
 
 function viewFromPath(pathname: string): AppView {
   if (pathname === '/updates') {
@@ -232,11 +215,6 @@ function App() {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [chatAnalysisFocusId, setChatAnalysisFocusId] = useState('')
   const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
-  const [dailyKnowledgeSession] = useState(() => prepareDailyKnowledgeSession())
-  const [dailyKnowledge, setDailyKnowledge] = useState<DailyKnowledgeItem>(dailyKnowledgeSession.current)
-  const [dailyKnowledgeQueue, setDailyKnowledgeQueue] = useState<DailyKnowledgeItem[]>(dailyKnowledgeSession.queue)
-  const [isDailyKnowledgeLoading, setIsDailyKnowledgeLoading] = useState(false)
-  const [isDailyKnowledgePrefetching, setIsDailyKnowledgePrefetching] = useState(false)
   const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
   const [incomeVisible, setIncomeVisible] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
@@ -249,11 +227,7 @@ function App() {
   const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [showFireworks, setShowFireworks] = useState(false)
   const [toastQueue, setToastQueue] = useState<ToastState[]>([])
-  const [topAnalysisJobs, setTopAnalysisJobs] = useState<AgentBackgroundTask[]>([])
   const toastTimersRef = useRef<number[]>([])
-  const analysisJobStatusesRef = useRef<Map<string, AgentBackgroundTask['status']>>(new Map())
-  const analysisJobsInitializedRef = useRef(false)
-  const analysisJobsNotifiedRef = useRef<Set<string>>(new Set())
   const updatingTaskIdsRef = useRef<Set<number>>(new Set())
   const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
@@ -287,10 +261,6 @@ function App() {
     })
   }
   const lastAltPressRef = useRef<number>(0)
-  const dailyKnowledgeRequestedRef = useRef(false)
-  const dailyKnowledgeRef = useRef(dailyKnowledge)
-  const dailyKnowledgeQueueRef = useRef(dailyKnowledgeQueue)
-  const dailyKnowledgePrefetchRef = useRef(false)
   const isAdmin = role === 'admin' && Boolean(auth)
   // 角色能力分级（前端展示用；后端是真正的安全边界）
   const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
@@ -311,6 +281,18 @@ function App() {
     [currentMonth.value, taskItems],
   )
   const activeMonthTasks = useMemo(() => monthTasks.filter((task) => !task.voidedAt), [monthTasks])
+  const {
+    dailyKnowledge,
+    dailyKnowledgeQueueLength,
+    isDailyKnowledgeLoading,
+    isDailyKnowledgePrefetching,
+    showNextDailyKnowledge,
+  } = useDailyKnowledge({
+    isAdmin,
+    isLoaded,
+    currentMonthValue: currentMonth.value,
+    activeMonthTasks,
+  })
   const taskPageSourceTasks = useMemo(
     () => sortTasksByLatestActivity(showVoidedTasks ? monthTasks : activeMonthTasks),
     [activeMonthTasks, monthTasks, showVoidedTasks],
@@ -354,203 +336,15 @@ function App() {
     })
   }, [setChatAnalysisFocusId, setIsChatOpen])
 
-  useEffect(() => {
-    if (!isAdmin) {
-      analysisJobStatusesRef.current.clear()
-      analysisJobsNotifiedRef.current.clear()
-      analysisJobsInitializedRef.current = false
-      return
-    }
-    let cancelled = false
-    const poll = async () => {
-      const response = await fetch('/api/ai/analysis-jobs?limit=20')
-      const data = await response.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
-      if (!response.ok || cancelled || !Array.isArray(data?.jobs)) return
-      setTopAnalysisJobs(data.jobs)
-      const next = new Map(data.jobs.map((job) => [job.id, job.status]))
-      if (!analysisJobsInitializedRef.current) {
-        data.jobs.forEach((job) => {
-          if (job.unread && (job.status === 'completed' || job.status === 'failed')) {
-            analysisJobsNotifiedRef.current.add(job.id)
-          }
-        })
-        analysisJobStatusesRef.current = next
-        analysisJobsInitializedRef.current = true
-        return
-      }
-      for (const job of data.jobs) {
-          const shouldNotify = job.unread && !analysisJobsNotifiedRef.current.has(job.id)
-          const previous = analysisJobStatusesRef.current.get(job.id)
-          if (shouldNotify && job.status === 'completed' && previous && previous !== job.status) {
-            analysisJobsNotifiedRef.current.add(job.id)
-            if (job.source === 'scheduled' && (job.type === 'risk_digest' || job.type === 'monthly_review')) {
-              continue
-            }
-            notify(`${job.title}已完成`, 'success', {
-              actionLabel: '查看结果',
-              durationMs: 7200,
-              onAction: () => {
-                setChatAnalysisFocusId(job.id)
-                setIsChatOpen(true)
-              },
-            })
-          }
-          if (shouldNotify && job.status === 'failed' && previous && previous !== job.status) {
-            analysisJobsNotifiedRef.current.add(job.id)
-            notify(`${job.title}失败，可在对话中重试`, 'error', {
-              actionLabel: '打开爱丽丝',
-              durationMs: 7200,
-              onAction: () => {
-                setChatAnalysisFocusId(job.id)
-                setIsChatOpen(true)
-              },
-            })
-          }
-      }
-      analysisJobStatusesRef.current = next
-      analysisJobsInitializedRef.current = true
-    }
-    void poll()
-    const timer = window.setInterval(() => void poll(), 5000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [isAdmin, notify])
+  const openAnalysisJob = useCallback((jobId: string) => {
+    setChatAnalysisFocusId(jobId)
+    setIsChatOpen(true)
+  }, [setChatAnalysisFocusId, setIsChatOpen])
+  const { topAnalysisJobs, markAnalysisJobRead } = useAgentJobNotifications({ isAdmin, notify, onOpenJob: openAnalysisJob })
 
   useEffect(() => {
     taskItemsRef.current = taskItems
   }, [taskItems])
-
-  useEffect(() => {
-    dailyKnowledgeRef.current = dailyKnowledge
-    writeStoredDailyKnowledgeItem(dailyKnowledge)
-    rememberDailyKnowledgeTitle(dailyKnowledge.title)
-  }, [dailyKnowledge])
-
-  useEffect(() => {
-    dailyKnowledgeQueueRef.current = dailyKnowledgeQueue
-    writeStoredDailyKnowledgeQueue(dailyKnowledgeQueue)
-  }, [dailyKnowledgeQueue])
-
-  const seedDailyKnowledgeQueue = useCallback((baseQueue: DailyKnowledgeItem[] = dailyKnowledgeQueueRef.current) => {
-    const history = readDailyKnowledgeHistory()
-    const currentTitle = dailyKnowledgeRef.current.title
-    const excluded = [currentTitle, ...history]
-    const merged = mergeDailyKnowledgeQueue(baseQueue, excluded)
-    const missingCount = DAILY_KNOWLEDGE_QUEUE_SIZE - merged.length
-    const filled = missingCount > 0
-      ? mergeDailyKnowledgeQueue(
-        [
-          ...merged,
-          ...fallbackDailyKnowledgeBatch(missingCount, [...excluded, ...merged.map((item) => item.title)]),
-        ],
-        excluded,
-      )
-      : merged
-    const nextQueue = filled.slice(0, DAILY_KNOWLEDGE_QUEUE_SIZE)
-    dailyKnowledgeQueueRef.current = nextQueue
-    setDailyKnowledgeQueue(nextQueue)
-    return nextQueue
-  }, [])
-
-  const fetchDailyKnowledgeItem = useCallback(async (extraTitles: string[] = []) => {
-    const taskThemes = activeMonthTasks.flatMap((task) => [task.type, task.title]).filter(Boolean).slice(0, 12)
-    const recentTitles = [
-      ...readDailyKnowledgeHistory(),
-      dailyKnowledgeRef.current.title,
-      ...dailyKnowledgeQueueRef.current.map((item) => item.title),
-      ...extraTitles,
-    ].filter(Boolean)
-    const attemptedTitles = new Set(recentTitles)
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const suggestion: DailyKnowledgeSuggestion = await api.suggestDailyKnowledge({
-        currentMonth: currentMonth.value,
-        taskThemes,
-        recentTitles: [...attemptedTitles],
-      })
-      if (suggestion.title && !attemptedTitles.has(suggestion.title)) {
-        return suggestion
-      }
-      if (suggestion.title) {
-        attemptedTitles.add(suggestion.title)
-      }
-    }
-    return null
-  }, [activeMonthTasks, currentMonth.value])
-
-  const prefetchDailyKnowledgeQueue = useCallback(async () => {
-    if (!isAdmin || dailyKnowledgePrefetchRef.current) {
-      return
-    }
-    dailyKnowledgePrefetchRef.current = true
-    setIsDailyKnowledgePrefetching(true)
-    try {
-      const fetchedItems: DailyKnowledgeItem[] = []
-      const fetchTargetCount = Math.min(3, DAILY_KNOWLEDGE_QUEUE_SIZE)
-      for (let index = 0; index < fetchTargetCount; index += 1) {
-        const nextItem = await fetchDailyKnowledgeItem(fetchedItems.map((item) => item.title))
-        if (!nextItem) {
-          break
-        }
-        fetchedItems.push(nextItem)
-        const nextQueue = mergeDailyKnowledgeQueue(
-          [nextItem, ...dailyKnowledgeQueueRef.current],
-          [dailyKnowledgeRef.current.title],
-        ).slice(0, DAILY_KNOWLEDGE_QUEUE_SIZE)
-        dailyKnowledgeQueueRef.current = nextQueue
-        setDailyKnowledgeQueue(nextQueue)
-      }
-    } catch {
-      seedDailyKnowledgeQueue()
-    } finally {
-      seedDailyKnowledgeQueue()
-      dailyKnowledgePrefetchRef.current = false
-      setIsDailyKnowledgePrefetching(false)
-    }
-  }, [fetchDailyKnowledgeItem, isAdmin, seedDailyKnowledgeQueue])
-
-  const showNextDailyKnowledge = async () => {
-    const [nextItem, ...remainingQueue] = dailyKnowledgeQueueRef.current
-    if (nextItem) {
-      dailyKnowledgeRef.current = nextItem
-      setDailyKnowledge(nextItem)
-      rememberDailyKnowledgeTitle(nextItem.title)
-      seedDailyKnowledgeQueue(remainingQueue)
-      void prefetchDailyKnowledgeQueue()
-      return
-    }
-
-    if (isDailyKnowledgeLoading) {
-      return
-    }
-    setIsDailyKnowledgeLoading(true)
-    try {
-      const excludedTitles = [
-        dailyKnowledgeRef.current.title,
-        ...readDailyKnowledgeHistory(),
-        ...dailyKnowledgeQueueRef.current.map((item) => item.title),
-      ]
-      const fetchedItem = await fetchDailyKnowledgeItem()
-      const nextFallback = fetchedItem ?? fallbackDailyKnowledge(excludedTitles)
-      dailyKnowledgeRef.current = nextFallback
-      setDailyKnowledge(nextFallback)
-      rememberDailyKnowledgeTitle(nextFallback.title)
-    } catch {
-      const fallback = fallbackDailyKnowledge([
-        dailyKnowledgeRef.current.title,
-        ...readDailyKnowledgeHistory(),
-        ...dailyKnowledgeQueueRef.current.map((item) => item.title),
-      ])
-      dailyKnowledgeRef.current = fallback
-      setDailyKnowledge(fallback)
-      rememberDailyKnowledgeTitle(fallback.title)
-    } finally {
-      setIsDailyKnowledgeLoading(false)
-      seedDailyKnowledgeQueue()
-      void prefetchDailyKnowledgeQueue()
-    }
-  }
 
   const handleConfirmDialogConfirm = async () => {
     if (!confirmDialog || isConfirmDialogBusy) {
@@ -780,17 +574,6 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [attachmentAnalyses, isLoaded])
 
-  useEffect(() => {
-    if (!isLoaded || role !== 'admin' || dailyKnowledgeRequestedRef.current) {
-      return
-    }
-    dailyKnowledgeRequestedRef.current = true
-    seedDailyKnowledgeQueue()
-    void prefetchDailyKnowledgeQueue()
-    // Keep a ready-to-read pool so manual refresh can swap instantly while AI refills in the background.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, role])
-
   // 缩略图自愈：对缺少预览图、但可客户端生成首帧/首页的文件（PDF、视频、PSD/AI），
   // 后台渲染并回传持久化，之后所有视图（时间轴 / 文件库 / 分享回单）都会显示真实缩略图。
   const previewBackfillAttemptsRef = useRef<Map<number, number>>(new Map())
@@ -921,8 +704,7 @@ function App() {
 
   const handleTopReminderClick = (item?: { key: string; jobId?: string }) => {
     if (item?.jobId) {
-      setTopAnalysisJobs((current) => current.map((job) => job.id === item.jobId ? { ...job, unread: false } : job))
-      void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(item.jobId)}/read`, { method: 'POST' }).catch(() => undefined)
+      markAnalysisJobRead(item.jobId)
       return
     }
     navigateView('任务')
@@ -2383,7 +2165,7 @@ function App() {
             dailyKnowledge={dailyKnowledge}
             isDailyKnowledgeLoading={isDailyKnowledgeLoading}
             isDailyKnowledgePrefetching={isDailyKnowledgePrefetching}
-            dailyKnowledgeQueueLength={dailyKnowledgeQueue.length}
+            dailyKnowledgeQueueLength={dailyKnowledgeQueueLength}
             isAdmin={isAdmin}
             onOpenDailyKnowledge={() => setIsDailyKnowledgeOpen(true)}
             onShowNextDailyKnowledge={showNextDailyKnowledge}
