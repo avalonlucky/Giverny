@@ -104,10 +104,14 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('get_requester_profile')
     issues.push('需求人画像没有读取当前工作区的历史任务证据。')
   }
-  if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(turn.question)
-    && !turn.evidence.some((item) => item.toolName === 'get_task_detail')) {
+  const asksPortfolio = /(?:哪些|所有|全部|多个|多项|谁).*(?:任务|项目|工作|等待|延期|逾期)|(?:任务|项目|工作).*(?:汇总|概况|清单|排查)/.test(turn.question)
+  if (asksPortfolio && !turn.evidence.some((item) => item.toolName === 'query_task_portfolio')) {
+    requiredTools.push('query_task_portfolio')
+    issues.push('跨任务结论没有经过工作概况聚合工具。')
+  } else if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(turn.question)
+    && !turn.evidence.some((item) => item.toolName === 'get_task_detail' || item.toolName === 'query_task_portfolio')) {
     requiredTools.push('get_task_detail')
-    issues.push('任务阻塞问题没有读取任务详情和等待记录。')
+    issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
   }
   if (turn.plan.some((item) => item.risk !== 'read') && !turn.answer.includes('确认')) {
     issues.push('写入动作没有进入人工确认流程。')

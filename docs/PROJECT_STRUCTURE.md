@@ -273,6 +273,7 @@
 - Independent BAML Node runtime: `ai-runtime/`
 - Cloudflare Agents SDK Runtime: `src/aliceAgent.ts`
 - Shared Agent/MCP read-tool registry: `src/agentToolRegistry.ts`
+- Deterministic cross-task portfolio query and regression guard: `query_task_portfolio` in `src/worker.ts`, `scripts/check-agent-portfolio-architecture.mjs`
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
 - Signed tenant/principal context for internal tools: `src/agentScope.ts`
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`

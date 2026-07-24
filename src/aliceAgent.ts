@@ -90,6 +90,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 产品知识工具标记为“部分确认”或明确说资料未记录时，必须保留这个边界；可以说明已确认线索，但不得把推断改写成作者事实。
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
 - 用户询问某个任务“卡在哪里 / 为什么没交付”时，必须读取任务详情，优先核对 active 等待记录的 note、reason、startAt 和 elapsedMinutes，再给出具体结论。
+- 用户询问“哪些任务延期”、“全部等待原因”、“谁负责哪些未完成工作”或按日期范围汇总多个任务时，必须调用 query_task_portfolio，不要用标题关键词搜索代替全量聚合。
 - 用户要查看、打开、预览或下载附件时，必须调用 search_attachments；答案只做简要概括，不要把内部文件 URL 写进正文，界面会另行显示可操作附件卡。
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
 - 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
@@ -121,6 +122,7 @@ const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint
 const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: string }> = {
   query_month_finance: { running: '核对月份工时与收入', completed: '月份统计已返回' },
   search_tasks: { running: '检索相关任务', completed: '任务检索已完成' },
+  query_task_portfolio: { running: '汇总跨任务工作概况', completed: '工作概况已核对' },
   search_attachments: { running: '查找相关附件', completed: '附件检索已完成' },
   get_task_detail: { running: '读取任务详情', completed: '任务详情已返回' },
   get_requester_profile: { running: '读取需求人画像', completed: '需求人画像已返回' },
@@ -536,6 +538,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: readTools.search_tasks.description,
         inputSchema: readTools.search_tasks.inputSchema,
         execute: (input) => this.callTool('search-tasks', input, 'GET'),
+      }),
+      query_task_portfolio: tool({
+        description: readTools.query_task_portfolio.description,
+        inputSchema: readTools.query_task_portfolio.inputSchema,
+        execute: (input) => this.callTool('task-portfolio', {
+          ...input,
+          month: input.month || (!input.startDate && !input.endDate ? currentMonth : undefined),
+        }),
       }),
       get_task_detail: tool({
         description: readTools.get_task_detail.description,

@@ -23,6 +23,23 @@ export const agentReadToolRegistry = {
       limit: z.number().int().min(1).max(50).default(30),
     }),
   },
+  query_task_portfolio: {
+    title: '查询跨任务工作概况',
+    description: '按日期、状态、需求人、对接人和设计类型聚合当前工作区任务，确定性返回未完成、逾期、正在等待、最近进展和负责人。用户询问“哪些任务”、“全部延期”、“谁在等待什么”或跨项目工作概况时必须调用。',
+    endpoint: 'task-portfolio',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read'] },
+    inputSchema: z.object({
+      scope: z.enum(['all', 'unfinished', 'overdue', 'waiting', 'accepted']).default('all'),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+      statuses: z.array(z.string()).max(10).optional(),
+      requester: z.string().max(80).optional(),
+      contact: z.string().max(80).optional(),
+      designType: z.string().max(80).optional(),
+      limit: z.number().int().min(1).max(200).default(100),
+    }),
+  },
   get_task_detail: {
     title: '读取任务详情',
     description: '按任务 ID 或近似标题读取任务详情、进展、附件与验收信息。',

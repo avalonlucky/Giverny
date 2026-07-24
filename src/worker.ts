@@ -2552,7 +2552,7 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
 type ChatAgentPlanResponse = {
   intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
@@ -2592,6 +2592,7 @@ function chatUnderstandingTrace(question: string, intent?: ChatAgentPlanResponse
 }
 
 function chatVerificationTrace(results: ChatAgentToolResult[]) {
+  if (results.some((item) => item.name === 'query_task_portfolio')) return '核对结论：跨任务状态、延期和等待原因来自当前工作区的确定性聚合。'
   if (results.some((item) => item.name === 'get_requester_profile')) return '核对结论：画像指标来自确定性历史任务聚合，没有使用模型猜测。'
   if (results.some((item) => item.name === 'search_product_help')) return '核对结论：回答已与官方手册和版本记录交叉核对。'
   if (results.some((item) => item.name === 'query_month_finance')) return '核对结论：金额与工时来自确定性结算计算，没有使用模型估算。'
@@ -2600,6 +2601,13 @@ function chatVerificationTrace(results: ChatAgentToolResult[]) {
 }
 
 function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
+  const portfolioResult = results.find((item) => item.name === 'query_task_portfolio')?.result as {
+    summary?: { matched?: number; overdue?: number; waiting?: number; unfinished?: number }
+  } | undefined
+  if (portfolioResult?.summary) {
+    const summary = portfolioResult.summary
+    return `提取数据：匹配 ${Number(summary.matched || 0)} 项，其中未完成 ${Number(summary.unfinished || 0)} 项、逾期 ${Number(summary.overdue || 0)} 项、等待中 ${Number(summary.waiting || 0)} 项。`
+  }
   const profileResult = results.find((item) => item.name === 'get_requester_profile')?.result as {
     profile?: { name?: string; projects?: number; hours?: number; acceptanceRate?: number; onTimeRate?: number }
     found?: boolean
@@ -2673,10 +2681,11 @@ async function planChatAgentTurn(
 1. query_month_finance：查询一个或多个月份的金额、计费工时、任务明细。参数：months:string[]，格式 YYYY-MM。
 2. export_settlement_receipt：按明确日期范围生成结算回单、线上预览链接和 Excel 下载。参数：startDate:string，endDate:string，格式 YYYY-MM-DD。
 3. search_tasks：按完整语义搜索任务。参数：query:string，limit:number。
-4. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
-5. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
-6. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
-7. none：不需要工具，交给普通聊天模型回答。
+4. query_task_portfolio：按日期、状态和人员聚合多个任务，返回延期、正在等待、最近进展和负责人。参数：scope:"all"|"unfinished"|"overdue"|"waiting"|"accepted"，month?:string，startDate?:string，endDate?:string，requester?:string，contact?:string，designType?:string。
+5. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
+6. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
+7. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
+8. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
@@ -2687,6 +2696,7 @@ async function planChatAgentTurn(
 - 用户明确要求导出、生成或下载某个日期范围的结算回单/Excel 时，必须调用 export_settlement_receipt；不能只返回文字汇总。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
+- 用户问“哪些 / 所有 / 全部”任务的延期、等待、未完成、负责人或按日期的跨项目汇总时，必须调用 query_task_portfolio，不要用 search_tasks 的标题搜索代替。
 - 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
 - 只输出 JSON，不要回答正文。`
@@ -2695,7 +2705,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2783,6 +2793,24 @@ async function executeChatAgentTools(
         : `查找依据：没有找到“${nameArg}”作为需求人的历史任务。`)
       continue
     }
+    if (name === 'query_task_portfolio') {
+      const token = getAgentToolToken(env)
+      const principal = normalizeAgentPrincipalContext({ workspaceId, principalId: 'legacy-chat', role: 'system', runId: crypto.randomUUID() })
+      const scopeHeaders = await createAgentScopeHeaders(token, principal)
+      const toolRequest = new Request('https://giverny.internal/api/agent/tools/task-portfolio', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...scopeHeaders },
+        body: JSON.stringify(tool.args || {}),
+      })
+      const response = await agentTaskPortfolioTool(env, toolRequest)
+      const result = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as Record<string, unknown>
+      results.push({ name, args: tool.args || {}, result })
+      const summary = result.summary as { matched?: number; overdue?: number; waiting?: number } | undefined
+      trace.push(response.ok
+        ? `查找依据：已聚合当前工作区 ${Number(summary?.matched || 0)} 项任务，其中逾期 ${Number(summary?.overdue || 0)} 项、等待中 ${Number(summary?.waiting || 0)} 项。`
+        : `查找依据：跨任务聚合失败，${String(result.error || `HTTP ${response.status}`)}。`)
+      continue
+    }
     if (name === 'search_tasks' || name === 'get_task_detail') {
       const query = agentString(tool.args?.title ?? tool.args?.query, 300)
       const limit = name === 'get_task_detail' ? 6 : Math.min(Math.max(Number(tool.args?.limit ?? 12), 1), 30)
@@ -2840,6 +2868,7 @@ async function composeChatAgentAnswer(
 - 如果工具结果里有金额、工时、月份，必须严格使用工具结果数字，不要重算或改写为其他数值。
 - 如果工具结果里有 export_settlement_receipt，明确告诉用户 Excel 已生成，可在回答下方直接下载或打开线上预览；不要再输出冗长的重复明细表。
 - 如果工具结果里有 get_requester_profile，必须把 found/profile 当作需求人画像的唯一事实来源；found=true 时不得说没有记录，必须引用 profile.projects、profile.hours、acceptanceRate、onTimeRate、traits 和 advice。
+- 如果工具结果里有 query_task_portfolio，必须以 summary 和 tasks 为唯一跨任务事实来源；说明匹配数量，并对每项引用真实状态、负责人、activeWaiting 和 latestProgress，不得根据标题推测原因。
 - 先给结论，再给分月/分项说明。
 - 如果用户问某任务为什么没交付或卡在哪里，必须优先读取 waitingRecords 中 active=true 的 note/reason，明确说出等待谁、等待什么、开始时间和已等待时长。
 - 如果工具返回 needsDisambiguation=true，必须请用户选择，不得自行假定。
@@ -3543,7 +3572,7 @@ async function verifyAgentToolRequest(env: Env, request: Request) {
 function agentToolPathAllowed(role: AgentPrincipalContext['role'], path: string, method: string) {
   const endpoint = path.split('/').pop() || ''
   const publicRead = new Set(['context', 'product-help'])
-  const businessRead = new Set(['month-finance', 'search-tasks', 'task-detail', 'requester-profile', 'search-attachments', 'get-task-memory'])
+  const businessRead = new Set(['month-finance', 'search-tasks', 'task-portfolio', 'task-detail', 'requester-profile', 'search-attachments', 'get-task-memory'])
   if (publicRead.has(endpoint)) return true
   if (businessRead.has(endpoint) && (method === 'GET' || method === 'POST')) {
     if (endpoint === 'month-finance') return ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'].includes(role)
@@ -4563,6 +4592,31 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
+      '/api/agent/tools/task-portfolio': {
+        get: {
+          operationId: 'query_task_portfolio',
+          tags: ['Tasks'],
+          summary: 'Query task portfolio',
+          description: 'Deterministically aggregate task status, overdue work, active waiting reasons, owners and latest progress in the current workspace.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'scope', in: 'query', required: false, schema: { type: 'string', enum: ['all', 'unfinished', 'overdue', 'waiting', 'accepted'] } },
+            { name: 'startDate', in: 'query', required: false, schema: { type: 'string', format: 'date' } },
+            { name: 'endDate', in: 'query', required: false, schema: { type: 'string', format: 'date' } },
+            { name: 'month', in: 'query', required: false, schema: { type: 'string', example: '2026-07' } },
+            { name: 'statuses', in: 'query', required: false, schema: { type: 'array', items: { type: 'string' } } },
+            { name: 'requester', in: 'query', required: false, schema: { type: 'string' } },
+            { name: 'contact', in: 'query', required: false, schema: { type: 'string' } },
+            { name: 'designType', in: 'query', required: false, schema: { type: 'string' } },
+            { name: 'limit', in: 'query', required: false, schema: { type: 'integer', maximum: 200 } },
+          ],
+          responses: {
+            '200': jsonResponse('Task portfolio results', '#/components/schemas/TaskPortfolioResponse'),
+            '400': errorResponse,
+            '401': errorResponse,
+          },
+        },
+      },
       '/api/agent/tools/task-detail': {
         get: {
           operationId: 'get_task_detail',
@@ -4757,6 +4811,21 @@ function agentOpenApiSpec(request: Request) {
             generatedAt: { type: 'string', format: 'date-time' },
           },
         },
+        TaskPortfolioResponse: {
+          type: 'object',
+          required: ['tool', 'scope', 'range', 'summary', 'tasks', 'generatedAt'],
+          properties: {
+            tool: { type: 'string', enum: ['query_task_portfolio'] },
+            scope: { type: 'string', enum: ['all', 'unfinished', 'overdue', 'waiting', 'accepted'] },
+            range: { type: 'object', additionalProperties: true },
+            summary: { type: 'object', additionalProperties: true },
+            tasks: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+            generatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
         TaskDetailResponse: {
           type: 'object',
           required: ['tool', 'task', 'updates', 'files', 'attachmentAnalyses', 'generatedAt'],
@@ -4891,7 +4960,7 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const statusIntent = /(?:未完成|没完成|没做完|没做|未做完|逾期|过期|延期|还(?:有|没)|待验收|进行中|计划中|挂起)/.test(query)
   const unfinishedIntent = /(?:未完成|没完成|没做完|没做|未做完|还(?:有|没)|逾期|过期|延期)/.test(query)
   const overdueIntent = /(?:逾期|过期|延期)/.test(query)
-  const today = nowIso().slice(0, 10)
+  const today = formatBeijing(nowIso()).slice(0, 10)
   const monthWhere = month ? '(settlement_month = ? OR start_date LIKE ?)' : ''
   const monthBindings = month ? [month, `${month}%`] : []
   const keywordRows = query && !statusIntent
@@ -4991,6 +5060,143 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   })
 }
 
+type AgentTaskPortfolioScope = 'all' | 'unfinished' | 'overdue' | 'waiting' | 'accepted'
+
+function taskPortfolioRange(body: Record<string, unknown>) {
+  const month = agentString(body.month, 7)
+  let startDate = agentString(body.startDate, 10)
+  let endDate = agentString(body.endDate, 10)
+  if (/^\d{4}-\d{2}$/.test(month)) {
+    startDate ||= `${month}-01`
+    const [year, monthNumber] = month.split('-').map(Number)
+    endDate ||= `${month}-${String(new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()).padStart(2, '0')}`
+  }
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) startDate = ''
+  if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) endDate = ''
+  if (startDate && endDate && startDate > endDate) return { startDate: endDate, endDate: startDate }
+  return { startDate, endDate }
+}
+
+function latestTaskPortfolioProgress(task: DbTask) {
+  const entries = parseTimeEntries(task.time_entries_json)
+  const latest = [...entries].sort((left, right) => {
+    const leftKey = `${left.endDate || left.date || task.start_date || ''}T${left.end || left.start || '00:00'}`
+    const rightKey = `${right.endDate || right.date || task.start_date || ''}T${right.end || right.start || '00:00'}`
+    return rightKey.localeCompare(leftKey)
+  })[0]
+  if (!latest) return null
+  return {
+    date: latest.endDate || latest.date || String(task.start_date || '').slice(0, 10),
+    note: latest.note || '',
+    start: latest.start || '',
+    end: latest.end || '',
+    acceptance: Boolean(latest.isAcceptanceProgress),
+    feedback: Boolean(latest.isClientFeedback),
+    revision: Boolean(latest.isRevision),
+    counted: !latest.isUncounted && !latest.isClientFeedback,
+  }
+}
+
+async function agentTaskPortfolioTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const scopeValue = agentString(body.scope, 20)
+  const scope: AgentTaskPortfolioScope = ['all', 'unfinished', 'overdue', 'waiting', 'accepted'].includes(scopeValue)
+    ? scopeValue as AgentTaskPortfolioScope
+    : 'all'
+  const { startDate, endDate } = taskPortfolioRange(body)
+  const statuses = Array.isArray(body.statuses) ? body.statuses.map((item) => String(item).trim()).filter(Boolean).slice(0, 10) : []
+  const requester = agentString(body.requester, 80).toLowerCase()
+  const contact = agentString(body.contact, 80).toLowerCase()
+  const designType = agentString(body.designType, 80).toLowerCase()
+  const limit = Math.min(Math.max(agentNumber(body.limit, 100), 1), 200)
+  const today = formatBeijing(nowIso()).slice(0, 10)
+  const rows = await env.DB.prepare(
+    `SELECT * FROM tasks
+     WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+     ORDER BY start_date DESC, created_at DESC`,
+  ).bind(principal.workspaceId).all<DbTask>()
+
+  const normalized = (rows.results ?? []).map((task) => {
+    const entries = parseTimeEntries(task.time_entries_json)
+    const status: TaskStatus = entries.some((entry) => entry.isAcceptanceProgress) ? '已验收' : task.status
+    const closed = ['已验收', '终止', '不计费'].includes(status)
+    const actualDeliveryDate = acceptanceProgressEndDateTime(entries, task.start_date) || task.actual_delivery_date || ''
+    const estimatedDate = String(task.estimated_delivery_date || '').slice(0, 10)
+    const overdue = !closed && Boolean(estimatedDate) && estimatedDate < today
+    const overdueDays = overdue ? Math.max(0, Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${estimatedDate}T00:00:00Z`)) / 86400000)) : 0
+    const waitingRecords = agentWaitingRecords(task)
+    const activeWaiting = closed ? [] : waitingRecords.filter((entry) => entry.active)
+    const taskStart = String(task.start_date || '').slice(0, 10)
+    const taskEnd = String(actualDeliveryDate || '').slice(0, 10)
+    const overlapsRange = (!startDate || !taskEnd || taskEnd >= startDate) && (!endDate || !taskStart || taskStart <= endDate)
+    return {
+      task,
+      status,
+      closed,
+      actualDeliveryDate,
+      estimatedDate,
+      overdue,
+      overdueDays,
+      waitingRecords,
+      activeWaiting,
+      overlapsRange,
+      latestProgress: latestTaskPortfolioProgress(task),
+    }
+  }).filter((item) => item.overlapsRange)
+    .filter(({ status }) => statuses.length === 0 || statuses.includes(status))
+    .filter(({ task }) => !requester || String(task.requester || '').toLowerCase().includes(requester))
+    .filter(({ task }) => !contact || String(task.contact_person || '').toLowerCase().includes(contact))
+    .filter(({ task }) => !designType || String(task.design_type || '').toLowerCase().includes(designType))
+
+  const scoped = normalized.filter((item) => {
+    if (scope === 'unfinished') return !item.closed
+    if (scope === 'overdue') return item.overdue
+    if (scope === 'waiting') return item.activeWaiting.length > 0
+    if (scope === 'accepted') return item.status === '已验收'
+    return true
+  })
+  const selected = scoped.slice(0, limit)
+  return agentOk({
+    tool: 'query_task_portfolio',
+    scope,
+    range: { startDate, endDate },
+    filters: { statuses, requester: agentString(body.requester, 80), contact: agentString(body.contact, 80), designType: agentString(body.designType, 80) },
+    summary: {
+      total: normalized.length,
+      matched: scoped.length,
+      returned: selected.length,
+      unfinished: normalized.filter((item) => !item.closed).length,
+      overdue: normalized.filter((item) => item.overdue).length,
+      waiting: normalized.filter((item) => item.activeWaiting.length > 0).length,
+      accepted: normalized.filter((item) => item.status === '已验收').length,
+    },
+    tasks: selected.map((item) => ({
+      id: Number(item.task.id),
+      title: item.task.title,
+      requirement: item.task.requirement || '',
+      type: item.task.design_type || '',
+      status: item.status,
+      progress: item.status === '已验收' ? 100 : Number(item.task.progress) || 0,
+      requester: item.task.requester || '',
+      contact: item.task.contact_person || '',
+      reviewer: item.task.reviewer || '',
+      startDate: item.task.start_date || '',
+      estimatedDeliveryDate: item.task.estimated_delivery_date || '',
+      actualDeliveryDate: item.actualDeliveryDate,
+      estimatedHours: Number(item.task.estimated_hours) || 0,
+      actualHours: actualHoursForDbTask(item.task),
+      billable: isBillableDbTask(item.task),
+      overdue: item.overdue,
+      overdueDays: item.overdueDays,
+      activeWaiting: item.activeWaiting,
+      latestProgress: item.latestProgress,
+    })),
+    generatedAt: nowIso(),
+  })
+}
+
 function agentWaitingRecords(task: DbTask) {
   const workStarts = parseTimeEntries(task.time_entries_json)
     .filter((entry) => !entry.isClientFeedback)
@@ -5084,7 +5290,7 @@ function isRequesterProfileQuestion(question: string) {
 }
 
 function normalizeChatToolName(value: unknown): ChatAgentToolName {
-  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
+  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
     ? value as ChatAgentToolName
     : 'none'
 }
@@ -5471,6 +5677,7 @@ async function agentContextTool(env: Env, request: Request) {
     identity: 'Giverny 设计兼职平台的工作智能体，也是用户的长期工作助手。',
     capabilities: [
       '查询任务、任务详情、进展、验收附件和交付件分析',
+      '按日期、状态、需求人、对接人和设计类型聚合跨任务概况，列出延期、等待原因、负责人与最近进展',
       '统计收入、计费工时、结算月份和任务明细',
       '整理需求、合作伙伴反馈、进展记录、验收备注和月报',
       '在后台汇总整月任务、工时、进展、改稿、等待和反馈，生成可核对的月度复盘',
@@ -6186,6 +6393,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/search-tasks' && (request.method === 'POST' || request.method === 'GET')) {
     return agentSearchTasksTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/task-portfolio' && (request.method === 'POST' || request.method === 'GET')) {
+    return agentTaskPortfolioTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/task-detail' && (request.method === 'POST' || request.method === 'GET')) {
     return agentTaskDetailTool(env, request)
