@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.71",
+  "version": "0.32.72",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",

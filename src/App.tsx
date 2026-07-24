@@ -1,4 +1,4 @@
-import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
   AlertTriangle,
@@ -45,27 +45,20 @@ import {
   type TaskProgressAssessment,
   type TokenScope,
 } from './lib/api'
-import { ModalShell } from './components/ModalShell'
-import { AdminLoginModal } from './components/AdminLoginModal'
-import { DailyKnowledgeModal } from './components/DailyKnowledgeModal'
-import { ConfirmDialogModal, type ConfirmDialogState } from './components/ConfirmDialogModal'
-import { VoidTaskModal } from './components/VoidTaskModal'
-import { FilePreviewModal } from './components/FilePreviewModal'
-import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
-import { TaskDetailModal } from './components/TaskDetailModal'
+import type { ConfirmDialogState } from './components/ConfirmDialogModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
 import { AppSidebar } from './components/AppSidebar'
 import { AppTopbar } from './components/AppTopbar'
+import { AppOverlayLayer, type ProgressModalTarget } from './components/AppOverlayLayer'
 import { DashboardView } from './views/DashboardView'
-import { NewTaskModal } from './components/NewTaskModal'
-import { CommandPalette, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
+import type { CommandPaletteAction, ShortcutHelpGroup } from './components/CommandPalette'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
 import { formatFileSize } from './lib/format'
 import { formatDuration } from './lib/durationDisplay'
 import { isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
-import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType } from './lib/fileTypes'
+import { fileTypeForAsset, fileTypeForFile } from './lib/fileTypes'
 import { taskSettlementMonth } from './lib/taskSettlement'
 import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
 import {
@@ -92,7 +85,6 @@ import { dailyKnowledgePool } from './data/dailyKnowledgePool'
 import {
   clearNewTaskDraftCache,
 } from './lib/newTaskDraftCache'
-import { ToastIcon } from './components/ToastIcon'
 import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShortcuts'
 import { inferToastTone, trimToastQueue, type ToastState, type ToastTone } from './lib/toastQueue'
 import { createOptionalPreviewFile } from './lib/attachmentPreview'
@@ -109,8 +101,6 @@ import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from '.
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
 
-const SemanticSearchModal = lazy(() => import('./components/SemanticSearchModal'))
-const ChatPanel = lazy(() => import('./components/ChatPanel').then((module) => ({ default: module.ChatPanel })))
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
 const FilesView = lazy(() => import('./views/FilesView'))
 const IncomeView = lazy(() => import('./views/IncomeView'))
@@ -188,13 +178,6 @@ function shiftMonthValue(value: string, offset: number) {
   const base = localDateFromIsoDate(`${value || isoDate().slice(0, 7)}-01`)
   base.setMonth(base.getMonth() + offset)
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
-}
-
-type ProgressModalTarget = {
-  taskId: number
-  mode: ProgressRecordMode
-  editEntryId?: string
-  initialAcceptanceMode?: boolean
 }
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
@@ -365,9 +348,11 @@ function App() {
   }, [])
 
   const toggleChat = useCallback(() => {
-    if (!isChatOpen) setChatAnalysisFocusId('')
-    setIsChatOpen((current) => !current)
-  }, [isChatOpen])
+    setIsChatOpen((current) => {
+      if (!current) setChatAnalysisFocusId('')
+      return !current
+    })
+  }, [setChatAnalysisFocusId, setIsChatOpen])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -2663,234 +2648,91 @@ function App() {
         )}
       </section>
 
-      {isDailyKnowledgeOpen && (
-        <DailyKnowledgeModal
-          item={dailyKnowledge}
-          isLoading={isDailyKnowledgeLoading}
-          canRefresh={isAdmin}
-          onRefresh={() => void showNextDailyKnowledge()}
-          onClose={() => setIsDailyKnowledgeOpen(false)}
-          onFavorite={isAdmin ? async (item) => {
-            const h: Record<string, string> = { 'content-type': 'application/json' }
-            const body = {
-              title: item.title,
-              content: item.body.join('\n\n'),
-              tags: item.category,
-              source: 'ai-tip',
-            }
-            const res = await fetch('/api/knowledge', { method: 'POST', headers: h, body: JSON.stringify(body) })
-            return res.ok
-          } : undefined}
-        />
-      )}
-      {isCommandPaletteOpen && (
-        <CommandPalette
-          key={commandPaletteInitialQuery}
-          actions={commandActions}
-          initialQuery={commandPaletteInitialQuery}
-          onClose={() => setIsCommandPaletteOpen(false)}
-        />
-      )}
-      {isShortcutHelpOpen && (
-        <ShortcutHelpModal groups={shortcutHelpGroups} onClose={() => setIsShortcutHelpOpen(false)} />
-      )}
-      {isChatOpen && isAdmin && (
-        <>
-          <div
-            className="chat-backdrop"
-            onDoubleClick={() => {
-              setIsChatOpen(false)
-              setChatAnalysisFocusId('')
-            }}
-          />
-          <Suspense fallback={<div className="chat-panel"><div className="office-preview-status">正在载入工作助手…</div></div>}>
-            <ChatPanel
-              currentMonthValue={currentMonth.value}
-              aiModelConfig={aiModelConfig}
-              aiProviderConfigs={aiProviderConfigs}
-              initialAnalysisJobId={chatAnalysisFocusId || undefined}
-              onNotify={notify}
-              onClose={() => {
-                setIsChatOpen(false)
-                setChatAnalysisFocusId('')
-              }}
-              onOpenTask={(taskId) => {
-                setIsChatOpen(false)
-                setChatAnalysisFocusId('')
-                void refreshState().then(() => handleOpenTaskDetail(taskId))
-              }}
-            />
-          </Suspense>
-        </>
-      )}
-      {isSemanticSearchOpen && (
-        <Suspense fallback={<div className="command-overlay"><p className="calendar-empty-hint">正在载入语义搜索…</p></div>}>
-          <SemanticSearchModal
-            isAdmin={isAdmin}
-            files={fileItems}
-            tasks={taskItems}
-            onClose={() => setIsSemanticSearchOpen(false)}
-            onOpenTask={(taskId) => {
-              setIsSemanticSearchOpen(false)
-              handleOpenTaskDetail(taskId)
-            }}
-            renderFileThumbnail={(file) => {
-              const fileType = fileTypeForAsset(file).type
-              const previewUrl = authedPreviewUrl(file.previewUrl ?? (isInlineImageFileType(fileType) ? file.sourceUrl : undefined))
-              return (
-                <AttachmentHoverThumbnail
-                  name={file.name}
-                  type={fileType}
-                  previewUrl={previewUrl}
-                  previewFallback={Boolean(file.previewFallback)}
-                  sourceUrl={fileThumbnailSource(file)}
-                  compact
-                  onOpen={() => {
-                    setIsSemanticSearchOpen(false)
-                    setFileLibraryFocusId(file.id)
-                    navigateView('文件库')
-                  }}
-                />
-              )
-            }}
-          />
-        </Suspense>
-      )}
-      {isModalOpen && (
-        <Suspense fallback={<ModalShell className="new-task-modal" labelledBy="new-task-loading-title" onClose={() => setIsModalOpen(false)} closeOnEscape><div id="new-task-loading-title" className="office-preview-status">正在载入新建任务…</div></ModalShell>}>
-          <NewTaskModal
-            designTypeGroups={designTypeGroups}
-            currentMonthValue={currentMonth.value}
-            initialSupplemental={newTaskSupplemental}
-            onClose={() => setIsModalOpen(false)}
-            onCreate={canWrite ? handleCreateTask : async () => requireAdmin()}
-            onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
-          />
-        </Suspense>
-      )}
-      {detailTaskId > 0 && (() => {
-        const detailTask = taskItems.find((task) => task.id === detailTaskId)
-        return detailTask ? (
-          <TaskDetailModal
-            key={detailTask.id}
-            task={detailTask}
-            onClose={() => setDetailTaskId(0)}
-            onOpenAcceptance={handleOpenTaskAcceptance}
-            canAccept={isAdmin}
-            onOpenEdit={(taskId) => {
-              setDetailTaskId(0)
-              handleOpenTaskEdit(taskId)
-            }}
-            onOpenProgress={(taskId) => {
-              setDetailTaskId(0)
-              handleOpenTaskProgress(taskId)
-            }}
-          />
-        ) : null
-      })()}
-      {editTaskId > 0 && (() => {
-        const editTask = taskItems.find((task) => task.id === editTaskId)
-        return editTask ? (
-          <Suspense fallback={<ModalShell className="new-task-modal" labelledBy="edit-task-loading-title" onClose={() => setEditTaskId(0)} closeOnEscape><div id="edit-task-loading-title" className="office-preview-status">正在载入任务编辑…</div></ModalShell>}>
-            <NewTaskModal
-              key={`edit-${editTask.id}`}
-              designTypeGroups={designTypeGroups}
-              currentMonthValue={currentMonth.value}
-              editingTask={editTask}
-              onClose={() => setEditTaskId(0)}
-              onCreate={canWrite ? handleCreateTask : async () => requireAdmin()}
-              onSave={(changes) => handleSaveTaskEdit(editTask.id, changes)}
-              onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
-            />
-          </Suspense>
-        ) : null
-      })()}
-      {progressModalTarget && (() => {
-        const progressTask = taskItems.find((task) => task.id === progressModalTarget.taskId)
-        return progressTask ? (
-          <TaskProgressModal
-            task={progressTask}
-            mode={progressModalTarget.mode}
-            editEntryId={progressModalTarget.editEntryId}
-            files={fileItems}
-            activity={taskActivity}
-            onClose={() => setProgressModalTarget(null)}
-            onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-            onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
-            onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
-            onPreviewFile={setPreviewFile}
-            onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
-            onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-            onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
-            onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
-            onNotify={notify}
-            initialAcceptanceMode={progressModalTarget.initialAcceptanceMode}
-            hourlyRate={hourlyRate}
-          />
-        ) : null
-      })()}
-      {confirmDialog && (
-        <ConfirmDialogModal
-          dialog={confirmDialog}
-          isBusy={isConfirmDialogBusy}
-          onClose={() => setConfirmDialog(null)}
-          onConfirm={() => void handleConfirmDialogConfirm()}
-        />
-      )}
-      {voidTaskTarget && (
-        <VoidTaskModal
-          task={voidTaskTarget}
-          monthLabel={monthLabelOf(taskSettlementMonth(voidTaskTarget))}
-          isBusy={isVoidTaskBusy}
-          onClose={() => setVoidTaskTarget(null)}
-          onConfirm={(reason) => void confirmVoidTask(reason)}
-        />
-      )}
-      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
-      {isLoginModalOpen && (
-        <AdminLoginModal
-          error={authError}
-          onClose={() => {
-            setIsLoginModalOpen(false)
-            setAuthError('')
-          }}
-          onSubmit={handleUnlock}
-        />
-      )}
-      {showFireworks && <Fireworks />}
-      {toastQueue.length > 0 && (
-        <div className="toast-stack" role="region" aria-label="操作提示">
-          {toastQueue.map((item) => (
-            <div className={`toast toast-${item.tone}`} key={item.id} role={item.tone === 'error' ? 'alert' : 'status'}>
-              <ToastIcon tone={item.tone} />
-              <span>{item.message}</span>
-              {item.actionLabel && item.onAction ? (
-                <button
-                  type="button"
-                  className="toast-action"
-                  onClick={() => {
-                    void item.onAction?.()
-                    setToastQueue((current) => current.filter((toast) => toast.id !== item.id))
-                  }}
-                >
-                  {item.actionLabel}
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      )}
+      <AppOverlayLayer
+        dailyKnowledgeOpen={isDailyKnowledgeOpen}
+        dailyKnowledge={dailyKnowledge}
+        dailyKnowledgeLoading={isDailyKnowledgeLoading}
+        isAdmin={isAdmin}
+        onRefreshDailyKnowledge={() => void showNextDailyKnowledge()}
+        onCloseDailyKnowledge={() => setIsDailyKnowledgeOpen(false)}
+        onFavoriteDailyKnowledge={async (item) => {
+          const response = await fetch('/api/knowledge', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title: item.title, content: item.body.join('\n\n'), tags: item.category, source: 'ai-tip' }),
+          })
+          return response.ok
+        }}
+        commandPaletteOpen={isCommandPaletteOpen}
+        commandPaletteInitialQuery={commandPaletteInitialQuery}
+        commandActions={commandActions}
+        onCloseCommandPalette={() => setIsCommandPaletteOpen(false)}
+        shortcutHelpOpen={isShortcutHelpOpen}
+        shortcutHelpGroups={shortcutHelpGroups}
+        onCloseShortcutHelp={() => setIsShortcutHelpOpen(false)}
+        chatOpen={isChatOpen}
+        currentMonthValue={currentMonth.value}
+        aiModelConfig={aiModelConfig}
+        aiProviderConfigs={aiProviderConfigs}
+        chatAnalysisFocusId={chatAnalysisFocusId}
+        notify={notify}
+        onCloseChat={() => { setIsChatOpen(false); setChatAnalysisFocusId('') }}
+        onOpenChatTask={(taskId) => {
+          setIsChatOpen(false)
+          setChatAnalysisFocusId('')
+          void refreshState().then(() => handleOpenTaskDetail(taskId))
+        }}
+        semanticSearchOpen={isSemanticSearchOpen}
+        files={fileItems}
+        tasks={taskItems}
+        onCloseSemanticSearch={() => setIsSemanticSearchOpen(false)}
+        onOpenSemanticTask={(taskId) => { setIsSemanticSearchOpen(false); handleOpenTaskDetail(taskId) }}
+        onOpenSemanticFile={(fileId) => { setIsSemanticSearchOpen(false); setFileLibraryFocusId(fileId); navigateView('文件库') }}
+        createTaskOpen={isModalOpen}
+        newTaskSupplemental={newTaskSupplemental}
+        designTypeGroups={designTypeGroups}
+        onCloseCreateTask={() => setIsModalOpen(false)}
+        onCreateTask={canWrite ? handleCreateTask : async () => requireAdmin()}
+        onDesignTypeGroupsChange={isAdmin ? handleDesignTypeGroupsChange : () => requireAdmin()}
+        detailTaskId={detailTaskId}
+        onCloseTaskDetail={() => setDetailTaskId(0)}
+        onOpenTaskAcceptance={handleOpenTaskAcceptance}
+        onOpenTaskEditFromDetail={(taskId) => { setDetailTaskId(0); handleOpenTaskEdit(taskId) }}
+        onOpenTaskProgressFromDetail={(taskId) => { setDetailTaskId(0); handleOpenTaskProgress(taskId) }}
+        editTaskId={editTaskId}
+        onCloseTaskEdit={() => setEditTaskId(0)}
+        onSaveTaskEdit={handleSaveTaskEdit}
+        progressModalTarget={progressModalTarget}
+        taskActivity={taskActivity}
+        onCloseTaskProgress={() => setProgressModalTarget(null)}
+        onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+        onCreateTaskUpdate={canWrite ? handleCreateTaskUpdate : readOnlyCreateUpdate}
+        onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
+        onPreviewFile={setPreviewFile}
+        onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
+        onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
+        onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+        onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
+        hourlyRate={hourlyRate}
+        confirmDialog={confirmDialog}
+        confirmDialogBusy={isConfirmDialogBusy}
+        onCloseConfirmDialog={() => setConfirmDialog(null)}
+        onConfirmDialog={() => void handleConfirmDialogConfirm()}
+        voidTaskTarget={voidTaskTarget}
+        voidTaskBusy={isVoidTaskBusy}
+        onCloseVoidTask={() => setVoidTaskTarget(null)}
+        onConfirmVoidTask={(reason) => void confirmVoidTask(reason)}
+        previewFile={previewFile}
+        onClosePreviewFile={() => setPreviewFile(null)}
+        loginModalOpen={isLoginModalOpen}
+        authError={authError}
+        onCloseLogin={() => { setIsLoginModalOpen(false); setAuthError('') }}
+        onUnlock={handleUnlock}
+        showFireworks={showFireworks}
+        toastQueue={toastQueue}
+        onDismissToast={(toastId) => setToastQueue((current) => current.filter((toast) => toast.id !== toastId))}
+      />
     </main>
-  )
-}
-
-function Fireworks() {
-  return (
-    <div className="fireworks" aria-hidden="true">
-      {Array.from({ length: 32 }, (_, index) => (
-        <span key={index} style={{ '--i': index } as CSSProperties} />
-      ))}
-    </div>
   )
 }
 
