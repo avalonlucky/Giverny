@@ -4,9 +4,11 @@ import { RouterProvider } from 'react-router'
 import './index.css'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { installGlobalErrorReporting } from './lib/clientErrorReporter'
+import { installClientPerformanceReporting } from './lib/clientPerformanceReporter'
 import { router } from './router'
 
 installGlobalErrorReporting()
+installClientPerformanceReporting()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

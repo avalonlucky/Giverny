@@ -47,6 +47,7 @@
 │   ├── AI_LEARNING.md
 │   ├── AI_HOUR_ESTIMATE.md
 │   ├── AI_PROGRESS_ASSESSMENT.md
+│   ├── CLIENT_OBSERVABILITY.md
 │   ├── AGENT_PRODUCTION_OPERATIONS.md
 │   ├── MCP_SERVER.md
 │   ├── LOCAL_CLI_BRIDGE.md
@@ -238,6 +239,9 @@
 - Shared progressive Agent execution trace: `src/components/AgentExecutionTimeline.tsx`
 - Lazy-loaded work assistant conversation, projects, history, local CLI and task center: `src/components/ChatPanel.tsx`
 - Shared prioritized toast queue and icon presentation: `src/lib/toastQueue.ts`, `src/components/ToastIcon.tsx`
+- Browser render/resource/API error reporting and privacy-safe deduplication: `src/lib/clientErrorReporter.ts`
+- Native real-user TTFB/FCP/LCP/INP/CLS reporting: `src/lib/clientPerformanceReporter.ts`
+- Frontend observability storage, aggregation and alerting: `db/migrations/0028_client_error_observability.sql`, `db/migrations/0029_client_performance_observability.sql`, `docs/CLIENT_OBSERVABILITY.md`
 - Shared editable-target and month keyboard shortcut rules: `src/lib/keyboardShortcuts.ts`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
 

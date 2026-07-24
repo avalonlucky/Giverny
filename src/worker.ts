@@ -16799,6 +16799,7 @@ async function updateAiOperationAlert(env: Env, alertId: string, request: Reques
 }
 
 const CLIENT_ERROR_BODY_LIMIT = 16 * 1024
+const CLIENT_PERFORMANCE_BODY_LIMIT = 8 * 1024
 
 async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<Record<string, unknown> | null> {
   if (!request.body) return null
@@ -16845,7 +16846,7 @@ async function clientErrorFingerprint(parts: string[]) {
   return Array.from(new Uint8Array(digest).slice(0, 12), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function recordClientError(env: Env, request: Request) {
+function validateClientTelemetryOrigin(request: Request) {
   const requestUrl = new URL(request.url)
   const origin = request.headers.get('origin')
   const fetchSite = request.headers.get('sec-fetch-site')
@@ -16855,11 +16856,80 @@ async function recordClientError(env: Env, request: Request) {
   } catch {
     return fail('来源无效', 403)
   }
+  return null
+}
+
+let clientPerformanceTableReady: Promise<void> | undefined
+
+function ensureClientPerformanceTable(env: Env) {
+  if (clientPerformanceTableReady) return clientPerformanceTableReady
+  clientPerformanceTableReady = (async () => {
+    await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS client_performance_events (
+       id TEXT PRIMARY KEY,
+       workspace_id TEXT NOT NULL DEFAULT 'default',
+       principal_id TEXT NOT NULL DEFAULT 'anonymous',
+       path TEXT NOT NULL DEFAULT '/',
+       app_version TEXT NOT NULL DEFAULT '',
+       navigation_type TEXT NOT NULL DEFAULT 'navigate',
+       device_class TEXT NOT NULL DEFAULT 'desktop',
+       connection_type TEXT NOT NULL DEFAULT '',
+       ttfb_ms REAL NOT NULL DEFAULT 0,
+       fcp_ms REAL NOT NULL DEFAULT 0,
+       lcp_ms REAL NOT NULL DEFAULT 0,
+       inp_ms REAL NOT NULL DEFAULT 0,
+       cls REAL NOT NULL DEFAULT 0,
+       load_ms REAL NOT NULL DEFAULT 0,
+       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+     )`,
+    ).run()
+    await env.DB.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_client_performance_workspace_created ON client_performance_events(workspace_id, created_at DESC)',
+    ).run()
+    await env.DB.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_client_performance_version_path ON client_performance_events(workspace_id, app_version, path, created_at DESC)',
+    ).run()
+  })().catch((error) => {
+    clientPerformanceTableReady = undefined
+    throw error
+  })
+  return clientPerformanceTableReady
+}
+
+type ClientPerformanceRow = {
+  path: string
+  app_version: string
+  device_class: string
+  ttfb_ms: number
+  fcp_ms: number
+  lcp_ms: number
+  inp_ms: number
+  cls: number
+  load_ms: number
+  created_at: string
+}
+
+function clientMetricPercentile(rows: ClientPerformanceRow[], key: keyof Pick<ClientPerformanceRow, 'ttfb_ms' | 'fcp_ms' | 'lcp_ms' | 'inp_ms' | 'cls' | 'load_ms'>, percentile = 0.75) {
+  const values = rows.map((row) => Number(row[key]) || 0).filter((value) => value > 0).sort((left, right) => left - right)
+  return values.length ? values[Math.min(values.length - 1, Math.ceil(values.length * percentile) - 1)] : 0
+}
+
+function clientExperienceRating(row: ClientPerformanceRow) {
+  if (!(Number(row.lcp_ms) > 0)) return 'unknown' as const
+  if (Number(row.lcp_ms) > 4000 || Number(row.inp_ms) > 500 || Number(row.cls) > 0.25) return 'poor' as const
+  if (Number(row.lcp_ms) > 2500 || Number(row.inp_ms) > 200 || Number(row.cls) > 0.1) return 'needs-improvement' as const
+  return 'good' as const
+}
+
+async function recordClientError(env: Env, request: Request) {
+  const originFailure = validateClientTelemetryOrigin(request)
+  if (originFailure) return originFailure
   if (!request.headers.get('content-type')?.includes('application/json')) return fail('请求格式无效', 415)
   const body = await readLimitedJsonBody(request, CLIENT_ERROR_BODY_LIMIT)
   if (!body) return fail('错误信息无效或过大', 413)
 
-  const kind = ['render', 'window-error', 'unhandled-rejection'].includes(String(body.kind)) ? String(body.kind) : 'window-error'
+  const kind = ['render', 'window-error', 'unhandled-rejection', 'resource-error', 'chunk-load', 'api-error'].includes(String(body.kind)) ? String(body.kind) : 'window-error'
   const message = sanitizeClientErrorText(body.message, 500) || '未知前端异常'
   const stack = sanitizeClientErrorText(body.stack, 1600)
   const componentStack = sanitizeClientErrorText(body.componentStack, 1200)
@@ -16867,7 +16937,7 @@ async function recordClientError(env: Env, request: Request) {
   const path = (rawPath.startsWith('/') ? rawPath : '/').split(/[?#]/)[0].slice(0, 200) || '/'
   const appVersion = sanitizeClientErrorText(body.appVersion, 40)
   const userAgent = sanitizeClientErrorText(body.userAgent, 300)
-  const fingerprint = await clientErrorFingerprint([kind, message, componentStack.slice(0, 300)])
+  const fingerprint = await clientErrorFingerprint([kind, message, componentStack.slice(0, 300), stack.slice(0, 300)])
   const principal = await resolveRequestPrincipal(env, request)
   const workspaceId = principalWorkspaceId(principal)
   const principalId = principal?.principalId || 'anonymous'
@@ -16893,12 +16963,68 @@ async function recordClientError(env: Env, request: Request) {
   return ok({ accepted: true }, 202)
 }
 
+function finiteClientMetric(value: unknown, maximum: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(Math.max(number, 0), maximum) : 0
+}
+
+async function recordClientPerformance(env: Env, request: Request) {
+  const originFailure = validateClientTelemetryOrigin(request)
+  if (originFailure) return originFailure
+  if (!request.headers.get('content-type')?.includes('application/json')) return fail('请求格式无效', 415)
+  const body = await readLimitedJsonBody(request, CLIENT_PERFORMANCE_BODY_LIMIT)
+  if (!body) return fail('性能信息无效或过大', 413)
+  const sessionId = sanitizeClientErrorText(body.sessionId, 80)
+  if (!sessionId) return fail('性能会话无效', 400)
+  const metricInput = body.metrics && typeof body.metrics === 'object' && !Array.isArray(body.metrics)
+    ? body.metrics as Record<string, unknown>
+    : {}
+  const rawPath = String(body.path || '/')
+  const path = (rawPath.startsWith('/') ? rawPath : '/').split(/[?#]/)[0].slice(0, 200) || '/'
+  const appVersion = sanitizeClientErrorText(body.appVersion, 40)
+  const navigationType = ['navigate', 'reload', 'back_forward', 'prerender'].includes(String(body.navigationType)) ? String(body.navigationType) : 'navigate'
+  const deviceClass = ['mobile', 'compact', 'desktop'].includes(String(body.deviceClass)) ? String(body.deviceClass) : 'desktop'
+  const connectionType = sanitizeClientErrorText(body.connectionType, 20)
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
+  const principalId = principal?.principalId || 'anonymous'
+  const values = {
+    ttfbMs: finiteClientMetric(metricInput.ttfbMs, 120_000),
+    fcpMs: finiteClientMetric(metricInput.fcpMs, 120_000),
+    lcpMs: finiteClientMetric(metricInput.lcpMs, 120_000),
+    inpMs: finiteClientMetric(metricInput.inpMs, 60_000),
+    cls: finiteClientMetric(metricInput.cls, 100),
+    loadMs: finiteClientMetric(metricInput.loadMs, 120_000),
+  }
+  await ensureClientPerformanceTable(env)
+  await env.DB.prepare(
+    `INSERT INTO client_performance_events (
+       id, workspace_id, principal_id, path, app_version, navigation_type, device_class, connection_type,
+       ttfb_ms, fcp_ms, lcp_ms, inp_ms, cls, load_ms
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       workspace_id = excluded.workspace_id, principal_id = excluded.principal_id, path = excluded.path,
+       app_version = excluded.app_version, navigation_type = excluded.navigation_type,
+       device_class = excluded.device_class, connection_type = excluded.connection_type,
+       ttfb_ms = excluded.ttfb_ms, fcp_ms = excluded.fcp_ms, lcp_ms = excluded.lcp_ms,
+       inp_ms = excluded.inp_ms, cls = excluded.cls, load_ms = excluded.load_ms,
+       updated_at = CURRENT_TIMESTAMP`,
+  ).bind(
+    sessionId, workspaceId, principalId, path, appVersion, navigationType, deviceClass, connectionType,
+    values.ttfbMs, values.fcpMs, values.lcpMs, values.inpMs, values.cls, values.loadMs,
+  ).run()
+  return ok({ accepted: true }, 202)
+}
+
 async function purgeClientErrorEvents(env: Env) {
-  await env.DB.prepare("DELETE FROM client_error_events WHERE last_seen_at < datetime('now', '-90 days')").run()
+  await Promise.all([
+    env.DB.prepare("DELETE FROM client_error_events WHERE last_seen_at < datetime('now', '-90 days')").run(),
+    ensureClientPerformanceTable(env).then(() => env.DB.prepare("DELETE FROM client_performance_events WHERE created_at < datetime('now', '-30 days')").run()),
+  ])
 }
 
 async function getAiOperationsCenter(env: Env, request: Request) {
-  await Promise.all([ensureAgentRunMetricsTable(env), ensureTaskLearningTables(env)])
+  await Promise.all([ensureAgentRunMetricsTable(env), ensureTaskLearningTables(env), ensureClientPerformanceTable(env)])
   const requestedDays = Number(new URL(request.url).searchParams.get('days'))
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 1), 30) : 7
   const principal = await resolveRequestPrincipal(env, request)
@@ -16906,7 +17032,7 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   if (principal.role !== 'admin') return fail('仅管理员可以查看 AI 运行中心', 403)
   const workspaceId = principalWorkspaceId(principal)
   await recoverAgentAnalysisJobs(env, workspaceId)
-  const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows, clientErrorRows] = await Promise.all([
+  const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows, clientErrorRows, clientPerformanceRows] = await Promise.all([
     env.DB.prepare(
       `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
               selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
@@ -16948,14 +17074,20 @@ async function getAiOperationsCenter(env: Env, request: Request) {
        WHERE actual_hours IS NOT NULL AND actual_hours > 0 AND requested_at >= datetime('now', ?)`,
     ).bind(`-${Math.max(periodDays, 30)} days`).all<{ suggested_hours: number; actual_hours: number }>(),
     env.DB.prepare(
-      `SELECT fingerprint, error_kind, message, path, app_version, occurrence_count, first_seen_at, last_seen_at
+      `SELECT fingerprint, error_kind, message, stack, component_stack, path, app_version, occurrence_count, first_seen_at, last_seen_at
        FROM client_error_events
        WHERE workspace_id = ? AND last_seen_at >= datetime('now', ?)
        ORDER BY last_seen_at DESC LIMIT 30`,
     ).bind(workspaceId, `-${periodDays} days`).all<{
-      fingerprint: string; error_kind: string; message: string; path: string; app_version: string
+      fingerprint: string; error_kind: string; message: string; stack: string; component_stack: string; path: string; app_version: string
       occurrence_count: number; first_seen_at: string; last_seen_at: string
     }>(),
+    env.DB.prepare(
+      `SELECT path, app_version, device_class, ttfb_ms, fcp_ms, lcp_ms, inp_ms, cls, load_ms, created_at
+       FROM client_performance_events
+       WHERE workspace_id = ? AND created_at >= datetime('now', ?)
+       ORDER BY created_at DESC LIMIT 1000`,
+    ).bind(workspaceId, `-${periodDays} days`).all<ClientPerformanceRow>(),
   ])
   const metrics = metricRows.results ?? []
   const turns = (turnRows.results ?? []).map((item) => {
@@ -16999,6 +17131,22 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   const hourItems = hourRows.results ?? []
   const hourWithin20 = hourItems.filter((item) => Math.abs(Number(item.suggested_hours) - Number(item.actual_hours)) / Number(item.actual_hours) <= 0.2).length
   const attachmentStatus = new Map((attachmentStatusRows.results ?? []).map((row) => [row.status, Number(row.count) || 0]))
+  const performanceItems = clientPerformanceRows.results ?? []
+  const performanceRatings = performanceItems.map(clientExperienceRating)
+  const ratedPerformanceItems = performanceRatings.filter((rating) => rating !== 'unknown')
+  const performanceGood = performanceRatings.filter((rating) => rating === 'good').length
+  const performanceNeedsImprovement = performanceRatings.filter((rating) => rating === 'needs-improvement').length
+  const performancePoor = performanceRatings.filter((rating) => rating === 'poor').length
+  const performanceByRoute = new Map<string, ClientPerformanceRow[]>()
+  for (const item of performanceItems) performanceByRoute.set(item.path, [...(performanceByRoute.get(item.path) ?? []), item])
+  const slowRoutes = [...performanceByRoute.entries()].map(([path, rows]) => ({
+    path,
+    samples: rows.length,
+    p75LcpMs: Math.round(clientMetricPercentile(rows, 'lcp_ms')),
+    p75InpMs: Math.round(clientMetricPercentile(rows, 'inp_ms')),
+    p75Cls: Number(clientMetricPercentile(rows, 'cls').toFixed(3)),
+  })).sort((left, right) => (right.p75LcpMs + right.p75InpMs) - (left.p75LcpMs + left.p75InpMs)).slice(0, 8)
+  const clientErrorOccurrences = (clientErrorRows.results ?? []).reduce((sum, item) => sum + (Number(item.occurrence_count) || 0), 0)
   const [workspaceRow, calibrationRows] = await Promise.all([
     env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>(),
     env.DB.prepare(
@@ -17034,6 +17182,21 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   if (activeJobs.some((item) => Date.now() - Date.parse(item.updated_at || item.created_at) > 10 * 60_000)) generatedAlerts.push({
     fingerprint: 'background-job-stalled', type: 'background', severity: 'critical', title: '后台任务疑似停滞',
     message: '存在超过 10 分钟没有心跳更新的后台任务。',
+  })
+  if (clientErrorOccurrences >= 5) generatedAlerts.push({
+    fingerprint: 'client-error-occurrences', type: 'frontend-error', severity: clientErrorOccurrences >= 20 ? 'critical' : 'warning', title: '前端异常需要关注',
+    message: `最近 ${periodDays} 天记录到 ${clientErrorOccurrences} 次前端异常，涉及 ${(clientErrorRows.results ?? []).length} 个错误指纹。`,
+  })
+  const p75LcpMs = Math.round(clientMetricPercentile(performanceItems, 'lcp_ms'))
+  const p75InpMs = Math.round(clientMetricPercentile(performanceItems, 'inp_ms'))
+  const p75Cls = Number(clientMetricPercentile(performanceItems, 'cls').toFixed(3))
+  if (performanceItems.length >= 3 && (p75LcpMs > 4000 || p75InpMs > 500 || p75Cls > 0.25)) generatedAlerts.push({
+    fingerprint: 'client-core-vitals-poor', type: 'frontend-performance', severity: 'critical', title: '前端核心体验偏慢',
+    message: `真实用户 P75：LCP ${(p75LcpMs / 1000).toFixed(1)} 秒、INP ${p75InpMs} 毫秒、CLS ${p75Cls}。`,
+  })
+  if (ratedPerformanceItems.length >= 5 && performancePoor / ratedPerformanceItems.length >= 0.25) generatedAlerts.push({
+    fingerprint: 'client-poor-session-rate', type: 'frontend-performance', severity: 'warning', title: '慢体验会话比例偏高',
+    message: `最近 ${periodDays} 天 ${(performancePoor / ratedPerformanceItems.length * 100).toFixed(1)}% 的有效体验样本至少有一项核心指标较差。`,
   })
   await syncAiOperationAlerts(env, workspaceId, generatedAlerts)
   const alertRows = await env.DB.prepare(
@@ -17116,18 +17279,40 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       })),
     },
     clientErrors: {
-      totalOccurrences: (clientErrorRows.results ?? []).reduce((sum, item) => sum + (Number(item.occurrence_count) || 0), 0),
+      totalOccurrences: clientErrorOccurrences,
       uniqueErrors: (clientErrorRows.results ?? []).length,
       recent: (clientErrorRows.results ?? []).map((item) => ({
         fingerprint: item.fingerprint,
         kind: item.error_kind,
         message: item.message,
+        stack: item.stack,
+        componentStack: item.component_stack,
         path: item.path,
         appVersion: item.app_version,
         occurrences: Number(item.occurrence_count) || 1,
         firstSeenAt: item.first_seen_at,
         lastSeenAt: item.last_seen_at,
       })),
+    },
+    clientPerformance: {
+      sampleCount: performanceItems.length,
+      p75: {
+        ttfbMs: Math.round(clientMetricPercentile(performanceItems, 'ttfb_ms')),
+        fcpMs: Math.round(clientMetricPercentile(performanceItems, 'fcp_ms')),
+        lcpMs: p75LcpMs,
+        inpMs: p75InpMs,
+        cls: p75Cls,
+        loadMs: Math.round(clientMetricPercentile(performanceItems, 'load_ms')),
+      },
+      ratings: {
+        good: performanceGood,
+        needsImprovement: performanceNeedsImprovement,
+        poor: performancePoor,
+        ratedSamples: ratedPerformanceItems.length,
+        goodRate: ratedPerformanceItems.length ? Number((performanceGood / ratedPerformanceItems.length * 100).toFixed(1)) : 0,
+      },
+      slowRoutes,
+      latestVersion: performanceItems[0]?.app_version || '',
     },
     alerts: (alertRows.results ?? []).map((item) => ({
       id: item.id,
@@ -18379,6 +18564,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   const isPublic =
     path === '/api/health' ||
     (path === '/api/client-errors' && request.method === 'POST') ||
+    (path === '/api/client-performance' && request.method === 'POST') ||
     path.startsWith('/api/agent/') ||
     path.startsWith('/api/local-cli/bridge/') ||
     path === '/api/auth/login' ||
@@ -18466,6 +18652,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/client-errors' && request.method === 'POST') {
     return recordClientError(env, request)
+  }
+  if (path === '/api/client-performance' && request.method === 'POST') {
+    return recordClientPerformance(env, request)
   }
   if (path === '/api/storage/usage') {
     return getStorageUsage(env)

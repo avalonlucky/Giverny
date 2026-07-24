@@ -380,6 +380,25 @@ CREATE TABLE IF NOT EXISTS client_error_events (
   UNIQUE(workspace_id, fingerprint, app_version, path)
 );
 
+CREATE TABLE IF NOT EXISTS client_performance_events (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'anonymous',
+  path TEXT NOT NULL DEFAULT '/',
+  app_version TEXT NOT NULL DEFAULT '',
+  navigation_type TEXT NOT NULL DEFAULT 'navigate',
+  device_class TEXT NOT NULL DEFAULT 'desktop',
+  connection_type TEXT NOT NULL DEFAULT '',
+  ttfb_ms REAL NOT NULL DEFAULT 0,
+  fcp_ms REAL NOT NULL DEFAULT 0,
+  lcp_ms REAL NOT NULL DEFAULT 0,
+  inp_ms REAL NOT NULL DEFAULT 0,
+  cls REAL NOT NULL DEFAULT 0,
+  load_ms REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS monthly_reports (
   id TEXT PRIMARY KEY,
   client_id TEXT,
@@ -572,6 +591,8 @@ CREATE INDEX IF NOT EXISTS idx_settlement_exports_public_token ON settlement_exp
 CREATE INDEX IF NOT EXISTS idx_settlement_exports_access ON settlement_exports(public_token, disabled, expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_client_errors_workspace_last_seen ON client_error_events(workspace_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_performance_workspace_created ON client_performance_events(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_performance_version_path ON client_performance_events(workspace_id, app_version, path, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);

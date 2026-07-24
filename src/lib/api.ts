@@ -2,6 +2,7 @@ import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryIte
 import type { DesignTypeGroup } from '../config/appConfig'
 import type { AgentFailureCase, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
 import type { ReceiptExcelOptions } from './receiptExcel'
+import { reportClientError } from './clientErrorReporter'
 
 export type ReportRecord = {
   id: string
@@ -273,12 +274,40 @@ export type AiOperationsCenter = {
       fingerprint: string
       kind: string
       message: string
+      stack: string
+      componentStack: string
       path: string
       appVersion: string
       occurrences: number
       firstSeenAt: string
       lastSeenAt: string
     }>
+  }
+  clientPerformance: {
+    sampleCount: number
+    p75: {
+      ttfbMs: number
+      fcpMs: number
+      lcpMs: number
+      inpMs: number
+      cls: number
+      loadMs: number
+    }
+    ratings: {
+      good: number
+      needsImprovement: number
+      poor: number
+      ratedSamples: number
+      goodRate: number
+    }
+    slowRoutes: Array<{
+      path: string
+      samples: number
+      p75LcpMs: number
+      p75InpMs: number
+      p75Cls: number
+    }>
+    latestVersion: string
   }
   alerts: Array<{
     id: string
@@ -808,6 +837,23 @@ export class ApiError extends Error {
   }
 }
 
+function apiRequestLabel(input: RequestInfo | URL, method = 'GET') {
+  try {
+    const rawUrl = input instanceof Request ? input.url : String(input)
+    const url = new URL(rawUrl, window.location.origin)
+    return `${method.toUpperCase()} ${url.pathname}`
+  } catch {
+    return `${method.toUpperCase()} [unknown-api]`
+  }
+}
+
+function reportApiFailure(label: string, status: number, error?: unknown) {
+  if (status > 0 && status < 500) return
+  if (status === 0 && typeof navigator !== 'undefined' && !navigator.onLine) return
+  const detail = error instanceof Error ? `：${error.message}` : ''
+  reportClientError({ kind: 'api-error', error: new Error(`${label} 请求失败（${status || 'network'}）${detail}`) })
+}
+
 /** XHR 请求：用于需要上传进度回调的场景 */
 function xhrJson<T>(method: string, url: string, body: XMLHttpRequestBodyInit, onProgress?: (loaded: number, total: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -833,9 +879,13 @@ function xhrJson<T>(method: string, url: string, body: XMLHttpRequestBodyInit, o
       } catch {
         /* keep default */
       }
+      reportApiFailure(`${method} ${new URL(url, window.location.origin).pathname}`, xhr.status)
       reject(new ApiError(message, xhr.status))
     }
-    xhr.onerror = () => reject(new ApiError('网络错误，请重试', 0))
+    xhr.onerror = () => {
+      reportApiFailure(`${method} ${new URL(url, window.location.origin).pathname}`, 0)
+      reject(new ApiError('网络错误，请重试', 0))
+    }
     xhr.send(body)
   })
 }
@@ -843,12 +893,20 @@ function xhrJson<T>(method: string, url: string, body: XMLHttpRequestBodyInit, o
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, withAuth = true): Promise<T> {
   const headers = new Headers(init?.headers)
   void withAuth
-  const response = await fetch(input, { ...init, headers })
+  const label = apiRequestLabel(input, init?.method)
+  const response = await fetch(input, { ...init, headers }).catch((error) => {
+    reportApiFailure(label, 0, error)
+    throw error
+  })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null
+    reportApiFailure(label, response.status)
     throw new ApiError(body?.error ?? `请求失败：${response.status}`, response.status)
   }
-  return response.json() as Promise<T>
+  return response.json().catch((error) => {
+    reportApiFailure(`${label} 响应解析`, 0, error)
+    throw error
+  }) as Promise<T>
 }
 
 export const api = {

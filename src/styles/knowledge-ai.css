@@ -2084,6 +2084,53 @@
   padding: 7px 0 0;
 }
 
+.client-performance-overview {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.client-performance-overview p {
+  min-width: 0;
+  margin: 0;
+}
+
+.client-performance-overview span,
+.client-performance-overview strong {
+  display: block;
+}
+
+.client-performance-overview span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.client-performance-overview strong {
+  margin-top: 4px;
+  color: var(--color-text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.client-performance-routes {
+  margin-top: 12px;
+}
+
+.client-error-stack {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ai-operations-columns h3 {
   margin: 0 0 12px;
   font-size: 14px;
@@ -2188,6 +2235,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .client-performance-overview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .ai-workspace-row {
     grid-template-columns: 58px minmax(0, 1fr) auto;
   }
@@ -2208,6 +2259,10 @@
   .ai-operations-summary,
   .ai-operations-columns {
     grid-template-columns: 1fr;
+  }
+
+  .client-performance-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .model-provider-modal-head,

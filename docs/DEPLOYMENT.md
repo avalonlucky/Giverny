@@ -15,7 +15,7 @@
 
 1. 本地修改。
 2. 跑 `npm run agent:quality:gate`（包含 build、lint 和隔离 Agent 全链路评测）。
-3. 涉及新增 D1 migration 时，先在隔离环境验证，再应用正式迁移。
+3. 涉及新增 D1 migration 时，先用本地 SQLite 验证，再通过 `npm run db:apply:production -- db/migrations/<file>.sql` 调用 Cloudflare D1 HTTP API 应用正式迁移。
 4. 部署正式站。
 5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
 6. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
@@ -50,6 +50,7 @@
 npm run lint
 npm run build
 npm run agent:quality:gate
+npm run db:apply:production -- db/migrations/<file>.sql
 npm run deploy:production
 ```
 
@@ -58,6 +59,8 @@ npm run deploy:production
 用户已明确要求永久停用 Wrangler。不得执行 `wrangler` / `npx wrangler`，也不得在 Direct Upload 失败时回退 Wrangler。`scripts/deploy-cloudflare-api.mjs` 使用 Cloudflare 官方 Workers Scripts 与 Static Assets HTTP API，自动继承线上已有绑定并上传新 Worker 模块和 `dist` 资源。
 
 发布凭证优先读取 `CLOUDFLARE_API_TOKEN`；首次运行可把旧 OAuth 凭证迁移到 `~/.config/giverny/cloudflare-auth.json`（权限 `0600`），迁移后发布器不再读取旧目录。API 认证失败时应更新 Giverny 凭证，不能恢复 Wrangler。
+
+D1 migration 同样不使用 Wrangler。`scripts/apply-cloudflare-d1-sql.mjs` 只接受明确传入的 SQL 文件，逐条通过 Cloudflare D1 Query API 执行；正式执行前必须确认 SQL 可重复运行且不包含清表、覆盖金额或改写既有业务数据的语句。
 
 ## 数据安全
 

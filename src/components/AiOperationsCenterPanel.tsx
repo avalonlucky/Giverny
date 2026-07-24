@@ -38,6 +38,19 @@ function formatDuration(value: number) {
   return value < 1000 ? `${Math.round(value)} 毫秒` : `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)} 秒`
 }
 
+function formatObservedDuration(value: number, samples: number) {
+  return samples > 0 ? formatDuration(value) : '—'
+}
+
+const clientErrorKindLabels: Record<string, string> = {
+  render: 'React 渲染',
+  'window-error': '脚本异常',
+  'unhandled-rejection': 'Promise 异常',
+  'resource-error': '资源加载',
+  'chunk-load': '分包加载',
+  'api-error': '接口异常',
+}
+
 export default function AiOperationsCenterPanel({
   operations,
   loading,
@@ -74,8 +87,8 @@ export default function AiOperationsCenterPanel({
       <div className="panel-header compact agent-quality-header">
         <div>
           <span className="model-section-kicker">可观测与治理</span>
-          <h2>AI 运行中心</h2>
-          <p>统一查看模型路由、后台任务、学习效果与当前工作区，不保存用户问题或回答正文</p>
+          <h2>运行与质量中心</h2>
+          <p>统一查看模型路由、后台任务、前端体验与当前工作区，不保存用户输入、问题或回答正文</p>
         </div>
         <button type="button" className="ghost-button compact-button" disabled={loading} onClick={onRefresh}>
           <RotateCcw size={14} />
@@ -86,7 +99,7 @@ export default function AiOperationsCenterPanel({
       {operations && (
         <>
           {operations.alerts.length > 0 && (
-            <div className="ai-operation-alerts" aria-label="AI 运行告警">
+            <div className="ai-operation-alerts" aria-label="运行告警">
               {operations.alerts.map((alert) => (
                 <article className={`ai-operation-alert severity-${alert.severity}`} key={alert.id}>
                   <AlertTriangle size={17} />
@@ -191,6 +204,38 @@ export default function AiOperationsCenterPanel({
               </div>
             ) : <p className="calendar-empty-hint">新的 Agent 请求完成后，这里会显示可核对的执行记录。</p>}
           </section>
+          <section className="ai-agent-audit-section" aria-label="真实用户体验">
+            <div className="ai-agent-audit-heading">
+              <div>
+                <h3>真实用户体验</h3>
+                <p>最近 {operations.periodDays} 天 {operations.clientPerformance.sampleCount} 次访问 · 有效样本 {operations.clientPerformance.ratings.ratedSamples} · 良好率 {operations.clientPerformance.ratings.ratedSamples ? `${operations.clientPerformance.ratings.goodRate}%` : '—'}</p>
+              </div>
+              <small>{operations.clientPerformance.latestVersion ? `最新 v${operations.clientPerformance.latestVersion}` : '等待真实访问样本'}</small>
+            </div>
+            <div className="client-performance-overview" aria-label="前端 P75 性能指标">
+              <p><span>TTFB</span><strong>{formatObservedDuration(operations.clientPerformance.p75.ttfbMs, operations.clientPerformance.sampleCount)}</strong></p>
+              <p><span>FCP</span><strong>{formatObservedDuration(operations.clientPerformance.p75.fcpMs, operations.clientPerformance.ratings.ratedSamples)}</strong></p>
+              <p><span>LCP</span><strong>{formatObservedDuration(operations.clientPerformance.p75.lcpMs, operations.clientPerformance.ratings.ratedSamples)}</strong></p>
+              <p><span>INP</span><strong>{operations.clientPerformance.p75.inpMs ? formatDuration(operations.clientPerformance.p75.inpMs) : '—'}</strong></p>
+              <p><span>CLS</span><strong>{operations.clientPerformance.ratings.ratedSamples ? operations.clientPerformance.p75.cls : '—'}</strong></p>
+              <p><span>页面加载</span><strong>{formatObservedDuration(operations.clientPerformance.p75.loadMs, operations.clientPerformance.sampleCount)}</strong></p>
+            </div>
+            {operations.clientPerformance.slowRoutes.length > 0 && (
+              <div className="ai-operations-list ai-agent-audit-list client-performance-routes">
+                {operations.clientPerformance.slowRoutes.slice(0, 5).map((item) => (
+                  <details key={item.path}>
+                    <summary>
+                      <div>
+                        <strong>{item.path}</strong>
+                        <small>{item.samples} 个样本 · LCP {formatDuration(item.p75LcpMs)} · INP {formatDuration(item.p75InpMs)}</small>
+                      </div>
+                      <span>CLS {item.p75Cls}</span>
+                    </summary>
+                  </details>
+                ))}
+              </div>
+            )}
+          </section>
           <section className="ai-agent-audit-section" aria-label="前端运行异常">
             <div className="ai-agent-audit-heading">
               <div>
@@ -211,8 +256,10 @@ export default function AiOperationsCenterPanel({
                       <span className="status-failed">{item.occurrences} 次</span>
                     </summary>
                     <div className="ai-agent-audit-detail">
-                      <p>类型：{item.kind} · 首次：{item.firstSeenAt}</p>
+                      <p>类型：{clientErrorKindLabels[item.kind] || item.kind} · 首次：{item.firstSeenAt}</p>
                       <p>指纹：{item.fingerprint}</p>
+                      {item.stack && <pre className="client-error-stack">{item.stack}</pre>}
+                      {item.componentStack && <pre className="client-error-stack">{item.componentStack}</pre>}
                     </div>
                   </details>
                 ))}
