@@ -1,25 +1,16 @@
 import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
-  AlarmClock,
   AlertTriangle,
   Archive,
-  PanelRightClose,
-  PanelRightOpen,
   BarChart3,
-  ChevronDown,
-  ChevronRight,
   ClipboardCheck,
-  Eye,
-  EyeOff,
   FileText,
   FolderKanban,
   KeyRound,
   LayoutDashboard,
   LoaderCircle,
-  Lock,
   Pencil,
-  Plus,
   RotateCcw,
   Sparkles,
   BookOpen,
@@ -56,8 +47,7 @@ import {
   type TaskProgressAssessment,
   type TokenScope,
 } from './lib/api'
-import { DonutChart, type DonutChartItem } from './components/DonutChart'
-import { TrendChart } from './components/TrendChart'
+import type { DonutChartItem } from './components/DonutChart'
 import { ModalShell } from './components/ModalShell'
 import { CreateTaskContextMenu, TaskContextMenu } from './components/TaskContextMenu'
 import { AdminLoginModal } from './components/AdminLoginModal'
@@ -72,17 +62,16 @@ import { TaskDetailModal } from './components/TaskDetailModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
 import { AppSidebar } from './components/AppSidebar'
 import { AppTopbar } from './components/AppTopbar'
+import { DashboardView } from './views/DashboardView'
 import { NewTaskModal } from './components/NewTaskModal'
 import { CommandPalette, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
-import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from './components/TaskUi'
-import { EmptyState } from './components/EmptyState'
+import { StatusBadge } from './components/TaskUi'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
 import { formatFileSize } from './lib/format'
 import { formatDuration } from './lib/durationDisplay'
 import { datePart, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
-import { formatYuan } from './lib/money'
 import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType } from './lib/fileTypes'
 import { taskSettlementMonth } from './lib/taskSettlement'
 import {
@@ -2597,6 +2586,47 @@ function App() {
       </button>
     </section>
   )
+  const dashboardTaskMenus = (
+    <>
+      {dashboardContextMenu && (
+        <TaskContextMenu
+          menu={dashboardContextMenu}
+          onClose={() => setDashboardContextMenu(null)}
+          onOpenTask={handleOpenTaskDetail}
+          onOpenEditTask={handleOpenTaskEdit}
+          onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
+          onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
+          onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+          onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
+          onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
+          onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
+          canWrite={canWrite}
+          canDelete={isAdmin}
+        />
+      )}
+      {canWrite && dashboardCreateMenu && (
+        <CreateTaskContextMenu menu={dashboardCreateMenu} onCreate={openNewTaskFromDashboardMenu} />
+      )}
+    </>
+  )
+  const dashboardTaskSidebar = !isTaskDetailCollapsed ? (
+    <DashboardTaskSidebar
+      task={selectedTask}
+      files={fileItems}
+      progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
+      hourlyRate={hourlyRate}
+      onPreviewFile={setPreviewFile}
+      onUpdateTask={handleUpdateTask}
+      onOpenProgress={handleOpenTaskProgress}
+      onDeleteEntry={handleDeleteTaskTimeEntry}
+      onDeleteAcceptanceProgress={handleDeleteAcceptanceProgress}
+      onOpenEdit={handleOpenTaskEdit}
+      onOpenAcceptance={handleOpenTaskAcceptance}
+      onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
+      canWrite={canWrite}
+      canDelete={isAdmin}
+    />
+  ) : null
   const effectiveBackendSyncSlow = backendStatus === '连接中' && backendSyncSlow
 
   if (!isLoaded) {
@@ -2699,307 +2729,55 @@ function App() {
         )}
 
         {activeView === '工作台' && (
-          <div className="dashboard-context-surface" onContextMenu={openDashboardCreateMenu}>
-        <section className="dashboard-metrics" aria-label="本月统计">
-          <article className="dashboard-metric">
-            <span>本月总工时</span>
-            <strong>{stats.totalHours.toFixed(1)}<small>h</small></strong>
-            <p>{importedHours > 0 ? `含导入工时 ${importedHours.toFixed(1)}h` : '本月任务实际投入'}</p>
-          </article>
-          <article className="dashboard-metric">
-            <span>计费工时</span>
-            <strong>{stats.billableHours.toFixed(1)}<small>h</small></strong>
-            <p>已排除不计费项</p>
-          </article>
-          <article className="dashboard-metric">
-            <span>预计收入</span>
-            <strong className={`income-metric-value ${canToggleIncomeVisibility ? '' : 'permission-placeholder'}`}>
-              {canToggleIncomeVisibility
-                ? (incomeVisible ? `¥${formatYuan(stats.amount)}` : '¥ ****')
-                : <><Lock size={15} /><span>管理员可见</span></>}
-              {canToggleIncomeVisibility && (
-                <button
-                  type="button"
-                  className="income-visibility-toggle"
-                  aria-label={incomeVisible ? '隐藏收入' : '显示收入'}
-                  aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
-                  title={`${incomeVisible ? '隐藏收入' : '显示收入'}（⌘⇧M / Ctrl⇧M）`}
-                  onClick={toggleIncomeVisibility}
-                >
-                  {incomeVisible ? <EyeOff size={13} /> : <Eye size={13} />}
-                </button>
-              )}
-            </strong>
-            <p>{canToggleIncomeVisibility ? `按 ¥${hourlyRate} / 小时` : '登录管理员后查看'}</p>
-          </article>
-          <article className="dashboard-metric">
-            <span>验收情况</span>
-            <strong>{stats.accepted} / {activeMonthTasks.length}</strong>
-            <p className={stats.pending > 0 ? 'attention' : ''}>{stats.pending} 个待验收</p>
-          </article>
-        </section>
-
-        <section className="daily-knowledge" aria-label="AI 每日知识">
-          <button className="daily-knowledge-main" type="button" onClick={() => setIsDailyKnowledgeOpen(true)}>
-            <span className="daily-knowledge-category">✦ {isDailyKnowledgeLoading ? 'AI' : dailyKnowledge.category}</span>
-            <span className="daily-knowledge-copy">
-              <strong>{isDailyKnowledgeLoading ? 'AI 正在准备一条新的小知识' : dailyKnowledge.title}</strong>
-              {!isDailyKnowledgeLoading && <span> · {dailyKnowledge.teaser}</span>}
-            </span>
-            <span className="daily-knowledge-more">展开阅读</span>
-            <em>{dailyKnowledge.source}</em>
-          </button>
-          <button
-            className="daily-knowledge-roll"
-            type="button"
-            aria-label="让 AI 换一条知识"
-            title={isDailyKnowledgePrefetching ? '正在后台预加载小知识' : '换一条'}
-            disabled={!isAdmin || (isDailyKnowledgeLoading && dailyKnowledgeQueue.length === 0)}
-            onClick={(event) => {
-              event.stopPropagation()
-              void showNextDailyKnowledge()
-            }}
-          >
-            ↻ 换一条
-          </button>
-        </section>
-
-        {activeTopReminderItem && (
-          <button className="due-strip" onClick={() => handleTopReminderClick(activeTopReminderItem)}>
-            <AlarmClock size={17} />
-            <span className="due-marquee" aria-label="任务提醒">
-              <span className="due-marquee-track">
-                <span className="due-marquee-item" key={activeTopReminderItem.key}>
-                  <strong className={activeTopReminderItem.key.startsWith('due') ? 'due-summary-overdue' : 'due-summary-nearest'}>{activeTopReminderItem.title}</strong>
-                  {activeTopReminderItem.body && <em>{activeTopReminderItem.body}</em>}
-                </span>
-              </span>
-            </span>
-            <ChevronRight size={15} className="due-arrow" />
-          </button>
-        )}
-
-        <section className={`content-grid dashboard-content-grid ${isTaskDetailCollapsed ? 'detail-collapsed' : ''}`}>
-          <div className="main-column">
-            <section className="panel task-panel dashboard-task-panel">
-              <div className="dashboard-task-header">
-                <div className="dashboard-task-heading-row">
-                  <div className="dashboard-task-title-group">
-                    <h2>任务明细</h2>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={rowThemeOn}
-                      className={`giverny-toggle task-row-theme-toggle ${rowThemeOn ? 'on' : ''}`}
-                      title={rowThemeOn ? '关闭任务状态配色' : '打开任务状态配色'}
-                      onClick={toggleRowTheme}
-                    >
-                      <span className="giverny-toggle-label">状态色</span>
-                      <span className="giverny-toggle-track"><span className="giverny-toggle-thumb" /></span>
-                      <span className="task-row-theme-state">{rowThemeOn ? '打开' : '关闭'}</span>
-                    </button>
-                  </div>
-                  <p>按月份汇总工作内容、工时与验收</p>
-                  <button
-                    type="button"
-                    className="detail-pane-toggle"
-                    aria-pressed={!isTaskDetailCollapsed}
-                    title={isTaskDetailCollapsed ? '显示任务详情' : '收起任务详情'}
-                    onClick={toggleTaskDetail}
-                  >
-                    {isTaskDetailCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
-                    {isTaskDetailCollapsed ? '显示详情' : '收起详情'}
-                  </button>
-                </div>
-                <TaskSearchBox
-                  value={taskQuery}
-                  onChange={setTaskQuery}
-                  placeholder="搜索本月任务、需求、需求人（/）"
-                  className="dashboard-task-search"
-                />
-              </div>
-
-              <div className="segment-tabs">
-                {dashboardTaskFilters.map((filter) => (
-                  <button className={dashboardTaskFilter === filter ? 'active' : ''} aria-pressed={dashboardTaskFilter === filter} key={filter} onClick={() => setTaskFilter(filter)}>
-                    {filter}
-                  </button>
-                ))}
-              </div>
-
-              <ActiveTaskFilters
-                query={taskQuery}
-                filter={dashboardTaskFilter}
-                onClearQuery={() => setTaskQuery('')}
-                onClearFilter={() => setTaskFilter('全部')}
-              />
-
-              <div className={`task-list ${rowThemeOn ? '' : 'no-row-theme'}`} onContextMenu={openDashboardCreateMenu}>
-                {visibleTasks.length === 0 && (
-                  <EmptyState
-                    role="status"
-                    title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
-                    description={activeMonthTasks.length === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}
-                    action={activeMonthTasks.length === 0 ? (
-                      <button className="ghost-button compact-button empty-state-action" onClick={() => openCreateTask(false)}>
-                        <Plus size={15} />
-                        新建任务
-                      </button>
-                    ) : (
-                      <button className="ghost-button compact-button empty-state-action" onClick={() => { setTaskQuery(''); setTaskFilter('全部') }}>
-                        <RotateCcw size={15} />
-                        清除筛选
-                      </button>
-                    )}
-                  />
-                )}
-                {dashboardPendingVisible.map(renderDashboardTaskRow)}
-                {dashboardPendingTasks.length > DASHBOARD_PAGE_SIZE && (
-                  <button type="button" className="dashboard-list-more" onClick={() => setDashboardPendingShowAll((current) => !current)}>
-                    {dashboardPendingShowAll ? '收起' : `展开剩余 ${dashboardPendingTasks.length - DASHBOARD_PAGE_SIZE} 条`}
-                  </button>
-                )}
-                {isAllDashboardFilter && dashboardAcceptedTasks.length > 0 && (
-                  <div className="dashboard-accepted-group">
-                    <button
-                      type="button"
-                      className={`dashboard-accepted-toggle ${dashboardAcceptedOpen ? 'open' : ''}`}
-                      onClick={() => setDashboardAcceptedOpen((current) => !current)}
-                    >
-                      <ChevronDown size={15} />
-                      <span>已验收 {dashboardAcceptedTasks.length} 个</span>
-                      <em>{dashboardAcceptedOpen ? '收起' : '展开'}</em>
-                    </button>
-                    {dashboardAcceptedOpen && (
-                      <>
-                        {dashboardAcceptedVisible.map(renderDashboardTaskRow)}
-                        {dashboardAcceptedTasks.length > DASHBOARD_PAGE_SIZE && (
-                          <button type="button" className="dashboard-list-more" onClick={() => setDashboardAcceptedShowAll((current) => !current)}>
-                            {dashboardAcceptedShowAll ? '收起' : `展开剩余 ${dashboardAcceptedTasks.length - DASHBOARD_PAGE_SIZE} 条`}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-                {dashboardContextMenu && (
-                  <TaskContextMenu
-                    menu={dashboardContextMenu}
-                    onClose={() => setDashboardContextMenu(null)}
-                    onOpenTask={handleOpenTaskDetail}
-                    onOpenEditTask={handleOpenTaskEdit}
-                    onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
-                    onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
-                    onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-                    onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
-                    onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
-                    onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
-                    canWrite={canWrite}
-                    canDelete={isAdmin}
-                  />
-                )}
-                {canWrite && dashboardCreateMenu && (
-                  <CreateTaskContextMenu
-                    menu={dashboardCreateMenu}
-                    onCreate={openNewTaskFromDashboardMenu}
-                  />
-                )}
-              </div>
-            </section>
-
-            <details className="insight-shell">
-              <summary className="insight-summary">
-                <div>
-                  <h2>本月洞察</h2>
-                  <p>设计类型、周趋势和年度统计</p>
-                </div>
-                <span className="insight-summary-action">
-                  <ChevronDown size={16} />
-                  <em className="show-closed">展开</em>
-                  <em className="show-open">收起</em>
-                </span>
-              </summary>
-
-              <div className="insight-body">
-                <section className="bottom-grid">
-                  <section className="panel distribution-panel">
-                    <div className="panel-header compact">
-                      <div>
-                        <h2>设计类型工时分布</h2>
-                        <p>本月工作类型分布</p>
-                      </div>
-                    </div>
-                    <DonutChart items={donutData.items} total={donutData.total} />
-                  </section>
-
-                  <section className="panel trend-panel">
-                    <div className="panel-header compact">
-                      <div>
-                        <h2>工时趋势 <span>小时</span></h2>
-                        <p>按天查看本月投入变化</p>
-                      </div>
-                    </div>
-                    <TrendChart data={dailyTrendData} />
-                  </section>
-                </section>
-
-                <section className="panel annual-panel">
-                  <div className="panel-header compact">
-                    <div>
-                      <h2>{annualData.year} 年度统计</h2>
-                      <p>全年计费工时与收入（已锁定月份按结算快照计）</p>
-                    </div>
-                    <div className="annual-totals">
-                      <span>
-                        累计工时 <strong>{annualData.totalHours.toFixed(1)}h</strong>
-                      </span>
-                      <span>
-                        累计收入 <strong>¥{formatYuan(annualData.totalAmount)}</strong>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="annual-bars">
-                    {annualData.rows.map((row) => {
-                      const maxHours = Math.max(...annualData.rows.map((item) => item.hours), 1)
-                      return (
-                        <div
-                          className={`annual-bar ${row.month === currentMonth.value ? 'current' : ''}`}
-                          key={row.month}
-                          title={`${monthLabelOf(row.month)}：${row.hours.toFixed(1)}h · ¥${formatYuan(row.amount)}${row.locked ? '（已锁定）' : ''}`}
-                        >
-                          <span className="annual-bar-amount">{row.hours > 0 ? `${row.hours.toFixed(1)}h` : ''}</span>
-                          <div className="annual-bar-track">
-                            <span style={{ height: `${Math.max(row.hours > 0 ? 6 : 0, (row.hours / maxHours) * 100)}%` }} />
-                          </div>
-                          <small>
-                            {Number(row.month.slice(5, 7))}月{row.locked ? ' 🔒' : ''}
-                          </small>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </section>
-              </div>
-            </details>
-          </div>
-          {!isTaskDetailCollapsed && <DashboardTaskSidebar
-            task={selectedTask}
-            files={fileItems}
-            progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
+          <DashboardView
+            openDashboardCreateMenu={openDashboardCreateMenu}
+            stats={stats}
+            importedHours={importedHours}
+            canToggleIncomeVisibility={canToggleIncomeVisibility}
+            incomeVisible={incomeVisible}
+            toggleIncomeVisibility={toggleIncomeVisibility}
             hourlyRate={hourlyRate}
-            onPreviewFile={setPreviewFile}
-            onUpdateTask={handleUpdateTask}
-            onOpenProgress={handleOpenTaskProgress}
-            onDeleteEntry={handleDeleteTaskTimeEntry}
-            onDeleteAcceptanceProgress={handleDeleteAcceptanceProgress}
-            onOpenEdit={(taskId) => handleOpenTaskEdit(taskId)}
-            onOpenAcceptance={(taskId) => handleOpenTaskAcceptance(taskId)}
-            onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
-            canWrite={canWrite}
-            canDelete={isAdmin}
-          />}
-        </section>
-          </div>
+            activeMonthTaskCount={activeMonthTasks.length}
+            dailyKnowledge={dailyKnowledge}
+            isDailyKnowledgeLoading={isDailyKnowledgeLoading}
+            isDailyKnowledgePrefetching={isDailyKnowledgePrefetching}
+            dailyKnowledgeQueueLength={dailyKnowledgeQueue.length}
+            isAdmin={isAdmin}
+            onOpenDailyKnowledge={() => setIsDailyKnowledgeOpen(true)}
+            onShowNextDailyKnowledge={showNextDailyKnowledge}
+            activeTopReminderItem={activeTopReminderItem}
+            handleTopReminderClick={handleTopReminderClick}
+            isTaskDetailCollapsed={isTaskDetailCollapsed}
+            rowThemeOn={rowThemeOn}
+            toggleRowTheme={toggleRowTheme}
+            toggleTaskDetail={toggleTaskDetail}
+            taskQuery={taskQuery}
+            setTaskQuery={setTaskQuery}
+            dashboardTaskFilters={dashboardTaskFilters}
+            dashboardTaskFilter={dashboardTaskFilter}
+            setTaskFilter={setTaskFilter}
+            visibleTaskCount={visibleTasks.length}
+            onCreateTask={() => openCreateTask(false)}
+            dashboardPendingVisible={dashboardPendingVisible}
+            renderDashboardTaskRow={renderDashboardTaskRow}
+            dashboardPendingTasks={dashboardPendingTasks}
+            dashboardPageSize={DASHBOARD_PAGE_SIZE}
+            dashboardPendingShowAll={dashboardPendingShowAll}
+            setDashboardPendingShowAll={setDashboardPendingShowAll}
+            isAllDashboardFilter={isAllDashboardFilter}
+            dashboardAcceptedTasks={dashboardAcceptedTasks}
+            dashboardAcceptedOpen={dashboardAcceptedOpen}
+            setDashboardAcceptedOpen={setDashboardAcceptedOpen}
+            dashboardAcceptedVisible={dashboardAcceptedVisible}
+            dashboardAcceptedShowAll={dashboardAcceptedShowAll}
+            setDashboardAcceptedShowAll={setDashboardAcceptedShowAll}
+            dashboardTaskMenus={dashboardTaskMenus}
+            donutData={donutData}
+            dailyTrendData={dailyTrendData}
+            annualData={annualData}
+            currentMonthValue={currentMonth.value}
+            dashboardTaskSidebar={dashboardTaskSidebar}
+          />
         )}
 
         {activeView === '任务' && (

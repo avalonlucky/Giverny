@@ -93,6 +93,7 @@
 │   │   └── timeEntryDraft.ts
 │   ├── views/
 │   │   ├── CalendarView.tsx
+│   │   ├── DashboardView.tsx
 │   │   ├── TasksView.tsx
 │   │   ├── FilesView.tsx
 │   │   ├── IncomeView.tsx
@@ -142,6 +143,7 @@
 ## Debug Entry Points
 
 - Main admin UI and route state: `src/App.tsx`
+- Dashboard metrics, task list, daily knowledge and insights: `src/views/DashboardView.tsx`
 - Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
 - Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Visual system and layout: `src/App.css`
