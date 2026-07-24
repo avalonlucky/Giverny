@@ -119,6 +119,20 @@
 │   │   ├── settingsStore.ts
 │   │   ├── uiStore.ts
 │   │   └── storeUtils.ts
+│   ├── styles/
+│   │   ├── tokens-theme.css
+│   │   ├── shell-navigation.css
+│   │   ├── dashboard-tasks.css
+│   │   ├── task-management.css
+│   │   ├── files-previews.css
+│   │   ├── modals-core.css
+│   │   ├── task-forms.css
+│   │   ├── chat.css
+│   │   ├── settings.css
+│   │   ├── calendar-insights.css
+│   │   ├── business-reports.css
+│   │   ├── progress-responsive.css
+│   │   └── knowledge-ai.css
 │   ├── components/
 │   │   ├── AppOverlayLayer.tsx
 │   │   ├── AiBrandIcon.tsx
@@ -185,7 +199,9 @@
 - Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
 - Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Global modal, search, assistant, preview, toast and celebration composition: `src/components/AppOverlayLayer.tsx`
-- Visual system and layout: `src/App.css`
+- Ordered CSS entry: `src/App.css`
+- Design tokens and seasonal theme: `src/styles/tokens-theme.css`
+- Domain style modules and ownership map: `src/styles/`, `docs/DESIGN.md`
 - Client share page: `src/SharedReport.tsx`
 - Lazy-loaded file library and file inspector: `src/views/FilesView.tsx`
 - Lazy-loaded income and tax-estimate view: `src/views/IncomeView.tsx`
@@ -245,6 +261,7 @@
 - Browser regression environment and projects: `playwright.config.ts`, `agent-evals/start-browser-eval.mjs`
 - Main-entry size regression guard: `scripts/check-app-entry-size.mjs` (`App.tsx` maximum 1,000 lines)
 - State-ownership regression guard: `scripts/check-state-architecture.mjs` (six Zustand stores; no cross-view `useState / useReducer` in `App` or workspace hydration)
+- CSS architecture regression guard: `scripts/check-css-architecture.mjs` (`App.css` import-only; 13 ordered domains; 4,500-line module cap)
 - AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation
@@ -276,6 +293,7 @@
 
 - Frontend state is split into six Zustand business domains. Component-local form drafts remain local React state; cross-view UI and server-mirrored entities must use the appropriate store.
 - Backend hydration commits auth, task, file and settings snapshots atomically by domain. The existing versioned 30-minute boot cache remains an acceleration layer, not a second source of truth.
+- CSS keeps one public entry (`App.css`) while implementation rules live in 13 ordered business-domain modules under `src/styles/`. This preserves the existing global class contract and cascade while preventing another 25K-line stylesheet.
 - Production data is stored in Cloudflare D1 `designer-worklog-db`.
 - Production files are stored in Cloudflare R2 `designer-worklog-uploads`.
 - The former staging site and its separate D1/R2 resources have been removed. Validate locally, then deploy the production Worker directly.

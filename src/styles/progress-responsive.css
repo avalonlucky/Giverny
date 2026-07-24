@@ -1,0 +1,561 @@
+/* ===== 记录进展弹窗 · 验收进展合并态 ===== */
+.progress-acceptance-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.progress-acceptance-toggle.active {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  color: var(--color-primary-strong);
+}
+
+.progress-acceptance-toggle .switch-control {
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.progress-acceptance-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.progress-acceptance-toggle em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.progress-acceptance-sections {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.progress-acceptance-base {
+  display: grid;
+}
+
+.progress-acceptance-base-toggle {
+  width: 100%;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: inherit;
+}
+
+.progress-acceptance-base-toggle > span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.progress-acceptance-base-toggle em {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.progress-acceptance-base-toggle svg {
+  transition: transform 0.16s ease;
+}
+
+.progress-acceptance-base-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.progress-acceptance-base-toggle:hover em {
+  color: var(--color-text-secondary);
+}
+
+.progress-acceptance-base > .progress-acceptance-basic-grid {
+  padding: 18px 0 6px;
+}
+
+.progress-acceptance-block {
+  display: grid;
+  gap: 12px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress-acceptance-block-title {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.progress-acceptance-basic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+
+.progress-acceptance-basic-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.progress-acceptance-basic-grid > div.wide {
+  grid-column: 1 / -1;
+}
+
+.progress-acceptance-basic-grid span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.progress-acceptance-basic-grid strong {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.progress-acceptance-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-acceptance-progress strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: right;
+}
+
+.progress-acceptance-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.progress-acceptance-time-table-wrap {
+  overflow-x: auto;
+}
+
+.progress-acceptance-time-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.progress-acceptance-time-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress-acceptance-time-table td {
+  padding: 9px 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.progress-acceptance-time-table tfoot td {
+  padding: 10px;
+  font-weight: 600;
+  color: var(--color-text);
+  border-top: 1px solid var(--color-border);
+}
+
+.progress-acceptance-money {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.progress-acceptance-money > div {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.progress-acceptance-money strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.progress-acceptance-waiting {
+  padding: 12px 14px;
+  background: var(--color-alert-surface);
+}
+
+.progress-acceptance-waiting h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-alert-accent);
+}
+
+.progress-acceptance-waiting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  font-size: 12px;
+  padding: 3px 0;
+  color: var(--color-text-secondary);
+}
+
+.progress-acceptance-waiting-total {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--color-alert-accent) 20%, transparent);
+}
+
+.progress-acceptance-waiting-total em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.progress-acceptance-feedback {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-acceptance-confirm-summary {
+  padding: 12px 14px;
+  background: var(--color-supplement-bg);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  .app-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    width: 72px;
+    padding: 34px 14px 24px;
+    align-items: center;
+    gap: 34px;
+  }
+
+  .dashboard-layout .sidebar {
+    gap: 50px;
+  }
+
+  .brand {
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .brand .brand-mark {
+    display: grid;
+    width: 40px;
+    height: 40px;
+  }
+
+  .brand > div:last-child,
+  .brand-watermark,
+  .nav-item span,
+  .nav-item kbd,
+  .sidebar-account-trigger span,
+  .sidebar-account-trigger kbd,
+  .sub-nav button span {
+    display: none !important;
+  }
+
+  .nav-list,
+  .sub-nav {
+    width: 100%;
+    justify-items: center;
+  }
+
+  .nav-item,
+  .sidebar-account-trigger,
+  .sub-nav button {
+    width: 44px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .nav-item.active::before,
+  .sidebar-account-trigger.active::before {
+    left: 50%;
+    top: auto;
+    bottom: 2px;
+    width: 18px;
+    height: 2px;
+    transform: translateX(-50%);
+  }
+
+  .sidebar-account {
+    width: 100%;
+    display: grid;
+    justify-items: center;
+  }
+
+  .sidebar-account-menu {
+    left: calc(100% + 10px);
+    right: auto;
+    bottom: 0;
+  }
+
+  .workspace {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .progress-acceptance-toggle {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .progress-acceptance-toggle em {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .progress-acceptance-basic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-acceptance-money {
+    display: grid;
+    gap: 12px;
+  }
+}
+
+/* ---------- 移动端主框架：紧凑页头、底部导航与首屏信息密度 ---------- */
+@media (max-width: 680px) {
+  .app-shell {
+    display: block;
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+
+  .sidebar {
+    position: relative;
+    z-index: var(--z-sticky);
+    width: 100%;
+    height: 64px;
+    padding: 12px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .brand strong {
+    font-size: 20px;
+  }
+
+  .brand .brand-status,
+  .brand-watermark {
+    display: none !important;
+  }
+
+  .nav-list {
+    position: fixed;
+    z-index: var(--z-sticky);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(62px + env(safe-area-inset-bottom));
+    padding: 0 6px env(safe-area-inset-bottom);
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface-strong);
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .nav-item {
+    height: 62px;
+    padding: 0 2px;
+    justify-content: center;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .nav-item.active::before {
+    left: 50%;
+    top: 0;
+    width: 20px;
+    height: 2px;
+    transform: translateX(-50%);
+  }
+
+  .sidebar-account {
+    margin: 0;
+  }
+
+  .sidebar-account-trigger {
+    width: auto;
+    height: 34px;
+    padding: 0;
+    justify-content: flex-end;
+    font-size: 12px;
+  }
+
+  .sidebar-account-menu {
+    position: fixed;
+    top: 58px;
+    right: 12px;
+    bottom: auto;
+    left: auto;
+    width: min(280px, calc(100vw - 24px));
+    margin: 0;
+  }
+
+  .workspace {
+    padding: 24px 16px 32px;
+  }
+
+  .backend-notice {
+    margin-top: -12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .backend-notice div {
+    display: grid;
+    gap: 2px;
+    flex: 1 1 240px;
+  }
+
+  .backend-notice .text-button {
+    margin-left: 26px;
+  }
+
+  .topbar {
+    margin-bottom: 28px;
+  }
+
+  .topbar h1 {
+    font-size: 26px;
+  }
+
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    margin-bottom: 20px;
+  }
+
+  .dashboard-metric,
+  .dashboard-metric:nth-child(2),
+  .dashboard-metric:nth-child(3),
+  .dashboard-metric:last-child {
+    min-height: 118px;
+    padding: 14px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .dashboard-metric:nth-child(odd) {
+    padding-left: 0;
+    border-right: 1px solid var(--color-border);
+  }
+
+  .dashboard-metric:nth-child(even) {
+    padding-right: 0;
+  }
+
+  .dashboard-metric:nth-child(n + 3) {
+    border-bottom: 0;
+  }
+
+  .dashboard-metric strong {
+    font-size: 30px;
+  }
+
+  .segment-tabs {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .segment-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .segment-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .task-toolbar-row {
+    align-items: flex-start;
+  }
+
+  .task-active-filters {
+    margin-top: 10px;
+  }
+
+  .dashboard-task-sidebar-header h2 {
+    font-size: 22px;
+  }
+
+  .management-list-toolbar-end small {
+    display: none;
+  }
+
+  .management-grid .dashboard-task-sidebar {
+    scroll-margin-top: 76px;
+  }
+
+  .management-grid .dashboard-side-mobile-back {
+    width: fit-content;
+    min-height: 30px;
+    margin: 0 0 14px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+}
+

@@ -52,7 +52,7 @@
 7. **内部可见信息统一棕色** —— 任何只给管理员看的字段，都用 `admin-only-data` / `--color-admin-only`；普通成员、甲方预览、公开只读报告不显示该字段。
 8. **补录是公开解释，不是内部信息** —— 「补录」必须让甲方可见，用 `--color-supplement`，不要使用棕色管理员专属样式。
 9. **禁止浏览器原生弹窗** —— 不使用 `window.alert` / `window.confirm` / `window.prompt`；所有确认、提示、输入都走站内 modal / toast / form，避免系统弹窗破坏产品一致性。
-10. **新增组件先查复用** —— 新增任何按钮组、弹窗、选择器、滑杆、上传区、列表行、状态 badge 前，必须先在 `src/App.tsx` / `src/App.css` 搜索现有实现；同类能力优先复用或抽成共享组件，禁止写一套风格不一致的临时组件。
+10. **新增组件先查复用** —— 新增任何按钮组、弹窗、选择器、滑杆、上传区、列表行、状态 badge 前，必须先在 `src/App.tsx` / `src/styles/` 搜索现有实现；同类能力优先复用或抽成共享组件，禁止写一套风格不一致的临时组件。
 11. **没有现成组件也不能脱离风格** —— 确实没有可复用组件时，新组件也必须沿用当前产品的 token、纸张表面、发丝线、留白、轻标题、轻按钮和交互反馈规则；不允许出现浏览器默认样式或明显不属于 Giverny 的“自创丑组件”。
 12. **输入区与附件区使用统一表面** —— 弹窗内的多行输入、文件上传和同类可编辑区域，默认使用比弹窗背景略深的 `var(--color-surface-alt)` 作为直角底色，并使用相同的内边距层级；不要在同一表单内混用纯白输入框、灰底附件框和另一套边框语言。
 13. **日期选择统一复用 `PlanDateTimeField`** —— 默认使用同一套「月份标题 + 月份切换 + 日历 + 小时/分钟」交互；纯日期场景传 `includeTime={false}` 隐藏右侧时间列。弹层优先在所属弹窗内完整显示；空间不足时允许浮层越界，不能为了裁切而牺牲日期、时间或“今天 / 清除”等操作。
@@ -60,7 +60,7 @@
 
 ## 四、复用现有的 CSS token（不要新造）
 
-本项目 `App.css` 顶部 `:root` 已定义完整色板，**新增样式必须复用，禁止裸色值**：
+本项目 `src/styles/tokens-theme.css` 顶部 `:root` 已定义完整色板，**新增样式必须复用，禁止裸色值**：
 
 ```css
 /* 文字三档 —— 对应「主 / 次 / 弱」三层信息 */
@@ -98,10 +98,32 @@
 
 新增 UI 前按这个顺序处理：
 
-1. **先搜现有组件 / 类名**：用 `rg "关键词|className|组件名" src/App.tsx src/App.css` 查找类似功能，例如进度先搜 `progress-slider-row` / `progress-quick-options`，确认先搜 `ConfirmDialog`，弹窗先搜 `ModalShell`。
+1. **先搜现有组件 / 类名**：用 `rg "关键词|className|组件名" src/App.tsx src/styles` 查找类似功能，例如进度先搜 `progress-slider-row` / `progress-quick-options`，确认先搜 `ConfirmDialog`，弹窗先搜 `ModalShell`。
 2. **能复用就复用**：同类功能只允许有一套主要视觉语言；例如进度编辑、档位快选、验收确认、文件上传、状态 badge 不应在不同弹窗里长得不一样。
 3. **需要变化就扩展**：如果场景略有不同，优先给现有组件加 modifier class 或抽出小组件，而不是复制一段再改成另一套样式。
 4. **确实没有再新建**：新建时必须复用 `--color-*` token、现有按钮 / 输入框 / badge / modal / toast 的尺寸和交互反馈，不使用浏览器默认控件外观作为最终方案。
+
+### CSS 样式域归属
+
+`src/App.css` 只维护以下模块的导入顺序，不允许直接追加规则。新增或修改样式时按业务归属进入对应文件：
+
+| 样式域 | 负责内容 |
+|---|---|
+| `tokens-theme.css` | 颜色、圆角、层级、吉维尼四季主题 |
+| `shell-navigation.css` | 应用壳、侧栏、顶栏、基础导航 |
+| `dashboard-tasks.css` | 工作台、任务行、详情侧栏、统计卡 |
+| `task-management.css` | 任务管理、日历基础、进展和附件编辑 |
+| `files-previews.css` | 文件库、文件检查器、统一预览器 |
+| `modals-core.css` | 通用弹窗、遮罩、命令面板、Toast |
+| `task-forms.css` | 新建任务、排期、语音、验收表单 |
+| `chat.css` | 爱丽丝会话、执行链路、历史与项目 |
+| `settings.css` | 登录、设置、模型中心、设计分类 |
+| `calendar-insights.css` | 日历响应式、洞察、统计与经营视图 |
+| `business-reports.css` | 结算、收入、分享回单和 Excel 预览 |
+| `progress-responsive.css` | 验收进展合并态和移动端主框架 |
+| `knowledge-ai.css` | 知识库、AI 附件、欢迎页和运行中心 |
+
+发布前运行 `npm run architecture:guard`。守卫会检查入口顺序、模块清单和单模块 4,500 行上限。
 
 ## 七、改 UI 前的自检清单
 

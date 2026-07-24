@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.77",
+  "version": "0.32.78",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "npm run product-knowledge:generate && npm run baml:generate && tsc -b && vite build",
     "ui:guard": "node scripts/check-ui-reuse.mjs",
-    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs",
+    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs",
     "accounting:test": "node scripts/test-task-accounting.mjs",
     "lint": "eslint .",
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",

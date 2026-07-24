@@ -1,0 +1,200 @@
+:root {
+  /* 编辑式平面分区调色板（对齐 giverny-redesign 设计规范）：
+     深度靠色调，分隔靠留白，浮起靠反白。绿色全站只有一支 sage。 */
+  --color-text: #1f2a27;
+  --color-text-secondary: #586460;
+  --color-text-muted: #66716d;
+  --color-surface: #fbfbf8;
+  --color-surface-strong: #fbfbf8;
+  --color-surface-alt: #f4f4ee;
+  --color-sidebar: #fbfbf8;
+  /* ===== 品牌季节主色 =====
+     莫奈的睡莲池在四季捕捉不同的光。品牌主色随真实当前季节在「青绿带」内冷暖微移，
+     幅度刻意很小：用户说不出哪变了，但能感觉到网站在跟着季节呼吸。默认=夏。
+     语义状态色（已验收绿/进行中蓝/待验收琥珀/临期橙/逾期红）不在此列，永远钉死、不漂移。 */
+  --brand-primary: #3c6b61;
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.10);
+  --brand-glow-soft: rgba(60, 107, 97, 0.05);
+  /* 全站 --color-primary 统一引用品牌主色 → 一处定义，全站跟着季节呼吸 */
+  --color-primary: var(--brand-primary);
+  --color-primary-strong: var(--brand-primary-strong);
+  --color-primary-hover: var(--brand-primary-strong);
+  --color-admin-only: #94652f;
+  --color-supplement: #3c6b61;
+  --color-supplement-bg: rgba(60, 107, 97, 0.1);
+  --color-status-danger: #97474a;
+  --color-status-warning: #94652f;
+  /* 状态点配色（方案B）：色相明确拉开，低饱和 */
+  --color-status-planning: #7a8590;
+  --color-status-active: #3a7bb5;
+  /* 待验收：哑琥珀（平静的「待办」信号，区别于绿/蓝/灰，不偏粉） */
+  --color-status-pending: #b08438;
+  --color-status-accepted: #3c6b61;
+  --color-status-hold: #7a6e94;
+  --color-status-stopped: #97474a;
+  --color-status-disabled: #949c96;
+  /* 暖色递进：临期=哑橙（提醒），逾期=干净红（紧迫）。用于角标，行填充另用更浅的 --row-fill */
+  --color-due-soon: #cf8b3e;
+  --color-due-overdue: #c25450;
+  --color-alert-surface: #f2ebdf;
+  /* 任务行状态填充（方案B）：每状态独立低饱和底色，底色即可区分状态 */
+  --row-fill-plan: #e3fdfd;
+  --row-fill-active: #eaf0f4;
+  --row-fill-pending: #f5f0e6;
+  --row-fill-accepted: #e9f5ea;
+  --color-alert-accent: #94652f;
+  --color-editorial-surface: #fbfbf8;
+  --color-editorial-surface-alt: #f4f4ee;
+  --color-editorial-text: #1f2a27;
+  --color-editorial-text-secondary: #586460;
+  --color-editorial-text-muted: #66716d;
+  --color-editorial-primary: #3c6b61;
+  --color-editorial-primary-hover: #2f564e;
+  --color-editorial-menu: #20302c;
+  --color-editorial-backdrop: rgba(20, 28, 26, 0.34);
+  --color-receipt-text: #2b2b28;
+  --color-receipt-muted: #8c8b80;
+  --color-receipt-green: #3f5e4a;
+  --color-receipt-green-text: #2f4938;
+  --color-receipt-info: #eaf0e6;
+  --color-receipt-paper: #ffffff;
+  --color-receipt-zebra: #fbfaf4;
+  --color-receipt-border: #dde4d9;
+  --color-receipt-inner-border: #e8ece5;
+  --color-receipt-accepted: #e6f2e7;
+  --color-receipt-accepted-text: #397047;
+  --color-receipt-active: #ffead0;
+  --color-receipt-active-text: #b06f19;
+  --color-receipt-pending: #f5f1e7;
+  --color-receipt-pending-text: #856826;
+  --color-surface-deep: #ecede5;
+  --color-border: rgba(31, 42, 39, 0.08);
+  --color-border-soft: rgba(31, 42, 39, 0.045);
+  --color-border-strong: rgba(31, 42, 39, 0.14);
+  /* 深墨反白浮层（右键菜单 / 命令面板 / Toast）：靠明暗对比浮起，无阴影无描边 */
+  --color-menu: #20302c;
+  --color-menu-2: #2a3b36;
+  --color-menu-ink: #ecefe9;
+  --color-menu-ink-2: #8a968f;
+  --color-menu-accent: #8fbcaf;
+  --color-menu-danger: #d98c8c;
+  --radius-control: 4px;
+  --radius-panel: 4px;
+  --radius-menu: 8px;
+  --radius-pill: 999px;
+  --shadow-popover: none;
+  /* 浮层柔和投影：无描边时靠它做图底分离（比硬边框更干净） */
+  --shadow-float: 0 8px 26px rgba(20, 28, 26, 0.14), 0 2px 6px rgba(20, 28, 26, 0.08);
+  --z-base: 1;
+  --z-sticky: 20;
+  --z-floating: 40;
+  --z-popover: 70;
+  --z-modal: 100;
+  --z-overlay-effect: 110;
+  accent-color: var(--color-primary);
+}
+
+/* 工具模式（默认）主色固定为 #3c6b61，不随季节漂移——季节只在「吉维尼模式」里生效。 */
+
+/* ===== 吉维尼模式：一键把整套色系切到莫奈睡莲池 =====
+   默认是冷静的工具模式；开启后只做低饱和、高明度的季节偏色。
+   纸面仍保持干净，季节感来自主色和极浅水面底色，不让整站变脏。 */
+:root[data-giverny="on"] {
+  --color-text: #28302c;
+  --color-text-secondary: #5d6863;
+  --color-text-muted: #66716d;
+  /* 「整片水面」：surface 系列由当前季节主色派生 → 同一片池塘、不同时节的水色。
+     基底是近白，季节色只按很低比例渗入：看得出季节，但仍像干净白纸。 */
+  --color-surface: color-mix(in srgb, var(--brand-primary) 5%, #fbfbf9);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 2.5%, #fdfdfc);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 8%, #f7f8f5);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 6%, #fbfbf8);
+  --color-border: color-mix(in srgb, var(--brand-primary) 13%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+  /* 主色随季节走（见下方花园四季块）。默认夏。 */
+  --brand-primary: #3c6b61;
+  --brand-primary-strong: #2f564e;
+  --brand-glow: rgba(60, 107, 97, 0.12);
+  --brand-glow-soft: rgba(60, 107, 97, 0.06);
+  --color-primary: var(--brand-primary);
+  --color-primary-strong: var(--brand-primary-strong);
+  --color-primary-hover: var(--brand-primary-strong);
+  /* 状态色融入花园：饱和度再降、色相偏自然 */
+  --color-status-planning: #8b928c;
+  --color-status-active: #668699;
+  --color-status-pending: #ae9661;
+  --color-status-accepted: var(--brand-primary);
+  --row-fill-plan: color-mix(in srgb, var(--brand-primary) 7%, #f8f8f4);
+  --row-fill-active: color-mix(in srgb, var(--color-status-active) 8%, #f8f8f4);
+  --row-fill-pending: color-mix(in srgb, var(--color-status-pending) 10%, #f8f8f4);
+}
+
+/* 吉维尼模式四季：低饱和、高明度，避免脏绿、土黄和冷灰压住内容。 */
+:root[data-giverny="on"][data-season="spring"] {
+  --brand-primary: #82a08b;        /* 春 · 淡芽绿 */
+  --brand-primary-strong: #617b69;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+}
+:root[data-giverny="on"][data-season="summer"] {
+  --brand-primary: #78a09a;        /* 夏 · 清水青 */
+  --brand-primary-strong: #5b7b76;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+}
+:root[data-giverny="on"][data-season="autumn"] {
+  --brand-primary: #a96f56;        /* 秋 · 暖陶土：参考 Claude 官网的暖白 + 陶土橙棕 */
+  --brand-primary-strong: #75503f;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+  --color-text: #2f2923;
+  --color-text-secondary: #6c6258;
+  --color-text-muted: #756b61;
+  --color-surface: color-mix(in srgb, var(--brand-primary) 4%, #fcfaf6);
+  --color-surface-strong: color-mix(in srgb, var(--brand-primary) 1.8%, #fffdf8);
+  --color-surface-alt: color-mix(in srgb, var(--brand-primary) 7%, #f8f4ed);
+  --color-sidebar: color-mix(in srgb, var(--brand-primary) 5%, #faf6ef);
+  --color-border: color-mix(in srgb, var(--brand-primary) 12%, transparent);
+  --color-border-soft: color-mix(in srgb, var(--brand-primary) 6%, transparent);
+  --color-status-pending: #a98258;
+  --row-fill-pending: color-mix(in srgb, var(--brand-primary) 9%, #fbf8f2);
+}
+:root[data-giverny="on"][data-season="winter"] {
+  --brand-primary: #8aa1ad;        /* 冬 · 雾蓝灰 */
+  --brand-primary-strong: #667b86;
+  --brand-glow: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --brand-glow-soft: color-mix(in srgb, var(--brand-primary) 7%, transparent);
+}
+
+/* 画布纹理：极淡水彩纸噪点，只在吉维尼模式叠加，压在弹窗(z=100)之下不挡交互 */
+:root[data-giverny="on"] .app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.07;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18  0 0 0 0 0.14  0 0 0 0 0.08  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 200px 200px;
+}
+
+/* logo 旁的睡莲签名（侧栏只有文字 logo，故放在 Giverny 字标后）：仅吉维尼模式显示 */
+.brand-watermark {
+  display: inline-flex;
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  opacity: 0;
+  color: var(--color-primary);
+  transition: opacity 0.5s ease, width 0.5s ease, margin 0.5s ease;
+  vertical-align: middle;
+}
+
+:root[data-giverny="on"] .brand-watermark {
+  width: 16px;
+  margin-left: 6px;
+  opacity: 0.55;
+}
+

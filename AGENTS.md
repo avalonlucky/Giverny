@@ -27,9 +27,9 @@ Giverny —— 设计兼职任务管理与结算工具。
 6. **管理员专属信息**（普通成员、甲方预览、公开只读链接不可见的字段）统一使用 `admin-only-data`，颜色来自 `--color-admin-only`，让管理员一眼知道这是内部可见信息。
 7. **补录是公开解释标记**，必须让甲方可见，使用 `--color-supplement`，不要做成棕色管理员专属信息。
 8. **禁止浏览器原生弹窗**：不要使用 `window.alert` / `window.confirm` / `window.prompt`；确认、提示、输入必须使用站内 modal / toast / form 组件。
-9. **新增组件前必须先查复用**：先在 `src/App.tsx` / `src/App.css` 搜索现有组件、类名和交互模式；同类能力必须复用已有组件或抽出共享组件，禁止为了省事自创一套风格不一致的临时组件。
+9. **新增组件前必须先查复用**：先在 `src/App.tsx` / `src/styles/` 搜索现有组件、类名和交互模式；同类能力必须复用已有组件或抽出共享组件，禁止为了省事自创一套风格不一致的临时组件。
 10. **确实没有可复用组件时，也必须沿用现有 UI 风格**：使用已有 token、圆角、按钮、输入框、弹窗、滑杆、badge、toast、空状态等视觉语言，不允许出现浏览器默认样式或和产品气质明显不一致的“自创丑组件”。
-11. **新增颜色必须复用** `App.css` 顶部 `:root` 的 `--color-*` token，**禁止裸 hex 色值**。
+11. **新增颜色必须复用** `src/styles/tokens-theme.css` 顶部 `:root` 的 `--color-*` token，**禁止裸 hex 色值**。
 12. **交付前**对照 `docs/DESIGN.md` 第七节的自检清单逐条过一遍。
 
 ## 代码风格
@@ -37,7 +37,7 @@ Giverny —— 设计兼职任务管理与结算工具。
 - 组件与类名沿用现有约定（见 DESIGN.md 第五节「组件命名约定」）。
 - 新增 UI 前先 `rg` 搜索可复用组件 / 样式；优先复用 `ModalShell`、`ConfirmDialog`、`progress-slider-row`、`progress-quick-options`、`due-tag`、`status-*`、`ghost-button`、`primary-button` 等现有模式。
 - 任务相关类型定义在 `src/types/domain.ts`，新增字段先改这里。
-- 样式统一写在 `src/App.css`，按现有区块顺序追加，不要新建散落 CSS 文件。
+- `src/App.css` 只作为有序样式入口，不得直接追加规则。样式必须写入 `src/styles/` 对应业务域；新增样式文件前先确认现有 13 个模块均不适合，并同步更新 CSS 架构守卫。
 
 ## 发布纪律
 
