@@ -29,6 +29,13 @@ type AliceAgentState = {
   messageCount: number
   lastActiveAt: number | null
   pendingAction: PendingActionSummary | null
+  taskReference: TaskReference | null
+}
+
+type TaskReference = {
+  id: number
+  title: string
+  updatedAt: number
 }
 
 type StoredMessage = {
@@ -180,6 +187,7 @@ function parseJsonObject(value: string) {
 export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   private activeConversationId = ''
   private activePrincipal = normalizeAgentPrincipalContext({ role: 'system' })
+  private activeTaskReference: TaskReference | null = null
   private readonly aliceEnv: AliceAgentEnv
 
   constructor(ctx: AgentContext, env: AliceAgentEnv) {
@@ -191,6 +199,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     messageCount: 0,
     lastActiveAt: null,
     pendingAction: null,
+    taskReference: null,
   }
 
   async onStart() {
@@ -298,6 +307,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     void this.sql`DELETE FROM alice_messages`
     void this.sql`DELETE FROM alice_pending_actions`
     this.setState({ ...this.initialState })
+    this.activeTaskReference = null
     return { cleared: true }
   }
 
@@ -503,6 +513,106 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
   }
 
+  private selectedTaskReference(message: string): TaskReference | null {
+    const match = message.match(/(?:选择)?任务\s*#(\d+)(?:[：:]\s*(.+))?/)
+    const id = Number(match?.[1])
+    if (!Number.isInteger(id) || id <= 0) return null
+    return { id, title: String(match?.[2] || this.state.taskReference?.title || `任务 #${id}`).trim(), updatedAt: Date.now() }
+  }
+
+  private setTaskReference(reference: TaskReference | null) {
+    this.activeTaskReference = reference
+    this.setState({ ...this.state, taskReference: reference })
+  }
+
+  private referencesCurrentTask(message: string) {
+    return /(?:这个|那个|刚才|上述|前面|当前|该|它|继续|这项|那项)(?:任务|项目|工作|进展|反馈|等待|验收)?/.test(message)
+  }
+
+  private withTaskReference(input: Record<string, unknown>, message: string) {
+    const taskId = Number(input.taskId)
+    const reference = this.activeTaskReference || this.state.taskReference
+    const hasExplicitReference = /(?:选择)?任务\s*#\d+/.test(message)
+    if ((Number.isInteger(taskId) && taskId > 0) || !reference || (!hasExplicitReference && !this.referencesCurrentTask(message))) return input
+    return { ...input, taskId: reference.id, taskTitle: reference.title }
+  }
+
+  private taskReferencesFromResult(value: unknown) {
+    const record = toJsonObject(value)
+    const candidates: TaskReference[] = []
+    const append = (item: unknown) => {
+      const candidate = toJsonObject(item)
+      const id = Number(candidate.taskId ?? candidate.id)
+      const title = String(candidate.title ?? candidate.taskTitle ?? candidate.task ?? '').trim()
+      if (Number.isInteger(id) && id > 0 && title) candidates.push({ id, title, updatedAt: Date.now() })
+    }
+    append(record.task)
+    append(record.draft)
+    append(record.memory)
+    append(record.plan)
+    for (const key of ['results', 'tasks', 'files']) {
+      const items = Array.isArray(record[key]) ? record[key] as unknown[] : []
+      items.forEach((item) => {
+        const nested = toJsonObject(item)
+        append(nested.task && typeof nested.task === 'object' ? nested.task : nested)
+      })
+    }
+    const unique = [...new Map(candidates.map((item) => [item.id, item])).values()]
+    return unique
+  }
+
+  private taskIdsFromResult(value: unknown) {
+    const record = toJsonObject(value)
+    const ids: number[] = []
+    const append = (item: unknown) => {
+      const candidate = toJsonObject(item)
+      const id = Number(candidate.taskId ?? candidate.id)
+      if (Number.isInteger(id) && id > 0) ids.push(id)
+    }
+    append(record.task)
+    append(record.draft)
+    append(record.memory)
+    append(record.plan)
+    for (const key of ['results', 'tasks', 'files']) {
+      const items = Array.isArray(record[key]) ? record[key] as unknown[] : []
+      items.forEach((item) => {
+        const nested = toJsonObject(item)
+        append(nested.task && typeof nested.task === 'object' ? nested.task : nested)
+      })
+    }
+    return [...new Set(ids)]
+  }
+
+  private taskEvidenceMismatch(toolName: string, input: Record<string, unknown>, output: unknown) {
+    const expectedTaskId = Number(input.taskId)
+    const returnedIds = this.taskIdsFromResult(output)
+    if (Number.isInteger(expectedTaskId) && expectedTaskId > 0) {
+      if (this.isTaskScopedTool(toolName) && returnedIds.length === 0) return `工具 ${toolName} 未返回可核对的 taskId`
+      if (returnedIds.length > 0 && !returnedIds.includes(expectedTaskId)) {
+        return `工具请求任务 #${expectedTaskId}，但返回了 ${returnedIds.map((id) => `#${id}`).join('、')}`
+      }
+    }
+    const record = toJsonObject(output)
+    const task = toJsonObject(record.task)
+    const waitingRecords = Array.isArray(record.waitingRecords) ? record.waitingRecords.map(toJsonObject) : []
+    const activeWaiting = waitingRecords.filter((item) => item.active === true)
+    if (['已验收', '终止', '不计费'].includes(String(task.status || '')) && activeWaiting.length > 0) {
+      return `任务 #${Number(task.id) || expectedTaskId} 已关闭，但工具仍返回活动等待记录`
+    }
+    if (activeWaiting.some((item) => !String(item.note || item.reason || '').trim() || !String(item.startAt || '').trim())) {
+      return `任务 #${Number(task.id) || expectedTaskId} 的活动等待记录缺少原因或开始时间`
+    }
+    return ''
+  }
+
+  private isTaskScopedTool(toolName: string) {
+    return new Set([
+      'get_task_detail', 'get_task_memory', 'create_task_plan', 'record_feedback_preview', 'update_task_status_preview',
+      'update_task_fields_preview', 'append_progress_preview', 'append_waiting_preview',
+      'manage_record_preview', 'mark_acceptance_files_preview', 'complete_acceptance_preview',
+    ]).has(toolName)
+  }
+
   private resultAttachments(value: unknown): AgentResultAttachment[] {
     const record = toJsonObject(value)
     const files = Array.isArray(record.files) ? record.files : []
@@ -522,7 +632,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     })).filter((file) => file.id > 0 && file.name && file.sourceUrl)
   }
 
-  private buildTools(currentMonth: string | undefined, conversationId: string | undefined) {
+  private buildTools(currentMonth: string | undefined, conversationId: string | undefined, message: string) {
     const readTools = agentReadToolRegistry
     return {
       query_month_finance: tool({
@@ -550,7 +660,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       get_task_detail: tool({
         description: readTools.get_task_detail.description,
         inputSchema: readTools.get_task_detail.inputSchema,
-        execute: (input) => this.callTool('task-detail', input, 'GET'),
+        execute: (input) => this.callTool('task-detail', this.withTaskReference(input, message), 'GET'),
       }),
       get_requester_profile: tool({
         description: readTools.get_requester_profile.description,
@@ -580,12 +690,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           nextActionAt: z.string().optional(),
           steps: z.array(z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) })).min(2).max(8),
         }),
-        execute: (input) => this.callTool('create-task-plan', { ...input, conversationId }),
+        execute: (input) => this.callTool('create-task-plan', { ...this.withTaskReference(input, message), conversationId }),
       }),
       get_task_memory: tool({
         description: '读取并刷新某个任务的长期记忆，包括需求摘要、近期记录、合作伙伴反馈偏好和未解决事项。',
-        inputSchema: z.object({ taskId: z.number().int().positive() }),
-        execute: (input) => this.callTool('get-task-memory', input, 'GET'),
+        inputSchema: z.object({ taskId: z.number().int().positive().optional() }),
+        execute: (input) => this.callTool('get-task-memory', this.withTaskReference(input, message), 'GET'),
       }),
       start_monthly_review: tool({
         description: '启动指定月份的持久化后台工作复盘。用于“复盘本月”、“整体分析 7 月工作”等耗时请求，不要用于单个数字查询。',
@@ -642,7 +752,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           feedbackSource: z.string().optional(),
           dateTime: z.string().optional(),
         }),
-        execute: (input) => this.previewTool('record_feedback_preview', 'record-feedback-preview', input),
+        execute: (input) => this.previewTool('record_feedback_preview', 'record-feedback-preview', this.withTaskReference(input, message)),
       }),
       update_task_status_preview: tool({
         description: '生成任务状态与进度修改预览。',
@@ -653,7 +763,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           progress: z.number().min(0).max(100).optional(),
           reason: z.string().optional(),
         }),
-        execute: (input) => this.previewTool('update_task_status_preview', 'update-task-status-preview', input),
+        execute: (input) => this.previewTool('update_task_status_preview', 'update-task-status-preview', this.withTaskReference(input, message)),
       }),
       update_task_fields_preview: tool({
         description: '生成任务字段修改预览。fields 只包含需要变更的字段。',
@@ -662,7 +772,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           taskTitle: z.string().optional(),
           fields: z.record(z.string(), z.unknown()),
         }),
-        execute: (input) => this.previewTool('update_task_fields_preview', 'update-task-fields-preview', input),
+        execute: (input) => this.previewTool('update_task_fields_preview', 'update-task-fields-preview', this.withTaskReference(input, message)),
       }),
       append_progress_preview: tool({
         description: '生成任务进展和分段计时记录预览。',
@@ -676,7 +786,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           isRevision: z.boolean().optional(),
           isAcceptanceProgress: z.boolean().optional(),
         }),
-        execute: (input) => this.previewTool('append_progress_preview', 'append-progress-preview', input),
+        execute: (input) => this.previewTool('append_progress_preview', 'append-progress-preview', this.withTaskReference(input, message)),
       }),
       append_waiting_preview: tool({
         description: '生成等待记录预览。等待时长不计入实际工时或结算。',
@@ -688,7 +798,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           startDateTime: z.string().optional(),
           endDateTime: z.string().optional(),
         }),
-        execute: (input) => this.previewTool('append_waiting_preview', 'append-waiting-preview', input),
+        execute: (input) => this.previewTool('append_waiting_preview', 'append-waiting-preview', this.withTaskReference(input, message)),
       }),
       manage_record_preview: tool({
         description: '生成编辑或删除已有进展、反馈、等待记录的预览。必须先读取任务详情取得 recordId。',
@@ -700,7 +810,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           recordId: z.string(),
           changes: z.record(z.string(), z.unknown()).optional(),
         }),
-        execute: (input) => this.previewTool('manage_record_preview', 'manage-record-preview', input),
+        execute: (input) => this.previewTool('manage_record_preview', 'manage-record-preview', this.withTaskReference(input, message)),
       }),
       mark_acceptance_files_preview: tool({
         description: '把任务已有附件标记为验收文件。必须先通过任务详情或附件搜索获得 attachmentId。',
@@ -709,7 +819,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           taskTitle: z.string().optional(),
           attachmentIds: z.array(z.number().int().positive()).min(1).max(30),
         }),
-        execute: (input) => this.previewTool('mark_acceptance_files_preview', 'mark-acceptance-files-preview', input),
+        execute: (input) => this.previewTool('mark_acceptance_files_preview', 'mark-acceptance-files-preview', this.withTaskReference(input, message)),
       }),
       complete_acceptance_preview: tool({
         description: '生成完整验收包预览，一次确认验收备注、最终进展、实际工时和已有验收附件。',
@@ -724,7 +834,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           isRevision: z.boolean().optional(),
           attachmentIds: z.array(z.number().int().positive()).max(30).optional(),
         }),
-        execute: (input) => this.previewTool('complete_acceptance_preview', 'complete-acceptance-preview', input),
+        execute: (input) => this.previewTool('complete_acceptance_preview', 'complete-acceptance-preview', this.withTaskReference(input, message)),
       }),
     }
   }
@@ -887,6 +997,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
 
     const pending = this.getPendingAction()
     this.saveMessage('user', message)
+    const selectedReference = this.selectedTaskReference(message)
+    this.activeTaskReference = selectedReference || this.state.taskReference || null
+    if (selectedReference) this.setTaskReference(selectedReference)
 
     const decision = normalizedDecision(message)
     if (pending && CONFIRM_RE.test(decision)) {
@@ -935,9 +1048,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const messages = this.recentMessages(20)
     const result = await generateText({
       model: provider(modelName),
-      system: `${SYSTEM_PROMPT}\n\n当前月份：${request.currentMonth || '未知'}${pending ? `\n当前仍有一项待确认操作：${pending.label}。除非用户明确确认或取消，否则不要执行。` : ''}${request.context ? `\n\n本轮参考上下文：\n${request.context.slice(0, 10000)}` : ''}`,
+      system: `${SYSTEM_PROMPT}\n\n当前月份：${request.currentMonth || '未知'}${this.activeTaskReference ? `\n当前会话已确认任务：#${this.activeTaskReference.id} ${this.activeTaskReference.title}。用户说“这个 / 那个 / 刚才 / 继续”时优先使用该 taskId。` : ''}${pending ? `\n当前仍有一项待确认操作：${pending.label}。除非用户明确确认或取消，否则不要执行。` : ''}${request.context ? `\n\n本轮参考上下文：\n${request.context.slice(0, 10000)}` : ''}`,
       messages,
-      tools: this.buildTools(request.currentMonth, request.conversationId),
+      tools: this.buildTools(request.currentMonth, request.conversationId, message),
       toolChoice: 'auto',
       stopWhen: stepCountIs(8),
       temperature: 0.2,
@@ -955,10 +1068,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const evidence: AgentEvidence[] = []
     for (const step of result.steps) {
       for (const call of step.toolCalls) {
+        const rawInput = toJsonObject(call.input)
+        const effectiveInput = this.isTaskScopedTool(call.toolName) ? this.withTaskReference(rawInput, message) : rawInput
         plannedCalls.push({
           id: `${agentTurn.id}:tool:${plannedCalls.length + 1}`,
           name: call.toolName,
-          args: toJsonObject(call.input),
+          args: effectiveInput,
           reason: '由主模型结合完整语义规划。',
           risk: call.toolName.endsWith('_preview') ? 'write' : 'read',
           status: 'pending',
@@ -981,16 +1096,27 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         } else {
           trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
         }
+        const planned = [...plannedCalls].reverse().find((item) => item.name === toolResult.toolName && item.status === 'pending')
+        const mismatch = planned ? this.taskEvidenceMismatch(toolResult.toolName, planned.args, output) : ''
         evidence.push({
           id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
           toolCallId: plannedCalls.find((item) => item.name === toolResult.toolName)?.id || `${agentTurn.id}:tool:unknown`,
           toolName: toolResult.toolName,
           source: toolResult.toolName === 'search_product_help' || toolResult.toolName === 'get_giverny_context' ? 'product_registry' : 'd1',
-          deterministic: true,
+          deterministic: !mismatch,
           payload: output,
         })
-        const planned = [...plannedCalls].reverse().find((item) => item.name === toolResult.toolName && item.status === 'pending')
-        if (planned) planned.status = 'success'
+        if (planned) {
+          planned.status = mismatch ? 'failed' : 'success'
+          if (mismatch) planned.error = mismatch
+        }
+        if (mismatch) {
+          answer = `这次工具返回的任务与当前选中任务不一致，我已停止采用该结果。${mismatch}。`
+          trace.push({ type: 'error', label: '任务证据不一致', detail: mismatch })
+        } else {
+          const references = this.taskReferencesFromResult(output)
+          if (references.length === 1) this.setTaskReference(references[0])
+        }
         if (toolResult.toolName === 'search_attachments' || wantsAttachmentResults(message)) {
           this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
         }
@@ -1008,13 +1134,13 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         ? 'attachment'
         : [...usedTools].some((name) => name.endsWith('_preview'))
           ? 'write'
-          : usedTools.has('get_task_detail') || usedTools.has('search_tasks')
+          : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('query_task_portfolio')
             ? 'task_data'
             : usedTools.has('search_product_help')
               ? 'product_help'
               : 'general'
     const usedWritePreview = [...usedTools].some((toolName) => toolName.endsWith('_preview'))
-    if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message) && !usedTools.has('get_task_detail') && !usedWritePreview) {
+    if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message) && !usedTools.has('get_task_detail') && !usedTools.has('query_task_portfolio') && !usedWritePreview) {
       const repaired = await this.callTool('task-detail', { title: message }, 'GET').catch(() => null)
       const repairedRecord = toJsonObject(repaired)
       const task = toJsonObject(repairedRecord.task)

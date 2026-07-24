@@ -155,7 +155,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {

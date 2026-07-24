@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "description": "Giverny Agent 会话级任务引用与证据一致性回归集",
+  "cases": [
+    {
+      "id": "reference-01",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "查一下任务#1的详情", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "这个任务现在在等什么？", "expect": { "tools": ["get_task_detail"], "taskId": 1 } }
+      ]
+    },
+    {
+      "id": "reference-02",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "选择任务 #2：公司产品封套延展", "expect": {} },
+        { "prompt": "刚才那个项目的详情", "expect": { "tools": ["get_task_detail"], "taskId": 2 } }
+      ]
+    },
+    {
+      "id": "reference-03",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "读取任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "把这个任务的预估工时改成7小时", "expect": { "tools": ["update_task_fields_preview"], "taskId": 1, "approval": "update_task_fields" } }
+      ]
+    },
+    {
+      "id": "reference-04",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "看看任务#1现在的进展", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "给这项工作记录一条不计时进展：已完成第二版排版", "expect": { "tools": ["append_progress_preview"], "taskId": 1, "approval": "append_progress" } }
+      ]
+    },
+    {
+      "id": "reference-05",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "打开任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "为这个任务制定从当前进展到验收的持续计划", "expect": { "tools": ["create_task_plan"], "taskId": 1 } }
+      ]
+    },
+    {
+      "id": "reference-06",
+      "category": "multi_turn_reference",
+      "turns": [
+        { "prompt": "查看任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "它现在还有哪些未解决问题？", "expect": { "tools": ["get_task_memory"], "taskId": 1 } }
+      ]
+    }
+  ]
+}

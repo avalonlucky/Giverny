@@ -6520,12 +6520,11 @@ async function verifyMcpReadRequest(env: Env, request: Request): Promise<AgentPr
 async function callMcpReadTool(env: Env, endpoint: string, input: Record<string, unknown>, principal: AgentPrincipalContext) {
   if (!env.AGENT_TOOL_TOKEN) throw new Error('AGENT_TOOL_TOKEN 未配置，MCP 无法访问业务工具。')
   const url = new URL(`https://giverny.internal/api/agent/tools/${endpoint}`)
-  Object.entries(input).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
-  })
   const scopedHeaders = await createAgentScopeHeaders(env.AGENT_TOOL_TOKEN, principal)
   const response = await handleAgentToolApi(new Request(url, {
-    headers: { authorization: `Bearer ${env.AGENT_TOOL_TOKEN}`, ...scopedHeaders },
+    method: 'POST',
+    headers: { authorization: `Bearer ${env.AGENT_TOOL_TOKEN}`, 'content-type': 'application/json', ...scopedHeaders },
+    body: JSON.stringify(input),
   }), env)
   const data = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok || !data) throw new Error(String(data?.error || `工具调用失败：HTTP ${response.status}`))
@@ -6565,6 +6564,15 @@ function registerGivernyMcpTools(server: McpServer, env: Env, principal: AgentPr
     annotations,
   }, async (input) => {
     try { return mcpToolResult(await callMcpReadTool(env, search.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
+  })
+  const portfolio = agentReadToolRegistry.query_task_portfolio
+  server.registerTool('query_task_portfolio', {
+    title: portfolio.title,
+    description: portfolio.description,
+    inputSchema: portfolio.inputSchema,
+    annotations,
+  }, async (input) => {
+    try { return mcpToolResult(await callMcpReadTool(env, portfolio.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
   })
   const detail = agentReadToolRegistry.get_task_detail
   server.registerTool('get_task_detail', {

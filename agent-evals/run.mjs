@@ -2,10 +2,13 @@ import { readFile } from 'node:fs/promises'
 import process from 'node:process'
 
 const suiteUrl = new URL('./cases.json', import.meta.url)
+const multiTurnSuiteUrl = new URL('./multiturn-cases.json', import.meta.url)
 const gatesUrl = new URL('./quality-gates.json', import.meta.url)
 const suite = JSON.parse(await readFile(suiteUrl, 'utf8'))
+const multiTurnSuite = JSON.parse(await readFile(multiTurnSuiteUrl, 'utf8'))
 const gates = JSON.parse(await readFile(gatesUrl, 'utf8'))
 const cases = Array.isArray(suite.cases) ? suite.cases : []
+const multiTurnCases = Array.isArray(multiTurnSuite.cases) ? multiTurnSuite.cases : []
 const ids = new Set()
 const errors = []
 
@@ -22,6 +25,18 @@ for (const testCase of cases) {
 }
 
 if (cases.length < 50) errors.push(`评测集至少需要 50 条用例，当前 ${cases.length} 条`)
+for (const testCase of multiTurnCases) {
+  if (!testCase.id || !testCase.category || !Array.isArray(testCase.turns) || testCase.turns.length < 2) {
+    errors.push(`无效多轮用例：${JSON.stringify(testCase)}`)
+    continue
+  }
+  if (ids.has(testCase.id)) errors.push(`重复用例 ID：${testCase.id}`)
+  ids.add(testCase.id)
+  testCase.turns.forEach((turn, index) => {
+    if (!turn.prompt || !turn.expect) errors.push(`${testCase.id}.turns[${index}] 缺少 prompt/expect`)
+  })
+}
+if (multiTurnCases.length < 6) errors.push(`多轮引用评测至少需要 6 组，当前 ${multiTurnCases.length} 组`)
 if (errors.length) {
   console.error(errors.join('\n'))
   process.exit(1)
@@ -31,6 +46,9 @@ const categories = cases.reduce((result, item) => {
   result[item.category] = (result[item.category] || 0) + 1
   return result
 }, {})
+multiTurnCases.forEach((item) => {
+  categories[item.category] = (categories[item.category] || 0) + item.turns.length
+})
 
 if (typeof gates.overall !== 'number' || gates.overall < 0 || gates.overall > 1) {
   errors.push('quality-gates.json.overall 必须是 0 到 1 之间的数字')
@@ -47,7 +65,7 @@ if (errors.length) {
 }
 
 if (process.argv.includes('--validate-only') || !process.env.GIVERNY_AGENT_EVAL_URL) {
-  console.log(`Agent eval schema passed: ${cases.length} cases`)
+  console.log(`Agent eval schema passed: ${cases.length} single-turn cases + ${multiTurnCases.length} multi-turn conversations`)
   console.log(categories)
   if (!process.argv.includes('--validate-only')) console.log('Set GIVERNY_AGENT_EVAL_URL to run live evaluations.')
   process.exit(0)
@@ -75,6 +93,38 @@ if (!headers.cookie && process.env.GIVERNY_AGENT_EVAL_AUTH_EMAIL && process.env.
 }
 
 const results = []
+function evaluateResponse(testCase, data) {
+  const trace = Array.isArray(data.trace) ? data.trace.join('\n') : ''
+  const failures = []
+  for (const tool of testCase.expect.tools || []) {
+    if (!trace.includes(tool)) failures.push(`未调用 ${tool}`)
+  }
+  for (const tool of testCase.expect.forbiddenTools || []) {
+    if (trace.includes(tool)) failures.push(`误调用 ${tool}`)
+  }
+  if (testCase.expect.taskId) {
+    const plan = Array.isArray(data.agentTurn?.plan) ? data.agentTurn.plan : []
+    const expectedTools = testCase.expect.tools || []
+    const scopedCalls = plan.filter((item) => expectedTools.length === 0 || expectedTools.includes(item.name))
+    if (!scopedCalls.some((item) => Number(item.taskId) === Number(testCase.expect.taskId))) {
+      failures.push(`未继承 taskId=${testCase.expect.taskId}`)
+    }
+  }
+  if (testCase.expect.approval && data.approval?.action !== testCase.expect.approval) {
+    failures.push(`approval=${data.approval?.action || 'none'}，预期 ${testCase.expect.approval}`)
+  }
+  if (testCase.expect.backgroundTask && data.backgroundTask?.type !== testCase.expect.backgroundTask) {
+    failures.push(`backgroundTask=${data.backgroundTask?.type || 'none'}，预期 ${testCase.expect.backgroundTask}`)
+  }
+  if (testCase.expect.attachments && (!Array.isArray(data.attachments) || data.attachments.length === 0)) {
+    failures.push('未返回结构化附件')
+  }
+  if (data.selection && !testCase.expect.selectionAllowed) failures.push('意外返回任务消歧')
+  const candidateCount = Array.isArray(data.selection?.candidates) ? data.selection.candidates.length : 0
+  if (testCase.expect.selectionRequired && candidateCount < 2) failures.push(`未返回有效消歧候选（${candidateCount} 个）`)
+  return failures
+}
+
 for (const testCase of cases) {
   const conversationId = `eval-${testCase.id}-${crypto.randomUUID()}`
   try {
@@ -89,29 +139,35 @@ for (const testCase of cases) {
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
-    const trace = Array.isArray(data.trace) ? data.trace.join('\n') : ''
-    const failures = []
-    for (const tool of testCase.expect.tools || []) {
-      if (!trace.includes(tool)) failures.push(`未调用 ${tool}`)
-    }
-    for (const tool of testCase.expect.forbiddenTools || []) {
-      if (trace.includes(tool)) failures.push(`误调用 ${tool}`)
-    }
-    if (testCase.expect.approval && data.approval?.action !== testCase.expect.approval) {
-      failures.push(`approval=${data.approval?.action || 'none'}，预期 ${testCase.expect.approval}`)
-    }
-    if (testCase.expect.backgroundTask && data.backgroundTask?.type !== testCase.expect.backgroundTask) {
-      failures.push(`backgroundTask=${data.backgroundTask?.type || 'none'}，预期 ${testCase.expect.backgroundTask}`)
-    }
-    if (testCase.expect.attachments && (!Array.isArray(data.attachments) || data.attachments.length === 0)) {
-      failures.push('未返回结构化附件')
-    }
-    if (data.selection && !testCase.expect.selectionAllowed) failures.push('意外返回任务消歧')
-    const candidateCount = Array.isArray(data.selection?.candidates) ? data.selection.candidates.length : 0
-    if (testCase.expect.selectionRequired && candidateCount < 2) failures.push(`未返回有效消歧候选（${candidateCount} 个）`)
+    const failures = evaluateResponse(testCase, data)
     results.push({ id: testCase.id, category: testCase.category, ok: failures.length === 0, detail: failures.join('；') })
   } catch (error) {
     results.push({ id: testCase.id, category: testCase.category, ok: false, detail: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+for (const testCase of multiTurnCases) {
+  const conversationId = `eval-${testCase.id}-${crypto.randomUUID()}`
+  for (let index = 0; index < testCase.turns.length; index += 1) {
+    const turn = testCase.turns[index]
+    const id = `${testCase.id}.${index + 1}`
+    try {
+      const response = await fetch(`${baseUrl}/api/ai/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: turn.prompt }],
+          month: '2026-07',
+          agentRuntimeConversationId: conversationId,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
+      const failures = evaluateResponse({ ...turn, id }, data)
+      results.push({ id, category: testCase.category, ok: failures.length === 0, detail: failures.join('；') })
+    } catch (error) {
+      results.push({ id, category: testCase.category, ok: false, detail: error instanceof Error ? error.message : String(error) })
+    }
   }
 }
 

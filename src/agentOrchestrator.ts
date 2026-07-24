@@ -145,6 +145,7 @@ export function sanitizeAgentTurnAudit(turn: AgentTurn) {
     attempts: turn.attempts,
     plan: turn.plan.map((item) => ({
       name: String(item.name),
+      taskId: Number(item.args.taskId) > 0 ? Number(item.args.taskId) : undefined,
       risk: item.risk,
       status: item.status || 'pending',
       attempt: item.attempt || 1,
