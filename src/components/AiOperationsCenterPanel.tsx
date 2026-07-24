@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Plus, RotateCcw, UserPlus } from 'lucide-react'
 import type { AiOperationsCenter, WorkspaceSummary } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 type Props = {
   operations: AiOperationsCenter | null
@@ -95,7 +96,7 @@ export default function AiOperationsCenterPanel({
           {loading ? '刷新中…' : '刷新'}
         </button>
       </div>
-      {!operations && loading && <p className="calendar-empty-hint">正在汇总 AI 运行状态…</p>}
+      {!operations && loading && <p className="loading-state">正在汇总运行状态…</p>}
       {operations && (
         <>
           {operations.alerts.length > 0 && (
@@ -202,7 +203,7 @@ export default function AiOperationsCenterPanel({
                   </details>
                 ))}
               </div>
-            ) : <p className="calendar-empty-hint">新的 Agent 请求完成后，这里会显示可核对的执行记录。</p>}
+            ) : <EmptyState variant="inline" title="暂无 Agent 执行记录" description="新的 Agent 请求完成后，这里会显示可核对的执行记录。" />}
           </section>
           <section className="ai-agent-audit-section" aria-label="真实用户体验">
             <div className="ai-agent-audit-heading">
@@ -264,7 +265,7 @@ export default function AiOperationsCenterPanel({
                   </details>
                 ))}
               </div>
-            ) : <p className="calendar-empty-hint">当前周期没有记录到前端运行异常。</p>}
+            ) : <EmptyState variant="inline" title="当前周期没有前端运行异常" />}
           </section>
           <div className="ai-operations-columns">
             <section>
@@ -278,7 +279,7 @@ export default function AiOperationsCenterPanel({
                     </article>
                   ))}
                 </div>
-              ) : <p className="calendar-empty-hint">当前周期还没有路由记录。</p>}
+              ) : <EmptyState variant="inline" title="当前周期还没有路由记录" />}
             </section>
             <section>
               <h3>后台任务中心</h3>
@@ -295,7 +296,7 @@ export default function AiOperationsCenterPanel({
                     </article>
                   ))}
                 </div>
-              ) : <p className="calendar-empty-hint">当前没有后台分析任务。</p>}
+              ) : <EmptyState variant="inline" title="当前没有后台分析任务" />}
             </section>
             <section>
               <h3>学习效果</h3>
@@ -313,7 +314,7 @@ export default function AiOperationsCenterPanel({
                     </div>
                   ))}
                 </div>
-              ) : <p className="calendar-empty-hint">继续采用、修改或拒绝 AI 建议后，这里会形成独立校准画像。</p>}
+              ) : <EmptyState variant="inline" title="暂无学习校准画像" description="继续采用、修改或拒绝 AI 建议后，这里会形成独立校准画像。" />}
             </section>
           </div>
         </>

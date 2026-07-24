@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type CSSProperties } from 'react'
 import { BarChart3, CheckCircle2, Clock3 } from 'lucide-react'
 import { StatCard } from '../components/TaskUi'
+import { EmptyState } from '../components/EmptyState'
 import { formatYuan } from '../lib/money'
 import { monthLabelOf } from '../lib/month'
 import type { AnnualIncomeRow, IncomeDailyGroup, TaxMode } from '../types/domain'
@@ -284,7 +285,7 @@ export default function IncomeView({
             </table>
           </div>
         ) : (
-          <p className="income-empty">本月暂无分段计时记录，在任务进展中添加计时后即可看到日明细。</p>
+          <EmptyState variant="panel" title="本月暂无分段计时记录" description="在任务进展中添加计时后即可看到日明细。" />
         )}
       </section>
     </section>
@@ -294,5 +295,4 @@ export default function IncomeView({
 function CalculatorIcon() {
   return <BarChart3 size={20} />
 }
-
 

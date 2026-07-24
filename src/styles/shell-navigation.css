@@ -811,16 +811,6 @@ button.topbar-create-button:hover {
   padding: 4px 6px;
 }
 
-.command-empty {
-  min-height: 120px;
-  color: var(--color-text-muted);
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 9px;
-  font-size: 13px;
-}
-
 .command-footer {
   min-height: 38px;
   padding: 0 18px;
@@ -1117,4 +1107,3 @@ button.topbar-create-button:hover {
   font-size: 12px;
   line-height: 1.45;
 }
-

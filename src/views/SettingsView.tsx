@@ -55,6 +55,7 @@ import type { AgentFailureCase } from '../types/agent'
 import type { TaxMode } from '../types/domain'
 import { AiBrandIcon } from '../components/AiBrandIcon'
 import { ConfirmDialogModal, type ConfirmDialogState } from '../components/ConfirmDialogModal'
+import { EmptyState } from '../components/EmptyState'
 import { GivernyModeSettings } from '../components/GivernyModeSettings'
 import { GivernySelect } from '../components/GivernySelect'
 import { ModalShell } from '../components/ModalShell'
@@ -1033,7 +1034,7 @@ export default function SettingsView({
         </div>
       )}
       {settingsTab === 'local-cli' && (
-        <Suspense fallback={<p className="calendar-empty-hint">正在载入本机 CLI 设置…</p>}>
+        <Suspense fallback={<p className="loading-state">正在载入本机 CLI 设置…</p>}>
           <LocalCliConnectionPanel renderCliIcon={(cliId) => <AiBrandIcon brand={aiBrandForValue(cliId)} size={20} />} />
         </Suspense>
       )}
@@ -1112,7 +1113,7 @@ export default function SettingsView({
               ))}
               {providerError && !providerModal && <p className="settings-inline-error">{providerError}</p>}
             </section>
-            <Suspense fallback={<section className="panel settings-ai-panel ai-operations-panel"><p className="calendar-empty-hint">正在载入 AI 运行中心…</p></section>}>
+            <Suspense fallback={<section className="panel settings-ai-panel ai-operations-panel"><p className="loading-state">正在载入运行与质量中心…</p></section>}>
               <AiOperationsCenterPanel
                 operations={aiOperations}
                 loading={agentMetricsLoading}
@@ -1156,7 +1157,7 @@ export default function SettingsView({
                 </div>
               </div>
               {agentMetricsError && <p className="settings-inline-error">{agentMetricsError}</p>}
-              {!agentMetrics && agentMetricsLoading && <p className="calendar-empty-hint">正在读取 Agent 运行指标…</p>}
+              {!agentMetrics && agentMetricsLoading && <p className="loading-state">正在读取 Agent 运行指标…</p>}
               {agentMetrics && (
                 <>
                   <div className="agent-quality-metrics" aria-label={`最近 ${agentMetrics.periodDays} 天 Agent 指标`}>
@@ -1200,7 +1201,7 @@ export default function SettingsView({
                             <div key={item.name}><span>{agentMetricIntentLabels[item.name] || item.name}</span><strong>{item.count}</strong></div>
                           ))}
                         </div>
-                      ) : <p className="calendar-empty-hint">当前周期还没有运行记录。</p>}
+                      ) : <EmptyState variant="inline" title="当前周期还没有运行记录" />}
                     </div>
                     <div>
                       <h3>工具调用</h3>
@@ -1210,7 +1211,7 @@ export default function SettingsView({
                             <div key={item.name}><code>{item.name}</code><strong>{item.count}</strong></div>
                           ))}
                         </div>
-                      ) : <p className="calendar-empty-hint">当前周期还没有工具调用。</p>}
+                      ) : <EmptyState variant="inline" title="当前周期还没有工具调用" />}
                     </div>
                     <div>
                       <h3>质量信号</h3>
@@ -1238,7 +1239,7 @@ export default function SettingsView({
                   <details className="agent-failure-learning" open={agentFailures.some((item) => item.regressionStatus === 'required')}>
                     <summary>失败学习与回归 <span>{agentFailures.filter((item) => item.regressionStatus === 'required').length} 项待覆盖</span></summary>
                     <p>{agentFailurePolicy || '仅保存匿名失败类型、工具和状态，不保存用户业务内容。'}</p>
-                    {agentFailures.length === 0 ? <p className="calendar-empty-hint">当前没有记录到失败案例。</p> : <div className="agent-failure-case-list">
+                    {agentFailures.length === 0 ? <EmptyState variant="inline" title="当前没有记录到失败案例" /> : <div className="agent-failure-case-list">
                       {agentFailures.slice(0, 20).map((failure) => (
                         <article key={failure.fingerprint}>
                           <div className="agent-failure-case-main">
@@ -1520,7 +1521,7 @@ export default function SettingsView({
                     </button>
                   </div>
                   {orError && <p className="settings-inline-error">{orError}</p>}
-                  {orFreeModels.length === 0 && !orScanning && <p className="calendar-empty-hint">还没有扫描结果，点「立即扫描」获取。</p>}
+                  {orFreeModels.length === 0 && !orScanning && <EmptyState variant="compact" title="还没有扫描结果" description="点击「立即扫描」获取可用模型。" />}
                   {orFreeModels.length > 0 && (
                     <div className="or-free-list">
                       {orFreeModels.map((model) => {
@@ -1784,7 +1785,7 @@ export default function SettingsView({
               </div>
               {activeTokenScope && <p className="token-scope-hint"><strong>{activeTokenScope.label}</strong>：{activeTokenScope.desc}</p>}
               <div className="token-list">
-                {accessTokens.length === 0 && <p className="calendar-empty-hint">还没有生成过口令。</p>}
+                {accessTokens.length === 0 && <EmptyState variant="compact" title="还没有生成过口令" />}
                 {accessTokens.map((token) => {
                   const status = tokenStatus(token)
                   return (
@@ -2054,15 +2055,16 @@ export default function SettingsView({
                         {model === providerDefaultModelDraft && <CheckCircle2 size={15} />}
                       </button>
                     )) : (
-                      <p className="provider-model-empty">
-                        没有匹配“{providerModelFilter}”的模型
-                        {providerModelTabsVisible && providerModelView === 'recommended' ? '，可切换到「全部」再找找' : ''}
-                      </p>
+                      <EmptyState
+                        variant="inline"
+                        title={`没有匹配“${providerModelFilter}”的模型`}
+                        description={providerModelTabsVisible && providerModelView === 'recommended' ? '可以切换到「全部」再找找。' : undefined}
+                      />
                     )}
                   </div>
                   <small>共 {providerModelsDraft.length} 个模型，列表可滚动。全站模型选择器只展示默认模型；更换后会同步更新正在使用该服务商的路线。</small>
                 </label>
-              ) : <p>还没有模型。请填写密钥后点击“加载模型”。</p>}
+              ) : <EmptyState variant="compact" title="还没有模型" description="请填写密钥后点击「加载模型」。" />}
             </div>
           </div>
           <div className="modal-footer model-provider-modal-actions">

@@ -1917,7 +1917,7 @@ textarea:focus-visible {
   --status-dot-color: var(--color-status-planning);
 }
 
-.calendar-empty-hint {
+.loading-state {
   margin: 0;
   padding: 8px 10px;
   color: var(--color-text-muted);
@@ -2581,4 +2581,3 @@ textarea:focus-visible {
   position: relative;
   overflow: hidden;
 }
-

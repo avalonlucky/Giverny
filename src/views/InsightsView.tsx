@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { ModalShell } from '../components/ModalShell'
+import { EmptyState } from '../components/EmptyState'
 import { api, type HourEstimateMetrics, type ReportRecord } from '../lib/api'
 import { datePart, formatMonthDay, formatMonthDayTime, isoDate, isoDateFromLocalDate, localDateFromIsoDate } from '../lib/dateTime'
 import { formatYuan } from '../lib/money'
@@ -114,7 +115,7 @@ function HourCalibrationTable({ title, rows }: { title: string; rows: HourEstima
     <section className="hour-calibration-table">
       <h4>{title}</h4>
       {rows.length === 0 ? (
-        <p>暂无可校准样本</p>
+        <EmptyState variant="inline" title="暂无可校准样本" />
       ) : (
         <div className="hour-calibration-rows">
           <div className="hour-calibration-row header" aria-hidden="true">
@@ -746,7 +747,7 @@ export default function InsightsView({
               </button>
             ))}
             {projectDiagnosisRows.length === 0 && (
-              <p className="insight-tree-empty">本月暂无需要关注的异常任务</p>
+              <EmptyState variant="inline" title="本月暂无需要关注的异常任务" />
             )}
           </div>
           <div className="insight-tree-group">
@@ -764,7 +765,7 @@ export default function InsightsView({
               </button>
             ))}
             {requesterProfileRows.length === 0 && (
-              <p className="insight-tree-empty">周期内出现记录需求人的任务后生成画像</p>
+              <EmptyState variant="inline" title="暂无需求人画像" description="周期内出现记录需求人的任务后自动生成。" />
             )}
           </div>
         </aside>
@@ -879,10 +880,10 @@ export default function InsightsView({
                 <h2>AI 工时准确率与学习复盘</h2>
                 <p>{currentMonth.label} · 只统计已验收任务，对比 AI 建议、最终采用值与真实工时</p>
               </div>
-              {hourMetricsLoading && <p className="hour-learning-empty">AI 正在整理工时复盘…</p>}
-              {!hourMetricsLoading && hourMetricsError && <p className="hour-learning-empty error-text">{hourMetricsError}</p>}
+              {hourMetricsLoading && <p className="loading-state">AI 正在整理工时复盘…</p>}
+              {!hourMetricsLoading && hourMetricsError && <p className="error-text">{hourMetricsError}</p>}
               {!hourMetricsLoading && !hourMetricsError && hourMetrics && hourMetrics.summary.observedCount === 0 && hourMetrics.observationReadiness.observedCount === 0 && (
-                <p className="hour-learning-empty">当月还没有“使用过 AI 工时建议且已验收”的任务。完成验收后，这里会自动生成偏差和校准结果。</p>
+                <EmptyState variant="panel" title="暂无可复盘的工时建议" description="当月还没有使用过 AI 工时建议且已验收的任务。完成验收后，这里会自动生成偏差和校准结果。" />
               )}
               {!hourMetricsLoading && !hourMetricsError && hourMetrics && (hourMetrics.summary.observedCount > 0 || hourMetrics.observationReadiness.observedCount > 0) && (
                 <article className="hour-learning-report">
@@ -936,7 +937,7 @@ export default function InsightsView({
                         <span>结算偏差 {item.medianSettlementErrorRate}%</span>
                         <p>{item.recommendation}</p>
                       </div>)}
-                    </div> : <p className="hour-learning-empty">记录报价结果后，将自动生成成交与结算策略建议。</p>}
+                    </div> : <EmptyState variant="inline" title="暂无报价结果" description="记录报价结果后，将自动生成成交与结算策略建议。" />}
                   </section>
 
                   <section className="hour-learning-section">
@@ -964,7 +965,7 @@ export default function InsightsView({
                         <span>低估 {item.underRate}% · 高估 {item.overRate}%</span>
                         <small>{item.topFactors.join('、') || '暂无集中偏差因素'}</small>
                       </div>)}
-                    </div> : <p className="hour-learning-empty">健康样本不足，暂不生成分类结论。</p>}
+                    </div> : <EmptyState variant="inline" title="健康样本不足" description="继续积累验收样本后生成分类结论。" />}
                   </section>
 
                   <section className="hour-learning-section">
@@ -978,7 +979,7 @@ export default function InsightsView({
                         <strong>{item.changeRate > 0 ? '+' : ''}{item.changeRate}%</strong>
                         <p>{item.summary}</p>
                       </div>)}
-                    </div> : <p className="hour-learning-empty">当前没有达到提醒阈值的类型，或同类型样本尚不足 6 条。</p>}
+                    </div> : <EmptyState variant="inline" title="暂无类型提醒" description="当前没有达到提醒阈值的类型，或同类型样本尚不足 6 条。" />}
                   </section>
 
                   <section className="hour-learning-section">
@@ -1000,7 +1001,7 @@ export default function InsightsView({
                           </div>
                         ))}
                       </div>
-                    ) : <p className="hour-learning-empty">跨月样本不足，验收任务积累后自动生成趋势。</p>}
+                    ) : <EmptyState variant="inline" title="跨月样本不足" description="验收任务积累后自动生成趋势。" />}
                   </section>
 
                   <section className="hour-learning-section">
@@ -1048,7 +1049,7 @@ export default function InsightsView({
                           </div>
                         ))}
                       </div>
-                    ) : <p className="hour-learning-empty">同类型跨期样本不足，暂不生成效率结论。</p>}
+                    ) : <EmptyState variant="inline" title="同类型跨期样本不足" description="继续积累后再生成效率结论。" />}
                   </section>
 
                   <section className="hour-learning-section">
@@ -1068,7 +1069,7 @@ export default function InsightsView({
                           </div>
                         ))}
                       </div>
-                    ) : <p className="hour-learning-empty">当前没有需要处理的异常样本。</p>}
+                    ) : <EmptyState variant="inline" title="当前没有需要处理的异常样本" />}
                     {hourSampleQualityError && <p className="error-text">{hourSampleQualityError}</p>}
                   </section>
 
@@ -1270,7 +1271,7 @@ export default function InsightsView({
                     <span className="cp-dist-seg s-bad" style={{ flexGrow: Math.max(c.problem, 0.001) }}>有问题 {c.problem}</span>
                   </div>
                 ) : (
-                  <p className="cp-empty">暂无体感反馈记录（验收时勾选「顺利 / 一般 / 有问题」后会沉淀到这里）。</p>
+                  <EmptyState variant="compact" title="暂无体感反馈记录" description="验收时勾选「顺利 / 一般 / 有问题」后会沉淀到这里。" />
                 )}
                 {topTags.length > 0 && (
                   <div className="cp-tags">

@@ -298,15 +298,16 @@ export function DashboardView({
                 {visibleTaskCount === 0 && (
                   <EmptyState
                     role="status"
+                    variant="feature"
                     title={activeMonthTaskCount === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
                     description={activeMonthTaskCount === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}
                     action={activeMonthTaskCount === 0 ? (
-                      <button className="ghost-button compact-button empty-state-action" onClick={() => onCreateTask()}>
+                      <button className="ghost-button compact-button" onClick={() => onCreateTask()}>
                         <Plus size={15} />
                         新建任务
                       </button>
                     ) : (
-                      <button className="ghost-button compact-button empty-state-action" onClick={() => { setTaskQuery(''); setTaskFilter('全部') }}>
+                      <button className="ghost-button compact-button" onClick={() => { setTaskQuery(''); setTaskFilter('全部') }}>
                         <RotateCcw size={15} />
                         清除筛选
                       </button>

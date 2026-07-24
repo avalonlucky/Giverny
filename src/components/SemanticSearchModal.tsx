@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { RotateCcw, Search, X } from 'lucide-react'
 import { api } from '../lib/api'
 import type { FileAsset, Task } from '../types/domain'
+import { EmptyState } from './EmptyState'
 
 export default function SemanticSearchModal({
   isAdmin,
@@ -93,7 +94,7 @@ export default function SemanticSearchModal({
         {note && <p className="semantic-search-note">{note}</p>}
         <div className="semantic-search-results">
           {searched && !loading && results.length === 0 && !note && (
-            <p className="calendar-empty-hint">没有找到相关任务。如果是刚新建的任务，可点下方「重建索引」后再搜。</p>
+            <EmptyState variant="compact" icon={<Search size={18} />} title="没有找到相关任务" description="如果是刚新建的任务，可点下方「重建索引」后再搜。" />
           )}
           {results.map((item) => {
             const libraryFiles = files.filter(

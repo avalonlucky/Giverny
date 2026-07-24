@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Bot, CheckCircle2, Copy, RotateCcw, Search } from 'lucide-react'
 import { api, type LocalCliDevice } from '../lib/api'
 import { LOCAL_CLI_RUNTIME_VERSION, localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
+import { EmptyState } from './EmptyState'
 
 export default function LocalCliConnectionPanel({ renderCliIcon }: { renderCliIcon: (cliId: string) => ReactNode }) {
   const [browserDeviceKey] = useState(localCliBrowserDeviceKey)
@@ -131,14 +132,15 @@ export default function LocalCliConnectionPanel({ renderCliIcon }: { renderCliIc
         </div>
 
         {error && <p className="settings-inline-error local-cli-error">{error}</p>}
-        {loading && <p className="calendar-empty-hint">正在读取本机连接状态…</p>}
+        {loading && <p className="loading-state">正在读取本机连接状态…</p>}
 
         {!loading && devices.length === 0 && !pairing && (
-          <div className="local-cli-empty">
-            <Bot size={25} />
-            <strong>尚未连接这台电脑</strong>
-            <p>点击「扫描这台电脑」生成一次性配对码。连接器只向 Giverny 发起出站请求，不开放本机端口。</p>
-          </div>
+          <EmptyState
+            variant="panel"
+            icon={<Bot size={25} />}
+            title="尚未连接这台电脑"
+            description="点击「扫描这台电脑」生成一次性配对码。连接器只向 Giverny 发起出站请求，不开放本机端口。"
+          />
         )}
 
         {pairing && (

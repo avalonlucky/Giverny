@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, Pencil, Plus, Sparkles } from 'lucide-react'
 import { authedPreviewUrl, type TaskProgressAssessment } from '../lib/api'
 import { AttachmentHoverThumbnail } from './AttachmentHoverThumbnail'
+import { EmptyState } from './EmptyState'
 import { StatusDotLabel } from './TaskUi'
 import { formatPlanDateTime, isoDateTime } from '../lib/dateTime'
 import { formatYuan, roundCents } from '../lib/money'
@@ -95,10 +96,7 @@ export function DashboardTaskSidebar({
   if (!task) {
     return (
       <aside className="dashboard-task-sidebar">
-        <div className="dashboard-task-sidebar-empty">
-          <strong>选择一条任务</strong>
-          <p>右侧会显示任务信息、进度、分段计时和等待记录。</p>
-        </div>
+        <EmptyState variant="panel" title="选择一条任务" description="右侧会显示任务信息、进度、分段计时和等待记录。" />
       </aside>
     )
   }
@@ -322,7 +320,7 @@ export function DashboardTaskSidebar({
               </div>
               <p className="dashboard-side-subsection-meta">可结算 · {progressBillableEntries.length} 段 · {billableHours.toFixed(1)}h · ¥{formatYuan(billableAmount)}</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
-                <p className="dashboard-side-muted">暂无分段计时；点击记录进展后添加。</p>
+                <EmptyState variant="compact" title="暂无分段计时" description="点击记录进展后添加。" />
               ) : (
                 <>
                   <div className="dashboard-side-timeline">
@@ -453,7 +451,7 @@ export function DashboardTaskSidebar({
               </div>
               <p className="dashboard-side-subsection-meta">用于追溯 B01 / B02 等每轮修改意见，默认不计工时。</p>
               {sortedFeedbackEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无合作伙伴反馈；收到批注、聊天截图或版本意见时可单独记录。</p>
+                <EmptyState variant="compact" title="暂无合作伙伴反馈" description="收到批注、聊天截图或版本意见时可单独记录。" />
               ) : (
                 <>
                   <div className="dashboard-side-timeline">
@@ -517,7 +515,7 @@ export function DashboardTaskSidebar({
               </div>
               {waitingMinutes > 0 && <p className="dashboard-side-subsection-meta">等待合计 {(waitingMinutes / 60).toFixed(1)}h · 仅进入洞察分析</p>}
               {waitingEntries.length === 0 ? (
-                <p className="dashboard-side-muted">暂无等待记录；等待合作伙伴意见、补资料或确认时可单独记录。</p>
+                <EmptyState variant="compact" title="暂无等待记录" description="等待合作伙伴意见、补资料或确认时可单独记录。" />
               ) : (
                 <>
                   <div className="dashboard-side-waiting-list">

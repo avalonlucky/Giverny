@@ -204,7 +204,7 @@ export default function TasksView({
             <div className="panel-tools calendar-toolbar-actions">{viewTabs}</div>
           </div>
         </section>
-        <Suspense fallback={<p className="calendar-empty-hint">正在载入任务日历…</p>}>
+        <Suspense fallback={<p className="loading-state">正在载入任务日历…</p>}>
           <CalendarView
             key={monthValue}
             monthValue={monthValue}
@@ -335,12 +335,13 @@ export default function TasksView({
           {tasks.length === 0 && (
             <EmptyState
               role="status"
+              variant="feature"
               title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
               description={activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}
               action={canWrite && activeMonthTasks.length === 0
-                ? <button className="ghost-button compact-button empty-state-action" onClick={onCreateTask}><Plus size={15} />新建任务</button>
+                ? <button className="ghost-button compact-button" onClick={onCreateTask}><Plus size={15} />新建任务</button>
                 : activeMonthTasks.length > 0
-                  ? <button className="ghost-button compact-button empty-state-action" onClick={() => { onQueryChange(''); onFilterChange('全部') }}><RotateCcw size={15} />清除筛选</button>
+                  ? <button className="ghost-button compact-button" onClick={() => { onQueryChange(''); onFilterChange('全部') }}><RotateCcw size={15} />清除筛选</button>
                   : null}
             />
           )}

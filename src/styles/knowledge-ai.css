@@ -90,14 +90,6 @@
   gap: 10px;
 }
 
-.knowledge-empty {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  text-align: center;
-  margin: 24px 0;
-  line-height: 1.6;
-}
-
 .knowledge-item {
   border: 1px solid var(--color-border);
   padding: 10px 12px;
@@ -654,19 +646,13 @@
   font-weight: 700;
 }
 
-.alice-model-row small,
-.alice-model-empty {
+.alice-model-row small {
   color: var(--color-text-secondary);
   font-size: 12px;
 }
 
 .alice-model-selected {
   color: var(--color-primary);
-}
-
-.alice-model-empty {
-  margin: 8px;
-  line-height: 1.6;
 }
 
 .alice-model-label {
@@ -890,13 +876,6 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px 0;
-}
-
-.chat-history-empty {
-  text-align: center;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  margin-top: 48px;
 }
 
 .chat-history-item {
@@ -1785,14 +1764,6 @@
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.provider-model-empty {
-  margin: 0;
-  padding: 16px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  text-align: center;
 }
 
 .provider-default-model-field small {

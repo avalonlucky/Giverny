@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowRight, ArrowUp, CheckCircle2, ExternalLink, FileArchive, FileText, Image as ImageIcon, X } from 'lucide-react'
 import type { FileAsset, Task, TaskUpdate, TimeEntry } from '../types/domain'
+import { EmptyState } from './EmptyState'
 
 type ProjectTimelineItem = {
   id: string
@@ -223,7 +224,7 @@ export function SharedProjectAppendix({ tasks, updates, files }: { tasks: Task[]
                     )}
                   </>
                 ) : (
-                  <div className="shared-project-empty-file"><FileArchive size={28} /><span>暂无公开附件</span></div>
+                  <EmptyState variant="compact" icon={<FileArchive size={24} />} title="暂无公开附件" />
                 )}
               </div>
               <footer className="shared-project-row-footer">

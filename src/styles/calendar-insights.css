@@ -525,12 +525,6 @@
   border-top: none;
 }
 
-.income-empty {
-  padding: 20px 24px;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-}
-
 .task-detail-modal {
   width: min(860px, 100%);
 }
@@ -2553,4 +2547,3 @@
     white-space: normal;
   }
 }
-

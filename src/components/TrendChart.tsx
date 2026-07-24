@@ -18,7 +18,6 @@ export function TrendChart({ data }: TrendChartProps) {
   if (data.length === 0) {
     return (
       <EmptyState
-        className="trend-empty"
         title="暂无趋势数据"
         description="记录任务工时后，这里会按天显示本月投入变化。"
       />

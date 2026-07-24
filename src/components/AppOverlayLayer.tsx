@@ -221,7 +221,7 @@ export function AppOverlayLayer({
         </>
       )}
       {semanticSearchOpen && (
-        <Suspense fallback={<div className="command-overlay"><p className="calendar-empty-hint">正在载入语义搜索…</p></div>}>
+        <Suspense fallback={<div className="command-overlay"><p className="loading-state">正在载入语义搜索…</p></div>}>
           <SemanticSearchModal
             isAdmin={isAdmin}
             files={files}

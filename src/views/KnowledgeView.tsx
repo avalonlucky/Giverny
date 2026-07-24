@@ -131,15 +131,16 @@ export default function KnowledgeView() {
           </button>
         </div>
 
-        {loading && <p className="knowledge-empty">加载中…</p>}
+        {loading && <p className="loading-state">正在载入知识库…</p>}
         {!loading && activeTab === 'user' && userNotes.length === 0 && (
           <EmptyState
+            variant="feature"
             title="还没有笔记"
             description="写下定价逻辑、合作伙伴沟通方式、行业心得，AI 工作助手对话时会自动参考这里的内容。"
           />
         )}
         {!loading && activeTab === 'ai-tip' && aiTipNotes.length === 0 && (
-          <EmptyState title="还没有收藏" description="在工作台的每日小知识里点击收藏，感兴趣的内容会收进这里。" />
+          <EmptyState variant="feature" title="还没有收藏" description="在工作台的每日小知识里点击收藏，感兴趣的内容会收进这里。" />
         )}
         {(activeTab === 'user' ? userNotes : aiTipNotes).map((note) => (
           <div key={note.id} className={`knowledge-item ${note.source === 'ai-tip' ? 'knowledge-item-ai-tip' : ''}`}>

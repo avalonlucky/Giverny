@@ -597,7 +597,7 @@ function App() {
         )}
 
         {activeView === '任务' && (
-          <Suspense fallback={<p className="calendar-empty-hint">正在载入任务管理…</p>}>
+          <Suspense fallback={<p className="loading-state">正在载入任务管理…</p>}>
           <TasksView
             viewMode={taskViewMode}
             onViewModeChange={(mode) => routerNavigate(appViewPath('任务', mode), {
@@ -666,7 +666,7 @@ function App() {
         )}
 
         {activeView === '文件库' && (
-          <Suspense fallback={<p className="calendar-empty-hint">正在载入文件库…</p>}>
+          <Suspense fallback={<p className="loading-state">正在载入文件库…</p>}>
             <FilesView
               files={fileItems}
               tasks={taskItems}
@@ -687,7 +687,7 @@ function App() {
 
         {activeView === '洞察' && (
           canSeeFull || isClient ? (
-            <Suspense fallback={<p className="calendar-empty-hint">正在载入洞察分析…</p>}>
+            <Suspense fallback={<p className="loading-state">正在载入洞察分析…</p>}>
               <InsightsView
                 tasks={activeTaskItems}
                 updates={updateItems}
@@ -706,7 +706,7 @@ function App() {
 
         {activeView === '收入' && (
           canSeeFull ? (
-            <Suspense fallback={<p className="calendar-empty-hint">正在载入收入分析…</p>}>
+            <Suspense fallback={<p className="loading-state">正在载入收入分析…</p>}>
               <IncomeView
                 annualData={annualData}
                 currentMonth={currentMonth}
@@ -723,7 +723,7 @@ function App() {
 
         {activeView === '结算' && (
           canSeeFull || isClient ? (
-            <Suspense fallback={<p className="calendar-empty-hint">正在载入结算回单…</p>}>
+            <Suspense fallback={<p className="loading-state">正在载入结算回单…</p>}>
               <ReportsView
                 stats={stats}
                 tasks={activeMonthTasks}
@@ -746,14 +746,14 @@ function App() {
         )}
 
         {activeView === '知识库' && isAdmin && (
-          <Suspense fallback={<p className="calendar-empty-hint">正在载入知识库…</p>}>
+          <Suspense fallback={<p className="loading-state">正在载入知识库…</p>}>
             <KnowledgeView />
           </Suspense>
         )}
 
         {activeView === '设置' && (
           isAdmin ? (
-            <Suspense fallback={<p className="calendar-empty-hint">正在载入设置…</p>}>
+            <Suspense fallback={<p className="loading-state">正在载入设置…</p>}>
               <SettingsView
                 key={settingsEntry.nonce}
                 initialTab={settingsEntry.tab}

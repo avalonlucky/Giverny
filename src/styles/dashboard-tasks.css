@@ -1624,24 +1624,6 @@
   color: var(--color-status-stopped);
 }
 
-.dashboard-task-sidebar-empty {
-  display: grid;
-  gap: 8px;
-  padding: 20px 0;
-}
-
-.dashboard-task-sidebar-empty strong {
-  color: var(--color-text);
-  font-size: 16px;
-}
-
-.dashboard-task-sidebar-empty p {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
 .task-row {
   position: relative;
   width: 100%;
@@ -2373,16 +2355,6 @@
   font-weight: 700;
 }
 
-/* 树分组下暂无条目时的占位说明：与树项同缩进，弱化为 muted 文字，不可点击 */
-.insight-tree-empty {
-  margin: 0;
-  min-height: 32px;
-  padding: 6px 0 0 16px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
 .insight-tree-item.active em {
   color: var(--color-primary);
 }
@@ -2767,13 +2739,6 @@
 .cp-list-k.good {
   background: var(--color-sidebar);
   color: var(--color-primary);
-}
-
-.cp-empty {
-  margin: 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  line-height: 1.55;
 }
 
 .cp-traits {
@@ -4031,4 +3996,3 @@
 .detail-pane-toggle:hover {
   color: var(--color-primary);
 }
-

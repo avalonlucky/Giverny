@@ -903,11 +903,6 @@
   font-weight: 800;
 }
 
-.receipt-empty {
-  text-align: center;
-  color: var(--color-text-muted);
-}
-
 .receipt-detail-section {
   margin-top: 18px;
 }
@@ -1172,4 +1167,3 @@
 .task-modal.is-dragging * {
   user-select: none;
 }
-

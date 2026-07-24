@@ -1050,17 +1050,6 @@ button.topbar-create-button kbd {
   line-height: 1.55;
 }
 
-.hour-learning-empty {
-  max-width: 760px;
-  margin: 28px 0 0;
-  padding: 22px 0;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
-}
-
 .hour-learning-report {
   display: grid;
   gap: 38px;
@@ -2428,16 +2417,6 @@ button.topbar-create-button kbd {
   font-weight: 600;
 }
 
-.shared-project-empty-file {
-  min-height: 160px;
-  color: var(--color-text-muted);
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
 .shared-project-row-footer {
   display: flex;
   align-items: center;
@@ -2750,4 +2729,3 @@ button.topbar-create-button kbd {
     mix-blend-mode: normal;
   }
 }
-

@@ -23,6 +23,7 @@ import type { FileAsset, Task, TaskFeedbackRating, TaskFeedbackTag, TimeEntry, W
 import type { AcceptancePayload, PendingProgressAttachment, ProgressRecordMode, TaskUpdateChanges } from '../types/taskUi'
 import type { ToastTone } from '../lib/toastQueue'
 import { AttachmentHoverThumbnail } from './AttachmentHoverThumbnail'
+import { EmptyState } from './EmptyState'
 import { ModalShell } from './ModalShell'
 import { PendingAttachmentPreview, PendingAttachmentThumbnail } from './PendingAttachmentPreview'
 import { PlanDateTimeField } from './PlanDateTimeField'
@@ -2606,7 +2607,7 @@ export function TaskProgressModal({
                 <section className="progress-acceptance-block">
                   <h3 className="progress-acceptance-block-title">计时与工时汇总</h3>
                   {acceptanceBillablePreviewTimeEntries.length === 0 ? (
-                    <p className="progress-acceptance-hint">还没有分段计时。</p>
+                    <EmptyState variant="compact" title="还没有分段计时" description="可以先记录实际投入，再确认验收。" />
                   ) : (
                     <div className="progress-acceptance-time-table-wrap">
                       <table className="progress-acceptance-time-table">

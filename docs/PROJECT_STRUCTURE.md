@@ -142,6 +142,7 @@
 │   │   ├── AppTopbar.tsx
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
+│   │   ├── EmptyState.tsx
 │   │   ├── MonthPicker.tsx
 │   │   ├── NewTaskModal.tsx
 │   │   ├── NewTaskDesignTypeSelector.tsx
@@ -226,6 +227,7 @@
 - Shared upload-time PDF, PSD, video and Office preview generation: `src/lib/attachmentPreview.ts`
 - Shared lazy PDF runtime and worker initialization: `src/lib/pdfRuntime.ts`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
+- Shared four-density empty-state presentation: `src/components/EmptyState.tsx`, `src/styles/task-management.css`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
 - Progress, waiting, feedback and acceptance workflow modal: `src/components/TaskProgressModal.tsx`
 - Shared month navigation and year/month picker: `src/components/MonthPicker.tsx`
@@ -283,6 +285,7 @@
 - CSS architecture regression guard: `scripts/check-css-architecture.mjs` (`App.css` import-only; 13 ordered domains; 4,500-line module cap)
 - Routing architecture regression guard: `scripts/check-routing-architecture.mjs` (single RouterProvider; no pathname regex dispatch; public share routes lazy-loaded)
 - Deployment architecture regression guard: `scripts/check-deployment-architecture.mjs` (production deploy scripts must use Cloudflare HTTP API Direct Upload and must not invoke Wrangler)
+- Empty-state architecture regression guard: `scripts/check-empty-state-architecture.mjs` (shared coverage baseline, four density levels, legacy TSX/CSS patterns and reduced-motion support)
 - AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation

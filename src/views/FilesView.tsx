@@ -207,6 +207,7 @@ export default function FilesView({
         <aside className="file-project-list">
           {monthGroups.length === 0 && (
             <EmptyState
+              variant="feature"
               title="还没有验收交付件"
               description="任务提交验收时上传的交付文件会按项目自动归档到这里，AI 也会同步解析内容供搜索。"
             />
@@ -310,7 +311,7 @@ export default function FilesView({
                 </article>
               )
             })}
-            {selectedProject && selectedFiles.length === 0 && <p className="calendar-empty-hint">这个项目下还没有文件。</p>}
+            {selectedProject && selectedFiles.length === 0 && <EmptyState variant="panel" title="这个项目下还没有文件" description="验收交付件上传后会自动归入当前项目。" />}
           </div>
         </section>
         {selectedFile && (
@@ -491,7 +492,7 @@ function FileInspector({
         />
       </label>}
       <div className="inspector-tags">
-        {tags.length === 0 && <em>暂无标签</em>}
+        {tags.length === 0 && <EmptyState variant="inline" title="暂无标签" />}
         {tags.map((tag) => (
           <span key={tag}>
             {tag}

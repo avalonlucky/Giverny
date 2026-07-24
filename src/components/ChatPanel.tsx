@@ -35,6 +35,7 @@ import { AgentExecutionTimeline } from './AgentExecutionTimeline'
 import { AgentTaskSelectionCard } from './AgentTaskSelectionCard'
 import { AiBrandIcon } from './AiBrandIcon'
 import { ChatContent } from './ChatContent'
+import { EmptyState } from './EmptyState'
 import { ImageLightbox } from './CommandPalette'
 
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
@@ -940,7 +941,7 @@ export function ChatPanel({
           </div>
           <div className="chat-project-list">
             {projects.length === 0 ? (
-              <p>还没有项目，可以先建一个「金额核对」。</p>
+              <EmptyState variant="inline" title="还没有项目" description="可以先建一个「金额核对」。" />
             ) : projects.map((project) => (
               <button key={project.id} type="button" className={activeProjectId === project.id ? 'active' : ''} onClick={() => selectConversationProject(project.id)}>
                 <Folder size={13} aria-hidden="true" />
@@ -1091,9 +1092,9 @@ export function ChatPanel({
             </div>
             <div className="alice-model-popup-section">
               <div className="alice-model-popup-title">更多免费模型</div>
-              {isLoadingOpenRouterModels && <p className="alice-model-empty">正在读取 OpenRouter 免费模型…</p>}
+              {isLoadingOpenRouterModels && <p className="loading-state">正在读取 OpenRouter 免费模型…</p>}
               {!isLoadingOpenRouterModels && openRouterModels.length === 0 && (
-                <p className="alice-model-empty">暂无可用缓存，可先在设置里扫描 OpenRouter 免费模型。</p>
+                <EmptyState variant="inline" title="暂无可用缓存" description="可以先在设置里扫描 OpenRouter 免费模型。" />
               )}
               {openRouterModels.map((model) => (
                 <button
@@ -1232,7 +1233,7 @@ export function ChatPanel({
           </div>
           <div className="chat-history-list">
             {filteredHistoryList.length === 0 ? (
-              <p className="chat-history-empty">暂无历史记录</p>
+              <EmptyState variant="compact" title="暂无历史记录" description="新的正式对话会保存在这里，临时对话不会留存。" />
             ) : filteredHistoryList.map((r) => (
               <div key={r.id} className="chat-history-item" onClick={() => void loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void loadConversation(r)}>
                 <span className="chat-history-item-title">{r.title}</span>
@@ -1320,7 +1321,7 @@ export function ChatPanel({
                 <span className="chat-task-item-meta">{new Date(job.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
               </button>
             ))}
-            {taskCenterTab === 'plans' && analysisJobs.length === 0 && agentPlans.length === 0 && <p className="chat-history-empty">暂无持续计划、提醒或后台分析</p>}
+            {taskCenterTab === 'plans' && analysisJobs.length === 0 && agentPlans.length === 0 && <EmptyState variant="compact" title="暂无持续计划、提醒或后台分析" />}
             {taskCenterTab === 'memories' && taskMemories.map((memory) => {
               const expanded = expandedMemoryId === memory.taskId
               return (
@@ -1357,7 +1358,7 @@ export function ChatPanel({
                 </article>
               )
             })}
-            {taskCenterTab === 'memories' && taskMemories.length === 0 && <p className="chat-history-empty">暂无任务记忆；Agent 在读取或更新任务后会自动建立。</p>}
+            {taskCenterTab === 'memories' && taskMemories.length === 0 && <EmptyState variant="compact" title="暂无任务记忆" description="Agent 在读取或更新任务后会自动建立。" />}
           </div>
         </div>
       )}

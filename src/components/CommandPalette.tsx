@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { EmptyState } from './EmptyState'
 
 export type CommandPaletteAction = {
   id: string
@@ -123,10 +124,7 @@ export function CommandPalette({
             </div>
           ))}
           {filteredActions.length === 0 && (
-            <div className="command-empty">
-              <Search size={18} />
-              <span>没有匹配的任务或操作</span>
-            </div>
+            <EmptyState variant="compact" icon={<Search size={18} />} title="没有匹配的任务或操作" />
           )}
         </div>
         <footer className="command-footer">
