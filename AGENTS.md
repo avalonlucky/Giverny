@@ -42,6 +42,9 @@ Giverny —— 设计兼职任务管理与结算工具。
 ## 发布纪律
 
 - **永久禁止使用 Wrangler CLI**：本项目的本地检修和正式部署都不要再执行 `wrangler` / `npx wrangler`。正式发布只允许使用 `npm run deploy:production`（Cloudflare 官方 HTTP API Direct Upload）；如该链路失败，应修复 API 发布器，禁止回退 Wrangler 重试。
+- **8GB Mac 资源纪律**：迭代阶段优先运行 `npm run quality:fast` 和定向浏览器用例；`agent:eval:isolated` 与 `browser:eval` 只在发布前各完整运行一次，必须严格串行，禁止并发或重复全量回归。
+- **浏览器回收纪律**：普通线上健康、资源哈希和深链接核对优先使用 HTTP 检查；只有必须验证真实交互时才启动浏览器。使用内置浏览器后必须 finalize/关闭测试标签，并确认没有遗留浏览器控制 Node 内核或测试 Chromium。
+- **临时目录纪律**：隔离评测目录必须带 `.metadata_never_index` 并在正常退出、信号退出和进程退出时清理，避免 Spotlight 扫描大量 D1/R2 临时文件造成持续卡顿。
 - 只有影响网站本体的正式更新才需要版本记录：包括功能、UI、交互、数据口径、部署配置、数据库 / R2 / Worker 行为、用户可见文案等。
 - README、仓库首页、多语言说明、handoff、内部协作说明这类不影响网站运行的文档调整，只需要普通 commit / push，不需要递增版本号、不需要 tag、不需要 GitHub Release。
 - 网站更新默认一次闭环：完成本地验证后部署正式站，线上关键路径回归通过即继续完成代码提交、推送、版本 tag 和 GitHub Release，不再额外等待用户验收确认。

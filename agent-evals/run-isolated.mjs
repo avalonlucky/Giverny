@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -9,6 +10,7 @@ import { runWranglerD1 } from './run-wrangler-d1.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-agent-eval-'))
+await writeFile(join(persistPath, '.metadata_never_index'), '')
 const children = []
 const proxyEnvKeys = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
 const localProcessEnv = {
@@ -69,6 +71,11 @@ function stopChildren() {
     }
   }
 }
+
+process.on('exit', () => {
+  stopChildren()
+  rmSync(persistPath, { recursive: true, force: true })
+})
 
 function mcpStructured(result) {
   if (result?.structuredContent) return result.structuredContent

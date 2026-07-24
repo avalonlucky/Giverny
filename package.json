@@ -16,6 +16,7 @@
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
     "browser:eval": "node scripts/run-browser-eval.mjs",
+    "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run lint && npm run build",
     "agent:quality:gate": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:production": "npm run build && node scripts/deploy-cloudflare-api.mjs",

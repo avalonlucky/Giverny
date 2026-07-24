@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -8,6 +9,7 @@ import { runWranglerD1 } from './run-wrangler-d1.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-browser-eval-'))
+await writeFile(join(persistPath, '.metadata_never_index'), '')
 const appPort = Number(process.env.BROWSER_EVAL_APP_PORT || 8799)
 const modelPort = Number(process.env.BROWSER_EVAL_MODEL_PORT || 8899)
 const children = []
@@ -83,6 +85,7 @@ process.on('exit', () => {
   for (const child of children) {
     if (child.pid && !child.killed) child.kill('SIGTERM')
   }
+  rmSync(persistPath, { recursive: true, force: true })
 })
 
 try {
