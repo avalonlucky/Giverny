@@ -39,7 +39,6 @@ import {
   type AiProviderConfig,
   type AuthRole,
   type ReportRecord,
-  type StorageUsage,
   type StoredAuth,
   type TaskProgressAssessment,
   type TokenScope,
@@ -76,12 +75,13 @@ import {
   clearNewTaskDraftCache,
 } from './lib/newTaskDraftCache'
 import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShortcuts'
-import { inferToastTone, trimToastQueue, type ToastState, type ToastTone } from './lib/toastQueue'
 import { createOptionalPreviewFile } from './lib/attachmentPreview'
 import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
 import { useWorkspaceAnalytics } from './hooks/useWorkspaceAnalytics'
 import { useDailyKnowledge } from './hooks/useDailyKnowledge'
 import { useAgentJobNotifications } from './hooks/useAgentJobNotifications'
+import { useToastNotifications } from './hooks/useToastNotifications'
+import { useBackendRuntime, type BackendStatus } from './hooks/useBackendRuntime'
 import {
   prepareImageFiles,
   validateUploadFile,
@@ -226,16 +226,11 @@ function App() {
   const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
   const [showFireworks, setShowFireworks] = useState(false)
-  const [toastQueue, setToastQueue] = useState<ToastState[]>([])
-  const toastTimersRef = useRef<number[]>([])
   const updatingTaskIdsRef = useRef<Set<number>>(new Set())
   const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
-  const [backendStatus, setBackendStatus] = useState<'连接中' | '已接入 D1/R2' | '后端异常'>('连接中')
-  const [backendSyncSlow, setBackendSyncSlow] = useState(false)
-  const [isOffline, setIsOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
-  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>('连接中')
   const [taskQuery, setTaskQuery] = useState('')
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
   // 工作台任务明细：未完成列表兜底分页 + 已验收默认折叠
@@ -267,6 +262,13 @@ function App() {
   const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
   const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
   const canToggleIncomeVisibility = canSeeFull || isClient
+  const { toastQueue, notify, dismissToast } = useToastNotifications()
+  const {
+    backendSyncSlow: effectiveBackendSyncSlow,
+    resetBackendSyncSlow,
+    isOffline,
+    storageUsage,
+  } = useBackendRuntime({ backendStatus, isAdmin })
   const toggleIncomeVisibility = () => setIncomeVisible((value) => !value)
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
   const taskMonthValues = useMemo(() => {
@@ -312,22 +314,6 @@ function App() {
   const isTaskCalendarView = activeView === '任务' && taskViewMode === '日历'
   const effectiveCalendarFocusDate = calendarFocusDate.startsWith(currentMonth.value) ? calendarFocusDate : `${currentMonth.value}-01`
   const viewTitle = activeView === '工作台' ? `${currentMonth.label}工作台` : activeView
-
-  const notify = useCallback((
-    message: string,
-    tone: ToastTone = inferToastTone(message),
-    options: Pick<ToastState, 'actionLabel' | 'onAction' | 'durationMs'> = {},
-  ) => {
-    const id = Date.now() + Math.random()
-    const nextToast: ToastState = { id, message, tone, ...options }
-    const duration = options.durationMs ?? (tone === 'error' ? 4200 : 2400)
-    setToastQueue((current) => trimToastQueue([...current, nextToast]))
-    const timer = window.setTimeout(() => {
-      setToastQueue((current) => current.filter((item) => item !== nextToast))
-      toastTimersRef.current = toastTimersRef.current.filter((value) => value !== timer)
-    }, duration)
-    toastTimersRef.current = [...toastTimersRef.current, timer]
-  }, [])
 
   const toggleChat = useCallback(() => {
     setIsChatOpen((current) => {
@@ -392,10 +378,6 @@ function App() {
     }
   }, [isAccountMenuOpen])
 
-  useEffect(() => () => {
-    toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
-  }, [])
-
   useEffect(() => {
     const canonicalPath = taskViewRoute(activeView, taskViewMode)
     if (`${location.pathname}${location.search}` !== canonicalPath) {
@@ -435,13 +417,13 @@ function App() {
       return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? normalizedTasks[0]?.id ?? 0
     })
     setBackendStatus('已接入 D1/R2')
-    setBackendSyncSlow(false)
+    resetBackendSyncSlow()
     setIsLoaded(true)
   }
 
   const retryRefreshState = async () => {
     setBackendStatus('连接中')
-    setBackendSyncSlow(false)
+    resetBackendSyncSlow()
     try {
       await refreshState()
     } catch (error) {
@@ -470,56 +452,9 @@ function App() {
       setIsLoaded(true)
       notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
     })
+  // refreshState intentionally follows credential changes; its setters are not effect triggers.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth, notify])
-
-  useEffect(() => {
-    if (backendStatus !== '连接中') {
-      return undefined
-    }
-    const timer = window.setTimeout(() => {
-      setBackendSyncSlow(true)
-    }, 8000)
-    return () => window.clearTimeout(timer)
-  }, [backendStatus])
-
-  useEffect(() => {
-    if (typeof navigator === 'undefined') {
-      return undefined
-    }
-    const updateOnlineState = () => setIsOffline(!navigator.onLine)
-    window.addEventListener('online', updateOnlineState)
-    window.addEventListener('offline', updateOnlineState)
-    updateOnlineState()
-    return () => {
-      window.removeEventListener('online', updateOnlineState)
-      window.removeEventListener('offline', updateOnlineState)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!isAdmin || backendStatus !== '已接入 D1/R2') {
-      return undefined
-    }
-    let cancelled = false
-    const loadStorageUsage = async () => {
-      try {
-        const usage = await api.getStorageUsage()
-        if (!cancelled) {
-          setStorageUsage(usage)
-        }
-      } catch {
-        if (!cancelled) {
-          setStorageUsage(null)
-        }
-      }
-    }
-    void loadStorageUsage()
-    const timer = window.setInterval(() => void loadStorageUsage(), 5 * 60 * 1000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [backendStatus, isAdmin])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -2051,8 +1986,6 @@ function App() {
       </button>
     </section>
   )
-  const effectiveBackendSyncSlow = backendStatus === '连接中' && backendSyncSlow
-
   if (!isLoaded) {
     return (
       <main className="boot-screen">
@@ -2512,7 +2445,7 @@ function App() {
         onUnlock={handleUnlock}
         showFireworks={showFireworks}
         toastQueue={toastQueue}
-        onDismissToast={(toastId) => setToastQueue((current) => current.filter((toast) => toast.id !== toastId))}
+        onDismissToast={dismissToast}
       />
     </main>
   )

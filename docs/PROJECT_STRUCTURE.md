@@ -101,7 +101,9 @@
 │   │   └── SettingsView.tsx
 │   ├── hooks/
 │   │   ├── useAgentJobNotifications.ts
+│   │   ├── useBackendRuntime.ts
 │   │   ├── useDailyKnowledge.ts
+│   │   ├── useToastNotifications.ts
 │   │   └── useWorkspaceAnalytics.ts
 │   ├── components/
 │   │   ├── AppOverlayLayer.tsx
@@ -152,6 +154,8 @@
 - Shared dashboard, income and annual settlement analytics: `src/hooks/useWorkspaceAnalytics.ts`
 - Daily knowledge cache, queue, fallback and background prefetch state: `src/hooks/useDailyKnowledge.ts`
 - Agent background-job polling, transition notifications and read state: `src/hooks/useAgentJobNotifications.ts`
+- Backend slow-sync, online/offline and R2 usage refresh state: `src/hooks/useBackendRuntime.ts`
+- Prioritized toast queue, expiry timers and dismissal state: `src/hooks/useToastNotifications.ts`
 - Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
 - Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Global modal, search, assistant, preview, toast and celebration composition: `src/components/AppOverlayLayer.tsx`
