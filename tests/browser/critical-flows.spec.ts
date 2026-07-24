@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { PDF_PREVIEW_TIMEOUT_MS } from '../../src/lib/previewTimeout'
 
 function createPdfFixture() {
   const stream = 'BT /F1 24 Tf 72 720 Td (Giverny acceptance preview) Tj ET'
@@ -882,7 +883,9 @@ test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ pag
     },
   ])
 
-  await expect(acceptanceDialog.getByRole('button', { name: '预览 验收预览.pdf' }).locator('img')).toBeVisible()
+  await expect(acceptanceDialog.getByRole('button', { name: '预览 验收预览.pdf' }).locator('img')).toBeVisible({
+    timeout: PDF_PREVIEW_TIMEOUT_MS + 2_000,
+  })
   await page.getByRole('button', { name: '预览 验收预览.pdf' }).click()
   const pdfDialog = page.getByRole('dialog', { name: '验收预览.pdf' })
   const pdfCanvas = pdfDialog.locator('canvas[data-pdf-page="1"]')

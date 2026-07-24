@@ -8,8 +8,8 @@ import { runWranglerD1 } from './run-wrangler-d1.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const persistPath = await mkdtemp(join(tmpdir(), 'giverny-browser-eval-'))
-const appPort = 8799
-const modelPort = 8899
+const appPort = Number(process.env.BROWSER_EVAL_APP_PORT || 8799)
+const modelPort = Number(process.env.BROWSER_EVAL_MODEL_PORT || 8899)
 const children = []
 let stopping = false
 
@@ -47,11 +47,21 @@ async function stop() {
   if (stopping) return
   stopping = true
   for (const child of children.reverse()) {
-    if (!child.pid || child.killed) continue
+    if (!child.pid || child.exitCode !== null) continue
+    const exited = new Promise((resolve) => child.once('exit', resolve))
     try {
       child.kill('SIGTERM')
     } catch {
       // The process already exited.
+    }
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3000))])
+    if (child.exitCode === null) {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // The process exited while the timeout was being handled.
+      }
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1000))])
     }
   }
   await rm(persistPath, { recursive: true, force: true })

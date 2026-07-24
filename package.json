@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.74",
+  "version": "0.32.75",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -14,7 +14,7 @@
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
-    "browser:eval": "playwright test",
+    "browser:eval": "BROWSER_EVAL_APP_PORT=8799 BROWSER_EVAL_MODEL_PORT=8899 playwright test --project=desktop-chromium && BROWSER_EVAL_APP_PORT=8800 BROWSER_EVAL_MODEL_PORT=8900 playwright test --project=mobile-chromium",
     "agent:quality:gate": "npm run ui:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:pages": "npm run build && npx wrangler pages deploy dist --project-name designer-worklog",

@@ -32,7 +32,6 @@ import {
   getStoredAuth,
   setStoredAuth,
   type AccessToken,
-  type ActivityItem,
   type AiModelConfig,
   type AiModelEndpointConfig,
   type AiModelRouteKey,
@@ -56,7 +55,7 @@ import { formatFileSize } from './lib/format'
 import { formatDuration } from './lib/durationDisplay'
 import { isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
-import { fileTypeForAsset, fileTypeForFile } from './lib/fileTypes'
+import { fileTypeForFile } from './lib/fileTypes'
 import { taskSettlementMonth } from './lib/taskSettlement'
 import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
 import {
@@ -82,11 +81,13 @@ import { useDailyKnowledge } from './hooks/useDailyKnowledge'
 import { useAgentJobNotifications } from './hooks/useAgentJobNotifications'
 import { useToastNotifications } from './hooks/useToastNotifications'
 import { useBackendRuntime, type BackendStatus } from './hooks/useBackendRuntime'
+import { useAttachmentRuntime } from './hooks/useAttachmentRuntime'
+import { useTaskActivity } from './hooks/useTaskActivity'
 import {
   prepareImageFiles,
   validateUploadFile,
 } from './lib/fileUpload'
-import type { AppView, AttachmentAnalysis, FileAsset, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
+import type { AppView, FileAsset, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
 import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from './types/taskUi'
 import type { SettingsTab } from './views/SettingsView'
 import type { CalendarDisplayMode } from './views/CalendarView'
@@ -188,7 +189,6 @@ function App() {
   const taskItemsRef = useRef<Task[]>(bootTasks)
   const [updateItems, setUpdateItems] = useState<TaskUpdate[]>(bootCache?.updates ?? [])
   const [fileItems, setFileItems] = useState<FileAsset[]>(bootCache?.files ?? [])
-  const [attachmentAnalyses, setAttachmentAnalyses] = useState<AttachmentAnalysis[]>(bootCache?.attachmentAnalyses ?? [])
   const [reports, setReports] = useState<ReportRecord[]>(bootCache?.reports ?? [])
   const [hourlyRate, setHourlyRate] = useState(bootCache?.settings?.hourlyRate ?? defaultHourlyRate)
   const [pdfTitle, setPdfTitle] = useState(bootCache?.settings?.pdfTitle || defaultPdfTitle)
@@ -203,9 +203,7 @@ function App() {
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
-  const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
   const [progressAssessments, setProgressAssessments] = useState<Record<number, TaskProgressAssessment>>({})
-  const taskActivityRequestRef = useRef(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
@@ -263,6 +261,14 @@ function App() {
   const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
   const canToggleIncomeVisibility = canSeeFull || isClient
   const { toastQueue, notify, dismissToast } = useToastNotifications()
+  const { taskActivity, loadTaskActivity } = useTaskActivity()
+  const { attachmentAnalyses, setAttachmentAnalyses } = useAttachmentRuntime({
+    initialAnalyses: bootCache?.attachmentAnalyses ?? [],
+    isLoaded,
+    role,
+    files: fileItems,
+    setFiles: setFileItems,
+  })
   const {
     backendSyncSlow: effectiveBackendSyncSlow,
     resetBackendSyncSlow,
@@ -473,105 +479,6 @@ function App() {
     }
   }, [isAdmin, aiModelConfig?.updatedAt])
 
-  const analysisPollingRef = useRef({ signature: '', attempts: 0, inFlight: false })
-  useEffect(() => {
-    const activeAnalyses = attachmentAnalyses.filter((analysis) => analysis.status === 'pending' || analysis.status === 'processing')
-    if (!isLoaded || activeAnalyses.length === 0) {
-      analysisPollingRef.current = { signature: '', attempts: 0, inFlight: false }
-      return undefined
-    }
-    const signature = activeAnalyses
-      .map((analysis) => `${analysis.attachmentId}:${analysis.requestedAt}`)
-      .sort()
-      .join('|')
-    if (analysisPollingRef.current.signature !== signature) {
-      analysisPollingRef.current = { signature, attempts: 0, inFlight: false }
-    }
-    if (analysisPollingRef.current.attempts >= 60) {
-      return undefined
-    }
-    const timer = window.setTimeout(() => {
-      if (analysisPollingRef.current.inFlight) {
-        return
-      }
-      analysisPollingRef.current.inFlight = true
-      analysisPollingRef.current.attempts += 1
-      void api.getAttachmentAnalysisStatuses(activeAnalyses.map((analysis) => analysis.attachmentId))
-        .then((updatedAnalyses) => {
-          const updatedById = new Map(updatedAnalyses.map((analysis) => [analysis.attachmentId, analysis]))
-          setAttachmentAnalyses((current) => current.map((analysis) => updatedById.get(analysis.attachmentId) ?? analysis))
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          analysisPollingRef.current.inFlight = false
-        })
-    }, 4000)
-    return () => window.clearTimeout(timer)
-  }, [attachmentAnalyses, isLoaded])
-
-  // 缩略图自愈：对缺少预览图、但可客户端生成首帧/首页的文件（PDF、视频、PSD/AI），
-  // 后台渲染并回传持久化，之后所有视图（时间轴 / 文件库 / 分享回单）都会显示真实缩略图。
-  const previewBackfillAttemptsRef = useRef<Map<number, number>>(new Map())
-  const [previewBackfillTick, setPreviewBackfillTick] = useState(0)
-  useEffect(() => {
-    if (role !== 'admin') {
-      return
-    }
-    const canBackfill = (file: FileAsset) => ['pdf', 'ai', 'psd', 'office', 'video'].includes(fileTypeForAsset(file).kind)
-    const targets = fileItems.filter(
-      (file) =>
-        !file.deletedAt &&
-        (!file.previewUrl || file.previewFallback) &&
-        file.sourceUrl &&
-        canBackfill(file) &&
-        (previewBackfillAttemptsRef.current.get(file.id) ?? 0) < 3,
-    )
-    if (targets.length === 0) {
-      return
-    }
-    let cancelled = false
-    void (async () => {
-      for (const file of targets.slice(0, 6)) {
-        if (cancelled) {
-          break
-        }
-        const attempt = (previewBackfillAttemptsRef.current.get(file.id) ?? 0) + 1
-        previewBackfillAttemptsRef.current.set(file.id, attempt)
-        let repaired = false
-        try {
-          const sourceUrl = authedPreviewUrl(file.sourceUrl)
-          if (!sourceUrl) {
-            continue
-          }
-          const response = await fetch(sourceUrl)
-          if (!response.ok) {
-            continue
-          }
-          const blob = await response.blob()
-          const sourceFile = new File([blob], file.name, { type: blob.type || file.mimeType || '' })
-          const preview = await createOptionalPreviewFile(sourceFile)
-          if (!preview) {
-            continue
-          }
-          const result = await api.setFilePreview(file.id, preview)
-          if (!cancelled && result?.previewUrl) {
-            repaired = true
-            setFileItems((current) => current.map((item) => (item.id === file.id ? { ...item, previewUrl: result.previewUrl, previewFallback: Boolean(result.previewFallback) } : item)))
-          }
-        } catch (error) {
-          console.warn('缩略图补全失败', file.name, error)
-        } finally {
-          if (!cancelled && !repaired && attempt < 3) {
-            window.setTimeout(() => setPreviewBackfillTick((current) => current + 1), attempt * 1600)
-          }
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [fileItems, previewBackfillTick, role])
-
   const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
 
   const filterTasks = (tasks: Task[], filter: TaskFilter = taskFilter) =>
@@ -603,6 +510,7 @@ function App() {
   ]
   const selectedTaskSource = activeView === '任务' ? taskPageTasks : dashboardSelectableTasks
   const selectedTask = selectedTaskSource.find((task) => task.id === selectedTaskId) ?? selectedTaskSource.at(0)
+  const selectedTaskActivityId = selectedTask?.id ?? 0
   const selectedTaskSourceSignature = selectedTaskSource.map((task) => task.id).join(',')
 
   useEffect(() => {
@@ -689,21 +597,6 @@ function App() {
       notify('进展记录已保存')
     } catch (error) {
       notify(error instanceof Error ? `进展保存失败：${error.message}` : '进展保存失败')
-    }
-  }
-
-  const loadTaskActivity = async (taskId: number) => {
-    const requestId = taskActivityRequestRef.current + 1
-    taskActivityRequestRef.current = requestId
-    try {
-      const result = await api.getTaskActivity(taskId)
-      if (taskActivityRequestRef.current === requestId) {
-        setTaskActivity(result.items)
-      }
-    } catch {
-      if (taskActivityRequestRef.current === requestId) {
-        setTaskActivity([])
-      }
     }
   }
 
@@ -1036,11 +929,8 @@ function App() {
 
   // 选中任务变化时自动加载它的动态时间轴（工作台右侧明细卡用）
   useEffect(() => {
-    if (selectedTask) {
-      void loadTaskActivity(selectedTask.id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTask?.id])
+    if (selectedTaskActivityId) void loadTaskActivity(selectedTaskActivityId)
+  }, [loadTaskActivity, selectedTaskActivityId])
 
   const handleQuickUploadImage = async (
     taskId: number,
