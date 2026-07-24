@@ -2,8 +2,9 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
-import { agentReadToolRegistry } from './agentToolRegistry'
-import { completeAgentTurn, createAgentTurn, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
+import { agentReadToolRegistry, type AgentReadToolName } from './agentToolRegistry'
+import { requesterNameFromQuestion, taskTitleFromQuestion } from './agentEntityResolver'
+import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection } from './types/agent'
@@ -174,6 +175,10 @@ function normalizedDecision(value: string) {
 
 function wantsAttachmentResults(value: string) {
   return /附件|(?:找|找到|打开|预览|下载).*(?:文件|交付件)|(?:文件|交付件).*(?:找|打开|预览|下载)/.test(value)
+}
+
+function isAgentReadToolName(value: string): value is AgentReadToolName {
+  return Object.hasOwn(agentReadToolRegistry, value)
 }
 
 function toJsonObject(value: unknown): Record<string, unknown> {
@@ -611,6 +616,43 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       'update_task_fields_preview', 'append_progress_preview', 'append_waiting_preview',
       'manage_record_preview', 'mark_acceptance_files_preview', 'complete_acceptance_preview',
     ]).has(toolName)
+  }
+
+  private repairToolInput(toolName: AgentReadToolName, message: string, currentMonth?: string): Record<string, unknown> | null {
+    if (toolName === 'query_month_finance') return { question: message, currentMonth }
+    if (toolName === 'search_product_help') return { query: message, limit: 5 }
+    if (toolName === 'get_requester_profile') {
+      const name = requesterNameFromQuestion(message)
+      return name ? { name } : null
+    }
+    if (toolName === 'query_task_portfolio') {
+      const scope = /(?:逾期|延期|过期)/.test(message)
+        ? 'overdue'
+        : /等待/.test(message)
+          ? 'waiting'
+          : /(?:未完成|没完成|没闭环)/.test(message)
+            ? 'unfinished'
+            : /(?:已验收|验收了)/.test(message)
+              ? 'accepted'
+              : 'all'
+      return { scope, month: currentMonth, limit: 100 }
+    }
+    if (toolName === 'get_task_detail') {
+      const reference = this.activeTaskReference || this.state.taskReference
+      const explicitId = Number(message.match(/任务\s*#(\d+)/)?.[1])
+      if (Number.isInteger(explicitId) && explicitId > 0) return { taskId: explicitId }
+      if (reference && this.referencesCurrentTask(message)) return { taskId: reference.id, title: reference.title }
+      return { title: taskTitleFromQuestion(message) || message }
+    }
+    if (toolName === 'search_tasks') return { query: message, month: currentMonth, limit: 30 }
+    if (toolName === 'search_attachments') return { query: message, month: currentMonth, limit: 30 }
+    if (toolName === 'get_giverny_context') return {}
+    return null
+  }
+
+  private async executeRepairTool(toolName: AgentReadToolName, input: Record<string, unknown>) {
+    const config = agentReadToolRegistry[toolName]
+    return this.callTool(config.endpoint, input)
   }
 
   private resultAttachments(value: unknown): AgentResultAttachment[] {
@@ -1140,36 +1182,110 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
               ? 'product_help'
               : 'general'
     const usedWritePreview = [...usedTools].some((toolName) => toolName.endsWith('_preview'))
-    if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message) && !usedTools.has('get_task_detail') && !usedTools.has('query_task_portfolio') && !usedWritePreview) {
-      const repaired = await this.callTool('task-detail', { title: message }, 'GET').catch(() => null)
-      const repairedRecord = toJsonObject(repaired)
-      const task = toJsonObject(repairedRecord.task)
-      const waitingRecords = Array.isArray(repairedRecord.waitingRecords)
-        ? repairedRecord.waitingRecords.map(toJsonObject)
-        : []
+    const verifiedIntent = inferAgentIntent(message, inferredIntent)
+    let workingTurn = { ...agentTurn, intent: verifiedIntent, phase: 'analyze' as const, plan: plannedCalls, evidence, attempts: 1, answer }
+    if (!usedWritePreview) {
+      for (let attempt = 2; attempt <= 3 && !selection; attempt += 1) {
+        const checkedTurn = completeAgentTurn(workingTurn, answer)
+        const decision = decideAgentReplan(checkedTurn)
+        const requiredTools = decision.requiredTools.filter(isAgentReadToolName)
+        if (!decision.shouldReplan || requiredTools.length === 0) break
+        trace.push({ type: 'plan', label: '验真后动态补查', detail: decision.reason })
+        let addedEvidence = false
+        for (const toolName of requiredTools) {
+          const input = this.repairToolInput(toolName, message, request.currentMonth)
+          if (!input) {
+            trace.push({ type: 'error', label: `无法补全 ${toolName} 参数`, detail: '需要用户补充明确对象。' })
+            continue
+          }
+          const callId = `${agentTurn.id}:repair:${plannedCalls.length + 1}`
+          const planned: AgentPlannedToolCall = {
+            id: callId,
+            name: toolName,
+            args: input,
+            reason: `验真阶段动态重规划：${decision.reason}`,
+            risk: 'read',
+            status: 'running',
+            attempt,
+          }
+          plannedCalls.push(planned)
+          trace.push({ type: 'tool', label: `补查必要依据 [tool:${toolName}]` })
+          try {
+            const output = toJsonObject(await this.executeRepairTool(toolName, input))
+            const repairSelection = this.taskSelection(output)
+            if (repairSelection) {
+              selection = repairSelection
+              planned.status = 'success'
+              answer = repairSelection.prompt
+              trace.push({ type: 'result', label: '补查需要任务消歧' })
+              break
+            }
+            const mismatch = this.taskEvidenceMismatch(toolName, input, output)
+            planned.status = mismatch ? 'failed' : 'success'
+            planned.error = mismatch
+            evidence.push({
+              id: `${callId}:evidence`,
+              toolCallId: callId,
+              toolName,
+              source: toolName === 'search_product_help' || toolName === 'get_giverny_context' ? 'product_registry' : 'd1',
+              deterministic: !mismatch,
+              payload: output,
+            })
+            usedTools.add(toolName)
+            if (mismatch) {
+              trace.push({ type: 'error', label: '补查证据未通过', detail: mismatch })
+              continue
+            }
+            addedEvidence = true
+            const references = this.taskReferencesFromResult(output)
+            if (references.length === 1) this.setTaskReference(references[0])
+            if (toolName === 'search_attachments') {
+              this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
+            }
+            trace.push({ type: 'result', label: `补查完成 [tool:${toolName}]` })
+          } catch (error) {
+            planned.status = 'failed'
+            planned.error = error instanceof Error ? error.message : String(error)
+            trace.push({ type: 'error', label: `补查失败 [tool:${toolName}]`, detail: planned.error })
+          }
+        }
+        if (selection || !addedEvidence) {
+          workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
+          break
+        }
+        const verifiedEvidence = evidence.filter((item) => item.deterministic).map((item) => ({ tool: item.toolName, result: item.payload }))
+        try {
+          const rewritten = await generateText({
+            model: provider(modelName),
+            system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；先回答结论，再列必要依据。数据缺失时明确说明，不得猜测。',
+            messages: [{ role: 'user', content: `用户问题：\n${message}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
+            temperature: 0.1,
+          })
+          answer = cleanAnswer(rewritten.text) || '已完成必要补查，但没有生成可靠的整理结果。'
+          trace.push({ type: 'result', label: '依据补齐后重新整理答案' })
+        } catch {
+          answer = '已补齐必要业务证据，但主模型未能完成第二次整理，我没有将未验证的初稿交给你。'
+        }
+        workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
+      }
+    }
+    if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message)) {
+      const detailEvidence = [...evidence].reverse().find((item) => item.deterministic && item.toolName === 'get_task_detail')
+      const detail = toJsonObject(detailEvidence?.payload)
+      const task = toJsonObject(detail.task)
+      const waitingRecords = Array.isArray(detail.waitingRecords) ? detail.waitingRecords.map(toJsonObject) : []
       const activeWait = waitingRecords.find((item) => item.active === true)
-      if (task.title && activeWait) {
-        const repairCallId = `${agentTurn.id}:tool:${plannedCalls.length + 1}`
-        plannedCalls.push({ id: repairCallId, name: 'get_task_detail', args: { title: message }, reason: '验真阶段补查任务阻塞证据。', risk: 'read', status: 'success', attempt: 2 })
-        evidence.push({ id: `${agentTurn.id}:evidence:${evidence.length + 1}`, toolCallId: repairCallId, toolName: 'get_task_detail', source: 'd1', deterministic: true, payload: repairedRecord })
-        usedTools.add('get_task_detail')
-        const elapsedMinutes = Math.max(0, Number(activeWait.elapsedMinutes) || 0)
+      const reason = String(activeWait?.note || activeWait?.reason || '').trim()
+      if (task.title && reason && !answer.includes(reason)) {
+        const elapsedMinutes = Math.max(0, Number(activeWait?.elapsedMinutes) || 0)
         const elapsed = elapsedMinutes >= 1440
           ? `${Math.floor(elapsedMinutes / 1440)} 天 ${Math.floor(elapsedMinutes % 1440 / 60)} 小时`
           : `${Math.floor(elapsedMinutes / 60)} 小时 ${elapsedMinutes % 60} 分钟`
-        answer = [
-          `**${String(task.title)}** 目前卡在等待环节。`,
-          '',
-          `- **具体原因**：${String(activeWait.note || activeWait.reason || '未填写')}`,
-          `- **开始等待**：${String(activeWait.startAt || '未记录').replace('T', ' ')}`,
-          `- **已等待**：${elapsed}`,
-        ].join('\n')
-        trace.push({ type: 'tool', label: '验真补查任务详情 [tool:get_task_detail]' })
-        trace.push({ type: 'result', label: '已用等待记录纠正模型初稿' })
+        answer = `**${String(task.title)}** 目前卡在等待环节。\n\n- **具体原因**：${reason}\n- **开始等待**：${String(activeWait?.startAt || '未记录').replace('T', ' ')}\n- **已等待**：${elapsed}`
+        trace.push({ type: 'result', label: '已用等待记录校正最终结论' })
       }
     }
-    const verifiedIntent: AgentIntent = usedTools.has('get_task_detail') && inferredIntent === 'general' ? 'task_data' : inferredIntent
-    agentTurn = completeAgentTurn({ ...agentTurn, intent: verifiedIntent, phase: 'analyze', plan: plannedCalls, evidence, attempts: 1 }, answer)
+    agentTurn = completeAgentTurn({ ...workingTurn, plan: plannedCalls, evidence, answer }, answer)
     const nextPending = this.getPendingAction()
     const approval = nextPending && (!pending || nextPending.createdAt !== pending.createdAt)
       ? this.approvalResult(nextPending, 'pending')

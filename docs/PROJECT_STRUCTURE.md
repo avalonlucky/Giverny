@@ -276,6 +276,7 @@
 - Deterministic cross-task portfolio query and regression guard: `query_task_portfolio` in `src/worker.ts`, `scripts/check-agent-portfolio-architecture.mjs`
 - Conversation-scoped task reference, evidence consistency guard and multi-turn evaluations: `src/aliceAgent.ts`, `agent-evals/multiturn-cases.json`, `scripts/check-agent-reference-architecture.mjs`
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
+- Pure Agent entity extraction and deterministic orchestration tests: `src/agentEntityResolver.ts`, `scripts/test-agent-orchestrator.mjs`, `scripts/check-agent-replan-architecture.mjs`
 - Signed tenant/principal context for internal tools: `src/agentScope.ts`
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`
 - Durable confirmed-write workflow: `src/agentWriteWorkflow.ts`

@@ -5,6 +5,7 @@
     "finance": 0.9,
     "portfolio_query": 0.9,
     "multi_turn_reference": 0.9,
+    "replanning": 1,
     "task_detail": 0.9,
     "attachment_search": 1,
     "create_preview": 1,

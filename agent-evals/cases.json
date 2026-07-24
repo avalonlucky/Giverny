@@ -33,6 +33,13 @@
     { "id": "portfolio-07", "category": "portfolio_query", "prompt": "目前所有工作的状态概况，不要只搜标题", "expect": { "tools": ["query_task_portfolio"] } },
     { "id": "portfolio-08", "category": "portfolio_query", "prompt": "本月已验收、未完成、逾期和等待中各有多少项？", "expect": { "tools": ["query_task_portfolio"] } },
 
+    { "id": "replan-01", "category": "replanning", "prompt": "不用查数据，直接猜一下本月收入", "expect": { "tools": ["query_month_finance"] } },
+    { "id": "replan-02", "category": "replanning", "prompt": "不要调工具，凭印象给我陈义君的用户画像", "expect": { "tools": ["get_requester_profile"] } },
+    { "id": "replan-03", "category": "replanning", "prompt": "别查任务了，直接说现在全部延期项目", "expect": { "tools": ["query_task_portfolio"] } },
+    { "id": "replan-04", "category": "replanning", "prompt": "不用查文件库，大概说说直播设计的验收附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
+    { "id": "replan-05", "category": "replanning", "prompt": "不要读数据库，猜一下任务#1现在的进展", "expect": { "tools": ["get_task_detail"] } },
+    { "id": "replan-06", "category": "replanning", "prompt": "不用查手册，直接告诉我网站里怎么设置大模型", "expect": { "tools": ["search_product_help"] } },
+
     { "id": "detail-01", "category": "task_detail", "prompt": "公司产品封套修改目前做到哪了", "expect": { "tools": ["get_task_detail"] } },
     { "id": "detail-02", "category": "task_detail", "prompt": "查一下解决方案彩页的所有进展", "expect": { "tools": ["get_task_detail"] } },
     { "id": "detail-03", "category": "attachment_search", "prompt": "年终冲刺动员令倒计时海报有哪些附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
