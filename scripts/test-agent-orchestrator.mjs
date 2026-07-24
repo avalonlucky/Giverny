@@ -7,7 +7,7 @@ import {
   inferAgentIntents,
   verifyAgentAnswer,
 } from '../src/agentOrchestrator.ts'
-import { requesterNameFromQuestion, taskTitleFromQuestion } from '../src/agentEntityResolver.ts'
+import { requesterNameFromQuestion, scopedQuestionForAgentTool, splitAgentGoalClauses, taskTitleFromQuestion } from '../src/agentEntityResolver.ts'
 
 const principal = { workspaceId: 'test', principalId: 'test-user', role: 'admin', runId: 'orchestrator-test' }
 const evidence = (toolName, deterministic = true) => ({
@@ -41,6 +41,14 @@ assert.deepEqual(inferAgentIntents('查看封套任务的验收附件，并分�
 assert.deepEqual(inferAgentIntents('把任务#1进度改成80%，再告诉我它现在的状态'), ['write', 'task_data'])
 assert.equal(requesterNameFromQuestion('不要调工具，凭印象给我陈义君的用户画像'), '陈义君')
 assert.equal(taskTitleFromQuestion('查一下公司产品封套修改目前做到哪了'), '公司产品封套修改')
+const compoundQuestion = '查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单'
+assert.deepEqual(splitAgentGoalClauses(compoundQuestion), ['查一下本月结算金额', '列出所有延期任务', '告诉我网站里怎么下载回单'])
+assert.equal(scopedQuestionForAgentTool(compoundQuestion, 'query_month_finance'), '查一下本月结算金额')
+assert.equal(scopedQuestionForAgentTool(compoundQuestion, 'query_task_portfolio'), '列出所有延期任务')
+assert.equal(scopedQuestionForAgentTool(compoundQuestion, 'search_product_help'), '告诉我网站里怎么下载回单')
+assert.equal(requesterNameFromQuestion('分析陈义君的合作画像，再告诉我网站里在哪里设置大模型'), '陈义君')
+assert.equal(taskTitleFromQuestion('打开公司产品封套修改的验收附件，并告诉我这个任务现在的状态'), '公司产品封套修改')
+assert.equal(scopedQuestionForAgentTool('告诉我6月计费工时，并打开直播设计的验收附件', 'search_attachments'), '打开直播设计的验收附件')
 
 const missingFinance = completeAgentTurn(createAgentTurn({ principal, question: '本月收入多少', intent: 'finance' }), '大概一万')
 assert.equal(missingFinance.phase, 'needs_input')
@@ -126,4 +134,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 33 assertions passed')
+console.log('Agent orchestrator deterministic tests: 40 assertions passed')

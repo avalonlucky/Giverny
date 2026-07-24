@@ -3,7 +3,7 @@ import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry, type AgentReadToolName } from './agentToolRegistry'
-import { requesterNameFromQuestion, taskTitleFromQuestion } from './agentEntityResolver'
+import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
@@ -619,20 +619,21 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private repairToolInput(toolName: AgentReadToolName, message: string, currentMonth?: string): Record<string, unknown> | null {
-    if (toolName === 'query_month_finance') return { question: message, currentMonth }
-    if (toolName === 'search_product_help') return { query: message, limit: 5 }
+    const scopedQuestion = scopedQuestionForAgentTool(message, toolName)
+    if (toolName === 'query_month_finance') return { question: scopedQuestion, currentMonth }
+    if (toolName === 'search_product_help') return { query: scopedQuestion, limit: 5 }
     if (toolName === 'get_requester_profile') {
       const name = requesterNameFromQuestion(message)
       return name ? { name } : null
     }
     if (toolName === 'query_task_portfolio') {
-      const scope = /(?:逾期|延期|过期)/.test(message)
+      const scope = /(?:逾期|延期|过期)/.test(scopedQuestion)
         ? 'overdue'
-        : /等待/.test(message)
+        : /等待/.test(scopedQuestion)
           ? 'waiting'
-          : /(?:未完成|没完成|没闭环)/.test(message)
+          : /(?:未完成|没完成|没闭环)/.test(scopedQuestion)
             ? 'unfinished'
-            : /(?:已验收|验收了)/.test(message)
+            : /(?:已验收|验收了)/.test(scopedQuestion)
               ? 'accepted'
               : 'all'
       return { scope, month: currentMonth, limit: 100 }
@@ -642,10 +643,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       const explicitId = Number(message.match(/任务\s*#(\d+)/)?.[1])
       if (Number.isInteger(explicitId) && explicitId > 0) return { taskId: explicitId }
       if (reference && this.referencesCurrentTask(message)) return { taskId: reference.id, title: reference.title }
-      return { title: taskTitleFromQuestion(message) || message }
+      return { title: taskTitleFromQuestion(message) || scopedQuestion }
     }
-    if (toolName === 'search_tasks') return { query: message, month: currentMonth, limit: 30 }
-    if (toolName === 'search_attachments') return { query: message, month: currentMonth, limit: 30 }
+    if (toolName === 'search_tasks') return { query: scopedQuestion, month: currentMonth, limit: 30 }
+    if (toolName === 'search_attachments') return { query: scopedQuestion, month: currentMonth, limit: 30 }
     if (toolName === 'get_giverny_context') return {}
     return null
   }
