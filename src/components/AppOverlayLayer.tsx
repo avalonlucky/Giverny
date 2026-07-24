@@ -20,7 +20,6 @@ import { ConfirmDialogModal } from './ConfirmDialogModal'
 import { AdminLoginModal } from './AdminLoginModal'
 import { AttachmentHoverThumbnail } from './AttachmentHoverThumbnail'
 import { DailyKnowledgeModal } from './DailyKnowledgeModal'
-import { FilePreviewModal } from './FilePreviewModal'
 import { ModalShell } from './ModalShell'
 import { NewTaskModal } from './NewTaskModal'
 import { TaskDetailModal } from './TaskDetailModal'
@@ -30,6 +29,7 @@ import { VoidTaskModal } from './VoidTaskModal'
 
 const SemanticSearchModal = lazy(() => import('./SemanticSearchModal'))
 const ChatPanel = lazy(() => import('./ChatPanel').then((module) => ({ default: module.ChatPanel })))
+const FilePreviewModal = lazy(() => import('./FilePreviewModal').then((module) => ({ default: module.FilePreviewModal })))
 
 export type ProgressModalTarget = {
   taskId: number
@@ -299,7 +299,11 @@ export function AppOverlayLayer({
       )}
       {confirmDialog && <ConfirmDialogModal dialog={confirmDialog} isBusy={confirmDialogBusy} onClose={onCloseConfirmDialog} onConfirm={onConfirmDialog} />}
       {voidTaskTarget && <VoidTaskModal task={voidTaskTarget} monthLabel={monthLabelOf(taskSettlementMonth(voidTaskTarget))} isBusy={voidTaskBusy} onClose={onCloseVoidTask} onConfirm={onConfirmVoidTask} />}
-      {previewFile && <FilePreviewModal file={previewFile} onClose={onClosePreviewFile} />}
+      {previewFile && (
+        <Suspense fallback={<ModalShell className="file-preview-modal" labelledBy="file-preview-loading-title" onClose={onClosePreviewFile}><div id="file-preview-loading-title" className="office-preview-status">正在载入文件预览…</div></ModalShell>}>
+          <FilePreviewModal file={previewFile} onClose={onClosePreviewFile} />
+        </Suspense>
+      )}
       {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} />}
       {showFireworks && <Fireworks />}
       {toastQueue.length > 0 && (

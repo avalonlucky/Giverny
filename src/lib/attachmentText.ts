@@ -1,4 +1,4 @@
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { loadPdfRuntime } from './pdfRuntime'
 
 const ATTACHMENT_TEXT_LIMIT = 16000
 
@@ -32,8 +32,7 @@ export async function extractAttachmentText(file: File): Promise<string> {
       .slice(0, ATTACHMENT_TEXT_LIMIT)
   }
   if (name.endsWith('.pdf')) {
-    const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+    const pdfjs = await loadPdfRuntime()
     const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise
     const parts: string[] = []
     for (let pageNumber = 1; pageNumber <= Math.min(document.numPages, 20); pageNumber += 1) {

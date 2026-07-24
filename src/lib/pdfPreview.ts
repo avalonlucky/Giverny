@@ -1,9 +1,8 @@
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { loadPdfRuntime } from './pdfRuntime'
 
 export async function createPdfPreviewFile(file: File) {
   const data = await file.arrayBuffer()
-  const pdfjs = await import('pdfjs-dist')
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+  const pdfjs = await loadPdfRuntime()
   const doc = await pdfjs.getDocument({ data }).promise
   const page = await doc.getPage(1)
   const base = page.getViewport({ scale: 1 })

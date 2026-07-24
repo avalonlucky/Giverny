@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-24 · v0.32.80（重依赖真正按需加载完成）
+
+- **PDF 首屏误加载彻底修复**：新增统一 `pdfRuntime`，PDF 运行时与 worker URL 均在实际生成缩略图、提取文字或打开阅读器时动态加载；入口 HTML 不再预加载约 331KB 的 PDF chunk。
+- **工作助手 Markdown 不再挤占首屏**：Markdown 渲染依赖被限制在懒加载的工作助手子树，入口 HTML 不再预加载约 154KB 的 Markdown chunk。
+- **八类文档能力独立分包**：PDF / PDF worker、Excel、Canvas、PSD、Word、PPT、ZIP 解析和 Markdown 使用 Rolldown 精确分组，PPT 与 ZIP 补齐稳定 chunk；共享 JSX/runtime 不再被重依赖分组吞并。
+- **文件预览弹窗按需加载**：后台基础壳不再同步携带文件阅读器，用户打开具体文件后才下载预览弹窗及对应格式运行时。
+- **构建产物双重门禁**：源码守卫禁止重依赖静态 import 回退；manifest 守卫验证入口 preload、Dashboard 静态依赖闭包、八类动态功能入口及独立 PDF worker，任何一项回退都会阻止构建和部署。
+- **首屏依赖闭包已核验**：生产构建仅保留 4 个轻量 preload，Dashboard 的 26 个静态 chunk 均不含上述重依赖；各文档能力仍可从用户触发后的动态链路到达。
+- **工时与金额不变**：本轮只调整前端装载时机、构建分包与质量门，未修改任务工时、计费、金额、验收日期、补录归属、实际完成日期或结算口径。
+
 ## 2026-07-24 · v0.32.79（正式路由树与路由级懒加载完成）
 
 - **全站统一进入正式路由树**：`createBrowserRouter` 与单一 `RouterProvider` 同时管理后台、普通报告分享页和结算分享页，入口不再用 `window.location.pathname.match` 手动分流。

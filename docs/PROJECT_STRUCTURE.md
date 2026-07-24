@@ -88,6 +88,7 @@
 │   │   ├── money.ts
 │   │   ├── month.ts
 │   │   ├── previewTimeout.ts
+│   │   ├── pdfRuntime.ts
 │   │   ├── psdPreview.ts
 │   │   ├── taskSettlement.ts
 │   │   └── timeEntryDraft.ts
@@ -222,6 +223,7 @@
 - Shared attachment hover thumbnail and document fallback preview: `src/components/AttachmentHoverThumbnail.tsx`
 - Shared upload limits, attachment naming, image optimization worker and main-thread fallback: `src/lib/fileUpload.ts`
 - Shared upload-time PDF, PSD, video and Office preview generation: `src/lib/attachmentPreview.ts`
+- Shared lazy PDF runtime and worker initialization: `src/lib/pdfRuntime.ts`
 - Shared task detail sidebar for dashboard and task management: `src/components/DashboardTaskSidebar.tsx`
 - Shared task summary/detail modal: `src/components/TaskDetailModal.tsx`
 - Progress, waiting, feedback and acceptance workflow modal: `src/components/TaskProgressModal.tsx`
@@ -238,6 +240,13 @@
 - Shared prioritized toast queue and icon presentation: `src/lib/toastQueue.ts`, `src/components/ToastIcon.tsx`
 - Shared editable-target and month keyboard shortcut rules: `src/lib/keyboardShortcuts.ts`
 - Shared task timeline and partner-facing presentation rules: `src/lib/taskPresentation.ts`
+
+## Heavy Dependency Boundaries
+
+- Browser-heavy document runtimes (`pdfjs-dist`, `exceljs`, `html2canvas`, `ag-psd`, `docx-preview`, `pptx-preview`, `jszip`) must stay behind dynamic imports. Markdown rendering is allowed only inside the lazy work-assistant subtree.
+- `vite.config.ts` uses Rolldown `codeSplitting.groups` with non-recursive dependency capture so heavy chunks cannot absorb shared JSX or preload helpers.
+- `scripts/check-heavy-dependency-architecture.mjs` blocks source-level static import regressions; `scripts/check-heavy-dependency-build.mjs` checks the generated manifest, Dashboard static closure, initial preload list, feature reachability and PDF worker asset.
+- `npm run build` always runs the generated-output guard after Vite, so a heavy dependency returning to the first screen blocks deployment.
 - Shared task-list dates, due-state and design-type presentation rules: `src/lib/taskListPresentation.ts`
 - Shared task history sample insights and accepted-task normalization: `src/lib/taskContextInsights.ts`
 - Shared Agent task attachments, activity summaries and progress evidence: `src/lib/taskAssistantContext.ts`

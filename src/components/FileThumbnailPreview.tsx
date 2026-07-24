@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileArchive, FileImage, FileText } from 'lucide-react'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { OfficePreview } from './FilePreviewReaders'
 import { authedPreviewUrl } from '../lib/api'
 import { fileDocumentPreviewSource, fileTypeForAsset, isInlineImageFileType, isOfficeFileType, videoFileTypes } from '../lib/fileTypes'
+import { loadPdfRuntime } from '../lib/pdfRuntime'
 import { createPsdPreviewFile } from '../lib/psdPreview'
 import { PDF_PREVIEW_TIMEOUT_MS, withPreviewTimeout } from '../lib/previewTimeout'
 import type { FileAsset } from '../types/domain'
@@ -62,8 +62,7 @@ function PdfThumbnail({ sourceUrl, label }: { sourceUrl: string; label: string }
             throw new Error('PDF 读取失败')
           }
           const data = await response.arrayBuffer()
-          const pdfjs = await import('pdfjs-dist')
-          pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+          const pdfjs = await loadPdfRuntime()
           const document = await pdfjs.getDocument({ data }).promise
           const page = await document.getPage(1)
           const baseViewport = page.getViewport({ scale: 1 })
@@ -157,5 +156,4 @@ export function PsdThumbnail({ sourceUrl, label }: { sourceUrl: string; label: s
     </div>
   )
 }
-
 

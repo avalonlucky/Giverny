@@ -1,6 +1,6 @@
 import { type WheelEvent as ReactWheelEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, FileImage, FileText, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { loadPdfRuntime } from '../lib/pdfRuntime'
 
 type PdfPreviewDocument = {
   numPages: number
@@ -56,8 +56,7 @@ export function PdfPreviewReader({
               if (!response.ok) throw new Error(`PDF 读取失败（${response.status}）`)
               return response.arrayBuffer()
             })
-        const pdfjs = await import('pdfjs-dist')
-        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+        const pdfjs = await loadPdfRuntime()
         loadingTask = pdfjs.getDocument({ data }) as unknown as typeof loadingTask
         const document = await loadingTask!.promise as PdfPreviewDocument
         if (cancelled) {
