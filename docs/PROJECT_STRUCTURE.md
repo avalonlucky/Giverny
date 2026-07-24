@@ -42,6 +42,7 @@
 ├── docs/
 │   ├── AI_AGENT_RUNTIME.md
 │   ├── AGENT_ORCHESTRATOR.md
+│   ├── AGENT_ENTERPRISE_ROADMAP.md
 │   ├── AGENT_WORKFLOWS.md
 │   ├── AI_MODEL_ROUTING.md
 │   ├── AI_LEARNING.md
@@ -276,6 +277,8 @@
 - Deterministic cross-task portfolio query and regression guard: `query_task_portfolio` in `src/worker.ts`, `scripts/check-agent-portfolio-architecture.mjs`
 - Conversation-scoped task reference, evidence consistency guard and multi-turn evaluations: `src/aliceAgent.ts`, `agent-evals/multiturn-cases.json`, `scripts/check-agent-reference-architecture.mjs`
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
+- Enterprise Agent priorities, capability rollout and per-release status: `docs/AGENT_ENTERPRISE_ROADMAP.md`
+- Deterministic final-answer fact snapshots and protected-claim verification: `src/agentFactGuard.ts`, `scripts/test-agent-fact-guard.mjs`, `scripts/check-agent-fact-architecture.mjs`
 - Pure Agent entity extraction and deterministic orchestration tests: `src/agentEntityResolver.ts`, `scripts/test-agent-orchestrator.mjs`, `scripts/check-agent-replan-architecture.mjs`
 - Signed tenant/principal context for internal tools: `src/agentScope.ts`
 - Durable background analysis workflow: `src/agentAnalysisWorkflow.ts`

@@ -4,6 +4,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry, type AgentReadToolName } from './agentToolRegistry'
 import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
+import { buildAgentFactSnapshot, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
@@ -1256,20 +1257,37 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
           break
         }
-        const verifiedEvidence = evidence.filter((item) => item.deterministic).map((item) => ({ tool: item.toolName, result: item.payload }))
-        try {
-          const rewritten = await generateText({
-            model: provider(modelName),
-            system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；按识别到的目标逐项回答，不能遗漏其中任何一项；每项先回答结论，再列必要依据。数据缺失时明确说明，不得猜测。',
-            messages: [{ role: 'user', content: `用户问题：\n${message}\n\n需要逐项回答的目标：\n${verifiedIntents.join('、')}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
-            temperature: 0.1,
-          })
-          answer = cleanAnswer(rewritten.text) || '已完成必要补查，但没有生成可靠的整理结果。'
-          trace.push({ type: 'result', label: '依据补齐后重新整理答案' })
-        } catch {
-          answer = '已补齐必要业务证据，但主模型未能完成第二次整理，我没有将未验证的初稿交给你。'
-        }
         workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
+    }
+    const deterministicEvidence = evidence.filter((item) => item.deterministic)
+    const shouldGroundAnswer = !selection && !backgroundTask && deterministicEvidence.length > 0
+      && verifiedIntents.some((intent) => ['finance', 'task_data', 'person_profile', 'attachment', 'product_help', 'knowledge'].includes(intent))
+    if (shouldGroundAnswer) {
+      const verifiedEvidence = deterministicEvidence.map((item) => ({ tool: item.toolName, result: item.payload }))
+      const factSnapshot = buildAgentFactSnapshot(deterministicEvidence)
+      try {
+        const rewritten = await generateText({
+          model: provider(modelName),
+          system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；按识别到的目标逐项回答，不能遗漏其中任何一项；金额、工时、日期、状态、任务 ID 和附件数量必须逐字忠于证据。数据缺失时明确说明，不得猜测。',
+          messages: [{ role: 'user', content: `用户问题：\n${message}\n\n需要逐项回答的目标：\n${verifiedIntents.join('、')}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
+          temperature: 0,
+        })
+        answer = cleanAnswer(rewritten.text) || factSnapshot.fallbackAnswer || '工具已经返回证据，但没有生成可靠的整理结果。'
+        trace.push({ type: 'result', label: '仅依据工具证据整理答案' })
+      } catch {
+        answer = factSnapshot.fallbackAnswer || '工具已经返回证据，但主模型未能完成整理；我没有采用未经验证的初稿。'
+        trace.push({ type: 'error', label: '证据整理失败', detail: '已切换为确定性事实摘要。' })
+      }
+      if (factSnapshot.fallbackAnswer) {
+        const factVerification = verifyAgentFactClaims(answer, factSnapshot)
+        if (!factVerification.passed) {
+          answer = factSnapshot.fallbackAnswer
+          trace.push({ type: 'error', label: '关键事实校验未通过', detail: `${factVerification.issues.slice(0, 3).join('；')}。已改用权威事实摘要。` })
+        } else {
+          trace.push({ type: 'result', label: '关键事实逐字段校验通过' })
+        }
+      }
+      workingTurn = { ...workingTurn, plan: plannedCalls, evidence, answer }
     }
     if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message)) {
       const detailEvidence = [...evidence].reverse().find((item) => item.deterministic && item.toolName === 'get_task_detail')
@@ -1294,7 +1312,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       : undefined
     const response: AliceAgentChatResult = {
       answer,
-      trace: [...trace, { type: 'result' as const, label: '核对并整理结论', detail: '只保留与问题直接相关、且有依据支持的内容。' }].slice(0, 10),
+      trace: [...trace, { type: 'result' as const, label: '核对并整理结论', detail: '只保留与问题直接相关、且有依据支持的内容。' }],
       model: `deepseek:${modelName}`,
       agentTurn: { ...sanitizeAgentTurnAudit(agentTurn), evidenceCount: agentTurn.evidence.length },
       ...(approval ? { approval } : {}),
