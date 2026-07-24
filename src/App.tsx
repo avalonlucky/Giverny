@@ -13,83 +13,33 @@ import {
   Sparkles,
   BookOpen,
 } from 'lucide-react'
-import {
-  defaultDesignTypeGroups,
-  defaultDesignTypes,
-  defaultHourlyRate,
-  defaultPdfTitle,
-  defaultServiceCompanyName,
-  importedHoursMonth,
-  importedMonthlyHours,
-  type DesignTypeGroup,
-} from './config/appConfig'
-import { productShortcutHelpGroups } from './productCapabilities'
-import {
-  api,
-  ApiError,
-  authedPreviewUrl,
-  clearStoredAuth,
-  getStoredAuth,
-  setStoredAuth,
-  type AccessToken,
-  type AiModelConfig,
-  type AiModelEndpointConfig,
-  type AiModelRouteKey,
-  type AiProviderConfig,
-  type AuthRole,
-  type ReportRecord,
-  type StoredAuth,
-  type TaskProgressAssessment,
-  type TokenScope,
-} from './lib/api'
+import { importedHoursMonth, importedMonthlyHours } from './config/appConfig'
 import type { ConfirmDialogState } from './components/ConfirmDialogModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
 import { AppSidebar } from './components/AppSidebar'
 import { AppTopbar } from './components/AppTopbar'
 import { AppOverlayLayer, type ProgressModalTarget } from './components/AppOverlayLayer'
 import { DashboardView } from './views/DashboardView'
-import type { CommandPaletteAction, ShortcutHelpGroup } from './components/CommandPalette'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
-import { formatFileSize } from './lib/format'
-import { formatDuration } from './lib/durationDisplay'
-import { isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
-import { addIsoDays } from './lib/calendar'
-import { fileTypeForFile } from './lib/fileTypes'
-import { taskSettlementMonth } from './lib/taskSettlement'
+import { isoDate } from './lib/dateTime'
 import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
 import {
-  isSupplementalTask,
-  minutesForTimeEntry,
   sortTasksByLatestActivity,
-  sumTimeEntries,
   taskHasMonthActivity,
   taskRelatedMonths,
 } from './lib/taskAccounting'
-import { normalizeDesignTypeGroups } from './lib/designTypeGroups'
-import { canRecordNewProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
-import { formatEntryDateTimeRange, formatWaitingEntryDateTimeRange, sortTimeEntriesDesc } from './lib/taskPresentation'
-import { clearStateCache, readStateCache, writeStateCache } from './lib/stateCache'
-import {
-  clearNewTaskDraftCache,
-} from './lib/newTaskDraftCache'
-import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShortcuts'
-import { createOptionalPreviewFile } from './lib/attachmentPreview'
-import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
+import { buildTaskContextInsights } from './lib/taskContextInsights'
 import { useWorkspaceAnalytics } from './hooks/useWorkspaceAnalytics'
 import { useDailyKnowledge } from './hooks/useDailyKnowledge'
 import { useAgentJobNotifications } from './hooks/useAgentJobNotifications'
 import { useToastNotifications } from './hooks/useToastNotifications'
-import { useBackendRuntime, type BackendStatus } from './hooks/useBackendRuntime'
-import { useAttachmentRuntime } from './hooks/useAttachmentRuntime'
 import { useTaskActivity } from './hooks/useTaskActivity'
-import {
-  prepareImageFiles,
-  validateUploadFile,
-} from './lib/fileUpload'
-import type { AppView, FileAsset, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
-import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from './types/taskUi'
-import type { SettingsTab } from './views/SettingsView'
+import { useWorkspaceData } from './hooks/useWorkspaceData'
+import { useSettingsOperations } from './hooks/useSettingsOperations'
+import { useTaskOperations } from './hooks/useTaskOperations'
+import { useAppShortcuts } from './hooks/useAppShortcuts'
+import type { AppView, FileAsset, Task, TaskFilter, TaskViewMode } from './types/domain'
 import type { CalendarDisplayMode } from './views/CalendarView'
 
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
@@ -149,20 +99,9 @@ function taskViewRoute(view: AppView, mode: TaskViewMode) {
 }
 
 
-function nowStamp() {
-  const now = new Date()
-  return `${isoDate()} ${pad(now.getHours())}:${pad(now.getMinutes())}`
-}
-
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
 
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
-
-function shiftMonthValue(value: string, offset: number) {
-  const base = localDateFromIsoDate(`${value || isoDate().slice(0, 7)}-01`)
-  base.setMonth(base.getMonth() + offset)
-  return `${base.getFullYear()}-${pad(base.getMonth() + 1)}`
-}
 
 // ─── AI 工作助手 ──────────────────────────────────────────────────────────────
 
@@ -174,36 +113,13 @@ function App() {
   const taskViewMode = taskViewModeFromSearch(location.search)
   const [calendarDisplayMode, setCalendarDisplayMode] = useState<CalendarDisplayMode>('月')
   const [calendarFocusDate, setCalendarFocusDate] = useState(() => isoDate())
-  const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
-  // 上次成功加载的状态快照，用于静默刷新首屏（存在则直接秒开，不再卡在加载页）
-  const [bootCache] = useState(() => readStateCache())
-  const bootTasks = useMemo(() => bootCache?.tasks.map(normalizeTaskClosure) ?? [], [bootCache])
-  const [role, setRole] = useState<AuthRole>(bootCache?.role ?? 'guest')
-  const [accessTokens, setAccessTokens] = useState<AccessToken[]>(bootCache?.accessTokens ?? [])
-  const [newTokenId, setNewTokenId] = useState('')
-  const [authError, setAuthError] = useState('')
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-  const [isLoaded, setIsLoaded] = useState(Boolean(bootCache))
   const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
-  const [taskItems, setTaskItems] = useState<Task[]>(bootTasks)
-  const taskItemsRef = useRef<Task[]>(bootTasks)
-  const [updateItems, setUpdateItems] = useState<TaskUpdate[]>(bootCache?.updates ?? [])
-  const [fileItems, setFileItems] = useState<FileAsset[]>(bootCache?.files ?? [])
-  const [reports, setReports] = useState<ReportRecord[]>(bootCache?.reports ?? [])
-  const [hourlyRate, setHourlyRate] = useState(bootCache?.settings?.hourlyRate ?? defaultHourlyRate)
-  const [pdfTitle, setPdfTitle] = useState(bootCache?.settings?.pdfTitle || defaultPdfTitle)
-  const [serviceCompanyName, setServiceCompanyName] = useState(bootCache?.settings?.serviceCompanyName || defaultServiceCompanyName)
-  const [taxMode, setTaxMode] = useState<TaxMode>(bootCache?.settings?.taxMode ?? 'salary')
-  const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
-  const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
-  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>([])
-  const [settingsEntry, setSettingsEntry] = useState<{ tab: SettingsTab; nonce: number }>({ tab: 'ai', nonce: 0 })
   const [selectedTaskId, setSelectedTaskId] = useState(0)
   const [isTaskDetailCollapsed, setIsTaskDetailCollapsed] = useState(() => window.localStorage.getItem('giverny-task-detail-collapsed') === '1')
   const [detailTaskId, setDetailTaskId] = useState(0)
   const [editTaskId, setEditTaskId] = useState(0)
   const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
-  const [progressAssessments, setProgressAssessments] = useState<Record<number, TaskProgressAssessment>>({})
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
@@ -218,17 +134,11 @@ function App() {
   const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
-  const [voidTaskTarget, setVoidTaskTarget] = useState<Task | null>(null)
-  const [isVoidTaskBusy, setIsVoidTaskBusy] = useState(false)
   const [showVoidedTasks, setShowVoidedTasks] = useState(false)
   const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
   const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
-  const [showFireworks, setShowFireworks] = useState(false)
-  const updatingTaskIdsRef = useRef<Set<number>>(new Set())
-  const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>('连接中')
   const [taskQuery, setTaskQuery] = useState('')
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
   // 工作台任务明细：未完成列表兜底分页 + 已验收默认折叠
@@ -253,28 +163,35 @@ function App() {
       return next
     })
   }
-  const lastAltPressRef = useRef<number>(0)
-  const isAdmin = role === 'admin' && Boolean(auth)
+  const { toastQueue, notify, dismissToast } = useToastNotifications()
+  const workspaceData = useWorkspaceData(notify)
+  const {
+    auth, role, accessTokens, newTokenId, authError, setAuthError, isLoaded, taskItems,
+    updateItems, fileItems, reports, setReports,
+    hourlyRate, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig,
+    aiProviderConfigs, setAiProviderConfigs, settingsEntry, setSettingsEntry,
+    backendStatus, backendSyncSlow: effectiveBackendSyncSlow, isOffline, storageUsage,
+    attachmentAnalyses, refreshState, retryRefreshState, isAdmin,
+  } = workspaceData
+  const settingsOperations = useSettingsOperations({
+    workspace: workspaceData,
+    notify,
+    setConfirmDialog,
+    setIsLoginModalOpen,
+    setIsAccountMenuOpen,
+  })
+  const {
+    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
+    handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
+    handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
+    handleDesignTypeGroupsChange, handleAiModelConfigChange,
+  } = settingsOperations
   // 角色能力分级（前端展示用；后端是真正的安全边界）
   const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
   const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
   const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
   const canToggleIncomeVisibility = canSeeFull || isClient
-  const { toastQueue, notify, dismissToast } = useToastNotifications()
   const { taskActivity, loadTaskActivity } = useTaskActivity()
-  const { attachmentAnalyses, setAttachmentAnalyses } = useAttachmentRuntime({
-    initialAnalyses: bootCache?.attachmentAnalyses ?? [],
-    isLoaded,
-    role,
-    files: fileItems,
-    setFiles: setFileItems,
-  })
-  const {
-    backendSyncSlow: effectiveBackendSyncSlow,
-    resetBackendSyncSlow,
-    isOffline,
-    storageUsage,
-  } = useBackendRuntime({ backendStatus, isAdmin })
   const toggleIncomeVisibility = () => setIncomeVisible((value) => !value)
   const currentMonth = useMemo(() => ({ value: monthValue, label: monthLabelOf(monthValue) }), [monthValue])
   const taskMonthValues = useMemo(() => {
@@ -334,10 +251,6 @@ function App() {
   }, [setChatAnalysisFocusId, setIsChatOpen])
   const { topAnalysisJobs, markAnalysisJobRead } = useAgentJobNotifications({ isAdmin, notify, onOpenJob: openAnalysisJob })
 
-  useEffect(() => {
-    taskItemsRef.current = taskItems
-  }, [taskItems])
-
   const handleConfirmDialogConfirm = async () => {
     if (!confirmDialog || isConfirmDialogBusy) {
       return
@@ -391,93 +304,6 @@ function App() {
     }
   }, [activeView, location.pathname, location.search, routerNavigate, taskViewMode])
 
-
-  const refreshState = async () => {
-    const state = await api.getState()
-    const normalizedTasks = state.tasks.map(normalizeTaskClosure)
-    const normalizedState = { ...state, tasks: normalizedTasks }
-    writeStateCache(normalizedState)
-    setTaskItems(normalizedTasks)
-    setUpdateItems(state.updates)
-    setFileItems(state.files)
-    setAttachmentAnalyses(state.attachmentAnalyses ?? [])
-    setReports(state.reports ?? [])
-    setRole(state.role)
-    // 登录态失效检测：本地存的是管理员凭证，但后端返回的角色被降级 → 主动提示重新登录，
-    // 避免「看着像登录、其实是只读」的静默降级（金额隐藏、附件预览 401 等）。
-    const storedForCheck = getStoredAuth()
-    if (storedForCheck?.role === 'admin' && state.role !== 'admin') {
-      clearStoredAuth()
-      setAuth(null)
-      setAuthError('管理员登录已失效（密码可能已修改），请重新登录')
-    }
-    setAccessTokens(state.accessTokens ?? [])
-    setHourlyRate(state.settings.hourlyRate)
-    setPdfTitle(state.settings.pdfTitle || defaultPdfTitle)
-    setServiceCompanyName(state.settings.serviceCompanyName || defaultServiceCompanyName)
-    setTaxMode(state.settings.taxMode ?? 'salary')
-    setDesignTypeGroups(normalizeDesignTypeGroups(state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }]))
-    setAiModelConfig(state.settings.aiModel ?? null)
-    setSelectedTaskId((currentId) => {
-      const activeTasks = normalizedTasks.filter((task) => !task.voidedAt)
-      return activeTasks.some((task) => task.id === currentId) ? currentId : activeTasks[0]?.id ?? normalizedTasks[0]?.id ?? 0
-    })
-    setBackendStatus('已接入 D1/R2')
-    resetBackendSyncSlow()
-    setIsLoaded(true)
-  }
-
-  const retryRefreshState = async () => {
-    setBackendStatus('连接中')
-    resetBackendSyncSlow()
-    try {
-      await refreshState()
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `重新同步失败：${error.message}` : '重新同步失败，请稍后再试')
-    }
-  }
-
-  useEffect(() => {
-    // Initial and credential-change state hydration is the intended effect here.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refreshState().catch((error) => {
-      if (error instanceof ApiError && error.status === 401) {
-        clearStoredAuth()
-        setAuth(null)
-        setRole('guest')
-        setAuthError('登录已失效（口令可能被停用或已过期），已切换为游客只读')
-        void refreshState().catch((publicError) => {
-          setBackendStatus('后端异常')
-          setIsLoaded(true)
-          notify(publicError instanceof Error ? `后端连接失败：${publicError.message}` : '后端连接失败')
-        })
-        return
-      }
-      setBackendStatus('后端异常')
-      setIsLoaded(true)
-      notify(error instanceof Error ? `后端连接失败：${error.message}` : '后端连接失败')
-    })
-  // refreshState intentionally follows credential changes; its setters are not effect triggers.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth, notify])
-
-  useEffect(() => {
-    if (!isAdmin) {
-      return undefined
-    }
-    let cancelled = false
-    api.getAiProviderConfigs()
-      .then((result) => {
-        if (!cancelled) setAiProviderConfigs(result.providers)
-      })
-      .catch(() => {
-        if (!cancelled) setAiProviderConfigs([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [isAdmin, aiModelConfig?.updatedAt])
 
   const dashboardTaskFilter = dashboardTaskFilters.includes(taskFilter) ? taskFilter : '全部'
 
@@ -553,336 +379,39 @@ function App() {
     navigateView('任务')
   }
 
-  const handleCreateTask = async (task: Task) => {
-    try {
-      const savedTask = await api.createTask(task)
-      await refreshState()
-      setSelectedTaskId(savedTask.id)
-      if (taskSettlementMonth(savedTask).length >= 7) {
-        setMonthValue(taskSettlementMonth(savedTask))
-      }
-      clearNewTaskDraftCache()
-      setIsModalOpen(false)
-      setBackendStatus('已接入 D1/R2')
-      notify('任务已写入 D1，最新进展已同步')
-      return savedTask
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `任务保存失败：${error.message}` : '任务保存失败')
-      return undefined
-    }
-  }
-
-  const handleRetryAttachmentAnalysis = async (attachmentId: number) => {
-    await api.retryAttachmentAnalysis(attachmentId)
-    notify('已重新创建附件分析任务')
-    await refreshState()
-  }
-
-  const handleCreateTaskUpdate = async (taskId: number, update: { title: string; body: string; hours: number; visible: boolean }) => {
-    try {
-      const savedUpdate = await api.createUpdate({
-        id: 0,
-        taskId,
-        date: isoDateTime(),
-        title: update.title,
-        body: update.body,
-        hours: update.hours,
-        visible: update.visible,
-        files: [],
-      })
-      setUpdateItems((currentUpdates) => [savedUpdate, ...currentUpdates])
-      await refreshState()
-      await loadTaskActivity(taskId)
-      notify('进展记录已保存')
-    } catch (error) {
-      notify(error instanceof Error ? `进展保存失败：${error.message}` : '进展保存失败')
-    }
-  }
-
-  const handleOpenTaskDetail = (taskId: number) => {
-    setSelectedTaskId(taskId)
-    setDetailTaskId(taskId)
-    void loadTaskActivity(taskId)
-  }
-
-  const handleOpenTaskEdit = (taskId: number) => {
-    setSelectedTaskId(taskId)
-    setEditTaskId(taskId)
-  }
-
-  const handleOpenTaskProgress = (taskId: number, mode: ProgressRecordMode = 'progress', editEntryId?: string, initialAcceptanceMode = false) => {
-    const task = taskItemsRef.current.find((item) => item.id === taskId)
-    if (task && mode === 'progress' && !editEntryId && !initialAcceptanceMode && !canRecordNewProgress(task)) {
-      notify('任务已进入验收闭环。如需继续记录，请先编辑或删除右侧的验收进展。', 'error')
-      return
-    }
-    setSelectedTaskId(taskId)
-    setProgressModalTarget({ taskId, mode, editEntryId, initialAcceptanceMode })
-    void loadTaskActivity(taskId)
-  }
-
-  const handleDeleteTaskTimeEntry = (taskId: number, mode: ProgressRecordMode, entryId: string) => {
-    const task = taskItems.find((item) => item.id === taskId)
-    if (!task) {
-      return
-    }
-    if (mode === 'progress' && task.status === '已验收') {
-      notify('已验收任务的结算工时已锁定，不能直接删除分段记录', 'error')
-      return
-    }
-    const entries = mode === 'waiting' ? task.waitingEntries ?? [] : task.timeEntries ?? []
-    const entry = entries.find((item) => item.id === entryId)
-    if (!entry) {
-      notify('这条记录已不存在，请刷新后重试', 'error')
-      return
-    }
-    const isWaiting = mode === 'waiting'
-    const restoreDeletedEntry = async () => {
-      const latestTask = taskItemsRef.current.find((item) => item.id === taskId)
-      if (!latestTask) {
-        notify('撤回失败：任务不存在', 'error')
-        return
-      }
-      if (isWaiting) {
-        const latestEntries = latestTask.waitingEntries ?? []
-        if (latestEntries.some((item) => item.id === entry.id)) {
-          notify('这段等待记录已恢复')
-          return
-        }
-        const restored = await handleUpdateTask(taskId, { waitingEntries: sortTimeEntriesDesc([...latestEntries, entry as WaitingEntry]) })
-        if (!restored) {
-          notify('撤回失败：等待记录未能恢复', 'error')
-          return
-        }
-        await api.setEntryAttachmentsArchived(taskId, entry.id, false)
-        await refreshState()
-        notify('已撤回等待记录')
-        return
-      }
-      const latestEntries = latestTask.timeEntries ?? []
-      if (latestEntries.some((item) => item.id === entry.id)) {
-        notify('这段分段计时已恢复')
-        return
-      }
-      const nextEntries = sortTimeEntriesDesc([...latestEntries, entry])
-      const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
-      const restored = await handleUpdateTask(taskId, { timeEntries: nextEntries, actualHours: nextActualHours })
-      if (!restored) {
-        notify('撤回失败：分段计时未能恢复', 'error')
-        return
-      }
-      await api.setEntryAttachmentsArchived(taskId, entry.id, false)
-      await refreshState()
-      notify('已撤回分段计时')
-    }
-    const entryRangeLabel = isWaiting ? formatWaitingEntryDateTimeRange(task, entry as WaitingEntry) : formatEntryDateTimeRange(task, entry)
-    setConfirmDialog({
-      title: `确定删除 ${entryRangeLabel} 这段记录吗？`,
-      body: isWaiting
-        ? '删除后，这段等待时长将不再进入洞察分析。'
-        : '删除后，这段工时会从实际工时和结算金额中扣除。',
-      confirmText: '确认删除',
-      tone: 'danger',
-      hideIcon: true,
-      details: [entry.note || (isWaiting ? '未填写等待说明' : '未填写进展内容'), isWaiting ? '不计结算，下一段工作进展开始时自动截止' : `计时 ${formatDuration(minutesForTimeEntry(entry))}`],
-      onConfirm: async () => {
-        // 附件归档与 task update 并行，减少串行等待
-        const archivePromise = api.setEntryAttachmentsArchived(taskId, entry.id, true)
-        if (isWaiting) {
-          const deleted = await handleUpdateTask(taskId, { waitingEntries: entries.filter((item) => item.id !== entryId) })
-          if (!deleted) {
-            archivePromise.then(() => api.setEntryAttachmentsArchived(taskId, entry.id, false)).catch(() => {})
-            notify('等待记录删除失败，关联附件已保留', 'error')
-            return
-          }
-          void refreshState()
-          notify('等待记录已删除', 'success', {
-            actionLabel: '撤回',
-            durationMs: 7200,
-            onAction: restoreDeletedEntry,
-          })
-          return
-        }
-        const nextEntries = entries.filter((item) => item.id !== entryId)
-        const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
-        const deleted = await handleUpdateTask(taskId, { timeEntries: nextEntries, actualHours: nextActualHours })
-        if (!deleted) {
-          archivePromise.then(() => api.setEntryAttachmentsArchived(taskId, entry.id, false)).catch(() => {})
-          notify('分段计时删除失败，关联附件已保留', 'error')
-          return
-        }
-        void refreshState()
-        notify('分段计时已删除，实际工时已重新计算', 'success', {
-          actionLabel: '撤回',
-          durationMs: 7200,
-          onAction: restoreDeletedEntry,
-        })
-      },
-    })
-  }
-
-  const handleTaskCalendarMonthChange = (value: string) => {
-    setMonthValue(value)
-    setCalendarFocusDate((current) => (current.startsWith(value) ? current : `${value}-01`))
-  }
-
-  const shiftTaskCalendarPeriod = (direction: -1 | 1) => {
-    if (calendarDisplayMode === '月') {
-      const nextMonth = shiftMonthValue(currentMonth.value, direction)
-      setMonthValue(nextMonth)
-      setCalendarFocusDate(`${nextMonth}-01`)
-      return
-    }
-    const nextDate = addIsoDays(effectiveCalendarFocusDate, direction * (calendarDisplayMode === '周' ? 7 : 1))
-    setCalendarFocusDate(nextDate)
-    if (monthPart(nextDate) !== currentMonth.value) {
-      setMonthValue(monthPart(nextDate))
-    }
-  }
-
-  const handleDeleteAcceptanceProgress = (taskId: number, entryId?: string) => {
-    const task = taskItems.find((item) => item.id === taskId)
-    if (!task) {
-      return
-    }
-    const entry = entryId ? (task.timeEntries ?? []).find((item) => item.id === entryId) : undefined
-    if (entryId && !entry) {
-      notify('这条验收进展已不存在，请刷新后重试', 'error')
-      return
-    }
-    const nextEntries = entryId ? (task.timeEntries ?? []).filter((item) => item.id !== entryId) : task.timeEntries ?? []
-    const nextActualHours = Math.round((sumTimeEntries(nextEntries) / 60) * 100) / 100
-    const restoreAcceptanceProgress = async () => {
-      if (!entry) {
-        notify('这条验收进展没有可撤回的分段工时')
-        return
-      }
-      const latestTask = taskItemsRef.current.find((item) => item.id === taskId)
-      if (!latestTask) {
-        notify('撤回失败：任务不存在', 'error')
-        return
-      }
-      const latestEntries = latestTask.timeEntries ?? []
-      if (latestEntries.some((item) => item.id === entry.id)) {
-        notify('这条验收进展已恢复')
-        return
-      }
-      const restoredEntries = sortTimeEntriesDesc([...latestEntries, entry])
-      const restoredHours = Math.round((sumTimeEntries(restoredEntries) / 60) * 100) / 100
-      const restored = await handleUpdateTask(taskId, {
-        status: '已验收',
-        stage: '已验收',
-        progress: 100,
-        timeEntries: restoredEntries,
-        actualHours: restoredHours,
-        acceptanceNote: task.acceptanceNote ?? entry.note ?? '',
-        acceptanceFiles: task.acceptanceFiles ?? [],
-        actualDeliveryDate: task.actualDeliveryDate || isoDateTime(),
-        allowAcceptedTimeEdit: true,
-      })
-      if (!restored) {
-        notify('撤回失败：验收进展未能恢复', 'error')
-        return
-      }
-      await api.setEntryAttachmentsArchived(taskId, entry.id, false)
-      await refreshState()
-      notify('已撤回验收进展删除')
-    }
-    setConfirmDialog({
-      title: entry ? `确定删除 ${formatEntryDateTimeRange(task, entry)} 这条验收进展吗？` : '确定删除这条验收进展吗？',
-      body: entry
-        ? '删除后，这段验收工时会从实际工时和结算金额中扣除，任务将回到待验收状态。'
-        : '删除后，任务将回到待验收状态，验收备注与验收附件记录会从本次验收进展中移除。',
-      confirmText: '确认删除',
-      tone: 'danger',
-      hideIcon: true,
-      details: [
-        entry?.note || task.acceptanceNote || '未填写验收备注',
-        entry ? `计时 ${formatDuration(minutesForTimeEntry(entry))}` : '不新增计时',
-      ],
-      onConfirm: async () => {
-        if (entry) {
-          await api.setEntryAttachmentsArchived(taskId, entry.id, true)
-        }
-        const deleted = await handleUpdateTask(taskId, {
-          status: '待验收',
-          stage: '待验收',
-          progress: Math.min(taskDisplayProgress(task), 80),
-          actualDeliveryDate: '',
-          acceptanceNote: '',
-          acceptanceFiles: [],
-          ...(entryId ? { timeEntries: nextEntries, actualHours: nextActualHours } : {}),
-          allowAcceptedTimeEdit: Boolean(entryId),
-          allowAcceptanceRollback: true,
-        })
-        if (!deleted) {
-          if (entry) {
-            await api.setEntryAttachmentsArchived(taskId, entry.id, false)
-          }
-          notify('验收进展删除失败，关联附件已保留', 'error')
-          return
-        }
-        await refreshState()
-        notify(entry ? '验收进展已删除，实际工时已重新计算' : '验收进展已删除，任务已回到待验收', 'success', entry ? {
-          actionLabel: '撤回',
-          durationMs: 7200,
-          onAction: restoreAcceptanceProgress,
-        } : undefined)
-      },
-    })
-  }
-
-  const handleOpenTaskAcceptance = (taskId: number) => {
-    if (!isAdmin) {
-      requireAdmin()
-      return
-    }
-    setSelectedTaskId(taskId)
-    setProgressModalTarget({ taskId, mode: 'progress', initialAcceptanceMode: true })
-    void loadTaskActivity(taskId)
-  }
-
-  const handleSaveTaskEdit = (taskId: number, changes: Partial<Task>) => {
-    if (canWrite) {
-      void handleUpdateTask(taskId, changes)
-    } else {
-      requireAdmin()
-    }
-    setEditTaskId(0)
-  }
-
-  const handleConfirmTaskAcceptance = async (
-    task: Task,
-    payload: AcceptancePayload,
-  ) => {
-    if (isAdmin) {
-      const saved = await handleUpdateTask(task.id, {
-        ...payload.taskChanges,
-        status: '已验收',
-        reviewer: payload.taskChanges?.reviewer || task.reviewer || payload.taskChanges?.requester || task.requester || '待确认',
-        actualHours: payload.actualHours,
-        acceptanceNote: payload.acceptanceNote,
-        feedbackRating: payload.feedbackRating,
-        feedbackTags: payload.feedbackTags,
-        feedbackNote: payload.feedbackNote,
-        timeEntries: payload.timeEntries,
-        waitingEntries: payload.waitingEntries,
-        acceptanceFiles: payload.acceptanceFiles,
-        progress: 100,
-        ...(task.status === '已验收' ? { allowAcceptedTimeEdit: true } : {}),
-        // 非补录任务：结算月份自动跟随验收时间（当前年月）
-        settlementMonth: isSupplementalTask(task) ? taskSettlementMonth(task) : monthPart(isoDate()),
-      })
-      if (!saved) {
-        throw new Error('任务状态未能写入，请稍后重试')
-      }
-    } else {
-      requireAdmin()
-      throw new Error('需要管理员权限')
-    }
-  }
-
+  const taskOperations = useTaskOperations({
+    workspace: workspaceData,
+    selectedTask,
+    detailTaskId,
+    loadTaskActivity,
+    notify,
+    setSelectedTaskId,
+    setMonthValue,
+    setIsModalOpen,
+    setDetailTaskId,
+    setEditTaskId,
+    setProgressModalTarget,
+    setConfirmDialog,
+    setIsLoginModalOpen,
+    previewFile,
+    setPreviewFile,
+    calendarDisplayMode,
+    currentMonthValue: currentMonth.value,
+    effectiveCalendarFocusDate,
+    setCalendarFocusDate,
+    canWrite,
+    isAdmin,
+  })
+  const {
+    progressAssessments, voidTaskTarget, setVoidTaskTarget, isVoidTaskBusy, showFireworks,
+    requireAdmin, handleCreateTask, handleRetryAttachmentAnalysis, handleCreateTaskUpdate,
+    handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleDeleteTaskTimeEntry,
+    handleTaskCalendarMonthChange, shiftTaskCalendarPeriod,
+    handleDeleteAcceptanceProgress, handleOpenTaskAcceptance, handleSaveTaskEdit,
+    handleConfirmTaskAcceptance, handleQuickUploadImage, handleAcceptanceFileUpload,
+    handleAutoEstimateProgress, handleUpdateTask, handleVoidTask, confirmVoidTask,
+    handleRestoreTask, handleDeleteTask, handleDownloadFile, handleDeleteFile, handleUpdateFile,
+  } = taskOperations
   useEffect(() => {
     if (!dashboardContextMenu && !dashboardCreateMenu) {
       return
@@ -932,633 +461,6 @@ function App() {
     if (selectedTaskActivityId) void loadTaskActivity(selectedTaskActivityId)
   }, [loadTaskActivity, selectedTaskActivityId])
 
-  const handleQuickUploadImage = async (
-    taskId: number,
-    file: File,
-    onProgress?: (ratio: number) => void,
-    entryId?: string,
-  ) => {
-    try {
-      validateUploadFile(file)
-      const prepared = await prepareImageFiles(file)
-      const uploadFile = prepared.uploadFile
-      const uploadExtension = fileTypeForFile(uploadFile).type
-      const preview = prepared.previewFile ?? await createOptionalPreviewFile(uploadFile)
-      await api.uploadFile({
-        taskId,
-        entryId,
-        scope: 'progress',
-        file: uploadFile,
-        preview,
-        type: uploadExtension,
-        size: formatFileSize(uploadFile.size),
-        final: false,
-        visible: true,
-        analyze: true,
-      }, onProgress)
-      await refreshState()
-      await loadTaskActivity(taskId)
-      notify('图片已上传')
-    } catch (error) {
-      notify(error instanceof Error ? `上传失败：${error.message}` : '上传失败')
-      throw error
-    }
-  }
-
-  const handleAcceptanceFileUpload = async (taskId: number, file: File, onProgress?: (ratio: number) => void, entryId?: string, preview?: File) => {
-    const extension = fileTypeForFile(file).type
-    const savedFile = await api.uploadFile(
-      {
-        taskId,
-        entryId,
-        scope: 'acceptance',
-        file,
-        preview,
-        type: extension,
-        size: formatFileSize(file.size),
-        final: true,
-        visible: true,
-        tag: '验收文件',
-        analyze: true,
-      },
-      onProgress,
-    )
-    setFileItems((currentFiles) => [savedFile, ...currentFiles])
-    setTaskItems((currentTasks) =>
-      currentTasks.map((task) => (task.id === taskId ? { ...task, files: Array.from(new Set([savedFile.name, ...task.files])) } : task)),
-    )
-    // 缩略图不是源文件上传的前置条件。复杂 PDF / Office 即使首次渲染失败，
-    // 完整文件也已经可用；后台再有限重试并把成功结果持久化到 R2。
-    if (fileTypeForFile(file).kind !== 'image') {
-      void (async () => {
-        for (const delay of [0, 800, 2400]) {
-          if (delay > 0) {
-            await new Promise((resolve) => window.setTimeout(resolve, delay))
-          }
-          const preview = await createOptionalPreviewFile(file)
-          if (!preview) {
-            continue
-          }
-          try {
-            const result = await api.setFilePreview(savedFile.id, preview)
-            if (result.previewUrl) {
-              savedFile.previewUrl = result.previewUrl
-              setFileItems((currentFiles) => currentFiles.map((item) => (
-                item.id === savedFile.id ? { ...item, previewUrl: result.previewUrl, previewFallback: Boolean(result.previewFallback) } : item
-              )))
-              return
-            }
-          } catch (error) {
-            console.warn('验收附件缩略图持久化失败', file.name, error)
-          }
-        }
-      })()
-    }
-    return savedFile
-  }
-
-  // AI 自动估算整体进度：读取完整生命周期证据，并按语义签名去重。
-  const autoEstimateSigRef = useRef<Map<number, string>>(new Map())
-  const aiProgressWriteRef = useRef<Set<number>>(new Set())
-  const handleAutoEstimateProgress = async (task: Task) => {
-    if (!isAdmin) {
-      return
-    }
-    if (['已验收', '终止', '挂起', '不计费'].includes(task.status)) {
-      return
-    }
-    const taskFiles = fileItems.filter((file) => file.taskId === task.id && !file.deletedAt)
-    const attachmentsByEntry = new Map<string, string[]>()
-    taskFiles.forEach((file) => {
-      if (!file.entryId) return
-      attachmentsByEntry.set(file.entryId, [...(attachmentsByEntry.get(file.entryId) ?? []), file.name])
-    })
-    const entries = [...(task.timeEntries ?? [])]
-      .sort((left, right) => `${left.date ?? ''}T${left.start}`.localeCompare(`${right.date ?? ''}T${right.start}`))
-      .filter((entry) => (entry.note ?? '').trim() || (attachmentsByEntry.get(entry.id)?.length ?? 0) > 0)
-    if (entries.length === 0 && taskFiles.length === 0) {
-      return
-    }
-    const payload = {
-      taskId: task.id,
-      title: task.title,
-      type: task.type,
-      requirement: task.requirement,
-      status: task.status,
-      currentProgress: snapProgress(task.progress),
-      estimatedHours: task.estimatedHours,
-      actualHours: task.actualHours,
-      entries: entries.map((entry) => ({
-        id: entry.id,
-        date: entry.date ?? '',
-        endDate: entry.endDate ?? entry.date ?? '',
-        note: entry.note ?? '',
-        isAcceptance: Boolean(entry.isAcceptanceProgress),
-        isRevision: Boolean(entry.isRevision),
-        isClientFeedback: Boolean(entry.isClientFeedback),
-        isUncounted: Boolean(entry.isUncounted),
-        feedbackVersion: entry.feedbackVersion ?? '',
-        attachments: attachmentsByEntry.get(entry.id) ?? [],
-      })),
-      waitingEntries: (task.waitingEntries ?? []).map((entry) => ({
-        date: entry.date ?? '',
-        note: entry.note ?? '',
-        reason: entry.reason ?? '',
-        active: (entry.endDate ?? entry.date ?? '') === (entry.date ?? '') && entry.end === entry.start,
-      })),
-      files: taskFiles.map((file) => ({
-        name: file.name,
-        scope: file.scope,
-        final: file.final,
-        tag: file.tag ?? '',
-      })),
-    }
-    const signature = JSON.stringify(payload)
-    if (autoEstimateSigRef.current.get(task.id) === signature) {
-      return
-    }
-    autoEstimateSigRef.current.set(task.id, signature)
-    try {
-      const result = await api.estimateTaskProgress(payload)
-      if (autoEstimateSigRef.current.get(task.id) !== signature) {
-        return
-      }
-      setProgressAssessments((current) => ({ ...current, [task.id]: result }))
-      const next = snapProgress(result.progress)
-      const current = taskItemsRef.current.find((item) => item.id === task.id)
-      if (!current || ['已验收', '终止', '挂起', '不计费'].includes(current.status)) {
-        return
-      }
-      if (snapProgress(current.progress) !== next) {
-        aiProgressWriteRef.current.add(task.id)
-        await handleUpdateTask(task.id, { progress: next })
-      }
-    } catch {
-      // 失败则清掉签名，下次再试
-      if (autoEstimateSigRef.current.get(task.id) === signature) {
-        autoEstimateSigRef.current.delete(task.id)
-      }
-    }
-  }
-
-  const handleUpdateTask = async (taskId: number, changes: TaskUpdateChanges) => {
-    if (updatingTaskIdsRef.current.has(taskId)) {
-      pendingTaskChangesRef.current.set(taskId, { ...(pendingTaskChangesRef.current.get(taskId) ?? {}), ...changes })
-      return false
-    }
-    const currentTask = taskItemsRef.current.find((task) => task.id === taskId)
-    if (!currentTask) {
-      return false
-    }
-    const allowAcceptedTimeEdit = Boolean(changes.allowAcceptedTimeEdit)
-    const allowAcceptanceRollback = Boolean(changes.allowAcceptanceRollback)
-    if (currentTask.status === '已验收') {
-      if (changes.status && changes.status !== '已验收' && !allowAcceptanceRollback) {
-        notify('已验收任务状态已锁定，如需调整请先走验收修正流程')
-        return false
-      }
-      if (!allowAcceptedTimeEdit && ('actualHours' in changes || 'timeEntries' in changes)) {
-        notify('已验收任务的工时已锁定，不能再修改实际工时')
-        return false
-      }
-    }
-    const normalizedChanges = { ...changes }
-    const isAiProgressWrite = Object.hasOwn(changes, 'progress') && aiProgressWriteRef.current.has(taskId)
-    const isManualProgressCorrection = Object.hasOwn(changes, 'progress') && !isAiProgressWrite
-    if (normalizedChanges.progress !== undefined) {
-      normalizedChanges.progress = snapProgress(Number(normalizedChanges.progress))
-    }
-    if (currentTask.status === '计划中' && normalizedChanges.progress !== undefined && !changes.status) {
-      normalizedChanges.progress = 0
-    }
-    if (changes.status) {
-      normalizedChanges.stage = changes.status === '已验收' ? '完成' : changes.status
-      normalizedChanges.progress = changes.status === '已验收'
-        ? 100
-        : changes.status === '计划中'
-          ? 0
-          : allowAcceptanceRollback && changes.status === '待验收'
-            ? snapProgress(Number(changes.progress ?? Math.min(currentTask.progress, 80)))
-            : changes.status === '待验收'
-              ? snapProgress(Math.max(currentTask.progress, 80))
-              : snapProgress(currentTask.progress)
-      notify('正在保存…', 'info')
-    }
-
-    updatingTaskIdsRef.current.add(taskId)
-    let savedSuccessfully = false
-    try {
-      const savedTask = normalizeTaskClosure(await api.updateTask(taskId, normalizedChanges))
-      setTaskItems((currentTasks) => currentTasks.map((task) => (task.id === taskId ? normalizeTaskClosure({ ...task, ...savedTask }) : task)))
-      setBackendStatus('已接入 D1/R2')
-      if (detailTaskId === taskId) {
-        void loadTaskActivity(taskId)
-      }
-      if (selectedTask?.id === taskId) {
-        void loadTaskActivity(taskId)
-      }
-      if (changes.status === '已验收') {
-        setShowFireworks(true)
-        window.setTimeout(() => setShowFireworks(false), 3000)
-      }
-      if (changes.status) {
-        notify('任务已同步到 D1')
-      }
-      savedSuccessfully = true
-      if (isManualProgressCorrection) {
-        const assessment = progressAssessments[taskId]
-        if (assessment && snapProgress(Number(normalizedChanges.progress)) !== assessment.progress) {
-          void api.recordAiLearningEvent({
-            context: 'task_progress',
-            sourceInput: assessment.reason,
-            aiOutput: String(assessment.progress),
-            userFinal: String(snapProgress(Number(normalizedChanges.progress))),
-            action: 'edited',
-            designType: currentTask.type,
-            taskId,
-            taskTitle: currentTask.title,
-            metadata: {
-              stage: assessment.stage,
-              confidence: assessment.confidence,
-              evidence: assessment.evidence,
-              algorithmVersion: '2.0.0',
-            },
-          })
-        }
-      }
-      const shouldReassessProgress = !Object.hasOwn(changes, 'progress') && (
-        Object.hasOwn(changes, 'timeEntries')
-        || Object.hasOwn(changes, 'waitingEntries')
-        || Object.hasOwn(changes, 'requirement')
-        || Object.hasOwn(changes, 'type')
-        || Object.hasOwn(changes, 'status')
-      )
-      if (shouldReassessProgress && !['已验收', '终止', '挂起', '不计费'].includes(savedTask.status)) {
-        window.setTimeout(() => void handleAutoEstimateProgress(savedTask), 0)
-      }
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `任务更新失败：${error.message}` : '任务更新失败')
-    } finally {
-      updatingTaskIdsRef.current.delete(taskId)
-      if (isAiProgressWrite) {
-        aiProgressWriteRef.current.delete(taskId)
-      }
-      const pendingChanges = pendingTaskChangesRef.current.get(taskId)
-      if (pendingChanges) {
-        pendingTaskChangesRef.current.delete(taskId)
-        void handleUpdateTask(taskId, pendingChanges)
-      }
-    }
-    return savedSuccessfully
-  }
-
-  const handleVoidTask = (taskId: number) => {
-    const task = taskItems.find((item) => item.id === taskId)
-    if (!task || task.voidedAt) {
-      return
-    }
-    setVoidTaskTarget(task)
-  }
-
-  const confirmVoidTask = async (reason: string) => {
-    if (!voidTaskTarget || isVoidTaskBusy) {
-      return
-    }
-    setIsVoidTaskBusy(true)
-    try {
-      await api.voidTask(voidTaskTarget.id, reason.trim())
-      await refreshState()
-      setVoidTaskTarget(null)
-      notify('任务已作废，不再计入工时和结算')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `作废失败：${error.message}` : '作废失败')
-    } finally {
-      setIsVoidTaskBusy(false)
-    }
-  }
-
-  const handleRestoreTask = async (taskId: number) => {
-    try {
-      await api.restoreTask(taskId)
-      await refreshState()
-      notify('任务已恢复')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `恢复失败：${error.message}` : '恢复失败')
-    }
-  }
-
-  const handleDeleteTask = (taskId: number) => {
-    const task = taskItems.find((item) => item.id === taskId)
-    if (!task?.voidedAt) {
-      notify('只有已作废任务才能永久删除', 'error')
-      return
-    }
-    setConfirmDialog({
-      eyebrow: '永久删除',
-      title: `确定永久删除「${task.title}」吗？`,
-      body: '永久删除只允许用于已作废任务。删除后任务不会再出现在后台列表中，关联文件仍会保留在文件库记录里。',
-      confirmText: '永久删除',
-      tone: 'danger',
-      details: [task.type, `作废原因：${task.voidReason || '未记录'}`],
-      onConfirm: async () => {
-        try {
-          await api.deleteTask(taskId)
-          await refreshState()
-          notify('已作废任务已永久删除')
-        } catch (error) {
-          setBackendStatus('后端异常')
-          notify(error instanceof Error ? `删除失败：${error.message}` : '删除失败')
-        }
-      },
-    })
-  }
-
-  const handleDownloadFile = (file: FileAsset) => {
-    const sourceUrl = authedPreviewUrl(file.sourceUrl)
-    if (!sourceUrl) {
-      notify('源文件链接不可用', 'error')
-      return
-    }
-    const link = document.createElement('a')
-    link.href = sourceUrl
-    link.download = file.name
-    link.rel = 'noreferrer'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-  }
-
-  const handleDeleteFile = async (fileId: number) => {
-    const file = fileItems.find((item) => item.id === fileId)
-    const fileTask = file ? taskItemsRef.current.find((task) => task.id === file.taskId) : undefined
-    const shouldRollbackAcceptance = Boolean(file && file.scope === 'acceptance' && fileTask?.status === '已验收')
-    setConfirmDialog({
-      eyebrow: shouldRollbackAcceptance ? '撤回验收文件' : '删除文件',
-      title: `确定删除「${file?.name ?? '该文件'}」吗？`,
-      body: shouldRollbackAcceptance
-        ? '这是已验收任务的验收文件。删除后会同时撤回验收状态，任务回到待验收，方便重新补传文件后再次确认。'
-        : '删除后会同时移除 D1 文件记录、R2 源文件和预览图。请只删除误传文件，已验收或已发给合作伙伴的文件建议保留。',
-      confirmText: shouldRollbackAcceptance ? '删除并撤回验收' : '确认删除',
-      tone: 'danger',
-      details: [file?.task, file?.type, file?.size, shouldRollbackAcceptance ? '状态将改回待验收' : ''].filter(Boolean) as string[],
-      onConfirm: async () => {
-        try {
-          await api.deleteFile(fileId)
-          if (previewFile?.id === fileId) {
-            setPreviewFile(null)
-          }
-          if (shouldRollbackAcceptance && fileTask && file) {
-            const nextAcceptanceFiles = (fileTask.acceptanceFiles ?? []).filter((name) => name !== file.name)
-            await handleUpdateTask(fileTask.id, {
-              status: '待验收',
-              stage: '待验收',
-              progress: snapProgress(Math.min(fileTask.progress, 80)),
-              acceptanceFiles: nextAcceptanceFiles,
-              actualDeliveryDate: '',
-              allowAcceptanceRollback: true,
-            })
-          }
-          await refreshState()
-          notify(shouldRollbackAcceptance ? '验收文件已删除，任务已回到待验收' : '文件已删除')
-        } catch (error) {
-          setBackendStatus('后端异常')
-          notify(error instanceof Error ? `文件删除失败：${error.message}` : '文件删除失败')
-        }
-      },
-    })
-  }
-
-  const handleUpdateFile = async (fileId: number, changes: { name?: string; tag?: string; scope?: 'acceptance' | 'progress' }) => {
-    try {
-      const updatedFile = await api.updateFile(fileId, changes)
-      setFileItems((currentFiles) => currentFiles.map((file) => (file.id === fileId ? { ...file, ...updatedFile } : file)))
-      setTaskItems((currentTasks) =>
-        currentTasks.map((task) =>
-          task.id === updatedFile.taskId
-            ? { ...task, files: Array.from(new Set([updatedFile.name, ...task.files.filter((fileName) => fileName !== updatedFile.name)])) }
-            : task,
-        ),
-      )
-      notify('文件信息已更新')
-      return updatedFile
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `文件更新失败：${error.message}` : '文件更新失败')
-      throw error
-    }
-  }
-
-  const handleExportBackup = () => {
-    const payload = {
-      exportedAt: nowStamp(),
-      settings: { hourlyRate, pdfTitle, serviceCompanyName, taxMode },
-      tasks: taskItems,
-      updates: updateItems,
-      files: fileItems,
-      reports,
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `worklog-backup-${isoDate()}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-    notify('备份已导出到下载目录')
-  }
-
-  const handleUnlock = async (email: string, key: string, turnstileToken?: string) => {
-    try {
-      const result = await api.login(email, key, turnstileToken)
-      const credentials = { email, role: result.role }
-      setStoredAuth(credentials)
-      setAuthError('')
-      setBackendStatus('连接中')
-      setRole(result.role)
-      setAuth(credentials)
-      setIsLoginModalOpen(false)
-      notify(result.role === 'admin' ? '管理员已登录' : '访问口令已登录')
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setAuthError('账号或密码不正确')
-      } else {
-        setAuthError(error instanceof Error ? `登录失败：${error.message}` : '登录失败，请重试')
-      }
-    }
-  }
-
-  const handleSignOut = () => {
-    void api.logout().catch(() => {})
-    clearStoredAuth()
-    clearStateCache()
-    setAuth(null)
-    setRole('guest')
-    setAccessTokens([])
-    setAuthError('')
-    setIsAccountMenuOpen(false)
-    setIsLoginModalOpen(false)
-    notify('已退出管理员身份，当前为游客只读')
-  }
-
-  const handleChangeAdminPassword = async (currentPassword: string, newPassword: string) => {
-    try {
-      await api.changeAdminPassword({ currentPassword, newPassword })
-      notify('管理员密码已更新')
-    } catch (error) {
-      notify(error instanceof Error ? `密码更新失败：${error.message}` : '密码更新失败')
-      throw error
-    }
-  }
-
-  const handleCreateAccessToken = async (label: string, expiresInDays: number | null, scope: TokenScope) => {
-    try {
-      const created = await api.createAccessToken({ label, expiresInDays, scope })
-      setAccessTokens((current) => [created, ...current])
-      setNewTokenId(created.id)
-      try {
-        await window.navigator.clipboard.writeText(created.token)
-        notify('口令已生成并复制到剪贴板')
-      } catch {
-        notify('口令已生成，请在列表中复制')
-      }
-    } catch (error) {
-      notify(error instanceof Error ? `口令生成失败：${error.message}` : '口令生成失败')
-    }
-  }
-
-  const handleToggleAccessToken = async (tokenId: string, disabled: boolean) => {
-    try {
-      const saved = await api.setAccessTokenDisabled(tokenId, disabled)
-      setAccessTokens((current) => current.map((token) => (token.id === tokenId ? saved : token)))
-      notify(disabled ? '口令已停用' : '口令已恢复')
-    } catch (error) {
-      notify(error instanceof Error ? `操作失败：${error.message}` : '操作失败')
-    }
-  }
-
-  const handleDeleteAccessToken = async (tokenId: string) => {
-    const token = accessTokens.find((item) => item.id === tokenId)
-    setConfirmDialog({
-      eyebrow: '删除口令',
-      title: `确定删除「${token?.label || '该口令'}」吗？`,
-      body: '正在使用这个口令登录的设备会立即失效，删除后无法恢复。',
-      confirmText: '确认删除',
-      tone: 'danger',
-      details: [token?.expiresAt ? `有效期：${token.expiresAt}` : '永久有效', token?.lastUsedAt ? `最后使用：${token.lastUsedAt}` : '尚未使用'],
-      onConfirm: async () => {
-        try {
-          await api.deleteAccessToken(tokenId)
-          setAccessTokens((current) => current.filter((token) => token.id !== tokenId))
-          notify('口令已删除')
-        } catch (error) {
-          notify(error instanceof Error ? `删除失败：${error.message}` : '删除失败')
-        }
-      },
-    })
-  }
-
-  const handleCopyAccessToken = async (token: string) => {
-    try {
-      await window.navigator.clipboard.writeText(token)
-      notify('口令已复制')
-    } catch {
-      notify(token)
-    }
-  }
-
-  const handleRateChange = async (rate: number) => {
-    setHourlyRate(rate)
-    try {
-      const result = await api.setHourlyRate(rate)
-      setHourlyRate(result.hourlyRate)
-      setBackendStatus('已接入 D1/R2')
-      notify('小时单价已写入 D1')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `单价保存失败：${error.message}` : '单价保存失败')
-    }
-  }
-
-  const handlePdfTitleChange = async (title: string) => {
-    const nextTitle = title.trim() || defaultPdfTitle
-    setPdfTitle(nextTitle)
-    try {
-      const saved = await api.setPdfTitle(nextTitle)
-      setPdfTitle(saved.pdfTitle)
-      notify('PDF 抬头已保存')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `PDF 抬头保存失败：${error.message}` : 'PDF 抬头保存失败')
-    }
-  }
-
-  const handleServiceCompanyNameChange = async (name: string) => {
-    const nextName = name.trim() || defaultServiceCompanyName
-    setServiceCompanyName(nextName)
-    try {
-      const saved = await api.setServiceCompanyName(nextName)
-      setServiceCompanyName(saved.serviceCompanyName)
-      notify('服务公司名称已保存')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `服务公司名称保存失败：${error.message}` : '服务公司名称保存失败')
-    }
-  }
-
-  const handleTaxModeChange = async (mode: TaxMode) => {
-    setTaxMode(mode)
-    try {
-      const saved = await api.setTaxMode(mode)
-      setTaxMode(saved.taxMode)
-      setBackendStatus('已接入 D1/R2')
-      notify('计税方式已保存')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `计税方式保存失败：${error.message}` : '计税方式保存失败')
-    }
-  }
-
-  const handleDesignTypeGroupsChange = async (nextGroups: DesignTypeGroup[]) => {
-    const safeGroups = normalizeDesignTypeGroups(nextGroups)
-    setDesignTypeGroups(safeGroups)
-    try {
-      const result = await api.setDesignTypeGroups(safeGroups)
-      setDesignTypeGroups(result.designTypeGroups)
-      setBackendStatus('已接入 D1/R2')
-      notify('设计类型已写入 D1')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `设计类型保存失败：${error.message}` : '设计类型保存失败')
-    }
-  }
-
-  const handleAiModelConfigChange = async (
-    payload: Partial<Pick<AiModelConfig, 'mode' | 'provider' | 'baseUrl' | 'model' | 'runtimeUrl'>> & {
-      apiKey?: string
-      clearApiKey?: boolean
-      routes?: Partial<Record<AiModelRouteKey, Partial<Pick<AiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>>>
-      routeApiKeys?: Partial<Record<AiModelRouteKey, string>>
-      clearRouteApiKeys?: AiModelRouteKey[]
-    },
-  ) => {
-    try {
-      const saved = await api.setAiModelConfig(payload)
-      setAiModelConfig(saved)
-      setBackendStatus('已接入 D1/R2')
-      notify(saved.mode === 'baml-runtime' ? 'BAML Runtime 模型配置已保存' : 'AI 模型配置已保存')
-    } catch (error) {
-      setBackendStatus('后端异常')
-      notify(error instanceof Error ? `AI 模型配置保存失败：${error.message}` : 'AI 模型配置保存失败')
-    }
-  }
-
-  const requireAdmin = () => {
-    notify('请先登录管理员身份再编辑')
-    setIsLoginModalOpen(true)
-  }
   const openCreateTask = (supplemental = false) => {
     if (canWrite) {
       setNewTaskSupplemental(supplemental)
@@ -1580,287 +482,17 @@ function App() {
     requireAdmin()
     throw new Error('需要管理员权限')
   }
-  const visibleNavItems = navItems.filter((item) => !('adminOnly' in item) || !item.adminOnly || isAdmin)
-  const navShortcutHints: Partial<Record<AppView, string>> = {
-    工作台: '⌘⌥1',
-    任务: '⌘⌥2',
-    文件库: '⌘⌥3',
-    洞察: '⌘⌥4',
-    结算: '⌘⌥5',
-    收入: '⌘⌥6',
-    知识库: '⌘⇧⌥K',
-    设置: '⌘⇧⌥,',
-  }
-  const navAriaShortcutHints: Partial<Record<AppView, string>> = {
-    工作台: 'Meta+Alt+1 Control+Alt+1',
-    任务: 'Meta+Alt+2 Control+Alt+2',
-    文件库: 'Meta+Alt+3 Control+Alt+3',
-    洞察: 'Meta+Alt+4 Control+Alt+4',
-    结算: 'Meta+Alt+5 Control+Alt+5',
-    收入: 'Meta+Alt+6 Control+Alt+6',
-    知识库: 'Meta+Shift+Alt+K Control+Shift+Alt+K',
-  }
-  const openCommandPalette = (initialQuery = '') => {
-    setCommandPaletteInitialQuery(initialQuery)
-    setIsShortcutHelpOpen(false)
-    setIsCommandPaletteOpen(true)
-  }
-  const commandActions: CommandPaletteAction[] = [
-    ...visibleNavItems.map((item) => {
-      return {
-        id: `view-${item.label}`,
-        group: '快速导航',
-        label: `前往${item.label}`,
-        detail: item.label === activeView ? '当前页面' : undefined,
-        shortcut: navShortcutHints[item.label as AppView],
-        keywords: `页面 导航 ${item.label}`,
-        run: () => navigateView(item.label as AppView),
-      }
-    }),
-    {
-      id: 'view-settings',
-      group: '快速导航',
-      label: '前往设置',
-      shortcut: '⌘⇧⌥,',
-      keywords: '设置 配置 API 模型',
-      run: () => navigateView('设置'),
-    },
-    {
-      id: 'create-task',
-      group: '任务操作',
-      label: '新建任务',
-      detail: '记录一条新的设计任务',
-      shortcut: 'N',
-      keywords: '创建 新任务',
-      disabled: !canWrite,
-      run: () => openCreateTask(false),
-    },
-    {
-      id: 'create-supplemental-task',
-      group: '任务操作',
-      label: '补录已完成任务',
-      detail: '补录过去三个月内的任务',
-      shortcut: '⇧ N',
-      keywords: '补录 历史任务',
-      disabled: !canWrite,
-      run: () => openCreateTask(true),
-    },
-    ...(selectedTask
-      ? [
-          {
-            id: 'selected-task-detail',
-            group: '当前任务',
-            label: '查看任务详情',
-            detail: selectedTask.title,
-            shortcut: 'Enter',
-            keywords: '打开 详情',
-            run: () => handleOpenTaskDetail(selectedTask.id),
-          },
-          {
-            id: 'selected-task-edit',
-            group: '当前任务',
-            label: '编辑任务',
-            detail: selectedTask.title,
-            shortcut: 'E',
-            keywords: '修改 编辑',
-            disabled: !canWrite,
-            run: () => handleOpenTaskEdit(selectedTask.id),
-          },
-          {
-            id: 'selected-task-progress',
-            group: '当前任务',
-            label: '记录进展',
-            detail: selectedTask.title,
-            shortcut: 'P',
-            keywords: '进展 工时 附件',
-            disabled: !canWrite,
-            run: () => handleOpenTaskProgress(selectedTask.id),
-          },
-          {
-            id: 'selected-task-acceptance',
-            group: '当前任务',
-            label: '去验收',
-            detail: selectedTask.status === '待验收' ? selectedTask.title : `当前状态：${selectedTask.status}`,
-            shortcut: 'A',
-            keywords: '验收 交付',
-            disabled: !isAdmin || selectedTask.status !== '待验收',
-            run: () => handleOpenTaskAcceptance(selectedTask.id),
-          },
-        ]
-      : []),
-    ...taskItems
-      .filter((task) => !task.voidedAt)
-      .slice()
-      .sort((left, right) => right.date.localeCompare(left.date))
-      .map((task) => ({
-        id: `task-${task.id}`,
-        group: '搜索任务',
-        label: task.title,
-        detail: `${task.type} · ${task.requester || task.contact} · ${task.status}`,
-        keywords: `${task.requirement} ${task.contact} ${task.requester} ${task.status}`,
-        run: () => handleOpenTaskDetail(task.id),
-      })),
-  ]
-  const shortcutHelpGroups: ShortcutHelpGroup[] = productShortcutHelpGroups
-  const hasBlockingModal = Boolean(
-    isModalOpen
-      || detailTaskId
-      || editTaskId
-      || progressModalTarget
-      || previewFile
-      || confirmDialog
-      || voidTaskTarget
-      || isLoginModalOpen,
-  )
-
-  useEffect(() => {
-    const handleGlobalShortcut = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase()
-      if (event.repeat) {
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && key === 'k') {
-        event.preventDefault()
-        if (isCommandPaletteOpen) {
-          setIsCommandPaletteOpen(false)
-        } else {
-          openCommandPalette()
-        }
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === 'm') {
-        if (canToggleIncomeVisibility && !isCommandPaletteOpen && !isShortcutHelpOpen && !hasBlockingModal && !isEditableShortcutTarget(event.target)) {
-          event.preventDefault()
-          toggleIncomeVisibility()
-        }
-        return
-      }
-      // 双击 Option/Alt 打开快捷键面板
-      if (event.key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-        if (!isCommandPaletteOpen && !isShortcutHelpOpen && !hasBlockingModal) {
-          const now = Date.now()
-          if (now - lastAltPressRef.current < 380) {
-            event.preventDefault()
-            lastAltPressRef.current = 0
-            setIsShortcutHelpOpen(true)
-          } else {
-            lastAltPressRef.current = now
-          }
-        }
-        return
-      }
-      if (isCommandPaletteOpen || isShortcutHelpOpen || hasBlockingModal || isEditableShortcutTarget(event.target)) {
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && event.altKey) {
-        const navigationShortcuts: Record<string, AppView> = {
-          Digit1: '工作台',
-          Digit2: '任务',
-          Digit3: '文件库',
-          Digit4: '洞察',
-          Digit5: '结算',
-          Digit6: '收入',
-        }
-        const nextView = !event.shiftKey ? navigationShortcuts[event.code] : undefined
-        if (nextView && visibleNavItems.some((item) => item.label === nextView)) {
-          event.preventDefault()
-          navigateView(nextView)
-          return
-        }
-        if (event.shiftKey && event.key === ',') {
-          event.preventDefault()
-          navigateView('设置')
-          return
-        }
-        if (event.shiftKey && event.code === 'KeyK' && isAdmin) {
-          event.preventDefault()
-          navigateView('知识库')
-          return
-        }
-      }
-      // ⌥A = 工作助手（Option 键，不与文字输入冲突）
-      if (event.altKey && !event.metaKey && !event.shiftKey) {
-        if (event.code === 'KeyA' && isAdmin) {
-          event.preventDefault()
-          toggleChat()
-          return
-        }
-      }
-      const shortcutMonth = monthFromShortcut(event)
-      if (shortcutMonth > 0) {
-        event.preventDefault()
-        setMonthValue(`${isoDate().slice(0, 4)}-${pad(shortcutMonth)}`)
-        return
-      }
-      if (key === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault()
-        openCreateTask(event.shiftKey)
-        return
-      }
-      if (key === 'f' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-        event.preventDefault()
-        navigateView('文件库')
-        return
-      }
-      if (event.key === ',' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-        event.preventDefault()
-        navigateView('设置')
-        return
-      }
-      if (key === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && selectedTask && isAdmin) {
-        event.preventDefault()
-        handleOpenTaskProgress(selectedTask.id)
-        return
-      }
-      if (event.key === '/' && !event.shiftKey) {
-        const searchInput = document.querySelector<HTMLInputElement>('.dashboard-task-search input, .task-search-inline input')
-        if (searchInput) {
-          event.preventDefault()
-          searchInput.focus()
-          searchInput.select()
-        }
-        return
-      }
-      if (event.key === '[' || event.key === ']') {
-        event.preventDefault()
-        setMonthValue((current) => shiftMonthValue(current, event.key === '[' ? -1 : 1))
-        return
-      }
-      if (!selectedTask || !['工作台', '任务'].includes(activeView)) {
-        return
-      }
-      if (key === 'j' || key === 'k') {
-        event.preventDefault()
-        const currentIndex = Math.max(0, selectedTaskSource.findIndex((task) => task.id === selectedTask.id))
-        const offset = key === 'j' ? 1 : -1
-        const nextIndex = Math.min(Math.max(currentIndex + offset, 0), selectedTaskSource.length - 1)
-        const nextTask = selectedTaskSource[nextIndex]
-        if (nextTask) {
-          setSelectedTaskId(nextTask.id)
-        }
-        return
-      }
-      if (event.key === 'Enter') {
-        event.preventDefault()
-        handleOpenTaskDetail(selectedTask.id)
-      } else if (key === 'e' && isAdmin) {
-        event.preventDefault()
-        handleOpenTaskEdit(selectedTask.id)
-      } else if (key === 'p' && isAdmin) {
-        event.preventDefault()
-        handleOpenTaskProgress(selectedTask.id)
-      } else if (key === 'a' && isAdmin && selectedTask.status === '待验收') {
-        event.preventDefault()
-        handleOpenTaskAcceptance(selectedTask.id)
-      } else if (key === 's' && isAdmin) {
-        event.preventDefault()
-        openCommandPalette('状态')
-      }
-    }
-    window.addEventListener('keydown', handleGlobalShortcut)
-    return () => {
-      window.removeEventListener('keydown', handleGlobalShortcut)
-    }
+  const {
+    visibleNavItems, navShortcutHints, navAriaShortcutHints,
+    commandActions, shortcutHelpGroups,
+  } = useAppShortcuts({
+    navItems, activeView, canWrite, isAdmin, canToggleIncomeVisibility,
+    selectedTask, taskItems, selectedTaskSource, navigateView, openCreateTask,
+    handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleOpenTaskAcceptance,
+    isModalOpen, detailTaskId, editTaskId, progressModalTarget, previewFile, confirmDialog,
+    voidTaskTarget, isLoginModalOpen, isCommandPaletteOpen, setIsCommandPaletteOpen,
+    setCommandPaletteInitialQuery, isShortcutHelpOpen, setIsShortcutHelpOpen,
+    toggleIncomeVisibility, toggleChat, setMonthValue, setSelectedTaskId,
   })
   const adminOnlyPanel = (
     <section className="panel read-only-settings-panel">

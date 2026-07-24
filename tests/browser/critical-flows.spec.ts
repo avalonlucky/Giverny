@@ -42,6 +42,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('heading', { name: /2026 年 7 月工作台/ })).toBeVisible()
 })
 
+test.describe('基础流程分片', () => {
 test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('公司产品封套修改', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '打开工作助手' }).click()
@@ -119,7 +120,7 @@ test('结算页仅在进入时加载独立分包', async ({ page }) => {
   ))
   expect(reportsLoadedOnDashboard).toBe(false)
 
-  await page.getByRole('button', { name: '结算' }).click()
+  await page.getByRole('button', { name: '切换到结算', exact: true }).click()
   await expect(page).toHaveURL(/\/reports$/)
   await expect(page.getByRole('region', { name: '月度结算回单' })).toBeVisible()
   const reportsLoadedAfterNavigation = await page.evaluate(() => (
@@ -201,7 +202,7 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
 })
 
 test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ page }) => {
-  await page.getByRole('button', { name: '结算' }).click()
+  await page.getByRole('button', { name: '切换到结算', exact: true }).click()
   const receipt = page.getByRole('region', { name: '月度结算回单' })
   await expect(receipt.getByText('Giverny', { exact: true })).toBeVisible()
   await expect(receipt.getByText('让创作在自己的花园里生长', { exact: true })).toBeVisible()
@@ -378,7 +379,7 @@ test('自定义范围分享链接保持未锁定', async ({ page }) => {
     return (await response.json() as { records: Array<{ id: string; startDate: string; endDate: string; locked: boolean }> }).records
   }
 
-  await page.getByRole('button', { name: '结算' }).click()
+  await page.getByRole('button', { name: '切换到结算', exact: true }).click()
   const beforeIds = new Set((await readRecords()).map((record) => record.id))
 
   await page.getByRole('button', { name: '分享范围链接' }).click()
@@ -530,6 +531,10 @@ test('新建任务默认把图片粘贴到甲方附件，文本粘贴到任务�
   })
   await expect(dialog.getByRole('textbox', { name: '任务具体需求' })).toHaveValue('默认文字应写入任务需求')
 })
+
+})
+
+test.describe('任务流程分片', () => {
 
 test('新建任务可直接点击采用 AI 的分类、任务名称和文案建议', async ({ page }) => {
   await page.route('**/api/ai/task-assistant', async (route) => {
@@ -791,7 +796,7 @@ test('补录任务显示真实验收动态日期而不是补录操作日期', as
 })
 
 test('计划中任务可直接进入记录进展并切换验收模式', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   const progressButton = page.getByRole('button', { name: /记录进展/ }).last()
   await expect(progressButton).toBeEnabled()
   await progressButton.click()
@@ -831,7 +836,7 @@ test('计划中任务可直接进入记录进展并切换验收模式', async ({
 })
 
 test('普通记录进展可展开完整基础信息', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()
   const dialog = page.getByRole('dialog', { name: '记录进展' })
   await expect(dialog.getByRole('button', { name: /本次进展为验收进展/ })).not.toHaveClass(/active/)
@@ -849,7 +854,7 @@ test('普通记录进展可展开完整基础信息', async ({ page }) => {
 })
 
 test('反馈来源支持自由输入且使用合作伙伴称呼', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   await page.getByRole('tab', { name: '修改建议' }).click()
   await page.getByRole('button', { name: '记录反馈' }).click()
   const dialog = page.getByRole('dialog', { name: '记录反馈' })
@@ -869,7 +874,7 @@ test('反馈来源支持自由输入且使用合作伙伴称呼', async ({ page 
 })
 
 test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
@@ -900,7 +905,7 @@ test('验收附件的 PDF 与图片可在统一阅读器中预览', async ({ pag
 })
 
 test('验收面板任意位置可直接粘贴图片到验收附件', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
@@ -921,7 +926,7 @@ test('验收面板任意位置可直接粘贴图片到验收附件', async ({ pa
 })
 
 test('多张高分辨率验收图后台压缩时备注输入保持响应', async ({ page }) => {
-  await page.getByText('公司产品封套延展', { exact: true }).click()
+  await page.locator('article.task-row').filter({ hasText: '公司产品封套延展' }).click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   const acceptanceDialog = page.getByRole('dialog', { name: '记录验收进展' })
@@ -1083,4 +1088,6 @@ test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({
   await expect(workspaceSelect.locator('option[value="default"]')).toHaveText('Giverny 默认工作区')
   await expect(page.getByText('浏览器回归后台任务', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+})
+
 })

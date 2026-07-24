@@ -101,11 +101,15 @@
 │   │   └── SettingsView.tsx
 │   ├── hooks/
 │   │   ├── useAgentJobNotifications.ts
+│   │   ├── useAppShortcuts.ts
 │   │   ├── useAttachmentRuntime.ts
 │   │   ├── useBackendRuntime.ts
 │   │   ├── useDailyKnowledge.ts
+│   │   ├── useSettingsOperations.ts
 │   │   ├── useTaskActivity.ts
+│   │   ├── useTaskOperations.ts
 │   │   ├── useToastNotifications.ts
+│   │   ├── useWorkspaceData.ts
 │   │   └── useWorkspaceAnalytics.ts
 │   ├── components/
 │   │   ├── AppOverlayLayer.tsx
@@ -152,6 +156,10 @@
 ## Debug Entry Points
 
 - Main admin UI and route state: `src/App.tsx`
+- Workspace hydration, identity, settings data and backend synchronization: `src/hooks/useWorkspaceData.ts`
+- Task, progress, acceptance, attachment and file write operations: `src/hooks/useTaskOperations.ts`
+- Login, access-token, backup and administrator settings operations: `src/hooks/useSettingsOperations.ts`
+- Command palette construction and global keyboard shortcuts: `src/hooks/useAppShortcuts.ts`
 - Dashboard task presentation, menus, detail sidebar, daily knowledge and insights: `src/views/DashboardView.tsx`
 - Shared dashboard, income and annual settlement analytics: `src/hooks/useWorkspaceAnalytics.ts`
 - Daily knowledge cache, queue, fallback and background prefetch state: `src/hooks/useDailyKnowledge.ts`
@@ -221,6 +229,7 @@
 - Agent regression suite and isolated quality gate: `agent-evals/`
 - Desktop/mobile browser critical-flow gate: `tests/browser/critical-flows.spec.ts`
 - Browser regression environment and projects: `playwright.config.ts`, `agent-evals/start-browser-eval.mjs`
+- Main-entry size regression guard: `scripts/check-app-entry-size.mjs` (`App.tsx` maximum 1,000 lines)
 - AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation
