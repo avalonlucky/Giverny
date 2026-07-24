@@ -4,6 +4,7 @@ import {
   createAgentTurn,
   decideAgentReplan,
   inferAgentIntent,
+  inferAgentIntents,
   verifyAgentAnswer,
 } from '../src/agentOrchestrator.ts'
 import { requesterNameFromQuestion, taskTitleFromQuestion } from '../src/agentEntityResolver.ts'
@@ -35,6 +36,9 @@ assert.equal(inferAgentIntent('打开封套任务的验收附件'), 'attachment'
 assert.equal(inferAgentIntent('任务#1现在卡在哪里'), 'task_data')
 assert.equal(inferAgentIntent('把这个任务的进度修改成80%'), 'write')
 assert.equal(inferAgentIntent('帮我润色一句话'), 'general')
+assert.deepEqual(inferAgentIntents('查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单'), ['product_help', 'finance', 'task_data'])
+assert.deepEqual(inferAgentIntents('查看封套任务的验收附件，并分析陈义君的合作偏好'), ['attachment', 'person_profile'])
+assert.deepEqual(inferAgentIntents('把任务#1进度改成80%，再告诉我它现在的状态'), ['write', 'task_data'])
 assert.equal(requesterNameFromQuestion('不要调工具，凭印象给我陈义君的用户画像'), '陈义君')
 assert.equal(taskTitleFromQuestion('查一下公司产品封套修改目前做到哪了'), '公司产品封套修改')
 
@@ -53,6 +57,34 @@ assert.ok(missingAttachment.verification.requiredTools.includes('search_attachme
 
 const missingTask = completeAgentTurn(createAgentTurn({ principal, question: '任务#1现在的进展', intent: 'task_data' }), '猜测已完成')
 assert.ok(missingTask.verification.requiredTools.includes('get_task_detail'))
+
+const compoundTurn = completeAgentTurn(createAgentTurn({
+  principal,
+  question: '查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单',
+  intent: 'finance',
+}), '本月一切正常')
+assert.deepEqual(compoundTurn.verification.detectedIntents, ['product_help', 'finance', 'task_data'])
+assert.ok(compoundTurn.verification.requiredTools.includes('query_month_finance'))
+assert.ok(compoundTurn.verification.requiredTools.includes('search_product_help'))
+assert.ok(compoundTurn.verification.requiredTools.includes('query_task_portfolio'))
+assert.ok(!compoundTurn.verification.requiredTools.includes('search_tasks'))
+
+const partiallyVerifiedCompound = {
+  ...compoundTurn,
+  plan: [call('query_month_finance')],
+  evidence: [evidence('query_month_finance')],
+}
+assert.ok(!verifyAgentAnswer(partiallyVerifiedCompound).requiredTools.includes('query_month_finance'))
+assert.ok(verifyAgentAnswer(partiallyVerifiedCompound).requiredTools.includes('search_product_help'))
+assert.ok(verifyAgentAnswer(partiallyVerifiedCompound).requiredTools.includes('query_task_portfolio'))
+
+const verifiedWritePreview = {
+  ...createAgentTurn({ principal, question: '把任务#1进度改成80%', intent: 'write' }),
+  plan: [{ ...call('update_task_status_preview'), risk: 'write' }],
+  evidence: [evidence('update_task_status_preview')],
+  answer: '修改草稿已经准备好',
+}
+assert.equal(verifyAgentAnswer(verifiedWritePreview).passed, true)
 
 const verifiedFinance = {
   ...createAgentTurn({ principal, question: '本月收入', intent: 'finance' }),
@@ -94,4 +126,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 21 assertions passed')
+console.log('Agent orchestrator deterministic tests: 33 assertions passed')

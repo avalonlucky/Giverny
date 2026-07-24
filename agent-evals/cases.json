@@ -102,6 +102,13 @@
 
     { "id": "person-profile-01", "category": "person_profile", "prompt": "给我一下陈义君的用户画像", "expect": { "tools": ["get_requester_profile"] } },
 
+    { "id": "compound-01", "category": "compound_goal", "prompt": "查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单", "expect": { "tools": ["query_month_finance", "query_task_portfolio", "search_product_help"] } },
+    { "id": "compound-02", "category": "compound_goal", "prompt": "告诉我6月计费工时，并打开直播设计的验收附件", "expect": { "tools": ["query_month_finance", "search_attachments"], "attachments": true } },
+    { "id": "compound-03", "category": "compound_goal", "prompt": "分析陈义君的合作画像，再告诉我网站里在哪里设置大模型", "expect": { "tools": ["get_requester_profile", "search_product_help"] } },
+    { "id": "compound-04", "category": "compound_goal", "prompt": "打开公司产品封套修改的验收附件，并告诉我这个任务现在的状态", "expect": { "tools": ["search_attachments", "get_task_detail"], "attachments": true } },
+    { "id": "compound-05", "category": "compound_goal", "prompt": "把任务#1进度改成80%，再告诉我它现在的状态", "expect": { "tools": ["update_task_status_preview", "get_task_detail"], "approval": "update_task_status" } },
+    { "id": "compound-06", "category": "compound_goal", "prompt": "核对本月收入，同时告诉我最近更新了哪些网站功能", "expect": { "tools": ["query_month_finance", "search_product_help"] } },
+
     { "id": "ambiguous-01", "category": "disambiguation", "prompt": "帮我看看封套任务的详情", "expect": { "tools": ["get_task_detail"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-02", "category": "disambiguation", "prompt": "给海报任务记一条反馈：文案需要更新", "expect": { "tools": ["record_feedback_preview"], "selectionAllowed": true, "selectionRequired": true } },
     { "id": "ambiguous-03", "category": "disambiguation", "prompt": "把视频任务的进度改成80%", "expect": { "tools": ["update_task_status_preview"], "selectionAllowed": true, "selectionRequired": true } },

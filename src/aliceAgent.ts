@@ -4,7 +4,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { agentReadToolRegistry, type AgentReadToolName } from './agentToolRegistry'
 import { requesterNameFromQuestion, taskTitleFromQuestion } from './agentEntityResolver'
-import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
+import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection } from './types/agent'
@@ -1181,11 +1181,13 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
             : usedTools.has('search_product_help')
               ? 'product_help'
               : 'general'
-    const usedWritePreview = [...usedTools].some((toolName) => toolName.endsWith('_preview'))
     const verifiedIntent = inferAgentIntent(message, inferredIntent)
+    const verifiedIntents = inferAgentIntents(message, inferredIntent)
+    if (verifiedIntents.length > 1) {
+      trace.push({ type: 'plan', label: `拆解 ${verifiedIntents.length} 个目标`, detail: verifiedIntents.join('、') })
+    }
     let workingTurn = { ...agentTurn, intent: verifiedIntent, phase: 'analyze' as const, plan: plannedCalls, evidence, attempts: 1, answer }
-    if (!usedWritePreview) {
-      for (let attempt = 2; attempt <= 3 && !selection; attempt += 1) {
+    for (let attempt = 2; attempt <= 3 && !selection; attempt += 1) {
         const checkedTurn = completeAgentTurn(workingTurn, answer)
         const decision = decideAgentReplan(checkedTurn)
         const requiredTools = decision.requiredTools.filter(isAgentReadToolName)
@@ -1257,8 +1259,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         try {
           const rewritten = await generateText({
             model: provider(modelName),
-            system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；先回答结论，再列必要依据。数据缺失时明确说明，不得猜测。',
-            messages: [{ role: 'user', content: `用户问题：\n${message}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
+            system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；按识别到的目标逐项回答，不能遗漏其中任何一项；每项先回答结论，再列必要依据。数据缺失时明确说明，不得猜测。',
+            messages: [{ role: 'user', content: `用户问题：\n${message}\n\n需要逐项回答的目标：\n${verifiedIntents.join('、')}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
             temperature: 0.1,
           })
           answer = cleanAnswer(rewritten.text) || '已完成必要补查，但没有生成可靠的整理结果。'
@@ -1267,7 +1269,6 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           answer = '已补齐必要业务证据，但主模型未能完成第二次整理，我没有将未验证的初稿交给你。'
         }
         workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
-      }
     }
     if (/卡在|卡点|等待|为什么.*(?:没|未).*交付|延期/.test(message)) {
       const detailEvidence = [...evidence].reverse().find((item) => item.deterministic && item.toolName === 'get_task_detail')
