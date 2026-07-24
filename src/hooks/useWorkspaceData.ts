@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
-  defaultDesignTypeGroups,
   defaultDesignTypes,
-  defaultHourlyRate,
   defaultPdfTitle,
   defaultServiceCompanyName,
 } from '../config/appConfig'
@@ -11,50 +9,40 @@ import {
   ApiError,
   clearStoredAuth,
   getStoredAuth,
-  type AccessToken,
-  type AiModelConfig,
-  type AiProviderConfig,
-  type AuthRole,
-  type ReportRecord,
-  type StoredAuth,
 } from '../lib/api'
 import { normalizeDesignTypeGroups } from '../lib/designTypeGroups'
 import { normalizeTaskClosure } from '../lib/taskContextInsights'
-import { readStateCache, writeStateCache } from '../lib/stateCache'
-import type { FileAsset, Task, TaskUpdate, TaxMode } from '../types/domain'
-import type { SettingsTab } from '../views/SettingsView'
+import { writeStateCache } from '../lib/stateCache'
 import type { ToastState } from '../lib/toastQueue'
 import { useAttachmentRuntime } from './useAttachmentRuntime'
-import { useBackendRuntime, type BackendStatus } from './useBackendRuntime'
+import { useBackendRuntime } from './useBackendRuntime'
+import { useAuthStore } from '../stores/authStore'
+import { useTaskStore } from '../stores/taskStore'
+import { useFileStore } from '../stores/fileStore'
+import { useSettingsStore } from '../stores/settingsStore'
 
 type Notify = (message: string, tone?: ToastState['tone']) => void
 
 export function useWorkspaceData(notify: Notify) {
-  const [auth, setAuth] = useState<StoredAuth | null>(getStoredAuth)
-  const [bootCache] = useState(() => readStateCache())
-  const bootTasks = useMemo(() => bootCache?.tasks.map(normalizeTaskClosure) ?? [], [bootCache])
-  const [role, setRole] = useState<AuthRole>(bootCache?.role ?? 'guest')
-  const [accessTokens, setAccessTokens] = useState<AccessToken[]>(bootCache?.accessTokens ?? [])
-  const [newTokenId, setNewTokenId] = useState('')
-  const [authError, setAuthError] = useState('')
-  const [isLoaded, setIsLoaded] = useState(Boolean(bootCache))
-  const [taskItems, setTaskItems] = useState<Task[]>(bootTasks)
-  const taskItemsRef = useRef<Task[]>(bootTasks)
-  const [updateItems, setUpdateItems] = useState<TaskUpdate[]>(bootCache?.updates ?? [])
-  const [fileItems, setFileItems] = useState<FileAsset[]>(bootCache?.files ?? [])
-  const [reports, setReports] = useState<ReportRecord[]>(bootCache?.reports ?? [])
-  const [hourlyRate, setHourlyRate] = useState(bootCache?.settings?.hourlyRate ?? defaultHourlyRate)
-  const [pdfTitle, setPdfTitle] = useState(bootCache?.settings?.pdfTitle || defaultPdfTitle)
-  const [serviceCompanyName, setServiceCompanyName] = useState(bootCache?.settings?.serviceCompanyName || defaultServiceCompanyName)
-  const [taxMode, setTaxMode] = useState<TaxMode>(bootCache?.settings?.taxMode ?? 'salary')
-  const [designTypeGroups, setDesignTypeGroups] = useState(defaultDesignTypeGroups)
-  const [aiModelConfig, setAiModelConfig] = useState<AiModelConfig | null>(null)
-  const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>([])
-  const [settingsEntry, setSettingsEntry] = useState<{ tab: SettingsTab; nonce: number }>({ tab: 'ai', nonce: 0 })
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>('连接中')
+  const {
+    auth, setAuth, role, setRole, accessTokens, setAccessTokens, newTokenId, setNewTokenId,
+    authError, setAuthError, isLoaded, setIsLoaded,
+    hydrateAuthState,
+  } = useAuthStore()
+  const {
+    taskItems, setTaskItems, updateItems, setUpdateItems, reports, setReports,
+    hydrateTaskState,
+  } = useTaskStore()
+  const { fileItems, setFileItems, hydrateFileState } = useFileStore()
+  const {
+    hourlyRate, setHourlyRate, pdfTitle, setPdfTitle, serviceCompanyName, setServiceCompanyName,
+    taxMode, setTaxMode, designTypeGroups, setDesignTypeGroups, aiModelConfig, setAiModelConfig,
+    aiProviderConfigs, setAiProviderConfigs, backendStatus, setBackendStatus,
+    hydrateSettingsState,
+  } = useSettingsStore()
+  const taskItemsRef = useRef(taskItems)
   const isAdmin = role === 'admin' && Boolean(auth)
-  const { attachmentAnalyses, setAttachmentAnalyses } = useAttachmentRuntime({
-    initialAnalyses: bootCache?.attachmentAnalyses ?? [],
+  const { attachmentAnalyses } = useAttachmentRuntime({
     isLoaded,
     role,
     files: fileItems,
@@ -75,30 +63,26 @@ export function useWorkspaceData(notify: Notify) {
     const state = await api.getState()
     const normalizedTasks = state.tasks.map(normalizeTaskClosure)
     writeStateCache({ ...state, tasks: normalizedTasks })
-    setTaskItems(normalizedTasks)
-    setUpdateItems(state.updates)
-    setFileItems(state.files)
-    setAttachmentAnalyses(state.attachmentAnalyses ?? [])
-    setReports(state.reports ?? [])
-    setRole(state.role)
+    hydrateTaskState({ taskItems: normalizedTasks, updateItems: state.updates, reports: state.reports ?? [] })
+    hydrateFileState({ fileItems: state.files, attachmentAnalyses: state.attachmentAnalyses ?? [] })
+    hydrateAuthState({ role: state.role, accessTokens: state.accessTokens ?? [] })
     const storedForCheck = getStoredAuth()
     if (storedForCheck?.role === 'admin' && state.role !== 'admin') {
       clearStoredAuth()
       setAuth(null)
       setAuthError('管理员登录已失效（密码可能已修改），请重新登录')
     }
-    setAccessTokens(state.accessTokens ?? [])
-    setHourlyRate(state.settings.hourlyRate)
-    setPdfTitle(state.settings.pdfTitle || defaultPdfTitle)
-    setServiceCompanyName(state.settings.serviceCompanyName || defaultServiceCompanyName)
-    setTaxMode(state.settings.taxMode ?? 'salary')
-    setDesignTypeGroups(normalizeDesignTypeGroups(
-      state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }],
-    ))
-    setAiModelConfig(state.settings.aiModel ?? null)
-    setBackendStatus('已接入 D1/R2')
+    hydrateSettingsState({
+      hourlyRate: state.settings.hourlyRate,
+      pdfTitle: state.settings.pdfTitle || defaultPdfTitle,
+      serviceCompanyName: state.settings.serviceCompanyName || defaultServiceCompanyName,
+      taxMode: state.settings.taxMode ?? 'salary',
+      designTypeGroups: normalizeDesignTypeGroups(
+        state.settings.designTypeGroups ?? [{ name: '常用类型', items: state.settings.designTypes ?? defaultDesignTypes }],
+      ),
+      aiModelConfig: state.settings.aiModel ?? null,
+    })
     resetBackendSyncSlow()
-    setIsLoaded(true)
     return normalizedTasks
   }
 
@@ -115,7 +99,6 @@ export function useWorkspaceData(notify: Notify) {
 
   useEffect(() => {
     // Initial and credential-change state hydration is the intended effect here.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshState().catch((error) => {
       if (error instanceof ApiError && error.status === 401) {
         clearStoredAuth()
@@ -150,7 +133,7 @@ export function useWorkspaceData(notify: Notify) {
     return () => {
       cancelled = true
     }
-  }, [isAdmin, aiModelConfig?.updatedAt])
+  }, [isAdmin, aiModelConfig?.updatedAt, setAiProviderConfigs])
 
   return {
     auth, setAuth, role, setRole, accessTokens, setAccessTokens, newTokenId, setNewTokenId,
@@ -158,7 +141,7 @@ export function useWorkspaceData(notify: Notify) {
     updateItems, setUpdateItems, fileItems, setFileItems, reports, setReports,
     hourlyRate, setHourlyRate, pdfTitle, setPdfTitle, serviceCompanyName, setServiceCompanyName,
     taxMode, setTaxMode, designTypeGroups, setDesignTypeGroups, aiModelConfig, setAiModelConfig,
-    aiProviderConfigs, setAiProviderConfigs, settingsEntry, setSettingsEntry,
+    aiProviderConfigs, setAiProviderConfigs,
     backendStatus, setBackendStatus, backendSyncSlow, isOffline, storageUsage,
     attachmentAnalyses, refreshState, retryRefreshState, isAdmin,
   }

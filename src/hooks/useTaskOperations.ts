@@ -1,7 +1,7 @@
-import { useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useRef, type Dispatch, type SetStateAction } from 'react'
 import type { ConfirmDialogState } from '../components/ConfirmDialogModal'
 import type { ProgressModalTarget } from '../components/AppOverlayLayer'
-import { api, authedPreviewUrl, type TaskProgressAssessment } from '../lib/api'
+import { api, authedPreviewUrl } from '../lib/api'
 import { createOptionalPreviewFile } from '../lib/attachmentPreview'
 import { clearNewTaskDraftCache } from '../lib/newTaskDraftCache'
 import { fileTypeForFile } from '../lib/fileTypes'
@@ -19,6 +19,8 @@ import type { FileAsset, Task, WaitingEntry } from '../types/domain'
 import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from '../types/taskUi'
 import type { ToastState } from '../lib/toastQueue'
 import type { useWorkspaceData } from './useWorkspaceData'
+import { useTaskRuntimeStore } from '../stores/taskRuntimeStore'
+import { useShallow } from 'zustand/react/shallow'
 
 type Notify = (
   message: string,
@@ -60,10 +62,19 @@ export function useTaskOperations({
     taskItems, setTaskItems, taskItemsRef, setUpdateItems, fileItems, setFileItems,
     setBackendStatus, refreshState,
   } = workspace
-  const [progressAssessments, setProgressAssessments] = useState<Record<number, TaskProgressAssessment>>({})
-  const [voidTaskTarget, setVoidTaskTarget] = useState<Task | null>(null)
-  const [isVoidTaskBusy, setIsVoidTaskBusy] = useState(false)
-  const [showFireworks, setShowFireworks] = useState(false)
+  const {
+    progressAssessments, setProgressAssessments, voidTaskTarget, setVoidTaskTarget,
+    isVoidTaskBusy, setIsVoidTaskBusy, showFireworks, setShowFireworks,
+  } = useTaskRuntimeStore(useShallow((state) => ({
+    progressAssessments: state.progressAssessments,
+    setProgressAssessments: state.setProgressAssessments,
+    voidTaskTarget: state.voidTaskTarget,
+    setVoidTaskTarget: state.setVoidTaskTarget,
+    isVoidTaskBusy: state.isVoidTaskBusy,
+    setIsVoidTaskBusy: state.setIsVoidTaskBusy,
+    showFireworks: state.showFireworks,
+    setShowFireworks: state.setShowFireworks,
+  })))
   const updatingTaskIdsRef = useRef<Set<number>>(new Set())
   const pendingTaskChangesRef = useRef<Map<number, Partial<Task>>>(new Map())
 

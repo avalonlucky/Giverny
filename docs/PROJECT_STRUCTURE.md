@@ -111,6 +111,14 @@
 │   │   ├── useToastNotifications.ts
 │   │   ├── useWorkspaceData.ts
 │   │   └── useWorkspaceAnalytics.ts
+│   ├── stores/
+│   │   ├── authStore.ts
+│   │   ├── taskStore.ts
+│   │   ├── taskRuntimeStore.ts
+│   │   ├── fileStore.ts
+│   │   ├── settingsStore.ts
+│   │   ├── uiStore.ts
+│   │   └── storeUtils.ts
 │   ├── components/
 │   │   ├── AppOverlayLayer.tsx
 │   │   ├── AiBrandIcon.tsx
@@ -156,6 +164,12 @@
 ## Debug Entry Points
 
 - Main admin UI and route state: `src/App.tsx`
+- Cross-view UI state and persisted view preferences: `src/stores/uiStore.ts`
+- Authentication, role and access-token state: `src/stores/authStore.ts`
+- Task, progress-update and settlement-report entities: `src/stores/taskStore.ts`
+- Task activity, AI progress assessment and task-operation runtime state: `src/stores/taskRuntimeStore.ts`
+- File entities and attachment-analysis state: `src/stores/fileStore.ts`
+- Business settings, AI model configuration and backend status: `src/stores/settingsStore.ts`
 - Workspace hydration, identity, settings data and backend synchronization: `src/hooks/useWorkspaceData.ts`
 - Task, progress, acceptance, attachment and file write operations: `src/hooks/useTaskOperations.ts`
 - Login, access-token, backup and administrator settings operations: `src/hooks/useSettingsOperations.ts`
@@ -230,6 +244,7 @@
 - Desktop/mobile browser critical-flow gate: `tests/browser/critical-flows.spec.ts`
 - Browser regression environment and projects: `playwright.config.ts`, `agent-evals/start-browser-eval.mjs`
 - Main-entry size regression guard: `scripts/check-app-entry-size.mjs` (`App.tsx` maximum 1,000 lines)
+- State-ownership regression guard: `scripts/check-state-architecture.mjs` (six Zustand stores; no cross-view `useState / useReducer` in `App` or workspace hydration)
 - AI operations aggregation and workspace context: `GET /api/ai/operations-center`, `db/migrations/0024_ai_governance_runtime.sql`
 
 ## AI Operations And Workspace Foundation
@@ -259,6 +274,8 @@
 
 ## Current Architecture
 
+- Frontend state is split into six Zustand business domains. Component-local form drafts remain local React state; cross-view UI and server-mirrored entities must use the appropriate store.
+- Backend hydration commits auth, task, file and settings snapshots atomically by domain. The existing versioned 30-minute boot cache remains an acceleration layer, not a second source of truth.
 - Production data is stored in Cloudflare D1 `designer-worklog-db`.
 - Production files are stored in Cloudflare R2 `designer-worklog-uploads`.
 - The former staging site and its separate D1/R2 resources have been removed. Validate locally, then deploy the production Worker directly.

@@ -1,8 +1,13 @@
-import { useCallback, useRef, useState } from 'react'
-import { api, type ActivityItem } from '../lib/api'
+import { useCallback, useRef } from 'react'
+import { api } from '../lib/api'
+import { useTaskRuntimeStore } from '../stores/taskRuntimeStore'
+import { useShallow } from 'zustand/react/shallow'
 
 export function useTaskActivity() {
-  const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([])
+  const { taskActivity, setTaskActivity } = useTaskRuntimeStore(useShallow((state) => ({
+    taskActivity: state.taskActivity,
+    setTaskActivity: state.setTaskActivity,
+  })))
   const requestRef = useRef(0)
 
   const loadTaskActivity = useCallback(async (taskId: number) => {
@@ -14,7 +19,7 @@ export function useTaskActivity() {
     } catch {
       if (requestRef.current === requestId) setTaskActivity([])
     }
-  }, [])
+  }, [setTaskActivity])
 
   return { taskActivity, loadTaskActivity }
 }

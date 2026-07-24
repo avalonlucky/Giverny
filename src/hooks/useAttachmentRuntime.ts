@@ -2,22 +2,25 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { api, authedPreviewUrl, type AuthRole } from '../lib/api'
 import { createOptionalPreviewFile } from '../lib/attachmentPreview'
 import { fileTypeForAsset } from '../lib/fileTypes'
-import type { AttachmentAnalysis, FileAsset } from '../types/domain'
+import type { FileAsset } from '../types/domain'
+import { useFileStore } from '../stores/fileStore'
+import { useShallow } from 'zustand/react/shallow'
 
 export function useAttachmentRuntime({
-  initialAnalyses,
   isLoaded,
   role,
   files,
   setFiles,
 }: {
-  initialAnalyses: AttachmentAnalysis[]
   isLoaded: boolean
   role: AuthRole
   files: FileAsset[]
   setFiles: Dispatch<SetStateAction<FileAsset[]>>
 }) {
-  const [attachmentAnalyses, setAttachmentAnalyses] = useState(initialAnalyses)
+  const { attachmentAnalyses, setAttachmentAnalyses } = useFileStore(useShallow((state) => ({
+    attachmentAnalyses: state.attachmentAnalyses,
+    setAttachmentAnalyses: state.setAttachmentAnalyses,
+  })))
   const analysisPollingRef = useRef({ signature: '', attempts: 0, inFlight: false })
   const previewBackfillAttemptsRef = useRef<Map<number, number>>(new Map())
   const [previewBackfillTick, setPreviewBackfillTick] = useState(0)
@@ -56,7 +59,7 @@ export function useAttachmentRuntime({
         })
     }, 4000)
     return () => window.clearTimeout(timer)
-  }, [attachmentAnalyses, isLoaded])
+  }, [attachmentAnalyses, isLoaded, setAttachmentAnalyses])
 
   useEffect(() => {
     if (role !== 'admin') return undefined

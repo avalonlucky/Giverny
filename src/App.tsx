@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
   AlertTriangle,
@@ -14,15 +14,13 @@ import {
   BookOpen,
 } from 'lucide-react'
 import { importedHoursMonth, importedMonthlyHours } from './config/appConfig'
-import type { ConfirmDialogState } from './components/ConfirmDialogModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
 import { AppSidebar } from './components/AppSidebar'
 import { AppTopbar } from './components/AppTopbar'
-import { AppOverlayLayer, type ProgressModalTarget } from './components/AppOverlayLayer'
+import { AppOverlayLayer } from './components/AppOverlayLayer'
 import { DashboardView } from './views/DashboardView'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
-import { isoDate } from './lib/dateTime'
 import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
 import {
   sortTasksByLatestActivity,
@@ -39,8 +37,8 @@ import { useWorkspaceData } from './hooks/useWorkspaceData'
 import { useSettingsOperations } from './hooks/useSettingsOperations'
 import { useTaskOperations } from './hooks/useTaskOperations'
 import { useAppShortcuts } from './hooks/useAppShortcuts'
+import { useUiStore } from './stores/uiStore'
 import type { AppView, FileAsset, Task, TaskFilter, TaskViewMode } from './types/domain'
-import type { CalendarDisplayMode } from './views/CalendarView'
 
 const KnowledgeView = lazy(() => import('./views/KnowledgeView'))
 const FilesView = lazy(() => import('./views/FilesView'))
@@ -111,65 +109,32 @@ function App() {
   const routerNavigate = useNavigate()
   const activeView = viewFromPath(location.pathname)
   const taskViewMode = taskViewModeFromSearch(location.search)
-  const [calendarDisplayMode, setCalendarDisplayMode] = useState<CalendarDisplayMode>('月')
-  const [calendarFocusDate, setCalendarFocusDate] = useState(() => isoDate())
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-  const [monthValue, setMonthValue] = useState(() => isoDate().slice(0, 7))
-  const [selectedTaskId, setSelectedTaskId] = useState(0)
-  const [isTaskDetailCollapsed, setIsTaskDetailCollapsed] = useState(() => window.localStorage.getItem('giverny-task-detail-collapsed') === '1')
-  const [detailTaskId, setDetailTaskId] = useState(0)
-  const [editTaskId, setEditTaskId] = useState(0)
-  const [progressModalTarget, setProgressModalTarget] = useState<ProgressModalTarget | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [newTaskSupplemental, setNewTaskSupplemental] = useState(false)
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
-  const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('')
-  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
-  const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
-  const [isChatOpen, setIsChatOpen] = useState(false)
-  const [chatAnalysisFocusId, setChatAnalysisFocusId] = useState('')
-  const [fileLibraryFocusId, setFileLibraryFocusId] = useState(0)
-  const [isDailyKnowledgeOpen, setIsDailyKnowledgeOpen] = useState(false)
-  const [incomeVisible, setIncomeVisible] = useState(false)
-  const [previewFile, setPreviewFile] = useState<FileAsset | null>(null)
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
-  const [isConfirmDialogBusy, setIsConfirmDialogBusy] = useState(false)
-  const [showVoidedTasks, setShowVoidedTasks] = useState(false)
-  const [dashboardContextMenu, setDashboardContextMenu] = useState<{ x: number; y: number; task: Task } | null>(null)
-  const [dashboardCreateMenu, setDashboardCreateMenu] = useState<{ x: number; y: number } | null>(null)
-  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
+  const {
+    calendarDisplayMode, setCalendarDisplayMode, calendarFocusDate, setCalendarFocusDate,
+    isLoginModalOpen, setIsLoginModalOpen, monthValue, setMonthValue,
+    selectedTaskId, setSelectedTaskId, isTaskDetailCollapsed, detailTaskId, setDetailTaskId,
+    editTaskId, setEditTaskId, progressModalTarget, setProgressModalTarget,
+    isModalOpen, setIsModalOpen, newTaskSupplemental, setNewTaskSupplemental,
+    isCommandPaletteOpen, setIsCommandPaletteOpen, commandPaletteInitialQuery, setCommandPaletteInitialQuery,
+    isShortcutHelpOpen, setIsShortcutHelpOpen, isSemanticSearchOpen, setIsSemanticSearchOpen,
+    isChatOpen, setIsChatOpen, chatAnalysisFocusId, setChatAnalysisFocusId,
+    fileLibraryFocusId, setFileLibraryFocusId, isDailyKnowledgeOpen, setIsDailyKnowledgeOpen,
+    incomeVisible, setIncomeVisible, previewFile, setPreviewFile, confirmDialog, setConfirmDialog,
+    isConfirmDialogBusy, setIsConfirmDialogBusy, showVoidedTasks, setShowVoidedTasks,
+    dashboardContextMenu, setDashboardContextMenu, dashboardCreateMenu, setDashboardCreateMenu,
+    isAccountMenuOpen, setIsAccountMenuOpen, taskQuery, setTaskQuery, taskFilter, setTaskFilter,
+    dashboardPendingShowAll, setDashboardPendingShowAll, dashboardAcceptedOpen, setDashboardAcceptedOpen,
+    dashboardAcceptedShowAll, setDashboardAcceptedShowAll, rowThemeOn, toggleRowTheme,
+    settingsEntry, setSettingsEntry, toggleTaskDetail,
+  } = useUiStore()
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
-  const [taskQuery, setTaskQuery] = useState('')
-  const [taskFilter, setTaskFilter] = useState<TaskFilter>('全部')
-  // 工作台任务明细：未完成列表兜底分页 + 已验收默认折叠
-  const [dashboardPendingShowAll, setDashboardPendingShowAll] = useState(false)
-  const [dashboardAcceptedOpen, setDashboardAcceptedOpen] = useState(false)
-  const [dashboardAcceptedShowAll, setDashboardAcceptedShowAll] = useState(false)
-  // 任务行状态配色主题开关：默认关闭，用户手动打开后才生效（持久化在 localStorage）
-  const [rowThemeOn, setRowThemeOn] = useState(() => {
-    if (typeof window === 'undefined') {
-      return false
-    }
-    return window.localStorage.getItem('giverny-row-theme') === 'on'
-  })
-  const toggleRowTheme = () => {
-    setRowThemeOn((current) => {
-      const next = !current
-      try {
-        window.localStorage.setItem('giverny-row-theme', next ? 'on' : 'off')
-      } catch {
-        // 忽略持久化失败
-      }
-      return next
-    })
-  }
   const { toastQueue, notify, dismissToast } = useToastNotifications()
   const workspaceData = useWorkspaceData(notify)
   const {
     auth, role, accessTokens, newTokenId, authError, setAuthError, isLoaded, taskItems,
     updateItems, fileItems, reports, setReports,
     hourlyRate, pdfTitle, serviceCompanyName, taxMode, designTypeGroups, aiModelConfig,
-    aiProviderConfigs, setAiProviderConfigs, settingsEntry, setSettingsEntry,
+    aiProviderConfigs, setAiProviderConfigs,
     backendStatus, backendSyncSlow: effectiveBackendSyncSlow, isOffline, storageUsage,
     attachmentAnalyses, refreshState, retryRefreshState, isAdmin,
   } = workspaceData
@@ -295,7 +260,7 @@ function App() {
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isAccountMenuOpen])
+  }, [isAccountMenuOpen, setIsAccountMenuOpen])
 
   useEffect(() => {
     const canonicalPath = taskViewRoute(activeView, taskViewMode)
@@ -342,17 +307,8 @@ function App() {
   useEffect(() => {
     // Filters, pagination and collapsed groups should keep the detail pane aligned with a rendered row.
     const visibleIds = selectedTaskSourceSignature ? selectedTaskSourceSignature.split(',').map(Number) : []
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedTaskId((currentId) => visibleIds.includes(currentId) ? currentId : visibleIds[0] ?? 0)
-  }, [selectedTaskSourceSignature])
-
-  const toggleTaskDetail = () => {
-    setIsTaskDetailCollapsed((current) => {
-      const next = !current
-      window.localStorage.setItem('giverny-task-detail-collapsed', next ? '1' : '0')
-      return next
-    })
-  }
+  }, [selectedTaskSourceSignature, setSelectedTaskId])
 
   const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
 
@@ -433,7 +389,7 @@ function App() {
       window.removeEventListener('scroll', closeMenu, true)
       window.removeEventListener('keydown', handleKeydown)
     }
-  }, [dashboardContextMenu, dashboardCreateMenu])
+  }, [dashboardContextMenu, dashboardCreateMenu, setDashboardContextMenu, setDashboardCreateMenu])
 
   const openDashboardContextMenu = (event: React.MouseEvent, task: Task) => {
     event.preventDefault()
