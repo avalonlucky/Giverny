@@ -4,13 +4,11 @@ import {
   AlertTriangle,
   Archive,
   BarChart3,
-  ClipboardCheck,
   FileText,
   FolderKanban,
   KeyRound,
   LayoutDashboard,
   LoaderCircle,
-  Pencil,
   RotateCcw,
   Sparkles,
   BookOpen,
@@ -47,17 +45,13 @@ import {
   type TaskProgressAssessment,
   type TokenScope,
 } from './lib/api'
-import type { DonutChartItem } from './components/DonutChart'
 import { ModalShell } from './components/ModalShell'
-import { CreateTaskContextMenu, TaskContextMenu } from './components/TaskContextMenu'
 import { AdminLoginModal } from './components/AdminLoginModal'
 import { DailyKnowledgeModal } from './components/DailyKnowledgeModal'
 import { ConfirmDialogModal, type ConfirmDialogState } from './components/ConfirmDialogModal'
 import { VoidTaskModal } from './components/VoidTaskModal'
 import { FilePreviewModal } from './components/FilePreviewModal'
 import { AttachmentHoverThumbnail } from './components/AttachmentHoverThumbnail'
-import { DashboardTaskSidebar } from './components/DashboardTaskSidebar'
-import { TaskContextInsightBadge } from './components/TaskContextInsightBadge'
 import { TaskDetailModal } from './components/TaskDetailModal'
 import { TaskProgressModal } from './components/TaskProgressModal'
 import { AppSidebar } from './components/AppSidebar'
@@ -65,33 +59,22 @@ import { AppTopbar } from './components/AppTopbar'
 import { DashboardView } from './views/DashboardView'
 import { NewTaskModal } from './components/NewTaskModal'
 import { CommandPalette, ShortcutHelpModal, type CommandPaletteAction, type ShortcutHelpGroup } from './components/CommandPalette'
-import { StatusBadge } from './components/TaskUi'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
 import { formatFileSize } from './lib/format'
 import { formatDuration } from './lib/durationDisplay'
-import { datePart, isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
+import { isoDate, isoDateTime, localDateFromIsoDate, monthPart, pad } from './lib/dateTime'
 import { addIsoDays } from './lib/calendar'
 import { fileThumbnailSource, fileTypeForAsset, fileTypeForFile, isInlineImageFileType } from './lib/fileTypes'
 import { taskSettlementMonth } from './lib/taskSettlement'
-import {
-  formatTaskActivityDateRange,
-  formatTaskActivityTime,
-  isTaskListBlankContextTarget,
-  taskDueState,
-} from './lib/taskListPresentation'
+import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
 import {
   isSupplementalTask,
-  isTaskBillable,
   minutesForTimeEntry,
   sortTasksByLatestActivity,
-  sumBillableAmountForMonth,
   sumTimeEntries,
-  taskBillableHoursInMonth,
   taskHasMonthActivity,
-  taskHoursInMonth,
   taskRelatedMonths,
-  timeEntryMonth,
 } from './lib/taskAccounting'
 import { normalizeDesignTypeGroups } from './lib/designTypeGroups'
 import { canRecordNewProgress, snapProgress, taskDisplayProgress } from './lib/taskProgress'
@@ -114,11 +97,12 @@ import { isEditableShortcutTarget, monthFromShortcut } from './lib/keyboardShort
 import { inferToastTone, trimToastQueue, type ToastState, type ToastTone } from './lib/toastQueue'
 import { createOptionalPreviewFile } from './lib/attachmentPreview'
 import { buildTaskContextInsights, normalizeTaskClosure } from './lib/taskContextInsights'
+import { useWorkspaceAnalytics } from './hooks/useWorkspaceAnalytics'
 import {
   prepareImageFiles,
   validateUploadFile,
 } from './lib/fileUpload'
-import type { AppView, AttachmentAnalysis, FileAsset, IncomeDailyGroup, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
+import type { AppView, AttachmentAnalysis, FileAsset, Task, TaskFilter, TaskUpdate, TaskViewMode, TaxMode, WaitingEntry } from './types/domain'
 import type { AgentBackgroundTask } from './types/agent'
 import type { DailyKnowledgeItem } from './types/knowledge'
 import type { AcceptancePayload, ProgressRecordMode, TaskUpdateChanges } from './types/taskUi'
@@ -197,8 +181,6 @@ function nowStamp() {
 }
 
 const donutPalette = ['#2f6f6d', '#6f8f72', '#b08a3c', '#66a182', '#b86b5f', '#7c8b46', '#8a7a55', '#a36b7a']
-
-type DonutItem = DonutChartItem
 
 const dashboardTaskFilters: TaskFilter[] = ['全部', '计划中', '进行中', '待验收', '已验收']
 
@@ -935,228 +917,23 @@ function App() {
     })
   }
 
-  const renderDashboardTaskRow = (task: Task) => {
-    const dueState = taskDueState(task, today, dueSoonDate)
-    const canAcceptTask = task.status === '待验收'
-    const canRecordProgress = canRecordNewProgress(task)
-    const contextInsight = taskContextInsights.get(task.id)
-    return (
-      <article
-        className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
-        data-status={task.status}
-        data-due={dueState || undefined}
-        key={task.id}
-        role="button"
-        aria-pressed={selectedTask?.id === task.id}
-        tabIndex={0}
-        onClick={() => setSelectedTaskId(task.id)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            setSelectedTaskId(task.id)
-          }
-        }}
-        onContextMenu={(event) => openDashboardContextMenu(event, task)}
-      >
-        <div className="task-date">
-          <b>{formatTaskActivityDateRange(task)}</b>
-          <span className="task-date-meta">
-            <span>{[formatTaskActivityTime(task), task.type].filter(Boolean).join(' · ')}</span>
-            {isSupplementalTask(task) && (
-              <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>
-                补录
-              </em>
-            )}
-          </span>
-        </div>
-        <div className="task-main">
-          <strong>{task.title}</strong>
-          <p>{task.requirement}</p>
-          <TaskContextInsightBadge insight={contextInsight} />
-        </div>
-        <div className="task-meta">
-          <b>{task.requester || task.contact || '待确认'}</b>
-          <span>
-            实际 <strong>{taskHoursInMonth(task, currentMonth.value).toFixed(1)}h</strong>
-          </span>
-        </div>
-        <div className="task-row-end">
-          <div className="task-state">
-            <div className="task-state-badges">
-              {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
-              <StatusBadge status={task.status} />
-            </div>
-            {task.status !== '已验收' && (
-              <div className="progress-cell">
-                <div className="mini-meter">
-                  <span style={{ width: `${taskDisplayProgress(task)}%` }} />
-                </div>
-                <small>{taskDisplayProgress(task)}%</small>
-              </div>
-            )}
-          </div>
-          {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
-            <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); handleOpenTaskEdit(task.id) }}>
-              <Pencil size={15} />
-            </button>
-            <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); handleOpenTaskProgress(task.id) }}>
-              <BarChart3 size={15} />
-            </button>
-            {isAdmin && <button
-              type="button"
-              className="icon-button"
-              title={canAcceptTask ? '去验收' : '当前不是待验收'}
-              aria-label={canAcceptTask ? '去验收' : '当前不是待验收'}
-              disabled={!canAcceptTask}
-              onClick={(event) => { event.stopPropagation(); handleOpenTaskAcceptance(task.id) }}
-            >
-              <ClipboardCheck size={15} />
-            </button>}
-          </div>}
-        </div>
-      </article>
-    )
-  }
-
   const voidedMonthTaskCount = useMemo(() => monthTasks.filter((task) => task.voidedAt).length, [monthTasks])
 
   const activeTaskItems = useMemo(() => taskItems.filter((task) => !task.voidedAt), [taskItems])
   const taskContextInsights = buildTaskContextInsights(activeTaskItems, updateItems)
 
-  const stats = useMemo(() => {
-    const totalHours = activeMonthTasks.reduce((sum, task) => sum + taskHoursInMonth(task, currentMonth.value), importedHours)
-    const billableHours = activeMonthTasks
-      .filter(isTaskBillable)
-      .reduce((sum, task) => sum + taskBillableHoursInMonth(task, currentMonth.value), importedHours)
-    const accepted = activeMonthTasks.filter((task) => task.status === '已验收').length
-    const pending = activeMonthTasks.filter((task) => task.status === '待验收').length
+  const { stats, donutData, activeTopReminderItem, annualData, incomeToday, incomeDailyGroups, dailyTrendData } = useWorkspaceAnalytics({
+    activeMonthTasks,
+    activeTaskItems,
+    currentMonth,
+    hourlyRate,
+    importedHours,
+    reports,
+    topAnalysisJobs,
+    isAdmin,
+    donutPalette,
+  })
 
-    return {
-      totalHours,
-      billableHours,
-      amount: sumBillableAmountForMonth(activeMonthTasks, currentMonth.value, hourlyRate, importedHours),
-      accepted,
-      pending,
-    }
-  }, [activeMonthTasks, currentMonth.value, hourlyRate, importedHours])
-
-  const donutData = useMemo(() => {
-    // 本月洞察只统计实际投入；预计工时只作为排期参考，不参与分析。
-    const hoursByType = new Map<string, number>()
-    activeMonthTasks.forEach((task) => {
-      const hours = taskHoursInMonth(task, currentMonth.value)
-      if (hours > 0) {
-        hoursByType.set(task.type, Number(((hoursByType.get(task.type) ?? 0) + hours).toFixed(1)))
-      }
-    })
-    const items: DonutItem[] = [...hoursByType.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([label, value], index) => ({ label, value, color: donutPalette[index % donutPalette.length] }))
-
-    return { items, total: Number(items.reduce((sum, item) => sum + item.value, 0).toFixed(1)) }
-  }, [activeMonthTasks, currentMonth.value])
-
-  const today = isoDate()
-  const dueSoonDate = isoDate(3)
-  const dueTasks = (() => {
-    const actionableTasks = activeMonthTasks.filter((task) => !['已验收', '终止', '不计费'].includes(task.status))
-    const byEstimateAsc = (a: Task, b: Task) => datePart(a.estimatedDate || a.date).localeCompare(datePart(b.estimatedDate || b.date))
-    const byNearestPlan = (a: Task, b: Task) => {
-      const aDate = datePart(a.estimatedDate || a.date)
-      const bDate = datePart(b.estimatedDate || b.date)
-      const aFutureRank = aDate >= today ? 0 : 1
-      const bFutureRank = bDate >= today ? 0 : 1
-      if (aFutureRank !== bFutureRank) return aFutureRank - bFutureRank
-      return aFutureRank === 0 ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate)
-    }
-    const overdue = actionableTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'overdue').sort(byEstimateAsc)
-    const soon = actionableTasks.filter((task) => taskDueState(task, today, dueSoonDate) === 'soon').sort(byEstimateAsc)
-    const primary = overdue[0] ?? [...actionableTasks].sort(byNearestPlan)[0] ?? null
-    const soonHighlights = soon.filter((task) => task.id !== primary?.id).slice(0, 2)
-    const reminderTasks = [primary, ...soonHighlights].filter((task): task is Task => Boolean(task))
-    return { overdue, soon, primary, soonHighlights, reminderTasks }
-  })()
-
-  const topReminderItems = (() => {
-    const items: Array<{ key: string; title: string; body: string; jobId?: string }> = []
-    if (dueTasks.reminderTasks.length > 0) {
-      const bodyParts = dueTasks.reminderTasks.map((task) => task.title)
-      if (dueTasks.soonHighlights.length > 0) {
-        bodyParts.push(`${dueTasks.soonHighlights.length} 个任务 3 天内交付`)
-      }
-      items.push({
-        key: 'due-current',
-        title: dueTasks.overdue.length > 0 ? `${dueTasks.overdue.length} 个任务已逾期` : '最近任务',
-        body: bodyParts.join(' · '),
-      })
-    }
-
-    const todayDate = localDateFromIsoDate(today)
-    const currentViewingMonth = today.slice(0, 7)
-    const [year, month] = currentMonth.value.split('-').map(Number)
-    const lastDay = `${currentMonth.value}-${pad(new Date(year, month, 0).getDate())}`
-    const previousDate = localDateFromIsoDate(today)
-    previousDate.setDate(1)
-    previousDate.setMonth(previousDate.getMonth() - 1)
-    const previousMonthValue = `${previousDate.getFullYear()}-${pad(previousDate.getMonth() + 1)}`
-    if (today === lastDay && currentMonth.value === currentViewingMonth) {
-      items.push({
-        key: 'review-current',
-        title: '本月工作复盘',
-        body: `${currentMonth.label}快结束了，可以整理本月任务、收入和交付问题。`,
-      })
-    }
-    if (todayDate.getDate() === 1 && currentMonth.value === previousMonthValue) {
-      items.push({
-        key: 'review-previous',
-        title: `上个月（${monthLabelOf(previousMonthValue)}）工作复盘`,
-        body: '可以回看上个月任务、收入和交付问题。',
-      })
-    }
-    const visibleAnalysisJobs = isAdmin ? topAnalysisJobs : []
-    const completedScheduledJobs = visibleAnalysisJobs.filter((job) => {
-      if (!job.unread || job.status !== 'completed' || job.source !== 'scheduled') return false
-      const finishedAt = datePart(job.completedAt || job.updatedAt || job.createdAt)
-      return finishedAt === today
-    })
-    const todayRiskJobs = completedScheduledJobs
-      .filter((job) => job.type === 'risk_digest')
-      .slice(0, 1)
-    todayRiskJobs.forEach((job) => {
-      items.push({
-        key: `risk-job-${job.id}`,
-        title: '今日任务风险提示已完成',
-        body: job.title.replace(/^\d{4}-\d{2}-\d{2}\s*/, '') || '查看今日需要关注的任务风险。',
-        jobId: job.id,
-      })
-    })
-    const monthlyReviewJobs = completedScheduledJobs
-      .filter((job) => job.type === 'monthly_review' && (
-        today === lastDay ||
-        todayDate.getDate() === 1
-      ))
-      .slice(0, 1)
-    monthlyReviewJobs.forEach((job) => {
-      items.push({
-        key: `review-job-${job.id}`,
-        title: '工作复盘已完成',
-        body: job.title || '可以查看本次复盘结果。',
-        jobId: job.id,
-      })
-    })
-    return items
-  })()
-  const [topReminderIndex, setTopReminderIndex] = useState(0)
-  useEffect(() => {
-    if (topReminderItems.length <= 1) return
-    const timer = window.setInterval(() => {
-      setTopReminderIndex((current) => (current + 1) % topReminderItems.length)
-    }, 60_000)
-    return () => window.clearInterval(timer)
-  }, [topReminderItems.length])
-  const activeTopReminderItem = topReminderItems.length > 0
-    ? topReminderItems[topReminderIndex % topReminderItems.length]
-    : undefined
   const handleTopReminderClick = (item?: { key: string; jobId?: string }) => {
     if (item?.jobId) {
       setTopAnalysisJobs((current) => current.map((job) => job.id === item.jobId ? { ...job, unread: false } : job))
@@ -1165,85 +942,6 @@ function App() {
     }
     navigateView('任务')
   }
-
-  const annualData = useMemo(() => {
-    const year = currentMonth.value.slice(0, 4)
-    const lockedByMonth = new Map(reports.filter((report) => report.month.startsWith(year)).map((report) => [report.month, report]))
-    const months = Array.from({ length: 12 }, (_, index) => `${year}-${pad(index + 1)}`)
-    const rows = months.map((month) => {
-      const tasks = activeTaskItems.filter((task) => taskHasMonthActivity(task, month) && isTaskBillable(task))
-      const imported = month === importedHoursMonth ? importedMonthlyHours : 0
-      const hours = Number(tasks.reduce((sum, task) => sum + taskBillableHoursInMonth(task, month), imported).toFixed(1))
-      const locked = lockedByMonth.get(month)
-      const amount = locked ? locked.totalAmount : sumBillableAmountForMonth(tasks, month, hourlyRate, imported)
-      return { month, hours, amount, locked: Boolean(locked) }
-    })
-    return {
-      year,
-      rows,
-      totalHours: Number(rows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)),
-      totalAmount: rows.reduce((sum, row) => sum + row.amount, 0),
-    }
-  }, [activeTaskItems, currentMonth.value, hourlyRate, reports])
-
-  const incomeToday = datePart(isoDate())
-  const incomeDailyGroups = useMemo<IncomeDailyGroup[]>(() => {
-    const dayMap = new Map<string, Map<number, { title: string; hours: number; isSupplemental: boolean }>>()
-    activeMonthTasks.forEach((task) => {
-      const isSupplemental = isSupplementalTask(task)
-      ;(task.timeEntries ?? []).forEach((entry) => {
-        const minutes = minutesForTimeEntry(entry)
-        if (minutes <= 0) return
-        const entryDay = datePart(entry.date || task.date || '')
-        const day = isSupplemental && !entryDay.startsWith(currentMonth.value)
-          ? `${currentMonth.value}-01`
-          : entryDay
-        if (!day.startsWith(currentMonth.value)) return
-        if (!dayMap.has(day)) dayMap.set(day, new Map())
-        const taskMap = dayMap.get(day)!
-        const existing = taskMap.get(task.id) ?? { title: task.title || '未命名', hours: 0, isSupplemental }
-        existing.hours = Number((existing.hours + minutes / 60).toFixed(2))
-        taskMap.set(task.id, existing)
-      })
-    })
-    return Array.from(dayMap.entries())
-      .sort(([a], [b]) => b.localeCompare(a))
-      .map(([day, taskMap]) => {
-        const entries = Array.from(taskMap.entries()).map(([id, data]) => ({
-          id,
-          title: data.title,
-          hours: data.hours,
-          income: Math.round(data.hours * hourlyRate),
-          isSupplemental: data.isSupplemental,
-        }))
-        const totalHours = Number(entries.reduce((sum, entry) => sum + entry.hours, 0).toFixed(1))
-        return { day, totalHours, totalIncome: Math.round(totalHours * hourlyRate), entries }
-      })
-  }, [activeMonthTasks, currentMonth.value, hourlyRate])
-
-  const dailyTrendData = useMemo(() => {
-    const [year, month] = currentMonth.value.split('-').map(Number)
-    const daysInMonth = new Date(year, month, 0).getDate()
-    // 本月每一天一个桶，形成平滑日曲线
-    const days = Array.from({ length: daysInMonth }, (_, index) => ({ label: `${month}/${index + 1}`, value: 0 }))
-    // 工时来自分段计时（timeEntries），进展记录本身不带工时
-    activeMonthTasks.forEach((task) => {
-      ;(task.timeEntries ?? []).forEach((entry) => {
-        const minutes = minutesForTimeEntry(entry)
-        if (minutes <= 0) {
-          return
-        }
-        if (timeEntryMonth(entry, task) !== currentMonth.value) {
-          return
-        }
-        const entryDate = entry.date || ''
-        const day = Number(datePart(entryDate).slice(8, 10)) || 1
-        const index = Math.min(Math.max(day - 1, 0), daysInMonth - 1)
-        days[index].value += minutes / 60
-      })
-    })
-    return days.map((day) => ({ ...day, value: Number(day.value.toFixed(1)) }))
-  }, [currentMonth.value, activeMonthTasks])
 
   const handleCreateTask = async (task: Task) => {
     try {
@@ -2586,47 +2284,6 @@ function App() {
       </button>
     </section>
   )
-  const dashboardTaskMenus = (
-    <>
-      {dashboardContextMenu && (
-        <TaskContextMenu
-          menu={dashboardContextMenu}
-          onClose={() => setDashboardContextMenu(null)}
-          onOpenTask={handleOpenTaskDetail}
-          onOpenEditTask={handleOpenTaskEdit}
-          onOpenAcceptance={(task) => handleOpenTaskAcceptance(task.id)}
-          onOpenProgress={(task) => handleOpenTaskProgress(task.id)}
-          onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-          onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
-          onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
-          onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
-          canWrite={canWrite}
-          canDelete={isAdmin}
-        />
-      )}
-      {canWrite && dashboardCreateMenu && (
-        <CreateTaskContextMenu menu={dashboardCreateMenu} onCreate={openNewTaskFromDashboardMenu} />
-      )}
-    </>
-  )
-  const dashboardTaskSidebar = !isTaskDetailCollapsed ? (
-    <DashboardTaskSidebar
-      task={selectedTask}
-      files={fileItems}
-      progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
-      hourlyRate={hourlyRate}
-      onPreviewFile={setPreviewFile}
-      onUpdateTask={handleUpdateTask}
-      onOpenProgress={handleOpenTaskProgress}
-      onDeleteEntry={handleDeleteTaskTimeEntry}
-      onDeleteAcceptanceProgress={handleDeleteAcceptanceProgress}
-      onOpenEdit={handleOpenTaskEdit}
-      onOpenAcceptance={handleOpenTaskAcceptance}
-      onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
-      canWrite={canWrite}
-      canDelete={isAdmin}
-    />
-  ) : null
   const effectiveBackendSyncSlow = backendStatus === '连接中' && backendSyncSlow
 
   if (!isLoaded) {
@@ -2757,9 +2414,8 @@ function App() {
             dashboardTaskFilter={dashboardTaskFilter}
             setTaskFilter={setTaskFilter}
             visibleTaskCount={visibleTasks.length}
-            onCreateTask={() => openCreateTask(false)}
+            onCreateTask={openNewTaskFromDashboardMenu}
             dashboardPendingVisible={dashboardPendingVisible}
-            renderDashboardTaskRow={renderDashboardTaskRow}
             dashboardPendingTasks={dashboardPendingTasks}
             dashboardPageSize={DASHBOARD_PAGE_SIZE}
             dashboardPendingShowAll={dashboardPendingShowAll}
@@ -2771,12 +2427,33 @@ function App() {
             dashboardAcceptedVisible={dashboardAcceptedVisible}
             dashboardAcceptedShowAll={dashboardAcceptedShowAll}
             setDashboardAcceptedShowAll={setDashboardAcceptedShowAll}
-            dashboardTaskMenus={dashboardTaskMenus}
             donutData={donutData}
             dailyTrendData={dailyTrendData}
             annualData={annualData}
             currentMonthValue={currentMonth.value}
-            dashboardTaskSidebar={dashboardTaskSidebar}
+            selectedTask={selectedTask}
+            taskContextInsights={taskContextInsights}
+            onSelectTask={setSelectedTaskId}
+            onOpenTaskContextMenu={openDashboardContextMenu}
+            dashboardContextMenu={dashboardContextMenu}
+            onCloseTaskContextMenu={() => setDashboardContextMenu(null)}
+            dashboardCreateMenu={dashboardCreateMenu}
+            onOpenTask={handleOpenTaskDetail}
+            onOpenEditTask={handleOpenTaskEdit}
+            onOpenAcceptance={handleOpenTaskAcceptance}
+            onOpenProgress={handleOpenTaskProgress}
+            onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
+            onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
+            onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
+            onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
+            files={fileItems}
+            progressAssessments={progressAssessments}
+            onPreviewFile={setPreviewFile}
+            onDeleteEntry={isAdmin ? handleDeleteTaskTimeEntry : () => requireAdmin()}
+            onDeleteAcceptanceProgress={isAdmin ? handleDeleteAcceptanceProgress : () => requireAdmin()}
+            onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
+            canWrite={canWrite}
+            canDelete={isAdmin}
           />
         )}
 

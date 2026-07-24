@@ -99,6 +99,8 @@
 │   │   ├── IncomeView.tsx
 │   │   ├── KnowledgeView.tsx
 │   │   └── SettingsView.tsx
+│   ├── hooks/
+│   │   └── useWorkspaceAnalytics.ts
 │   ├── components/
 │   │   ├── AiBrandIcon.tsx
 │   │   ├── AppSidebar.tsx
@@ -143,7 +145,8 @@
 ## Debug Entry Points
 
 - Main admin UI and route state: `src/App.tsx`
-- Dashboard metrics, task list, daily knowledge and insights: `src/views/DashboardView.tsx`
+- Dashboard task presentation, menus, detail sidebar, daily knowledge and insights: `src/views/DashboardView.tsx`
+- Shared dashboard, income and annual settlement analytics: `src/hooks/useWorkspaceAnalytics.ts`
 - Application navigation, account menu and storage status: `src/components/AppSidebar.tsx`
 - Application title, month/calendar controls and global actions: `src/components/AppTopbar.tsx`
 - Visual system and layout: `src/App.css`

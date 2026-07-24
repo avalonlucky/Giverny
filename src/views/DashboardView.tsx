@@ -1,26 +1,36 @@
-import type { Dispatch, MouseEventHandler, ReactNode, SetStateAction } from 'react'
-import { AlarmClock, ChevronDown, ChevronRight, Eye, EyeOff, Lock, PanelRightClose, PanelRightOpen, Plus, RotateCcw } from 'lucide-react'
+import type { Dispatch, MouseEvent, MouseEventHandler, SetStateAction } from 'react'
+import { AlarmClock, BarChart3, ChevronDown, ChevronRight, ClipboardCheck, Eye, EyeOff, Lock, PanelRightClose, PanelRightOpen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import { DonutChart, type DonutChartItem } from '../components/DonutChart'
 import { TrendChart } from '../components/TrendChart'
-import { ActiveTaskFilters, TaskSearchBox } from '../components/TaskUi'
+import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from '../components/TaskUi'
 import { EmptyState } from '../components/EmptyState'
+import { CreateTaskContextMenu, TaskContextMenu } from '../components/TaskContextMenu'
+import { DashboardTaskSidebar } from '../components/DashboardTaskSidebar'
+import { TaskContextInsightBadge } from '../components/TaskContextInsightBadge'
+import type { TaskProgressAssessment } from '../lib/api'
+import { isoDate } from '../lib/dateTime'
 import { formatYuan } from '../lib/money'
 import { monthLabelOf } from '../lib/month'
-import type { Task, TaskFilter } from '../types/domain'
+import { taskSettlementMonth } from '../lib/taskSettlement'
+import { isSupplementalTask, taskHoursInMonth } from '../lib/taskAccounting'
+import { formatTaskActivityDateRange, formatTaskActivityTime, taskDueState } from '../lib/taskListPresentation'
+import { canRecordNewProgress, taskDisplayProgress } from '../lib/taskProgress'
+import type { FileAsset, Task, TaskFilter } from '../types/domain'
 import type { DailyKnowledgeItem } from '../types/knowledge'
-
-type DashboardStats = { totalHours: number; billableHours: number; amount: number; accepted: number; pending: number }
-type DashboardReminder = { key: string; title: string; body?: string; jobId?: string }
-type DashboardAnnualData = { year: string; rows: Array<{ month: string; hours: number; amount: number; locked: boolean }>; totalHours: number; totalAmount: number }
+import type { ProgressRecordMode, TaskContextInsight, TaskUpdateChanges } from '../types/taskUi'
+import type { DashboardAnnualData, DashboardReminder, DashboardStats } from '../hooks/useWorkspaceAnalytics'
 
 export function DashboardView({
   openDashboardCreateMenu, stats, importedHours, canToggleIncomeVisibility, incomeVisible, toggleIncomeVisibility, hourlyRate, activeMonthTaskCount,
   dailyKnowledge, isDailyKnowledgeLoading, isDailyKnowledgePrefetching, dailyKnowledgeQueueLength, isAdmin, onOpenDailyKnowledge, onShowNextDailyKnowledge,
   activeTopReminderItem, handleTopReminderClick, isTaskDetailCollapsed, rowThemeOn, toggleRowTheme, toggleTaskDetail, taskQuery, setTaskQuery,
-  dashboardTaskFilters, dashboardTaskFilter, setTaskFilter, visibleTaskCount, onCreateTask, dashboardPendingVisible, renderDashboardTaskRow,
+  dashboardTaskFilters, dashboardTaskFilter, setTaskFilter, visibleTaskCount, onCreateTask, dashboardPendingVisible,
   dashboardPendingTasks, dashboardPageSize, dashboardPendingShowAll, setDashboardPendingShowAll, isAllDashboardFilter, dashboardAcceptedTasks,
   dashboardAcceptedOpen, setDashboardAcceptedOpen, dashboardAcceptedVisible, dashboardAcceptedShowAll, setDashboardAcceptedShowAll,
-  dashboardTaskMenus, donutData, dailyTrendData, annualData, currentMonthValue, dashboardTaskSidebar,
+  donutData, dailyTrendData, annualData, currentMonthValue, selectedTask, taskContextInsights, onSelectTask, onOpenTaskContextMenu,
+  dashboardContextMenu, onCloseTaskContextMenu, dashboardCreateMenu, onOpenTask, onOpenEditTask, onOpenAcceptance, onOpenProgress,
+  onUpdateTask, onVoidTask, onRestoreTask, onDeleteTask, files, progressAssessments, onPreviewFile, onDeleteEntry,
+  onDeleteAcceptanceProgress, onAutoEstimateProgress, canWrite, canDelete,
 }: {
   openDashboardCreateMenu: MouseEventHandler<HTMLDivElement>
   stats: DashboardStats
@@ -51,7 +61,6 @@ export function DashboardView({
   visibleTaskCount: number
   onCreateTask: () => void
   dashboardPendingVisible: Task[]
-  renderDashboardTaskRow: (task: Task) => ReactNode
   dashboardPendingTasks: Task[]
   dashboardPageSize: number
   dashboardPendingShowAll: boolean
@@ -63,14 +72,92 @@ export function DashboardView({
   dashboardAcceptedVisible: Task[]
   dashboardAcceptedShowAll: boolean
   setDashboardAcceptedShowAll: Dispatch<SetStateAction<boolean>>
-  dashboardTaskMenus: ReactNode
   donutData: { items: DonutChartItem[]; total: number }
   dailyTrendData: Array<{ label: string; value: number }>
   annualData: DashboardAnnualData
   currentMonthValue: string
-  dashboardTaskSidebar: ReactNode
+  selectedTask?: Task
+  taskContextInsights: Map<number, TaskContextInsight>
+  onSelectTask: (taskId: number) => void
+  onOpenTaskContextMenu: (event: MouseEvent<HTMLElement>, task: Task) => void
+  dashboardContextMenu: { x: number; y: number; task: Task } | null
+  onCloseTaskContextMenu: () => void
+  dashboardCreateMenu: { x: number; y: number } | null
+  onOpenTask: (taskId: number) => void
+  onOpenEditTask: (taskId: number) => void
+  onOpenAcceptance: (taskId: number) => void
+  onOpenProgress: (taskId: number, mode?: ProgressRecordMode, editEntryId?: string, initialAcceptanceMode?: boolean) => void
+  onUpdateTask: (taskId: number, changes: TaskUpdateChanges) => void
+  onVoidTask: (taskId: number) => void
+  onRestoreTask: (taskId: number) => void
+  onDeleteTask: (taskId: number) => void
+  files: FileAsset[]
+  progressAssessments: Record<number, TaskProgressAssessment>
+  onPreviewFile: (file: FileAsset) => void
+  onDeleteEntry: (taskId: number, mode: ProgressRecordMode, entryId: string) => void
+  onDeleteAcceptanceProgress: (taskId: number, entryId?: string) => void
+  onAutoEstimateProgress?: (task: Task) => void
+  canWrite: boolean
+  canDelete: boolean
 }) {
   const DASHBOARD_PAGE_SIZE = dashboardPageSize
+  const today = isoDate()
+  const dueSoonDate = isoDate(3)
+  const renderDashboardTaskRow = (task: Task) => {
+    const dueState = taskDueState(task, today, dueSoonDate)
+    const canAcceptTask = task.status === '待验收'
+    const canRecordProgress = canRecordNewProgress(task)
+    return (
+      <article
+        className={`task-row ${selectedTask?.id === task.id ? 'selected' : ''} ${isSupplementalTask(task) ? 'supplemental' : ''}`}
+        data-status={task.status}
+        data-due={dueState || undefined}
+        key={task.id}
+        role="button"
+        aria-pressed={selectedTask?.id === task.id}
+        tabIndex={0}
+        onClick={() => onSelectTask(task.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onSelectTask(task.id)
+          }
+        }}
+        onContextMenu={(event) => onOpenTaskContextMenu(event, task)}
+      >
+        <div className="task-date">
+          <b>{formatTaskActivityDateRange(task)}</b>
+          <span className="task-date-meta">
+            <span>{[formatTaskActivityTime(task), task.type].filter(Boolean).join(' · ')}</span>
+            {isSupplementalTask(task) && <em className="task-inline-supplement" title={`补录至 ${monthLabelOf(taskSettlementMonth(task))}`}>补录</em>}
+          </span>
+        </div>
+        <div className="task-main">
+          <strong>{task.title}</strong>
+          <p>{task.requirement}</p>
+          <TaskContextInsightBadge insight={taskContextInsights.get(task.id)} />
+        </div>
+        <div className="task-meta">
+          <b>{task.requester || task.contact || '待确认'}</b>
+          <span>实际 <strong>{taskHoursInMonth(task, currentMonthValue).toFixed(1)}h</strong></span>
+        </div>
+        <div className="task-row-end">
+          <div className="task-state">
+            <div className="task-state-badges">
+              {dueState && <span className={`due-tag ${dueState}`}>{dueState === 'overdue' ? '已逾期' : '临期'}</span>}
+              <StatusBadge status={task.status} />
+            </div>
+            {task.status !== '已验收' && <div className="progress-cell"><div className="mini-meter"><span style={{ width: `${taskDisplayProgress(task)}%` }} /></div><small>{taskDisplayProgress(task)}%</small></div>}
+          </div>
+          {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
+            <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}><Pencil size={15} /></button>
+            <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); onOpenProgress(task.id) }}><BarChart3 size={15} /></button>
+            {canDelete && <button type="button" className="icon-button" title={canAcceptTask ? '去验收' : '当前不是待验收'} aria-label={canAcceptTask ? '去验收' : '当前不是待验收'} disabled={!canAcceptTask} onClick={(event) => { event.stopPropagation(); onOpenAcceptance(task.id) }}><ClipboardCheck size={15} /></button>}
+          </div>}
+        </div>
+      </article>
+    )
+  }
   return (
           <div className="dashboard-context-surface" onContextMenu={openDashboardCreateMenu}>
         <section className="dashboard-metrics" aria-label="本月统计">
@@ -255,7 +342,23 @@ export function DashboardView({
                     )}
                   </div>
                 )}
-                {dashboardTaskMenus}
+                {dashboardContextMenu && (
+                  <TaskContextMenu
+                    menu={dashboardContextMenu}
+                    onClose={onCloseTaskContextMenu}
+                    onOpenTask={onOpenTask}
+                    onOpenEditTask={onOpenEditTask}
+                    onOpenAcceptance={(task) => onOpenAcceptance(task.id)}
+                    onOpenProgress={(task) => onOpenProgress(task.id)}
+                    onUpdateTask={onUpdateTask}
+                    onVoidTask={onVoidTask}
+                    onRestoreTask={onRestoreTask}
+                    onDeleteTask={onDeleteTask}
+                    canWrite={canWrite}
+                    canDelete={canDelete}
+                  />
+                )}
+                {canWrite && dashboardCreateMenu && <CreateTaskContextMenu menu={dashboardCreateMenu} onCreate={onCreateTask} />}
               </div>
             </section>
 
@@ -334,7 +437,24 @@ export function DashboardView({
               </div>
             </details>
           </div>
-          {dashboardTaskSidebar}
+          {!isTaskDetailCollapsed && (
+            <DashboardTaskSidebar
+              task={selectedTask}
+              files={files}
+              progressAssessment={selectedTask ? progressAssessments[selectedTask.id] : undefined}
+              hourlyRate={hourlyRate}
+              onPreviewFile={onPreviewFile}
+              onUpdateTask={onUpdateTask}
+              onOpenProgress={onOpenProgress}
+              onDeleteEntry={onDeleteEntry}
+              onDeleteAcceptanceProgress={onDeleteAcceptanceProgress}
+              onOpenEdit={onOpenEditTask}
+              onOpenAcceptance={onOpenAcceptance}
+              onAutoEstimateProgress={onAutoEstimateProgress}
+              canWrite={canWrite}
+              canDelete={canDelete}
+            />
+          )}
         </section>
           </div>
   )
