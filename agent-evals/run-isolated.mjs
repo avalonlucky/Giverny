@@ -152,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -215,10 +215,10 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 63) {
+  if (!response.ok || capabilities.length !== 64) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
-  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export']) {
+  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda']) {
     if (!capabilities.some((capability) => capability.name === required)) throw new Error(`Agent capability manifest is missing ${required}`)
   }
   for (const capability of capabilities) {
@@ -592,6 +592,31 @@ async function runAgentBusinessToolCheck(cookie) {
   if (!conflicts.response.ok || conflicts.data.conflictCount < 1 || !conflicts.data.conflicts?.some((item) => item.taskId === 1)) {
     throw new Error(`Schedule conflict query did not return overlapping tasks: ${JSON.stringify(conflicts.data)}`)
   }
+  const historicalAgenda = await request('/api/agent/tools/agenda', {
+    method: 'POST', headers,
+    body: JSON.stringify({ startDate: '2026-07-09', endDate: '2026-07-10', workingDayStart: '09:00', workingDayEnd: '18:00' }),
+  })
+  if (!historicalAgenda.response.ok || historicalAgenda.data.daily?.length !== 2 || !historicalAgenda.data.tasks?.some((item) => item.taskId === 1 && item.activeWaiting?.some((waiting) => waiting.note === '等待刘总的建议')) || historicalAgenda.data.tasks?.some((item) => item.taskId === 9001)) {
+    throw new Error(`Agenda did not return isolated tasks, days, and active waiting evidence: ${JSON.stringify(historicalAgenda.data)}`)
+  }
+  const tenantAgenda = await request('/api/agent/tools/agenda', {
+    method: 'POST', headers: { ...headers, ...agentScopeHeaders('tenant-b', 'business-agenda-tenant', 'admin') },
+    body: JSON.stringify({ startDate: '2026-07-01', endDate: '2026-07-02' }),
+  })
+  if (!tenantAgenda.response.ok || !tenantAgenda.data.tasks?.some((item) => item.taskId === 9001) || tenantAgenda.data.tasks?.some((item) => item.taskId === 1)) {
+    throw new Error(`Agenda workspace isolation failed: ${JSON.stringify(tenantAgenda.data)}`)
+  }
+
+  const taskTenFirst = await preview('reschedule-task-preview', { taskId: 10, startDate: '2026-07-27T09:00', endDate: '2026-07-27T17:00', estimatedHours: 8, reason: 'Agenda 冲突快照评测' })
+  await execute('reschedule-task', taskTenFirst.confirmationToken)
+  const conflictBoundPreview = await preview('reschedule-task-preview', { taskId: 12, startDate: '2026-07-27T10:00', endDate: '2026-07-27T12:00', estimatedHours: 2, reason: '绑定冲突快照' })
+  if (!conflictBoundPreview.draft?.conflicts?.some((item) => item.taskId === 10)) throw new Error(`Reschedule preview missed the conflicting task: ${JSON.stringify(conflictBoundPreview)}`)
+  const taskTenMoved = await preview('reschedule-task-preview', { taskId: 10, startDate: '2026-07-28T09:00', endDate: '2026-07-28T17:00', estimatedHours: 8, reason: '制造确认期间变化' })
+  await execute('reschedule-task', taskTenMoved.confirmationToken)
+  const staleConflictExecute = await request('/api/agent/tools/reschedule-task', { method: 'POST', headers, body: JSON.stringify({ confirmationToken: conflictBoundPreview.confirmationToken }) })
+  if (staleConflictExecute.response.status !== 409 || !String(staleConflictExecute.data.error || '').includes('冲突列表')) {
+    throw new Error(`Changed schedule conflicts did not invalidate the confirmation: ${JSON.stringify(staleConflictExecute.data)}`)
+  }
 
   const staleSettlement = await preview('export-settlement-preview', { startDate: '2026-06-01', endDate: '2026-07-22' })
   const reschedule = await preview('reschedule-task-preview', {
@@ -708,6 +733,13 @@ async function runAgentBusinessToolCheck(cookie) {
   const reminder = await execute('schedule-reminder', reminderPreview.confirmationToken)
   if (reminder.plan?.kind !== 'reminder' || reminder.plan?.taskId !== 1 || !String(reminder.plan?.nextActionAt || '').startsWith('2026-07-26T09:00')) {
     throw new Error(`Task-center reminder was not persisted: ${JSON.stringify(reminder)}`)
+  }
+  const futureAgenda = await request('/api/agent/tools/agenda', {
+    method: 'POST', headers,
+    body: JSON.stringify({ startDate: '2026-07-26', endDate: '2026-07-29', durationMinutes: 60, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 }),
+  })
+  if (!futureAgenda.response.ok || !futureAgenda.data.reminders?.some((item) => item.id === reminder.plan.id) || !futureAgenda.data.tasks?.some((item) => item.taskId === 10) || !futureAgenda.data.availableSlots?.length || futureAgenda.data.availableSlots.some((slot) => new Date(`${slot.startAt}:00+08:00`).getTime() < Date.now())) {
+    throw new Error(`Agenda did not return future reminder, task, and usable slots: ${JSON.stringify(futureAgenda.data)}`)
   }
 
   const inspected = await request('/api/agent/tools/inspect-ai-settings', { method: 'POST', headers, body: '{}' })

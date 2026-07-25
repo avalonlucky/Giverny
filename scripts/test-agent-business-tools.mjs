@@ -41,6 +41,9 @@ for (const endpoint of ['prepare-attachment-upload', 'reschedule-task-preview', 
 }
 
 assert.equal(agentCapabilityAllows('schedule-conflicts', 'viewer', 'GET'), true)
+assert.equal(agentCapabilityAllows('schedule-conflicts', 'client', 'GET'), false)
+assert.equal(agentCapabilityAllows('agenda', 'viewer', 'GET'), true)
+assert.equal(agentCapabilityAllows('agenda', 'client', 'GET'), false)
 assert.equal(agentCapabilityAllows('settlement-exports', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-reconciliation', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-exports', 'client', 'GET'), false)
@@ -61,6 +64,9 @@ assert.equal(aiRouteSchema.safeParse({ route: 'textPrimary', provider: 'deepseek
 assert.equal('apiKey' in (aiRouteSchema.parse({ route: 'textPrimary', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner', apiKey: 'sk-secret' })), false)
 
 assert.equal(agentCapabilityRegistry.check_schedule_conflicts.inputSchema.safeParse({ startDate: '2026-07-25T14:00', endDate: '2026-07-25T16:00', excludeTaskId: 12 }).success, true)
+assert.equal(agentCapabilityRegistry.query_agenda.inputSchema.safeParse({ startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: 90, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 }).success, true)
+assert.equal(agentCapabilityRegistry.query_agenda.inputSchema.safeParse({ durationMinutes: 10 }).success, false)
+assert.equal(agentCapabilityRegistry.query_agenda.inputSchema.safeParse({ workingDayStart: '9点' }).success, false)
 assert.equal(agentCapabilityRegistry.schedule_reminder_preview.inputSchema.safeParse({ taskId: 12, goal: '提醒验收', remindAt: '2026-07-26T09:00:00+08:00' }).success, true)
 assert.equal(agentCapabilityRegistry.export_settlement_preview.inputSchema.safeParse({ startDate: '2026-07-31', endDate: '2026-07-01' }).success, true, '跨字段日期顺序由确定性 Worker 校验')
 assert.equal(agentCapabilityRegistry.reconcile_settlement_export.inputSchema.safeParse({ exportId: 'settlement-1' }).success, true)

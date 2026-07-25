@@ -175,10 +175,12 @@ async function createDeployment(token, versions, message) {
   })
 }
 
-async function probeCandidate(versionId) {
+async function probeCandidate(versionId, affinityKey = '') {
   const headers = {
     'cache-control': 'no-cache',
-    'Cloudflare-Workers-Version-Overrides': `${workerName}="${versionId}"`,
+    ...(affinityKey
+      ? { 'Cloudflare-Workers-Version-Key': affinityKey }
+      : { 'Cloudflare-Workers-Version-Overrides': `${workerName}="${versionId}"` }),
   }
   const [healthResponse, htmlResponse] = await Promise.all([
     fetch(`${productionUrl}/api/health?canary=${Date.now()}`, { headers, signal: AbortSignal.timeout(20_000) }),
@@ -205,6 +207,23 @@ async function probeCandidate(versionId) {
   return { decision, expectedAsset, observedAsset, health }
 }
 
+async function findCandidateAffinityKey(versionId, batches = 20, batchSize = 30) {
+  for (let batch = 0; batch < batches; batch += 1) {
+    const candidates = Array.from({ length: batchSize }, (_, index) => `giverny-${versionId}-${batch * batchSize + index}`)
+    const results = await Promise.all(candidates.map(async (key) => {
+      const response = await fetch(`${productionUrl}/api/health?affinity=${encodeURIComponent(key)}`, {
+        headers: { 'cache-control': 'no-cache', 'Cloudflare-Workers-Version-Key': key },
+        signal: AbortSignal.timeout(20_000),
+      }).catch(() => null)
+      const health = response ? await response.json().catch(() => ({})) : {}
+      return response?.ok && health.ok === true && String(health.version || '') === releaseVersion ? key : ''
+    }))
+    const matched = results.find(Boolean)
+    if (matched) return matched
+  }
+  return ''
+}
+
 async function waitForCandidate(versionId, attempts = 7) {
   let latest
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -212,6 +231,8 @@ async function waitForCandidate(versionId, attempts = 7) {
     if (latest.decision.action === 'promote') return latest
     if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 3000))
   }
+  const affinityKey = await findCandidateAffinityKey(versionId)
+  if (affinityKey) latest = await probeCandidate(versionId, affinityKey)
   return latest
 }
 
@@ -258,8 +279,8 @@ async function deploy() {
   }
   process.stdout.write(`候选版本已上传：${candidateVersionId}；正在进行隔离冒烟验证…\n`)
   await createDeployment(token, [
-    { version_id: previousVersionId, percentage: 99.99 },
-    { version_id: candidateVersionId, percentage: 0.01 },
+    { version_id: previousVersionId, percentage: 99 },
+    { version_id: candidateVersionId, percentage: 1 },
   ], `v${releaseVersion} 候选验证`)
   try {
     const probe = await waitForCandidate(candidateVersionId)

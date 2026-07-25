@@ -2700,7 +2700,7 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'query_enterprise_memory' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'query_enterprise_memory' | 'query_agenda' | 'none'
 type ChatAgentPlanResponse = {
   intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
@@ -2724,6 +2724,7 @@ function chatPlanTrace(plan: ChatAgentPlanResponse | null, tools: ChatAgentToolN
   if (plan?.intent === 'knowledge' || tools.includes('query_enterprise_memory')) {
     return '制定计划：先检索组织、合作伙伴和项目记忆，再核对来源、版本与有效期。'
   }
+  if (tools.includes('query_agenda')) return '制定计划：先读取任务、提醒与工作时段，再核对日程风险和可用时间。'
   if (plan?.intent === 'finance' || tools.includes('query_month_finance')) {
     return '制定计划：先读取真实工时与结算数据，再完成金额核算。'
   }
@@ -2747,6 +2748,7 @@ function chatVerificationTrace(results: ChatAgentToolResult[]) {
   if (results.some((item) => item.name === 'get_requester_profile')) return '核对结论：画像指标来自确定性历史任务聚合，没有使用模型猜测。'
   if (results.some((item) => item.name === 'search_product_help')) return '核对结论：回答已与官方手册和版本记录交叉核对。'
   if (results.some((item) => item.name === 'query_month_finance')) return '核对结论：金额与工时来自确定性结算计算，没有使用模型估算。'
+  if (results.some((item) => item.name === 'query_agenda')) return '核对结论：日程、提醒、等待与可用时间来自当前工作区的确定性 Agenda。'
   if (results.some((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')) return '核对结论：状态、进展和等待原因均来自当前任务记录。'
   return '核对结论：回答已与本轮可用依据核对。'
 }
@@ -2836,7 +2838,8 @@ async function planChatAgentTurn(
 5. get_task_detail：读取某个具体任务的需求、进展、等待与验收事实。参数：title:string。
 6. get_requester_profile：按需求人姓名读取历史任务画像。参数：name:string。
 7. search_product_help：查询 Giverny 的快捷键、入口、使用方法、模型设置、版本更新、品牌说明和产品规则。参数：query:string。
-8. none：不需要工具，交给普通聊天模型回答。
+8. query_agenda：查询日期范围内的任务、到期风险、活动等待、站内提醒、每日负载和可用时间。参数：startDate?:string，endDate?:string，durationMinutes?:number，workingDayStart?:string，workingDayEnd?:string。
+9. none：不需要工具，交给普通聊天模型回答。
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
@@ -2847,6 +2850,7 @@ async function planChatAgentTurn(
 - 用户明确要求导出、生成或下载某个日期范围的结算回单/Excel 时，必须调用 export_settlement_receipt；不能只返回文字汇总。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
+- 用户问今天/本周日程、安排、提醒、空闲时间或什么时候能安排工作时，调用 query_agenda。
 - 用户问“哪些 / 所有 / 全部”任务的延期、等待、未完成、负责人或按日期的跨项目汇总时，必须调用 query_task_portfolio，不要用 search_tasks 的标题搜索代替。
 - 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
 - 用户询问组织规则、合作伙伴长期偏好、项目约定、历史决策或之前记住了什么时，必须调用 query_enterprise_memory；不能把模型推测当成已确认记忆。
@@ -2857,7 +2861,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"query_enterprise_memory"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"query_enterprise_memory"|"query_agenda"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2877,6 +2881,17 @@ async function executeChatAgentTools(
   for (const tool of plannedTools) {
     const name = normalizeChatToolName(tool.name)
     if (name === 'none') continue
+    if (name === 'query_agenda') {
+      try {
+        const agenda = await buildAgendaSnapshot(env, workspaceId, tool.args || {})
+        results.push({ name, args: tool.args || {}, result: agenda })
+        trace.push(`查询 Agenda：已整理 ${agenda.range.startDate} 至 ${agenda.range.endDate} 的 ${agenda.summary.taskCount} 项任务、${agenda.summary.reminderCount} 条提醒和 ${agenda.availableSlots.length} 个可用时间候选。`)
+      } catch (error) {
+        results.push({ name, args: tool.args || {}, result: { error: error instanceof Error ? error.message : 'Agenda 查询失败' } })
+        trace.push('查询 Agenda：日期范围或工作时段无效。')
+      }
+      continue
+    }
     if (name === 'export_settlement_receipt') {
       const startDate = agentString(tool.args?.startDate, 10)
       const endDate = agentString(tool.args?.endDate, 10)
@@ -3883,7 +3898,7 @@ async function agentReconcileSettlementTool(env: Env, request: Request) {
 
 async function scheduleConflictSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string, excludeTaskId = 0) {
   const rows = await env.DB.prepare(
-    `SELECT id, title, status, start_date, estimated_delivery_date, estimated_hours, requester, contact_person
+    `SELECT id, title, status, start_date, estimated_delivery_date, estimated_hours, requester, contact_person, waiting_entries_json, updated_at
      FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
        AND status NOT IN ('已验收', '终止', '不计费')
        AND start_date IS NOT NULL AND estimated_delivery_date IS NOT NULL
@@ -3895,7 +3910,150 @@ async function scheduleConflictSnapshot(env: Env, workspaceId: string, startDate
     taskId: Number(task.id), title: task.title, status: task.status,
     startDate: task.start_date || '', endDate: task.estimated_delivery_date || '',
     estimatedHours: Number(task.estimated_hours) || 0, requester: task.requester || '', contact: task.contact_person || '',
+    overlapMinutes: Math.max(0, Math.round((Math.min(agendaTimeMs(endDate), agendaTimeMs(task.estimated_delivery_date || '')) - Math.max(agendaTimeMs(startDate), agendaTimeMs(task.start_date || ''))) / 60000)),
+    activeWaiting: parseWaitingEntries(task.waiting_entries_json).filter((entry) => !entry.end).map((entry) => ({ reason: entry.reason || '', note: entry.note || '' })),
+    updatedAt: task.updated_at,
   }))
+}
+
+function agendaTimeMs(value: string) {
+  const normalized = String(value || '').trim().replace(' ', 'T')
+  if (!normalized) return Number.NaN
+  const withTime = /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T00:00` : normalized
+  const withSeconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(withTime) ? `${withTime}:00` : withTime
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(withSeconds) ? withSeconds : `${withSeconds}+08:00`
+  return new Date(zoned).getTime()
+}
+
+function agendaLocalDateTime(value: number) {
+  return new Date(value + 8 * 60 * 60 * 1000).toISOString().slice(0, 16)
+}
+
+function agendaClockMinutes(value: string) {
+  const [hours, minutes] = value.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function agendaDateRange(startDate: string, endDate: string) {
+  const values: string[] = []
+  for (let value = startDate; value <= endDate && values.length <= 62; value = shiftSettlementDay(value, 1)) values.push(value)
+  return values
+}
+
+function agendaTaskBlock(task: DbTask) {
+  const start = task.start_date || ''
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(start)) return null
+  const startMs = agendaTimeMs(start)
+  if (!Number.isFinite(startMs)) return null
+  const durationMinutes = Math.max(30, Math.round(((Number(task.estimated_hours) || 1) * 60)))
+  return { taskId: Number(task.id), title: task.title, startAt: agendaLocalDateTime(startMs), endAt: agendaLocalDateTime(startMs + durationMinutes * 60000), startMs, endMs: startMs + durationMinutes * 60000 }
+}
+
+function mergeAgendaBlocks(blocks: Array<{ startMs: number; endMs: number }>) {
+  const merged: Array<{ startMs: number; endMs: number }> = []
+  for (const block of blocks.slice().sort((left, right) => left.startMs - right.startMs)) {
+    const previous = merged.at(-1)
+    if (previous && block.startMs <= previous.endMs) previous.endMs = Math.max(previous.endMs, block.endMs)
+    else merged.push({ startMs: block.startMs, endMs: block.endMs })
+  }
+  return merged
+}
+
+async function scheduleSnapshotChecksum(value: unknown) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value))))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function buildAgendaSnapshot(env: Env, workspaceId: string, body: Record<string, unknown>) {
+  const today = beijingClock().date
+  const startDate = agentString(body.startDate, 10) || today
+  const endDate = agentString(body.endDate, 10) || shiftSettlementDay(startDate, 6)
+  if (!settlementDay.test(startDate) || !settlementDay.test(endDate) || startDate > endDate) throw new Error('Agenda 日期范围无效')
+  const days = agendaDateRange(startDate, endDate)
+  if (!days.length || days.at(-1) !== endDate) throw new Error('Agenda 单次最多查询 63 天')
+  const workingDayStart = agentString(body.workingDayStart, 5) || '09:00'
+  const workingDayEnd = agentString(body.workingDayEnd, 5) || '18:00'
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(workingDayStart) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(workingDayEnd) || agendaClockMinutes(workingDayStart) >= agendaClockMinutes(workingDayEnd)) throw new Error('工作时段无效')
+  const includeCompleted = agentBool(body.includeCompleted)
+  const includeWeekends = body.includeWeekends === undefined ? true : agentBool(body.includeWeekends)
+  const durationMinutes = body.durationMinutes === undefined ? 0 : Math.max(15, Math.min(480, Number(body.durationMinutes) || 0))
+  const slotStepMinutes = [15, 30, 60].includes(Number(body.slotStepMinutes)) ? Number(body.slotStepMinutes) : 30
+  const excludeTaskId = Number(body.excludeTaskId) || 0
+  const [taskResult, reminderResult] = await Promise.all([
+    env.DB.prepare(
+      `SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+       AND (? = 1 OR status NOT IN ('已验收', '终止', '不计费'))
+       AND ((start_date IS NOT NULL AND substr(start_date, 1, 10) <= ? AND substr(COALESCE(estimated_delivery_date, start_date), 1, 10) >= ?)
+         OR (estimated_delivery_date IS NOT NULL AND substr(estimated_delivery_date, 1, 10) BETWEEN ? AND ?))
+       ORDER BY COALESCE(estimated_delivery_date, start_date) ASC, start_date ASC LIMIT 500`,
+    ).bind(workspaceId, includeCompleted ? 1 : 0, endDate, startDate, startDate, endDate).all<DbTask>(),
+    env.DB.prepare(
+      `SELECT agent_task_plans.*, tasks.title AS task_title FROM agent_task_plans
+       LEFT JOIN tasks ON tasks.id = agent_task_plans.task_id AND tasks.workspace_id = agent_task_plans.workspace_id
+       WHERE agent_task_plans.workspace_id = ? AND agent_task_plans.kind = 'reminder' AND agent_task_plans.status = 'active'
+       AND agent_task_plans.next_action_at IS NOT NULL AND substr(agent_task_plans.next_action_at, 1, 10) BETWEEN ? AND ?
+       ORDER BY agent_task_plans.next_action_at ASC LIMIT 200`,
+    ).bind(workspaceId, startDate, endDate).all<DbAgentTaskPlan & { task_title: string | null }>(),
+  ])
+  const tasks = taskResult.results || []
+  const taskTitleById = new Map(tasks.map((task) => [Number(task.id), task.title]))
+  const blocks = tasks.map(agendaTaskBlock).filter((item): item is NonNullable<typeof item> => Boolean(item)).filter((item) => item.taskId !== excludeTaskId)
+  const reminders = (reminderResult.results || []).map((row) => ({ id: row.id, taskId: Number(row.task_id) || 0, taskTitle: row.task_title || taskTitleById.get(Number(row.task_id)) || '', goal: row.goal, remindAt: row.next_action_at || '' }))
+  const agendaTasks = tasks.map((task) => {
+    const deliveryDay = String(task.estimated_delivery_date || task.start_date || '').slice(0, 10)
+    const waiting = agentWaitingRecords(task).filter((entry) => entry.active)
+    const overdue = !['已验收', '终止', '不计费'].includes(task.status) && Boolean(deliveryDay && deliveryDay < today)
+    return { taskId: Number(task.id), title: task.title, type: task.design_type || '', status: task.status, progress: Number(task.progress) || 0, startDate: task.start_date || '', endDate: task.estimated_delivery_date || '', estimatedHours: Number(task.estimated_hours) || 0, actualHours: actualHoursForDbTask(task), requester: task.requester || '', contact: task.contact_person || '', overdue, dueToday: deliveryDay === today, activeWaiting: waiting }
+  })
+  const timeConflicts: Array<{ day: string; firstTaskId: number; secondTaskId: number; startAt: string; endAt: string }> = []
+  for (let index = 0; index < blocks.length; index += 1) {
+    for (let next = index + 1; next < blocks.length; next += 1) {
+      const startMs = Math.max(blocks[index].startMs, blocks[next].startMs)
+      const endMs = Math.min(blocks[index].endMs, blocks[next].endMs)
+      if (startMs < endMs) timeConflicts.push({ day: agendaLocalDateTime(startMs).slice(0, 10), firstTaskId: blocks[index].taskId, secondTaskId: blocks[next].taskId, startAt: agendaLocalDateTime(startMs), endAt: agendaLocalDateTime(endMs) })
+    }
+  }
+  const daily = days.map((day) => {
+    const isWeekend = [0, 6].includes(new Date(`${day}T00:00:00Z`).getUTCDay())
+    const workStartMs = agendaTimeMs(`${day}T${workingDayStart}`)
+    const workEndMs = agendaTimeMs(`${day}T${workingDayEnd}`)
+    const dayBlocks = blocks.filter((block) => block.startAt.slice(0, 10) === day).map((block) => ({ ...block, startMs: Math.max(block.startMs, workStartMs), endMs: Math.min(block.endMs, workEndMs) })).filter((block) => block.startMs < block.endMs)
+    const merged = mergeAgendaBlocks(dayBlocks)
+    const busyMinutes = merged.reduce((sum, block) => sum + Math.round((block.endMs - block.startMs) / 60000), 0)
+    const capacityMinutes = workEndMs - workStartMs > 0 ? Math.round((workEndMs - workStartMs) / 60000) : 0
+    const dayTaskIds = agendaTasks.filter((task) => String(task.startDate).slice(0, 10) <= day && String(task.endDate || task.startDate).slice(0, 10) >= day).map((task) => task.taskId)
+    return { date: day, isWeekend, taskIds: dayTaskIds, startingTaskIds: agendaTasks.filter((task) => task.startDate.slice(0, 10) === day).map((task) => task.taskId), dueTaskIds: agendaTasks.filter((task) => task.endDate.slice(0, 10) === day).map((task) => task.taskId), reminderIds: reminders.filter((reminder) => reminder.remindAt.slice(0, 10) === day).map((reminder) => reminder.id), busyMinutes, availableMinutes: includeWeekends || !isWeekend ? Math.max(0, capacityMinutes - busyMinutes) : 0, load: capacityMinutes > 0 ? Math.round((busyMinutes / capacityMinutes) * 100) : 0 }
+  })
+  const availableSlots: Array<{ startAt: string; endAt: string; durationMinutes: number }> = []
+  if (durationMinutes > 0) {
+    for (const day of days) {
+      const isWeekend = [0, 6].includes(new Date(`${day}T00:00:00Z`).getUTCDay())
+      if (!includeWeekends && isWeekend) continue
+      const workStartMs = agendaTimeMs(`${day}T${workingDayStart}`)
+      const workEndMs = agendaTimeMs(`${day}T${workingDayEnd}`)
+      const busy = mergeAgendaBlocks(blocks.filter((block) => block.startAt.slice(0, 10) === day).map((block) => ({ startMs: Math.max(block.startMs, workStartMs), endMs: Math.min(block.endMs, workEndMs) })).filter((block) => block.startMs < block.endMs))
+      const nowMs = Date.now()
+      const earliestMs = day === today && nowMs > workStartMs ? Math.ceil(nowMs / (slotStepMinutes * 60000)) * slotStepMinutes * 60000 : workStartMs
+      for (let cursor = earliestMs; cursor + durationMinutes * 60000 <= workEndMs && availableSlots.length < 20; cursor += slotStepMinutes * 60000) {
+        const slotEnd = cursor + durationMinutes * 60000
+        if (!busy.some((block) => cursor < block.endMs && slotEnd > block.startMs)) availableSlots.push({ startAt: agendaLocalDateTime(cursor), endAt: agendaLocalDateTime(slotEnd), durationMinutes })
+      }
+      if (availableSlots.length >= 20) break
+    }
+  }
+  const risks = { overdueTaskIds: agendaTasks.filter((task) => task.overdue).map((task) => task.taskId), dueTodayTaskIds: agendaTasks.filter((task) => task.dueToday).map((task) => task.taskId), waitingTaskIds: agendaTasks.filter((task) => task.activeWaiting.length > 0).map((task) => task.taskId), timeConflicts }
+  return { tool: 'query_agenda', timezone: 'Asia/Shanghai', range: { startDate, endDate }, workingHours: { start: workingDayStart, end: workingDayEnd, includeWeekends }, summary: { taskCount: agendaTasks.length, reminderCount: reminders.length, overdueCount: risks.overdueTaskIds.length, dueTodayCount: risks.dueTodayTaskIds.length, waitingCount: risks.waitingTaskIds.length, timeConflictCount: timeConflicts.length }, tasks: agendaTasks, reminders, daily, availableSlots, risks, schedulingMethod: '明确开始时刻的任务按开始时间加预估工时占用时间块；跨日任务作为持续计划展示，不会占满跨日区间。' }
+}
+
+async function agentAgendaTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  try {
+    const result = await buildAgendaSnapshot(env, agentWorkspaceIdFromRequest(request), await parseAgentToolBody(request))
+    await audit(env, agentCapabilityRegistry.query_agenda.policy.auditEvent, 'agenda', `${result.range.startDate}:${result.range.endDate}`, { ...result.range, taskCount: result.summary.taskCount, reminderCount: result.summary.reminderCount, availableSlotCount: result.availableSlots.length, conflictCount: result.summary.timeConflictCount })
+    return agentOk(result)
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : 'Agenda 查询失败', 400)
+  }
 }
 
 async function agentScheduleConflictsTool(env: Env, request: Request) {
@@ -4141,9 +4299,14 @@ async function agentReschedulePreviewTool(env: Env, request: Request) {
     const task = await agentTaskByRef(env, body)
     const startDate = agentDateTime(body.startDate)
     const endDate = agentDateTime(body.endDate, startDate)
-    if (startDate >= endDate) return agentFail('预计交付必须晚于预计开始', 400)
-    const conflicts = await scheduleConflictSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate, Number(task.id))
-    const draft = { taskId: Number(task.id), taskTitle: task.title, startDate, endDate, estimatedHours: Math.max(0, agentNumber(body.estimatedHours, Number(task.estimated_hours) || 0)), reason: agentString(body.reason, 500), before: { startDate: task.start_date || '', endDate: task.estimated_delivery_date || '', estimatedHours: Number(task.estimated_hours) || 0 }, conflictCount: conflicts.length, conflicts }
+    if (!startDate || !endDate || startDate >= endDate) return agentFail('预计交付必须晚于预计开始', 400)
+    const workspaceId = agentWorkspaceIdFromRequest(request)
+    if (await isLockedReportMonth(env, task.settlement_month, workspaceId)) return agentFail('任务所属月份已锁定结算，不能调整排期', 409)
+    const estimatedHours = Math.max(0, agentNumber(body.estimatedHours, Number(task.estimated_hours) || 0))
+    const conflicts = await scheduleConflictSnapshot(env, workspaceId, startDate, endDate, Number(task.id))
+    const before = { startDate: task.start_date || '', endDate: task.estimated_delivery_date || '', estimatedHours: Number(task.estimated_hours) || 0, status: task.status, settlementMonth: task.settlement_month || '', updatedAt: task.updated_at }
+    const scheduleChecksum = await scheduleSnapshotChecksum({ taskId: Number(task.id), startDate, endDate, estimatedHours, conflicts })
+    const draft = { taskId: Number(task.id), taskTitle: task.title, startDate, endDate, estimatedHours, reason: agentString(body.reason, 500), before, conflictCount: conflicts.length, conflicts, scheduleChecksum }
     return agentPreview(env, request, 'reschedule_task_preview', draft, [], conflicts.length ? [`新排期与 ${conflicts.length} 个未闭环任务重叠，请核对后再确认。`] : [])
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'reschedule_task_preview')
@@ -4160,7 +4323,17 @@ async function agentRescheduleTool(env: Env, request: Request) {
   const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), workspaceId).first<DbTask>()
   if (!task) return agentFail('任务不存在或已作废', 404)
   if (await isLockedReportMonth(env, task.settlement_month, workspaceId)) return agentFail('任务所属月份已锁定结算，不能调整排期', 409)
-  await env.DB.prepare('UPDATE tasks SET start_date = ?, estimated_delivery_date = ?, estimated_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(agentDateTime(draft.startDate), agentDateTime(draft.endDate), Math.max(0, agentNumber(draft.estimatedHours)), task.id).run()
+  const before = draft.before && typeof draft.before === 'object' ? draft.before as Record<string, unknown> : {}
+  if ((task.start_date || '') !== before.startDate || (task.estimated_delivery_date || '') !== before.endDate || (Number(task.estimated_hours) || 0) !== Number(before.estimatedHours) || task.status !== before.status || (task.settlement_month || '') !== before.settlementMonth || task.updated_at !== before.updatedAt) {
+    return agentFail('任务排期在确认期间发生变化，请重新预览', 409)
+  }
+  const startDate = agentDateTime(draft.startDate)
+  const endDate = agentDateTime(draft.endDate, startDate)
+  const estimatedHours = Math.max(0, agentNumber(draft.estimatedHours))
+  const conflicts = await scheduleConflictSnapshot(env, workspaceId, startDate, endDate, Number(task.id))
+  const currentChecksum = await scheduleSnapshotChecksum({ taskId: Number(task.id), startDate, endDate, estimatedHours, conflicts })
+  if (currentChecksum !== draft.scheduleChecksum) return agentFail('相关任务或冲突列表在确认期间发生变化，请重新预览', 409)
+  await env.DB.prepare('UPDATE tasks SET start_date = ?, estimated_delivery_date = ?, estimated_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?').bind(startDate, endDate, estimatedHours, task.id, workspaceId).run()
   await audit(env, agentCapabilityRegistry.reschedule_task.policy.auditEvent, 'task', task.id, draft)
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'reschedule_task', mode: 'execute', task: saved ? toTask(saved) : null })
@@ -4172,6 +4345,7 @@ async function agentScheduleReminderPreviewTool(env: Env, request: Request) {
   try {
     const task = await agentTaskByRef(env, body)
     const remindAt = agentDateTime(body.remindAt)
+    if (!remindAt || agendaTimeMs(remindAt) <= Date.now()) return agentFail('提醒时间必须晚于当前时间', 400)
     const draft = { taskId: Number(task.id), taskTitle: task.title, goal: agentString(body.goal, 500), remindAt }
     return agentPreview(env, request, 'schedule_reminder_preview', draft, [!draft.goal && 'goal'].filter(Boolean) as string[])
   } catch (error) {
@@ -4185,7 +4359,11 @@ async function agentScheduleReminderTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'schedule_reminder', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
-  const plan = await createAgentTaskPlan(env, { workspaceId: agentWorkspaceIdFromRequest(request), taskId: Number(draft.taskId), kind: 'reminder', goal: agentString(draft.goal, 500), steps: [{ key: 'remind', label: agentString(draft.goal, 120), action: 'follow_up', dependsOn: [] }], nextActionAt: agentDateTime(draft.remindAt) })
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const task = await env.DB.prepare('SELECT id FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), workspaceId).first<{ id: string }>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (agendaTimeMs(agentString(draft.remindAt, 40)) <= Date.now()) return agentFail('提醒时间已经过去，请重新安排', 409)
+  const plan = await createAgentTaskPlan(env, { workspaceId, taskId: Number(draft.taskId), kind: 'reminder', goal: agentString(draft.goal, 500), steps: [{ key: 'remind', label: agentString(draft.goal, 120), action: 'follow_up', dependsOn: [] }], nextActionAt: agentDateTime(draft.remindAt) })
   await audit(env, agentCapabilityRegistry.schedule_reminder.policy.auditEvent, 'agent_plan', plan.id, { taskId: plan.taskId, remindAt: plan.nextActionAt })
   return agentOk({ tool: 'schedule_reminder', mode: 'execute', plan })
 }
@@ -6620,7 +6798,7 @@ function isRequesterProfileQuestion(question: string) {
 }
 
 function normalizeChatToolName(value: unknown): ChatAgentToolName {
-  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_product_help', 'query_enterprise_memory'].includes(String(value))
+  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_product_help', 'query_enterprise_memory', 'query_agenda'].includes(String(value))
     ? value as ChatAgentToolName
     : 'none'
 }
@@ -7854,6 +8032,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
   if (url.pathname === '/api/agent/tools/settlement-reconciliation' && (request.method === 'POST' || request.method === 'GET')) return agentReconcileSettlementTool(env, request)
+  if (url.pathname === '/api/agent/tools/agenda' && (request.method === 'POST' || request.method === 'GET')) return agentAgendaTool(env, request)
   if (url.pathname === '/api/agent/tools/schedule-conflicts' && (request.method === 'POST' || request.method === 'GET')) return agentScheduleConflictsTool(env, request)
   if (url.pathname === '/api/agent/tools/prepare-attachment-upload' && request.method === 'POST') return agentPrepareAttachmentUploadTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-attachment-analysis-preview' && request.method === 'POST') return agentManageAttachmentAnalysisPreviewTool(env, request)

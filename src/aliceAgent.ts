@@ -117,7 +117,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
 - 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；为步骤提供稳定 key，用 dependsOn 表达真实依赖，存在可逆操作时声明 compensation。默认创建 batch 批次，必须由用户整体确认后才推进，不要只在正文里写一次性清单。
 - 用户要求导出结算回单时调用 export_settlement_preview；查询既有回单时调用 query_settlement_exports；要求核账、查重复、遗漏、日期重叠或空档时调用 reconcile_settlement_export；锁定、管理链接或删除未锁定记录时先查询，再生成 manage_settlement_export_preview。不得绕回旧兼容聊天导出旁路，不得在对话中索取管理员密码。
-- 用户询问排期冲突时调用 check_schedule_conflicts；要求改排期时调用 reschedule_task_preview，必须把冲突结果展示在确认卡中。
+- 用户询问今天/本周已有安排、日程、提醒、空闲时间或什么时候可以安排时调用 query_agenda；“安排下周做某项新工作”属于创建任务，不能仅因出现“安排”就查询 Agenda。询问一个明确时间段是否冲突时调用 check_schedule_conflicts；要求改排期时调用 reschedule_task_preview，必须把冲突结果展示在确认卡中。
 - 用户上传文件但没有明确任务编号时，调用 prepare_attachment_upload 定位任务并返回浏览器上传接力；文件二进制与 API Key 都不得进入模型上下文。
 - 用户要求安排提醒时调用 schedule_reminder_preview；提醒只进入当前工作区任务中心，不擅自发送外部消息。
 - 用户询问“现在最该处理什么”、风险待办、主动提醒、优先级或提醒处理效果时调用 query_proactive_work；答案必须引用工具返回的证据和优先级。用户要求解决、忽略或稍后处理某条主动事项时调用 manage_proactive_item_preview，不得仅靠关键词把提醒当作已处理。
@@ -719,6 +719,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.query_settlement_exports.description,
         inputSchema: capabilities.query_settlement_exports.inputSchema,
         execute: (input) => this.callTool(capabilities.query_settlement_exports.endpoint, input, 'GET'),
+      }),
+      query_agenda: tool({
+        description: capabilities.query_agenda.description,
+        inputSchema: capabilities.query_agenda.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_agenda.endpoint, input, 'GET'),
       }),
       reconcile_settlement_export: tool({
         description: capabilities.reconcile_settlement_export.description,

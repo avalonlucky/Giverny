@@ -130,9 +130,15 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ exportId: z.string().min(1).optional(), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
     trace: { running: '逐项核对结算数据', completed: '结算核对结果已生成' },
   }),
+  query_agenda: readCapability({
+    title: '查询日程与可用时间', description: '按日期范围读取任务计划、到期风险、活动等待和站内提醒，并基于现有日历时间块确定性计算每日负载与可用时间候选。用户询问今天、本周、日程、空闲时间或什么时候能安排时必须调用。', category: 'calendar', endpoint: 'agenda',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read', 'plans:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_agenda' },
+    inputSchema: z.object({ startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), durationMinutes: z.number().int().min(15).max(480).optional(), workingDayStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('09:00'), workingDayEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('18:00'), slotStepMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).default(30), includeWeekends: z.boolean().default(true), includeCompleted: z.boolean().default(false), excludeTaskId: z.number().int().positive().optional() }),
+    trace: { running: '整理日程、提醒与可用时间', completed: 'Agenda 已生成' },
+  }),
   check_schedule_conflicts: readCapability({
     title: '检查任务排期冲突', description: '按开始和交付时间检查当前工作区未闭环任务的时间重叠与容量风险。', category: 'calendar', endpoint: 'schedule-conflicts', taskScoped: true,
-    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read'], roles: businessReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_check_schedule_conflicts' },
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_check_schedule_conflicts' },
     inputSchema: z.object({ startDate: z.string(), endDate: z.string(), excludeTaskId: z.number().int().positive().optional(), estimatedHours: z.number().min(0).optional() }),
     trace: { running: '检查排期冲突', completed: '排期冲突已核对' },
   }),
@@ -280,7 +286,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'query_agenda', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

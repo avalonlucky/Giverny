@@ -9,6 +9,7 @@ const registry = readFileSync('src/agentToolRegistry.ts', 'utf8')
 for (const symbol of [
   'agentQuerySettlementExportsTool',
   'agentReconcileSettlementTool',
+  'agentAgendaTool',
   'agentScheduleConflictsTool',
   'agentPrepareAttachmentUploadTool',
   'agentInspectAiSettingsTool',
@@ -26,6 +27,10 @@ for (const symbol of [
 ]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 
 assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
+assert.match(worker, /scheduleSnapshotChecksum/)
+assert.match(worker, /任务排期在确认期间发生变化，请重新预览/)
+assert.match(worker, /相关任务或冲突列表在确认期间发生变化，请重新预览/)
+assert.match(worker, /schedulingMethod:/)
 assert.match(worker, /action === 'delete_unlocked' && row\.locked/)
 assert.match(worker, /settlementExportFingerprint\(before\) !== draft\.recordFingerprint/)
 assert.match(worker, /DELETE FROM settlement_exports WHERE id = \? AND workspace_id = \? AND locked = 0/)

@@ -114,6 +114,9 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   if ((productSubject && /(?:怎么|如何|在哪|入口|设置|开通|为什么|原因|是什么)/.test(value))
     || /(?:这个网站)?最近更新了?哪些内容/.test(value)) add('product_help')
   const explicitTaskFacts = /(?:列|哪些|所有|全部|多少|汇总|概况|清单|排查|目前|现在|详情|进展|状态|卡在|卡点|等待|延期|逾期|待验收|已验收|没完成|未完成|做到|为什么|有没有|是否)/.test(value)
+  const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(value)
+    && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(value)
+  if (asksAgenda) add('task_data')
   const readsTaskData = /(?:任务|项目|工作|进展|等待|延期|逾期|待验收|已验收|卡点|交付)/.test(value)
     && (explicitTaskFacts || (!readsAttachment && /(?:查|看|告诉)/.test(value)))
   if (readsTaskData && (!writesBusinessData || /(?:查|看|告诉|列|哪些|所有|全部|多少|目前|现在|为什么|有没有|是否)/.test(value))) add('task_data')
@@ -153,6 +156,8 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     && /(?:这个任务|那个任务|这个项目|那个项目|刚才那个|上述任务|当前任务).*(?:详情|进展|状态|等|卡|为什么|现在)/.test(turn.question)
   const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
   const asksProactiveWork = /(?:主动事项|风险待办|优先级|最该|优先处理|提醒处理效果|误报率|解决率)/.test(turn.question)
+  const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(turn.question)
+    && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(turn.question)
   const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
   const hasPortfolioScope = /(?:列|哪些|所有|全部|多个|多项|多少|各有|谁|汇总|概况|清单|排查)|(?:从|\d{1,2}月\d{1,2}日).*(?:到|至)/.test(turn.question)
   const stateKinds = ['已验收', '未完成', '逾期', '延期', '等待中', '待验收'].filter((value) => turn.question.includes(value)).length
@@ -168,6 +173,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     && !hasDeterministicTool('get_task_detail', 'query_task_portfolio')) {
     requiredTools.push('get_task_detail')
     issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
+  }
+  if (asksAgenda && !hasDeterministicTool('query_agenda')) {
+    requiredTools.push('query_agenda')
+    issues.push('日程或可用时间结论没有读取 Agenda。')
   }
   if (asksProactiveWork && !hasDeterministicTool('query_proactive_work')) {
     requiredTools.push('query_proactive_work')
@@ -186,7 +195,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('inspect_attachment_evidence')
     issues.push('附件内容或质量结论没有读取可引用的文件证据。')
   }
-  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work')) {
+  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')

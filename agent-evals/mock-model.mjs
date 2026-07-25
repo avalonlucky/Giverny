@@ -119,6 +119,9 @@ function chooseTool(messages) {
     if (/卡在哪|为什么一直没有交付/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'get_task_detail', args: { title: '公司产品分套的修改' }, reason: '需要核对具体任务的等待记录' }], confidence: 0.99 }) })
     }
+    if (/(?:日程|安排|空闲|空档|有空|时间槽|什么时候能安排|本周计划|今天计划|明天计划)/.test(plannerQuestion) && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'query_agenda', args: { startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: /两小时|2小时/.test(plannerQuestion) ? 120 : undefined }, reason: '需要读取任务、提醒和可用时间' }], confidence: 0.99 }) })
+    }
     if (/(?:导出|生成|下载).*(?:结算回单|Excel|excel)/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'export_settlement_receipt', args: { startDate: '2026-06-01', endDate: '2026-06-10' }, reason: '需要生成可下载的正式回单' }], confidence: 0.99 }) })
     }
@@ -215,6 +218,7 @@ function chooseTool(messages) {
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
   if (/最该.*处理|风险待办|主动事项|提醒处理效果|解决率|误报率/.test(text)) return toolCall('query_proactive_work', { status: 'active', limit: 50 })
+  if (/(?:日程|安排|空闲|空档|有空|时间槽|什么时候能安排|本周计划|今天计划|明天计划)/.test(text) && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(text)) return toolCall('query_agenda', { startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: /两小时|2小时/.test(text) ? 120 : undefined, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 })
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
     return toolCall('start_monthly_review', { month: /6\s*月|2026-06/.test(text) ? '2026-06' : '2026-07' })
   }
