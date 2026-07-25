@@ -13,7 +13,10 @@ Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作与�
   -> Workflow 调用 workflow-write
   -> Worker 校验 operationId + confirmationToken
   -> 执行确定性业务写入
-  -> 缓存写入结果并回传 Agent
+  -> 从当前 workspace 的 D1 权威数据独立重读
+  -> 生成结构化 postcondition 验收结果
+  -> 缓存写入与验收结果并回传 Agent
+  -> 验收通过才宣称完成并推进计划
 ```
 
 当前覆盖二十类操作：创建任务、记录反馈、修改任务状态、修改任务字段、追加任务进展、记录等待、维护单条记录、标记验收文件、完整验收、导出结算回单、管理结算锁定/分享有效期/未锁定记录删除、调整排期、创建站内提醒、配置模型路由、恢复模型路由、管理项目执行计划、恢复附件分析、修改附件元数据、处理主动事项和维护企业记忆。模型仍然只有 preview 权限，不能直接启动 execute。预览与执行的配对关系、风险、允许角色和 Workflow 白名单均由 `src/agentToolRegistry.ts` 生成。
@@ -88,13 +91,15 @@ Agent 创建 2–8 个步骤及依赖图
 - 人工确认通过 `waitForApproval` 恢复流程，页面关闭或 Worker 重启不会把已确认流程变回未确认。
 - 执行步骤最多重试 3 次，使用指数退避和 30 秒单次超时。
 - `agent_write_operations` 以 Workflow instance ID 作为 `operationId`，成功结果会被缓存；同一操作重放时直接返回第一次结果，不会重复创建任务或重复记录进展。
+- 二十类签名写入均有独立后置验收：任务字段、记录、验收附件、结算快照、执行计划、主动事项、企业记忆和模型路由都从 D1 重新读取，不复用写入函数的内存结果。
+- `postcondition` 与写入结果一起持久化；幂等重放返回首次的验收快照。验收失败不会自动重做业务写入，而是写入审计、将对话操作标记为失败并阻断计划下游。
 - 执行批次以 D1 为权威状态；浏览器关闭、Agent Durable Object 休眠或换一个会话重新打开任务中心后，仍能恢复依赖、失败、暂停和补偿进度。
 - 完成或失败记录保留 30 天；异常停留在 processing 的记录保留 1 天，之后由定时清理回收。
 - 未配置 Workflow binding 的本地兼容环境仍可退回原有同步确认写入，正式环境必须使用 `AGENT_WRITE_WORKFLOW`。
 
 ## 安全边界
 
-- Workflow 只能调用统一能力注册表中标记为 `signed-execute + workflow` 的十八个 execute endpoint，不维护第二份手写白名单。附件分析恢复、附件元数据修改、主动事项处理和企业记忆维护也必须经过预览、签名确认和 Workflow。
+- Workflow 只能调用统一能力注册表中标记为 `signed-execute + workflow` 的二十个 execute endpoint，不维护第二份手写白名单。附件分析恢复、附件元数据修改、主动事项处理和企业记忆维护也必须经过预览、签名确认、Workflow 和独立验收。
 - `operationId` 不能跨 endpoint 复用。
 - 每个 execute 仍必须提供 Worker 签发且未过期的 `confirmationToken`。
 - MCP 不开放 Workflow 写入入口；`MCP 只读`口令也不能调用该入口。
@@ -107,6 +112,7 @@ Agent 创建 2–8 个步骤及依赖图
 - 生成创建任务确认卡后，Workflow 等待并接收确认。
 - Workflow 完成真实隔离 D1 写入并返回任务结果。
 - 相同 `operationId` 重放时返回同一任务，并标记 `replayed: true`。
+- 每类 Workflow 写入都必须返回 `source: d1-independent-read` 且通过的 `postcondition`；重放必须保留与首次完全相同的验收快照。
 - 后台分析会完成数据收集和报告生成，并验证取消、重试及最终恢复。
 - 云端会话会验证索引、消息恢复、旧历史导入与删除；任务中心会验证未读状态持久化。
 - 多步骤批次会验证未确认不可推进、依赖解锁、失败停止、重试、暂停/恢复、过期 revision 冲突、下游重开及反向补偿。

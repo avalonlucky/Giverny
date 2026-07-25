@@ -4188,7 +4188,7 @@ async function agentUpdateAttachmentMetadataTool(env: Env, request: Request) {
     .bind(agentString(draft.name, 120), agentString(draft.tag, 240), draft.scope === 'acceptance' ? 'acceptance' : 'progress', agentBool(draft.visibleToClient) ? 1 : 0, row.id, row.task_id).run()
   await audit(env, agentCapabilityRegistry.update_attachment_metadata.policy.auditEvent, 'attachment', row.id, { taskId: Number(row.task_id), before, after: { name: draft.name, tag: draft.tag, scope: draft.scope, visibleToClient: draft.visibleToClient } })
   const saved = await env.DB.prepare('SELECT a.*, t.title AS task_title FROM attachments a INNER JOIN tasks t ON t.id = a.task_id WHERE a.id = ?').bind(row.id).first<DbAttachment>()
-  return agentOk({ tool: 'update_attachment_metadata', mode: 'execute', file: saved ? toAgentResultAttachment(saved) : null })
+  return agentOk({ tool: 'update_attachment_metadata', mode: 'execute', file: saved ? { ...toAgentResultAttachment(saved), visibleToClient: Boolean(saved.visible_to_client) } : null })
 }
 
 async function agentInspectAiSettingsTool(env: Env, request: Request) {
@@ -8228,6 +8228,155 @@ async function maybeScheduleAgentTaskReminders(env: Env, now = new Date()) {
   return { scannedAt: `${clock.date}T${String(clock.hour).padStart(2, '0')}:00:00+08:00` }
 }
 
+type AgentPostconditionItem = {
+  name: string
+  passed: boolean
+  expected: unknown
+  actual: unknown
+}
+
+type AgentPostcondition = {
+  passed: boolean
+  endpoint: string
+  source: 'd1-independent-read'
+  checks: AgentPostconditionItem[]
+  verifiedAt: string
+}
+
+function postconditionCheck(name: string, expected: unknown, actual: unknown): AgentPostconditionItem {
+  return { name, passed: agentCanonicalize(expected) === agentCanonicalize(actual), expected, actual }
+}
+
+const agentTaskPostconditionEndpoints = new Set([
+  'create-task',
+  'record-feedback',
+  'update-task-status',
+  'update-task-fields',
+  'append-progress',
+  'append-waiting',
+  'manage-record',
+  'reschedule-task',
+  'mark-acceptance-files',
+  'complete-acceptance',
+])
+
+function taskPostconditionSnapshot(value: unknown) {
+  const task = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    id: Number(task.id) || 0,
+    title: String(task.title || ''),
+    requirement: String(task.requirement || ''),
+    type: String(task.type || ''),
+    status: String(task.status || ''),
+    progress: Number(task.progress) || 0,
+    date: String(task.date || ''),
+    estimatedDate: String(task.estimatedDate || ''),
+    actualDeliveryDate: String(task.actualDeliveryDate || ''),
+    estimatedHours: Number(task.estimatedHours) || 0,
+    actualHours: Number(task.actualHours) || 0,
+    billable: Boolean(task.billable),
+    requester: String(task.requester || ''),
+    contact: String(task.contact || ''),
+    acceptanceNote: String(task.acceptanceNote || ''),
+    timeEntries: Array.isArray(task.timeEntries) ? task.timeEntries : [],
+    waitingEntries: Array.isArray(task.waitingEntries) ? task.waitingEntries : [],
+  }
+}
+
+async function verifyAgentWritePostcondition(env: Env, principal: AgentPrincipalContext, endpoint: string, result: Record<string, unknown>): Promise<AgentPostcondition> {
+  const checks: AgentPostconditionItem[] = []
+  const taskResult = result.task && typeof result.task === 'object' ? result.task as Record<string, unknown> : null
+  if (agentTaskPostconditionEndpoints.has(endpoint)) {
+    if (!taskResult?.id) {
+      checks.push({ name: '写入结果包含可核对任务', passed: false, expected: 'task.id', actual: null })
+    } else {
+      const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?').bind(String(taskResult.id), principal.workspaceId).first<DbTask>()
+      checks.push(postconditionCheck('任务存在且关键字段一致', taskPostconditionSnapshot(taskResult), row ? taskPostconditionSnapshot(toTask(row)) : null))
+    }
+  }
+
+  if (endpoint === 'manage-attachment-analysis') {
+    const queued = Array.isArray(result.queued) ? result.queued as Array<Record<string, unknown>> : []
+    for (const item of queued) {
+      const row = await env.DB.prepare(
+        `SELECT aa.status FROM attachment_analyses aa
+         INNER JOIN tasks t ON t.id = aa.task_id
+         WHERE aa.attachment_id = ? AND t.workspace_id = ?`,
+      ).bind(String(item.attachmentId), principal.workspaceId).first<{ status: string }>()
+      const actual = row?.status || 'missing'
+      checks.push({
+        name: `附件 ${Number(item.attachmentId)} 已进入分析队列`,
+        passed: ['pending', 'processing', 'completed'].includes(actual),
+        expected: 'pending | processing | completed',
+        actual,
+      })
+    }
+  }
+  if (endpoint === 'update-attachment-metadata') {
+    const file = result.file && typeof result.file === 'object' ? result.file as Record<string, unknown> : {}
+    const row = await env.DB.prepare(
+      `SELECT a.*, t.title AS task_title FROM attachments a
+       INNER JOIN tasks t ON t.id = a.task_id
+       WHERE a.id = ? AND t.workspace_id = ?`,
+    ).bind(String(file.id), principal.workspaceId).first<DbAttachment>()
+    checks.push(postconditionCheck('附件元数据已保存', { id: Number(file.id), name: file.name, scope: file.scope, tag: file.tag, visibleToClient: Boolean(file.visibleToClient) }, row ? { id: Number(row.id), name: row.file_name, scope: row.attachment_scope, tag: row.file_tag || '', visibleToClient: Boolean(row.visible_to_client) } : null))
+  }
+  if (endpoint === 'mark-acceptance-files' || endpoint === 'complete-acceptance') {
+    const files = Array.isArray(result.files) ? result.files as Array<Record<string, unknown>> : []
+    for (const file of files) {
+      const row = await env.DB.prepare(
+        `SELECT a.attachment_scope, a.file_tag FROM attachments a
+         INNER JOIN tasks t ON t.id = a.task_id
+         WHERE a.id = ? AND t.workspace_id = ?`,
+      ).bind(String(file.id), principal.workspaceId).first<{ attachment_scope: string; file_tag: string | null }>()
+      checks.push(postconditionCheck(`附件 ${Number(file.id)} 已标记为验收文件`, { scope: 'acceptance', tag: '验收文件' }, row ? { scope: row.attachment_scope, tag: row.file_tag || '' } : null))
+    }
+  }
+  if (endpoint === 'export-settlement' || endpoint === 'manage-settlement-export') {
+    const record = result.record && typeof result.record === 'object' ? result.record as Record<string, unknown> : null
+    const exportId = String(record?.id || result.exportId || '')
+    const row = exportId ? await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, principal.workspaceId).first<DbSettlementExport>() : null
+    if (result.deleted === true) checks.push(postconditionCheck('未锁定结算记录已删除', null, row ? 'exists' : null))
+    else {
+      const savedRecord = row ? toAgentSettlementExportRecord(row) : null
+      checks.push(postconditionCheck('结算记录已保存', record ? { id: record.id, locked: Boolean(record.locked), disabled: Boolean(record.disabled), expiresAt: String(record.expiresAt || '') } : null, savedRecord ? { id: savedRecord.id, locked: savedRecord.locked, disabled: savedRecord.disabled, expiresAt: savedRecord.expiresAt } : null))
+    }
+  }
+  if (endpoint === 'schedule-reminder' || endpoint === 'manage-task-plan') {
+    const plan = result.plan && typeof result.plan === 'object' ? result.plan as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(String(plan.id), principal.workspaceId).first<DbAgentTaskPlan>()
+    checks.push(postconditionCheck('执行计划已保存', { id: plan.id, status: plan.status, revision: Number(plan.revision) || 0, goal: plan.goal }, row ? { id: row.id, status: row.status, revision: Number(row.revision) || 0, goal: row.goal } : null))
+  }
+  if (endpoint === 'manage-proactive-item') {
+    const item = result.item && typeof result.item === 'object' ? result.item as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT status FROM agent_proactive_items WHERE id = ? AND workspace_id = ?').bind(String(item.id), principal.workspaceId).first<{ status: string }>()
+    checks.push(postconditionCheck('主动事项状态已保存', String(item.status || ''), row?.status || 'missing'))
+  }
+  if (endpoint === 'manage-enterprise-memory') {
+    const memory = result.memory && typeof result.memory === 'object' ? result.memory as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT status, version, content FROM agent_enterprise_memories WHERE id = ? AND workspace_id = ?').bind(String(memory.id), principal.workspaceId).first<{ status: string; version: number; content: string }>()
+    checks.push(postconditionCheck('企业记忆已保存', { status: memory.status, version: Number(memory.version) || 0, content: memory.content }, row ? { status: row.status, version: Number(row.version) || 0, content: row.content } : null))
+  }
+  if (endpoint === 'configure-ai-route') {
+    const route = parseAiRouteKey(result.route)
+    const config = result.config && typeof result.config === 'object' ? result.config as Record<string, unknown> : {}
+    const saved = route ? publicAiModelConfig(env, await getStoredAiModelConfig(env))[route] : null
+    checks.push(postconditionCheck('模型路由已保存', { provider: config.provider, baseUrl: config.baseUrl, model: config.model }, saved ? { provider: saved.provider, baseUrl: saved.baseUrl, model: saved.model } : null))
+    checks.push(postconditionCheck('当前模型选择已保存', result.activeChoice, await getActiveChatModelChoice(env)))
+  }
+  if (endpoint === 'restore-ai-routing') {
+    const expectedRoutes = result.routes && typeof result.routes === 'object' ? result.routes : null
+    const saved = safeAiRoutes(env, await getStoredAiModelConfig(env))
+    checks.push(postconditionCheck('模型路由历史已恢复', expectedRoutes, saved))
+    checks.push(postconditionCheck('恢复后的当前模型已保存', result.activeChoice, await getActiveChatModelChoice(env)))
+  }
+
+  if (checks.length === 0) checks.push({ name: '写入类型已接入独立验收', passed: false, expected: endpoint, actual: 'missing-verifier' })
+  const verification = { passed: checks.every((item) => item.passed), endpoint, source: 'd1-independent-read' as const, checks, verifiedAt: nowIso() }
+  await audit(env, verification.passed ? 'agent_postcondition_verified' : 'agent_postcondition_failed', 'agent_write_operation', endpoint, { workspaceId: principal.workspaceId, checks: checks.map((item) => ({ name: item.name, passed: item.passed })) })
+  return verification
+}
+
 async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
   const principal = await resolveAgentToolPrincipal(env, request)
   if (!principal) return agentFail('Agent tool token missing or invalid', 401)
@@ -8277,12 +8426,14 @@ async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerEx
       }
       return agentFail(message, response.status || 500)
     }
+    const postcondition = await verifyAgentWritePostcondition(env, principal, endpoint, result)
+    const verifiedResult = { ...result, postcondition }
     await env.DB.prepare(
       `UPDATE agent_write_operations
        SET status = 'completed', result_json = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE operation_id = ?`,
-    ).bind(JSON.stringify(result), operationId).run()
-    return agentOk({ ...result, workflowOperationId: operationId, replayed: false })
+    ).bind(JSON.stringify(verifiedResult), operationId).run()
+    return agentOk({ ...verifiedResult, workflowOperationId: operationId, replayed: false })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Workflow 写入异常'
     await env.DB.prepare(

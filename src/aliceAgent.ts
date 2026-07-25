@@ -906,9 +906,39 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private async completedActionResult(pending: StoredPendingAction, result: AgentToolResponse): Promise<AliceAgentChatResult> {
-    const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
     const task = toJsonObject(result.task)
     const attachments = this.resultAttachments(result)
+    const postcondition = toJsonObject(result.postcondition)
+    const independentlyVerified = postcondition.passed === true
+    if (pending.workflowId && !independentlyVerified) {
+      const failedChecks = Array.isArray(postcondition.checks)
+        ? postcondition.checks
+            .map((item) => toJsonObject(item))
+            .filter((item) => item.passed !== true)
+            .map((item) => String(item.name || '').trim())
+            .filter(Boolean)
+        : []
+      const detail = failedChecks.length ? `未通过项：${failedChecks.join('、')}` : '未获得可核对的独立验收结果。'
+      await this.callTool('progress-task-plan', {
+        conversationId: this.activeConversationId,
+        action: pending.action,
+        taskId: Number(task.id) || Number(pending.draft.taskId) || undefined,
+        outcome: 'failed',
+        error: `写入后独立验收未通过：${failedChecks.join('、') || 'missing-verification'}`,
+      }).catch(() => undefined)
+      return {
+        answer: `写入接口已返回，但独立验收未通过，暂不标记为完成。\n\n${detail}\n\n我已停止后续计划推进，请在复核业务数据后再继续。`,
+        model: 'cloudflare-workflow:durable-write',
+        approval: this.approvalResult(pending, 'failed', detail),
+        ...(attachments.length ? { attachments } : {}),
+        trace: [
+          { type: 'plan', label: '确认操作', detail: `读取已持久保存的${pending.label}预览。` },
+          { type: 'tool', label: `执行${pending.label}`, detail: 'Cloudflare Workflow 已完成业务写入步骤。' },
+          { type: 'error', label: '独立验收失败', detail },
+        ],
+      }
+    }
+    const answer = `${pending.label}已完成。\n\n${this.executionSummary(result)}`
     await this.callTool('progress-task-plan', {
       conversationId: this.activeConversationId,
       action: pending.action,
@@ -933,7 +963,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           label: `执行${pending.label}`,
           detail: pending.workflowId ? 'Cloudflare Workflow 已完成持久化写入步骤。' : '使用签名确认凭证写入业务数据。',
         },
-        { type: 'result', label: '写入完成', detail: '业务接口已返回成功结果。' },
+        {
+          type: 'result',
+          label: pending.workflowId ? '独立验收通过' : '写入完成',
+          detail: pending.workflowId ? '已从 D1 权威数据源重新读取，写入结果与预期一致。' : '业务接口已返回成功结果。',
+        },
       ],
     }
   }

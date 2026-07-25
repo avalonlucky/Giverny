@@ -9,6 +9,7 @@ const files = {
   migration: readFileSync('db/migrations/0030_agent_execution_engine.sql', 'utf8'),
   ui: readFileSync('src/components/ChatPanel.tsx', 'utf8'),
   workflow: readFileSync('src/agentWriteWorkflow.ts', 'utf8'),
+  alice: readFileSync('src/aliceAgent.ts', 'utf8'),
 }
 
 for (const symbol of [
@@ -34,6 +35,25 @@ assert.match(files.worker, /计划已在其他会话更新/)
 assert.match(files.ui, /确认整个批次/)
 assert.match(files.ui, /补偿 \/ 回滚/)
 assert.match(files.workflow, /waitForApproval/)
+const signedWriteEndpoints = files.registry
+  .split('\n')
+  .filter((line) => line.includes("confirmation: 'signed-execute'"))
+  .map((line) => line.match(/endpoint: '([^']+)'/)?.[1])
+  .filter(Boolean)
+const postconditionVerifier = files.worker.slice(
+  files.worker.indexOf('const agentTaskPostconditionEndpoints'),
+  files.worker.indexOf('async function agentWorkflowWriteTool'),
+)
+assert.equal(signedWriteEndpoints.length, 20, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
+for (const endpoint of signedWriteEndpoints) {
+  assert.ok(postconditionVerifier.includes(`'${endpoint}'`), `signed write endpoint missing independent postcondition: ${endpoint}`)
+}
+assert.match(files.worker, /agent_postcondition_verified/)
+assert.match(files.worker, /agent_postcondition_failed/)
+assert.match(files.worker, /source: 'd1-independent-read'/)
+assert.match(files.alice, /postcondition\.passed === true/)
+assert.match(files.alice, /outcome: 'failed'/)
+assert.match(files.alice, /独立验收未通过，暂不标记为完成/)
 assert.ok(!files.worker.includes("status = 'active', paused_at = NULL, completed_at = NULL"), 'legacy resume must not erase execution result')
 
 console.log('Agent execution engine architecture guard passed.')

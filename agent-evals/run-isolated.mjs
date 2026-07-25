@@ -113,6 +113,12 @@ function assertProgressiveTraceBeforeResult(sseText, label) {
   }
 }
 
+function assertIndependentPostcondition(result, label) {
+  if (result?.postcondition?.passed !== true || result.postcondition.source !== 'd1-independent-read' || !result.postcondition.checks?.length) {
+    throw new Error(`${label} did not pass independent D1 postcondition verification: ${JSON.stringify(result?.postcondition)}`)
+  }
+}
+
 async function runMcpChecks() {
   const endpoint = 'http://127.0.0.1:8798/mcp'
   const unauthorized = await fetch(endpoint, {
@@ -373,6 +379,7 @@ async function runWorkflowWriteCheck(cookie) {
   if (!Array.isArray(result.trace) || !result.trace.join('\n').includes('Workflow')) {
     throw new Error('Workflow write response did not expose the durable execution trace')
   }
+  if (!result.trace.join('\n').includes('独立验收通过')) throw new Error('Workflow write response did not expose independent acceptance')
   process.stdout.write('Workflow approval and durable write check passed.\n')
 }
 
@@ -429,9 +436,12 @@ async function runWorkflowReplayCheck() {
   }
   const first = await execute()
   const replay = await execute()
+  assertIndependentPostcondition(first, 'Workflow first execution')
+  assertIndependentPostcondition(replay, 'Workflow replay')
   if (first.replayed !== false || replay.replayed !== true || first.task?.id !== replay.task?.id) {
     throw new Error('Workflow operation replay was not idempotent')
   }
+  if (JSON.stringify(first.postcondition) !== JSON.stringify(replay.postcondition)) throw new Error('Workflow replay changed the persisted postcondition')
   process.stdout.write('Workflow idempotent replay check passed.\n')
 }
 
@@ -518,6 +528,7 @@ async function runAgentLifecycleWriteCheck() {
     })
     const result = await response.json().catch(() => ({}))
     if (!response.ok || result.ok !== true) throw new Error(`${executeEndpoint} execute failed: ${JSON.stringify(result)}`)
+    assertIndependentPostcondition(result, executeEndpoint)
     return result
   }
   const created = await previewAndExecute('create-task-preview', 'create-task', {
@@ -526,6 +537,15 @@ async function runAgentLifecycleWriteCheck() {
   })
   const taskId = Number(created.task?.id)
   if (!taskId) throw new Error('Lifecycle task was not created')
+  await previewAndExecute('update-task-fields-preview', 'update-task-fields', {
+    taskId, fields: { requester: '隔离评测需求人', contact: '隔离评测对接人' },
+  })
+  await previewAndExecute('update-task-status-preview', 'update-task-status', {
+    taskId, status: '进行中', progress: 20, reason: '开始执行隔离评测',
+  })
+  await previewAndExecute('record-feedback-preview', 'record-feedback', {
+    taskId, note: '合作伙伴确认第一版方向', feedbackVersion: 'B01', feedbackSource: '隔离评测合作伙伴', dateTime: '2026-07-16T08:55',
+  })
   const progress = await previewAndExecute('append-progress-preview', 'append-progress', {
     taskId, note: '完成第一版排版', startDateTime: '2026-07-16T09:00', endDateTime: '2026-07-16T11:00',
   })
@@ -582,6 +602,7 @@ async function runAgentBusinessToolCheck(cookie) {
       body: JSON.stringify({ operationId: `business-${crypto.randomUUID()}`, endpoint, confirmationToken }),
     })
     if (!result.response.ok) throw new Error(`${endpoint} execute failed: ${JSON.stringify(result.data)}`)
+    assertIndependentPostcondition(result.data, endpoint)
     return result.data
   }
 
@@ -839,6 +860,7 @@ async function runAgentMultimodalToolCheck(cookie) {
       body: JSON.stringify({ operationId: `multimodal-${crypto.randomUUID()}`, endpoint, confirmationToken }),
     })
     if (!result.response.ok) throw new Error(`${endpoint} execute failed: ${JSON.stringify(result.data)}`)
+    assertIndependentPostcondition(result.data, endpoint)
     return result.data
   }
 
@@ -1967,6 +1989,7 @@ async function runAgentOrchestrationCheck(cookie) {
   const workflowExecute = async (endpoint, confirmationToken) => {
     const result = await toolRequest('workflow-write', { operationId: `plan-management-${crypto.randomUUID()}`, endpoint, confirmationToken })
     if (!result.response.ok) throw new Error(`${endpoint} workflow failed: ${JSON.stringify(result.data)}`)
+    assertIndependentPostcondition(result.data, endpoint)
     return result.data
   }
   const executionQuery = await toolRequest('project-execution', { planId: plan.id, status: 'open' })
@@ -2063,6 +2086,7 @@ async function runAgentOrchestrationCheck(cookie) {
     method: 'POST', headers: toolHeaders, body: JSON.stringify({ operationId: `enterprise-memory-${crypto.randomUUID()}`, endpoint: 'manage-enterprise-memory', confirmationToken: enterprisePreview.confirmationToken }),
   })
   const enterpriseExecute = await enterpriseExecuteResponse.json().catch(() => ({}))
+  assertIndependentPostcondition(enterpriseExecute, 'manage-enterprise-memory')
   if (!enterpriseExecuteResponse.ok || enterpriseExecute.memory?.scopeType !== 'organization') throw new Error(`Enterprise memory workflow execution failed: ${JSON.stringify(enterpriseExecute)}`)
 
   const failuresResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-failures', { headers: { cookie } })
@@ -2676,6 +2700,7 @@ async function runAgentProactiveWorkCheck(cookie) {
   if (!previewResponse.ok || !preview.confirmationToken) throw new Error(`Proactive management preview failed: ${JSON.stringify(preview)}`)
   const executeResponse = await fetch(`${base}/api/agent/tools/workflow-write`, { method: 'POST', headers: toolHeaders, body: JSON.stringify({ operationId: `proactive-${crypto.randomUUID()}`, endpoint: 'manage-proactive-item', confirmationToken: preview.confirmationToken }) })
   const executed = await executeResponse.json().catch(() => ({}))
+  assertIndependentPostcondition(executed, 'manage-proactive-item')
   if (!executeResponse.ok || executed.item?.status !== 'resolved' || Number(executed.summary?.handledTotal || 0) < 1) {
     throw new Error(`Proactive management Workflow failed: ${JSON.stringify(executed)}`)
   }
