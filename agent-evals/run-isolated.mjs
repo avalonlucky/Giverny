@@ -221,7 +221,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 70) {
+  if (!response.ok || capabilities.length !== 72) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
@@ -579,6 +579,67 @@ async function runAgentLifecycleWriteCheck() {
     throw new Error(`Acceptance file marking is inconsistent: ${JSON.stringify(fileResult)}`)
   }
   process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
+}
+
+async function runAgentBatchTransactionCheck() {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const request = async (endpoint, payload) => {
+    const response = await fetch(`${base}/api/agent/tools/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(payload) })
+    return { response, data: await response.json().catch(() => ({})) }
+  }
+  const preview = async (endpoint, payload) => {
+    const result = await request(endpoint, payload)
+    if (!result.response.ok || result.data.ready !== true || !result.data.confirmationToken) throw new Error(`${endpoint} preview failed: ${JSON.stringify(result.data)}`)
+    return result.data
+  }
+  const execute = async (endpoint, confirmationToken, operationId = `batch-eval-${crypto.randomUUID()}`) => {
+    const result = await request('workflow-write', { operationId, endpoint, confirmationToken })
+    return { ...result, operationId }
+  }
+  const createTask = async (title) => {
+    const draft = await preview('create-task-preview', { title, requirement: '批量事务隔离评测', type: '隔离评测', startDate: '2026-07-18T09:00', estimatedDate: '2026-07-18T18:00', settlementMonth: '2026-07', estimatedHours: 2 })
+    const result = await execute('create-task', draft.confirmationToken)
+    if (!result.response.ok || !result.data.task?.id) throw new Error(`Batch fixture task creation failed: ${JSON.stringify(result.data)}`)
+    assertIndependentPostcondition(result.data, 'batch fixture create-task')
+    return result.data.task
+  }
+  const taskA = await createTask(`批量事务 A ${crypto.randomUUID()}`)
+  const taskB = await createTask(`批量事务 B ${crypto.randomUUID()}`)
+  const batchPreview = await preview('batch-task-operations-preview', {
+    reason: '验证多任务原子提交',
+    operations: [
+      { action: 'update_task_fields', taskId: taskA.id, fields: { contact: '批量对接人', estimatedHours: 3.5 } },
+      { action: 'update_task_status', taskId: taskA.id, status: '进行中', progress: 40, reason: '批量启动' },
+      { action: 'append_progress', taskId: taskA.id, note: '批量记录首次进展', startDateTime: '2026-07-18T09:00', endDateTime: '2026-07-18T10:00' },
+      { action: 'record_feedback', taskId: taskB.id, note: '合作伙伴确认批量方案', feedbackVersion: 'B01', feedbackSource: '隔离评测' },
+      { action: 'append_waiting', taskId: taskB.id, note: '等待补充资料', waitingReason: '等待补充资料', startDateTime: '2026-07-18T10:00', endDateTime: '2026-07-18T10:00' },
+    ],
+  })
+  if (batchPreview.draft?.atomic !== true || batchPreview.draft?.operationCount !== 5 || batchPreview.draft?.taskCount !== 2) throw new Error(`Batch preview summary is incomplete: ${JSON.stringify(batchPreview.draft)}`)
+  const operationId = `batch-commit-${crypto.randomUUID()}`
+  const committed = await execute('batch-task-operations', batchPreview.confirmationToken, operationId)
+  if (!committed.response.ok || committed.data.batch?.status !== 'completed' || committed.data.batch?.atomic !== true || committed.data.tasks?.length !== 2) throw new Error(`Atomic batch execution failed: ${JSON.stringify(committed.data)}`)
+  assertIndependentPostcondition(committed.data, 'batch-task-operations')
+  const savedA = committed.data.tasks.find((task) => task.id === taskA.id)
+  const savedB = committed.data.tasks.find((task) => task.id === taskB.id)
+  if (savedA?.contact !== '批量对接人' || savedA?.estimatedHours !== 3.5 || savedA?.status !== '进行中' || savedA?.progress !== 40 || savedA?.actualHours !== 1) throw new Error(`Batch task A projection is inconsistent: ${JSON.stringify(savedA)}`)
+  if (savedB?.actualHours !== 0 || !savedB?.timeEntries?.some((entry) => entry.isClientFeedback && entry.note === '合作伙伴确认批量方案') || !savedB?.waitingEntries?.some((entry) => entry.note === '等待补充资料')) throw new Error(`Batch task B records or preserved hours are inconsistent: ${JSON.stringify(savedB)}`)
+  const replay = await execute('batch-task-operations', batchPreview.confirmationToken, operationId)
+  if (!replay.response.ok || replay.data.replayed !== true || JSON.stringify(replay.data.postcondition) !== JSON.stringify(committed.data.postcondition)) throw new Error(`Batch replay changed result or acceptance: ${JSON.stringify(replay.data)}`)
+
+  const rollbackPreview = await preview('batch-task-operations-preview', { operations: [
+    { action: 'update_task_fields', taskId: taskA.id, fields: { title: '不应提交 A' } },
+    { action: 'update_task_fields', taskId: taskB.id, fields: { title: '不应提交 B' } },
+  ] })
+  const concurrentPreview = await preview('update-task-fields-preview', { taskId: taskA.id, fields: { contact: '并发变更已提交' } })
+  const concurrent = await execute('update-task-fields', concurrentPreview.confirmationToken)
+  if (!concurrent.response.ok) throw new Error(`Concurrent mutation setup failed: ${JSON.stringify(concurrent.data)}`)
+  const rolledBack = await request('batch-task-operations', { confirmationToken: rollbackPreview.confirmationToken })
+  if (rolledBack.response.status !== 409 || !String(rolledBack.data.error || '').includes('全部操作已回滚')) throw new Error(`Stale batch did not fail closed: ${JSON.stringify(rolledBack.data)}`)
+  const detailB = await request('task-detail', { taskId: taskB.id })
+  if (!detailB.response.ok || detailB.data.task?.title !== taskB.title) throw new Error(`Failed batch partially changed task B: ${JSON.stringify(detailB.data)}`)
+  process.stdout.write('Agent multi-operation preview, atomic commit, preserved finance hours, idempotent replay, stale-batch rollback, and postcondition checks passed.\n')
 }
 
 async function runAgentBusinessToolCheck(cookie) {
@@ -2736,6 +2797,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
+  await runAgentBatchTransactionCheck()
   await runAgentBusinessToolCheck(cookie)
   await runAgentMultimodalToolCheck(cookie)
   await runAgentProactiveWorkCheck(cookie)
@@ -2774,7 +2836,7 @@ try {
     .filter((line) => !line.includes('/analysis-job-generate 409 Conflict'))
   const expectedScopeRejection = toolErrors.findIndex((line) => line.includes('/search-tasks 401 Unauthorized'))
   if (expectedScopeRejection >= 0) toolErrors.splice(expectedScopeRejection, 1)
-  for (const expected of ['/task-detail 404', '/create-task 400', '/update-task-status 400', '/attachment-evidence 404', '/update-attachment-metadata-preview 400', '/update-attachment-metadata 409']) {
+  for (const expected of ['/task-detail 404', '/create-task 400', '/update-task-status 400', '/attachment-evidence 404', '/update-attachment-metadata-preview 400', '/update-attachment-metadata 409', '/batch-task-operations 409']) {
     for (let index = toolErrors.length - 1; index >= 0; index -= 1) {
       if (toolErrors[index].includes(expected)) toolErrors.splice(index, 1)
     }

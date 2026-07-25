@@ -5638,6 +5638,271 @@ async function agentPreview(env: Env, request: Request, action: string, draft: R
   })
 }
 
+type AgentBatchTaskAction = 'update_task_fields' | 'update_task_status' | 'record_feedback' | 'append_progress' | 'append_waiting'
+
+type AgentPreparedBatchOperation = {
+  id: string
+  action: AgentBatchTaskAction
+  label: string
+  taskId: number
+  taskTitle: string
+  fields?: Record<string, unknown>
+  status?: TaskStatus
+  progress?: number
+  reason?: string
+  entry?: TimeEntry | WaitingEntry
+}
+
+type AgentBatchTaskProjection = {
+  row: DbTask
+  timeEntries: TimeEntry[]
+  waitingEntries: WaitingEntry[]
+  hoursChanged: boolean
+}
+
+let agentOperationBatchTableEnsured = false
+
+async function ensureAgentOperationBatchTable(env: Env) {
+  if (agentOperationBatchTableEnsured) return
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agent_operation_batches (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', principal_id TEXT NOT NULL DEFAULT 'system',
+    status TEXT NOT NULL DEFAULT 'processing', operation_count INTEGER NOT NULL DEFAULT 0, task_count INTEGER NOT NULL DEFAULT 0,
+    operations_json TEXT NOT NULL DEFAULT '[]', preconditions_json TEXT NOT NULL DEFAULT '[]', result_json TEXT,
+    error_message TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
+  )`).run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_operation_batches_workspace ON agent_operation_batches(workspace_id, status, updated_at DESC)').run()
+  agentOperationBatchTableEnsured = true
+}
+
+const agentBatchTaskActionLabels: Record<AgentBatchTaskAction, string> = {
+  update_task_fields: '修改任务字段',
+  update_task_status: '修改任务状态',
+  record_feedback: '记录合作伙伴反馈',
+  append_progress: '追加任务进展',
+  append_waiting: '记录等待',
+}
+
+function agentBatchMutableSnapshot(row: DbTask) {
+  return {
+    id: Number(row.id), title: row.title, requirement: row.requirement || '', type: row.design_type || '',
+    date: row.start_date || '', estimatedDate: row.estimated_delivery_date || '', actualDeliveryDate: row.actual_delivery_date || '',
+    settlementMonth: row.settlement_month || '', isSupplemental: Boolean(row.is_supplemental), estimatedHours: Number(row.estimated_hours) || 0,
+    actualHours: Number(row.actual_hours) || 0, requester: row.requester || '', contact: row.contact_person || '', reviewer: row.reviewer || '',
+    stage: row.stage || '', status: row.status, progress: Number(row.progress) || 0, supplementalNote: row.supplemental_note || '',
+    acceptanceNote: row.acceptance_note || '', billable: Boolean(row.is_billable), timeEntries: parseTimeEntries(row.time_entries_json),
+    waitingEntries: parseWaitingEntries(row.waiting_entries_json), updatedAt: row.updated_at,
+  }
+}
+
+async function agentBatchTaskFingerprint(row: DbTask) {
+  return scheduleSnapshotChecksum(agentBatchMutableSnapshot(row))
+}
+
+function normalizedAgentBatchFields(value: unknown, task: DbTask) {
+  const fields = agentAllowedFieldChanges(value && typeof value === 'object' ? value as Record<string, unknown> : {})
+  return Object.fromEntries(Object.entries({
+    title: Object.hasOwn(fields, 'title') ? agentString(fields.title, 120) : undefined,
+    requirement: Object.hasOwn(fields, 'requirement') ? agentString(fields.requirement, 3000) : undefined,
+    type: Object.hasOwn(fields, 'type') ? agentString(fields.type, 120) : undefined,
+    date: Object.hasOwn(fields, 'date') ? agentDateTime(fields.date, task.start_date || nowIso().slice(0, 16)) : undefined,
+    estimatedDate: Object.hasOwn(fields, 'estimatedDate') ? agentDateTime(fields.estimatedDate, task.estimated_delivery_date || task.start_date || nowIso().slice(0, 16)) : undefined,
+    settlementMonth: Object.hasOwn(fields, 'settlementMonth') ? agentString(fields.settlementMonth, 7) : undefined,
+    estimatedHours: Object.hasOwn(fields, 'estimatedHours') ? Math.max(0, agentNumber(fields.estimatedHours, Number(task.estimated_hours) || 0)) : undefined,
+    requester: Object.hasOwn(fields, 'requester') ? agentString(fields.requester, 80) : undefined,
+    contact: Object.hasOwn(fields, 'contact') ? agentString(fields.contact, 80) : undefined,
+    reviewer: Object.hasOwn(fields, 'reviewer') ? agentString(fields.reviewer, 80) : undefined,
+    billable: Object.hasOwn(fields, 'billable') ? agentBool(fields.billable, true) : undefined,
+    isSupplemental: Object.hasOwn(fields, 'isSupplemental') ? agentBool(fields.isSupplemental) : undefined,
+    supplementalNote: Object.hasOwn(fields, 'supplementalNote') ? agentString(fields.supplementalNote, 1000) : undefined,
+    acceptanceNote: Object.hasOwn(fields, 'acceptanceNote') ? agentString(fields.acceptanceNote, 1000) : undefined,
+  }).filter(([, fieldValue]) => fieldValue !== undefined))
+}
+
+function prepareAgentBatchOperation(raw: Record<string, unknown>, task: DbTask, index: number): AgentPreparedBatchOperation {
+  const action = agentString(raw.action, 40) as AgentBatchTaskAction
+  if (!Object.hasOwn(agentBatchTaskActionLabels, action)) throw new Error(`第 ${index + 1} 项不是可批量执行的任务操作`)
+  if (action !== 'update_task_fields' && task.status === '已验收') throw new Error(`任务“${task.title}”已验收，不能继续批量写入记录或状态`)
+  const base = { id: agentString(raw.id, 120) || crypto.randomUUID(), action, label: agentBatchTaskActionLabels[action], taskId: Number(task.id), taskTitle: task.title }
+  if (action === 'update_task_fields') {
+    const fields = normalizedAgentBatchFields(raw.fields, task)
+    if (!Object.keys(fields).length) throw new Error(`第 ${index + 1} 项没有可修改的任务字段`)
+    return { ...base, fields }
+  }
+  if (action === 'update_task_status') {
+    const status = agentString(raw.status, 20) as TaskStatus
+    if (!agentTaskStatuses.includes(status) || status === '已验收') throw new Error(`第 ${index + 1} 项状态无效；完整验收必须使用独立验收流程`)
+    if (task.status === '已验收') throw new Error(`任务“${task.title}”已验收，状态已锁定`)
+    return { ...base, status, progress: status === '待验收' ? Math.max(normalizeProgressStep(task.progress), 80) : normalizeProgressStep(agentNumber(raw.progress, Number(task.progress) || 0)), reason: agentString(raw.reason, 500) }
+  }
+  if (action === 'record_feedback') {
+    const dateTime = agentDateTime(raw.dateTime)
+    const note = agentString(raw.note, 2000)
+    if (!note) throw new Error(`第 ${index + 1} 项缺少反馈内容`)
+    return { ...base, entry: { id: crypto.randomUUID(), date: agentDatePart(dateTime), endDate: agentDatePart(dateTime), start: agentTimePart(dateTime), end: agentTimePart(dateTime), note, isClientFeedback: true, isRevision: true, isUncounted: true, feedbackVersion: agentString(raw.feedbackVersion, 30).toUpperCase(), feedbackSource: agentString(raw.feedbackSource, 80) || '合作伙伴' } }
+  }
+  const startDateTime = agentDateTime(raw.startDateTime)
+  const endDateTime = agentDateTime(raw.endDateTime, startDateTime)
+  const note = agentString(raw.note, 2000)
+  if (!note) throw new Error(`第 ${index + 1} 项缺少记录内容`)
+  if (action === 'append_waiting') {
+    const reason = agentString(raw.waitingReason ?? raw.reason, 30) as WaitingReason
+    return { ...base, entry: { id: crypto.randomUUID(), date: agentDatePart(startDateTime), endDate: agentDatePart(endDateTime), start: agentTimePart(startDateTime), end: agentTimePart(endDateTime), note, reason: (['等待合作伙伴意见', '等待补充资料', '等待排期', '其他'] as WaitingReason[]).includes(reason) ? reason : '其他', isUncounted: true } }
+  }
+  return { ...base, entry: { id: crypto.randomUUID(), date: agentDatePart(startDateTime), endDate: agentDatePart(endDateTime), start: agentTimePart(startDateTime), end: agentTimePart(endDateTime), note, isUncounted: agentBool(raw.isUncounted), isRevision: agentBool(raw.isRevision), isAcceptanceProgress: false } }
+}
+
+function agentBatchProjection(task: DbTask): AgentBatchTaskProjection {
+  return { row: { ...task }, timeEntries: parseTimeEntries(task.time_entries_json), waitingEntries: parseWaitingEntries(task.waiting_entries_json), hoursChanged: false }
+}
+
+function applyAgentBatchOperation(projection: AgentBatchTaskProjection, operation: AgentPreparedBatchOperation) {
+  const row = projection.row
+  if (operation.action === 'update_task_fields') {
+    const fields = operation.fields || {}
+    if (Object.hasOwn(fields, 'title')) row.title = String(fields.title)
+    if (Object.hasOwn(fields, 'requirement')) row.requirement = String(fields.requirement)
+    if (Object.hasOwn(fields, 'type')) row.design_type = String(fields.type)
+    if (Object.hasOwn(fields, 'date')) row.start_date = String(fields.date)
+    if (Object.hasOwn(fields, 'estimatedDate')) row.estimated_delivery_date = String(fields.estimatedDate)
+    if (Object.hasOwn(fields, 'settlementMonth')) row.settlement_month = String(fields.settlementMonth) || monthPart(row.start_date || nowIso())
+    if (Object.hasOwn(fields, 'estimatedHours')) row.estimated_hours = Number(fields.estimatedHours) || 0
+    if (Object.hasOwn(fields, 'requester')) row.requester = String(fields.requester)
+    if (Object.hasOwn(fields, 'contact')) row.contact_person = String(fields.contact)
+    if (Object.hasOwn(fields, 'reviewer')) row.reviewer = String(fields.reviewer)
+    if (Object.hasOwn(fields, 'billable')) row.is_billable = fields.billable ? 1 : 0
+    if (Object.hasOwn(fields, 'isSupplemental')) row.is_supplemental = fields.isSupplemental ? 1 : 0
+    if (Object.hasOwn(fields, 'supplementalNote')) row.supplemental_note = String(fields.supplementalNote)
+    if (Object.hasOwn(fields, 'acceptanceNote')) row.acceptance_note = String(fields.acceptanceNote)
+  }
+  if (operation.action === 'update_task_status' && operation.status) {
+    row.status = operation.status
+    row.stage = operation.status
+    row.progress = Number(operation.progress) || 0
+  }
+  if (operation.action === 'record_feedback' || operation.action === 'append_progress') {
+    projection.timeEntries.push(operation.entry as TimeEntry)
+    if (operation.action === 'append_progress') projection.hoursChanged = true
+    if (operation.action === 'append_progress' && row.status === '计划中') {
+      row.status = '进行中'
+      row.stage = '进行中'
+      row.progress = Math.max(normalizeProgressStep(row.progress), 20)
+    }
+  }
+  if (operation.action === 'append_waiting') projection.waitingEntries.push(operation.entry as WaitingEntry)
+  row.time_entries_json = JSON.stringify(projection.timeEntries)
+  row.waiting_entries_json = JSON.stringify(projection.waitingEntries)
+  if (projection.hoursChanged) row.actual_hours = agentEntryHours(projection.timeEntries)
+}
+
+function agentBatchPreconditionStatement(env: Env, row: DbTask, workspaceId: string) {
+  return env.DB.prepare(`SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ? AND updated_at = ? AND title = ?
+      AND COALESCE(requirement, '') = ? AND COALESCE(design_type, '') = ? AND COALESCE(start_date, '') = ?
+      AND COALESCE(estimated_delivery_date, '') = ? AND COALESCE(settlement_month, '') = ? AND status = ? AND progress = ?
+      AND COALESCE(time_entries_json, '[]') = ? AND COALESCE(waiting_entries_json, '[]') = ? AND COALESCE(is_billable, 1) = ?
+  ) THEN 1 ELSE json('agent-batch-precondition-failed') END AS accepted`)
+    .bind(row.id, workspaceId, row.updated_at, row.title, row.requirement || '', row.design_type || '', row.start_date || '', row.estimated_delivery_date || '', row.settlement_month || '', row.status, Number(row.progress) || 0, row.time_entries_json || '[]', row.waiting_entries_json || '[]', Number(row.is_billable) !== 0 ? 1 : 0)
+}
+
+function agentBatchUpdateStatement(env: Env, projection: AgentBatchTaskProjection, workspaceId: string) {
+  const row = projection.row
+  return env.DB.prepare(`UPDATE tasks SET title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?,
+    settlement_month = ?, is_supplemental = ?, estimated_hours = ?, actual_hours = ?, requester = ?, contact_person = ?, reviewer = ?,
+    stage = ?, status = ?, progress = ?, supplemental_note = ?, acceptance_note = ?, time_entries_json = ?, waiting_entries_json = ?,
+    is_billable = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?`)
+    .bind(row.title, row.requirement || '', row.design_type || '', row.start_date || '', row.estimated_delivery_date || '', row.settlement_month || monthPart(row.start_date || nowIso()), row.is_supplemental ? 1 : 0, Number(row.estimated_hours) || 0, Number(row.actual_hours) || 0, row.requester || '', row.contact_person || '', row.reviewer || '', row.stage || row.status, row.status, Number(row.progress) || 0, row.supplemental_note || '', row.acceptance_note || '', JSON.stringify(projection.timeEntries), JSON.stringify(projection.waitingEntries), row.is_billable ? 1 : 0, row.id, workspaceId)
+}
+
+async function agentBatchTaskOperationsPreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentOperationBatchTable(env)
+  const body = await parseAgentToolBody(request)
+  const rawOperations = Array.isArray(body.operations) ? body.operations.map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {}) : []
+  if (rawOperations.length < 2 || rawOperations.length > 20) return agentFail('批量事务必须包含 2–20 个操作', 400)
+  const taskIds = [...new Set(rawOperations.map((item) => Number(item.taskId)).filter((id) => Number.isInteger(id) && id > 0))]
+  if (!taskIds.length || rawOperations.some((item) => !Number.isInteger(Number(item.taskId)) || Number(item.taskId) <= 0)) return agentFail('批量操作必须为每一项提供明确 taskId', 400)
+  const placeholders = taskIds.map(() => '?').join(', ')
+  const rows = await env.DB.prepare(`SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`).bind(principal.workspaceId, ...taskIds.map(String)).all<DbTask>()
+  const tasks = new Map((rows.results || []).map((row) => [Number(row.id), row]))
+  if (tasks.size !== taskIds.length) return agentFail('部分任务不存在、已作废或不属于当前工作区', 404)
+  try {
+    for (const task of tasks.values()) {
+      if (await isLockedReportMonth(env, task.settlement_month, principal.workspaceId)) throw new Error(`任务“${task.title}”所属结算月份已锁定`)
+    }
+    const operations = rawOperations.map((operation, index) => prepareAgentBatchOperation(operation, tasks.get(Number(operation.taskId))!, index))
+    for (const operation of operations) {
+      const targetMonth = operation.fields?.settlementMonth
+      if (targetMonth && await isLockedReportMonth(env, String(targetMonth), principal.workspaceId)) throw new Error(`任务“${operation.taskTitle}”要迁入的结算月份已锁定`)
+    }
+    const preconditions = await Promise.all([...tasks.values()].map(async (task) => ({ taskId: Number(task.id), updatedAt: task.updated_at, fingerprint: await agentBatchTaskFingerprint(task) })))
+    const batchId = crypto.randomUUID()
+    return agentPreview(env, request, 'batch_task_operations_preview', {
+      batchId, operationCount: operations.length, taskCount: tasks.size, reason: agentString(body.reason, 500), atomic: true,
+      operations, preconditions,
+    }, [], ['这些操作将在同一个 D1 事务中提交；任一步失败时全部回滚，不会留下部分成功。'])
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '批量操作预览失败', 409)
+  }
+}
+
+async function agentBatchTaskOperationsTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentOperationBatchTable(env)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'batch_task_operations', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const batchId = agentString(draft.batchId, 160)
+  const operations = (Array.isArray(draft.operations) ? draft.operations : []).map((item) => item && typeof item === 'object' ? item as AgentPreparedBatchOperation : null).filter((item): item is AgentPreparedBatchOperation => Boolean(item))
+  const preconditions = (Array.isArray(draft.preconditions) ? draft.preconditions : []).map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+  const taskIds = [...new Set(operations.map((item) => Number(item.taskId)))]
+  if (!batchId || operations.length < 2 || operations.length > 20 || !taskIds.length) return agentFail('批量事务确认数据不完整', 400)
+  const placeholders = taskIds.map(() => '?').join(', ')
+  const rows = await env.DB.prepare(`SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`).bind(principal.workspaceId, ...taskIds.map(String)).all<DbTask>()
+  const tasks = new Map((rows.results || []).map((row) => [Number(row.id), row]))
+  if (tasks.size !== taskIds.length) return agentFail('批量事务中的部分任务已不可用，未执行任何操作', 409)
+  try {
+    for (const task of tasks.values()) {
+      const expected = preconditions.find((item) => Number(item.taskId) === Number(task.id))
+      if (!expected || String(expected.fingerprint || '') !== await agentBatchTaskFingerprint(task)) throw new Error(`任务“${task.title}”在确认前已发生变化`)
+      if (await isLockedReportMonth(env, task.settlement_month, principal.workspaceId)) throw new Error(`任务“${task.title}”所属结算月份已锁定`)
+    }
+    const projections = new Map([...tasks].map(([id, task]) => [id, agentBatchProjection(task)]))
+    for (const operation of operations) applyAgentBatchOperation(projections.get(operation.taskId)!, operation)
+    const statements: D1PreparedStatement[] = []
+    for (const task of tasks.values()) statements.push(agentBatchPreconditionStatement(env, task, principal.workspaceId))
+    for (const projection of projections.values()) statements.push(agentBatchUpdateStatement(env, projection, principal.workspaceId))
+    for (const operation of operations) {
+      statements.push(env.DB.prepare('INSERT INTO audit_log (id, action, entity_type, entity_id, payload_json) VALUES (?, ?, ?, ?, ?)').bind(crypto.randomUUID(), `agent_batch_${operation.action}`, 'task', String(operation.taskId), JSON.stringify({ batchId, operation })))
+    }
+    const resultSummary = { atomic: true, rollback: 'not-needed', operations: operations.map((operation) => ({ id: operation.id, action: operation.action, taskId: operation.taskId, status: 'completed' })) }
+    statements.push(env.DB.prepare(`INSERT INTO agent_operation_batches
+      (id, workspace_id, principal_id, status, operation_count, task_count, operations_json, preconditions_json, result_json, completed_at)
+      VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
+      .bind(batchId, principal.workspaceId, principal.principalId, operations.length, taskIds.length, JSON.stringify(operations), JSON.stringify(preconditions), JSON.stringify(resultSummary)))
+    await env.DB.batch(statements)
+    const savedRows = await env.DB.prepare(`SELECT * FROM tasks WHERE workspace_id = ? AND id IN (${placeholders}) ORDER BY CAST(id AS INTEGER)`).bind(principal.workspaceId, ...taskIds.map(String)).all<DbTask>()
+    const savedTasks = (savedRows.results || []).map((row) => toTask(row))
+    for (const row of savedRows.results || []) {
+      ctx?.waitUntil(indexTaskSearch(env, row.id))
+      if (operations.some((operation) => operation.taskId === Number(row.id) && ['record_feedback', 'append_progress'].includes(operation.action))) {
+        ctx?.waitUntil(updateHourEstimateObservation(env, row.id, Number(row.actual_hours) || 0, row.status === '已验收').catch(() => undefined))
+      }
+    }
+    return agentOk({ tool: 'batch_task_operations', mode: 'execute', ok: true, batch: { id: batchId, status: 'completed', operationCount: operations.length, taskCount: taskIds.length, atomic: true, rollback: 'not-needed', operations: resultSummary.operations }, tasks: savedTasks })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '批量事务执行失败'
+    await env.DB.prepare(`INSERT INTO agent_operation_batches
+      (id, workspace_id, principal_id, status, operation_count, task_count, operations_json, preconditions_json, error_message)
+      VALUES (?, ?, ?, 'rolled_back', ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = 'rolled_back', error_message = excluded.error_message, updated_at = CURRENT_TIMESTAMP`)
+      .bind(batchId, principal.workspaceId, principal.principalId, operations.length, taskIds.length, JSON.stringify(operations), JSON.stringify(preconditions), message).run().catch(() => undefined)
+    await audit(env, 'agent_batch_task_operations_rolled_back', 'agent_operation_batch', batchId, { operationCount: operations.length, taskCount: taskIds.length, error: message }).catch(() => undefined)
+    return agentFail(`批量事务未提交，全部操作已回滚：${message}`, 409)
+  }
+}
+
 async function agentCreateTaskPreviewTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
@@ -8286,6 +8551,17 @@ function taskPostconditionSnapshot(value: unknown) {
 async function verifyAgentWritePostcondition(env: Env, principal: AgentPrincipalContext, endpoint: string, result: Record<string, unknown>): Promise<AgentPostcondition> {
   const checks: AgentPostconditionItem[] = []
   const taskResult = result.task && typeof result.task === 'object' ? result.task as Record<string, unknown> : null
+  if (endpoint === 'batch-task-operations') {
+    const tasks = Array.isArray(result.tasks) ? result.tasks.map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {}) : []
+    if (!tasks.length) checks.push({ name: '批量结果包含可核对任务', passed: false, expected: 'tasks[]', actual: null })
+    for (const task of tasks) {
+      const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?').bind(String(task.id), principal.workspaceId).first<DbTask>()
+      checks.push(postconditionCheck(`任务 ${Number(task.id)} 批量写入后字段一致`, taskPostconditionSnapshot(task), row ? taskPostconditionSnapshot(toTask(row)) : null))
+    }
+    const batch = result.batch && typeof result.batch === 'object' ? result.batch as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT status, operation_count, task_count FROM agent_operation_batches WHERE id = ? AND workspace_id = ?').bind(String(batch.id || ''), principal.workspaceId).first<{ status: string; operation_count: number; task_count: number }>()
+    checks.push(postconditionCheck('批量事务记录已原子提交', { status: 'completed', operationCount: Number(batch.operationCount) || 0, taskCount: Number(batch.taskCount) || 0 }, row ? { status: row.status, operationCount: Number(row.operation_count) || 0, taskCount: Number(row.task_count) || 0 } : null))
+  }
   if (agentTaskPostconditionEndpoints.has(endpoint)) {
     if (!taskResult?.id) {
       checks.push({ name: '写入结果包含可核对任务', passed: false, expected: 'task.id', actual: null })
@@ -8541,6 +8817,12 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/workflow-write' && request.method === 'POST') {
     return agentWorkflowWriteTool(env, request, ctx)
+  }
+  if (url.pathname === '/api/agent/tools/batch-task-operations-preview' && request.method === 'POST') {
+    return agentBatchTaskOperationsPreviewTool(env, request)
+  }
+  if (url.pathname === '/api/agent/tools/batch-task-operations' && request.method === 'POST') {
+    return agentBatchTaskOperationsTool(env, request, ctx)
   }
   if (url.pathname === '/api/agent/tools/create-task-preview' && request.method === 'POST') {
     return agentCreateTaskPreviewTool(env, request)
@@ -13849,6 +14131,8 @@ async function purgeAgentWriteOperations(env: Env) {
      WHERE (status IN ('completed', 'failed') AND datetime(updated_at) < datetime('now', '-30 days'))
         OR (status = 'processing' AND datetime(updated_at) < datetime('now', '-1 day'))`,
   ).run()
+  await ensureAgentOperationBatchTable(env)
+  await env.DB.prepare("DELETE FROM agent_operation_batches WHERE datetime(updated_at) < datetime('now', '-90 days')").run()
 }
 
 async function audit(env: Env, action: string, entityType: string, entityId: string, payload: unknown) {

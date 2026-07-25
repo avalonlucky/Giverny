@@ -559,6 +559,49 @@ test('工作助手主面板可以直接新建对话项目', async ({ page }) => 
   expect(projects).toContain('金额核对')
 })
 
+test('工作助手批量事务使用单张原子确认卡', async ({ page }) => {
+  const createdAt = Date.now()
+  await page.route('**/api/ai/chat', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        content: '已整理为一个批量事务，请逐项核对。',
+        trace: ['核对批量任务操作', '批量事务草稿已生成'],
+        approval: {
+          id: `batch_task_operations:${createdAt}`,
+          action: 'batch_task_operations',
+          label: '批量任务操作',
+          status: 'pending',
+          createdAt,
+          expiresAt: createdAt + 600_000,
+          warnings: ['这些操作将在同一个 D1 事务中提交；任一步失败时全部回滚。'],
+          draft: {
+            batchId: 'browser-batch', operationCount: 2, taskCount: 2, atomic: true,
+            operations: [
+              { id: 'one', action: 'update_task_fields', taskId: 1, taskTitle: '公司产品封套修改', fields: { contact: '批量对接人' } },
+              { id: 'two', action: 'append_waiting', taskId: 2, taskTitle: '公司产品封套延展', entry: { note: '等待补充资料' } },
+            ],
+            preconditions: [{ taskId: 1, fingerprint: 'hidden' }, { taskId: 2, fingerprint: 'hidden' }],
+          },
+        },
+      }),
+    })
+  })
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  await dialog.getByPlaceholder('向爱丽丝提问…').fill('批量修改两个任务')
+  await dialog.getByRole('button', { name: '发送' }).click()
+  const card = dialog.getByLabel('批量任务操作确认卡片')
+  await expect(card).toBeVisible()
+  await expect(card.getByText('原子事务（失败全部回滚）', { exact: true })).toBeVisible()
+  await expect(card.getByText(/1\. 公司产品封套修改 · 修改字段/)).toBeVisible()
+  await expect(card.getByText(/2\. 公司产品封套延展 · 记录等待/)).toBeVisible()
+  await expect(card.getByText('请逐项核对。确认后所有操作将一次提交；任一项失败都会全部回滚。', { exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: '编辑草稿' })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: '确认执行' })).toBeVisible()
+})
+
 test('进行中的等待记录展示实时已等待时长', async ({ page }) => {
   await page.getByText('公司产品封套修改', { exact: true }).first().click()
   const sidebar = page.locator('.dashboard-task-sidebar')

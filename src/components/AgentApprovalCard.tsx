@@ -80,6 +80,9 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   sourceExcerpt: '来源依据',
   confidence: '确认状态',
   version: '记忆版本',
+  operationCount: '操作数量',
+  atomic: '提交方式',
+  operations: '操作清单',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
@@ -88,11 +91,23 @@ function formatAgentApprovalValue(key: string, value: unknown): string {
   if (key === 'memoryType') return ({ fact: '事实', preference: '偏好', rule: '规则', decision: '决策' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'sourceType') return ({ manual: '人工记录', task: '任务事实', conversation: '当前对话', document: '文档', system: '系统规则' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'confidence') return value === 'confirmed' ? '已确认' : '推导信息'
+  if (key === 'atomic') return value ? '原子事务（失败全部回滚）' : '普通执行'
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'estimatedHours') return `${value} h`
   if (key === 'progress') return `${value}%`
   if (key === 'totalAmount') return `¥${value}`
   if (key === 'totalHours') return `${value} h`
+  if (key === 'operations' && Array.isArray(value)) {
+    return value.map((item, index) => {
+      const operation = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const action = ({ update_task_fields: '修改字段', update_task_status: '修改状态', record_feedback: '记录反馈', append_progress: '追加进展', append_waiting: '记录等待' } as Record<string, string>)[String(operation.action)] || String(operation.label || operation.action || '任务操作')
+      const detail = operation.fields && typeof operation.fields === 'object'
+        ? formatAgentApprovalValue('fields', operation.fields)
+        : operation.status ? `${operation.status}${operation.progress !== undefined ? ` · ${operation.progress}%` : ''}`
+          : operation.entry && typeof operation.entry === 'object' ? String((operation.entry as Record<string, unknown>).note || '') : ''
+      return `${index + 1}. ${String(operation.taskTitle || `任务 #${operation.taskId || ''}`)} · ${action}${detail ? `：${detail}` : ''}`
+    }).join('\n')
+  }
   if (value === null || value === undefined || value === '') return '未填写'
   if (key === 'files' && Array.isArray(value)) {
     return value.map((item) => typeof item === 'object' && item ? String((item as Record<string, unknown>).name || (item as Record<string, unknown>).id || '') : String(item)).filter(Boolean).join('、') || '未选择'
@@ -121,7 +136,7 @@ function agentApprovalRows(approval: AgentApproval) {
     ? { taskTitle: draft.taskTitle, ...(draft.recordType ? { recordType: draft.recordType, action: draft.action, recordId: draft.recordId } : {}), ...changedFields }
     : draft
   return Object.entries(source)
-    .filter(([key, value]) => !['taskId', 'before', 'expectedUpdatedAt'].includes(key) && value !== undefined && value !== '')
+    .filter(([key, value]) => !['taskId', 'before', 'expectedUpdatedAt', 'batchId', 'preconditions'].includes(key) && value !== undefined && value !== '')
     .map(([key, value]) => ({
       key,
       label: approval.action === 'manage_enterprise_memory' && key === 'title' ? '记忆标题' : AGENT_APPROVAL_FIELD_LABELS[key] || key,
@@ -161,7 +176,7 @@ export function AgentApprovalCard({
   const [activePickerId, setActivePickerId] = useState<string | null>(null)
   const rows = agentApprovalRows(approval)
   const canDecide = approval.status === 'pending' || approval.status === 'failed'
-  const canEdit = canDecide
+  const canEdit = canDecide && approval.action !== 'batch_task_operations'
   const setDraftField = (key: string, value: unknown) => setEditDraft((current) => ({ ...current, [key]: value }))
   const nestedKey = editDraft.fields && typeof editDraft.fields === 'object' ? 'fields' : editDraft.changes && typeof editDraft.changes === 'object' ? 'changes' : ''
   const editableSource = nestedKey
@@ -215,7 +230,9 @@ export function AgentApprovalCard({
           ? '操作已经写入网站数据。'
           : approval.status === 'processing'
             ? '操作已交给持久化 Workflow，页面关闭后仍会继续执行。'
-            : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
+            : approval.action === 'batch_task_operations'
+              ? '请逐项核对。确认后所有操作将一次提交；任一项失败都会全部回滚。'
+              : '请核对草稿。只有确认后，Agent 才会写入网站数据。'}
       </p>
       {editing && approval.action === 'create_task' ? (
         <div className="agent-approval-editor">
@@ -346,7 +363,7 @@ export function AgentApprovalCard({
       ) : (
         <dl className="agent-approval-fields">
           {rows.map((row) => (
-            <div key={row.key} className="agent-approval-field">
+            <div key={row.key} className={`agent-approval-field field-${row.key}`}>
               <dt>{row.label}</dt>
               <dd>
                 {row.beforeValue !== undefined ? (

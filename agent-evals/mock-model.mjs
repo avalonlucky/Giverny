@@ -205,6 +205,16 @@ function chooseTool(messages) {
     return completion({ role: 'assistant', content: '评测工具已经返回，我会严格按照工具结果回答。' })
   }
 
+  if (/批量事务|同时把任务\s*#1.*任务\s*#2/.test(text)) {
+    return toolCall('batch_task_operations_preview', {
+      reason: '隔离评测批量操作',
+      operations: [
+        { action: 'update_task_fields', taskId: 1, fields: { contact: '批量评测对接人' } },
+        { action: 'append_waiting', taskId: 2, note: '等待批量评测资料', waitingReason: '等待补充资料', startDateTime: '2026-07-18T10:00', endDateTime: '2026-07-18T10:00' },
+      ],
+    })
+  }
+
   if (/天气|删掉|所有任务都改成|所有密钥/.test(text)) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
   }

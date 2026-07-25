@@ -17,13 +17,13 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 70, '能力总数必须固定为 70')
+check(manifest.length === 72, '能力总数必须固定为 72')
 check(Object.keys(agentReadToolRegistry).length === 17, 'MCP 读取工具应为 17 项')
-check(manifest.filter((item) => item.exposure.includes('model')).length === 45, '模型能力应为 45 项')
+check(manifest.filter((item) => item.exposure.includes('model')).length === 46, '模型能力应为 46 项')
 check(manifest.filter((item) => item.exposure.includes('mcp')).length === 17, 'MCP 能力应为 17 项')
-check(manifest.filter((item) => item.confirmation === 'preview').length === 20, '写入预览应为 20 项')
-check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 20, '签名执行应为 20 项')
-check(agentWorkflowWriteEndpoints.size === 20, 'Workflow 白名单应为 20 项')
+check(manifest.filter((item) => item.confirmation === 'preview').length === 21, '写入预览应为 21 项')
+check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 21, '签名执行应为 21 项')
+check(agentWorkflowWriteEndpoints.size === 21, 'Workflow 白名单应为 21 项')
 
 for (const capability of manifest) {
   check(Boolean(capability.name), '能力名不能为空')
@@ -81,6 +81,9 @@ check(agentCapabilityRegistry.append_progress_preview.inputSchema.safeParse({ ta
 check(!agentCapabilityRegistry.append_progress_preview.inputSchema.safeParse({ taskId: 1 }).success, '进展 schema 应要求备注')
 check(agentCapabilityRegistry.complete_acceptance_preview.inputSchema.safeParse({ taskId: 1, acceptanceNote: '验收通过', progressNote: '完成交付' }).success, '验收 schema 应接受完整草稿')
 check(!agentCapabilityRegistry.complete_acceptance_preview.inputSchema.safeParse({ taskId: 1, acceptanceNote: '验收通过' }).success, '验收 schema 应要求最终进展')
+check(agentCapabilityRegistry.batch_task_operations_preview.inputSchema.safeParse({ operations: [{ action: 'update_task_fields', taskId: 1, fields: { contact: '张三' } }, { action: 'append_waiting', taskId: 2, note: '等待资料' }] }).success, '批量事务 schema 应接受两个明确任务操作')
+check(!agentCapabilityRegistry.batch_task_operations_preview.inputSchema.safeParse({ operations: [{ action: 'update_task_fields', taskId: 1, fields: { contact: '张三' } }] }).success, '批量事务 schema 应拒绝单操作')
+check(!agentCapabilityRegistry.batch_task_operations_preview.inputSchema.safeParse({ operations: [{ action: 'update_task_fields', fields: { contact: '张三' } }, { action: 'append_waiting', taskId: 2, note: '等待资料' }] }).success, '批量事务 schema 应要求每项都有 taskId')
 check(agentCapabilityRegistry.create_task.inputSchema.safeParse({ confirmationToken: 'signed' }).success, '执行 schema 应要求确认凭证')
 check(!agentCapabilityRegistry.create_task.inputSchema.safeParse({}).success, '执行 schema 应拒绝缺少确认凭证')
 

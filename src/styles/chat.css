@@ -990,6 +990,14 @@
   margin: 0;
 }
 
+.agent-approval-field.field-operations {
+  grid-column: 1 / -1;
+}
+
+.agent-approval-field.field-operations dd {
+  white-space: pre-line;
+}
+
 .agent-approval-field dd {
   color: var(--color-text);
   font-size: 13px;

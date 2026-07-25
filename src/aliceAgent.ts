@@ -114,6 +114,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
 - 创建任务、记录反馈、修改字段、修改状态、追加进展、记录等待、维护已有记录、标记验收文件和完整验收只能调用对应的 preview 工具。
+- 用户在同一句话中要求 2–20 个可兼容的任务修改（改字段、改状态、记反馈、追加进展或记录等待）时，先查出每个明确 taskId，再调用 batch_task_operations_preview 生成一张整体确认卡；不要连续生成多张单操作确认卡。结算、完整验收、附件、模型配置和其他高风险跨域操作不得混入批量事务。
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
 - 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；为步骤提供稳定 key，用 dependsOn 表达真实依赖，存在可逆操作时声明 compensation。默认创建 batch 批次，必须由用户整体确认后才推进，不要只在正文里写一次性清单。
 - 用户询问执行计划做到哪一步、下一步是什么、为何被阻塞或哪些步骤失败时，必须调用 query_project_execution；依赖原因和下一步只能依据工具返回的确定性状态。用户要求暂停、恢复、重试失败步骤或取消计划时调用 manage_task_plan_preview。不得调用任何工具直接把实际业务步骤标记为完成，业务步骤只能由对应业务写入成功后推进。
@@ -853,6 +854,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           conversationId,
         }),
       }),
+      batch_task_operations_preview: tool({
+        description: capabilities.batch_task_operations_preview.description,
+        inputSchema: capabilities.batch_task_operations_preview.inputSchema,
+        execute: (input) => this.previewTool('batch_task_operations_preview', capabilities.batch_task_operations_preview.endpoint, input),
+      }),
       create_task_preview: tool({
         description: capabilities.create_task_preview.description,
         inputSchema: capabilities.create_task_preview.inputSchema,
@@ -1073,6 +1079,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private executionSummary(result: AgentToolResponse) {
+    const batch = toJsonObject(result.batch)
+    if (batch.id && batch.status === 'completed') return `批量事务已原子提交：${Number(batch.operationCount) || 0} 个操作，涉及 ${Number(batch.taskCount) || 0} 个任务。`
     const record = toJsonObject(result.record)
     if (record.startDate && record.endDate) return `结算日期：${String(record.startDate)} 至 ${String(record.endDate)}。回单已生成，可直接预览、分享或下载。`
     const plan = toJsonObject(result.plan)

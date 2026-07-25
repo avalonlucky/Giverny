@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：70 项
-- 分类：finance 7、tasks 4、files 8、product 2、calendar 4、security 7、notifications 5、planning 4、memory 4、analysis 2、write 18、internal 5
+- 注册能力：72 项
+- 分类：finance 7、tasks 4、files 8、product 2、calendar 4、security 7、notifications 5、planning 4、memory 4、analysis 2、write 20、internal 5
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -68,6 +68,8 @@
 `manage_record_preview` | 预览维护任务记录 | write | sensitive | preview | admin, collaborator, system | tasks:write | model, api | `agent_preview_manage_record`
 `mark_acceptance_files_preview` | 预览标记验收文件 | write | write | preview | admin, collaborator, system | attachments:write | model, api | `agent_preview_acceptance_files`
 `complete_acceptance_preview` | 预览完整验收 | write | sensitive | preview | admin, collaborator, system | tasks:write, attachments:write | model, api | `agent_preview_acceptance`
+`batch_task_operations_preview` | 预览批量任务操作 | write | sensitive | preview | admin, collaborator, system | tasks:write | model, api | `agent_preview_batch_task_operations`
+`batch_task_operations` | 执行批量任务操作 | write | sensitive | signed-execute | admin, collaborator, system | tasks:write | api, workflow | `agent_batch_task_operations`
 `create_task` | 执行创建任务 | write | write | signed-execute | admin, collaborator, system | tasks:write | api, workflow | `agent_create`
 `record_feedback` | 执行记录反馈 | write | write | signed-execute | admin, collaborator, system | tasks:write | api, workflow | `agent_record_feedback`
 `update_task_status` | 执行修改状态 | write | write | signed-execute | admin, collaborator, system | tasks:write | api, workflow | `agent_update_status`

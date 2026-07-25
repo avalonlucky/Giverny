@@ -41,6 +41,21 @@ const taskReferenceSchema = {
   taskId: z.number().int().positive().optional(),
   taskTitle: z.string().optional(),
 }
+const batchTaskOperationSchema = z.object({
+  action: z.enum(['update_task_fields', 'update_task_status', 'record_feedback', 'append_progress', 'append_waiting']),
+  taskId: z.number().int().positive(),
+  fields: z.object({
+    title: z.string().max(120).optional(), requirement: z.string().max(3000).optional(), type: z.string().max(120).optional(),
+    date: z.string().optional(), estimatedDate: z.string().optional(), settlementMonth: z.string().max(7).optional(),
+    estimatedHours: z.number().min(0).optional(), requester: z.string().max(80).optional(), contact: z.string().max(80).optional(),
+    reviewer: z.string().max(80).optional(), billable: z.boolean().optional(), isSupplemental: z.boolean().optional(),
+    supplementalNote: z.string().max(1000).optional(), acceptanceNote: z.string().max(1000).optional(),
+  }).optional(),
+  status: z.string().max(20).optional(), progress: z.number().min(0).max(100).optional(), reason: z.string().max(500).optional(),
+  note: z.string().max(2000).optional(), startDateTime: z.string().optional(), endDateTime: z.string().optional(), dateTime: z.string().optional(),
+  isUncounted: z.boolean().optional(), isRevision: z.boolean().optional(), feedbackVersion: z.string().max(30).optional(),
+  feedbackSource: z.string().max(80).optional(), waitingReason: z.string().max(30).optional(),
+})
 
 function defineCapability<const T extends AgentCapabilityDefinition>(definition: T) {
   return definition
@@ -288,6 +303,12 @@ export const agentCapabilityRegistry = {
     policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['tasks:write', 'attachments:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_acceptance' },
     inputSchema: z.object({ ...taskReferenceSchema, acceptanceNote: z.string(), progressNote: z.string(), startDateTime: z.string().optional(), endDateTime: z.string().optional(), countTime: z.boolean().optional(), isRevision: z.boolean().optional(), attachmentIds: z.array(z.number().int().positive()).max(30).optional() }), trace: { running: '整理完整验收包', completed: '验收草稿已生成' },
   }),
+  batch_task_operations_preview: writePreviewCapability({
+    title: '预览批量任务操作', description: '将 2–20 个任务字段、状态、反馈、进展或等待操作整理为一个原子批次；所有任务必须传 taskId。', category: 'write', endpoint: 'batch-task-operations-preview', executeWith: 'batch_task_operations',
+    policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_batch_task_operations' },
+    inputSchema: z.object({ operations: z.array(batchTaskOperationSchema).min(2).max(20), reason: z.string().max(500).optional() }), trace: { running: '核对批量任务操作', completed: '批量事务草稿已生成' },
+  }),
+  batch_task_operations: writeExecuteCapability({ title: '执行批量任务操作', description: '使用签名确认凭证在单个 D1 原子批次中执行多个任务操作；任一步失败时全部回滚。', category: 'write', endpoint: 'batch-task-operations', previewFor: 'batch_task_operations_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_batch_task_operations' }, trace: { running: '执行任务操作事务', completed: '批量任务操作已原子提交' } }),
   create_task: writeExecuteCapability({ title: '执行创建任务', description: '使用签名确认凭证创建任务。', category: 'write', endpoint: 'create-task', previewFor: 'create_task_preview', policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_create' }, trace: { running: '执行创建任务', completed: '任务已创建' } }),
   record_feedback: writeExecuteCapability({ title: '执行记录反馈', description: '使用签名确认凭证记录合作伙伴反馈。', category: 'write', endpoint: 'record-feedback', previewFor: 'record_feedback_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_record_feedback' }, trace: { running: '执行记录反馈', completed: '反馈已记录' } }),
   update_task_status: writeExecuteCapability({ title: '执行修改状态', description: '使用签名确认凭证修改任务状态。', category: 'write', endpoint: 'update-task-status', previewFor: 'update_task_status_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_update_status' }, trace: { running: '执行状态修改', completed: '状态已修改' } }),

@@ -84,6 +84,7 @@
     { "id": "waiting-01", "category": "write_preview", "prompt": "给任务#1记录等待：10点到12点等待甲方补充资料", "expect": { "tools": ["append_waiting_preview"], "approval": "append_waiting" } },
     { "id": "acceptance-file-01", "category": "write_preview", "prompt": "把任务#1的附件104标记为验收文件", "expect": { "tools": ["mark_acceptance_files_preview"], "approval": "mark_acceptance_files" } },
     { "id": "acceptance-01", "category": "write_preview", "prompt": "完整验收任务#1：已完成全部修改并交付最终文件", "expect": { "tools": ["complete_acceptance_preview"], "approval": "complete_acceptance" } },
+    { "id": "batch-01", "category": "write_preview", "prompt": "用批量事务同时把任务#1的对接人改掉，并给任务#2记录等待资料", "expect": { "tools": ["batch_task_operations_preview"], "approval": "batch_task_operations" } },
 
     { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
     { "id": "orchestration-02", "category": "orchestration", "prompt": "根据长期记忆告诉我任务#1还有哪些未解决问题", "expect": { "tools": ["get_task_memory"] } },

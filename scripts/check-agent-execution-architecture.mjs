@@ -10,6 +10,8 @@ const files = {
   ui: readFileSync('src/components/ChatPanel.tsx', 'utf8'),
   workflow: readFileSync('src/agentWriteWorkflow.ts', 'utf8'),
   alice: readFileSync('src/aliceAgent.ts', 'utf8'),
+  batchMigration: readFileSync('db/migrations/0033_agent_operation_batches.sql', 'utf8'),
+  approval: readFileSync('src/components/AgentApprovalCard.tsx', 'utf8'),
 }
 
 for (const symbol of [
@@ -44,7 +46,7 @@ const postconditionVerifier = files.worker.slice(
   files.worker.indexOf('const agentTaskPostconditionEndpoints'),
   files.worker.indexOf('async function agentWorkflowWriteTool'),
 )
-assert.equal(signedWriteEndpoints.length, 20, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
+assert.equal(signedWriteEndpoints.length, 21, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
 for (const endpoint of signedWriteEndpoints) {
   assert.ok(postconditionVerifier.includes(`'${endpoint}'`), `signed write endpoint missing independent postcondition: ${endpoint}`)
 }
@@ -54,6 +56,19 @@ assert.match(files.worker, /source: 'd1-independent-read'/)
 assert.match(files.alice, /postcondition\.passed === true/)
 assert.match(files.alice, /outcome: 'failed'/)
 assert.match(files.alice, /独立验收未通过，暂不标记为完成/)
+for (const marker of ['agent_operation_batches', 'operation_count', 'task_count', 'operations_json', 'preconditions_json']) {
+  assert.ok(files.schema.includes(marker), `batch schema missing ${marker}`)
+  assert.ok(files.batchMigration.includes(marker), `batch migration missing ${marker}`)
+}
+assert.match(files.registry, /batch_task_operations_preview/)
+assert.match(files.registry, /batch_task_operations/)
+assert.match(files.worker, /agentBatchPreconditionStatement/)
+assert.match(files.worker, /env\.DB\.batch\(statements\)/)
+assert.match(files.worker, /全部操作已回滚/)
+assert.match(files.worker, /endpoint === 'batch-task-operations'/)
+assert.match(files.alice, /batch_task_operations_preview/)
+assert.match(files.approval, /approval\.action !== 'batch_task_operations'/)
+assert.match(files.approval, /失败全部回滚/)
 assert.ok(!files.worker.includes("status = 'active', paused_at = NULL, completed_at = NULL"), 'legacy resume must not erase execution result')
 
 console.log('Agent execution engine architecture guard passed.')
