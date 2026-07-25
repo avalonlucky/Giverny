@@ -87,6 +87,7 @@
 
     { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
     { "id": "orchestration-02", "category": "orchestration", "prompt": "根据长期记忆告诉我任务#1还有哪些未解决问题", "expect": { "tools": ["get_task_memory"] } },
+    { "id": "proactive-01", "category": "proactive_work", "prompt": "现在最该优先处理哪些风险待办？也告诉我主动事项的解决率", "expect": { "tools": ["query_proactive_work"] } },
 
     { "id": "analysis-01", "category": "background_analysis", "prompt": "帮我做一份7月工作复盘", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },
     { "id": "analysis-02", "category": "background_analysis", "prompt": "后台分析一下2026年6月整月的任务、工时和风险", "expect": { "tools": ["start_monthly_review"], "backgroundTask": "monthly_review" } },

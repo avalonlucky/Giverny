@@ -43,6 +43,7 @@ Giverny —— 设计兼职任务管理与结算工具。
 
 - **永久禁止使用 Wrangler CLI**：本项目的本地检修和正式部署都不要再执行 `wrangler` / `npx wrangler`。正式发布只允许使用 `npm run deploy:production`（Cloudflare 官方 HTTP API Direct Upload）；如该链路失败，应修复 API 发布器，禁止回退 Wrangler 重试。
 - **8GB Mac 资源纪律**：迭代阶段优先运行 `npm run quality:fast` 和定向浏览器用例；`agent:eval:isolated` 与 `browser:eval` 只在发布前各完整运行一次，必须严格串行，禁止并发或重复全量回归。
+- **低负载常态**：本机命令默认单进程、低调度优先级运行；Node 检查优先使用 `NODE_OPTIONS=--max-old-space-size=1536 nice -n 19`。开发中只跑 TypeScript 与当前业务域的定向测试，不启动常驻 dev server，不并发构建、隔离评测或浏览器。每轮重任务结束后确认没有遗留 Node、Chromium、workerd、Miniflare 或 Playwright 进程。
 - **浏览器回收纪律**：普通线上健康、资源哈希和深链接核对优先使用 HTTP 检查；只有必须验证真实交互时才启动浏览器。使用内置浏览器后必须 finalize/关闭测试标签，并确认没有遗留浏览器控制 Node 内核或测试 Chromium。
 - **临时目录纪律**：隔离评测目录必须带 `.metadata_never_index` 并在正常退出、信号退出和进程退出时清理，避免 Spotlight 扫描大量 D1/R2 临时文件造成持续卡顿。
 - 只有影响网站本体的正式更新才需要版本记录：包括功能、UI、交互、数据口径、部署配置、数据库 / R2 / Worker 行为、用户可见文案等。

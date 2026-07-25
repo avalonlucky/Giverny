@@ -193,6 +193,16 @@ assert.ok(attachmentQueue.fallbackAnswer.includes('failed'))
 assert.ok(attachmentQueue.fallbackAnswer.includes('模型暂时不可用'))
 assert.equal(verifyAgentFactClaims(attachmentQueue.fallbackAnswer, attachmentQueue).passed, true)
 
+const proactive = buildAgentFactSnapshot([evidence('query_proactive_work', {
+  summary: { open: 2, critical: 1, high: 1, handledTotal: 5, resolutionRate: 80, dismissalRate: 20, averageResponseMinutes: 35 },
+  items: [{ taskId: 12, priority: 'critical', title: '官网首页轮播图已逾期 3 天', evidence: ['预计交付日期：2026-07-22', '当前进度：60%'], recommendation: '核对延期原因并更新进展。' }],
+})])
+assert.ok(proactive.fallbackAnswer.includes('待处理：2 项'))
+assert.ok(proactive.fallbackAnswer.includes('解决率 80%'))
+assert.ok(proactive.fallbackAnswer.includes('任务 #12'))
+assert.ok(proactive.fallbackAnswer.includes('预计交付日期：2026-07-22'))
+assert.equal(verifyAgentFactClaims(proactive.fallbackAnswer, proactive).passed, true)
+
 assert.equal(runAgentFactProtocolSelfTest().ok, true)
 
 console.log('Agent fact guard deterministic tests passed')

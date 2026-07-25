@@ -14,6 +14,7 @@ import { searchProductKnowledge } from './productKnowledgeSearch'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
+import { buildAgentProactiveSignals, type AgentProactivePriority, type AgentProactiveSignalType } from './agentProactive'
 import {
   approveExecutionBatch,
   beginExecutionCompensation,
@@ -32,7 +33,7 @@ import {
   type AgentExecutionStepDraft,
 } from './agentExecutionEngine'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -410,6 +411,7 @@ type DbTask = {
   deleted_at?: string | null
   voided_at?: string | null
   void_reason?: string | null
+  updated_at: string
 }
 
 type DbUpdate = {
@@ -3323,6 +3325,168 @@ type DbAgentTaskPlan = {
   error_message: string | null
 }
 
+type DbAgentProactiveItem = {
+  id: string
+  workspace_id: string
+  task_id: string
+  task_title: string
+  signal_type: AgentProactiveSignalType
+  priority: AgentProactivePriority
+  title: string
+  evidence_json: string
+  recommendation: string
+  suggested_prompt: string
+  status: 'open' | 'snoozed' | 'resolved' | 'dismissed'
+  detected_at: string
+  last_seen_at: string
+  snoozed_until: string | null
+  read_at: string | null
+  handled_at: string | null
+  resolution: 'resolved' | 'dismissed' | 'auto_resolved' | null
+  resolution_note: string | null
+  source_updated_at: string | null
+}
+
+function parseAgentEvidence(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.map((item) => agentString(item, 500)).filter(Boolean).slice(0, 12) : []
+  } catch {
+    return []
+  }
+}
+
+function toAgentProactiveItem(row: DbAgentProactiveItem): AgentProactiveItem {
+  return {
+    id: row.id,
+    taskId: Number(row.task_id),
+    taskTitle: row.task_title,
+    signalType: row.signal_type,
+    priority: row.priority,
+    title: row.title,
+    evidence: parseAgentEvidence(row.evidence_json),
+    recommendation: row.recommendation,
+    suggestedPrompt: row.suggested_prompt,
+    status: row.status,
+    unread: !row.read_at,
+    detectedAt: row.detected_at,
+    lastSeenAt: row.last_seen_at,
+    snoozedUntil: row.snoozed_until || undefined,
+    handledAt: row.handled_at || undefined,
+    resolution: row.resolution || undefined,
+    resolutionNote: row.resolution_note || undefined,
+  }
+}
+
+async function ensureAgentProactiveTable(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_proactive_items (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', task_id TEXT NOT NULL,
+      task_title TEXT NOT NULL DEFAULT '', signal_type TEXT NOT NULL, dedupe_key TEXT NOT NULL,
+      priority TEXT NOT NULL DEFAULT 'medium', title TEXT NOT NULL, evidence_json TEXT NOT NULL DEFAULT '[]',
+      recommendation TEXT NOT NULL DEFAULT '', suggested_prompt TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open',
+      source_updated_at TEXT, detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      snoozed_until TEXT, read_at TEXT, handled_at TEXT, resolution TEXT, resolution_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  ).run()
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_proactive_open_dedupe ON agent_proactive_items(workspace_id, dedupe_key) WHERE status IN ('open', 'snoozed')").run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_proactive_queue ON agent_proactive_items(workspace_id, status, priority, detected_at DESC)').run()
+}
+
+async function syncAgentProactiveTask(env: Env, taskId: number | string, workspaceId = DEFAULT_WORKSPACE_ID, today = beijingClock().date) {
+  await ensureAgentProactiveTable(env)
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL')
+    .bind(String(taskId), workspaceId).first<DbTask>()
+  const historyRows = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE workspace_id = ? AND task_id = ? ORDER BY updated_at DESC LIMIT 100')
+    .bind(workspaceId, String(taskId)).all<DbAgentProactiveItem>()
+  const openRows = { results: (historyRows.results ?? []).filter((row) => ['open', 'snoozed'].includes(row.status)) }
+  const latestByType = new Map<AgentProactiveSignalType, DbAgentProactiveItem>()
+  for (const row of historyRows.results ?? []) if (!latestByType.has(row.signal_type)) latestByType.set(row.signal_type, row)
+  if (!task) {
+    for (const row of openRows.results ?? []) {
+      await env.DB.prepare("UPDATE agent_proactive_items SET status = 'resolved', resolution = 'auto_resolved', handled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id).run()
+    }
+    return []
+  }
+  const acceptanceFile = await env.DB.prepare("SELECT id FROM attachments WHERE task_id = ? AND attachment_scope = 'acceptance' AND deleted_at IS NULL LIMIT 1").bind(String(taskId)).first<{ id: string }>()
+  const waiting = parseWaitingEntries(task.waiting_entries_json).filter((entry) => !entry.end).map((entry) => ({
+    reason: entry.reason,
+    note: entry.note,
+    startedAt: [entry.date, entry.start].filter(Boolean).join(' '),
+  }))
+  const signals = buildAgentProactiveSignals({
+    id: Number(task.id),
+    title: task.title,
+    status: task.status,
+    progress: Number(task.progress) || 0,
+    estimatedDeliveryDate: task.estimated_delivery_date || undefined,
+    estimatedHours: Number(task.estimated_hours) || 0,
+    actualHours: Number(task.actual_hours) || 0,
+    acceptanceNote: task.acceptance_note || undefined,
+    hasAcceptanceFile: Boolean(acceptanceFile),
+    activeWaiting: waiting,
+  }, today)
+  const existing = new Map((openRows.results ?? []).map((row) => [row.signal_type, row]))
+  const activeTypes = new Set(signals.map((signal) => signal.type))
+  for (const signal of signals) {
+    const row = existing.get(signal.type)
+    if (row) {
+      const wakeSnoozed = row.status === 'snoozed' && row.snoozed_until && row.snoozed_until <= nowIso()
+      await env.DB.prepare(
+        `UPDATE agent_proactive_items SET task_title = ?, priority = ?, title = ?, evidence_json = ?, recommendation = ?,
+         suggested_prompt = ?, source_updated_at = ?, last_seen_at = CURRENT_TIMESTAMP,
+         status = CASE WHEN ? THEN 'open' ELSE status END,
+         snoozed_until = CASE WHEN ? THEN NULL ELSE snoozed_until END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      ).bind(task.title, signal.priority, signal.title, JSON.stringify(signal.evidence), signal.recommendation, signal.suggestedPrompt, task.updated_at, wakeSnoozed ? 1 : 0, wakeSnoozed ? 1 : 0, row.id).run()
+    } else {
+      const previous = latestByType.get(signal.type)
+      if (previous?.handled_at && previous.source_updated_at === task.updated_at) continue
+      await env.DB.prepare(
+        `INSERT INTO agent_proactive_items (id, workspace_id, task_id, task_title, signal_type, dedupe_key, priority, title,
+         evidence_json, recommendation, suggested_prompt, source_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), workspaceId, String(task.id), task.title, signal.type, `${task.id}:${signal.type}`, signal.priority, signal.title, JSON.stringify(signal.evidence), signal.recommendation, signal.suggestedPrompt, task.updated_at).run()
+    }
+  }
+  for (const row of openRows.results ?? []) {
+    if (activeTypes.has(row.signal_type)) continue
+    await env.DB.prepare(
+      "UPDATE agent_proactive_items SET status = 'resolved', resolution = 'auto_resolved', resolution_note = '任务数据变化后信号已消失', handled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    ).bind(row.id).run()
+  }
+  return signals
+}
+
+async function syncAgentProactiveWorkspace(env: Env, workspaceId = DEFAULT_WORKSPACE_ID, limit = 300) {
+  await ensureAgentProactiveTable(env)
+  const tasks = await env.DB.prepare('SELECT id FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?').bind(workspaceId, limit).all<{ id: string }>()
+  for (const task of tasks.results ?? []) await syncAgentProactiveTask(env, task.id, workspaceId)
+}
+
+async function agentProactiveSummary(env: Env, workspaceId: string): Promise<AgentProactiveSummary> {
+  const row = await env.DB.prepare(
+    `SELECT
+      SUM(CASE WHEN status IN ('open', 'snoozed') THEN 1 ELSE 0 END) AS open_count,
+      SUM(CASE WHEN status IN ('open', 'snoozed') AND priority = 'critical' THEN 1 ELSE 0 END) AS critical_count,
+      SUM(CASE WHEN status IN ('open', 'snoozed') AND priority = 'high' THEN 1 ELSE 0 END) AS high_count,
+      SUM(CASE WHEN resolution = 'resolved' THEN 1 ELSE 0 END) AS resolved_count,
+      SUM(CASE WHEN resolution = 'dismissed' THEN 1 ELSE 0 END) AS dismissed_count,
+      SUM(CASE WHEN resolution = 'auto_resolved' THEN 1 ELSE 0 END) AS auto_count,
+      AVG(CASE WHEN handled_at IS NOT NULL THEN (julianday(handled_at) - julianday(detected_at)) * 1440 END) AS response_minutes
+     FROM agent_proactive_items WHERE workspace_id = ?`,
+  ).bind(workspaceId).first<Record<string, number | null>>()
+  const resolved = Number(row?.resolved_count || 0)
+  const dismissed = Number(row?.dismissed_count || 0)
+  const autoResolved = Number(row?.auto_count || 0)
+  const handledTotal = resolved + dismissed + autoResolved
+  return {
+    open: Number(row?.open_count || 0), critical: Number(row?.critical_count || 0), high: Number(row?.high_count || 0),
+    resolved, dismissed, autoResolved, handledTotal,
+    resolutionRate: handledTotal ? Math.round(((resolved + autoResolved) / handledTotal) * 100) : 0,
+    dismissalRate: handledTotal ? Math.round((dismissed / handledTotal) * 100) : 0,
+    averageResponseMinutes: Math.max(0, Math.round(Number(row?.response_minutes || 0))),
+  }
+}
+
 function parseAgentPlanSteps(planId: string, value: string): AgentPlanStep[] {
   try {
     return normalizeExecutionSteps(planId, JSON.parse(value))
@@ -3938,6 +4102,119 @@ async function listAgentTaskPlans(env: Env, request: Request) {
   const limit = Math.min(Math.max(Number(new URL(request.url).searchParams.get('limit')) || 50, 1), 100)
   const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND status != 'cancelled' ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, updated_at DESC LIMIT ?").bind(workspaceId, limit).all<DbAgentTaskPlan>()
   return ok({ plans: (rows.results ?? []).map(toAgentTaskPlan) })
+}
+
+async function proactiveQueuePayload(env: Env, request: Request, sync = true) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  await ensureAgentProactiveTable(env)
+  const existing = await env.DB.prepare('SELECT COUNT(*) AS count FROM agent_proactive_items WHERE workspace_id = ?').bind(workspaceId).first<{ count: number }>()
+  if (sync || Number(existing?.count || 0) === 0) await syncAgentProactiveWorkspace(env, workspaceId)
+  const url = new URL(request.url)
+  const taskId = Number(url.searchParams.get('taskId'))
+  const status = url.searchParams.get('status') || 'active'
+  const priority = url.searchParams.get('priority') || ''
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 50, 1), 100)
+  const filters = ['workspace_id = ?']
+  const values: unknown[] = [workspaceId]
+  if (status === 'active') filters.push("(status = 'open' OR (status = 'snoozed' AND snoozed_until <= CURRENT_TIMESTAMP))")
+  else if (['open', 'snoozed', 'resolved', 'dismissed'].includes(status)) { filters.push('status = ?'); values.push(status) }
+  if (Number.isFinite(taskId) && taskId > 0) { filters.push('task_id = ?'); values.push(String(taskId)) }
+  if (['critical', 'high', 'medium', 'low'].includes(priority)) { filters.push('priority = ?'); values.push(priority) }
+  values.push(limit)
+  const rows = await env.DB.prepare(
+    `SELECT * FROM agent_proactive_items WHERE ${filters.join(' AND ')}
+     ORDER BY CASE priority WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
+       CASE status WHEN 'open' THEN 0 WHEN 'snoozed' THEN 1 ELSE 2 END, detected_at ASC LIMIT ?`,
+  ).bind(...values).all<DbAgentProactiveItem>()
+  return { items: (rows.results ?? []).map(toAgentProactiveItem), summary: await agentProactiveSummary(env, workspaceId) }
+}
+
+async function listAgentProactiveItems(env: Env, request: Request) {
+  return ok(await proactiveQueuePayload(env, request, false))
+}
+
+async function updateAgentProactiveItem(env: Env, id: string, request: Request) {
+  await ensureAgentProactiveTable(env)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const body = await request.json().catch(() => ({})) as { action?: string; note?: string; snoozedUntil?: string }
+  const action = agentString(body.action, 40)
+  const row = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAgentProactiveItem>()
+  if (!row) return fail('主动事项不存在', 404)
+  if (action === 'read') {
+    await env.DB.prepare('UPDATE agent_proactive_items SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
+  } else if (action === 'resolve' || action === 'dismiss') {
+    if (!['open', 'snoozed'].includes(row.status)) return fail('该主动事项已处理', 409)
+    await env.DB.prepare(
+      `UPDATE agent_proactive_items SET status = ?, resolution = ?, resolution_note = ?, handled_at = CURRENT_TIMESTAMP,
+       snoozed_until = NULL, read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(action === 'resolve' ? 'resolved' : 'dismissed', action === 'resolve' ? 'resolved' : 'dismissed', agentString(body.note, 500), id).run()
+  } else if (action === 'snooze') {
+    if (!['open', 'snoozed'].includes(row.status)) return fail('该主动事项已处理', 409)
+    const until = agentDateTime(body.snoozedUntil)
+    if (!until || until <= nowIso()) return fail('稍后提醒时间必须晚于当前时间', 400)
+    await env.DB.prepare("UPDATE agent_proactive_items SET status = 'snoozed', snoozed_until = ?, read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(until, id).run()
+  } else if (action === 'reopen') {
+    if (!['resolved', 'dismissed'].includes(row.status)) return fail('只有已处理事项可以重新打开', 409)
+    const duplicate = await env.DB.prepare("SELECT id FROM agent_proactive_items WHERE workspace_id = ? AND dedupe_key = ? AND status IN ('open', 'snoozed') LIMIT 1").bind(workspaceId, `${row.task_id}:${row.signal_type}`).first<{ id: string }>()
+    if (duplicate) return fail('相同事项已经处于待处理状态', 409)
+    await env.DB.prepare("UPDATE agent_proactive_items SET status = 'open', resolution = NULL, resolution_note = NULL, handled_at = NULL, snoozed_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run()
+  } else return fail('不支持的主动事项操作', 400)
+  const updated = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE id = ?').bind(id).first<DbAgentProactiveItem>()
+  await audit(env, `agent_proactive_${action}`, 'agent_proactive_item', id, { taskId: row.task_id, signalType: row.signal_type, note: agentString(body.note, 500) })
+  return updated ? ok({ item: toAgentProactiveItem(updated), summary: await agentProactiveSummary(env, workspaceId) }) : fail('主动事项不存在', 404)
+}
+
+async function agentQueryProactiveWorkTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const url = new URL(request.url)
+  for (const key of ['taskId', 'status', 'priority', 'limit']) {
+    const value = body[key]
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  }
+  const scopedRequest = new Request(url, { method: 'GET', headers: request.headers })
+  const payload = await proactiveQueuePayload(env, scopedRequest)
+  return agentOk({ tool: 'query_proactive_work', ...payload })
+}
+
+async function agentManageProactivePreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentProactiveTable(env)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const id = agentString(body.itemId, 160)
+  const action = agentString(body.action, 30)
+  if (!['resolve', 'dismiss', 'snooze'].includes(action)) return agentFail('不支持的主动事项操作', 400)
+  const row = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAgentProactiveItem>()
+  if (!row) return agentFail('主动事项不存在', 404)
+  if (!['open', 'snoozed'].includes(row.status)) return agentFail('主动事项已经处理', 409)
+  const snoozedUntil = action === 'snooze' ? agentDateTime(body.snoozedUntil) : ''
+  if (action === 'snooze' && (!snoozedUntil || snoozedUntil <= nowIso())) return agentFail('稍后提醒时间必须晚于当前时间', 400)
+  return agentPreview(env, request, 'manage_proactive_item_preview', {
+    itemId: row.id, action, note: agentString(body.note, 500), snoozedUntil: snoozedUntil || undefined,
+    before: { status: row.status, title: row.title, priority: row.priority, taskId: Number(row.task_id), lastSeenAt: row.last_seen_at },
+  }, [])
+}
+
+async function agentManageProactiveTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_proactive_item', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const row = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE id = ? AND workspace_id = ?').bind(agentString(draft.itemId, 160), workspaceId).first<DbAgentProactiveItem>()
+  const before = typeof draft.before === 'object' && draft.before ? draft.before as Record<string, unknown> : {}
+  if (!row || row.status !== before.status || row.last_seen_at !== before.lastSeenAt) return agentFail('主动事项在确认前已发生变化，请重新预览', 409)
+  const action = agentString(draft.action, 30)
+  if (action === 'resolve' || action === 'dismiss') {
+    await env.DB.prepare("UPDATE agent_proactive_items SET status = ?, resolution = ?, resolution_note = ?, handled_at = CURRENT_TIMESTAMP, snoozed_until = NULL, read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(action === 'resolve' ? 'resolved' : 'dismissed', action === 'resolve' ? 'resolved' : 'dismissed', agentString(draft.note, 500), row.id).run()
+  } else if (action === 'snooze') {
+    await env.DB.prepare("UPDATE agent_proactive_items SET status = 'snoozed', snoozed_until = ?, read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(agentDateTime(draft.snoozedUntil), row.id).run()
+  } else return agentFail('不支持的主动事项操作', 400)
+  const updated = await env.DB.prepare('SELECT * FROM agent_proactive_items WHERE id = ?').bind(row.id).first<DbAgentProactiveItem>()
+  await audit(env, agentCapabilityRegistry.manage_proactive_item.policy.auditEvent, 'agent_proactive_item', row.id, { action, taskId: row.task_id, signalType: row.signal_type })
+  return agentOk({ tool: 'manage_proactive_item', mode: 'execute', item: updated ? toAgentProactiveItem(updated) : null, summary: await agentProactiveSummary(env, workspaceId) })
 }
 
 async function updateAgentTaskPlan(env: Env, id: string, request: Request, legacyAction?: 'read' | 'cancel') {
@@ -6941,28 +7218,11 @@ async function maybeScheduleProactiveAgentAnalyses(env: Env, now = new Date()) {
 
 async function maybeScheduleAgentTaskReminders(env: Env, now = new Date()) {
   const clock = beijingClock(now)
-  if (clock.hour !== 9) return
-  const rows = await env.DB.prepare(
-    `SELECT * FROM tasks WHERE deleted_at IS NULL AND voided_at IS NULL
-     AND status NOT IN ('已验收', '终止', '不计费') ORDER BY updated_at DESC LIMIT 200`,
-  ).all<DbTask>()
-  for (const task of rows.results ?? []) {
-    const reminders: string[] = []
-    if (task.estimated_delivery_date && task.estimated_delivery_date.slice(0, 10) < clock.date) reminders.push('任务已逾期，需要更新进展或调整交付时间')
-    if (Number(task.progress) >= 100) reminders.push('进度已到 100%，可以准备验收')
-    if (Number(task.estimated_hours) > 0 && Number(task.actual_hours) > Number(task.estimated_hours) * 1.25) reminders.push('实际工时已超过预估 25%，建议复核范围变化')
-    const waiting = parseWaitingEntries(task.waiting_entries_json)
-    if (waiting.length > 0) reminders.push('存在等待记录，请确认阻塞是否已经解除')
-    const acceptanceFile = await env.DB.prepare("SELECT id FROM attachments WHERE task_id = ? AND attachment_scope = 'acceptance' AND deleted_at IS NULL LIMIT 1").bind(task.id).first<{ id: string }>()
-    if (acceptanceFile && !task.acceptance_note) reminders.push('已有验收文件但尚未填写验收备注')
-    for (const goal of reminders) {
-      await env.DB.prepare(
-        `INSERT OR IGNORE INTO agent_task_plans (id, task_id, kind, goal, steps_json, next_action_at)
-         VALUES (?, ?, 'reminder', ?, ?, ?)`,
-      ).bind(crypto.randomUUID(), task.id, `${task.title}：${goal}`, JSON.stringify([{ id: crypto.randomUUID(), label: goal, action: 'follow_up', status: 'pending' }]), `${clock.date}T09:00:00+08:00`).run()
-    }
-    if (reminders.length > 0) await refreshAgentTaskMemory(env, Number(task.id))
+  const workspaces = await env.DB.prepare("SELECT DISTINCT COALESCE(workspace_id, 'default') AS workspace_id FROM tasks WHERE deleted_at IS NULL").all<{ workspace_id: string }>()
+  for (const row of workspaces.results ?? [{ workspace_id: DEFAULT_WORKSPACE_ID }]) {
+    await syncAgentProactiveWorkspace(env, row.workspace_id || DEFAULT_WORKSPACE_ID)
   }
+  return { scannedAt: `${clock.date}T${String(clock.hour).padStart(2, '0')}:00:00+08:00` }
 }
 
 async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
@@ -7085,6 +7345,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/reschedule-task' && request.method === 'POST') return agentRescheduleTool(env, request)
   if (url.pathname === '/api/agent/tools/schedule-reminder-preview' && request.method === 'POST') return agentScheduleReminderPreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/schedule-reminder' && request.method === 'POST') return agentScheduleReminderTool(env, request)
+  if (url.pathname === '/api/agent/tools/proactive-work' && (request.method === 'POST' || request.method === 'GET')) return agentQueryProactiveWorkTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-proactive-item-preview' && request.method === 'POST') return agentManageProactivePreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-proactive-item' && request.method === 'POST') return agentManageProactiveTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route-preview' && request.method === 'POST') return agentConfigureAiRoutePreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route' && request.method === 'POST') return agentConfigureAiRouteTool(env, request)
   if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {
@@ -12644,6 +12907,7 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
 
   await audit(env, 'create', 'task', id, task)
   ctx?.waitUntil(indexTaskSearch(env, id))
+  ctx?.waitUntil(syncAgentProactiveTask(env, id, workspaceId))
   return ok({ ...task, id: Number(id), status: initialStatus, progress: 0, files: [] }, 201)
 }
 
@@ -12782,6 +13046,7 @@ async function updateTask(env: Env, id: string, request: Request, role: AuthRole
     .bind(id, workspaceId)
     .first<DbTask>()
   ctx?.waitUntil(indexTaskSearch(env, id))
+  ctx?.waitUntil(syncAgentProactiveTask(env, id, workspaceId))
   return ok(saved ? toTask(saved) : toTask(current))
 }
 
@@ -13095,6 +13360,7 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
     if (form.get('analyze') !== 'false') {
       enqueueAnalysis(env, ctx, id)
     }
+    ctx?.waitUntil(syncAgentProactiveTask(env, taskId, workspaceId))
     return ok(saved, 201)
   } catch (error) {
     await Promise.allSettled([env.UPLOADS.delete(r2Key), ...(previewKey && previewKey !== r2Key ? [env.UPLOADS.delete(previewKey)] : [])])
@@ -13325,6 +13591,7 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
     if (form.get('analyze') !== 'false') {
       enqueueAnalysis(env, ctx, fileId)
     }
+    ctx?.waitUntil(syncAgentProactiveTask(env, taskId, workspaceId))
     return ok(saved, 201)
   } catch (error) {
     await Promise.allSettled([env.UPLOADS.delete(key), ...(previewKey ? [env.UPLOADS.delete(previewKey)] : [])])
@@ -19506,6 +19773,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/ai/openrouter/free-models/scan' ||
       path === '/api/ai/agent-plan' ||
       path.startsWith('/api/ai/agent-plans') ||
+      path.startsWith('/api/ai/proactive-items') ||
       path.startsWith('/api/ai/agent-failures') ||
       path.startsWith('/api/ai/task-memories') ||
       path === '/api/ai/agent-metrics' ||
@@ -19831,6 +20099,12 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/ai/agent-plans/') && request.method === 'PATCH') {
     return updateAgentTaskPlan(env, path.split('/')[4] || '', request)
+  }
+  if (path === '/api/ai/proactive-items' && request.method === 'GET') {
+    return listAgentProactiveItems(env, request)
+  }
+  if (path.startsWith('/api/ai/proactive-items/') && request.method === 'PATCH') {
+    return updateAgentProactiveItem(env, path.split('/')[4] || '', request)
   }
   if (path === '/api/ai/task-memories' && request.method === 'GET') {
     return listAgentTaskMemories(env, request)

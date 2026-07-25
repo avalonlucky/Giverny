@@ -156,6 +156,39 @@ export type AgentTaskMemory = {
   updatedAt: string
 }
 
+export type AgentProactiveItem = {
+  id: string
+  taskId: number
+  taskTitle: string
+  signalType: 'overdue' | 'due_soon' | 'ready_for_acceptance' | 'hours_overrun' | 'waiting_blocked' | 'acceptance_note_missing'
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  title: string
+  evidence: string[]
+  recommendation: string
+  suggestedPrompt: string
+  status: 'open' | 'snoozed' | 'resolved' | 'dismissed'
+  unread: boolean
+  detectedAt: string
+  lastSeenAt: string
+  snoozedUntil?: string
+  handledAt?: string
+  resolution?: 'resolved' | 'dismissed' | 'auto_resolved'
+  resolutionNote?: string
+}
+
+export type AgentProactiveSummary = {
+  open: number
+  critical: number
+  high: number
+  resolved: number
+  dismissed: number
+  autoResolved: number
+  handledTotal: number
+  resolutionRate: number
+  dismissalRate: number
+  averageResponseMinutes: number
+}
+
 export type AgentFailureCase = {
   fingerprint: string
   category: string

@@ -295,6 +295,17 @@ function renderAiRouteTest(payload: Record<string, unknown>) {
   return ['**模型路由测试结果**', `- 路由：${String(payload.route || '')}`, `- 模型：${String(payload.provider || '')} / ${String(payload.model || '')}`, `- 状态：${payload.ok ? '可用' : '不可用'}`, '- API Key 未显示。'].join('\n')
 }
 
+function renderProactiveWork(payload: Record<string, unknown>) {
+  const items = list(payload.items).map(record)
+  const summary = record(payload.summary)
+  return [
+    '**已核验主动事项**',
+    `- 待处理：${formatNumber(summary.open)} 项；紧急 ${formatNumber(summary.critical)} 项，高优先级 ${formatNumber(summary.high)} 项`,
+    `- 历史处理：${formatNumber(summary.handledTotal)} 项；解决率 ${formatNumber(summary.resolutionRate)}%，忽略率 ${formatNumber(summary.dismissalRate)}%，平均响应 ${formatNumber(summary.averageResponseMinutes)} 分钟`,
+    ...(items.length ? items.map((item) => `- [${String(item.priority || 'medium')}] ${String(item.title || '')}（任务 #${formatNumber(item.taskId)}）\n  - 证据：${list(item.evidence).map(String).join('；')}\n  - 建议：${String(item.recommendation || '')}`) : ['- 当前没有待处理主动事项。']),
+  ].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
@@ -315,6 +326,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'query_attachment_analysis') return renderAttachmentAnalysisQueue(payload)
   if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
   if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
+  if (evidence.toolName === 'query_proactive_work') return renderProactiveWork(payload)
   return ''
 }
 

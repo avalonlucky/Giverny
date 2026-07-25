@@ -26,7 +26,7 @@ import { localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
 import { providerSupportsVision } from '../lib/aiProviders'
 import { agentAnalysisStatusLabel } from '../lib/agentAnalysisPresentation'
 import type { FileAsset } from '../types/domain'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
 import type { ToastTone } from '../lib/toastQueue'
 import { AgentAnalysisTaskCard } from './AgentAnalysisTaskCard'
 import { AgentApprovalCard } from './AgentApprovalCard'
@@ -66,6 +66,13 @@ const planStepStatusLabels: Record<AgentTaskPlan['steps'][number]['status'], str
   compensation_pending: '待补偿',
   compensating: '补偿中',
   compensated: '已补偿',
+}
+
+const proactivePriorityLabels: Record<AgentProactiveItem['priority'], string> = {
+  critical: '紧急',
+  high: '高',
+  medium: '中',
+  low: '低',
 }
 
 type ChatPanelProps = {
@@ -116,8 +123,11 @@ export function ChatPanel({
   const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
   const [agentPlans, setAgentPlans] = useState<AgentTaskPlan[]>([])
   const [taskMemories, setTaskMemories] = useState<AgentTaskMemory[]>([])
-  const [taskCenterTab, setTaskCenterTab] = useState<'plans' | 'memories'>('plans')
+  const [proactiveItems, setProactiveItems] = useState<AgentProactiveItem[]>([])
+  const [proactiveSummary, setProactiveSummary] = useState<AgentProactiveSummary | null>(null)
+  const [taskCenterTab, setTaskCenterTab] = useState<'proactive' | 'plans' | 'memories'>('proactive')
   const [expandedPlanId, setExpandedPlanId] = useState('')
+  const [expandedProactiveId, setExpandedProactiveId] = useState('')
   const [expandedMemoryId, setExpandedMemoryId] = useState(0)
   const [memoryNoteDrafts, setMemoryNoteDrafts] = useState<Record<number, string>>({})
   const [memoryForgetConfirmId, setMemoryForgetConfirmId] = useState(0)
@@ -194,17 +204,23 @@ export function ChatPanel({
   }, [])
 
   const refreshAnalysisJobs = useCallback(async () => {
-    const [jobsResponse, plansResponse, memoriesResponse] = await Promise.all([
+    const [jobsResponse, plansResponse, memoriesResponse, proactiveResponse] = await Promise.all([
       fetch('/api/ai/analysis-jobs?limit=50'),
       fetch('/api/ai/agent-plans?limit=50'),
       fetch('/api/ai/task-memories?limit=50'),
+      fetch('/api/ai/proactive-items?status=active&limit=50'),
     ])
     const data = await jobsResponse.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
     const planData = await plansResponse.json().catch(() => null) as { plans?: AgentTaskPlan[] } | null
     const memoryData = await memoriesResponse.json().catch(() => null) as { memories?: AgentTaskMemory[] } | null
+    const proactiveData = await proactiveResponse.json().catch(() => null) as { items?: AgentProactiveItem[]; summary?: AgentProactiveSummary } | null
     if (jobsResponse.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
     if (plansResponse.ok && Array.isArray(planData?.plans)) setAgentPlans(planData.plans)
     if (memoriesResponse.ok && Array.isArray(memoryData?.memories)) setTaskMemories(memoryData.memories)
+    if (proactiveResponse.ok && Array.isArray(proactiveData?.items)) {
+      setProactiveItems(proactiveData.items)
+      setProactiveSummary(proactiveData.summary || null)
+    }
   }, [])
 
   useEffect(() => {
@@ -876,6 +892,33 @@ export function ChatPanel({
     void send(reminderPrompt(plan))
   }
 
+  const openProactiveItem = async (item: AgentProactiveItem) => {
+    setExpandedProactiveId((current) => current === item.id ? '' : item.id)
+    if (!item.unread) return
+    setProactiveItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, unread: false } : entry))
+    await api.updateProactiveItem(item.id, { action: 'read' }).catch(() => undefined)
+  }
+
+  const updateProactiveItem = async (item: AgentProactiveItem, action: 'resolve' | 'dismiss' | 'snooze') => {
+    setTaskCenterBusy(`proactive:${item.id}:${action}`)
+    try {
+      const snoozedUntil = action === 'snooze' ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined
+      const result = await api.updateProactiveItem(item.id, { action, snoozedUntil })
+      setProactiveItems((current) => current.filter((entry) => entry.id !== item.id))
+      setProactiveSummary(result.summary)
+      onNotify(action === 'resolve' ? '已记录为已解决' : action === 'dismiss' ? '已记录为无需处理' : '将在 24 小时后再次提醒', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '主动事项更新失败', 'error')
+    } finally {
+      setTaskCenterBusy('')
+    }
+  }
+
+  const executeProactiveSuggestion = (item: AgentProactiveItem) => {
+    setShowTaskCenter(false)
+    void send(item.suggestedPrompt)
+  }
+
   const scopeActive = useKnowledge || useWebSearch
   const activeProviderConfigs = useMemo(
     () => aiProviderConfigs.filter((config) => config.enabled && config.hasApiKey && config.models.includes(config.defaultModel)),
@@ -901,7 +944,7 @@ export function ChatPanel({
     if (selectedModelChoice === option.value) return true
     return false
   }
-  const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length
+  const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length + proactiveItems.filter((item) => item.unread).length
   const filteredHistoryList = useMemo(() => {
     const keyword = historySearch.trim().toLowerCase()
     return historyList.filter((record) => {
@@ -1328,10 +1371,49 @@ export function ChatPanel({
             <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭记录"><X size={15} /></button>
           </div>
           <div className="chat-task-center-tabs" role="tablist" aria-label="任务中心内容">
+            <button type="button" role="tab" aria-selected={taskCenterTab === 'proactive'} className={taskCenterTab === 'proactive' ? 'active' : ''} onClick={() => setTaskCenterTab('proactive')}>主动事项</button>
             <button type="button" role="tab" aria-selected={taskCenterTab === 'plans'} className={taskCenterTab === 'plans' ? 'active' : ''} onClick={() => setTaskCenterTab('plans')}>计划与提醒</button>
             <button type="button" role="tab" aria-selected={taskCenterTab === 'memories'} className={taskCenterTab === 'memories' ? 'active' : ''} onClick={() => setTaskCenterTab('memories')}>任务记忆</button>
           </div>
           <div className="chat-history-list">
+            {taskCenterTab === 'proactive' && proactiveSummary && (
+              <div className="chat-proactive-summary" aria-label="主动事项处理效果">
+                <span><strong>{proactiveSummary.open}</strong> 待处理</span>
+                <span><strong>{proactiveSummary.critical + proactiveSummary.high}</strong> 高风险</span>
+                <span><strong>{proactiveSummary.resolutionRate}%</strong> 解决率</span>
+                <span><strong>{proactiveSummary.averageResponseMinutes}</strong> 分钟响应</span>
+              </div>
+            )}
+            {taskCenterTab === 'proactive' && proactiveItems.map((item) => {
+              const expanded = expandedProactiveId === item.id
+              return (
+                <article key={item.id} className={`chat-task-plan chat-proactive-item ${item.unread ? 'unread' : ''}`}>
+                  <button type="button" className="chat-task-item" onClick={() => void openProactiveItem(item)} aria-expanded={expanded}>
+                    <span className="chat-task-item-main">
+                      <strong>{item.title}</strong>
+                      <small><span className={`proactive-priority ${item.priority}`}>{proactivePriorityLabels[item.priority]}优先级</span> · {item.status === 'snoozed' ? '稍后提醒' : '待处理'} · {new Date(item.detectedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</small>
+                    </span>
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </button>
+                  {expanded && (
+                    <div className="chat-task-plan-detail chat-proactive-detail">
+                      <strong>事实依据</strong>
+                      <ul>{item.evidence.map((line) => <li key={line}>{line}</li>)}</ul>
+                      <strong>建议处理</strong>
+                      <p>{item.recommendation}</p>
+                      <div className="chat-task-plan-actions">
+                        <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== '' || loading} onClick={() => executeProactiveSuggestion(item)}>执行建议</button>
+                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => onOpenTask(item.taskId)}><Eye size={13} />查看任务</button>
+                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'snooze')}>24 小时后提醒</button>
+                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'resolve')}>已解决</button>
+                        <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'dismiss')}>无需处理</button>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              )
+            })}
+            {taskCenterTab === 'proactive' && proactiveItems.length === 0 && <EmptyState variant="compact" title="当前没有主动事项" description="任务变化产生风险时会自动按优先级进入这里。" />}
             {taskCenterTab === 'plans' && agentPlans.map((plan) => {
               const expanded = expandedPlanId === plan.id
               const completedSteps = plan.steps.filter((step) => ['completed', 'skipped', 'compensated'].includes(step.status)).length

@@ -152,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_month_finance', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -215,7 +215,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 56) {
+  if (!response.ok || capabilities.length !== 59) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const capability of capabilities) {
@@ -2467,6 +2467,45 @@ async function runHourEstimateLearningCheck(cookie) {
   process.stdout.write('AI hour estimate quality scoring, completion, change audit, observation readiness, classification diagnostics, drift alerts, pricing strategy, replay gate, and learning checks passed.\n')
 }
 
+async function runAgentProactiveWorkCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const toolHeaders = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const firstResponse = await fetch(`${base}/api/ai/proactive-items?status=active&limit=100`, { headers: { cookie } })
+  const first = await firstResponse.json().catch(() => ({}))
+  if (!firstResponse.ok || !Array.isArray(first.items) || first.items.length < 1 || Number(first.summary?.open || 0) < 1) {
+    throw new Error(`Proactive queue was not generated from task events: ${JSON.stringify(first)}`)
+  }
+  const priorityRank = { critical: 4, high: 3, medium: 2, low: 1 }
+  for (let index = 1; index < first.items.length; index += 1) {
+    if ((priorityRank[first.items[index - 1].priority] || 0) < (priorityRank[first.items[index].priority] || 0)) {
+      throw new Error(`Proactive queue is not priority ordered: ${JSON.stringify(first.items)}`)
+    }
+  }
+  const second = await (await fetch(`${base}/api/ai/proactive-items?status=active&limit=100`, { headers: { cookie } })).json()
+  if (new Set(second.items.map((item) => `${item.taskId}:${item.signalType}`)).size !== second.items.length || second.items.length !== first.items.length) {
+    throw new Error(`Proactive deduplication failed: ${JSON.stringify({ first: first.items, second: second.items })}`)
+  }
+  const toolResponse = await fetch(`${base}/api/agent/tools/proactive-work`, { method: 'POST', headers: toolHeaders, body: JSON.stringify({ status: 'active', limit: 20 }) })
+  const toolPayload = await toolResponse.json().catch(() => ({}))
+  if (!toolResponse.ok || !toolPayload.items?.[0]?.evidence?.length || !toolPayload.items?.[0]?.recommendation || !toolPayload.summary) {
+    throw new Error(`Proactive Agent tool did not return evidence and outcomes: ${JSON.stringify(toolPayload)}`)
+  }
+  const target = toolPayload.items[0]
+  const previewResponse = await fetch(`${base}/api/agent/tools/manage-proactive-item-preview`, { method: 'POST', headers: toolHeaders, body: JSON.stringify({ itemId: target.id, action: 'resolve', note: '隔离评测已处理' }) })
+  const preview = await previewResponse.json().catch(() => ({}))
+  if (!previewResponse.ok || !preview.confirmationToken) throw new Error(`Proactive management preview failed: ${JSON.stringify(preview)}`)
+  const executeResponse = await fetch(`${base}/api/agent/tools/workflow-write`, { method: 'POST', headers: toolHeaders, body: JSON.stringify({ operationId: `proactive-${crypto.randomUUID()}`, endpoint: 'manage-proactive-item', confirmationToken: preview.confirmationToken }) })
+  const executed = await executeResponse.json().catch(() => ({}))
+  if (!executeResponse.ok || executed.item?.status !== 'resolved' || Number(executed.summary?.handledTotal || 0) < 1) {
+    throw new Error(`Proactive management Workflow failed: ${JSON.stringify(executed)}`)
+  }
+  const after = await (await fetch(`${base}/api/ai/proactive-items?status=active&limit=100`, { headers: { cookie } })).json()
+  if (after.items.some((item) => item.id === target.id || (item.taskId === target.taskId && item.signalType === target.signalType))) {
+    throw new Error(`Resolved proactive item immediately reappeared without a new task event: ${JSON.stringify(after.items)}`)
+  }
+  process.stdout.write('Agent proactive event detection, priority, evidence, deduplication, Workflow handling, and outcome statistics checks passed.\n')
+}
+
 try {
   start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: '8898' })
   isolatedRuntime = await createIsolatedRuntime({ appPort: 8798, modelPort: 8898, prefix: 'giverny-agent-eval-' })
@@ -2494,6 +2533,7 @@ try {
   await runAgentLifecycleWriteCheck()
   await runAgentBusinessToolCheck()
   await runAgentMultimodalToolCheck(cookie)
+  await runAgentProactiveWorkCheck(cookie)
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
   await runAttachmentPreviewResilienceCheck(cookie)

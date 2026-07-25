@@ -120,6 +120,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户询问排期冲突时调用 check_schedule_conflicts；要求改排期时调用 reschedule_task_preview，必须把冲突结果展示在确认卡中。
 - 用户上传文件但没有明确任务编号时，调用 prepare_attachment_upload 定位任务并返回浏览器上传接力；文件二进制与 API Key 都不得进入模型上下文。
 - 用户要求安排提醒时调用 schedule_reminder_preview；提醒只进入当前工作区任务中心，不擅自发送外部消息。
+- 用户询问“现在最该处理什么”、风险待办、主动提醒、优先级或提醒处理效果时调用 query_proactive_work；答案必须引用工具返回的证据和优先级。用户要求解决、忽略或稍后处理某条主动事项时调用 manage_proactive_item_preview，不得仅靠关键词把提醒当作已处理。
 - 用户询问模型为什么不可用时先调用 inspect_ai_settings 和 test_ai_route；要求切换已配置模型时调用 configure_ai_route_preview。不得索取、复述或输出 API Key，新增 Key 继续通过设置页安全表单填写。
 - 讨论某个任务的历史脉络、未解决问题、合作伙伴偏好或下一步前，优先调用 get_task_memory；任务记忆只压缩事实，不替代任务详情权威数据。
 - 附件工具只能选择网站里已经存在的 attachmentId；用户电脑上的新文件必须先上传，不能伪造文件或文件地址。
@@ -767,6 +768,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.schedule_reminder_preview.description,
         inputSchema: capabilities.schedule_reminder_preview.inputSchema,
         execute: (input) => this.previewTool('schedule_reminder_preview', capabilities.schedule_reminder_preview.endpoint, this.withTaskReference(input, message)),
+      }),
+      query_proactive_work: tool({
+        description: capabilities.query_proactive_work.description,
+        inputSchema: capabilities.query_proactive_work.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_proactive_work.endpoint, input, 'GET'),
+      }),
+      manage_proactive_item_preview: tool({
+        description: capabilities.manage_proactive_item_preview.description,
+        inputSchema: capabilities.manage_proactive_item_preview.inputSchema,
+        execute: (input) => this.previewTool('manage_proactive_item_preview', capabilities.manage_proactive_item_preview.endpoint, input),
       }),
       configure_ai_route_preview: tool({
         description: capabilities.configure_ai_route_preview.description,

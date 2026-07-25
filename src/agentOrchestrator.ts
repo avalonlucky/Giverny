@@ -151,6 +151,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   const asksReferencedTaskDetail = hasIntent('task_data')
     && /(?:这个任务|那个任务|这个项目|那个项目|刚才那个|上述任务|当前任务).*(?:详情|进展|状态|等|卡|为什么|现在)/.test(turn.question)
   const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
+  const asksProactiveWork = /(?:主动事项|风险待办|优先级|最该|优先处理|提醒处理效果|误报率|解决率)/.test(turn.question)
   const hasPortfolioScope = /(?:列|哪些|所有|全部|多个|多项|多少|各有|谁|汇总|概况|清单|排查)|(?:从|\d{1,2}月\d{1,2}日).*(?:到|至)/.test(turn.question)
   const stateKinds = ['已验收', '未完成', '逾期', '延期', '等待中', '待验收'].filter((value) => turn.question.includes(value)).length
   const asksPortfolio = !hasExplicitTaskId && hasPortfolioSubject && (hasPortfolioScope || stateKinds > 1)
@@ -166,6 +167,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('get_task_detail')
     issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
   }
+  if (asksProactiveWork && !hasDeterministicTool('query_proactive_work')) {
+    requiredTools.push('query_proactive_work')
+    issues.push('主动工作结论没有读取优先级、证据和处理效果。')
+  }
   if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
     requiredTools.push('search_attachments')
     issues.push('附件结论没有经过真实附件查询。')
@@ -175,7 +180,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('inspect_attachment_evidence')
     issues.push('附件内容或质量结论没有读取可引用的文件证据。')
   }
-  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'check_schedule_conflicts', 'reschedule_task_preview')) {
+  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')

@@ -1,6 +1,6 @@
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
-import type { AgentFailureCase, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
+import type { AgentFailureCase, AgentProactiveItem, AgentProactiveSummary, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
 import type { ReceiptExcelOptions } from './receiptExcel'
 import { reportClientError } from './clientErrorReporter'
 
@@ -1376,6 +1376,14 @@ export const api = {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action, stepId, error: options?.error, revision: options?.revision }),
+    }),
+  getProactiveItems: (limit = 50) =>
+    requestJson<{ items: AgentProactiveItem[]; summary: AgentProactiveSummary }>(`/api/ai/proactive-items?status=active&limit=${limit}`),
+  updateProactiveItem: (id: string, payload: { action: 'read' | 'resolve' | 'dismiss' | 'snooze' | 'reopen'; note?: string; snoozedUntil?: string }) =>
+    requestJson<{ item: AgentProactiveItem; summary: AgentProactiveSummary }>(`/api/ai/proactive-items/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   getTaskMemories: (limit = 50) =>
     requestJson<{ memories: AgentTaskMemory[] }>(`/api/ai/task-memories?limit=${limit}`),

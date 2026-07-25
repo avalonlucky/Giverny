@@ -65,9 +65,14 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   tag: '文件标签',
   scope: '附件范围',
   visibleToClient: '合作伙伴可见',
+  itemId: '主动事项',
+  snoozedUntil: '再次提醒时间',
+  priority: '优先级',
+  lastSeenAt: '最近发现',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
+  if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒' } as Record<string, string>)[String(value)] || String(value)
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'estimatedHours') return `${value} h`
   if (key === 'progress') return `${value}%`

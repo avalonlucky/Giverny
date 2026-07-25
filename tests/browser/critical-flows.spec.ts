@@ -90,6 +90,21 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('工作助手主动事项按优先级展示证据、建议和处理效果', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  await page.getByRole('button', { name: '记录与任务' }).click()
+  await page.getByRole('tab', { name: '后台任务' }).click()
+  await expect(page.getByRole('tab', { name: '主动事项' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByLabel('主动事项处理效果')).toBeVisible()
+  const item = page.locator('.chat-proactive-item').first()
+  await expect(item).toBeVisible()
+  await item.locator('.chat-task-item').click()
+  await expect(item.getByText('事实依据', { exact: true })).toBeVisible()
+  await expect(item.getByText('建议处理', { exact: true })).toBeVisible()
+  await expect(item.getByRole('button', { name: '执行建议' })).toBeVisible()
+  await expect(item.getByRole('button', { name: '已解决' })).toBeVisible()
+})
+
 test('文件库按需加载并可打开验收文件详情', async ({ page }) => {
   await page.getByRole('button', { name: '切换到文件库' }).click()
   await expect(page).toHaveURL(/\/files$/)

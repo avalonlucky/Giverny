@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：56 项
-- 分类：finance 6、tasks 4、files 8、product 2、calendar 3、security 4、notifications 2、planning 1、memory 1、analysis 2、write 18、internal 5
+- 注册能力：59 项
+- 分类：finance 6、tasks 4、files 8、product 2、calendar 3、security 4、notifications 5、planning 1、memory 1、analysis 2、write 18、internal 5
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -39,6 +39,9 @@
 `reschedule_task` | 执行调整任务排期 | calendar | write | signed-execute | admin, collaborator, system | tasks:write | api, workflow | `agent_reschedule_task`
 `schedule_reminder_preview` | 预览安排站内提醒 | notifications | write | preview | admin, collaborator, system | plans:write | model, api | `agent_preview_schedule_reminder`
 `schedule_reminder` | 执行安排站内提醒 | notifications | write | signed-execute | admin, collaborator, system | plans:write | api, workflow | `agent_schedule_reminder`
+`query_proactive_work` | 查询主动事项 | notifications | read | none | admin, collaborator, viewer, mcp-read, system | plans:read | model, mcp, api | `agent_query_proactive_work`
+`manage_proactive_item_preview` | 预览处理主动事项 | notifications | write | preview | admin, collaborator, system | plans:write | model, api | `agent_preview_manage_proactive_item`
+`manage_proactive_item` | 执行处理主动事项 | notifications | write | signed-execute | admin, collaborator, system | plans:write | api, workflow | `agent_manage_proactive_item`
 `configure_ai_route_preview` | 预览配置模型路由 | security | sensitive | preview | admin, system | settings:write | model, api | `agent_preview_configure_ai_route`
 `configure_ai_route` | 执行配置模型路由 | security | sensitive | signed-execute | admin, system | settings:write | api, workflow | `agent_configure_ai_route`
 `create_task_plan` | 创建持续任务计划 | planning | write | none | admin, collaborator, system | plans:write | model, api | `agent_create_task_plan`

@@ -78,6 +78,10 @@ assert.ok(missingAttachment.verification.requiredTools.includes('search_attachme
 
 const missingTask = completeAgentTurn(createAgentTurn({ principal, question: '任务#1现在的进展', intent: 'task_data' }), '猜测已完成')
 assert.ok(missingTask.verification.requiredTools.includes('get_task_detail'))
+const missingProactive = completeAgentTurn(createAgentTurn({ principal, question: '现在最该优先处理哪些风险待办？', intent: 'task_data' }), '随便处理一个')
+assert.ok(missingProactive.verification.requiredTools.includes('query_proactive_work'))
+const verifiedProactive = { ...missingProactive, plan: [call('query_proactive_work')], evidence: [evidence('query_proactive_work')] }
+assert.equal(verifyAgentAnswer(verifiedProactive).passed, true)
 const explicitTaskWithBroadSearch = {
   ...createAgentTurn({ principal, question: '查一下任务#1的详情', intent: 'task_data' }),
   plan: [call('search_tasks')],
@@ -161,4 +165,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 50 assertions passed')
+console.log('Agent orchestrator deterministic tests: 52 assertions passed')

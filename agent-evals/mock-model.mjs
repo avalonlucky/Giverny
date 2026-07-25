@@ -209,6 +209,7 @@ function chooseTool(messages) {
     return toolCall('get_requester_profile', { name: /陈义君/.test(text) ? '陈义君' : '黄媚' })
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
+  if (/最该.*处理|风险待办|主动事项|提醒处理效果|解决率|误报率/.test(text)) return toolCall('query_proactive_work', { status: 'active', limit: 50 })
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
     return toolCall('start_monthly_review', { month: /6\s*月|2026-06/.test(text) ? '2026-06' : '2026-07' })
   }

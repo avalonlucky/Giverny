@@ -17,13 +17,13 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 56, '能力总数必须固定为 56')
-check(Object.keys(agentReadToolRegistry).length === 12, 'MCP 读取工具应为 12 项')
-check(manifest.filter((item) => item.exposure.includes('model')).length === 35, '模型能力应为 35 项')
-check(manifest.filter((item) => item.exposure.includes('mcp')).length === 12, 'MCP 能力应为 12 项')
-check(manifest.filter((item) => item.confirmation === 'preview').length === 16, '写入预览应为 16 项')
-check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 16, '签名执行应为 16 项')
-check(agentWorkflowWriteEndpoints.size === 16, 'Workflow 白名单应为 16 项')
+check(manifest.length === 59, '能力总数必须固定为 59')
+check(Object.keys(agentReadToolRegistry).length === 13, 'MCP 读取工具应为 13 项')
+check(manifest.filter((item) => item.exposure.includes('model')).length === 37, '模型能力应为 37 项')
+check(manifest.filter((item) => item.exposure.includes('mcp')).length === 13, 'MCP 能力应为 13 项')
+check(manifest.filter((item) => item.confirmation === 'preview').length === 17, '写入预览应为 17 项')
+check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 17, '签名执行应为 17 项')
+check(agentWorkflowWriteEndpoints.size === 17, 'Workflow 白名单应为 17 项')
 
 for (const capability of manifest) {
   check(Boolean(capability.name), '能力名不能为空')
