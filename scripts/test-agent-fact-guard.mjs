@@ -171,6 +171,28 @@ assert.ok(aiRouteTest.fallbackAnswer.includes('状态：可用'))
 assert.ok(aiRouteTest.fallbackAnswer.includes('API Key 未显示'))
 assert.equal(verifyAgentFactClaims(aiRouteTest.fallbackAnswer, aiRouteTest).passed, true)
 
+const attachmentEvidence = buildAgentFactSnapshot([evidence('inspect_attachment_evidence', {
+  count: 1,
+  evidence: [{
+    evidenceRef: '[attachment:101]', analysisRef: '[attachment:101:analysis]', extractedTextRef: '[attachment:101:extracted-text]',
+    file: { id: 101, taskId: 13, taskTitle: '直播设计', name: '直播封面V1.0B01.jpg' },
+    task: { id: 13, title: '直播设计' },
+    analysis: { status: 'completed', parserKind: 'image-direct', summary: '直播封面包含活动标题与时间。', extractedText: '安全直播 6月29日', qualityIssues: [], requirementMatches: ['活动主题与需求一致'] },
+  }],
+})])
+assert.ok(attachmentEvidence.fallbackAnswer.includes('[attachment:101]'))
+assert.ok(attachmentEvidence.fallbackAnswer.includes('[attachment:101:analysis]'))
+assert.ok(attachmentEvidence.fallbackAnswer.includes('安全直播 6月29日'))
+assert.equal(verifyAgentFactClaims(attachmentEvidence.fallbackAnswer, attachmentEvidence).passed, true)
+
+const attachmentQueue = buildAgentFactSnapshot([evidence('query_attachment_analysis', {
+  count: 1,
+  items: [{ evidenceRef: '[attachment:102:analysis]', file: { id: 102, taskId: 13, name: '直播封面.pdf' }, status: 'failed', attemptCount: 2, errorMessage: '模型暂时不可用' }],
+})])
+assert.ok(attachmentQueue.fallbackAnswer.includes('failed'))
+assert.ok(attachmentQueue.fallbackAnswer.includes('模型暂时不可用'))
+assert.equal(verifyAgentFactClaims(attachmentQueue.fallbackAnswer, attachmentQueue).passed, true)
+
 assert.equal(runAgentFactProtocolSelfTest().ok, true)
 
 console.log('Agent fact guard deterministic tests passed')

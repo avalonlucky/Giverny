@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import JSZip from 'jszip'
 import { createIsolatedRuntime } from './isolated-runtime.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -151,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_month_finance', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -214,7 +215,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 50) {
+  if (!response.ok || capabilities.length !== 56) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const capability of capabilities) {
@@ -707,6 +708,127 @@ async function runAgentBusinessToolCheck() {
   }
 
   process.stdout.write('Agent settlement, scheduling, upload handoff, reminder, model settings, role boundary, snapshot checksum, and confirmation replay checks passed.\n')
+}
+
+async function runAgentMultimodalToolCheck(cookie) {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const request = async (path, options = {}) => {
+    const response = await fetch(`${base}${path}`, options)
+    const data = await response.json().catch(() => ({}))
+    return { response, data }
+  }
+  const preview = async (endpoint, payload) => {
+    const result = await request(`/api/agent/tools/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(payload) })
+    if (!result.response.ok || result.data.ready !== true || !result.data.confirmationToken) throw new Error(`${endpoint} preview failed: ${JSON.stringify(result.data)}`)
+    return result.data
+  }
+  const execute = async (endpoint, confirmationToken) => {
+    const result = await request('/api/agent/tools/workflow-write', {
+      method: 'POST', headers,
+      body: JSON.stringify({ operationId: `multimodal-${crypto.randomUUID()}`, endpoint, confirmationToken }),
+    })
+    if (!result.response.ok) throw new Error(`${endpoint} execute failed: ${JSON.stringify(result.data)}`)
+    return result.data
+  }
+
+  const evidence = await request('/api/agent/tools/attachment-evidence', {
+    method: 'POST', headers, body: JSON.stringify({ attachmentIds: [101], includeExtractedText: true }),
+  })
+  const item = evidence.data.evidence?.[0]
+  if (!evidence.response.ok || item?.evidenceRef !== '[attachment:101]' || item?.analysisRef !== '[attachment:101:analysis]' || !String(item?.analysis?.extractedText || '').includes('安全直播')) {
+    throw new Error(`Attachment evidence did not return traceable OCR/analysis: ${JSON.stringify(evidence.data)}`)
+  }
+
+  const clientHeaders = { ...agentScopeHeaders('default', 'multimodal-client', 'client'), 'content-type': 'application/json' }
+  const hiddenEvidence = await request('/api/agent/tools/attachment-evidence', {
+    method: 'POST', headers: clientHeaders, body: JSON.stringify({ attachmentIds: [105] }),
+  })
+  const hiddenSearch = await request('/api/agent/tools/search-attachments', {
+    method: 'POST', headers: clientHeaders, body: JSON.stringify({ query: '内部策略草稿', limit: 10 }),
+  })
+  const clientDetail = await request('/api/agent/tools/task-detail', {
+    method: 'POST', headers: clientHeaders, body: JSON.stringify({ taskId: 1 }),
+  })
+  if (hiddenEvidence.response.status !== 404 || hiddenSearch.data.count !== 0 || clientDetail.data.files?.some((file) => file.id === 105) || clientDetail.data.attachmentAnalyses?.some((analysis) => analysis.attachmentId === 105)) {
+    throw new Error(`Client attachment visibility boundary failed: ${JSON.stringify({ hiddenEvidence: hiddenEvidence.data, hiddenSearch: hiddenSearch.data, clientDetail: clientDetail.data })}`)
+  }
+
+  const statuses = await request('/api/agent/tools/attachment-analysis-status', {
+    method: 'POST', headers, body: JSON.stringify({ taskId: 13, statuses: ['completed', 'failed'] }),
+  })
+  if (!statuses.response.ok || statuses.data.summary?.completed !== 1 || statuses.data.summary?.failed !== 1 || !statuses.data.items?.some((entry) => entry.evidenceRef === '[attachment:102:analysis]' && entry.attemptCount === 2)) {
+    throw new Error(`Attachment analysis status query is incomplete: ${JSON.stringify(statuses.data)}`)
+  }
+
+  const retryPreview = await preview('manage-attachment-analysis-preview', { attachmentIds: [102], action: 'retry' })
+  const retried = await execute('manage-attachment-analysis', retryPreview.confirmationToken)
+  if (retried.queued?.[0]?.attachmentId !== 102 || retried.queued?.[0]?.status !== 'pending') {
+    throw new Error(`Failed attachment analysis was not re-queued: ${JSON.stringify(retried)}`)
+  }
+  const analyzePreview = await preview('manage-attachment-analysis-preview', { attachmentIds: [103], action: 'analyze' })
+  const analyzed = await execute('manage-attachment-analysis', analyzePreview.confirmationToken)
+  if (analyzed.queued?.[0]?.attachmentId !== 103) throw new Error(`Missing attachment analysis was not queued: ${JSON.stringify(analyzed)}`)
+
+  const changedPreview = await preview('update-attachment-metadata-preview', { attachmentId: 105, name: '内部策略留档', tag: '内部证据', scope: 'progress', visibleToClient: false })
+  const directChange = await fetch(`${base}/api/files/105`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ tag: '确认期间变更' }),
+  })
+  if (!directChange.ok) throw new Error(`Attachment metadata setup failed: ${await directChange.text()}`)
+  const stale = await request('/api/agent/tools/update-attachment-metadata', {
+    method: 'POST', headers, body: JSON.stringify({ confirmationToken: changedPreview.confirmationToken }),
+  })
+  if (stale.response.status !== 409 || !String(stale.data.error || '').includes('确认期间发生变化')) {
+    throw new Error(`Stale attachment metadata confirmation was not rejected: ${JSON.stringify(stale.data)}`)
+  }
+  const invalidExtension = await request('/api/agent/tools/update-attachment-metadata-preview', {
+    method: 'POST', headers, body: JSON.stringify({ attachmentId: 105, name: '伪装成PDF.pdf' }),
+  })
+  if (invalidExtension.response.status !== 400 || !String(invalidExtension.data.error || '').includes('扩展名')) {
+    throw new Error(`Attachment extension spoofing was not rejected: ${JSON.stringify(invalidExtension.data)}`)
+  }
+  const metadataPreview = await preview('update-attachment-metadata-preview', { attachmentId: 105, name: '内部策略留档', tag: '内部证据', scope: 'progress', visibleToClient: true })
+  const metadata = await execute('update-attachment-metadata', metadataPreview.confirmationToken)
+  if (metadata.file?.name !== '内部策略留档.txt' || metadata.file?.tag !== '内部证据') {
+    throw new Error(`Attachment metadata update did not preserve extension or fields: ${JSON.stringify(metadata)}`)
+  }
+  const visibleEvidence = await request('/api/agent/tools/attachment-evidence', {
+    method: 'POST', headers: clientHeaders, body: JSON.stringify({ attachmentIds: [105] }),
+  })
+  if (!visibleEvidence.response.ok || visibleEvidence.data.evidence?.[0]?.file?.name !== '内部策略留档.txt') {
+    throw new Error(`Client did not receive the attachment after explicit visibility change: ${JSON.stringify(visibleEvidence.data)}`)
+  }
+
+  const zip = new JSZip()
+  zip.file('xl/sharedStrings.xml', '<?xml version="1.0"?><sst><si><t>项目</t></si><si><t>金额</t></si><si><t>官网视觉升级</t></si></sst>')
+  zip.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>1280</v></c></row></sheetData></worksheet>')
+  const xlsxBytes = await zip.generateAsync({ type: 'uint8array' })
+  const form = new FormData()
+  form.set('taskId', '1')
+  form.set('scope', 'progress')
+  form.set('type', 'XLSX')
+  form.set('size', `${xlsxBytes.byteLength} B`)
+  form.set('visible', 'true')
+  form.set('analyze', 'false')
+  form.set('file', new Blob([xlsxBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), '结构化表格评测.xlsx')
+  const xlsxUpload = await fetch(`${base}/api/files`, { method: 'POST', headers: { cookie }, body: form })
+  const xlsxFile = await xlsxUpload.json().catch(() => ({}))
+  if (!xlsxUpload.ok || !xlsxFile.id) throw new Error(`XLSX analysis fixture upload failed: ${JSON.stringify(xlsxFile)}`)
+  const modelBefore = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+  const xlsxPreview = await preview('manage-attachment-analysis-preview', { attachmentIds: [xlsxFile.id], action: 'analyze' })
+  await execute('manage-attachment-analysis', xlsxPreview.confirmationToken)
+  let xlsxPromptFound = false
+  for (let attempt = 0; attempt < 20 && !xlsxPromptFound; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const modelAfter = await fetch('http://127.0.0.1:8898/test/requests').then((response) => response.json())
+    const beforeRequests = Array.isArray(modelBefore.requests) ? modelBefore.requests : []
+    const afterRequests = Array.isArray(modelAfter.requests) ? modelAfter.requests : []
+    const newRequests = afterRequests.slice(beforeRequests.length)
+    xlsxPromptFound = JSON.stringify(newRequests).includes('A1=项目') && JSON.stringify(newRequests).includes('B2=1280')
+  }
+  if (!xlsxPromptFound) throw new Error('XLSX table structure was not preserved in the multimodal analysis prompt')
+
+  process.stdout.write('Agent attachment evidence, client visibility, analysis queue/recovery, metadata concurrency, extension integrity, XLSX structure extraction, and Workflow checks passed.\n')
 }
 
 async function runPlannedProgressTransitionCheck(cookie) {
@@ -2371,6 +2493,7 @@ try {
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
   await runAgentBusinessToolCheck()
+  await runAgentMultimodalToolCheck(cookie)
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
   await runAttachmentPreviewResilienceCheck(cookie)
@@ -2406,7 +2529,7 @@ try {
     .filter((line) => !line.includes('/analysis-job-generate 409 Conflict'))
   const expectedScopeRejection = toolErrors.findIndex((line) => line.includes('/search-tasks 401 Unauthorized'))
   if (expectedScopeRejection >= 0) toolErrors.splice(expectedScopeRejection, 1)
-  for (const expected of ['/task-detail 404', '/create-task 400', '/update-task-status 400']) {
+  for (const expected of ['/task-detail 404', '/create-task 400', '/update-task-status 400', '/attachment-evidence 404', '/update-attachment-metadata-preview 400', '/update-attachment-metadata 409']) {
     for (let index = toolErrors.length - 1; index >= 0; index -= 1) {
       if (toolErrors[index].includes(expected)) toolErrors.splice(index, 1)
     }

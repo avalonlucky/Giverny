@@ -95,6 +95,18 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ query: z.string(), month: z.string().optional(), limit: z.number().int().min(1).max(50).default(30) }),
     trace: { running: '查找相关附件', completed: '附件检索已完成' },
   }),
+  inspect_attachment_evidence: readCapability({
+    title: '读取附件证据', description: '按附件 ID 读取文件元数据、任务归属、OCR/文档提取、分析结论和稳定证据引用。回答文件内容、质量或需求匹配时必须调用。', category: 'files', endpoint: 'attachment-evidence', taskScoped: true,
+    policy: { risk: 'read', deterministic: true, source: 'r2', scopes: ['attachments:read'], roles: businessReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_inspect_attachment_evidence' },
+    inputSchema: z.object({ attachmentIds: z.array(z.number().int().positive()).min(1).max(20), includeExtractedText: z.boolean().default(true) }),
+    trace: { running: '读取附件内容与证据', completed: '附件证据已返回' },
+  }),
+  query_attachment_analysis: readCapability({
+    title: '查询附件分析状态', description: '查询任务附件的分析状态、解析方式、尝试次数和失败原因，用于判断是否需要补分析或恢复。', category: 'files', endpoint: 'attachment-analysis-status', taskScoped: true,
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['attachments:read'], roles: businessReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_attachment_analysis' },
+    inputSchema: z.object({ ...taskReferenceSchema, attachmentIds: z.array(z.number().int().positive()).max(30).optional(), statuses: z.array(z.enum(['missing', 'pending', 'processing', 'completed', 'failed', 'unsupported'])).max(6).optional(), limit: z.number().int().min(1).max(100).default(30) }),
+    trace: { running: '检查附件分析状态', completed: '附件分析状态已返回' },
+  }),
   get_giverny_context: readCapability({
     title: '读取工作台能力', description: '读取当前 Giverny 工作台概览和能力边界。', category: 'product', endpoint: 'context',
     policy: { risk: 'read', deterministic: true, source: 'product_registry', scopes: ['product:read'], roles: allRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_get_context' },
@@ -124,6 +136,10 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ ...taskReferenceSchema, scope: z.enum(['progress', 'acceptance']).default('progress'), files: z.array(z.object({ name: z.string().min(1).max(240), size: z.number().int().positive().max(200 * 1024 * 1024), mimeType: z.string().max(120).optional() })).min(1).max(6) }),
     trace: { running: '核对附件上传条件', completed: '附件上传接力已准备' },
   }),
+  manage_attachment_analysis_preview: writePreviewCapability({ title: '预览批量分析附件', description: '预览新建分析或重试失败/不支持的附件；确认后进入现有后台解析与多模态分析链路。', category: 'files', endpoint: 'manage-attachment-analysis-preview', executeWith: 'manage_attachment_analysis', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write', 'analysis:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_manage_attachment_analysis' }, inputSchema: z.object({ attachmentIds: z.array(z.number().int().positive()).min(1).max(20), action: z.enum(['analyze', 'retry']) }), trace: { running: '核对附件分析任务', completed: '附件分析预览已生成' } }),
+  manage_attachment_analysis: writeExecuteCapability({ title: '执行批量分析附件', description: '使用签名确认凭证创建或重置附件分析任务，并交给后台队列处理。', category: 'files', endpoint: 'manage-attachment-analysis', previewFor: 'manage_attachment_analysis_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write', 'analysis:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_attachment_analysis' }, trace: { running: '提交附件分析任务', completed: '附件分析任务已提交' } }),
+  update_attachment_metadata_preview: writePreviewCapability({ title: '预览修改附件信息', description: '预览修改一个附件的文件名、标签或进展/验收范围；保留真实扩展名并检查锁定月份。', category: 'files', endpoint: 'update-attachment-metadata-preview', executeWith: 'update_attachment_metadata', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_update_attachment_metadata' }, inputSchema: z.object({ attachmentId: z.number().int().positive(), name: z.string().min(1).max(120).optional(), tag: z.string().max(240).optional(), scope: z.enum(['progress', 'acceptance']).optional(), visibleToClient: z.boolean().optional() }), trace: { running: '核对附件信息修改', completed: '附件信息草稿已生成' } }),
+  update_attachment_metadata: writeExecuteCapability({ title: '执行修改附件信息', description: '使用签名确认凭证修改附件名称、标签、范围或合作伙伴可见性。', category: 'files', endpoint: 'update-attachment-metadata', previewFor: 'update_attachment_metadata_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_update_attachment_metadata' }, trace: { running: '更新附件信息', completed: '附件信息已更新' } }),
   inspect_ai_settings: defineCapability({
     title: '检查模型设置', description: '读取脱敏后的主模型、备用模型、识图模型和服务商可用状态，不返回 API Key。', category: 'security', endpoint: 'inspect-ai-settings', methods: ['GET', 'POST'], exposure: ['model', 'api'],
     policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['settings:read'], roles: adminRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_inspect_ai_settings' },
@@ -242,7 +258,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'query_settlement_exports', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'check_schedule_conflicts', 'get_giverny_context', 'search_product_help'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'get_giverny_context', 'search_product_help'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

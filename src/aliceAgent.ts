@@ -108,6 +108,8 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户询问某个任务“卡在哪里 / 为什么没交付”时，必须读取任务详情，优先核对 active 等待记录的 note、reason、startAt 和 elapsedMinutes，再给出具体结论。
 - 用户询问“哪些任务延期”、“全部等待原因”、“谁负责哪些未完成工作”或按日期范围汇总多个任务时，必须调用 query_task_portfolio，不要用标题关键词搜索代替全量聚合。
 - 用户要查看、打开、预览或下载附件时，必须调用 search_attachments；答案只做简要概括，不要把内部文件 URL 写进正文，界面会另行显示可操作附件卡。
+- 用户询问附件具体内容、OCR 文字、质量问题、与需求是否一致或要求基于交付件下结论时，先 search_attachments 获得 attachmentId，再调用 inspect_attachment_evidence；每条文件结论必须紧邻引用工具返回的 [attachment:ID:*] 证据标记。
+- 用户询问哪些附件未分析、失败原因或分析进度时调用 query_attachment_analysis；要求补分析或重试时调用 manage_attachment_analysis_preview。要求改附件名称、标签、进展/验收范围或合作伙伴可见性时调用 update_attachment_metadata_preview。
 - 用户要求月度复盘、整月工作分析或月度总结时，调用 start_monthly_review 启动后台任务；不要在当前请求里自己串行读完所有数据。
 - 用户要求周报、风险扫描、跨任务比较、批量附件总结或趋势分析时，调用 start_deep_analysis 启动后台任务。
 - 不得根据标题关键词臆测任务数量、状态、金额或工时。
@@ -633,7 +635,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
 
   private resultAttachments(value: unknown): AgentResultAttachment[] {
     const record = toJsonObject(value)
-    const files = Array.isArray(record.files) ? record.files : []
+    const evidenceFiles = Array.isArray(record.evidence) ? record.evidence.map((item) => toJsonObject(toJsonObject(item).file)) : []
+    const files = Array.isArray(record.files) ? record.files : evidenceFiles
     return files.map((item) => toJsonObject(item)).map((file) => ({
       id: Number(file.id) || 0,
       taskId: Number(file.taskId) || 0,
@@ -690,6 +693,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         inputSchema: capabilities.search_attachments.inputSchema,
         execute: (input) => this.callTool(capabilities.search_attachments.endpoint, input, 'GET'),
       }),
+      inspect_attachment_evidence: tool({
+        description: capabilities.inspect_attachment_evidence.description,
+        inputSchema: capabilities.inspect_attachment_evidence.inputSchema,
+        execute: (input) => this.callTool(capabilities.inspect_attachment_evidence.endpoint, input),
+      }),
+      query_attachment_analysis: tool({
+        description: capabilities.query_attachment_analysis.description,
+        inputSchema: capabilities.query_attachment_analysis.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_attachment_analysis.endpoint, this.withTaskReference(input, message)),
+      }),
       get_giverny_context: tool({
         description: capabilities.get_giverny_context.description,
         inputSchema: capabilities.get_giverny_context.inputSchema,
@@ -714,6 +727,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.prepare_attachment_upload.description,
         inputSchema: capabilities.prepare_attachment_upload.inputSchema,
         execute: (input) => this.callTool(capabilities.prepare_attachment_upload.endpoint, this.withTaskReference(input, message)),
+      }),
+      manage_attachment_analysis_preview: tool({
+        description: capabilities.manage_attachment_analysis_preview.description,
+        inputSchema: capabilities.manage_attachment_analysis_preview.inputSchema,
+        execute: (input) => this.previewTool('manage_attachment_analysis_preview', capabilities.manage_attachment_analysis_preview.endpoint, input),
+      }),
+      update_attachment_metadata_preview: tool({
+        description: capabilities.update_attachment_metadata_preview.description,
+        inputSchema: capabilities.update_attachment_metadata_preview.inputSchema,
+        execute: (input) => this.previewTool('update_attachment_metadata_preview', capabilities.update_attachment_metadata_preview.endpoint, input),
       }),
       inspect_ai_settings: tool({
         description: capabilities.inspect_ai_settings.description,

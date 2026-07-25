@@ -259,6 +259,33 @@ function renderUploadHandoff(payload: Record<string, unknown>) {
   return [`**附件上传接力已核验**`, `- 目标任务：#${formatNumber(handoff.taskId)} ${String(handoff.taskTitle || '')}`, `- 附件范围：${handoff.scope === 'acceptance' ? '验收附件' : '进展附件'}`, `- 文件：${list(handoff.files).map((item) => String(record(item).name || '')).filter(Boolean).join('、')}`, '- 文件由当前已登录浏览器直接上传 R2，不经过模型上下文。'].join('\n')
 }
 
+function renderAttachmentEvidence(payload: Record<string, unknown>) {
+  const items = list(payload.evidence).map(record)
+  return ['**已核验附件证据**', ...(items.length ? items.map((item) => {
+    const file = record(item.file)
+    const task = record(item.task)
+    const analysis = record(item.analysis)
+    const analysisRef = String(item.analysisRef || item.evidenceRef || '')
+    const textRef = String(item.extractedTextRef || item.evidenceRef || '')
+    return [
+      `- ${String(item.evidenceRef || '')} ${String(file.name || '未命名文件')}（任务 #${formatNumber(task.id)} ${String(task.title || '')}）`,
+      `  - 分析状态：${String(analysis.status || 'missing')}，解析方式：${String(analysis.parserKind || '未解析')}`,
+      analysis.summary ? `  - 分析摘要：${String(analysis.summary)} ${analysisRef}` : '',
+      analysis.extractedText ? `  - 提取文字：${String(analysis.extractedText).slice(0, 1200)} ${textRef}` : '',
+      ...list(analysis.qualityIssues).slice(0, 8).map((issue) => `  - 质量问题：${String(issue)} ${analysisRef}`),
+      ...list(analysis.requirementMatches).slice(0, 6).map((match) => `  - 需求核对：${String(match)} ${analysisRef}`),
+    ].filter(Boolean).join('\n')
+  }) : ['- 没有找到可读取的附件证据。'])].join('\n')
+}
+
+function renderAttachmentAnalysisQueue(payload: Record<string, unknown>) {
+  const items = list(payload.items).map(record)
+  return ['**已核验附件分析状态**', ...(items.length ? items.map((item) => {
+    const file = record(item.file)
+    return `- ${String(item.evidenceRef || '')} ${String(file.name || '未命名文件')}：${String(item.status || 'missing')}，尝试 ${formatNumber(item.attemptCount)} 次${item.errorMessage ? `，原因：${String(item.errorMessage)}` : ''}`
+  }) : ['- 当前范围没有附件分析记录。'])].join('\n')
+}
+
 function renderAiSettings(payload: Record<string, unknown>) {
   const routes = record(payload.routes)
   return ['**已核验模型设置（已脱敏）**', `- 当前选择：${String(payload.activeChoice || 'auto')}`, ...Object.entries(routes).map(([route, value]) => { const endpoint = record(value); return `- ${route}：${String(endpoint.provider || '')} / ${String(endpoint.model || '')}（${endpoint.hasApiKey ? '凭证可用' : '缺少凭证'}）` }), '- API Key 未进入 Agent 上下文。'].join('\n')
@@ -284,6 +311,8 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'query_settlement_exports') return renderSettlementExports(payload)
   if (evidence.toolName === 'check_schedule_conflicts') return renderScheduleConflicts(payload)
   if (evidence.toolName === 'prepare_attachment_upload') return renderUploadHandoff(payload)
+  if (evidence.toolName === 'inspect_attachment_evidence') return renderAttachmentEvidence(payload)
+  if (evidence.toolName === 'query_attachment_analysis') return renderAttachmentAnalysisQueue(payload)
   if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
   if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
   return ''

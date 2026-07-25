@@ -61,6 +61,26 @@ INSERT INTO attachments (
   id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,
   file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
 ) VALUES (
+  '105', '1', NULL, 'progress', '内部策略草稿.txt', 'TXT', 'text/plain', 'eval/internal-draft.txt',
+  128, '128 B', 0, 0, '仅内部', '2026-07-03T18:10:00'
+);
+
+INSERT INTO attachment_analyses (
+  attachment_id, task_id, status, attempt_count, parser_kind, provider, model, summary, content_type,
+  extracted_text, findings_json, quality_issues_json, requirement_matches_json, risks_json, suggestions_json,
+  confidence, error_message, requested_at, completed_at, updated_at
+) VALUES
+  ('101', '13', 'completed', 1, 'image-direct', 'gemini', 'gemini-3-flash',
+   '直播邀请图包含活动主题、日期和参与方式。', '直播邀请图', '安全直播 6月29日 线上参与',
+   '["活动标题层级清楚"]', '[]', '["活动主题与直播设计需求一致"]', '[]', '["交付前复核二维码"]',
+   '高', NULL, '2026-06-29T18:10:00', '2026-06-29T18:11:00', '2026-06-29T18:11:00'),
+  ('102', '13', 'failed', 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, '模拟模型暂时不可用', '2026-06-29T18:12:00', '2026-06-29T18:13:00', '2026-06-29T18:13:00');
+
+INSERT INTO attachments (
+  id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,
+  file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
+) VALUES (
   '9101', '9001', NULL, 'acceptance', '租户B机密验收文件.pdf', 'PDF', 'application/pdf', 'tenant-b/secret.pdf',
   1024, '1 KB', 1, 1, '机密验收文件', '2026-07-02T18:00:00'
 );

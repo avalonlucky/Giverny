@@ -56,6 +56,10 @@
     { "id": "attachment-02", "category": "attachment_search", "prompt": "找到当天邀请V1.0B01.jpg这个文件", "expect": { "tools": ["search_attachments"], "attachments": true } },
     { "id": "attachment-03", "category": "attachment_search", "prompt": "打开直播设计的验收附件", "expect": { "tools": ["search_attachments"], "attachments": true } },
     { "id": "attachment-04", "category": "attachment_search", "prompt": "我要下载倒计时海报的交付文件", "expect": { "tools": ["search_attachments"], "attachments": true } },
+    { "id": "attachment-05", "category": "attachment_search", "prompt": "查看附件101的具体内容、OCR文字和需求匹配情况", "expect": { "tools": ["inspect_attachment_evidence"], "attachments": true } },
+    { "id": "attachment-06", "category": "attachment_search", "prompt": "查询任务13有哪些附件分析失败或还没分析", "expect": { "tools": ["query_attachment_analysis"] } },
+    { "id": "attachment-07", "category": "write_preview", "prompt": "重新分析附件102", "expect": { "tools": ["manage_attachment_analysis_preview"], "approval": "manage_attachment_analysis" } },
+    { "id": "attachment-08", "category": "write_preview", "prompt": "把附件105重命名为内部策略留档", "expect": { "tools": ["update_attachment_metadata_preview"], "approval": "update_attachment_metadata" } },
 
     { "id": "create-01", "category": "create_preview", "prompt": "新建任务：官网首页改版，明天下午开始，预计8小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-02", "category": "create_preview", "prompt": "帮我建一个Logo提案任务，需求人小陈，月底交付", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },

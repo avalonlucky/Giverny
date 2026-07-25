@@ -93,7 +93,7 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   const add = (intent: AgentIntent) => {
     if (!intents.includes(intent)) intents.push(intent)
   }
-  const readsAttachment = /(?:附件|交付件|验收文件|文件).*(?:查看|打开|预览|下载|找)|(?:查看|打开|预览|下载|找).*(?:附件|交付件|验收文件|文件)/.test(value)
+  const readsAttachment = /(?:附件|交付件|验收文件|文件).*(?:查看|打开|预览|下载|找|内容|文字|错别字|质量|问题|需求|分析)|(?:查看|打开|预览|下载|找|分析).*(?:附件|交付件|验收文件|文件)/.test(value)
   if (readsAttachment) add('attachment')
   const asksWorkflowHelp = /(?:怎么|如何|在哪).*(?:新建任务|记录进展|验收任务|修改任务|上传附件|导出回单|下载回单|设置大模型|切换主题)/.test(value)
   if (asksWorkflowHelp) add('product_help')
@@ -166,9 +166,14 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('get_task_detail')
     issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
   }
-  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload')) {
+  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
     requiredTools.push('search_attachments')
     issues.push('附件结论没有经过真实附件查询。')
+  }
+  const asksAttachmentContent = hasIntent('attachment') && /(?:内容|文字|OCR|错别字|质量|问题|需求.*(?:一致|匹配)|分析结论)/i.test(turn.question)
+  if (asksAttachmentContent && !hasDeterministicTool('inspect_attachment_evidence')) {
+    requiredTools.push('inspect_attachment_evidence')
+    issues.push('附件内容或质量结论没有读取可引用的文件证据。')
   }
   if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'check_schedule_conflicts', 'reschedule_task_preview')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)

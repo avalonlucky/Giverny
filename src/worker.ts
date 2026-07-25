@@ -3544,6 +3544,103 @@ async function agentPrepareAttachmentUploadTool(env: Env, request: Request) {
   }
 }
 
+async function agentManageAttachmentAnalysisPreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const ids = (Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map(Number)
+  const rows = await agentAttachmentEvidenceRows(env, principal, ids)
+  if (!ids.length || rows.length !== new Set(ids).size) return agentFail('部分附件不存在、已删除或不属于当前工作区', 404)
+  const action = body.action === 'retry' ? 'retry' : 'analyze'
+  const invalid = rows.filter((row) => action === 'analyze' ? Boolean(row.analysis_status) : row.analysis_status === 'processing' || !row.analysis_status)
+  if (invalid.length) return agentFail(action === 'analyze' ? '部分附件已有分析记录，请使用重新分析' : '只能重新分析已有且当前未处理中的记录', 409)
+  const draft = {
+    action,
+    attachmentIds: rows.map((row) => Number(row.id)),
+    attachments: rows.map((row) => ({ attachmentId: Number(row.id), taskId: Number(row.task_id), name: row.file_name, status: row.analysis_status || 'missing', attemptCount: Number(row.analysis_attempt_count) || 0 })),
+  }
+  const warnings = rows.filter((row) => row.analysis_status === 'unsupported').length
+    ? ['不支持记录会重新尝试；如果源格式仍不可读取且没有预览图，结果可能继续标记为不支持。']
+    : []
+  return agentPreview(env, request, 'manage_attachment_analysis_preview', draft, [], warnings)
+}
+
+async function agentManageAttachmentAnalysisTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_attachment_analysis', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const targets = (Array.isArray(draft.attachments) ? draft.attachments : []).map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+  const rows = await agentAttachmentEvidenceRows(env, principal, targets.map((item) => Number(item.attachmentId)))
+  if (rows.length !== targets.length) return agentFail('附件状态在确认期间发生变化，请重新预览', 409)
+  for (const row of rows) {
+    const before = targets.find((item) => Number(item.attachmentId) === Number(row.id))
+    if (!before || String(row.analysis_status || 'missing') !== String(before.status || 'missing') || Number(row.analysis_attempt_count || 0) !== Number(before.attemptCount || 0)) {
+      return agentFail('附件分析状态在确认期间发生变化，请重新预览', 409)
+    }
+  }
+  const reset = draft.action === 'retry'
+  for (const row of rows) {
+    await createAttachmentAnalysisJob(env, row.id, row.task_id, reset)
+    enqueueAnalysis(env, ctx, row.id)
+  }
+  await audit(env, agentCapabilityRegistry.manage_attachment_analysis.policy.auditEvent, 'attachment_analysis_batch', crypto.randomUUID(), { action: draft.action, attachmentIds: rows.map((row) => Number(row.id)), count: rows.length })
+  return agentOk({ tool: 'manage_attachment_analysis', mode: 'execute', action: draft.action, queued: rows.map((row) => ({ attachmentId: Number(row.id), taskId: Number(row.task_id), name: row.file_name, status: 'pending', evidenceRef: `[attachment:${row.id}:analysis]` })) })
+}
+
+function attachmentFileExtension(name: string) {
+  const match = name.trim().match(/\.([a-z\d]{1,12})$/i)
+  return match?.[1].toLowerCase() || ''
+}
+
+function safeAgentAttachmentName(currentName: string, requested: unknown) {
+  const value = agentString(requested, 120)
+  if (!value) return currentName
+  const currentExtension = attachmentFileExtension(currentName)
+  const nextExtension = attachmentFileExtension(value)
+  if (currentExtension && nextExtension && currentExtension !== nextExtension) throw new Error('修改文件名不能改变真实文件扩展名')
+  return currentExtension && !nextExtension ? `${value}.${currentExtension}` : value
+}
+
+async function agentUpdateAttachmentMetadataPreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const row = (await agentAttachmentEvidenceRows(env, principal, [Number(body.attachmentId)]))[0]
+  if (!row) return agentFail('附件不存在、已删除或不属于当前工作区', 404)
+  if (await isLockedReportMonth(env, row.settlement_month, principal.workspaceId)) return agentFail('该附件所属月份已锁定结算，不能修改', 409)
+  let name: string
+  try { name = safeAgentAttachmentName(row.file_name, body.name) } catch (error) { return agentFail(error instanceof Error ? error.message : '文件名无效', 400) }
+  const tag = body.tag === undefined ? row.file_tag || '' : agentString(body.tag, 240)
+  const scope = body.scope === 'acceptance' || body.scope === 'progress' ? body.scope : row.attachment_scope
+  const visibleToClient = body.visibleToClient === undefined ? Boolean(row.visible_to_client) : agentBool(body.visibleToClient)
+  const before = { name: row.file_name, tag: row.file_tag || '', scope: row.attachment_scope, visibleToClient: Boolean(row.visible_to_client) }
+  const after = { name, tag, scope, visibleToClient }
+  const changed = Object.keys(after).some((key) => after[key as keyof typeof after] !== before[key as keyof typeof before])
+  return agentPreview(env, request, 'update_attachment_metadata_preview', { attachmentId: Number(row.id), taskId: Number(row.task_id), taskTitle: row.task_title || '', before, ...after }, changed ? [] : ['至少一个修改字段'])
+}
+
+async function agentUpdateAttachmentMetadataTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_attachment_metadata', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const row = (await agentAttachmentEvidenceRows(env, principal, [Number(draft.attachmentId)]))[0]
+  if (!row) return agentFail('附件不存在、已删除或不属于当前工作区', 404)
+  if (await isLockedReportMonth(env, row.settlement_month, principal.workspaceId)) return agentFail('该附件所属月份已锁定结算，不能修改', 409)
+  const before = draft.before && typeof draft.before === 'object' ? draft.before as Record<string, unknown> : {}
+  if (row.file_name !== before.name || (row.file_tag || '') !== before.tag || row.attachment_scope !== before.scope || Boolean(row.visible_to_client) !== Boolean(before.visibleToClient)) {
+    return agentFail('附件信息在确认期间发生变化，请重新预览', 409)
+  }
+  await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ?, attachment_scope = ?, visible_to_client = ? WHERE id = ? AND task_id = ?')
+    .bind(agentString(draft.name, 120), agentString(draft.tag, 240), draft.scope === 'acceptance' ? 'acceptance' : 'progress', agentBool(draft.visibleToClient) ? 1 : 0, row.id, row.task_id).run()
+  await audit(env, agentCapabilityRegistry.update_attachment_metadata.policy.auditEvent, 'attachment', row.id, { taskId: Number(row.task_id), before, after: { name: draft.name, tag: draft.tag, scope: draft.scope, visibleToClient: draft.visibleToClient } })
+  const saved = await env.DB.prepare('SELECT a.*, t.title AS task_title FROM attachments a INNER JOIN tasks t ON t.id = a.task_id WHERE a.id = ?').bind(row.id).first<DbAttachment>()
+  return agentOk({ tool: 'update_attachment_metadata', mode: 'execute', file: saved ? toAgentResultAttachment(saved) : null })
+}
+
 async function agentInspectAiSettingsTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const config = publicAiModelConfig(env, await getStoredAiModelConfig(env))
@@ -5955,6 +6052,68 @@ type AgentAttachmentSearchRow = DbAttachment & {
   settlement_month: string | null
 }
 
+type AgentAttachmentEvidenceRow = AgentAttachmentSearchRow & {
+  analysis_status: AttachmentAnalysis['status'] | null
+  analysis_attempt_count: number | null
+  analysis_parser_kind: string | null
+  analysis_provider: string | null
+  analysis_model: string | null
+  analysis_summary: string | null
+  analysis_content_type: string | null
+  analysis_extracted_text: string | null
+  analysis_findings_json: string | null
+  analysis_quality_issues_json: string | null
+  analysis_requirement_matches_json: string | null
+  analysis_risks_json: string | null
+  analysis_suggestions_json: string | null
+  analysis_confidence: AttachmentAnalysis['confidence'] | null
+  analysis_error_message: string | null
+  analysis_requested_at: string | null
+  analysis_completed_at: string | null
+}
+
+function agentAttachmentVisibleToRole(row: Pick<DbAttachment, 'visible_to_client'>, role: AgentPrincipalContext['role']) {
+  return role !== 'client' || Boolean(row.visible_to_client)
+}
+
+async function agentAttachmentEvidenceRows(env: Env, principal: AgentPrincipalContext, attachmentIds: number[]) {
+  const ids = [...new Set(attachmentIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 30)
+  if (!ids.length) return []
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = await env.DB.prepare(
+    `SELECT a.*, t.title AS task_title, t.requirement, t.settlement_month,
+       aa.status AS analysis_status, aa.attempt_count AS analysis_attempt_count,
+       aa.parser_kind AS analysis_parser_kind, aa.provider AS analysis_provider, aa.model AS analysis_model,
+       aa.summary AS analysis_summary, aa.content_type AS analysis_content_type, aa.extracted_text AS analysis_extracted_text,
+       aa.findings_json AS analysis_findings_json, aa.quality_issues_json AS analysis_quality_issues_json,
+       aa.requirement_matches_json AS analysis_requirement_matches_json, aa.risks_json AS analysis_risks_json,
+       aa.suggestions_json AS analysis_suggestions_json, aa.confidence AS analysis_confidence,
+       aa.error_message AS analysis_error_message, aa.requested_at AS analysis_requested_at,
+       aa.completed_at AS analysis_completed_at
+     FROM attachments a
+     INNER JOIN tasks t ON t.id = a.task_id
+     LEFT JOIN attachment_analyses aa ON aa.attachment_id = a.id
+     WHERE a.id IN (${placeholders}) AND t.workspace_id = ? AND a.deleted_at IS NULL
+       AND t.deleted_at IS NULL AND t.voided_at IS NULL`,
+  ).bind(...ids.map(String), principal.workspaceId).all<AgentAttachmentEvidenceRow>()
+  const byId = new Map((rows.results || []).filter((row) => agentAttachmentVisibleToRole(row, principal.role)).map((row) => [Number(row.id), row]))
+  return ids.map((id) => byId.get(id)).filter(Boolean) as AgentAttachmentEvidenceRow[]
+}
+
+function toAgentAttachmentAnalysis(row: AgentAttachmentEvidenceRow): AttachmentAnalysis | null {
+  if (!row.analysis_status) return null
+  return {
+    attachmentId: Number(row.id), taskId: Number(row.task_id), fileName: row.file_name, fileType: row.file_type || 'FILE',
+    status: row.analysis_status, attemptCount: Number(row.analysis_attempt_count) || 0,
+    parserKind: row.analysis_parser_kind || '', provider: row.analysis_provider || '', model: row.analysis_model || '',
+    summary: row.analysis_summary || '', contentType: row.analysis_content_type || '', extractedText: row.analysis_extracted_text || '',
+    findings: analysisJsonArray(row.analysis_findings_json), qualityIssues: analysisJsonArray(row.analysis_quality_issues_json),
+    requirementMatches: analysisJsonArray(row.analysis_requirement_matches_json), risks: analysisJsonArray(row.analysis_risks_json),
+    suggestions: analysisJsonArray(row.analysis_suggestions_json), confidence: row.analysis_confidence || '',
+    errorMessage: row.analysis_error_message || '', requestedAt: formatBeijing(row.analysis_requested_at), completedAt: formatBeijing(row.analysis_completed_at),
+  }
+}
+
 function normalizedAttachmentSearchText(value: string) {
   return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
 }
@@ -6020,7 +6179,7 @@ async function agentSearchAttachmentsTool(env: Env, request: Request) {
   const semanticMatches = query ? await semanticTaskIds(env, query, 20, month) : []
   const semanticScores = new Map(semanticMatches.map((item) => [item.id, item.score]))
   const { normalized, terms } = attachmentSearchTerms(query)
-  const ranked = (rows.results ?? []).map((row) => {
+  const ranked = (rows.results ?? []).filter((row) => agentAttachmentVisibleToRole(row, principal.role)).map((row) => {
     const haystack = normalizedAttachmentSearchText([
       row.file_name,
       row.task_title,
@@ -6048,6 +6207,69 @@ async function agentSearchAttachmentsTool(env: Env, request: Request) {
   })
 }
 
+async function agentInspectAttachmentEvidenceTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const ids = (Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map(Number)
+  const rows = await agentAttachmentEvidenceRows(env, principal, ids)
+  if (!rows.length) return agentFail('当前工作区没有找到可读取的附件', 404)
+  const includeExtractedText = agentBool(body.includeExtractedText, true)
+  const evidence = await Promise.all(rows.map(async (row) => {
+    const analysis = toAgentAttachmentAnalysis(row)
+    const digestInput = [row.id, row.file_name, analysis?.status, analysis?.summary, analysis?.extractedText].join('\n')
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(digestInput))), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 16)
+    return {
+      evidenceRef: `[attachment:${row.id}]`,
+      metadataRef: `[attachment:${row.id}:metadata]`,
+      extractedTextRef: `[attachment:${row.id}:extracted-text]`,
+      analysisRef: `[attachment:${row.id}:analysis]`,
+      digest,
+      file: toAgentResultAttachment(row),
+      task: { id: Number(row.task_id), title: row.task_title || '', requirement: row.requirement || '' },
+      analysis: analysis ? { ...analysis, extractedText: includeExtractedText ? analysis.extractedText.slice(0, 12000) : '' } : { status: 'missing', attemptCount: 0 },
+    }
+  }))
+  return agentOk({ tool: 'inspect_attachment_evidence', count: evidence.length, evidence, citationRule: '回答附件内容、质量或需求匹配时，必须紧邻相关结论引用对应 evidenceRef/analysisRef/extractedTextRef。' })
+}
+
+async function agentQueryAttachmentAnalysisTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let taskId = Number(body.taskId) || 0
+  if (!taskId && body.taskTitle) {
+    try { taskId = Number((await agentTaskByRef(env, { ...body, __agentWorkspaceId: principal.workspaceId })).id) } catch (error) {
+      if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'query_attachment_analysis')
+      return agentFail(error instanceof Error ? error.message : '任务不存在', 404)
+    }
+  }
+  const requestedIds = (Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map(Number).filter((id) => id > 0)
+  const limit = Math.min(Math.max(Number(body.limit) || 30, 1), 100)
+  const rows = await env.DB.prepare(
+    `SELECT a.*, t.title AS task_title, t.requirement, t.settlement_month,
+       aa.status AS analysis_status, aa.attempt_count AS analysis_attempt_count,
+       aa.parser_kind AS analysis_parser_kind, aa.provider AS analysis_provider, aa.model AS analysis_model,
+       aa.summary AS analysis_summary, aa.content_type AS analysis_content_type, aa.extracted_text AS analysis_extracted_text,
+       aa.findings_json AS analysis_findings_json, aa.quality_issues_json AS analysis_quality_issues_json,
+       aa.requirement_matches_json AS analysis_requirement_matches_json, aa.risks_json AS analysis_risks_json,
+       aa.suggestions_json AS analysis_suggestions_json, aa.confidence AS analysis_confidence,
+       aa.error_message AS analysis_error_message, aa.requested_at AS analysis_requested_at, aa.completed_at AS analysis_completed_at
+     FROM attachments a INNER JOIN tasks t ON t.id = a.task_id
+     LEFT JOIN attachment_analyses aa ON aa.attachment_id = a.id
+     WHERE t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL AND t.voided_at IS NULL
+       AND (? = 0 OR a.task_id = ?) ORDER BY a.uploaded_at DESC LIMIT 300`,
+  ).bind(principal.workspaceId, taskId, String(taskId)).all<AgentAttachmentEvidenceRow>()
+  const statuses = new Set((Array.isArray(body.statuses) ? body.statuses : []).map(String))
+  const items = (rows.results || [])
+    .filter((row) => agentAttachmentVisibleToRole(row, principal.role))
+    .filter((row) => !requestedIds.length || requestedIds.includes(Number(row.id)))
+    .map((row) => ({ file: toAgentResultAttachment(row), status: row.analysis_status || 'missing', attemptCount: Number(row.analysis_attempt_count) || 0, parserKind: row.analysis_parser_kind || '', provider: row.analysis_provider || '', model: row.analysis_model || '', errorMessage: row.analysis_error_message || '', requestedAt: formatBeijing(row.analysis_requested_at), completedAt: formatBeijing(row.analysis_completed_at), evidenceRef: `[attachment:${row.id}:analysis]` }))
+    .filter((item) => !statuses.size || statuses.has(item.status))
+    .slice(0, limit)
+  return agentOk({ tool: 'query_attachment_analysis', count: items.length, items, summary: items.reduce((result, item) => ({ ...result, [item.status]: Number(result[item.status] || 0) + 1 }), {} as Record<string, number>) })
+}
+
 async function agentTaskDetailTool(env: Env, request: Request) {
   const principal = await resolveAgentToolPrincipal(env, request)
   if (!principal) {
@@ -6072,13 +6294,15 @@ async function agentTaskDetailTool(env: Env, request: Request) {
        ORDER BY attachment_analyses.requested_at ASC`,
     ).bind(task.id).all<DbAttachmentAnalysis>(),
   ])
+  const visibleFiles = (fileRows.results ?? []).filter((file) => agentAttachmentVisibleToRole(file, principal.role))
+  const visibleFileIds = new Set(visibleFiles.map((file) => Number(file.id)))
   return agentOk({
     tool: 'get_task_detail',
     task: toTask(task),
     waitingRecords: agentWaitingRecords(task),
     updates: (updateRows.results ?? []).map((update) => toUpdate(update)),
-    files: (fileRows.results ?? []).map(toAgentResultAttachment),
-    attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
+    files: visibleFiles.map(toAgentResultAttachment),
+    attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis).filter((analysis) => visibleFileIds.has(analysis.attachmentId)),
     generatedAt: nowIso(),
   })
 }
@@ -6836,6 +7060,8 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/search-attachments' && (request.method === 'POST' || request.method === 'GET')) {
     return agentSearchAttachmentsTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/attachment-evidence' && (request.method === 'POST' || request.method === 'GET')) return agentInspectAttachmentEvidenceTool(env, request)
+  if (url.pathname === '/api/agent/tools/attachment-analysis-status' && (request.method === 'POST' || request.method === 'GET')) return agentQueryAttachmentAnalysisTool(env, request)
   if (url.pathname === '/api/agent/tools/context' && (request.method === 'POST' || request.method === 'GET')) {
     return agentContextTool(env, request)
   }
@@ -6845,6 +7071,10 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
   if (url.pathname === '/api/agent/tools/schedule-conflicts' && (request.method === 'POST' || request.method === 'GET')) return agentScheduleConflictsTool(env, request)
   if (url.pathname === '/api/agent/tools/prepare-attachment-upload' && request.method === 'POST') return agentPrepareAttachmentUploadTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-attachment-analysis-preview' && request.method === 'POST') return agentManageAttachmentAnalysisPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-attachment-analysis' && request.method === 'POST') return agentManageAttachmentAnalysisTool(env, request, ctx)
+  if (url.pathname === '/api/agent/tools/update-attachment-metadata-preview' && request.method === 'POST') return agentUpdateAttachmentMetadataPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/update-attachment-metadata' && request.method === 'POST') return agentUpdateAttachmentMetadataTool(env, request)
   if (url.pathname === '/api/agent/tools/inspect-ai-settings' && (request.method === 'POST' || request.method === 'GET')) return agentInspectAiSettingsTool(env, request)
   if (url.pathname === '/api/agent/tools/test-ai-route' && request.method === 'POST') return agentTestAiRouteTool(env, request)
   if (url.pathname === '/api/agent/tools/export-settlement-preview' && request.method === 'POST') return agentExportSettlementPreviewTool(env, request)
@@ -7340,6 +7570,7 @@ function decodeXmlText(value: string) {
 
 async function extractOfficeSource(buffer: ArrayBuffer, extension: string): Promise<AnalysisSource> {
   const zip = await JSZip.loadAsync(buffer)
+  const xlsxTableText = extension === 'xlsx' ? await extractXlsxTableText(zip) : ''
   const textPatterns =
     extension === 'pptx'
       ? [/^ppt\/slides\/slide\d+\.xml$/]
@@ -7375,9 +7606,41 @@ async function extractOfficeSource(buffer: ArrayBuffer, extension: string): Prom
   }
   return {
     parserKind: `${extension}-xml-media`,
-    extractedText: textParts.join('\n').slice(0, 24000),
+    extractedText: (xlsxTableText || textParts.join('\n')).slice(0, 24000),
     assets,
   }
+}
+
+async function extractXlsxTableText(zip: JSZip) {
+  const sharedXml = await zip.file('xl/sharedStrings.xml')?.async('text') || ''
+  const sharedStrings = [...sharedXml.matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)]
+    .map((match) => decodeXmlText(match[1]))
+  const sheetEntries = Object.values(zip.files)
+    .filter((entry) => !entry.dir && /^xl\/worksheets\/sheet\d+\.xml$/.test(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .slice(0, 20)
+  const tables: string[] = []
+  for (const [sheetIndex, entry] of sheetEntries.entries()) {
+    const xml = await entry.async('text')
+    const rows: string[] = []
+    for (const rowMatch of xml.matchAll(/<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/g)) {
+      const cells: string[] = []
+      for (const cellMatch of rowMatch[1].matchAll(/<c([^>]*)>([\s\S]*?)<\/c>/g)) {
+        const attributes = cellMatch[1]
+        const body = cellMatch[2]
+        const ref = attributes.match(/\br="([A-Z]+\d+)"/)?.[1] || ''
+        const type = attributes.match(/\bt="([^"]+)"/)?.[1] || ''
+        const raw = body.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? body.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/)?.[1] ?? ''
+        const value = type === 's' ? sharedStrings[Number(raw)] || '' : decodeXmlText(raw)
+        const formula = decodeXmlText(body.match(/<f(?:\s[^>]*)?>([\s\S]*?)<\/f>/)?.[1] || '')
+        if (value || formula) cells.push(`${ref || `C${cells.length + 1}`}=${value}${formula ? `（公式:${formula}）` : ''}`)
+      }
+      if (cells.length) rows.push(cells.join(' | '))
+      if (rows.join('\n').length >= 10000) break
+    }
+    if (rows.length) tables.push(`[工作表 ${sheetIndex + 1} | ${entry.name.split('/').pop()}]\n${rows.join('\n')}`)
+  }
+  return tables.join('\n\n')
 }
 
 async function r2ObjectBytes(env: Env, key: string) {
@@ -13282,26 +13545,35 @@ async function getFileSource(env: Env, id: string, request: Request) {
 }
 
 async function updateFileMetadata(env: Env, id: string, request: Request) {
-  const body = (await request.json()) as { name?: string; tag?: string; scope?: string }
+  const body = (await request.json()) as { name?: string; tag?: string; scope?: string; visibleToClient?: boolean }
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const current = await env.DB.prepare(
-    `SELECT a.task_id, a.file_name, a.file_tag FROM attachments a
+    `SELECT a.task_id, a.file_name, a.file_tag, t.settlement_month FROM attachments a
      INNER JOIN tasks t ON t.id = a.task_id
      WHERE a.id = ? AND t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL`,
-  ).bind(id, workspaceId).first<{ task_id: string; file_name: string; file_tag: string | null }>()
+  ).bind(id, workspaceId).first<{ task_id: string; file_name: string; file_tag: string | null; settlement_month: string | null }>()
   if (!current) {
     return fail('文件不存在', 404)
   }
+  if (await isLockedReportMonth(env, current.settlement_month, workspaceId)) {
+    return fail('该附件所属月份已锁定结算，不能修改', 409)
+  }
 
-  const nextName = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : current.file_name
+  let nextName: string
+  try { nextName = safeAgentAttachmentName(current.file_name, body.name) } catch (error) { return fail(error instanceof Error ? error.message : '文件名无效', 400) }
   const nextTag = typeof body.tag === 'string' ? body.tag.trim().slice(0, 240) : (current.file_tag ?? '')
   const nextScope = body.scope === 'acceptance' || body.scope === 'progress' ? body.scope : null
-  if (nextScope) {
+  const nextVisibility = typeof body.visibleToClient === 'boolean' ? (body.visibleToClient ? 1 : 0) : null
+  if (nextScope && nextVisibility !== null) {
+    await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ?, attachment_scope = ?, visible_to_client = ? WHERE id = ?').bind(nextName, nextTag, nextScope, nextVisibility, id).run()
+  } else if (nextScope) {
     await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ?, attachment_scope = ? WHERE id = ?').bind(nextName, nextTag, nextScope, id).run()
+  } else if (nextVisibility !== null) {
+    await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ?, visible_to_client = ? WHERE id = ?').bind(nextName, nextTag, nextVisibility, id).run()
   } else {
     await env.DB.prepare('UPDATE attachments SET file_name = ?, file_tag = ? WHERE id = ?').bind(nextName, nextTag, id).run()
   }
-  await audit(env, 'update', 'attachment', id, { taskId: Number(current.task_id), fileName: nextName, tag: nextTag, scope: nextScope })
+  await audit(env, 'update', 'attachment', id, { taskId: Number(current.task_id), fileName: nextName, tag: nextTag, scope: nextScope, visibleToClient: nextVisibility })
 
   const row = await env.DB.prepare(`
     SELECT a.*, t.title AS task_title

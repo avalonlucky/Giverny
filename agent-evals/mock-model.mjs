@@ -94,6 +94,12 @@ function chooseTool(messages) {
     if (/用户问题：[\s\S]*?(?:卡在哪|为什么一直没有交付)/.test(text)) {
       return completion({ role: 'assistant', content: '这个任务目前卡在等待环节，具体原因是 **等待刘总的建议**。' })
     }
+    if (hasToolResult(text, 'inspect_attachment_evidence')) {
+      return completion({ role: 'assistant', content: '附件 OCR 识别到活动主题与日期，任务需求匹配。 [attachment:101:extracted-text] [attachment:101:analysis]' })
+    }
+    if (hasToolResult(text, 'query_attachment_analysis')) {
+      return completion({ role: 'assistant', content: '已按附件分析状态返回失败记录和重试次数。' })
+    }
     return completion({ role: 'assistant', content: '已根据站内工具返回的真实数据完成回答。' })
   }
   const isChatPlanner = messages.some((message) => message.role === 'system' && String(message.content || '').includes('Giverny 的聊天智能体规划器'))
@@ -232,6 +238,18 @@ function chooseTool(messages) {
   }
   if (/标记.*验收文件|设为验收文件/.test(text)) {
     return toolCall('mark_acceptance_files_preview', { taskId: 1, attachmentIds: [104] })
+  }
+  if (/附件\s*101.*(?:具体内容|OCR|错别字|质量|需求匹配)/i.test(text)) {
+    return toolCall('inspect_attachment_evidence', { attachmentIds: [101], includeExtractedText: true })
+  }
+  if (/(?:哪些附件|附件).*(?:分析失败|未分析|分析状态)/.test(text)) {
+    return toolCall('query_attachment_analysis', { taskId: 13, statuses: ['missing', 'failed', 'unsupported'], limit: 30 })
+  }
+  if (/(?:重新分析|重试分析).*附件\s*102/.test(text)) {
+    return toolCall('manage_attachment_analysis_preview', { attachmentIds: [102], action: 'retry' })
+  }
+  if (/附件\s*105.*(?:改名|重命名)/.test(text)) {
+    return toolCall('update_attachment_metadata_preview', { attachmentId: 105, name: '内部策略留档', tag: '内部证据', scope: 'progress', visibleToClient: false })
   }
   if (/删除.*等待记录|编辑.*等待记录|维护.*记录/.test(text)) {
     return toolCall('manage_record_preview', { taskId: 1, recordType: 'waiting', action: 'delete', recordId: 'eval-waiting-record' })

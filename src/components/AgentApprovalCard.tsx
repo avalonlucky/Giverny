@@ -60,6 +60,11 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   model: '模型名称',
   makeActive: '设为当前模型',
   conflictCount: '冲突任务数',
+  attachments: '附件清单',
+  name: '文件名称',
+  tag: '文件标签',
+  scope: '附件范围',
+  visibleToClient: '合作伙伴可见',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
@@ -72,6 +77,12 @@ function formatAgentApprovalValue(key: string, value: unknown): string {
   if (key === 'files' && Array.isArray(value)) {
     return value.map((item) => typeof item === 'object' && item ? String((item as Record<string, unknown>).name || (item as Record<string, unknown>).id || '') : String(item)).filter(Boolean).join('、') || '未选择'
   }
+  if (key === 'attachments' && Array.isArray(value)) {
+    return value.map((item) => {
+      const file = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      return `${String(file.name || `附件 ${file.attachmentId || ''}`)}（${String(file.status || 'missing')}）`
+    }).join('、') || '未选择'
+  }
   if (Array.isArray(value)) return value.map(String).join('、')
   if (typeof value === 'object') return Object.entries(value as Record<string, unknown>).map(([field, fieldValue]) => `${AGENT_APPROVAL_FIELD_LABELS[field] || field}：${formatAgentApprovalValue(field, fieldValue)}`).join('；')
   return String(value).replace('T', ' ')
@@ -83,7 +94,7 @@ function agentApprovalRows(approval: AgentApproval) {
   const changedFields = changeSource && typeof changeSource === 'object' && !Array.isArray(changeSource)
     ? changeSource as Record<string, unknown>
     : null
-  const before = changedFields && draft.before && typeof draft.before === 'object' && !Array.isArray(draft.before)
+  const before = draft.before && typeof draft.before === 'object' && !Array.isArray(draft.before)
     ? draft.before as Record<string, unknown>
     : null
   const source = changedFields

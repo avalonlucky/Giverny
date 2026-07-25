@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：50 项
-- 分类：finance 6、tasks 4、files 2、product 2、calendar 3、security 4、notifications 2、planning 1、memory 1、analysis 2、write 18、internal 5
+- 注册能力：56 项
+- 分类：finance 6、tasks 4、files 8、product 2、calendar 3、security 4、notifications 2、planning 1、memory 1、analysis 2、write 18、internal 5
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -18,11 +18,17 @@
 `get_task_detail` | 读取任务详情 | tasks | read | none | admin, collaborator, viewer, client, mcp-read, system | tasks:read | model, mcp, api | `agent_get_task_detail`
 `get_requester_profile` | 读取需求人画像 | tasks | read | none | admin, collaborator, viewer, client, mcp-read, system | tasks:read | model, mcp, api | `agent_get_requester_profile`
 `search_attachments` | 搜索任务附件 | files | read | none | admin, collaborator, viewer, client, mcp-read, system | attachments:read | model, mcp, api | `agent_search_attachments`
+`inspect_attachment_evidence` | 读取附件证据 | files | read | none | admin, collaborator, viewer, client, mcp-read, system | attachments:read | model, mcp, api | `agent_inspect_attachment_evidence`
+`query_attachment_analysis` | 查询附件分析状态 | files | read | none | admin, collaborator, viewer, client, mcp-read, system | attachments:read | model, mcp, api | `agent_query_attachment_analysis`
 `get_giverny_context` | 读取工作台能力 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_get_context`
 `search_product_help` | 查询产品使用说明 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_search_product_help`
 `query_settlement_exports` | 查询结算导出记录 | finance | read | none | admin, collaborator, viewer, mcp-read, system | finance:read | model, mcp, api | `agent_query_settlement_exports`
 `check_schedule_conflicts` | 检查任务排期冲突 | calendar | read | none | admin, collaborator, viewer, client, mcp-read, system | tasks:read | model, mcp, api | `agent_check_schedule_conflicts`
 `prepare_attachment_upload` | 准备附件上传接力 | files | write | none | admin, collaborator, system | attachments:write | model, api | `agent_prepare_attachment_upload`
+`manage_attachment_analysis_preview` | 预览批量分析附件 | files | write | preview | admin, collaborator, system | attachments:write, analysis:write | model, api | `agent_preview_manage_attachment_analysis`
+`manage_attachment_analysis` | 执行批量分析附件 | files | write | signed-execute | admin, collaborator, system | attachments:write, analysis:write | api, workflow | `agent_manage_attachment_analysis`
+`update_attachment_metadata_preview` | 预览修改附件信息 | files | write | preview | admin, collaborator, system | attachments:write | model, api | `agent_preview_update_attachment_metadata`
+`update_attachment_metadata` | 执行修改附件信息 | files | write | signed-execute | admin, collaborator, system | attachments:write | api, workflow | `agent_update_attachment_metadata`
 `inspect_ai_settings` | 检查模型设置 | security | read | none | admin, system | settings:read | model, api | `agent_inspect_ai_settings`
 `test_ai_route` | 测试模型路由 | security | read | none | admin, system | settings:read | model, api | `agent_test_ai_route`
 `export_settlement_preview` | 预览导出结算回单 | finance | sensitive | preview | admin, system | finance:write | model, api | `agent_preview_export_settlement`
