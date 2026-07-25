@@ -5,6 +5,7 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { agentReadToolRegistry } from './agentToolRegistry'
+import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 import { productCapabilities } from './productCapabilities'
@@ -2493,25 +2494,40 @@ async function resolveTaskBlockerAnswer(env: Env, question: string, workspaceId:
     .sort((left, right) => right.startAt.localeCompare(left.startAt))
   const currentWait = waiting[0]
   if (!currentWait) return null
-  const reason = currentWait.note || currentWait.reason || '等待外部确认'
-  const reasonDetail = currentWait.reason && currentWait.reason !== reason ? `（${currentWait.reason}）` : ''
-  const startLabel = currentWait.startAt.replace('T', ' ')
+  const evidence: AgentEvidence = {
+    id: `blocker:${best.task.id}`,
+    toolCallId: `blocker:${best.task.id}`,
+    toolName: 'get_task_detail',
+    source: 'd1',
+    deterministic: true,
+    payload: {
+      task: {
+        id: Number(best.task.id),
+        title: best.task.title,
+        status: best.task.status,
+        progress: Number(best.task.progress) || 0,
+        actualHours: Number(best.task.actual_hours) || 0,
+        estimatedDate: best.task.estimated_delivery_date || '',
+      },
+      waitingRecords: waiting,
+    },
+  }
+  const snapshot = buildAgentFactSnapshot([evidence])
+  const verification = verifyAgentFactClaims(snapshot.fallbackAnswer, snapshot)
   return {
-    content: [
-      `查到了，**${best.task.title}** 目前确实卡在等待环节，不是系统没有记录。`,
-      '',
-      `- **具体等待原因**：${reason}${reasonDetail}`,
-      `- **开始等待**：${startLabel}`,
-      `- **已等待**：${formatAgentElapsed(currentWait.elapsedMinutes)}`,
-      `- **当前状态**：${best.task.status || '未标记'}，进度 ${Number(best.task.progress) || 0}%`,
-      '',
-      `所以一直没有交付的直接原因是：**${reason}**。`,
-    ].join('\n'),
+    content: snapshot.fallbackAnswer,
     trace: [
       '识别为具体任务阻塞查询',
       `匹配任务：${best.task.title} [tool:search_tasks]`,
       '读取当前等待记录 [tool:get_task_detail]',
+      `结构化事实协议生成答案：核对 ${verification.checkedClaims} 条声明。`,
     ],
+    factVerification: {
+      passed: verification.passed,
+      checkedClaims: verification.checkedClaims,
+      sourceTools: verification.coveredSources,
+      fallbackUsed: false,
+    },
   }
 }
 
@@ -2902,6 +2918,12 @@ type OpenAiAgentRuntimeResult = {
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
   agentTurn?: ReturnType<typeof sanitizeAgentTurnAudit> & { evidenceCount?: number }
+  factVerification?: {
+    passed: boolean
+    checkedClaims: number
+    sourceTools: string[]
+    fallbackUsed: boolean
+  }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -15689,6 +15711,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           backgroundTask: runtimeResult.backgroundTask,
           attachments: runtimeResult.attachments,
           agentTurn: runtimeResult.agentTurn,
+          factVerification: runtimeResult.factVerification,
           model: runtimeResult.model,
         })
       }
@@ -15929,6 +15952,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
         receipt?: { taskCount?: number; totalHours?: number; totalAmount?: number }
         attachment?: AgentResultAttachment
       } | undefined
+      let finalToolResults = toolResults
       let finalContent = answer.content.trim() || (financeStats.length ? renderMonthFinanceAnswer(financeStats, hourlyRate) : '工具已执行，但模型没有生成可用回答。')
       if (settlementExportResult?.record && settlementExportResult.attachment) {
         finalContent = `已生成 **${settlementExportResult.record.label}** 的结算回单，共 ${Number(settlementExportResult.receipt?.taskCount || 0)} 项、${Number(settlementExportResult.receipt?.totalHours || 0).toFixed(2)} 小时、¥${Number(settlementExportResult.receipt?.totalAmount || 0).toFixed(2)}。可在下方直接下载 Excel，或打开线上预览。`
@@ -15995,6 +16019,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           })
           trace.push(...repair.trace)
           const combinedResults = [...toolResults, ...repair.results]
+          finalToolResults = combinedResults
           const repairedAnswer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults: combinedResults, modelChoice })
           const repairedFinance = (combinedResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined)?.stats ?? []
           finalContent = repairedAnswer.content.trim() || (repairedFinance.length ? renderMonthFinanceAnswer(repairedFinance, hourlyRate) : finalContent)
@@ -16018,6 +16043,33 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           orchestratedTurn = completeAgentTurn({ ...orchestratedTurn, attempts: orchestratedTurn.attempts + 1 }, finalContent)
         }
       }
+      const finalEvidence: AgentEvidence[] = finalToolResults.map((item, index) => ({
+        id: `${orchestratedTurn.id}:final-evidence:${index + 1}`,
+        toolCallId: orchestratedTurn.plan[index]?.id || `${orchestratedTurn.id}:final-tool:${index + 1}`,
+        toolName: item.name,
+        source: item.name === 'search_product_help' ? 'product_registry' : 'd1',
+        deterministic: true,
+        payload: item.result,
+      }))
+      const factSnapshot = buildAgentFactSnapshot(finalEvidence)
+      let legacyFactVerification: OpenAiAgentRuntimeResult['factVerification']
+      if (factSnapshot.fallbackAnswer) {
+        finalContent = factSnapshot.fallbackAnswer
+        const verified = verifyAgentFactClaims(finalContent, factSnapshot)
+        legacyFactVerification = {
+          passed: verified.passed,
+          checkedClaims: verified.checkedClaims,
+          sourceTools: verified.coveredSources,
+          fallbackUsed: false,
+        }
+        trace.push(verified.passed
+          ? `结构化事实协议生成答案：核对 ${verified.checkedClaims} 条声明，覆盖 ${verified.coveredSources.join('、')}。`
+          : `结构化事实协议校验失败：${verified.issues.slice(0, 3).join('；')}。`)
+        orchestratedTurn = completeAgentTurn(orchestratedTurn, finalContent)
+      } else {
+        finalContent = '工具返回的数据尚未接入结构化事实协议，我已停止采用模型初稿。'
+        legacyFactVerification = { passed: false, checkedClaims: 0, sourceTools: [], fallbackUsed: true }
+      }
       return ok({
         content: finalContent,
         model: answer.modelLabel,
@@ -16031,6 +16083,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           chatVerificationTrace(toolResults),
         ].filter(Boolean),
         fallbackUsed: answer.fallbackUsed,
+        factVerification: legacyFactVerification,
         attachments: settlementExportResult?.attachment ? [settlementExportResult.attachment] : undefined,
       })
     }
@@ -18866,7 +18919,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
 
   if (path === '/api/health') {
-    return ok({ ok: true, storage: 'D1/R2', checkedAt: nowIso() })
+    const agentFactProtocol = runAgentFactProtocolSelfTest()
+    if (!agentFactProtocol.ok) return fail('Agent 结构化事实协议自检失败', 503)
+    return ok({ ok: true, storage: 'D1/R2', agentFactProtocol, checkedAt: nowIso() })
   }
   if (path === '/api/client-errors' && request.method === 'POST') {
     return recordClientError(env, request)

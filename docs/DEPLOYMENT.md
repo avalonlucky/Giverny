@@ -24,6 +24,7 @@
 ### 双域名静态资源核对
 
 - 每次 Worker 部署后必须分别读取 `https://mayeai.com/` 与 `https://www.mayeai.com/` 的 HTML，确认两边引用的 `assets/index-*.js` 都是本次构建哈希；只检查健康接口不足以证明前端已更新。
+- `npm run deploy:production` 在 HTTP API Direct Upload 后必须执行 `npm run agent:fact:production`；正式 `/api/health` 只有在结构化事实协议正确摘要通过、错误事实被拒绝且来源覆盖完整时才返回健康。
 - Cloudflare 不同主机名或边缘节点可能在部署后的短时间内继续返回旧 HTML。发现哈希不一致时，先对照 workers.dev 入口和裸域名确认源版本，再等待边缘传播并复查；具备 Cache Purge 权限时才执行主动清理。
 - 发布闭环只能在线上健康接口正常、两个正式域名资源一致、关键路由真实浏览器回归通过后继续。
 
@@ -58,7 +59,7 @@ npm run deploy:production
 
 用户已明确要求永久停用 Wrangler。不得执行 `wrangler` / `npx wrangler`，也不得在 Direct Upload 失败时回退 Wrangler。`scripts/deploy-cloudflare-api.mjs` 使用 Cloudflare 官方 Workers Scripts 与 Static Assets HTTP API，自动继承线上已有绑定并上传新 Worker 模块和 `dist` 资源。
 
-发布凭证优先读取 `CLOUDFLARE_API_TOKEN`；首次运行可把旧 OAuth 凭证迁移到 `~/.config/giverny/cloudflare-auth.json`（权限 `0600`），迁移后发布器不再读取旧目录。API 认证失败时应更新 Giverny 凭证，不能恢复 Wrangler。
+发布凭证优先读取 `CLOUDFLARE_API_TOKEN`；本机 OAuth 凭证独立保存在 `~/.config/giverny/cloudflare-auth.json`（权限 `0600`）。HTTP API 发布器每次发布前自动刷新短期访问令牌并原子更新本地凭证，不读取 Wrangler 配置路径。API 认证失败时应修复 Giverny 独立凭证，不能恢复 Wrangler。
 
 D1 migration 同样不使用 Wrangler。`scripts/apply-cloudflare-d1-sql.mjs` 只接受明确传入的 SQL 文件，逐条通过 Cloudflare D1 Query API 执行；正式执行前必须确认 SQL 可重复运行且不包含清表、覆盖金额或改写既有业务数据的语句。
 

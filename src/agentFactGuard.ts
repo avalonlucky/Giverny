@@ -4,17 +4,34 @@ const taskStatuses = ['计划中', '进行中', '挂起', '待验收', '已验�
 
 type NumericFactKind = 'hours' | 'money' | 'percent' | 'taskId' | 'count'
 
+export type AgentFactClaim = {
+  kind: NumericFactKind | 'date' | 'status'
+  value: number | string
+  sourceTool: string
+  path: string
+}
+
+export type AgentFactSection = {
+  sourceTool: string
+  markdown: string
+}
+
 export type AgentFactSnapshot = {
   fallbackAnswer: string
   numbers: Record<NumericFactKind, number[]>
   dates: string[]
   statuses: string[]
   sources: string[]
+  claims: AgentFactClaim[]
+  sections: AgentFactSection[]
 }
 
 export type AgentFactVerification = {
   passed: boolean
   issues: string[]
+  checkedClaims: number
+  coveredSources: string[]
+  missingSources: string[]
 }
 
 function record(value: unknown) {
@@ -44,42 +61,64 @@ function formatNumber(value: unknown) {
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number(value))
 }
 
-function collectFacts(value: unknown, key: string, facts: AgentFactSnapshot) {
+function collectFacts(value: unknown, key: string, facts: AgentFactSnapshot, sourceTool: string, path = '') {
   if (Array.isArray(value)) {
-    if (/^(?:files|tasks|results|updates|attachments)$/i.test(key)) facts.numbers.count.push(value.length)
-    value.forEach((item) => collectFacts(item, key, facts))
+    if (/^(?:files|tasks|results|updates|attachments)$/i.test(key)) {
+      facts.numbers.count.push(value.length)
+      facts.claims.push({ kind: 'count', value: value.length, sourceTool, path })
+    }
+    value.forEach((item, index) => collectFacts(item, key, facts, sourceTool, `${path}[${index}]`))
     return
   }
   if (value && typeof value === 'object') {
-    Object.entries(value as Record<string, unknown>).forEach(([childKey, child]) => collectFacts(child, childKey, facts))
+    Object.entries(value as Record<string, unknown>).forEach(([childKey, child]) => collectFacts(child, childKey, facts, sourceTool, path ? `${path}.${childKey}` : childKey))
     return
   }
   if (typeof value === 'number') {
-    if (/(?:hours?|estimatedHours|actualHours|billableHours|totalHours|waitingHours|avgHoursPerProject)$/i.test(key)) facts.numbers.hours.push(value)
-    if (/(?:amount|hourlyRate|income|salary|cost)$/i.test(key)) facts.numbers.money.push(value)
-    if (/(?:progress|acceptanceRate|onTimeRate|hourDeviationRate)$/i.test(key)) facts.numbers.percent.push(value)
-    if (/^(?:id|taskId)$/i.test(key)) facts.numbers.taskId.push(value)
-    if (/(?:count|total|matched|returned|projects)$/i.test(key)) facts.numbers.count.push(value)
+    const append = (kind: NumericFactKind) => {
+      facts.numbers[kind].push(value)
+      facts.claims.push({ kind, value, sourceTool, path })
+    }
+    if (/(?:hours?|estimatedHours|actualHours|billableHours|totalHours|waitingHours|avgHoursPerProject)$/i.test(key)) append('hours')
+    if (/(?:amount|hourlyRate|income|salary|cost)$/i.test(key)) append('money')
+    if (/(?:progress|acceptanceRate|onTimeRate|hourDeviationRate)$/i.test(key)) append('percent')
+    if (/^(?:id|taskId)$/i.test(key)) append('taskId')
+    if (/(?:count|total|matched|returned|projects)$/i.test(key)) append('count')
     return
   }
   if (typeof value !== 'string') return
   if (/(?:date|month|startAt|endAt)$/i.test(key)) {
     const normalized = normalizeDate(value)
-    if (normalized) facts.dates.push(normalized)
+    if (normalized) {
+      facts.dates.push(normalized)
+      facts.claims.push({ kind: 'date', value: normalized, sourceTool, path })
+    }
   }
-  if (/status/i.test(key) && taskStatuses.includes(value as typeof taskStatuses[number])) facts.statuses.push(value)
+  if (/status/i.test(key) && taskStatuses.includes(value as typeof taskStatuses[number])) {
+    facts.statuses.push(value)
+    facts.claims.push({ kind: 'status', value, sourceTool, path })
+  }
 }
 
 function renderFinance(payload: Record<string, unknown>) {
   const stats = list(payload.stats).map(record)
+  const totalBillableHours = payload.totalBillableHours ?? stats.reduce((sum, item) => sum + number(item.billableHours), 0)
+  const totalAmount = payload.totalAmount ?? stats.reduce((sum, item) => sum + number(item.amount), 0)
   const lines = stats.map((item) => `- ${String(item.month || '未指定月份')}：计费 ${formatNumber(item.billableHours)} 小时，金额 ¥${formatNumber(item.amount)}，任务 ${formatNumber(item.taskCount)} 项`)
   return [
     '**已核验财务数据**',
-    `- 合计计费工时：${formatNumber(payload.totalBillableHours)} 小时`,
-    `- 合计结算金额：¥${formatNumber(payload.totalAmount)}`,
+    `- 合计计费工时：${formatNumber(totalBillableHours)} 小时`,
+    `- 合计结算金额：¥${formatNumber(totalAmount)}`,
     `- 当前小时单价：¥${formatNumber(payload.hourlyRate)}/小时`,
     ...lines,
   ].join('\n')
+}
+
+function normalizedTaskRows(value: unknown) {
+  return list(value).map(record).map((item) => {
+    const task = record(item.task)
+    return Object.keys(task).length ? { ...task, waitingRecords: item.waitingRecords } : item
+  })
 }
 
 function renderTaskRows(title: string, rows: Record<string, unknown>[], summary?: Record<string, unknown>) {
@@ -95,9 +134,14 @@ function renderTaskRows(title: string, rows: Record<string, unknown>[], summary?
 }
 
 function renderTaskDetail(payload: Record<string, unknown>) {
-  const task = record(payload.task)
-  const files = list(payload.files)
-  const waiting = list(payload.waitingRecords).map(record).filter((item) => item.active === true)
+  const legacyResult = normalizedTaskRows(payload.results)[0] || {}
+  const task = Object.keys(record(payload.task)).length ? record(payload.task) : legacyResult
+  const hasFiles = Array.isArray(payload.files) || Array.isArray(task.files)
+  const files = Array.isArray(payload.files) ? payload.files : list(task.files)
+  const waitingSource = list(payload.waitingRecords).length ? payload.waitingRecords : task.waitingRecords
+  const waiting = list(waitingSource).map(record).filter((item) => item.active === true)
+  const hasEstimatedHours = task.estimatedHours !== undefined
+  const hasActualHours = task.actualHours !== undefined
   const dates = [
     task.date ? `开始 ${String(task.date).slice(0, 10)}` : '',
     task.estimatedDate ? `预计交付 ${String(task.estimatedDate).slice(0, 10)}` : '',
@@ -106,10 +150,12 @@ function renderTaskDetail(payload: Record<string, unknown>) {
   return [
     `**任务 #${number(task.id)} ${String(task.title || '未命名')}**`,
     `- 状态：${String(task.status || '未记录')}，进度 ${formatNumber(task.progress)}%`,
-    `- 工时：预估 ${formatNumber(task.estimatedHours)} 小时，实际 ${formatNumber(task.actualHours)} 小时`,
+    hasEstimatedHours || hasActualHours
+      ? `- 工时：${hasEstimatedHours ? `预估 ${formatNumber(task.estimatedHours)} 小时` : ''}${hasEstimatedHours && hasActualHours ? '，' : ''}${hasActualHours ? `实际 ${formatNumber(task.actualHours)} 小时` : ''}`
+      : '',
     dates ? `- 日期：${dates}` : '',
-    `- 附件：${files.length} 个`,
-    ...waiting.map((item) => `- 正在等待：${String(item.note || item.reason || '未填写原因')}（自 ${String(item.startAt || '未记录').replace('T', ' ')}）`),
+    hasFiles ? `- 附件：${files.length} 个` : '',
+    ...waiting.map((item) => `- 正在等待：${String(item.note || item.reason || '未填写原因')}（自 ${String(item.startAt || '未记录').replace('T', ' ')}${item.elapsedMinutes === undefined ? '' : `，已等待 ${formatNumber(item.elapsedMinutes)} 分钟`}）`),
   ].filter(Boolean).join('\n')
 }
 
@@ -142,9 +188,22 @@ function renderProductHelp(payload: Record<string, unknown>) {
     '**已核验产品说明**',
     ...(matches.length ? matches.map((item) => {
       const title = String(item.title || item.heading || '产品说明')
-      const content = String(item.content || item.summary || item.description || '').trim().slice(0, 800)
+      const content = String(item.answer || item.content || item.summary || item.description || '').trim().slice(0, 800)
       return `- **${title}**${content ? `：${content}` : ''}`
     }) : ['- 产品知识库没有找到足够明确的说明。']),
+  ].join('\n')
+}
+
+function renderSettlement(payload: Record<string, unknown>) {
+  const receipt = record(payload.receipt)
+  const recordData = record(payload.record)
+  return [
+    '**已核验结算回单**',
+    `- 日期范围：${String(recordData.startDate || recordData.start_date || '')} 至 ${String(recordData.endDate || recordData.end_date || '')}`,
+    `- 任务：${formatNumber(receipt.taskCount)} 项`,
+    `- 工时：${formatNumber(receipt.totalHours)} 小时`,
+    `- 金额：¥${formatNumber(receipt.totalAmount)}`,
+    '- Excel 已生成，可使用结果卡下载或打开线上预览。',
   ].join('\n')
 }
 
@@ -156,29 +215,59 @@ function renderContext(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderTaskMemory(payload: Record<string, unknown>) {
+  const memory = record(payload.memory)
+  return [
+    `**任务 #${number(memory.taskId)} ${String(memory.taskTitle || '任务记忆')}**`,
+    String(memory.summary || '').trim() ? `- 摘要：${String(memory.summary).trim()}` : '',
+    ...list(memory.openItems).map((item) => `- 未解决：${String(item)}`),
+    ...list(memory.preferences).map((item) => `- 合作偏好：${String(item)}`),
+    ...list(memory.userNotes).map((item) => `- 人工纠正：${String(item)}`),
+  ].filter(Boolean).join('\n')
+}
+
+function renderTaskPlan(payload: Record<string, unknown>) {
+  const plan = record(payload.plan)
+  return [
+    `**持续计划：${String(plan.goal || '未命名目标')}**`,
+    ...list(plan.steps).map((item, index) => {
+      const step = record(item)
+      return `${index + 1}. ${String(step.label || step.action || '未命名步骤')}（${String(step.status || 'pending')}）`
+    }),
+  ].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
-  if (evidence.toolName === 'query_task_portfolio') return renderTaskRows('已核验任务概况', list(payload.tasks).map(record), record(payload.summary))
-  if (evidence.toolName === 'search_tasks') return renderTaskRows('已核验任务结果', list(payload.results).map(record))
+  if (evidence.toolName === 'query_task_portfolio') return renderTaskRows('已核验任务概况', normalizedTaskRows(payload.tasks), record(payload.summary))
+  if (evidence.toolName === 'search_tasks') return renderTaskRows('已核验任务结果', normalizedTaskRows(payload.results))
   if (evidence.toolName === 'get_task_detail') return renderTaskDetail(payload)
   if (evidence.toolName === 'get_requester_profile') return renderProfile(payload)
   if (evidence.toolName === 'search_attachments') return renderAttachments(payload)
   if (evidence.toolName === 'search_product_help') return renderProductHelp(payload)
   if (evidence.toolName === 'get_giverny_context') return renderContext(payload)
+  if (evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
+  if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
+  if (evidence.toolName === 'create_task_plan') return renderTaskPlan(payload)
   return ''
 }
 
 export function buildAgentFactSnapshot(evidence: AgentEvidence[]): AgentFactSnapshot {
   const deterministic = evidence.filter((item) => item.deterministic)
+  const sections = deterministic
+    .map((item) => ({ sourceTool: item.toolName, markdown: renderEvidence(item) }))
+    .filter((item) => item.markdown)
   const snapshot: AgentFactSnapshot = {
-    fallbackAnswer: deterministic.map(renderEvidence).filter(Boolean).join('\n\n'),
+    fallbackAnswer: sections.map((item) => item.markdown).join('\n\n'),
     numbers: { hours: [], money: [], percent: [], taskId: [], count: [] },
     dates: [],
     statuses: [],
     sources: deterministic.map((item) => item.toolName),
+    claims: [],
+    sections,
   }
-  deterministic.forEach((item) => collectFacts(item.payload, '', snapshot))
+  deterministic.forEach((item) => collectFacts(item.payload, '', snapshot, item.toolName))
   snapshot.numbers.hours = uniqueNumbers(snapshot.numbers.hours)
   snapshot.numbers.money = uniqueNumbers(snapshot.numbers.money)
   snapshot.numbers.percent = uniqueNumbers(snapshot.numbers.percent)
@@ -186,6 +275,7 @@ export function buildAgentFactSnapshot(evidence: AgentEvidence[]): AgentFactSnap
   snapshot.numbers.count = uniqueNumbers(snapshot.numbers.count)
   snapshot.dates = [...new Set(snapshot.dates)]
   snapshot.statuses = [...new Set(snapshot.statuses)]
+  snapshot.claims = [...new Map(snapshot.claims.map((claim) => [`${claim.kind}:${claim.value}:${claim.sourceTool}:${claim.path}`, claim])).values()]
   return snapshot
 }
 
@@ -253,5 +343,53 @@ export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapsho
   taskStatuses.forEach((status) => {
     if (answer.includes(status) && !snapshot.statuses.includes(status)) issues.push(`status=${status} 缺少工具证据`)
   })
-  return { passed: issues.length === 0, issues: [...new Set(issues)] }
+  const coveredSources = snapshot.sections.filter((section) => answer.includes(section.markdown)).map((section) => section.sourceTool)
+  const missingSources = snapshot.sections.filter((section) => !coveredSources.includes(section.sourceTool)).map((section) => section.sourceTool)
+  missingSources.forEach((source) => issues.push(`source=${source} 的权威事实区块缺失`))
+  return {
+    passed: issues.length === 0,
+    issues: [...new Set(issues)],
+    checkedClaims: snapshot.claims.length,
+    coveredSources: [...new Set(coveredSources)],
+    missingSources: [...new Set(missingSources)],
+  }
+}
+
+export function runAgentFactProtocolSelfTest() {
+  const evidence: AgentEvidence[] = [
+    {
+      id: 'self-test-finance',
+      toolCallId: 'self-test-finance',
+      toolName: 'query_month_finance',
+      source: 'd1',
+      deterministic: true,
+      payload: {
+        hourlyRate: 300,
+        totalBillableHours: 5,
+        totalAmount: 1500,
+        stats: [{ month: '2026-06', billableHours: 5, totalHours: 5, amount: 1500, taskCount: 2 }],
+      },
+    },
+    {
+      id: 'self-test-task',
+      toolCallId: 'self-test-task',
+      toolName: 'get_task_detail',
+      source: 'd1',
+      deterministic: true,
+      payload: {
+        task: { id: 12, title: '事实协议自检任务', status: '已验收', progress: 100, estimatedHours: 4, actualHours: 5, date: '2026-06-01', actualDeliveryDate: '2026-06-03' },
+        waitingRecords: [],
+        files: [],
+      },
+    },
+  ]
+  const snapshot = buildAgentFactSnapshot(evidence)
+  const valid = verifyAgentFactClaims(snapshot.fallbackAnswer, snapshot)
+  const invalid = verifyAgentFactClaims(`错误结论：实际投入 3 小时。\n\n${snapshot.fallbackAnswer}`, snapshot)
+  return {
+    ok: valid.passed && !invalid.passed && valid.coveredSources.length === 2 && valid.checkedClaims > 0,
+    checkedClaims: valid.checkedClaims,
+    coveredSources: valid.coveredSources,
+    rejectedInvalidAnswer: !invalid.passed,
+  }
 }

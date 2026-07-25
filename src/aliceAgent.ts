@@ -87,6 +87,12 @@ export type AliceAgentChatResult = {
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
   agentTurn?: ReturnType<typeof sanitizeAgentTurnAudit> & { evidenceCount?: number }
+  factVerification?: {
+    passed: boolean
+    checkedClaims: number
+    sourceTools: string[]
+    fallbackUsed: boolean
+  }
 }
 
 const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体。
@@ -1106,6 +1112,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     ]
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
+    let factVerificationSummary: AliceAgentChatResult['factVerification']
     const attachmentsById = new Map<number | string, AgentResultAttachment>()
     const usedTools = new Set<string>()
     const plannedCalls: AgentPlannedToolCall[] = []
@@ -1260,32 +1267,25 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
     }
     const deterministicEvidence = evidence.filter((item) => item.deterministic)
-    const shouldGroundAnswer = !selection && !backgroundTask && deterministicEvidence.length > 0
-      && verifiedIntents.some((intent) => ['finance', 'task_data', 'person_profile', 'attachment', 'product_help', 'knowledge'].includes(intent))
+    const factSnapshot = buildAgentFactSnapshot(deterministicEvidence)
+    const shouldGroundAnswer = !selection && !backgroundTask && factSnapshot.sections.length > 0
     if (shouldGroundAnswer) {
-      const verifiedEvidence = deterministicEvidence.map((item) => ({ tool: item.toolName, result: item.payload }))
-      const factSnapshot = buildAgentFactSnapshot(deterministicEvidence)
-      try {
-        const rewritten = await generateText({
-          model: provider(modelName),
-          system: '你是 Giverny 编排层的结果整理器。只能使用提供的确定性工具证据；按识别到的目标逐项回答，不能遗漏其中任何一项；金额、工时、日期、状态、任务 ID 和附件数量必须逐字忠于证据。数据缺失时明确说明，不得猜测。',
-          messages: [{ role: 'user', content: `用户问题：\n${message}\n\n需要逐项回答的目标：\n${verifiedIntents.join('、')}\n\n确定性证据：\n${JSON.stringify(verifiedEvidence).slice(0, 30000)}` }],
-          temperature: 0,
-        })
-        answer = cleanAnswer(rewritten.text) || factSnapshot.fallbackAnswer || '工具已经返回证据，但没有生成可靠的整理结果。'
-        trace.push({ type: 'result', label: '仅依据工具证据整理答案' })
-      } catch {
-        answer = factSnapshot.fallbackAnswer || '工具已经返回证据，但主模型未能完成整理；我没有采用未经验证的初稿。'
-        trace.push({ type: 'error', label: '证据整理失败', detail: '已切换为确定性事实摘要。' })
-      }
       if (factSnapshot.fallbackAnswer) {
+        answer = factSnapshot.fallbackAnswer
         const factVerification = verifyAgentFactClaims(answer, factSnapshot)
-        if (!factVerification.passed) {
-          answer = factSnapshot.fallbackAnswer
-          trace.push({ type: 'error', label: '关键事实校验未通过', detail: `${factVerification.issues.slice(0, 3).join('；')}。已改用权威事实摘要。` })
-        } else {
-          trace.push({ type: 'result', label: '关键事实逐字段校验通过' })
+        trace.push(factVerification.passed
+          ? { type: 'result', label: '结构化事实协议生成答案', detail: `核对 ${factVerification.checkedClaims} 条声明，覆盖 ${factVerification.coveredSources.join('、')}。` }
+          : { type: 'error', label: '结构化事实协议校验失败', detail: factVerification.issues.slice(0, 3).join('；') })
+        factVerificationSummary = {
+          passed: factVerification.passed,
+          checkedClaims: factVerification.checkedClaims,
+          sourceTools: factVerification.coveredSources,
+          fallbackUsed: false,
         }
+      } else {
+        answer = '工具返回的数据尚未接入结构化事实协议，我已停止采用模型初稿。'
+        factVerificationSummary = { passed: false, checkedClaims: 0, sourceTools: [], fallbackUsed: true }
+        trace.push({ type: 'error', label: '结构化事实协议缺少工具渲染器' })
       }
       workingTurn = { ...workingTurn, plan: plannedCalls, evidence, answer }
     }
@@ -1319,6 +1319,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),
       ...(attachmentsById.size ? { attachments: [...attachmentsById.values()].slice(0, 30) } : {}),
+      ...(factVerificationSummary ? { factVerification: factVerificationSummary } : {}),
     }
     this.saveMessage('assistant', answer, {
       approval,

@@ -8,7 +8,7 @@ const resolver = readFileSync('src/agentEntityResolver.ts', 'utf8')
 const tests = readFileSync('scripts/test-agent-orchestrator.mjs', 'utf8')
 const suite = JSON.parse(readFileSync('agent-evals/cases.json', 'utf8'))
 
-for (const marker of ['decideAgentReplan', 'repairToolInput(', 'executeRepairTool(', 'scopedQuestionForAgentTool', '验真后动态补查', '仅依据工具证据整理答案', '拆解 ${verifiedIntents.length} 个目标']) {
+for (const marker of ['decideAgentReplan', 'repairToolInput(', 'executeRepairTool(', 'scopedQuestionForAgentTool', '验真后动态补查', '结构化事实协议生成答案', '拆解 ${verifiedIntents.length} 个目标']) {
   if (!runtime.includes(marker)) failures.push(`AliceAgent 缺少动态重规划契约：${marker}`)
 }
 for (const marker of ['inferAgentIntent', 'inferAgentIntents', 'detectedIntents', 'hasDeterministicTool', "hasIntent('attachment')", "hasIntent('task_data')", 'hasSuccessfulWritePreview', 'successfulTools']) {

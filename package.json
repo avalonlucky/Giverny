@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.88",
+  "version": "0.32.89",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -15,6 +15,7 @@
     "accounting:test": "node scripts/test-task-accounting.mjs",
     "agent:orchestrator:test": "node scripts/test-agent-orchestrator.mjs",
     "agent:fact:test": "node scripts/test-agent-fact-guard.mjs",
+    "agent:fact:production": "node scripts/check-production-agent-facts.mjs",
     "lint": "eslint .",
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
     "agent:eval": "node agent-evals/run.mjs",
@@ -23,7 +24,7 @@
     "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run agent:orchestrator:test && npm run agent:fact:test && npm run lint && npm run build",
     "agent:quality:gate": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
-    "deploy:production": "npm run build && node scripts/deploy-cloudflare-api.mjs",
+    "deploy:production": "npm run build && node scripts/deploy-cloudflare-api.mjs && npm run agent:fact:production",
     "deploy:worker": "npm run deploy:production"
   },
   "dependencies": {
