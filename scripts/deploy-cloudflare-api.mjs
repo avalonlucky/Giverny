@@ -205,6 +205,16 @@ async function probeCandidate(versionId) {
   return { decision, expectedAsset, observedAsset, health }
 }
 
+async function waitForCandidate(versionId, attempts = 7) {
+  let latest
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    latest = await probeCandidate(versionId)
+    if (latest.decision.action === 'promote') return latest
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 3000))
+  }
+  return latest
+}
+
 async function deploy() {
   if (!existsSync(join(assetsDirectory, 'index.html'))) throw new Error('dist 尚未构建，请先运行 npm run build')
   const token = await loadToken()
@@ -252,10 +262,9 @@ async function deploy() {
     { version_id: candidateVersionId, percentage: 0.01 },
   ], `v${releaseVersion} 候选验证`)
   try {
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    const probe = await probeCandidate(candidateVersionId)
+    const probe = await waitForCandidate(candidateVersionId)
     if (probe.decision.action !== 'promote') {
-      throw new Error(`候选验证失败：${probe.decision.failures.join('；')}（资源 ${probe.observedAsset || '无'} / ${probe.expectedAsset || '无'}）`)
+      throw new Error(`候选验证失败：${probe.decision.failures.join('；')}（版本 ${probe.health?.version || '无'} / ${releaseVersion}；资源 ${probe.observedAsset || '无'} / ${probe.expectedAsset || '无'}）`)
     }
     await createDeployment(token, [{ version_id: candidateVersionId, percentage: 100 }], `v${releaseVersion} 候选验证通过，正式推广`)
     process.stdout.write(`Cloudflare 受控发布完成：v${releaseVersion} · ${candidateVersionId} · 健康、事实协议、版本与资源校验通过\n`)

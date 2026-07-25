@@ -134,7 +134,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (detectedIntents.some(requiresBusinessEvidence) && !turn.evidence.some((item) => item.deterministic)) {
     issues.push('业务事实回答缺少确定性工具证据。')
   }
-  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance', 'query_settlement_exports', 'export_settlement_preview', 'manage_settlement_export_preview')) {
+  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'export_settlement_preview', 'manage_settlement_export_preview')) {
     requiredTools.push('query_month_finance')
     issues.push('金额或工时结论没有经过财务计算工具。')
   }

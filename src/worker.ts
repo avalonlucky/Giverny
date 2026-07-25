@@ -3776,7 +3776,109 @@ async function agentQuerySettlementExportsTool(env: Env, request: Request) {
      AND (? = '' OR end_date >= ?) AND (? = '' OR start_date <= ?)
      ORDER BY generated_at DESC LIMIT ?`,
   ).bind(workspaceId, startDate, startDate, endDate, endDate, limit).all<DbSettlementExport>()
-  return agentOk({ tool: 'query_settlement_exports', count: rows.results?.length || 0, records: (rows.results || []).map(toSettlementExportRecord) })
+  return agentOk({ tool: 'query_settlement_exports', count: rows.results?.length || 0, records: (rows.results || []).map(toAgentSettlementExportRecord) })
+}
+
+const settlementDay = /^\d{4}-\d{2}-\d{2}$/
+
+function shiftSettlementDay(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function settlementCoverage(startDate: string, endDate: string, rows: DbSettlementExport[]) {
+  const ordered = rows
+    .map((row) => ({ id: row.id, startDate: row.start_date < startDate ? startDate : row.start_date, endDate: row.end_date > endDate ? endDate : row.end_date, locked: Boolean(row.locked) }))
+    .filter((item) => item.startDate <= item.endDate)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate))
+  const overlaps: Array<{ firstExportId: string; secondExportId: string; startDate: string; endDate: string }> = []
+  for (let index = 0; index < ordered.length; index += 1) {
+    for (let next = index + 1; next < ordered.length && ordered[next].startDate <= ordered[index].endDate; next += 1) {
+      overlaps.push({ firstExportId: ordered[index].id, secondExportId: ordered[next].id, startDate: ordered[next].startDate, endDate: ordered[index].endDate < ordered[next].endDate ? ordered[index].endDate : ordered[next].endDate })
+    }
+  }
+  const gaps: Array<{ startDate: string; endDate: string }> = []
+  let cursor = startDate
+  for (const range of ordered) {
+    if (range.startDate > cursor) gaps.push({ startDate: cursor, endDate: shiftSettlementDay(range.startDate, -1) })
+    const after = shiftSettlementDay(range.endDate, 1)
+    if (after > cursor) cursor = after
+  }
+  if (cursor <= endDate) gaps.push({ startDate: cursor, endDate })
+  return {
+    gaps,
+    overlaps,
+    lockedBoundaries: ordered.filter((item) => item.locked).map(({ id, startDate: lockedStart, endDate: lockedEnd }) => ({ exportId: id, startDate: lockedStart, endDate: lockedEnd })),
+  }
+}
+
+async function agentReconcileSettlementTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const exportId = agentString(body.exportId, 180)
+  let exportRow: DbSettlementExport | null = null
+  if (exportId) {
+    exportRow = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).first<DbSettlementExport>() || null
+    if (!exportRow) return agentFail('结算导出记录不存在或不属于当前工作区', 404)
+  }
+  const startDate = exportRow?.start_date || agentString(body.startDate, 10)
+  const endDate = exportRow?.end_date || agentString(body.endDate, 10)
+  if (!settlementDay.test(startDate) || !settlementDay.test(endDate) || startDate > endDate) return agentFail('请提供 exportId，或提供有效的开始和结束日期', 400)
+
+  const snapshot = exportRow ? parseSettlementReceiptSnapshot(exportRow.snapshot_json) : await buildSettlementReceiptSnapshot(env, workspaceId, startDate, endDate)
+  if (!snapshot) return agentFail('结算快照无法解析，需要重新生成回单', 409)
+  const current = exportRow ? await buildSettlementReceiptSnapshot(env, workspaceId, startDate, endDate) : snapshot
+  const history = await env.DB.prepare(
+    `SELECT * FROM settlement_exports WHERE workspace_id = ? AND end_date >= ? AND start_date <= ? ORDER BY start_date ASC, generated_at ASC`,
+  ).bind(workspaceId, startDate, endDate).all<DbSettlementExport>()
+  const historyRows = history.results || []
+  const rowHours = roundCents(snapshot.rows.reduce((sum, row) => sum + (Number(row.actualHours) || 0), 0))
+  const rowAmount = roundCents(snapshot.rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0))
+  const rowFormulaMismatches = snapshot.rows.map((row, index) => ({ index, taskId: Number(row.taskId) || 0, title: row.title, expectedAmount: roundCents((Number(row.actualHours) || 0) * (Number(row.unitPrice) || 0)), actualAmount: roundCents(Number(row.amount) || 0) })).filter((item) => item.expectedAmount !== item.actualAmount)
+  const taskKeys = snapshot.rows.map((row) => Number(row.taskId) > 0 ? `task:${Number(row.taskId)}` : `title:${row.title.replace(/（补录）$/, '').trim()}`)
+  const duplicateKeys = [...new Set(taskKeys.filter((key, index) => taskKeys.indexOf(key) !== index))]
+  const duplicateTaskIds = duplicateKeys.filter((key) => key.startsWith('task:')).map((key) => Number(key.slice(5)))
+  const savedIds = new Set(snapshot.rows.map((row) => Number(row.taskId)).filter((id) => id > 0))
+  const currentIds = new Set(current.rows.map((row) => Number(row.taskId)).filter((id) => id > 0))
+  const missingTaskIds = [...currentIds].filter((id) => !savedIds.has(id))
+  const snapshotOnlyTaskIds = [...savedIds].filter((id) => !currentIds.has(id))
+  const hoursDifference = roundCents(rowHours - (Number(snapshot.totalHours) || 0))
+  const amountDifference = roundCents(rowAmount - (Number(snapshot.totalAmount) || 0))
+  const storedHoursDifference = exportRow ? roundCents(rowHours - (Number(exportRow.billable_hours) || 0)) : 0
+  const storedAmountDifference = exportRow ? roundCents(rowAmount - (Number(exportRow.total_amount) || 0)) : 0
+  const taskCountDifference = exportRow ? snapshot.rows.length - (Number(exportRow.task_count) || 0) : 0
+  const dataChanged = exportRow ? await settlementSnapshotChecksum(snapshot) !== await settlementSnapshotChecksum(current) : false
+  const repeated = await Promise.all(historyRows.filter((row) => !exportRow || row.id !== exportRow.id).map(async (row) => {
+    const parsed = parseSettlementReceiptSnapshot(row.snapshot_json)
+    return row.start_date === startDate && row.end_date === endDate && parsed && await settlementSnapshotChecksum(parsed) === await settlementSnapshotChecksum(snapshot) ? row.id : ''
+  }))
+  const coverage = settlementCoverage(startDate, endDate, historyRows)
+  const findings: string[] = []
+  if (duplicateKeys.length) findings.push(`快照中有 ${duplicateKeys.length} 组重复任务。`)
+  if (rowFormulaMismatches.length) findings.push(`有 ${rowFormulaMismatches.length} 行的小计不等于实际工时乘以单价。`)
+  if (hoursDifference || storedHoursDifference) findings.push('逐行工时与回单汇总或数据库记录不一致。')
+  if (amountDifference || storedAmountDifference) findings.push('逐行金额与回单汇总或数据库记录不一致。')
+  if (taskCountDifference) findings.push('快照任务数与数据库记录不一致。')
+  if (missingTaskIds.length) findings.push(`当前范围新增了 ${missingTaskIds.length} 个未进入该快照的任务。`)
+  if (snapshotOnlyTaskIds.length) findings.push(`该快照有 ${snapshotOnlyTaskIds.length} 个任务已不在当前范围。`)
+  if (dataChanged) findings.push('保存快照后，当前业务数据已经发生变化。')
+  if (coverage.overlaps.length) findings.push(`历史导出存在 ${coverage.overlaps.length} 处日期重叠。`)
+  if (coverage.gaps.length) findings.push(`历史导出在核对范围内存在 ${coverage.gaps.length} 处日期空档。`)
+  if (repeated.filter(Boolean).length) findings.push('已有相同日期范围且内容一致的回单，无需重复生成。')
+  const structuralFailure = Boolean(duplicateKeys.length || rowFormulaMismatches.length || hoursDifference || amountDifference || storedHoursDifference || storedAmountDifference || taskCountDifference)
+  await audit(env, agentCapabilityRegistry.reconcile_settlement_export.policy.auditEvent, 'settlement_export', exportRow?.id || `${startDate}:${endDate}`, { startDate, endDate, integrity: structuralFailure ? 'fail' : findings.length ? 'warning' : 'pass', findingCount: findings.length })
+  return agentOk({
+    tool: 'reconcile_settlement_export', source: exportRow ? 'saved_snapshot' : 'current_range', range: { startDate, endDate },
+    record: exportRow ? toAgentSettlementExportRecord(exportRow) : null,
+    summary: { taskCount: snapshot.rows.length, uniqueTaskCount: new Set(taskKeys).size, rowHours, statedHours: Number(snapshot.totalHours) || 0, storedHours: exportRow ? Number(exportRow.billable_hours) || 0 : rowHours, rowAmount, statedAmount: Number(snapshot.totalAmount) || 0, storedAmount: exportRow ? Number(exportRow.total_amount) || 0 : rowAmount },
+    differences: { taskCount: taskCountDifference, hours: hoursDifference, storedHours: storedHoursDifference, amount: amountDifference, storedAmount: storedAmountDifference },
+    duplicateTaskIds, duplicateRows: duplicateKeys, rowFormulaMismatches, missingTaskIds, snapshotOnlyTaskIds, dataChanged,
+    coverage: { ...coverage, repeatedExportIds: repeated.filter(Boolean) },
+    traceability: { snapshotCreatedAt: exportRow ? formatBeijing(exportRow.generated_at) : '', snapshotChecksum: await settlementSnapshotChecksum(snapshot), locked: Boolean(exportRow?.locked), linkDisabled: Boolean(exportRow?.disabled), linkExpired: Boolean(exportRow?.expires_at && exportRow.expires_at <= nowIso()), taskIds: [...savedIds] },
+    integrity: structuralFailure ? 'fail' : findings.length ? 'warning' : 'pass', findings,
+  })
 }
 
 async function scheduleConflictSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string, excludeTaskId = 0) {
@@ -3952,6 +4054,12 @@ async function settlementSnapshotChecksum(receipt: ReceiptExcelOptions) {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function settlementExportFingerprint(row: DbSettlementExport) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ id: row.id, locked: Boolean(row.locked), publicToken: row.public_token, snapshot: row.snapshot_json, expiresAt: row.expires_at || '', disabled: Boolean(row.disabled) }))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 async function agentExportSettlementPreviewTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
@@ -3974,7 +4082,7 @@ async function agentExportSettlementTool(env: Env, request: Request) {
   if (await settlementSnapshotChecksum(receipt) !== draft.snapshotChecksum) return agentFail('结算数据在确认期间发生变化，请重新预览', 409)
   const row = await persistSettlementExport(env, agentWorkspaceIdFromRequest(request), startDate, endDate, receipt)
   await audit(env, agentCapabilityRegistry.export_settlement.policy.auditEvent, 'settlement_export', row.id, { startDate, endDate, taskCount: receipt.rows.length })
-  const record = toSettlementExportRecord(row)
+  const record = toAgentSettlementExportRecord(row)
   return agentOk({ tool: 'export_settlement', mode: 'execute', record, files: [{ id: row.id, taskId: 0, taskTitle: '结算回单', name: `结算回单_${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}.xlsx`, type: 'XLSX', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: '', scope: 'acceptance', tag: '结算回单', uploadedAt: formatBeijing(row.generated_at), sourceUrl: `/api/shared-settlement/${row.public_token}/excel`, downloadUrl: `/api/shared-settlement/${row.public_token}/excel`, shareUrl: `/settlement-share/${row.public_token}`, kind: 'settlement-receipt' }] })
 }
 
@@ -3983,9 +4091,21 @@ async function agentManageSettlementPreviewTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(agentString(body.exportId, 180), agentWorkspaceIdFromRequest(request)).first<DbSettlementExport>()
   if (!row) return agentFail('结算导出记录不存在', 404)
-  const action = body.action === 'lock' ? 'lock' : 'set_access'
-  const draft = { exportId: row.id, action, startDate: row.start_date, endDate: row.end_date, locked: Boolean(row.locked), expiresAt: action === 'set_access' ? agentString(body.expiresAt, 40) : row.expires_at || '', disabled: action === 'set_access' ? agentBool(body.disabled, false) : Boolean(row.disabled) }
-  return agentPreview(env, request, 'manage_settlement_export_preview', draft, [], action === 'lock' ? ['锁定后删除需要管理员密码。'] : [])
+  const action = body.action === 'lock' || body.action === 'set_access' || body.action === 'delete_unlocked' ? body.action : ''
+  if (!action) return agentFail('未知的结算回单操作', 400)
+  if (action === 'delete_unlocked' && row.locked) return agentFail('锁定回单不能由 Agent 删除，请在管理界面输入管理员密码处理', 409)
+  let expiresAt = row.expires_at || ''
+  if (action === 'set_access') {
+    expiresAt = agentString(body.expiresAt, 40)
+    if (expiresAt) {
+      const parsed = new Date(expiresAt)
+      if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) return agentFail('链接有效期必须晚于当前时间', 400)
+      expiresAt = parsed.toISOString()
+    }
+  }
+  const draft = { exportId: row.id, action, startDate: row.start_date, endDate: row.end_date, locked: Boolean(row.locked), expiresAt, disabled: action === 'set_access' ? agentBool(body.disabled, false) : Boolean(row.disabled), recordFingerprint: await settlementExportFingerprint(row) }
+  const warnings = action === 'lock' ? ['锁定后删除需要在管理界面验证管理员密码。'] : action === 'delete_unlocked' ? ['删除后该回单的在线预览、Excel、PDF 与分享链接会立即失效。'] : []
+  return agentPreview(env, request, 'manage_settlement_export_preview', draft, [], warnings)
 }
 
 async function agentManageSettlementTool(env: Env, request: Request) {
@@ -3995,12 +4115,23 @@ async function agentManageSettlementTool(env: Env, request: Request) {
   try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_settlement_export', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
   const workspaceId = agentWorkspaceIdFromRequest(request)
   const exportId = agentString(draft.exportId, 180)
+  const before = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).first<DbSettlementExport>()
+  if (!before) return agentFail('结算导出记录不存在', 404)
+  if (await settlementExportFingerprint(before) !== draft.recordFingerprint) return agentFail('结算回单状态在确认期间发生变化，请重新预览', 409)
+  if (draft.action === 'delete_unlocked') {
+    if (before.locked) return agentFail('锁定回单不能由 Agent 删除，请在管理界面输入管理员密码处理', 409)
+    const deleted = await env.DB.prepare('DELETE FROM settlement_exports WHERE id = ? AND workspace_id = ? AND locked = 0').bind(exportId, workspaceId).run()
+    if (!Number(deleted.meta?.changes)) return agentFail('结算回单状态已变化，请重新预览', 409)
+    await audit(env, agentCapabilityRegistry.manage_settlement_export.policy.auditEvent, 'settlement_export', exportId, { action: draft.action, startDate: before.start_date, endDate: before.end_date, locked: false })
+    return agentOk({ tool: 'manage_settlement_export', mode: 'execute', action: draft.action, deleted: true, exportId })
+  }
   if (draft.action === 'lock') await env.DB.prepare('UPDATE settlement_exports SET locked = 1 WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).run()
-  else await env.DB.prepare('UPDATE settlement_exports SET expires_at = ?, disabled = ? WHERE id = ? AND workspace_id = ?').bind(agentString(draft.expiresAt, 40) || null, agentBool(draft.disabled) ? 1 : 0, exportId, workspaceId).run()
+  else if (draft.action === 'set_access') await env.DB.prepare('UPDATE settlement_exports SET expires_at = ?, disabled = ? WHERE id = ? AND workspace_id = ?').bind(agentString(draft.expiresAt, 40) || null, agentBool(draft.disabled) ? 1 : 0, exportId, workspaceId).run()
+  else return agentFail('未知的结算回单操作', 400)
   const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).first<DbSettlementExport>()
   if (!row) return agentFail('结算导出记录不存在', 404)
   await audit(env, agentCapabilityRegistry.manage_settlement_export.policy.auditEvent, 'settlement_export', exportId, { action: draft.action, expiresAt: draft.expiresAt, disabled: draft.disabled })
-  return agentOk({ tool: 'manage_settlement_export', mode: 'execute', record: toSettlementExportRecord(row) })
+  return agentOk({ tool: 'manage_settlement_export', mode: 'execute', action: draft.action, record: toAgentSettlementExportRecord(row) })
 }
 
 async function agentReschedulePreviewTool(env: Env, request: Request) {
@@ -7722,6 +7853,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
     return agentProductHelpTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
+  if (url.pathname === '/api/agent/tools/settlement-reconciliation' && (request.method === 'POST' || request.method === 'GET')) return agentReconcileSettlementTool(env, request)
   if (url.pathname === '/api/agent/tools/schedule-conflicts' && (request.method === 'POST' || request.method === 'GET')) return agentScheduleConflictsTool(env, request)
   if (url.pathname === '/api/agent/tools/prepare-attachment-upload' && request.method === 'POST') return agentPrepareAttachmentUploadTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-attachment-analysis-preview' && request.method === 'POST') return agentManageAttachmentAnalysisPreviewTool(env, request)
@@ -10291,6 +10423,18 @@ const toSettlementExportRecord = (row: DbSettlementExport) => ({
   expiresAt: formatBeijing(row.expires_at),
   disabled: Boolean(row.disabled),
   expired: Boolean(row.expires_at && row.expires_at <= nowIso()),
+})
+
+const settlementExportLinks = (row: DbSettlementExport) => ({
+  preview: `/settlement-share/${row.public_token}`,
+  share: `/settlement-share/${row.public_token}`,
+  excel: `/api/shared-settlement/${row.public_token}/excel`,
+  pdf: `/api/shared-settlement/${row.public_token}/pdf`,
+})
+
+const toAgentSettlementExportRecord = (row: DbSettlementExport) => ({
+  ...toSettlementExportRecord(row),
+  links: settlementExportLinks(row),
 })
 
 function dbTaskHoursInDateRange(task: DbTask, startDate: string, endDate: string) {

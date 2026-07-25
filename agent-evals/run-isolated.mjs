@@ -152,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -215,10 +215,10 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 62) {
+  if (!response.ok || capabilities.length !== 63) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
-  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory']) {
+  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export']) {
     if (!capabilities.some((capability) => capability.name === required)) throw new Error(`Agent capability manifest is missing ${required}`)
   }
   for (const capability of capabilities) {
@@ -561,7 +561,7 @@ async function runAgentLifecycleWriteCheck() {
   process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
 }
 
-async function runAgentBusinessToolCheck() {
+async function runAgentBusinessToolCheck(cookie) {
   const base = 'http://127.0.0.1:8798'
   const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
   const request = async (path, options = {}) => {
@@ -630,6 +630,55 @@ async function runAgentBusinessToolCheck() {
   if (!exportQuery.response.ok || !exportQuery.data.records?.some((item) => item.id === record.id)) {
     throw new Error(`Settlement export query missed the generated record: ${JSON.stringify(exportQuery.data)}`)
   }
+  const queriedRecord = exportQuery.data.records.find((item) => item.id === record.id)
+  if (!queriedRecord?.links?.preview || !queriedRecord?.links?.share || !queriedRecord?.links?.excel || !queriedRecord?.links?.pdf) {
+    throw new Error(`Settlement export query missed delivery links: ${JSON.stringify(queriedRecord)}`)
+  }
+  const reconciliation = await request('/api/agent/tools/settlement-reconciliation', {
+    method: 'POST', headers, body: JSON.stringify({ exportId: record.id }),
+  })
+  if (!reconciliation.response.ok || reconciliation.data.integrity !== 'pass' || reconciliation.data.summary?.rowAmount !== record.amount || reconciliation.data.summary?.rowHours !== record.billableHours || reconciliation.data.dataChanged !== false) {
+    throw new Error(`Settlement reconciliation did not pass a fresh snapshot: ${JSON.stringify(reconciliation.data)}`)
+  }
+  const crossWorkspaceReconciliation = await request('/api/agent/tools/settlement-reconciliation', {
+    method: 'POST', headers: { ...headers, ...agentScopeHeaders('tenant-b', 'business-tenant-b', 'admin') }, body: JSON.stringify({ exportId: record.id }),
+  })
+  if (crossWorkspaceReconciliation.response.status !== 404) {
+    throw new Error(`Cross-workspace settlement reconciliation leaked a record: ${JSON.stringify(crossWorkspaceReconciliation.data)}`)
+  }
+
+  const disposablePreview = await preview('export-settlement-preview', { startDate: '2026-07-01', endDate: '2026-07-10' })
+  const disposable = await execute('export-settlement', disposablePreview.confirmationToken)
+  const deletePreview = await preview('manage-settlement-export-preview', { exportId: disposable.record.id, action: 'delete_unlocked' })
+  const mutatePreview = await preview('manage-settlement-export-preview', { exportId: disposable.record.id, action: 'set_access', expiresAt: '2026-08-31T20:00:00+08:00', disabled: false })
+  await execute('manage-settlement-export', mutatePreview.confirmationToken)
+  const staleDelete = await request('/api/agent/tools/manage-settlement-export', {
+    method: 'POST', headers, body: JSON.stringify({ confirmationToken: deletePreview.confirmationToken }),
+  })
+  if (staleDelete.response.status !== 409 || !String(staleDelete.data.error || '').includes('确认期间发生变化')) {
+    throw new Error(`Stale settlement deletion was not rejected: ${JSON.stringify(staleDelete.data)}`)
+  }
+  const freshDeletePreview = await preview('manage-settlement-export-preview', { exportId: disposable.record.id, action: 'delete_unlocked' })
+  const deleted = await execute('manage-settlement-export', freshDeletePreview.confirmationToken)
+  if (deleted.deleted !== true || deleted.exportId !== disposable.record.id) throw new Error(`Unlocked settlement export was not deleted: ${JSON.stringify(deleted)}`)
+  const deletedQuery = await request('/api/agent/tools/settlement-reconciliation', { method: 'POST', headers, body: JSON.stringify({ exportId: disposable.record.id }) })
+  if (deletedQuery.response.status !== 404) throw new Error(`Deleted settlement export remains available: ${JSON.stringify(deletedQuery.data)}`)
+
+  const malformedReceipt = {
+    fileLabel: 'reconcile-fixture', title: '结算回单', receiptNo: 'EVAL-RECONCILE', issuedAt: '2026/07/25', companyName: '评测', serviceName: '平面设计兼职', settlementLabel: '2026/07/01 至 2026/07/02', hourlyRate: 100,
+    rows: [
+      { taskId: 1, sequence: '01', type: '评测', title: '重复任务', requirement: '核对', estimatedStartDate: '2026/07/01', actualCompletionDate: '2026/07/01', requester: '评测', contact: '评测', status: '已验收', estimatedHours: 1, actualHours: 1, unitPrice: 100, amount: 99, acceptanceNote: '评测' },
+      { taskId: 1, sequence: '02', type: '评测', title: '重复任务', requirement: '核对', estimatedStartDate: '2026/07/01', actualCompletionDate: '2026/07/01', requester: '评测', contact: '评测', status: '已验收', estimatedHours: 1, actualHours: 1, unitPrice: 100, amount: 100, acceptanceNote: '评测' },
+    ], totalHours: 2, totalAmount: 199,
+  }
+  const malformedCreated = await request('/api/settlement-exports', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ startDate: '2026-07-01', endDate: '2026-07-02', receipt: malformedReceipt }) })
+  if (!malformedCreated.response.ok || !malformedCreated.data.record?.id) throw new Error(`Malformed reconciliation fixture was not created: ${JSON.stringify(malformedCreated.data)}`)
+  const malformedCheck = await request('/api/agent/tools/settlement-reconciliation', { method: 'POST', headers, body: JSON.stringify({ exportId: malformedCreated.data.record.id }) })
+  if (!malformedCheck.response.ok || malformedCheck.data.integrity !== 'fail' || malformedCheck.data.duplicateTaskIds?.[0] !== 1 || malformedCheck.data.rowFormulaMismatches?.length !== 1) {
+    throw new Error(`Settlement reconciliation missed duplicate rows or subtotal mismatch: ${JSON.stringify(malformedCheck.data)}`)
+  }
+  const malformedDeletePreview = await preview('manage-settlement-export-preview', { exportId: malformedCreated.data.record.id, action: 'delete_unlocked' })
+  await execute('manage-settlement-export', malformedDeletePreview.confirmationToken)
 
   const accessPreview = await preview('manage-settlement-export-preview', {
     exportId: record.id, action: 'set_access', expiresAt: '2026-08-31T23:59:59+08:00', disabled: false,
@@ -641,6 +690,8 @@ async function runAgentBusinessToolCheck() {
   const lockPreview = await preview('manage-settlement-export-preview', { exportId: record.id, action: 'lock' })
   const locked = await execute('manage-settlement-export', lockPreview.confirmationToken)
   if (locked.record?.locked !== true) throw new Error(`Settlement snapshot was not locked: ${JSON.stringify(locked)}`)
+  const lockedDelete = await request('/api/agent/tools/manage-settlement-export-preview', { method: 'POST', headers, body: JSON.stringify({ exportId: record.id, action: 'delete_unlocked' }) })
+  if (lockedDelete.response.status !== 409 || !String(lockedDelete.data.error || '').includes('管理界面')) throw new Error(`Agent allowed locked settlement deletion: ${JSON.stringify(lockedDelete.data)}`)
 
   const upload = await request('/api/agent/tools/prepare-attachment-upload', {
     method: 'POST', headers,
@@ -710,7 +761,7 @@ async function runAgentBusinessToolCheck() {
     throw new Error(`New business confirmation token boundary failed: ${JSON.stringify({ wrongPrincipal: wrongPrincipal.data, legitimate: legitimate.data, replay: replay.data })}`)
   }
 
-  process.stdout.write('Agent settlement, scheduling, upload handoff, reminder, model settings, role boundary, snapshot checksum, and confirmation replay checks passed.\n')
+  process.stdout.write('Agent settlement reconciliation, delivery links, safe deletion, scheduling, upload handoff, reminder, model settings, role boundary, snapshot checksum, and confirmation replay checks passed.\n')
 }
 
 async function runAgentMultimodalToolCheck(cookie) {
@@ -2562,7 +2613,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
-  await runAgentBusinessToolCheck()
+  await runAgentBusinessToolCheck(cookie)
   await runAgentMultimodalToolCheck(cookie)
   await runAgentProactiveWorkCheck(cookie)
   await runPlannedProgressTransitionCheck(cookie)

@@ -16,7 +16,7 @@ if (deploySource.includes("'.wrangler'")) failures.push('HTTP API 发布器禁�
 if (!deploySource.includes('refreshCloudflareOAuthToken') || !deploySource.includes('refresh_token')) {
   failures.push('HTTP API 发布器必须支持 OAuth 凭证自动刷新')
 }
-for (const marker of ['/versions?bindings_inherit=strict', '/deployments', 'Cloudflare-Workers-Version-Overrides', '自动回滚']) {
+for (const marker of ['/versions?bindings_inherit=strict', '/deployments', 'Cloudflare-Workers-Version-Overrides', 'waitForCandidate', '自动回滚']) {
   if (!deploySource.includes(marker)) failures.push(`HTTP API 发布器缺少受控发布能力：${marker}`)
 }
 

@@ -8,6 +8,7 @@ const registry = readFileSync('src/agentToolRegistry.ts', 'utf8')
 
 for (const symbol of [
   'agentQuerySettlementExportsTool',
+  'agentReconcileSettlementTool',
   'agentScheduleConflictsTool',
   'agentPrepareAttachmentUploadTool',
   'agentInspectAiSettingsTool',
@@ -25,6 +26,11 @@ for (const symbol of [
 ]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 
 assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
+assert.match(worker, /action === 'delete_unlocked' && row\.locked/)
+assert.match(worker, /settlementExportFingerprint\(before\) !== draft\.recordFingerprint/)
+assert.match(worker, /DELETE FROM settlement_exports WHERE id = \? AND workspace_id = \? AND locked = 0/)
+assert.match(worker, /missingTaskIds/)
+assert.match(worker, /coverage\.overlaps/)
 assert.match(worker, /transport: 'authenticated-browser-to-r2'/)
 assert.match(worker, /apiKeyExposed: false/)
 assert.match(worker, /Agent 只能使用平台默认地址或已在设置页登记的服务商地址/)
