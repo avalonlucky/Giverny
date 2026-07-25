@@ -105,6 +105,28 @@ test('工作助手主动事项按优先级展示证据、建议和处理效果',
   await expect(item.getByRole('button', { name: '已解决' })).toBeVisible()
 })
 
+test('工作助手企业记忆展示范围、来源、有效期和纠正入口', async ({ page }) => {
+  const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  const createdResponse = await page.request.post('/api/ai/enterprise-memories', { headers: authHeaders, data: { scopeType: 'partner', scopeKey: '浏览器评测合作伙伴', memoryType: 'preference', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceType: 'manual', sourceLabel: '浏览器评测人工确认', confidence: 'confirmed' } })
+  const created = await createdResponse.json() as { memory: { id: string }; error?: string }
+  expect(createdResponse.ok(), created.error || '企业记忆创建失败').toBeTruthy()
+
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  await page.getByRole('button', { name: '记录与任务' }).click()
+  await page.getByRole('tab', { name: '后台任务' }).click()
+  await page.getByRole('tab', { name: '企业记忆' }).click()
+  await expect(page.getByLabel('企业记忆概况')).toBeVisible()
+  const item = page.locator('.enterprise-memory-item', { hasText: '浏览器评测合作伙伴' })
+  await expect(item.getByText('验收文件偏好', { exact: true })).toBeVisible()
+  await expect(item.getByText('来源：浏览器评测人工确认', { exact: true })).toBeVisible()
+  await expect(item.getByText('长期有效', { exact: true })).toBeVisible()
+  await item.getByRole('button', { name: '纠正' }).click()
+  await expect(page.getByText('纠正记忆', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存纠正' })).toBeVisible()
+
+  await page.request.patch(`/api/ai/enterprise-memories/${created.memory.id}`, { headers: authHeaders, data: { action: 'delete', reason: '浏览器评测清理' } })
+})
+
 test('文件库按需加载并可打开验收文件详情', async ({ page }) => {
   await page.getByRole('button', { name: '切换到文件库' }).click()
   await expect(page).toHaveURL(/\/files$/)
@@ -1042,7 +1064,7 @@ test('验收备注 AI 使用弹窗内当前完整工时快照', async ({ page })
     })
   })
 
-  await page.getByText('公司产品封套修改', { exact: true }).click()
+  await page.getByText('公司产品封套修改', { exact: true }).first().click()
   await page.getByRole('button', { name: /记录进展/ }).last().click()
   await page.getByRole('button', { name: /本次进展为验收进展/ }).click()
   const dialog = page.getByRole('dialog', { name: '记录验收进展' })

@@ -69,10 +69,25 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   snoozedUntil: '再次提醒时间',
   priority: '优先级',
   lastSeenAt: '最近发现',
+  memoryId: '记忆记录',
+  scopeType: '记忆范围',
+  scopeKey: '范围名称',
+  memoryType: '记忆类型',
+  content: '记忆内容',
+  sourceType: '来源类型',
+  sourceRef: '来源引用',
+  sourceLabel: '来源说明',
+  sourceExcerpt: '来源依据',
+  confidence: '确认状态',
+  version: '记忆版本',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
-  if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒', create: '新增记忆', correct: '纠正记忆', expire: '设为失效', delete: '删除记忆' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'scopeType') return ({ organization: '组织', partner: '合作伙伴', project: '项目' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'memoryType') return ({ fact: '事实', preference: '偏好', rule: '规则', decision: '决策' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'sourceType') return ({ manual: '人工记录', task: '任务事实', conversation: '当前对话', document: '文档', system: '系统规则' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'confidence') return value === 'confirmed' ? '已确认' : '推导信息'
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'estimatedHours') return `${value} h`
   if (key === 'progress') return `${value}%`
@@ -106,10 +121,10 @@ function agentApprovalRows(approval: AgentApproval) {
     ? { taskTitle: draft.taskTitle, ...(draft.recordType ? { recordType: draft.recordType, action: draft.action, recordId: draft.recordId } : {}), ...changedFields }
     : draft
   return Object.entries(source)
-    .filter(([key, value]) => key !== 'taskId' && key !== 'before' && value !== undefined && value !== '')
+    .filter(([key, value]) => !['taskId', 'before', 'expectedUpdatedAt'].includes(key) && value !== undefined && value !== '')
     .map(([key, value]) => ({
       key,
-      label: AGENT_APPROVAL_FIELD_LABELS[key] || key,
+      label: approval.action === 'manage_enterprise_memory' && key === 'title' ? '记忆标题' : AGENT_APPROVAL_FIELD_LABELS[key] || key,
       value: formatAgentApprovalValue(key, value),
       beforeValue: before && key in before && before[key] !== value
         ? formatAgentApprovalValue(key, before[key])

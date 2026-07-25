@@ -306,6 +306,22 @@ function renderProactiveWork(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderEnterpriseMemory(payload: Record<string, unknown>) {
+  const memories = list(payload.memories).map(record)
+  const summary = record(payload.summary)
+  const scopeLabels: Record<string, string> = { organization: '组织', partner: '合作伙伴', project: '项目' }
+  return [
+    '**已核验企业记忆**',
+    `- 当前有效：${formatNumber(summary.active)} 条；组织 ${formatNumber(summary.organization)} 条，合作伙伴 ${formatNumber(summary.partner)} 条，项目 ${formatNumber(summary.project)} 条`,
+    ...(memories.length ? memories.map((memory) => {
+      const scope = scopeLabels[String(memory.scopeType || '')] || String(memory.scopeType || '')
+      const scopeKey = String(memory.scopeKey || '')
+      const expiry = memory.expiresAt ? `；有效至 ${String(memory.expiresAt).slice(0, 10)}` : '；长期有效'
+      return `- [${scope}${scopeKey ? `：${scopeKey}` : ''}] ${String(memory.title || '')}（v${formatNumber(memory.version)}）\n  - ${String(memory.content || '')}\n  - 来源：${String(memory.sourceLabel || '未标注')}${expiry}`
+    }) : ['- 当前查询范围没有有效记忆。']),
+  ].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
@@ -327,6 +343,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
   if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
   if (evidence.toolName === 'query_proactive_work') return renderProactiveWork(payload)
+  if (evidence.toolName === 'query_enterprise_memory') return renderEnterpriseMemory(payload)
   return ''
 }
 

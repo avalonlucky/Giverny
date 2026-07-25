@@ -82,6 +82,10 @@ const missingProactive = completeAgentTurn(createAgentTurn({ principal, question
 assert.ok(missingProactive.verification.requiredTools.includes('query_proactive_work'))
 const verifiedProactive = { ...missingProactive, plan: [call('query_proactive_work')], evidence: [evidence('query_proactive_work')] }
 assert.equal(verifyAgentAnswer(verifiedProactive).passed, true)
+const missingEnterpriseMemory = completeAgentTurn(createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), '他们喜欢简洁设计')
+assert.ok(missingEnterpriseMemory.verification.requiredTools.includes('query_enterprise_memory'))
+const verifiedEnterpriseMemory = completeAgentTurn({ ...createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), plan: [call('query_enterprise_memory')], evidence: [evidence('query_enterprise_memory')] }, '已查询')
+assert.equal(verifiedEnterpriseMemory.verification.passed, true)
 const explicitTaskWithBroadSearch = {
   ...createAgentTurn({ principal, question: '查一下任务#1的详情', intent: 'task_data' }),
   plan: [call('search_tasks')],

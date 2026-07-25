@@ -156,6 +156,42 @@ export type AgentTaskMemory = {
   updatedAt: string
 }
 
+export type AgentEnterpriseMemoryScope = 'organization' | 'partner' | 'project'
+export type AgentEnterpriseMemoryType = 'fact' | 'preference' | 'rule' | 'decision'
+export type AgentEnterpriseMemoryStatus = 'active' | 'superseded' | 'expired' | 'deleted'
+
+export type AgentEnterpriseMemory = {
+  id: string
+  scopeType: AgentEnterpriseMemoryScope
+  scopeKey: string
+  memoryType: AgentEnterpriseMemoryType
+  title: string
+  content: string
+  sourceType: 'manual' | 'task' | 'conversation' | 'document' | 'system'
+  sourceRef: string
+  sourceLabel: string
+  sourceExcerpt: string
+  confidence: 'confirmed' | 'derived'
+  status: AgentEnterpriseMemoryStatus
+  version: number
+  supersedesId?: string
+  validFrom: string
+  expiresAt?: string
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentEnterpriseMemorySummary = {
+  active: number
+  organization: number
+  partner: number
+  project: number
+  expiringSoon: number
+  corrected: number
+}
+
 export type AgentProactiveItem = {
   id: string
   taskId: number

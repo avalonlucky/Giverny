@@ -106,7 +106,8 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
     && (/(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除).*(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/.test(value)
       || /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期).*(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/.test(value))
   if (writesBusinessData) add('write')
-  if (/(?:用户|需求人|合作|客户).*(?:画像|特征|偏好|报价|排期建议)|(?:画像).*(?:用户|需求人|合作|客户)/.test(value)) add('person_profile')
+  const asksStoredMemory = /(?:记忆|之前记住|历史决策|组织规则|公司规则|团队规则|项目约定|长期规则)/.test(value)
+  if (!asksStoredMemory && /(?:用户|需求人|合作|客户).*(?:画像|特征|偏好|报价|排期建议)|(?:画像).*(?:用户|需求人|合作|客户)/.test(value)) add('person_profile')
   const asksMoneyDisplayHelp = /(?:显示|隐藏|展示|查看).*(?:金额).*(?:快捷键|怎么|如何|是什么)|(?:金额).*(?:显示|隐藏).*(?:快捷键|怎么|如何|是什么)/.test(value)
   if (!asksMoneyDisplayHelp && /(?:金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时)/.test(value)) add('finance')
   const productSubject = /(?:Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事)/i.test(value)
@@ -152,6 +153,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     && /(?:这个任务|那个任务|这个项目|那个项目|刚才那个|上述任务|当前任务).*(?:详情|进展|状态|等|卡|为什么|现在)/.test(turn.question)
   const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
   const asksProactiveWork = /(?:主动事项|风险待办|优先级|最该|优先处理|提醒处理效果|误报率|解决率)/.test(turn.question)
+  const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
   const hasPortfolioScope = /(?:列|哪些|所有|全部|多个|多项|多少|各有|谁|汇总|概况|清单|排查)|(?:从|\d{1,2}月\d{1,2}日).*(?:到|至)/.test(turn.question)
   const stateKinds = ['已验收', '未完成', '逾期', '延期', '等待中', '待验收'].filter((value) => turn.question.includes(value)).length
   const asksPortfolio = !hasExplicitTaskId && hasPortfolioSubject && (hasPortfolioScope || stateKinds > 1)
@@ -170,6 +172,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (asksProactiveWork && !hasDeterministicTool('query_proactive_work')) {
     requiredTools.push('query_proactive_work')
     issues.push('主动工作结论没有读取优先级、证据和处理效果。')
+  }
+  if (asksEnterpriseMemory && !hasDeterministicTool('query_enterprise_memory')) {
+    requiredTools.push('query_enterprise_memory')
+    issues.push('组织、合作伙伴或项目记忆结论没有读取企业分层记忆及来源。')
   }
   if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
     requiredTools.push('search_attachments')

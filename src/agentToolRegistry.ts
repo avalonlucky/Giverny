@@ -186,6 +186,19 @@ export const agentCapabilityRegistry = {
     policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['memory:read'], roles: businessReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_get_task_memory' },
     inputSchema: z.object({ taskId: z.number().int().positive().optional() }), trace: { running: '读取任务长期记忆', completed: '任务记忆已返回' },
   }),
+  query_enterprise_memory: readCapability({
+    title: '查询企业分层记忆', description: '查询当前工作区的组织规则、合作伙伴记忆和项目记忆，并返回来源、有效期、版本与纠正关系。涉及组织约定、合作偏好或项目历史规则时必须调用。', category: 'memory', endpoint: 'enterprise-memory',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['memory:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_enterprise_memory' },
+    inputSchema: z.object({ query: z.string().max(500).optional(), scopeType: z.enum(['organization', 'partner', 'project']).optional(), scopeKey: z.string().max(160).optional(), memoryType: z.enum(['fact', 'preference', 'rule', 'decision']).optional(), includeHistory: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(30) }),
+    trace: { running: '检索企业知识与记忆', completed: '分层记忆及来源已返回' },
+  }),
+  manage_enterprise_memory_preview: writePreviewCapability({
+    title: '预览维护企业记忆', description: '预览新增、纠正、失效或删除组织规则、合作伙伴记忆和项目记忆；纠正会保留旧版本。', category: 'memory', endpoint: 'manage-enterprise-memory-preview', executeWith: 'manage_enterprise_memory',
+    policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['memory:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_manage_enterprise_memory' },
+    inputSchema: z.object({ action: z.enum(['create', 'correct', 'expire', 'delete']), memoryId: z.string().max(160).optional(), scopeType: z.enum(['organization', 'partner', 'project']).optional(), scopeKey: z.string().max(160).optional(), memoryType: z.enum(['fact', 'preference', 'rule', 'decision']).optional(), title: z.string().max(160).optional(), content: z.string().max(4000).optional(), sourceType: z.enum(['manual', 'task', 'conversation', 'document', 'system']).optional(), sourceRef: z.string().max(500).optional(), sourceLabel: z.string().max(300).optional(), sourceExcerpt: z.string().max(1000).optional(), confidence: z.enum(['confirmed', 'derived']).optional(), expiresAt: z.string().optional(), reason: z.string().max(500).optional() }),
+    trace: { running: '核对记忆范围、来源和变更', completed: '企业记忆维护草稿已生成' },
+  }),
+  manage_enterprise_memory: writeExecuteCapability({ title: '执行维护企业记忆', description: '使用签名确认凭证新增、纠正、失效或软删除企业记忆，并写入不可覆盖的修订记录。', category: 'memory', endpoint: 'manage-enterprise-memory', previewFor: 'manage_enterprise_memory_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['memory:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_enterprise_memory' }, trace: { running: '写入企业记忆修订', completed: '企业记忆与修订记录已保存' } }),
   start_monthly_review: defineCapability({
     title: '启动月度复盘', description: '启动指定月份的持久化后台工作复盘。用于整月工作分析，不用于单个数字查询。', category: 'analysis', endpoint: 'monthly-review-start', methods: ['POST'], exposure: ['model', 'api'],
     policy: { risk: 'write', deterministic: false, source: 'workflow', scopes: ['analysis:write'], roles: writeRoles, confirmation: 'none', audit: 'workflow', auditEvent: 'agent_start_monthly_review' },
@@ -261,7 +274,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'query_settlement_exports', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'get_giverny_context', 'search_product_help'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

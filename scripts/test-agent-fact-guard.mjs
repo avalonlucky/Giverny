@@ -203,6 +203,16 @@ assert.ok(proactive.fallbackAnswer.includes('任务 #12'))
 assert.ok(proactive.fallbackAnswer.includes('预计交付日期：2026-07-22'))
 assert.equal(verifyAgentFactClaims(proactive.fallbackAnswer, proactive).passed, true)
 
+const enterpriseMemory = buildAgentFactSnapshot([evidence('query_enterprise_memory', {
+  summary: { active: 2, organization: 1, partner: 1, project: 0 },
+  memories: [{ id: 'memory-1', scopeType: 'partner', scopeKey: '昂楷', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceLabel: '2026-07-25 与刘总确认', version: 2, expiresAt: '2027-07-25T00:00:00.000Z' }],
+})])
+assert.ok(enterpriseMemory.fallbackAnswer.includes('当前有效：2 条'))
+assert.ok(enterpriseMemory.fallbackAnswer.includes('合作伙伴：昂楷'))
+assert.ok(enterpriseMemory.fallbackAnswer.includes('2026-07-25 与刘总确认'))
+assert.ok(enterpriseMemory.fallbackAnswer.includes('v2'))
+assert.equal(verifyAgentFactClaims(enterpriseMemory.fallbackAnswer, enterpriseMemory).passed, true)
+
 assert.equal(runAgentFactProtocolSelfTest().ok, true)
 
 console.log('Agent fact guard deterministic tests passed')

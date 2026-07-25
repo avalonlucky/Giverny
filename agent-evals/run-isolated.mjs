@@ -152,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -215,8 +215,11 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 59) {
+  if (!response.ok || capabilities.length !== 62) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
+  }
+  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory']) {
+    if (!capabilities.some((capability) => capability.name === required)) throw new Error(`Agent capability manifest is missing ${required}`)
   }
   for (const capability of capabilities) {
     const path = spec.paths?.[`/api/agent/tools/${capability.endpoint}`]
@@ -1885,6 +1888,34 @@ async function runAgentOrchestrationCheck(cookie) {
   const enabled = await updateMemory({ action: 'set_enabled', enabled: true })
   if (enabled.disabled || !enabled.summary) throw new Error('Task memory re-enable failed')
 
+  const createEnterpriseResponse = await fetch('http://127.0.0.1:8798/api/ai/enterprise-memories', {
+    method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ scopeType: 'partner', scopeKey: '昂楷', memoryType: 'preference', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceType: 'manual', sourceLabel: '隔离评测人工确认', sourceExcerpt: '刘总确认后续验收优先发 PDF。', confidence: 'confirmed' }),
+  })
+  const createdEnterprise = await createEnterpriseResponse.json().catch(() => ({}))
+  if (!createEnterpriseResponse.ok || createdEnterprise.memory?.scopeKey !== '昂楷' || createdEnterprise.summary?.partner < 1) throw new Error(`Enterprise memory creation failed: ${JSON.stringify(createdEnterprise)}`)
+  const correctEnterpriseResponse = await fetch(`http://127.0.0.1:8798/api/ai/enterprise-memories/${createdEnterprise.memory.id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ action: 'correct', content: '验收时优先提供 PDF，并附验收通过截图。', sourceLabel: '隔离评测二次确认', reason: '补充截图要求' }),
+  })
+  const correctedEnterprise = await correctEnterpriseResponse.json().catch(() => ({}))
+  if (!correctEnterpriseResponse.ok || correctedEnterprise.memory?.version !== 2 || correctedEnterprise.memory?.supersedesId !== createdEnterprise.memory.id) throw new Error(`Enterprise memory correction failed: ${JSON.stringify(correctedEnterprise)}`)
+  const enterpriseToolResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/enterprise-memory?scopeType=partner&scopeKey=%E6%98%82%E6%A5%B7', { headers: toolHeaders })
+  const enterpriseTool = await enterpriseToolResponse.json().catch(() => ({}))
+  if (!enterpriseToolResponse.ok || enterpriseTool.memories?.length !== 1 || enterpriseTool.memories[0].version !== 2 || !enterpriseTool.memories[0].sourceLabel) throw new Error(`Enterprise memory tool query failed: ${JSON.stringify(enterpriseTool)}`)
+  const enterpriseHistoryResponse = await fetch('http://127.0.0.1:8798/api/ai/enterprise-memories?includeHistory=true', { headers: { cookie } })
+  const enterpriseHistory = await enterpriseHistoryResponse.json().catch(() => ({}))
+  if (!enterpriseHistoryResponse.ok || !enterpriseHistory.memories?.some((item) => item.id === createdEnterprise.memory.id && item.status === 'superseded')) throw new Error('Enterprise memory correction history was not retained')
+
+  const enterprisePreviewResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/manage-enterprise-memory-preview', {
+    method: 'POST', headers: toolHeaders, body: JSON.stringify({ action: 'create', scopeType: 'organization', memoryType: 'rule', title: '验收事实规则', content: '验收结论必须引用任务与附件事实。', sourceType: 'system', sourceLabel: '企业 Agent 治理规则', confidence: 'confirmed' }),
+  })
+  const enterprisePreview = await enterprisePreviewResponse.json().catch(() => ({}))
+  if (!enterprisePreviewResponse.ok || !enterprisePreview.confirmationToken) throw new Error(`Enterprise memory preview failed: ${JSON.stringify(enterprisePreview)}`)
+  const enterpriseExecuteResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/workflow-write', {
+    method: 'POST', headers: toolHeaders, body: JSON.stringify({ operationId: `enterprise-memory-${crypto.randomUUID()}`, endpoint: 'manage-enterprise-memory', confirmationToken: enterprisePreview.confirmationToken }),
+  })
+  const enterpriseExecute = await enterpriseExecuteResponse.json().catch(() => ({}))
+  if (!enterpriseExecuteResponse.ok || enterpriseExecute.memory?.scopeType !== 'organization') throw new Error(`Enterprise memory workflow execution failed: ${JSON.stringify(enterpriseExecute)}`)
+
   const failuresResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-failures', { headers: { cookie } })
   const failures = await failuresResponse.json().catch(() => ({}))
   const failure = failures.cases?.find((item) => item.regressionStatus === 'required')
@@ -1902,7 +1933,7 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!metricsResponse.ok || typeof metrics.summary?.promptTokens !== 'number' || typeof metrics.summary?.completionTokens !== 'number' || !Array.isArray(metrics.models) || !metrics.tuning) {
     throw new Error(`Agent cost and tuning metrics are incomplete: ${JSON.stringify(metrics)}`)
   }
-  process.stdout.write('Persistent Agent plan, step progression, and task memory checks passed.\n')
+  process.stdout.write('Persistent Agent plan, step progression, task memory, and enterprise layered memory checks passed.\n')
 }
 
 async function runBackgroundAnalysisCheck(cookie) {

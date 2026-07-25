@@ -26,7 +26,7 @@ import { localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
 import { providerSupportsVision } from '../lib/aiProviders'
 import { agentAnalysisStatusLabel } from '../lib/agentAnalysisPresentation'
 import type { FileAsset } from '../types/domain'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentEnterpriseMemory, AgentEnterpriseMemorySummary, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
 import type { ToastTone } from '../lib/toastQueue'
 import { AgentAnalysisTaskCard } from './AgentAnalysisTaskCard'
 import { AgentApprovalCard } from './AgentApprovalCard'
@@ -37,6 +37,7 @@ import { AiBrandIcon } from './AiBrandIcon'
 import { ChatContent } from './ChatContent'
 import { EmptyState } from './EmptyState'
 import { ImageLightbox } from './CommandPalette'
+import { EnterpriseMemoryPanel, type EnterpriseMemoryDraft } from './EnterpriseMemoryPanel'
 
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
@@ -123,9 +124,11 @@ export function ChatPanel({
   const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
   const [agentPlans, setAgentPlans] = useState<AgentTaskPlan[]>([])
   const [taskMemories, setTaskMemories] = useState<AgentTaskMemory[]>([])
+  const [enterpriseMemories, setEnterpriseMemories] = useState<AgentEnterpriseMemory[]>([])
+  const [enterpriseMemorySummary, setEnterpriseMemorySummary] = useState<AgentEnterpriseMemorySummary | null>(null)
   const [proactiveItems, setProactiveItems] = useState<AgentProactiveItem[]>([])
   const [proactiveSummary, setProactiveSummary] = useState<AgentProactiveSummary | null>(null)
-  const [taskCenterTab, setTaskCenterTab] = useState<'proactive' | 'plans' | 'memories'>('proactive')
+  const [taskCenterTab, setTaskCenterTab] = useState<'proactive' | 'plans' | 'memories' | 'enterprise-memory'>('proactive')
   const [expandedPlanId, setExpandedPlanId] = useState('')
   const [expandedProactiveId, setExpandedProactiveId] = useState('')
   const [expandedMemoryId, setExpandedMemoryId] = useState(0)
@@ -204,22 +207,28 @@ export function ChatPanel({
   }, [])
 
   const refreshAnalysisJobs = useCallback(async () => {
-    const [jobsResponse, plansResponse, memoriesResponse, proactiveResponse] = await Promise.all([
+    const [jobsResponse, plansResponse, memoriesResponse, proactiveResponse, enterpriseMemoryResponse] = await Promise.all([
       fetch('/api/ai/analysis-jobs?limit=50'),
       fetch('/api/ai/agent-plans?limit=50'),
       fetch('/api/ai/task-memories?limit=50'),
       fetch('/api/ai/proactive-items?status=active&limit=50'),
+      fetch('/api/ai/enterprise-memories?includeHistory=true&limit=100'),
     ])
     const data = await jobsResponse.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
     const planData = await plansResponse.json().catch(() => null) as { plans?: AgentTaskPlan[] } | null
     const memoryData = await memoriesResponse.json().catch(() => null) as { memories?: AgentTaskMemory[] } | null
     const proactiveData = await proactiveResponse.json().catch(() => null) as { items?: AgentProactiveItem[]; summary?: AgentProactiveSummary } | null
+    const enterpriseMemoryData = await enterpriseMemoryResponse.json().catch(() => null) as { memories?: AgentEnterpriseMemory[]; summary?: AgentEnterpriseMemorySummary } | null
     if (jobsResponse.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
     if (plansResponse.ok && Array.isArray(planData?.plans)) setAgentPlans(planData.plans)
     if (memoriesResponse.ok && Array.isArray(memoryData?.memories)) setTaskMemories(memoryData.memories)
     if (proactiveResponse.ok && Array.isArray(proactiveData?.items)) {
       setProactiveItems(proactiveData.items)
       setProactiveSummary(proactiveData.summary || null)
+    }
+    if (enterpriseMemoryResponse.ok && Array.isArray(enterpriseMemoryData?.memories)) {
+      setEnterpriseMemories(enterpriseMemoryData.memories)
+      setEnterpriseMemorySummary(enterpriseMemoryData.summary || null)
     }
   }, [])
 
@@ -878,6 +887,34 @@ export function ChatPanel({
     }
   }
 
+  const createEnterpriseMemory = async (draft: EnterpriseMemoryDraft) => {
+    setTaskCenterBusy('enterprise-memory:create')
+    try {
+      const result = await api.createEnterpriseMemory(draft)
+      setEnterpriseMemories((current) => [result.memory, ...current])
+      setEnterpriseMemorySummary(result.summary)
+      onNotify('企业记忆已保存', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '企业记忆保存失败', 'error')
+    } finally { setTaskCenterBusy('') }
+  }
+
+  const updateEnterpriseMemory = async (memory: AgentEnterpriseMemory, payload: Record<string, unknown>) => {
+    setTaskCenterBusy(`enterprise-memory:${memory.id}`)
+    try {
+      const result = await api.updateEnterpriseMemory(memory.id, payload)
+      if (payload.action === 'correct') {
+        setEnterpriseMemories((current) => [result.memory, ...current.map((item) => item.id === memory.id ? { ...item, status: 'superseded' as const } : item)])
+      } else {
+        setEnterpriseMemories((current) => current.map((item) => item.id === memory.id ? result.memory : item))
+      }
+      setEnterpriseMemorySummary(result.summary)
+      onNotify(payload.action === 'correct' ? '企业记忆已纠正并保留旧版本' : payload.action === 'expire' ? '企业记忆已失效' : '企业记忆已删除', 'success')
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : '企业记忆更新失败', 'error')
+    } finally { setTaskCenterBusy('') }
+  }
+
   const reminderPrompt = (plan: AgentTaskPlan) => {
     const prefix = plan.taskId ? `任务 #${plan.taskId}` : '这个任务'
     if (plan.goal.includes('验收') || plan.goal.includes('100%')) return `请检查${prefix}当前资料，并生成完整验收草稿；执行前让我确认。`
@@ -1374,6 +1411,7 @@ export function ChatPanel({
             <button type="button" role="tab" aria-selected={taskCenterTab === 'proactive'} className={taskCenterTab === 'proactive' ? 'active' : ''} onClick={() => setTaskCenterTab('proactive')}>主动事项</button>
             <button type="button" role="tab" aria-selected={taskCenterTab === 'plans'} className={taskCenterTab === 'plans' ? 'active' : ''} onClick={() => setTaskCenterTab('plans')}>计划与提醒</button>
             <button type="button" role="tab" aria-selected={taskCenterTab === 'memories'} className={taskCenterTab === 'memories' ? 'active' : ''} onClick={() => setTaskCenterTab('memories')}>任务记忆</button>
+            <button type="button" role="tab" aria-selected={taskCenterTab === 'enterprise-memory'} className={taskCenterTab === 'enterprise-memory' ? 'active' : ''} onClick={() => setTaskCenterTab('enterprise-memory')}>企业记忆</button>
           </div>
           <div className="chat-history-list">
             {taskCenterTab === 'proactive' && proactiveSummary && (
@@ -1514,6 +1552,15 @@ export function ChatPanel({
               )
             })}
             {taskCenterTab === 'memories' && taskMemories.length === 0 && <EmptyState variant="compact" title="暂无任务记忆" description="Agent 在读取或更新任务后会自动建立。" />}
+            {taskCenterTab === 'enterprise-memory' && <EnterpriseMemoryPanel
+              memories={enterpriseMemories}
+              summary={enterpriseMemorySummary}
+              busy={taskCenterBusy !== ''}
+              onCreate={createEnterpriseMemory}
+              onCorrect={(memory, draft) => updateEnterpriseMemory(memory, { ...draft, action: 'correct', expectedUpdatedAt: memory.updatedAt })}
+              onExpire={(memory) => updateEnterpriseMemory(memory, { action: 'expire', reason: '任务中心人工设为失效', expectedUpdatedAt: memory.updatedAt })}
+              onDelete={(memory) => updateEnterpriseMemory(memory, { action: 'delete', reason: '任务中心人工删除', expectedUpdatedAt: memory.updatedAt })}
+            />}
           </div>
         </div>
       )}

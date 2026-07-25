@@ -144,6 +144,7 @@
 │   │   ├── AttachmentHoverThumbnail.tsx
 │   │   ├── DashboardTaskSidebar.tsx
 │   │   ├── EmptyState.tsx
+│   │   ├── EnterpriseMemoryPanel.tsx
 │   │   ├── MonthPicker.tsx
 │   │   ├── NewTaskModal.tsx
 │   │   ├── NewTaskDesignTypeSelector.tsx
@@ -240,6 +241,7 @@
 - Agent settlement, scheduling, upload handoff, reminder and secure model-setting regression: `scripts/test-agent-business-tools.mjs`, `scripts/check-agent-business-tools-architecture.mjs`, `agent-evals/run-isolated.mjs`
 - Agent attachment evidence, analysis recovery, metadata integrity and multimodal regression: `scripts/test-agent-multimodal-tools.mjs`, `scripts/check-agent-multimodal-architecture.mjs`, `agent-evals/run-isolated.mjs`
 - Agent proactive event rules, priority queue, deduplication and outcome regression: `src/agentProactive.ts`, `db/migrations/0031_agent_proactive_work.sql`, `scripts/test-agent-proactive-work.mjs`, `scripts/check-agent-proactive-architecture.mjs`
+- Enterprise organization/partner/project memory, source/version lifecycle and management UI: `db/migrations/0032_agent_enterprise_memory.sql`, `src/components/EnterpriseMemoryPanel.tsx`, `scripts/test-agent-enterprise-memory.mjs`, `scripts/check-agent-enterprise-memory-architecture.mjs`
 - Agent tenant scope, prompt-injection boundary and attack matrix: `src/agentScope.ts`, `src/agentSecurity.ts`, `docs/AGENT_TENANT_SECURITY.md`
 - Multi-step execution batches, dependency graph, failure stop and reverse compensation: `src/agentExecutionEngine.ts`, `db/migrations/0030_agent_execution_engine.sql`, `docs/AGENT_WORKFLOWS.md`
 - Shared Agent attachment results and settlement receipt preview: `src/components/AgentAttachmentResults.tsx`

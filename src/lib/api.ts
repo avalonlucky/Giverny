@@ -1,6 +1,6 @@
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
-import type { AgentFailureCase, AgentProactiveItem, AgentProactiveSummary, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
+import type { AgentEnterpriseMemory, AgentEnterpriseMemorySummary, AgentFailureCase, AgentProactiveItem, AgentProactiveSummary, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
 import type { ReceiptExcelOptions } from './receiptExcel'
 import { reportClientError } from './clientErrorReporter'
 
@@ -1393,6 +1393,12 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  getEnterpriseMemories: (includeHistory = true) =>
+    requestJson<{ memories: AgentEnterpriseMemory[]; summary: AgentEnterpriseMemorySummary }>(`/api/ai/enterprise-memories?includeHistory=${includeHistory}`),
+  createEnterpriseMemory: (payload: Record<string, unknown>) =>
+    requestJson<{ memory: AgentEnterpriseMemory; summary: AgentEnterpriseMemorySummary }>('/api/ai/enterprise-memories', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }),
+  updateEnterpriseMemory: (id: string, payload: Record<string, unknown>) =>
+    requestJson<{ memory: AgentEnterpriseMemory; summary: AgentEnterpriseMemorySummary }>(`/api/ai/enterprise-memories/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }),
   estimateTaskProgress: (payload: TaskProgressEstimatePayload) =>
     requestJson<TaskProgressAssessment>('/api/ai/progress-estimate', {
       method: 'POST',

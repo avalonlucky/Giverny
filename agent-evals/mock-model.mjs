@@ -110,6 +110,9 @@ function chooseTool(messages) {
     if (/快捷键|怎么用键盘|功能入口|网站怎么用|怎么设置|如何设置|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'product_help', tools: [{ name: 'search_product_help', args: { query: plannerQuestion }, reason: '用户在询产品用法' }], confidence: 0.99 }) })
     }
+    if (/(?:组织规则|合作伙伴|项目).*(?:记忆|长期偏好|历史决策|之前记住)/.test(plannerQuestion)) {
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'knowledge', tools: [{ name: 'query_enterprise_memory', args: { query: plannerQuestion, limit: 30 }, reason: '需要读取有来源和有效期的企业记忆' }], confidence: 0.99 }) })
+    }
     if (/画像|需求人.*(?:特征|偏好|分析)|合作.*(?:画像|特征|偏好|建议)/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'person_profile', tools: [{ name: 'get_requester_profile', args: { name: '陈义君' }, reason: '需要聚合需求人历史任务画像' }], confidence: 0.99 }) })
     }
@@ -205,6 +208,8 @@ function chooseTool(messages) {
   if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
   }
+  if (/(?:记住|保存为).*(?:组织规则|合作伙伴|项目|偏好|约定)/.test(text)) return toolCall('manage_enterprise_memory_preview', { action: 'create', scopeType: 'partner', scopeKey: '昂楷', memoryType: 'preference', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceType: 'conversation', sourceLabel: '用户在当前对话中确认', confidence: 'confirmed' })
+  if (/(?:组织规则|合作伙伴|项目).*(?:记忆|长期偏好|历史决策|之前记住)/.test(text)) return toolCall('query_enterprise_memory', { query: text, limit: 30 })
   if (/画像|需求人.*(?:特征|偏好|分析)|合作.*(?:画像|特征|偏好|建议)/.test(text)) {
     return toolCall('get_requester_profile', { name: /陈义君/.test(text) ? '陈义君' : '黄媚' })
   }

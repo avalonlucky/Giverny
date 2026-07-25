@@ -33,7 +33,7 @@ import {
   type AgentExecutionStepDraft,
 } from './agentExecutionEngine'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentEnterpriseMemory, AgentEnterpriseMemoryScope, AgentEnterpriseMemorySummary, AgentEnterpriseMemoryType, AgentFailureCase, AgentPlanStep, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
 
 export { AliceAgent, AgentAnalysisWorkflow, AgentWriteWorkflow }
@@ -2597,7 +2597,7 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
   ].join('\n')
 }
 
-type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'none'
+type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'query_enterprise_memory' | 'none'
 type ChatAgentPlanResponse = {
   intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
@@ -2617,6 +2617,9 @@ function chatPlanTrace(plan: ChatAgentPlanResponse | null, tools: ChatAgentToolN
   }
   if (plan?.intent === 'product_help' || tools.includes('search_product_help')) {
     return '制定计划：先核对官方产品资料，再依据文档组织回答。'
+  }
+  if (plan?.intent === 'knowledge' || tools.includes('query_enterprise_memory')) {
+    return '制定计划：先检索组织、合作伙伴和项目记忆，再核对来源、版本与有效期。'
   }
   if (plan?.intent === 'finance' || tools.includes('query_month_finance')) {
     return '制定计划：先读取真实工时与结算数据，再完成金额核算。'
@@ -2743,6 +2746,7 @@ async function planChatAgentTurn(
 - 用户问任务概览、最近做了什么、效率如何，可调用 search_tasks。
 - 用户问“哪些 / 所有 / 全部”任务的延期、等待、未完成、负责人或按日期的跨项目汇总时，必须调用 query_task_portfolio，不要用 search_tasks 的标题搜索代替。
 - 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
+- 用户询问组织规则、合作伙伴长期偏好、项目约定、历史决策或之前记住了什么时，必须调用 query_enterprise_memory；不能把模型推测当成已确认记忆。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
 - 只输出 JSON，不要回答正文。`
   return callSelectedModelJson<ChatAgentPlanResponse>(
@@ -2750,7 +2754,7 @@ async function planChatAgentTurn(
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"query_enterprise_memory"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -2822,6 +2826,15 @@ async function executeChatAgentTools(
       trace.push(titles
         ? `查找依据：已从${sources || '产品知识库'}找到 ${titles}${result.total > 3 ? ' 等相关资料' : ''}。`
         : '查找依据：官方产品知识库没有找到足够明确的记录。')
+      continue
+    }
+    if (name === 'query_enterprise_memory') {
+      const args = tool.args || {}
+      const result = await queryEnterpriseMemories(env, workspaceId, args)
+      results.push({ name, args, result })
+      trace.push(result.memories.length
+        ? `查找依据：已读取 ${result.memories.length} 条分层记忆，并核对来源、版本和有效期。`
+        : '查找依据：当前范围没有找到有效的企业记忆。')
       continue
     }
     if (name === 'get_requester_profile') {
@@ -2914,6 +2927,7 @@ async function composeChatAgentAnswer(
 - 如果工具结果里有 export_settlement_receipt，明确告诉用户 Excel 已生成，可在回答下方直接下载或打开线上预览；不要再输出冗长的重复明细表。
 - 如果工具结果里有 get_requester_profile，必须把 found/profile 当作需求人画像的唯一事实来源；found=true 时不得说没有记录，必须引用 profile.projects、profile.hours、acceptanceRate、onTimeRate、traits 和 advice。
 - 如果工具结果里有 query_task_portfolio，必须以 summary 和 tasks 为唯一跨任务事实来源；说明匹配数量，并对每项引用真实状态、负责人、activeWaiting 和 latestProgress，不得根据标题推测原因。
+- 如果工具结果里有 query_enterprise_memory，只能引用返回的有效记忆，并同时说明 scopeType/scopeKey、sourceLabel、version 和 expiresAt；不得把个人知识笔记或模型推测冒充已确认企业记忆。
 - 先给结论，再给分月/分项说明。
 - 如果用户问某任务为什么没交付或卡在哪里，必须优先读取 waitingRecords 中 active=true 的 note/reason，明确说出等待谁、等待什么、开始时间和已等待时长。
 - 如果工具返回 needsDisambiguation=true，必须请用户选择，不得自行假定。
@@ -4043,6 +4057,244 @@ async function agentGetTaskMemoryTool(env: Env, request: Request) {
   return memory ? agentOk({ tool: 'get_task_memory', memory }) : agentFail('任务不存在', 404)
 }
 
+type DbAgentEnterpriseMemory = {
+  id: string
+  workspace_id: string
+  scope_type: AgentEnterpriseMemoryScope
+  scope_key: string
+  memory_type: AgentEnterpriseMemoryType
+  title: string
+  content: string
+  source_type: AgentEnterpriseMemory['sourceType']
+  source_ref: string
+  source_label: string
+  source_excerpt: string
+  confidence: AgentEnterpriseMemory['confidence']
+  status: AgentEnterpriseMemory['status']
+  version: number
+  supersedes_id: string | null
+  valid_from: string
+  expires_at: string | null
+  created_by: string
+  updated_by: string
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+let agentEnterpriseMemoryTablesEnsured = false
+async function ensureAgentEnterpriseMemoryTables(env: Env) {
+  if (agentEnterpriseMemoryTablesEnsured) return
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agent_enterprise_memories (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', scope_type TEXT NOT NULL,
+    scope_key TEXT NOT NULL DEFAULT '', memory_type TEXT NOT NULL DEFAULT 'fact', title TEXT NOT NULL,
+    content TEXT NOT NULL, source_type TEXT NOT NULL DEFAULT 'manual', source_ref TEXT NOT NULL DEFAULT '',
+    source_label TEXT NOT NULL, source_excerpt TEXT NOT NULL DEFAULT '', confidence TEXT NOT NULL DEFAULT 'confirmed',
+    status TEXT NOT NULL DEFAULT 'active', version INTEGER NOT NULL DEFAULT 1, supersedes_id TEXT,
+    valid_from TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT, created_by TEXT NOT NULL DEFAULT 'system',
+    updated_by TEXT NOT NULL DEFAULT 'system', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TEXT
+  )`).run()
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agent_enterprise_memory_revisions (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', memory_id TEXT NOT NULL,
+    action TEXT NOT NULL, actor_id TEXT NOT NULL DEFAULT 'system', snapshot_json TEXT NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_enterprise_memory_scope ON agent_enterprise_memories(workspace_id, scope_type, scope_key, status, updated_at DESC)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_enterprise_memory_active ON agent_enterprise_memories(workspace_id, status, expires_at, updated_at DESC)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_enterprise_memory_revision ON agent_enterprise_memory_revisions(workspace_id, memory_id, created_at DESC)').run()
+  agentEnterpriseMemoryTablesEnsured = true
+}
+
+function toAgentEnterpriseMemory(row: DbAgentEnterpriseMemory): AgentEnterpriseMemory {
+  const naturallyExpired = row.status === 'active' && Boolean(row.expires_at && row.expires_at <= nowIso())
+  return {
+    id: row.id,
+    scopeType: row.scope_type,
+    scopeKey: row.scope_key,
+    memoryType: row.memory_type,
+    title: row.title,
+    content: row.content,
+    sourceType: row.source_type,
+    sourceRef: row.source_ref,
+    sourceLabel: row.source_label,
+    sourceExcerpt: row.source_excerpt,
+    confidence: row.confidence,
+    status: naturallyExpired ? 'expired' : row.status,
+    version: Number(row.version) || 1,
+    supersedesId: row.supersedes_id || undefined,
+    validFrom: row.valid_from,
+    expiresAt: row.expires_at || undefined,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function enterpriseMemoryScope(value: unknown): AgentEnterpriseMemoryScope {
+  const scope = agentString(value, 30)
+  if (scope === 'organization' || scope === 'partner' || scope === 'project') return scope
+  throw new Error('记忆范围必须是组织、合作伙伴或项目')
+}
+
+function enterpriseMemoryType(value: unknown): AgentEnterpriseMemoryType {
+  const type = agentString(value, 30)
+  if (type === 'fact' || type === 'preference' || type === 'rule' || type === 'decision') return type
+  return 'fact'
+}
+
+function enterpriseMemoryDate(value: unknown) {
+  const text = agentString(value, 50)
+  if (!text) return null
+  const time = Date.parse(text)
+  if (!Number.isFinite(time)) throw new Error('记忆有效期格式无效')
+  return new Date(time).toISOString()
+}
+
+function enterpriseMemoryDraft(body: Record<string, unknown>, existing?: DbAgentEnterpriseMemory | null) {
+  const scopeType = body.scopeType ? enterpriseMemoryScope(body.scopeType) : existing?.scope_type
+  if (!scopeType) throw new Error('缺少记忆范围')
+  const scopeKey = scopeType === 'organization' ? '' : agentString(body.scopeKey ?? existing?.scope_key, 160)
+  if (scopeType !== 'organization' && !scopeKey) throw new Error('合作伙伴或项目记忆必须填写范围名称')
+  const title = agentString(body.title ?? existing?.title, 160)
+  const content = agentString(body.content ?? existing?.content, 4000)
+  const sourceLabel = agentString(body.sourceLabel ?? existing?.source_label, 300)
+  if (!title || !content || !sourceLabel) throw new Error('标题、内容和来源说明不能为空')
+  const sourceType = ['manual', 'task', 'conversation', 'document', 'system'].includes(agentString(body.sourceType))
+    ? agentString(body.sourceType) as AgentEnterpriseMemory['sourceType']
+    : existing?.source_type || 'manual'
+  const confidence = agentString(body.confidence) === 'derived' ? 'derived' as const : existing?.confidence || 'confirmed' as const
+  return {
+    scopeType, scopeKey, title, content,
+    memoryType: body.memoryType ? enterpriseMemoryType(body.memoryType) : existing?.memory_type || 'fact',
+    sourceType,
+    sourceRef: agentString(body.sourceRef ?? existing?.source_ref, 500),
+    sourceLabel,
+    sourceExcerpt: agentString(body.sourceExcerpt ?? existing?.source_excerpt, 1000),
+    confidence,
+    expiresAt: body.expiresAt !== undefined ? enterpriseMemoryDate(body.expiresAt) : existing?.expires_at || null,
+  }
+}
+
+async function enterpriseMemorySummary(env: Env, workspaceId: string): Promise<AgentEnterpriseMemorySummary> {
+  const row = await env.DB.prepare(`SELECT
+    SUM(CASE WHEN status = 'active' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) AS active_count,
+    SUM(CASE WHEN status = 'active' AND scope_type = 'organization' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) AS organization_count,
+    SUM(CASE WHEN status = 'active' AND scope_type = 'partner' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) AS partner_count,
+    SUM(CASE WHEN status = 'active' AND scope_type = 'project' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END) AS project_count,
+    SUM(CASE WHEN status = 'active' AND expires_at > CURRENT_TIMESTAMP AND expires_at <= datetime('now', '+30 days') THEN 1 ELSE 0 END) AS expiring_count,
+    SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) AS corrected_count
+    FROM agent_enterprise_memories WHERE workspace_id = ? AND deleted_at IS NULL`).bind(workspaceId).first<Record<string, number | null>>()
+  return {
+    active: Number(row?.active_count || 0), organization: Number(row?.organization_count || 0),
+    partner: Number(row?.partner_count || 0), project: Number(row?.project_count || 0),
+    expiringSoon: Number(row?.expiring_count || 0), corrected: Number(row?.corrected_count || 0),
+  }
+}
+
+async function queryEnterpriseMemories(env: Env, workspaceId: string, body: Record<string, unknown>) {
+  await ensureAgentEnterpriseMemoryTables(env)
+  const includeHistory = agentBool(body.includeHistory)
+  const limit = Math.min(Math.max(agentNumber(body.limit, 30), 1), 100)
+  const filters = ['workspace_id = ?']
+  const values: unknown[] = [workspaceId]
+  if (!includeHistory) filters.push('deleted_at IS NULL', "status = 'active'", '(expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)')
+  if (body.scopeType) { filters.push('scope_type = ?'); values.push(enterpriseMemoryScope(body.scopeType)) }
+  if (agentString(body.scopeKey, 160)) { filters.push('scope_key LIKE ?'); values.push(`%${agentString(body.scopeKey, 160)}%`) }
+  if (body.memoryType) { filters.push('memory_type = ?'); values.push(enterpriseMemoryType(body.memoryType)) }
+  const query = agentString(body.query, 500)
+  if (query) {
+    const terms = query.split(/[\s，。；、]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8)
+    if (terms.length) {
+      filters.push(`(${terms.map(() => '(title LIKE ? OR content LIKE ? OR scope_key LIKE ? OR source_label LIKE ?)').join(' OR ')})`)
+      terms.forEach((term) => values.push(`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`))
+    }
+  }
+  const rows = await env.DB.prepare(`SELECT * FROM agent_enterprise_memories WHERE ${filters.join(' AND ')} ORDER BY CASE scope_type WHEN 'organization' THEN 0 WHEN 'partner' THEN 1 ELSE 2 END, updated_at DESC LIMIT ?`).bind(...values, limit).all<DbAgentEnterpriseMemory>()
+  return { memories: (rows.results || []).map(toAgentEnterpriseMemory), summary: await enterpriseMemorySummary(env, workspaceId) }
+}
+
+async function enterpriseMemoryById(env: Env, workspaceId: string, id: string) {
+  return env.DB.prepare('SELECT * FROM agent_enterprise_memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').bind(id, workspaceId).first<DbAgentEnterpriseMemory>()
+}
+
+async function mutateEnterpriseMemory(env: Env, workspaceId: string, actorId: string, body: Record<string, unknown>) {
+  await ensureAgentEnterpriseMemoryTables(env)
+  const action = agentString(body.action, 30)
+  if (!['create', 'correct', 'expire', 'delete'].includes(action)) throw new Error('不支持的记忆操作')
+  const memoryId = agentString(body.memoryId, 160)
+  const existing = memoryId ? await enterpriseMemoryById(env, workspaceId, memoryId) : null
+  if (action !== 'create' && !existing) throw new Error('记忆不存在或不属于当前工作区')
+  if (existing && ['superseded', 'deleted'].includes(existing.status)) throw new Error('该记忆版本已经不可修改')
+  const expectedUpdatedAt = agentString(body.expectedUpdatedAt, 50)
+  if (existing && expectedUpdatedAt && existing.updated_at !== expectedUpdatedAt) throw new Error('记忆在确认前已发生变化，请重新读取后再操作')
+  const reason = agentString(body.reason, 500)
+  let next: DbAgentEnterpriseMemory | null = null
+  if (action === 'create' || action === 'correct') {
+    const draft = enterpriseMemoryDraft(body, action === 'correct' ? existing : null)
+    const id = crypto.randomUUID()
+    const version = action === 'correct' ? Number(existing?.version || 1) + 1 : 1
+    const statements = []
+    if (action === 'correct' && existing) statements.push(env.DB.prepare("UPDATE agent_enterprise_memories SET status = 'superseded', updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?").bind(actorId, existing.id, workspaceId))
+    statements.push(env.DB.prepare(`INSERT INTO agent_enterprise_memories
+      (id, workspace_id, scope_type, scope_key, memory_type, title, content, source_type, source_ref, source_label, source_excerpt, confidence, status, version, supersedes_id, valid_from, expires_at, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`)
+      .bind(id, workspaceId, draft.scopeType, draft.scopeKey, draft.memoryType, draft.title, draft.content, draft.sourceType, draft.sourceRef, draft.sourceLabel, draft.sourceExcerpt, draft.confidence, version, existing?.id || null, draft.expiresAt, actorId, actorId))
+    statements.push(env.DB.prepare('INSERT INTO agent_enterprise_memory_revisions (id, workspace_id, memory_id, action, actor_id, snapshot_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(crypto.randomUUID(), workspaceId, id, action, actorId, JSON.stringify(draft), reason))
+    await env.DB.batch(statements)
+    next = await enterpriseMemoryById(env, workspaceId, id)
+  } else if (existing) {
+    const status = action === 'expire' ? 'expired' : 'deleted'
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE agent_enterprise_memories SET status = ?, expires_at = CASE WHEN ? = 'expired' THEN CURRENT_TIMESTAMP ELSE expires_at END, deleted_at = CASE WHEN ? = 'deleted' THEN CURRENT_TIMESTAMP ELSE deleted_at END, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?`).bind(status, status, status, actorId, existing.id, workspaceId),
+      env.DB.prepare('INSERT INTO agent_enterprise_memory_revisions (id, workspace_id, memory_id, action, actor_id, snapshot_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(crypto.randomUUID(), workspaceId, existing.id, action, actorId, JSON.stringify(toAgentEnterpriseMemory(existing)), reason),
+    ])
+    next = { ...existing, status, expires_at: status === 'expired' ? nowIso() : existing.expires_at, deleted_at: status === 'deleted' ? nowIso() : existing.deleted_at, updated_by: actorId, updated_at: nowIso() }
+  }
+  return next ? toAgentEnterpriseMemory(next) : null
+}
+
+async function agentQueryEnterpriseMemoryTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const result = await queryEnterpriseMemories(env, principal.workspaceId, await parseAgentToolBody(request))
+  return agentOk({ tool: 'query_enterprise_memory', ...result })
+}
+
+async function agentManageEnterpriseMemoryPreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const action = agentString(body.action, 30)
+    const existing = body.memoryId ? await enterpriseMemoryById(env, principal.workspaceId, agentString(body.memoryId, 160)) : null
+    if (action !== 'create' && !existing) return agentFail('记忆不存在或不属于当前工作区', 404)
+    const draft: Record<string, unknown> = action === 'create' || action === 'correct'
+      ? { ...enterpriseMemoryDraft(body, action === 'correct' ? existing : null), action, memoryId: existing?.id || '' }
+      : { action, memoryId: existing?.id || '', before: existing ? toAgentEnterpriseMemory(existing) : null, reason: agentString(body.reason, 500) }
+    if (existing) draft.expectedUpdatedAt = existing.updated_at
+    return agentPreview(env, request, 'manage_enterprise_memory_preview', draft, [], [action === 'correct' ? '旧版本会保留为已纠正记录。' : action === 'delete' ? '删除后默认查询不再返回该记忆。' : ''].filter(Boolean))
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '无法生成企业记忆预览', 400)
+  }
+}
+
+async function agentManageEnterpriseMemoryTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_enterprise_memory', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  try {
+    const memory = await mutateEnterpriseMemory(env, principal.workspaceId, principal.principalId, draft)
+    await audit(env, agentCapabilityRegistry.manage_enterprise_memory.policy.auditEvent, 'agent_enterprise_memory', memory?.id || agentString(draft.memoryId), { action: draft.action, scopeType: memory?.scopeType, scopeKey: memory?.scopeKey, version: memory?.version })
+    return agentOk({ tool: 'manage_enterprise_memory', mode: 'execute', memory, summary: await enterpriseMemorySummary(env, principal.workspaceId) })
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '企业记忆更新失败', 400)
+  }
+}
+
 async function agentProgressTaskPlanTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
@@ -4351,6 +4603,44 @@ async function updateAgentTaskMemory(env: Env, taskId: string, request: Request)
   }
   const updated = await env.DB.prepare('SELECT * FROM agent_task_memories WHERE task_id = ?').bind(taskId).first<DbAgentTaskMemory>()
   return updated ? ok({ memory: toAgentTaskMemory(updated) }) : fail('任务记忆不存在', 404)
+}
+
+async function listAgentEnterpriseMemories(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || !canSeeFullData(principal.role)) return fail('无权读取企业记忆', 403)
+  try {
+    return ok(await queryEnterpriseMemories(env, principalWorkspaceId(principal), Object.fromEntries(new URL(request.url).searchParams.entries())))
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '企业记忆查询失败', 400)
+  }
+}
+
+async function createAgentEnterpriseMemory(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || !['admin', 'collaborator'].includes(principal.role)) return fail('无权维护企业记忆', 403)
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>
+  try {
+    const workspaceId = principalWorkspaceId(principal)
+    const memory = await mutateEnterpriseMemory(env, workspaceId, principal.principalId, { ...body, action: 'create', sourceType: body.sourceType || 'manual' })
+    await audit(env, 'agent_enterprise_memory_direct_create', 'agent_enterprise_memory', memory?.id || '', { scopeType: memory?.scopeType, scopeKey: memory?.scopeKey })
+    return ok({ memory, summary: await enterpriseMemorySummary(env, workspaceId) })
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '企业记忆创建失败', 400)
+  }
+}
+
+async function updateAgentEnterpriseMemory(env: Env, id: string, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || !['admin', 'collaborator'].includes(principal.role)) return fail('无权维护企业记忆', 403)
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>
+  try {
+    const workspaceId = principalWorkspaceId(principal)
+    const memory = await mutateEnterpriseMemory(env, workspaceId, principal.principalId, { ...body, memoryId: id })
+    await audit(env, 'agent_enterprise_memory_direct_update', 'agent_enterprise_memory', memory?.id || id, { action: body.action, scopeType: memory?.scopeType, scopeKey: memory?.scopeKey })
+    return ok({ memory, summary: await enterpriseMemorySummary(env, workspaceId) })
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '企业记忆更新失败', 400)
+  }
 }
 
 const agentToolCorsHeaders = {
@@ -6096,7 +6386,7 @@ function isRequesterProfileQuestion(question: string) {
 }
 
 function normalizeChatToolName(value: unknown): ChatAgentToolName {
-  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_product_help'].includes(String(value))
+  return ['query_month_finance', 'export_settlement_receipt', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_product_help', 'query_enterprise_memory'].includes(String(value))
     ? value as ChatAgentToolName
     : 'none'
 }
@@ -7356,6 +7646,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/get-task-memory' && (request.method === 'POST' || request.method === 'GET')) {
     return agentGetTaskMemoryTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/enterprise-memory' && (request.method === 'POST' || request.method === 'GET')) return agentQueryEnterpriseMemoryTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-enterprise-memory-preview' && request.method === 'POST') return agentManageEnterpriseMemoryPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-enterprise-memory' && request.method === 'POST') return agentManageEnterpriseMemoryTool(env, request)
   if (url.pathname === '/api/agent/tools/progress-task-plan' && request.method === 'POST') {
     return agentProgressTaskPlanTool(env, request)
   }
@@ -16402,12 +16695,13 @@ async function getOrBuildTextStyleGuide(env: Env, context: TextLearningContext, 
 
 // ─── 个人知识库 ───────────────────────────────────────────────────────────────
 
-type KnowledgeNoteRow = { id: string; title: string; content: string; tags: string; created_at: string; source?: string }
+type KnowledgeNoteRow = { id: string; workspace_id?: string; title: string; content: string; tags: string; created_at: string; source?: string }
 
 async function ensureKnowledgeTable(env: Env) {
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS knowledge_notes (
       id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL DEFAULT 'default',
       title TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       tags TEXT DEFAULT '',
@@ -16418,13 +16712,15 @@ async function ensureKnowledgeTable(env: Env) {
   ).run()
   // Migration for existing tables
   await env.DB.prepare(`ALTER TABLE knowledge_notes ADD COLUMN source TEXT DEFAULT 'user'`).run().catch(() => {})
+  await env.DB.prepare(`ALTER TABLE knowledge_notes ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'`).run().catch(() => {})
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_knowledge_notes_workspace ON knowledge_notes(workspace_id, updated_at DESC)').run()
 }
 
-async function listKnowledgeNotes(env: Env): Promise<KnowledgeNoteRow[]> {
+async function listKnowledgeNotes(env: Env, workspaceId = DEFAULT_WORKSPACE_ID): Promise<KnowledgeNoteRow[]> {
   await ensureKnowledgeTable(env)
   const { results } = await env.DB.prepare(
-    'SELECT id, title, content, tags, source, created_at FROM knowledge_notes ORDER BY updated_at DESC',
-  ).all<KnowledgeNoteRow>()
+    'SELECT id, workspace_id, title, content, tags, source, created_at FROM knowledge_notes WHERE workspace_id = ? ORDER BY updated_at DESC',
+  ).bind(workspaceId).all<KnowledgeNoteRow>()
   return results ?? []
 }
 
@@ -16437,17 +16733,21 @@ async function upsertKnowledgeNote(env: Env, request: Request): Promise<Response
   const tags = String(body.tags ?? '').trim().slice(0, 200)
   const source = body.source === 'ai-tip' ? 'ai-tip' : 'user'
   if (!content) return fail('content 不能为空', 400)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const existing = await env.DB.prepare('SELECT workspace_id FROM knowledge_notes WHERE id = ?').bind(id).first<{ workspace_id?: string }>()
+  if (existing && (existing.workspace_id || DEFAULT_WORKSPACE_ID) !== workspaceId) return fail('知识笔记不属于当前工作区', 403)
   await env.DB.prepare(
-    `INSERT INTO knowledge_notes (id, title, content, tags, source, updated_at)
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `INSERT INTO knowledge_notes (id, workspace_id, title, content, tags, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content, tags = excluded.tags, source = excluded.source, updated_at = CURRENT_TIMESTAMP`,
-  ).bind(id, title, content, tags, source).run()
+  ).bind(id, workspaceId, title, content, tags, source).run()
   return ok({ id })
 }
 
-async function deleteKnowledgeNote(env: Env, id: string): Promise<Response> {
+async function deleteKnowledgeNote(env: Env, id: string, request: Request): Promise<Response> {
   await ensureKnowledgeTable(env)
-  await env.DB.prepare('DELETE FROM knowledge_notes WHERE id = ?').bind(id).run()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  await env.DB.prepare('DELETE FROM knowledge_notes WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).run()
   return ok({ deleted: true })
 }
 
@@ -16536,7 +16836,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     env.DB.prepare(
       'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT 50',
     ).bind(workspaceId).all<DbTask>(),
-    useKnowledge ? listKnowledgeNotes(env) : Promise.resolve([] as KnowledgeNoteRow[]),
+    useKnowledge ? listKnowledgeNotes(env, workspaceId) : Promise.resolve([] as KnowledgeNoteRow[]),
     needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
   ])
   const requestedMonths = extractRequestedMonths(lastMsg, month)
@@ -20112,11 +20412,14 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path.startsWith('/api/ai/task-memories/') && request.method === 'PATCH') {
     return updateAgentTaskMemory(env, path.split('/')[4] || '', request)
   }
+  if (path === '/api/ai/enterprise-memories' && request.method === 'GET') return listAgentEnterpriseMemories(env, request)
+  if (path === '/api/ai/enterprise-memories' && request.method === 'POST') return createAgentEnterpriseMemory(env, request)
+  if (path.startsWith('/api/ai/enterprise-memories/') && request.method === 'PATCH') return updateAgentEnterpriseMemory(env, decodeURIComponent(path.split('/')[4] || ''), request)
   if (path === '/api/ai/approval' && request.method === 'POST') {
     return reviseAgentApproval(env, request)
   }
   if (path === '/api/knowledge' && request.method === 'GET') {
-    const notes = await listKnowledgeNotes(env)
+    const notes = await listKnowledgeNotes(env, principalWorkspaceId(await resolveRequestPrincipal(env, request)))
     return ok(notes)
   }
   if (path === '/api/knowledge' && request.method === 'POST') {
@@ -20124,7 +20427,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path.startsWith('/api/knowledge/') && request.method === 'DELETE') {
     const id = path.slice('/api/knowledge/'.length)
-    return id ? deleteKnowledgeNote(env, id) : fail('缺少 id', 400)
+    return id ? deleteKnowledgeNote(env, id, request) : fail('缺少 id', 400)
   }
   if (path === '/api/search' && request.method === 'GET') {
     return searchTasks(env, url.searchParams.get('q') ?? '')
