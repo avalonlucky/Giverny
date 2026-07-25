@@ -1,17 +1,13 @@
 import { spawn } from 'node:child_process'
 import { createHmac } from 'node:crypto'
 import { rmSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { runWranglerD1 } from './run-wrangler-d1.mjs'
+import { createIsolatedRuntime } from './isolated-runtime.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const persistPath = await mkdtemp(join(tmpdir(), 'giverny-agent-eval-'))
-await writeFile(join(persistPath, '.metadata_never_index'), '')
 const children = []
+let isolatedRuntime
 const proxyEnvKeys = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
 const localProcessEnv = {
   ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !proxyEnvKeys.has(key))),
@@ -74,7 +70,7 @@ function stopChildren() {
 
 process.on('exit', () => {
   stopChildren()
-  rmSync(persistPath, { recursive: true, force: true })
+  if (isolatedRuntime?.persistPath) rmSync(isolatedRuntime.persistPath, { recursive: true, force: true })
 })
 
 function mcpStructured(result) {
@@ -340,6 +336,73 @@ async function runWorkflowReplayCheck() {
     throw new Error('Workflow operation replay was not idempotent')
   }
   process.stdout.write('Workflow idempotent replay check passed.\n')
+}
+
+async function runRuntimeRestartRecoveryCheck(cookie) {
+  const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const title = `运行时恢复评测 ${crypto.randomUUID()}`
+  const previewResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/create-task-preview', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      title,
+      requirement: '验证 workerd 重启后 D1 写入和幂等记录可恢复',
+      type: '隔离评测',
+      startDate: '2026-07-25T10:00',
+      estimatedDate: '2026-07-25T12:00',
+      settlementMonth: '2026-07',
+      estimatedHours: 2,
+    }),
+  })
+  const preview = await previewResponse.json().catch(() => ({}))
+  if (!previewResponse.ok || !preview.confirmationToken) throw new Error(`Runtime recovery preview failed: ${JSON.stringify(preview)}`)
+  const operationId = `runtime-recovery-${crypto.randomUUID()}`
+  const execute = async () => {
+    const response = await fetch('http://127.0.0.1:8798/api/agent/tools/workflow-write', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ operationId, endpoint: 'create-task', confirmationToken: preview.confirmationToken }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(`Runtime recovery write failed: ${JSON.stringify(data)}`)
+    return data
+  }
+  const first = await execute()
+  if (first.replayed !== false || !first.task?.id) throw new Error(`Runtime recovery initial task write failed: ${JSON.stringify(first)}`)
+
+  const form = new FormData()
+  form.set('taskId', String(first.task.id))
+  form.set('scope', 'progress')
+  form.set('type', 'TXT')
+  form.set('size', '24 B')
+  form.set('visible', 'true')
+  form.set('analyze', 'false')
+  form.set('file', new Blob(['runtime restart recovery'], { type: 'text/plain' }), 'runtime-recovery.txt')
+  const uploadResponse = await fetch('http://127.0.0.1:8798/api/files', {
+    method: 'POST',
+    headers: { cookie, 'x-giverny-agent-eval': '1' },
+    body: form,
+  })
+  const uploaded = await uploadResponse.json().catch(() => ({}))
+  if (!uploadResponse.ok || !uploaded.sourceUrl) throw new Error(`Runtime recovery R2 write failed: ${JSON.stringify(uploaded)}`)
+
+  await isolatedRuntime.restart()
+  await waitForHealth('http://127.0.0.1:8798/api/health')
+
+  const replay = await execute()
+  if (replay.replayed !== true || replay.task?.id !== first.task.id) {
+    throw new Error(`Runtime restart lost the idempotent operation: ${JSON.stringify({ first, replay })}`)
+  }
+  const stateResponse = await fetch('http://127.0.0.1:8798/api/state', { headers: { cookie } })
+  const state = await stateResponse.json().catch(() => ({}))
+  if (!stateResponse.ok || !state.tasks?.some((task) => task.id === first.task.id && task.title === title)) {
+    throw new Error(`Runtime restart lost the D1 task: ${JSON.stringify(state)}`)
+  }
+  const sourceResponse = await fetch(`http://127.0.0.1:8798${uploaded.sourceUrl}`, { headers: { cookie } })
+  if (!sourceResponse.ok || await sourceResponse.text() !== 'runtime restart recovery') {
+    throw new Error(`Runtime restart lost the R2 attachment: ${sourceResponse.status}`)
+  }
+  process.stdout.write('Isolated workerd restart preserved D1, R2, session, and idempotent operation state.\n')
 }
 
 async function runAgentLifecycleWriteCheck() {
@@ -1109,6 +1172,15 @@ async function runLocalCliBridgeCheck(cookie) {
     }
   }
 
+  const expectedProfileResponse = await fetch(`${base}/api/agent/tools/requester-profile`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '陈义君' }),
+  })
+  const expectedProfile = await expectedProfileResponse.json().catch(() => ({}))
+  if (!expectedProfileResponse.ok || !expectedProfile.profile) {
+    throw new Error(`Requester profile baseline query failed: ${JSON.stringify(expectedProfile)}`)
+  }
   const profileResponse = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', cookie, 'x-giverny-agent-eval': '1' },
@@ -1120,12 +1192,14 @@ async function runLocalCliBridgeCheck(cookie) {
     }),
   })
   const profileText = await profileResponse.text()
+  const profileResult = parseSseEvents(profileText).find((event) => event.type === 'result')
   assertProgressiveTraceBeforeResult(profileText, 'Requester profile')
   if (!profileResponse.ok
     || !profileText.includes('get_requester_profile')
     || !profileText.includes('陈义君')
-    || !profileText.includes('4 个项目')
-    || !profileText.includes('13.6')
+    || !profileText.includes(`${expectedProfile.profile.projects} 个项目`)
+    || !profileText.includes(String(expectedProfile.profile.hours))
+    || profileResult?.factVerification?.passed !== true
     || profileText.includes('没有任何关于')
     || profileText.includes('没有在当前工作区找到')) {
     throw new Error(`Requester profile question was not grounded in the profile tool: ${profileText}`)
@@ -1997,10 +2071,8 @@ async function runHourEstimateLearningCheck(cookie) {
 }
 
 try {
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root, env: localProcessEnv })
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root, env: localProcessEnv })
   start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: '8898' })
-  start('npx', ['wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--port', '8798'])
+  isolatedRuntime = await createIsolatedRuntime({ appPort: 8798, modelPort: 8898, prefix: 'giverny-agent-eval-' })
   await waitForHealth('http://127.0.0.1:8798/api/health')
 
   const anonymousOperations = await fetch('http://127.0.0.1:8798/api/ai/operations-center?days=7')
@@ -2047,6 +2119,8 @@ try {
     },
   })
 
+  await runRuntimeRestartRecoveryCheck(cookie)
+
   const toolErrors = children
     .flatMap((entry) => entry.output().split('\n'))
     .filter((line) => line.includes('/api/agent/tools/') && !line.includes('200 OK'))
@@ -2067,5 +2141,5 @@ try {
   process.stdout.write('Isolated D1 and telemetry exclusion checks passed.\n')
 } finally {
   stopChildren()
-  await rm(persistPath, { recursive: true, force: true })
+  await isolatedRuntime?.dispose()
 }

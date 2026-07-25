@@ -87,6 +87,13 @@ function collectFacts(value: unknown, key: string, facts: AgentFactSnapshot, sou
     return
   }
   if (typeof value !== 'string') return
+  if (sourceTool === 'get_requester_profile' && /^profile\.(?:traits|advice)\[\d+\]$/.test(path)) {
+    const embeddedHours = [...value.matchAll(/(-?\d+(?:\.\d+)?)\s*(?:小时|h\b)/gi)].map((match) => number(match[1]))
+    embeddedHours.forEach((embedded) => {
+      facts.numbers.hours.push(embedded)
+      facts.claims.push({ kind: 'hours', value: embedded, sourceTool, path })
+    })
+  }
   if (/(?:date|month|startAt|endAt)$/i.test(key)) {
     const normalized = normalizeDate(value)
     if (normalized) {
@@ -324,24 +331,28 @@ function chineseClaims(answer: string, pattern: RegExp) {
 
 export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapshot): AgentFactVerification {
   const issues: string[] = []
+  const answerOutsideCanonicalSections = snapshot.sections.reduce(
+    (remaining, section) => remaining.replace(section.markdown, ''),
+    answer,
+  )
   const checks: Array<[NumericFactKind, number[]]> = [
-    ['hours', [...numericClaims(answer, /(-?\d+(?:\.\d+)?)\s*(?:个)?(?:小时|h\b)/gi), ...chineseClaims(answer, /([零〇一二两三四五六七八九十百千万点]+)\s*(?:个)?小时/g)]],
-    ['money', [...numericClaims(answer, /(?:[¥￥]\s*(-?\d[\d,]*(?:\.\d+)?)|(-?\d[\d,]*(?:\.\d+)?)\s*元)/g), ...chineseClaims(answer, /([零〇一二两三四五六七八九十百千万点]+)\s*元/g)]],
-    ['percent', [...numericClaims(answer, /(-?\d+(?:\.\d+)?)\s*%/g), ...chineseClaims(answer, /([零〇一二两三四五六七八九十百千万点]+)\s*%/g)]],
-    ['taskId', numericClaims(answer, /(?:任务\s*#\s*(\d+)|任务(?:ID|编号)[：:\s#]*(\d+))/gi)],
-    ['count', [...numericClaims(answer, /(\d+(?:\.\d+)?)\s*(?:个|项|份|张|条)(?:任务|项目|附件|文件)?/g), ...chineseClaims(answer, /([零〇一二两三四五六七八九十百千万点]+)\s*(?:个|项|份|张|条)(?:任务|项目|附件|文件)?/g)]],
+    ['hours', [...numericClaims(answerOutsideCanonicalSections, /(-?\d+(?:\.\d+)?)\s*(?:个)?(?:小时|h\b)/gi), ...chineseClaims(answerOutsideCanonicalSections, /([零〇一二两三四五六七八九十百千万点]+)\s*(?:个)?小时/g)]],
+    ['money', [...numericClaims(answerOutsideCanonicalSections, /(?:[¥￥]\s*(-?\d[\d,]*(?:\.\d+)?)|(-?\d[\d,]*(?:\.\d+)?)\s*元)/g), ...chineseClaims(answerOutsideCanonicalSections, /([零〇一二两三四五六七八九十百千万点]+)\s*元/g)]],
+    ['percent', [...numericClaims(answerOutsideCanonicalSections, /(-?\d+(?:\.\d+)?)\s*%/g), ...chineseClaims(answerOutsideCanonicalSections, /([零〇一二两三四五六七八九十百千万点]+)\s*%/g)]],
+    ['taskId', numericClaims(answerOutsideCanonicalSections, /(?:任务\s*#\s*(\d+)|任务(?:ID|编号)[：:\s#]*(\d+))/gi)],
+    ['count', [...numericClaims(answerOutsideCanonicalSections, /(\d+(?:\.\d+)?)\s*(?:个|项|份|张|条)(?:任务|项目|附件|文件)?/g), ...chineseClaims(answerOutsideCanonicalSections, /([零〇一二两三四五六七八九十百千万点]+)\s*(?:个|项|份|张|条)(?:任务|项目|附件|文件)?/g)]],
   ]
   checks.forEach(([kind, claims]) => {
     claims.forEach((claim) => {
       if (!containsNumber(snapshot.numbers[kind], claim)) issues.push(`${kind}=${claim} 缺少工具证据`)
     })
   })
-  const dates = [...answer.matchAll(/20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?/g)].map((match) => normalizeDate(match[0])).filter(Boolean)
+  const dates = [...answerOutsideCanonicalSections.matchAll(/20\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?/g)].map((match) => normalizeDate(match[0])).filter(Boolean)
   dates.forEach((date) => {
     if (!snapshot.dates.includes(date) && !snapshot.dates.some((allowed) => allowed.startsWith(date) || date.startsWith(allowed))) issues.push(`date=${date} 缺少工具证据`)
   })
   taskStatuses.forEach((status) => {
-    if (answer.includes(status) && !snapshot.statuses.includes(status)) issues.push(`status=${status} 缺少工具证据`)
+    if (answerOutsideCanonicalSections.includes(status) && !snapshot.statuses.includes(status)) issues.push(`status=${status} 缺少工具证据`)
   })
   const coveredSources = snapshot.sections.filter((section) => answer.includes(section.markdown)).map((section) => section.sourceTool)
   const missingSources = snapshot.sections.filter((section) => !coveredSources.includes(section.sourceTool)).map((section) => section.sourceTool)

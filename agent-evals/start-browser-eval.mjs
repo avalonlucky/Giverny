@@ -1,18 +1,14 @@
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { runWranglerD1 } from './run-wrangler-d1.mjs'
+import { createIsolatedRuntime } from './isolated-runtime.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const persistPath = await mkdtemp(join(tmpdir(), 'giverny-browser-eval-'))
-await writeFile(join(persistPath, '.metadata_never_index'), '')
 const appPort = Number(process.env.BROWSER_EVAL_APP_PORT || 8799)
 const modelPort = Number(process.env.BROWSER_EVAL_MODEL_PORT || 8899)
 const children = []
+let isolatedRuntime
 let stopping = false
 const proxyEnvKeys = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
 const localProcessEnv = {
@@ -44,7 +40,7 @@ async function waitForHealth(url, timeoutMs = 30_000) {
       const response = await fetch(url)
       if (response.ok) return
     } catch {
-      // Wrangler is still starting.
+      // The isolated workerd runtime is still starting.
     }
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
@@ -72,7 +68,7 @@ async function stop() {
       await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1000))])
     }
   }
-  await rm(persistPath, { recursive: true, force: true })
+  await isolatedRuntime?.dispose()
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -82,27 +78,16 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 process.on('exit', () => {
-  for (const child of children) {
-    if (child.pid && !child.killed) child.kill('SIGTERM')
-  }
-  rmSync(persistPath, { recursive: true, force: true })
+  for (const child of children) if (child.pid && !child.killed) child.kill('SIGTERM')
+  if (isolatedRuntime?.persistPath) rmSync(isolatedRuntime.persistPath, { recursive: true, force: true })
 })
 
 try {
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'db/schema.sql'], { cwd: root, env: localProcessEnv })
-  await runWranglerD1('npx', ['wrangler', 'd1', 'execute', 'giverny-agent-eval', '--local', '--config', 'agent-evals/wrangler.eval.toml', '--persist-to', persistPath, '--file', 'agent-evals/fixture.sql'], { cwd: root, env: localProcessEnv })
   const model = start('node', ['agent-evals/mock-model.mjs'], { MOCK_MODEL_PORT: String(modelPort) })
-  const worker = start('npx', [
-    'wrangler', 'dev', '--local', '--config', 'agent-evals/wrangler.eval.toml',
-    '--persist-to', persistPath, '--port', String(appPort),
-    '--var', `DEEPSEEK_BASE_URL:http://127.0.0.1:${modelPort}`,
-    '--var', `DOUBAO_BASE_URL:http://127.0.0.1:${modelPort}`,
-    '--var', `GIVERNY_API_BASE_URL:http://127.0.0.1:${appPort}`,
-  ])
+  isolatedRuntime = await createIsolatedRuntime({ appPort, modelPort, prefix: 'giverny-browser-eval-' })
   await Promise.race([
     waitForHealth(`http://127.0.0.1:${appPort}/api/health`),
     model.failed,
-    worker.failed,
   ])
   process.stdout.write(`Browser eval server ready at http://127.0.0.1:${appPort}\n`)
   await new Promise(() => {})

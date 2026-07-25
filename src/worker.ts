@@ -142,11 +142,20 @@ type WorkerExecutionContext = {
 type WorkflowInstanceHandle = {
   id: string
   terminate: () => Promise<void>
+  [Symbol.dispose]?: () => void
+  [Symbol.asyncDispose]?: () => Promise<void>
 }
 
 type WorkflowBinding<Params> = {
   create: (options: { id: string; params: Params }) => Promise<WorkflowInstanceHandle>
   get: (id: string) => Promise<WorkflowInstanceHandle>
+}
+
+async function disposeWorkflowInstance(instance: WorkflowInstanceHandle | null | undefined) {
+  if (!instance) return
+  const asyncDispose = instance[Symbol.asyncDispose]
+  if (asyncDispose) await asyncDispose.call(instance)
+  else instance[Symbol.dispose]?.call(instance)
 }
 
 const roundCents = (value: number) => Math.round(value * 100) / 100
@@ -5768,7 +5777,8 @@ async function agentAnalysisJobById(env: Env, jobId: string) {
 
 async function startAgentAnalysisWorkflow(env: Env, jobId: string, workflowId: string, principal: AgentPrincipalContext) {
   if (!env.AGENT_ANALYSIS_WORKFLOW) throw new Error('AGENT_ANALYSIS_WORKFLOW 未配置')
-  await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId, principal } })
+  const instance = await env.AGENT_ANALYSIS_WORKFLOW.create({ id: workflowId, params: { jobId, principal } })
+  await disposeWorkflowInstance(instance)
 }
 
 const AGENT_ANALYSIS_TITLES: Record<AgentBackgroundTask['type'], (month: string) => string> = {
@@ -6170,7 +6180,11 @@ async function cancelAgentAnalysisJob(env: Env, jobId: string, request: Request)
   if (row.status === 'cancelled') return ok({ job: toAgentBackgroundTask(row) })
   if (env.AGENT_ANALYSIS_WORKFLOW) {
     const instance = await env.AGENT_ANALYSIS_WORKFLOW.get(row.workflow_id).catch(() => null)
-    await instance?.terminate().catch(() => undefined)
+    try {
+      await instance?.terminate().catch(() => undefined)
+    } finally {
+      await disposeWorkflowInstance(instance)
+    }
   }
   await env.DB.prepare(
     `UPDATE agent_analysis_jobs
@@ -16060,12 +16074,16 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           passed: verified.passed,
           checkedClaims: verified.checkedClaims,
           sourceTools: verified.coveredSources,
-          fallbackUsed: false,
+          fallbackUsed: !verified.passed,
         }
         trace.push(verified.passed
           ? `结构化事实协议生成答案：核对 ${verified.checkedClaims} 条声明，覆盖 ${verified.coveredSources.join('、')}。`
           : `结构化事实协议校验失败：${verified.issues.slice(0, 3).join('；')}。`)
         orchestratedTurn = completeAgentTurn(orchestratedTurn, finalContent)
+        if (!verified.passed) {
+          finalContent = '工具数据已返回，但最终答案未通过结构化事实校验。系统已停止输出未验证内容，请重试。'
+          orchestratedTurn = { ...orchestratedTurn, phase: 'failed', answer: finalContent }
+        }
       } else {
         finalContent = '工具返回的数据尚未接入结构化事实协议，我已停止采用模型初稿。'
         legacyFactVerification = { passed: false, checkedClaims: 0, sourceTools: [], fallbackUsed: true }

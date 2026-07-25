@@ -95,15 +95,16 @@ if (!headers.cookie && process.env.GIVERNY_AGENT_EVAL_AUTH_EMAIL && process.env.
 const results = []
 function evaluateResponse(testCase, data) {
   const trace = Array.isArray(data.trace) ? data.trace.join('\n') : ''
+  const plan = Array.isArray(data.agentTurn?.plan) ? data.agentTurn.plan : []
+  const plannedTools = new Set(plan.map((item) => String(item.name || '')))
   const failures = []
   for (const tool of testCase.expect.tools || []) {
-    if (!trace.includes(tool)) failures.push(`未调用 ${tool}`)
+    if (!plannedTools.has(tool) && !trace.includes(tool)) failures.push(`未调用 ${tool}`)
   }
   for (const tool of testCase.expect.forbiddenTools || []) {
-    if (trace.includes(tool)) failures.push(`误调用 ${tool}`)
+    if (plannedTools.has(tool) || trace.includes(tool)) failures.push(`误调用 ${tool}`)
   }
   if (testCase.expect.taskId) {
-    const plan = Array.isArray(data.agentTurn?.plan) ? data.agentTurn.plan : []
     const expectedTools = testCase.expect.tools || []
     const scopedCalls = plan.filter((item) => expectedTools.length === 0 || expectedTools.includes(item.name))
     if (!scopedCalls.some((item) => Number(item.taskId) === Number(testCase.expect.taskId))) {

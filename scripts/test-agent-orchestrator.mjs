@@ -36,6 +36,7 @@ assert.equal(inferAgentIntent('打开封套任务的验收附件'), 'attachment'
 assert.equal(inferAgentIntent('任务#1现在卡在哪里'), 'task_data')
 assert.equal(inferAgentIntent('把这个任务的进度修改成80%'), 'write')
 assert.equal(inferAgentIntent('帮我润色一句话'), 'general')
+assert.deepEqual(inferAgentIntents('显示金额和隐藏金额的快捷键是什么？'), ['product_help'])
 assert.deepEqual(inferAgentIntents('查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单'), ['product_help', 'finance', 'task_data'])
 assert.deepEqual(inferAgentIntents('查看封套任务的验收附件，并分析陈义君的合作偏好'), ['attachment', 'person_profile'])
 assert.deepEqual(inferAgentIntents('把任务#1进度改成80%，再告诉我它现在的状态'), ['write', 'task_data'])
@@ -59,12 +60,38 @@ assert.ok(missingProduct.verification.requiredTools.includes('search_product_hel
 
 const missingPortfolio = completeAgentTurn(createAgentTurn({ principal, question: '所有延期任务列出来', intent: 'task_data' }), '暂无')
 assert.ok(missingPortfolio.verification.requiredTools.includes('query_task_portfolio'))
+for (const question of [
+  '本月逾期任务列给我',
+  '本月待验收的任务有哪些',
+  '2026-07已经验收了多少个任务',
+  '从6月1日到7月24日，还有多少个项目没闭环？',
+  '黄娟的任务中哪些还在进行？',
+  '本月已验收、未完成、逾期和等待中各有多少项？',
+]) {
+  const turn = completeAgentTurn(createAgentTurn({ principal, question, intent: 'task_data' }), '暂无')
+  assert.ok(turn.verification.requiredTools.includes('query_task_portfolio'), question)
+}
+assert.ok(!inferAgentIntents('本月已验收、未完成、逾期和等待中各有多少项？').includes('write'))
 
 const missingAttachment = completeAgentTurn(createAgentTurn({ principal, question: '打开验收附件', intent: 'attachment' }), '没有')
 assert.ok(missingAttachment.verification.requiredTools.includes('search_attachments'))
 
 const missingTask = completeAgentTurn(createAgentTurn({ principal, question: '任务#1现在的进展', intent: 'task_data' }), '猜测已完成')
 assert.ok(missingTask.verification.requiredTools.includes('get_task_detail'))
+const explicitTaskWithBroadSearch = {
+  ...createAgentTurn({ principal, question: '查一下任务#1的详情', intent: 'task_data' }),
+  plan: [call('search_tasks')],
+  evidence: [evidence('search_tasks')],
+  answer: '已查询',
+}
+assert.ok(verifyAgentAnswer(explicitTaskWithBroadSearch).requiredTools.includes('get_task_detail'))
+const referencedTaskWithBroadSearch = {
+  ...createAgentTurn({ principal, question: '这个任务现在在等什么？', intent: 'task_data' }),
+  plan: [call('search_tasks')],
+  evidence: [evidence('search_tasks')],
+  answer: '已查询',
+}
+assert.ok(verifyAgentAnswer(referencedTaskWithBroadSearch).requiredTools.includes('get_task_detail'))
 
 const compoundTurn = completeAgentTurn(createAgentTurn({
   principal,
@@ -109,7 +136,7 @@ const uncertainFinance = {
 assert.ok(verifyAgentAnswer(uncertainFinance).requiredTools.includes('query_month_finance'))
 
 const repairedTask = {
-  ...createAgentTurn({ principal, question: '本月任务有哪些', intent: 'task_data' }),
+  ...createAgentTurn({ principal, question: '搜索官网任务', intent: 'task_data' }),
   plan: [call('search_tasks', 'failed', 1), call('search_tasks', 'success', 2)],
   evidence: [evidence('search_tasks')],
   answer: '已核对',
@@ -134,4 +161,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 40 assertions passed')
+console.log('Agent orchestrator deterministic tests: 50 assertions passed')

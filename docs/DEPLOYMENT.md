@@ -68,3 +68,5 @@ D1 migration 同样不使用 Wrangler。`scripts/apply-cloudflare-d1-sql.mjs` �
 正式站已经进入试运营，不要在正式 D1/R2 上做清表测试或无意义测试上传。涉及数据结构、结算口径、文件删除、权限等高风险改动时，先在本地或临时隔离环境验证清楚，再部署正式站。
 
 Agent 评测统一使用 `agent-evals/run-isolated.mjs` 创建的临时本地 D1。不要把固定评测任务写入正式库；在线专项评测必须携带 `x-giverny-agent-eval: 1`，避免污染真实运行质量统计。
+
+本机和 CI 的 Agent/浏览器评测由 `agent-evals/isolated-runtime.mjs` 直接调用 Cloudflare Miniflare API，不读取 Wrangler 配置。每次评测创建独立的 workerd、D1、R2、SQLite Durable Object 和 Workflow 存储；存储目录带 `.metadata_never_index`，并在正常、失败、信号中断与进程退出时清理。

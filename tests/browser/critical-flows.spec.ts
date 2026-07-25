@@ -188,7 +188,8 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
   const input = page.getByPlaceholder('向爱丽丝提问…')
   await input.fill('请帮我导出 6 月 1 号到 6 月 10 号的结算回单')
   await input.press('Enter')
-  await expect(page.getByText(/已生成.*2026\/06\/01 至 2026\/06\/10.*结算回单/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('已核验结算回单').first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/日期范围：2026-06-01 至 2026-06-10/).first()).toBeVisible()
   await expect(page.getByRole('link', { name: '下载' })).toBeVisible()
   const receiptPreviewButton = page.getByRole('button', { name: /预览 结算回单_/ })
   expect(await receiptPreviewButton.count()).toBe(1)
@@ -1119,7 +1120,7 @@ test('AI 运行中心汇总路由、后台任务和工作区上下文', async ({
   expect(payload.learning.totalSamples).toBeGreaterThan(0)
 
   await page.locator('.ai-operations-panel').getByRole('button', { name: '刷新' }).click()
-  await expect(page.getByRole('heading', { name: 'AI 运行中心' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '运行与质量中心' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Agent 执行审计' })).toBeVisible()
   await expect(page.getByText('已验真', { exact: true }).first()).toBeVisible()
   const workspaceSelect = page.getByLabel('切换工作区')

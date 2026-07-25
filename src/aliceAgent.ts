@@ -1280,8 +1280,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           passed: factVerification.passed,
           checkedClaims: factVerification.checkedClaims,
           sourceTools: factVerification.coveredSources,
-          fallbackUsed: false,
+          fallbackUsed: !factVerification.passed,
         }
+        if (!factVerification.passed) answer = '工具数据已返回，但最终答案未通过结构化事实校验。我已停止输出未验证内容，请重试。'
       } else {
         answer = '工具返回的数据尚未接入结构化事实协议，我已停止采用模型初稿。'
         factVerificationSummary = { passed: false, checkedClaims: 0, sourceTools: [], fallbackUsed: true }

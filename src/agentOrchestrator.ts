@@ -101,12 +101,14 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   const writeObject = /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/
   const onlyReadsAcceptanceAttachment = readsAttachment
     && !/(?:新建|创建|记录|修改|更新|改成|追加|标记|删除).*(?:附件|文件)|验收(?:任务|了|通过|完成)/.test(value)
-  const writesBusinessData = !asksWorkflowHelp && !onlyReadsAcceptanceAttachment && (writeAction.test(value) && writeObject.test(value))
+  const readsAcceptanceState = /(?:已|待|未)验收|验收(?:了多少|情况|状态)|多少.*验收/.test(value)
+  const writesBusinessData = !asksWorkflowHelp && !onlyReadsAcceptanceAttachment && !readsAcceptanceState && (writeAction.test(value) && writeObject.test(value))
     && (/(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除).*(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/.test(value)
       || /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期).*(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/.test(value))
   if (writesBusinessData) add('write')
   if (/(?:用户|需求人|合作|客户).*(?:画像|特征|偏好|报价|排期建议)|(?:画像).*(?:用户|需求人|合作|客户)/.test(value)) add('person_profile')
-  if (/(?:金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时)/.test(value)) add('finance')
+  const asksMoneyDisplayHelp = /(?:显示|隐藏|展示|查看).*(?:金额).*(?:快捷键|怎么|如何|是什么)|(?:金额).*(?:显示|隐藏).*(?:快捷键|怎么|如何|是什么)/.test(value)
+  if (!asksMoneyDisplayHelp && /(?:金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时)/.test(value)) add('finance')
   const productSubject = /(?:Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事)/i.test(value)
   if ((productSubject && /(?:怎么|如何|在哪|入口|设置|开通|为什么|原因|是什么)/.test(value))
     || /(?:这个网站)?最近更新了?哪些内容/.test(value)) add('product_help')
@@ -143,7 +145,19 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('get_requester_profile')
     issues.push('需求人画像没有读取当前工作区的历史任务证据。')
   }
-  const asksPortfolio = /(?:哪些|所有|全部|多个|多项|谁).*(?:任务|项目|工作|等待|延期|逾期)|(?:任务|项目|工作).*(?:汇总|概况|清单|排查)/.test(turn.question)
+  const hasExplicitTaskId = /(?:任务|项目)\s*#\s*\d+/.test(turn.question)
+  const asksExplicitTaskDetail = hasExplicitTaskId
+    && /(?:查|看|打开|读取|详情|进展|状态|等待|卡在|未解决)/.test(turn.question)
+  const asksReferencedTaskDetail = hasIntent('task_data')
+    && /(?:这个任务|那个任务|这个项目|那个项目|刚才那个|上述任务|当前任务).*(?:详情|进展|状态|等|卡|为什么|现在)/.test(turn.question)
+  const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
+  const hasPortfolioScope = /(?:列|哪些|所有|全部|多个|多项|多少|各有|谁|汇总|概况|清单|排查)|(?:从|\d{1,2}月\d{1,2}日).*(?:到|至)/.test(turn.question)
+  const stateKinds = ['已验收', '未完成', '逾期', '延期', '等待中', '待验收'].filter((value) => turn.question.includes(value)).length
+  const asksPortfolio = !hasExplicitTaskId && hasPortfolioSubject && (hasPortfolioScope || stateKinds > 1)
+  if ((asksExplicitTaskDetail || asksReferencedTaskDetail) && !hasDeterministicTool('get_task_detail')) {
+    requiredTools.push('get_task_detail')
+    issues.push('显式任务 ID 的详情问题没有读取对应任务详情。')
+  }
   if (asksPortfolio && !hasDeterministicTool('query_task_portfolio')) {
     requiredTools.push('query_task_portfolio')
     issues.push('跨任务结论没有经过工作概况聚合工具。')

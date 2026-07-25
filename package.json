@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.32.89",
+  "version": "0.32.90",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "npm run product-knowledge:generate && npm run baml:generate && tsc -b && vite build && npm run architecture:dist:guard",
     "ui:guard": "node scripts/check-ui-reuse.mjs",
-    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs && node scripts/check-routing-architecture.mjs && node scripts/check-heavy-dependency-architecture.mjs && node scripts/check-observability-architecture.mjs && node scripts/check-empty-state-architecture.mjs && node scripts/check-agent-portfolio-architecture.mjs && node scripts/check-agent-reference-architecture.mjs && node scripts/check-agent-replan-architecture.mjs && node scripts/check-agent-fact-architecture.mjs && node scripts/check-deployment-architecture.mjs",
+    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs && node scripts/check-routing-architecture.mjs && node scripts/check-heavy-dependency-architecture.mjs && node scripts/check-observability-architecture.mjs && node scripts/check-empty-state-architecture.mjs && node scripts/check-agent-portfolio-architecture.mjs && node scripts/check-agent-reference-architecture.mjs && node scripts/check-agent-replan-architecture.mjs && node scripts/check-agent-fact-architecture.mjs && node scripts/check-isolated-eval-architecture.mjs && node scripts/check-deployment-architecture.mjs",
     "architecture:dist:guard": "node scripts/check-heavy-dependency-build.mjs",
     "db:apply:production": "node scripts/apply-cloudflare-d1-sql.mjs",
     "accounting:test": "node scripts/test-task-accounting.mjs",
@@ -62,6 +62,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "miniflare": "^4.20260722.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"

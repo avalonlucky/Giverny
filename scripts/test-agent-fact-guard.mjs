@@ -77,7 +77,7 @@ const profile = buildAgentFactSnapshot([evidence('get_requester_profile', {
     hourDeviationRate: 0,
     avgRevisionCount: 0.3,
     waitingHours: 2,
-    traits: ['验收通过率高'],
+    traits: ['单项目平均 4.17h，高于全站需求人均值 2.01h'],
     advice: ['保持当前记录粒度。'],
   },
 })])
@@ -85,6 +85,8 @@ const profile = buildAgentFactSnapshot([evidence('get_requester_profile', {
 assert.ok(profile.fallbackAnswer.includes('累计工时 12.5 小时'))
 assert.equal(verifyAgentFactClaims('累计12.5小时，验收通过率100%。', profile).passed, false)
 assert.equal(verifyAgentFactClaims(`画像已经核对。\n\n${profile.fallbackAnswer}`, profile).passed, true)
+assert.ok(profile.numbers.hours.includes(4.17) && profile.numbers.hours.includes(2.01))
+assert.equal(verifyAgentFactClaims(profile.fallbackAnswer.replace('2.01h', '9.9h'), profile).passed, false)
 assert.equal(verifyAgentFactClaims('累计10小时，验收通过率80%。', profile).passed, false)
 assert.equal(verifyAgentFactClaims('累计十小时，验收通过率八十%。', profile).passed, false)
 
@@ -130,4 +132,4 @@ assert.equal(verifyAgentFactClaims(plan.fallbackAnswer, plan).passed, true)
 
 assert.equal(runAgentFactProtocolSelfTest().ok, true)
 
-console.log('Agent fact guard deterministic tests: 45 assertions passed')
+console.log('Agent fact guard deterministic tests: 47 assertions passed')
