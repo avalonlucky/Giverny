@@ -57,6 +57,14 @@ INSERT INTO attachments (
   ('103', '11', 'supplemental-acceptance-entry', 'progress', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 0, 1, '过程文件', '2026-06-30T18:00:00'),
   ('104', '1', 'finance-anchor-entry', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00');
 
+INSERT INTO attachments (
+  id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,
+  file_size, display_size, is_final, visible_to_client, file_tag, uploaded_at
+) VALUES (
+  '9101', '9001', NULL, 'acceptance', '租户B机密验收文件.pdf', 'PDF', 'application/pdf', 'tenant-b/secret.pdf',
+  1024, '1 KB', 1, 1, '机密验收文件', '2026-07-02T18:00:00'
+);
+
 INSERT INTO agent_failure_cases (
   fingerprint, category, intent, tool_name, http_status, occurrences, regression_status
 ) VALUES (

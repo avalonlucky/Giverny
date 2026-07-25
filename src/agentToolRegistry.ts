@@ -204,6 +204,11 @@ export function agentCapabilityAllows(endpoint: string, role: AgentPrincipalRole
   return Boolean(match && match[1].methods.includes(method as 'GET' | 'POST') && match[1].policy.roles.includes(role))
 }
 
+export function agentModelCapabilityAllows(name: string, role: AgentPrincipalRole) {
+  const capability = agentCapabilityRegistry[name as AgentCapabilityName] as AgentCapabilityDefinition | undefined
+  return Boolean(capability?.exposure.includes('model') && capability.policy.roles.includes(role))
+}
+
 export function agentCapabilityTraceLabel(name: string, phase: 'running' | 'completed') {
   const capability = agentCapabilityRegistry[name as AgentCapabilityName]
   return capability?.trace[phase] || (phase === 'running' ? '调用业务工具' : '业务工具已返回')

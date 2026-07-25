@@ -3725,11 +3725,14 @@ async function consumeAgentConfirmationToken(env: Env, jti: string, action: stri
   }
 }
 
-async function createAgentConfirmationToken(env: Env, action: string, draft: Record<string, unknown>) {
+async function createAgentConfirmationToken(env: Env, action: string, draft: Record<string, unknown>, principal: AgentPrincipalContext) {
   const payload = {
+    version: 2,
     jti: crypto.randomUUID(),
     action,
     draft,
+    workspaceId: principal.workspaceId,
+    principalId: principal.principalId,
     exp: Date.now() + 10 * 60 * 1000,
   }
   const payloadText = agentCanonicalize(payload)
@@ -3739,7 +3742,7 @@ async function createAgentConfirmationToken(env: Env, action: string, draft: Rec
   return `${payloadPart}.${agentBase64Url(signature)}`
 }
 
-async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAction: string) {
+async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAction: string, request: Request) {
   const raw = agentString(token, 5000)
   const [payloadPart, signaturePart] = raw.split('.')
   if (!payloadPart || !signaturePart) {
@@ -3750,7 +3753,7 @@ async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAc
   if (agentBase64Url(expectedSignature) !== signaturePart) {
     throw new Error('confirmationToken 校验失败，请重新生成预览。')
   }
-  const payload = JSON.parse(agentBase64UrlToString(payloadPart)) as { jti?: string; action?: string; draft?: Record<string, unknown>; exp?: number }
+  const payload = JSON.parse(agentBase64UrlToString(payloadPart)) as { version?: number; jti?: string; action?: string; draft?: Record<string, unknown>; workspaceId?: string; principalId?: string; exp?: number }
   if (payload.action !== expectedAction) {
     throw new Error(`confirmationToken 动作不匹配：需要 ${expectedAction}`)
   }
@@ -3759,6 +3762,10 @@ async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAc
   }
   if (!payload.jti) {
     throw new Error('confirmationToken 版本已失效，请重新生成预览。')
+  }
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal || payload.version !== 2 || payload.workspaceId !== principal.workspaceId || payload.principalId !== principal.principalId) {
+    throw new Error('confirmationToken 与当前工作区或操作主体不匹配，请重新生成预览。')
   }
   await consumeAgentConfirmationToken(env, payload.jti, expectedAction, payload.exp)
   return payload.draft ?? {}
@@ -3827,9 +3834,11 @@ function agentTaskSelectionResponse(error: AgentTaskSelectionRequired, toolName:
   })
 }
 
-async function agentPreview(env: Env, action: string, draft: Record<string, unknown>, missing: string[] = [], warnings: string[] = []) {
+async function agentPreview(env: Env, request: Request, action: string, draft: Record<string, unknown>, missing: string[] = [], warnings: string[] = []) {
   const confirmation = agentWritePreviewConfig(action)
   if (!confirmation) throw new Error(`未注册的 Agent 写入预览：${action}`)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   return agentOk({
     tool: action,
     mode: 'preview',
@@ -3837,7 +3846,7 @@ async function agentPreview(env: Env, action: string, draft: Record<string, unkn
     draft,
     missing,
     warnings,
-    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, confirmation.executeName, draft) : '',
+    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, confirmation.executeName, draft, principal) : '',
     instruction: missing.length === 0
       ? '请把预览内容展示给用户；只有用户明确确认后，才调用对应 execute 工具并传入 confirmationToken。'
       : '请向用户追问缺失字段，不要调用 execute 工具。',
@@ -3869,7 +3878,7 @@ async function agentCreateTaskPreviewTool(env: Env, request: Request) {
     !draft.date && 'startDate',
     !draft.estimatedDate && 'estimatedDate',
   ].filter(Boolean) as string[]
-  return agentPreview(env, 'create_task_preview', draft, missing)
+  return agentPreview(env, request, 'create_task_preview', draft, missing)
 }
 
 async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecutionContext) {
@@ -3877,7 +3886,7 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'create_task')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'create_task', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -3949,7 +3958,7 @@ async function agentRecordFeedbackPreviewTool(env: Env, request: Request) {
       dateTime,
     }
     const missing = [!draft.note && 'note'].filter(Boolean) as string[]
-    return agentPreview(env, 'record_feedback_preview', draft, missing)
+    return agentPreview(env, request, 'record_feedback_preview', draft, missing)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'record_feedback_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成反馈预览', 400)
@@ -3961,7 +3970,7 @@ async function agentRecordFeedbackTool(env: Env, request: Request, ctx?: WorkerE
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'record_feedback')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'record_feedback', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4013,7 +4022,7 @@ async function agentUpdateTaskStatusPreviewTool(env: Env, request: Request) {
     }
     const missing = [!agentTaskStatuses.includes(status) && 'status'].filter(Boolean) as string[]
     const warnings = task.status === '已验收' && status !== '已验收' ? ['已验收任务回退状态属于敏感操作，本工具不会回退验收锁定。'] : []
-    return agentPreview(env, 'update_task_status_preview', draft, missing, warnings)
+    return agentPreview(env, request, 'update_task_status_preview', draft, missing, warnings)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'update_task_status_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成状态修改预览', 400)
@@ -4025,7 +4034,7 @@ async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: Worke
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_status')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_status', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4084,7 +4093,7 @@ async function agentUpdateTaskFieldsPreviewTool(env: Env, request: Request) {
       },
     }
     const missing = Object.keys(fields).length === 0 ? ['fields'] : []
-    return agentPreview(env, 'update_task_fields_preview', draft, missing)
+    return agentPreview(env, request, 'update_task_fields_preview', draft, missing)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'update_task_fields_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成字段修改预览', 400)
@@ -4096,7 +4105,7 @@ async function agentUpdateTaskFieldsTool(env: Env, request: Request, ctx?: Worke
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_fields')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'update_task_fields', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4147,7 +4156,7 @@ async function agentAppendProgressPreviewTool(env: Env, request: Request) {
       isAcceptanceProgress: agentBool(body.isAcceptanceProgress, false),
     }
     const missing = [!draft.note && 'note'].filter(Boolean) as string[]
-    return agentPreview(env, 'append_progress_preview', draft, missing)
+    return agentPreview(env, request, 'append_progress_preview', draft, missing)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'append_progress_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成进展预览', 400)
@@ -4159,7 +4168,7 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_progress')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_progress', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4229,7 +4238,7 @@ async function agentAppendWaitingPreviewTool(env: Env, request: Request) {
       endDateTime,
     }
     const missing = [!draft.note && 'note'].filter(Boolean) as string[]
-    return agentPreview(env, 'append_waiting_preview', draft, missing)
+    return agentPreview(env, request, 'append_waiting_preview', draft, missing)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'append_waiting_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成等待记录预览', 400)
@@ -4241,7 +4250,7 @@ async function agentAppendWaitingTool(env: Env, request: Request, ctx?: WorkerEx
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_waiting')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'append_waiting', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4295,7 +4304,7 @@ async function agentManageRecordPreviewTool(env: Env, request: Request) {
       action === 'edit' && Object.keys(changes).length === 0 && 'changes',
     ].filter(Boolean) as string[]
     const warnings = action === 'delete' ? ['删除后关联过程附件会一并归档；该操作不会删除 R2 原文件。'] : []
-    return agentPreview(env, 'manage_record_preview', draft, missing, warnings)
+    return agentPreview(env, request, 'manage_record_preview', draft, missing, warnings)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'manage_record_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成记录维护预览', 400)
@@ -4307,7 +4316,7 @@ async function agentManageRecordTool(env: Env, request: Request, ctx?: WorkerExe
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_record')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_record', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4373,7 +4382,7 @@ async function agentMarkAcceptanceFilesPreviewTool(env: Env, request: Request) {
     const files = await agentTaskAttachments(env, Number(task.id), attachmentIds)
     const draft = { taskId: Number(task.id), taskTitle: task.title, attachmentIds, files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) }
     const missing = [!attachmentIds.length && 'attachmentIds', files.length !== attachmentIds.length && 'attachmentIds:not_found'].filter(Boolean) as string[]
-    return agentPreview(env, 'mark_acceptance_files_preview', draft, missing)
+    return agentPreview(env, request, 'mark_acceptance_files_preview', draft, missing)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'mark_acceptance_files_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成验收文件预览', 400)
@@ -4385,7 +4394,7 @@ async function agentMarkAcceptanceFilesTool(env: Env, request: Request, ctx?: Wo
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'mark_acceptance_files')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'mark_acceptance_files', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -4424,7 +4433,7 @@ async function agentCompleteAcceptancePreviewTool(env: Env, request: Request) {
     }
     const missing = [!draft.acceptanceNote && 'acceptanceNote', !draft.progressNote && 'progressNote', files.length !== attachmentIds.length && 'attachmentIds:not_found', draft.countTime && !draft.startDateTime && 'startDateTime'].filter(Boolean) as string[]
     const warnings = attachmentIds.length ? [] : ['本次验收没有选择附件；如需交付文件，请先上传或选择该任务已有附件。']
-    return agentPreview(env, 'complete_acceptance_preview', draft, missing, warnings)
+    return agentPreview(env, request, 'complete_acceptance_preview', draft, missing, warnings)
   } catch (error) {
     if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'complete_acceptance_preview')
     return agentFail(error instanceof Error ? error.message : '无法生成完整验收预览', 400)
@@ -4436,7 +4445,7 @@ async function agentCompleteAcceptanceTool(env: Env, request: Request, ctx?: Wor
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try {
-    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'complete_acceptance')
+    draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'complete_acceptance', request)
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
@@ -6326,7 +6335,8 @@ async function maybeScheduleAgentTaskReminders(env: Env, now = new Date()) {
 }
 
 async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const operationId = agentString(body.operationId, 180)
   const endpoint = agentString(body.endpoint, 80)
@@ -6349,11 +6359,13 @@ async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerEx
      VALUES (?, ?, 'processing')
      ON CONFLICT(operation_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
   ).bind(operationId, endpoint).run()
+  const scopeHeaders = await createAgentScopeHeaders(getAgentToolToken(env), principal)
   const toolRequest = new Request(`https://giverny.internal/api/agent/tools/${endpoint}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${getAgentToolToken(env)}`,
       'content-type': 'application/json',
+      ...scopeHeaders,
     },
     body: JSON.stringify({ confirmationToken }),
   })
@@ -12643,28 +12655,65 @@ async function canReadSharedFile(env: Env, fileId: string, shareToken: string) {
     `SELECT monthly_reports.id
      FROM monthly_reports
      INNER JOIN attachments ON attachments.id = ?
-     LEFT JOIN tasks ON tasks.id = attachments.task_id
+     INNER JOIN tasks ON tasks.id = attachments.task_id
      WHERE monthly_reports.public_token = ?
+       AND monthly_reports.workspace_id = tasks.workspace_id
        AND attachments.deleted_at IS NULL
        AND attachments.visible_to_client = 1
        AND (
          attachments.uploaded_at LIKE monthly_reports.month || '%'
          OR tasks.settlement_month = monthly_reports.month
        )
-       AND (tasks.id IS NULL OR tasks.deleted_at IS NULL)
-     LIMIT 1`,
+       AND tasks.deleted_at IS NULL
+       LIMIT 1`,
   )
     .bind(fileId, shareToken)
     .first<{ id: string }>()
   if (row) return true
   const [attachment, settlementExport] = await Promise.all([
-    env.DB.prepare('SELECT task_id FROM attachments WHERE id = ? AND deleted_at IS NULL AND visible_to_client = 1')
-      .bind(fileId).first<{ task_id: string }>(),
-    env.DB.prepare('SELECT snapshot_json FROM settlement_exports WHERE public_token = ?').bind(shareToken).first<{ snapshot_json: string }>(),
+    env.DB.prepare(`SELECT attachments.task_id, tasks.workspace_id
+      FROM attachments INNER JOIN tasks ON tasks.id = attachments.task_id
+      WHERE attachments.id = ? AND attachments.deleted_at IS NULL AND attachments.visible_to_client = 1 AND tasks.deleted_at IS NULL`)
+      .bind(fileId).first<{ task_id: string; workspace_id: string }>(),
+    env.DB.prepare(`SELECT snapshot_json, workspace_id FROM settlement_exports
+      WHERE public_token = ? AND disabled = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`)
+      .bind(shareToken).first<{ snapshot_json: string; workspace_id: string }>(),
   ])
-  if (!attachment || !settlementExport) return false
+  if (!attachment || !settlementExport || attachment.workspace_id !== settlementExport.workspace_id) return false
   const receipt = parseSettlementReceiptSnapshot(settlementExport.snapshot_json)
   return Boolean(receipt?.rows.some((receiptRow) => Number(receiptRow.taskId) === Number(attachment.task_id)))
+}
+
+async function resolveInternalFilePrincipal(env: Env, request: Request): Promise<AgentPrincipalContext | null> {
+  const expected = getAgentToolToken(env)
+  if (!expected) return null
+  const authorization = request.headers.get('authorization') || ''
+  const bearer = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
+  if (bearer !== expected) return null
+  if (request.headers.get('x-agent-scope-signature')) {
+    const principal = await verifyAgentScopeHeaders(expected, request.headers)
+    return principal?.role === 'system' ? principal : null
+  }
+  return normalizeAgentPrincipalContext({ workspaceId: DEFAULT_WORKSPACE_ID, principalId: 'legacy-internal-file', role: 'system' })
+}
+
+async function canReadAttachmentResource(env: Env, request: Request, fileId: string, row: {
+  visible_to_client: number
+  settlement_month: string | null
+  workspace_id: string | null
+}) {
+  const shareToken = new URL(request.url).searchParams.get('token') ?? ''
+  if (shareToken && await canReadSharedFile(env, fileId, shareToken)) return true
+
+  const internalPrincipal = await resolveInternalFilePrincipal(env, request)
+  if (internalPrincipal) return Boolean(row.workspace_id && row.workspace_id === internalPrincipal.workspaceId)
+
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || !row.workspace_id || row.workspace_id !== principalWorkspaceId(principal)) return false
+  if (canSeeFullData(principal.role)) return true
+  if (!row.visible_to_client) return false
+  if (principal.role === 'client') return row.settlement_month === monthPart(nowIso())
+  return principal.role === 'guest'
 }
 
 // 为已上传但缺少预览图的文件（如早期上传的 PDF）补一张预览图。前端客户端渲染 PDF 首页后回传。
@@ -12710,30 +12759,9 @@ async function getFilePreview(env: Env, id: string, request: Request) {
   if (!row) {
     return fail('文件不存在或已删除', 404)
   }
+  if (!(await canReadAttachmentResource(env, request, id, row))) return fail('文件不存在或无权访问', 404)
   if (!row.preview_r2_key && !isDocumentPreviewCoverType(inferAttachmentFileType(row.file_name, row.mime_type, row.file_type))) {
     return fail('没有预览图', 404)
-  }
-  const principal = await resolveRequestPrincipal(env, request)
-  const shareToken = new URL(request.url).searchParams.get('token') ?? ''
-  if (principal && row.workspace_id && row.workspace_id !== principalWorkspaceId(principal) && !(await canReadSharedFile(env, id, shareToken))) {
-    return fail('没有权限查看该文件', 403)
-  }
-
-  // 登录用户可看全部；匿名访客可看对客可见文件，分享链接继续按 token 校验。
-  if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
-    const url = new URL(request.url)
-    const requestRole = await resolveRequestRole(env, request)
-    const canReadByRole = Boolean(requestRole && (
-      canSeeFullData(requestRole) ||
-      (requestRole === 'client' && row.settlement_month === monthPart(nowIso()))
-    ))
-    if (!row.visible_to_client && !canReadByRole) {
-      const shareToken = url.searchParams.get('token') ?? ''
-      const canRead = await canReadSharedFile(env, id, shareToken)
-      if (!canRead) {
-        return fail('没有权限查看该文件', 401)
-      }
-    }
   }
 
   if (!row.preview_r2_key) {
@@ -12779,7 +12807,6 @@ function parseSingleByteRange(value: string | null, size: number) {
 
 async function getFileSource(env: Env, id: string, request: Request) {
   const url = new URL(request.url)
-  const internalAnalysisRequest = await verifyAgentToolRequest(env, request)
   const row = await env.DB.prepare(`
     SELECT attachments.file_name, attachments.r2_key, attachments.mime_type, attachments.file_size, attachments.visible_to_client, tasks.settlement_month, tasks.workspace_id
     FROM attachments
@@ -12797,32 +12824,7 @@ async function getFileSource(env: Env, id: string, request: Request) {
   if (!row?.r2_key) {
     return fail('文件不存在', 404)
   }
-  const principal = await resolveRequestPrincipal(env, request)
-  const shareToken = url.searchParams.get('token') ?? ''
-  if (
-    !internalAnalysisRequest &&
-    principal &&
-    row.workspace_id &&
-    row.workspace_id !== principalWorkspaceId(principal) &&
-    !(await canReadSharedFile(env, id, shareToken))
-  ) {
-    return fail('没有权限查看该文件', 403)
-  }
-
-  if (env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING))) {
-    const requestRole = await resolveRequestRole(env, request)
-    const canReadByRole = Boolean(requestRole && (
-      canSeeFullData(requestRole) ||
-      (requestRole === 'client' && row.settlement_month === monthPart(nowIso()))
-    ))
-    if (!row.visible_to_client && !canReadByRole && !internalAnalysisRequest) {
-      const shareToken = url.searchParams.get('token') ?? ''
-      const canRead = await canReadSharedFile(env, id, shareToken)
-      if (!canRead) {
-        return fail('没有权限查看该文件', 401)
-      }
-    }
-  }
+  if (!(await canReadAttachmentResource(env, request, id, row))) return fail('文件不存在或无权访问', 404)
 
   const fileSize = Number(row.file_size) || 0
   const requestedRange = parseSingleByteRange(request.headers.get('range'), fileSize)

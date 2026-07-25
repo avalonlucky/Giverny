@@ -24,13 +24,23 @@ function base64Url(bytes: Uint8Array) {
 }
 
 async function signingKey(secret: string) {
-  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
 }
 
 async function signScope(secret: string, scope: AgentPrincipalContext) {
   const key = await signingKey(secret)
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(canonicalScope(scope)))
   return base64Url(new Uint8Array(signature))
+}
+
+function base64UrlToBytes(value: string) {
+  try {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+    const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  } catch {
+    return null
+  }
 }
 
 export function normalizeAgentPrincipalContext(value: Partial<AgentPrincipalContext> | null | undefined): AgentPrincipalContext {
@@ -63,6 +73,9 @@ export async function verifyAgentScopeHeaders(secret: string, headers: Headers):
     role: headers.get('x-agent-role') as AgentPrincipalRole,
     runId: headers.get('x-agent-run-id') || undefined,
   })
-  const expected = await signScope(secret, scope)
-  return expected === signature ? scope : null
+  const signatureBytes = base64UrlToBytes(signature)
+  if (!signatureBytes) return null
+  const key = await signingKey(secret)
+  const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(canonicalScope(scope)))
+  return valid ? scope : null
 }

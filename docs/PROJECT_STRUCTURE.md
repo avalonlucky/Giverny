@@ -237,6 +237,7 @@
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
 - Agent capability source of truth and generated catalog: `src/agentToolRegistry.ts`, `docs/AGENT_CAPABILITY_REGISTRY.md`
+- Agent tenant scope, prompt-injection boundary and attack matrix: `src/agentScope.ts`, `src/agentSecurity.ts`, `docs/AGENT_TENANT_SECURITY.md`
 - Shared Agent attachment results and settlement receipt preview: `src/components/AgentAttachmentResults.tsx`
 - Shared Agent write-preview editing and durable confirmation card: `src/components/AgentApprovalCard.tsx`
 - Shared Agent task disambiguation choices: `src/components/AgentTaskSelectionCard.tsx`
