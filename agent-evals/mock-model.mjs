@@ -208,6 +208,8 @@ function chooseTool(messages) {
   if (/天气|删掉|所有任务都改成|所有密钥/.test(text)) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
   }
+  if (/(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(text)) return toolCall('diagnose_ai_routing', { scope: 'all', includeRecentFallbacks: true })
+  if (/(?:恢复|撤销).*(?:模型路由|模型配置|上一次配置)/.test(text)) return toolCall('restore_ai_routing_preview', {})
   if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
   }

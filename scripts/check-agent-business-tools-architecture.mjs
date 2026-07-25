@@ -27,6 +27,9 @@ for (const symbol of [
   'agentQueryProjectExecutionTool',
   'agentManageTaskPlanPreviewTool',
   'agentManageTaskPlanTool',
+  'agentDiagnoseAiRoutingTool',
+  'agentRestoreAiRoutingPreviewTool',
+  'agentRestoreAiRoutingTool',
 ]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 
 assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
@@ -52,5 +55,11 @@ assert.match(worker, /执行计划只反映编排状态/)
 assert.match(worker, /执行计划在确认前已发生变化，请重新预览/)
 assert.match(worker, /action === 'retry_step'/)
 assert.doesNotMatch(registry, /manage_task_plan_preview[\s\S]{0,1200}complete_step/)
+assert.match(worker, /AI_ROUTING_HISTORY_SETTING/)
+assert.match(worker, /sameModelAttemptsBeforeFallback: 2/)
+assert.match(worker, /targetPrimaryModelRate: 99/)
+assert.match(worker, /模型路由在确认期间发生变化，请重新预览/)
+assert.match(worker, /`route:\$\{endpoint\.route\}`/)
+assert.ok(!registry.match(/apiKey:\s*z\./), 'Security Agent schemas must never accept plaintext API keys')
 
 console.log('Agent business tool architecture guard passed.')

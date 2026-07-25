@@ -12,6 +12,7 @@ const previewPairs = [
   ['schedule_reminder_preview', 'schedule_reminder'],
   ['configure_ai_route_preview', 'configure_ai_route'],
   ['manage_task_plan_preview', 'manage_task_plan'],
+  ['restore_ai_routing_preview', 'restore_ai_routing'],
 ]
 
 for (const [previewName, executeName] of previewPairs) {
@@ -30,6 +31,8 @@ for (const endpoint of [
   'inspect-ai-settings',
   'test-ai-route',
   'configure-ai-route-preview',
+  'diagnose-ai-routing',
+  'restore-ai-routing-preview',
 ]) {
   assert.equal(agentCapabilityAllows(endpoint, 'admin', 'POST'), true)
   assert.equal(agentCapabilityAllows(endpoint, 'collaborator', 'POST'), false)
@@ -67,6 +70,9 @@ const aiRouteSchema = agentCapabilityRegistry.configure_ai_route_preview.inputSc
 assert.equal(aiRouteSchema.safeParse({ route: 'textPrimary', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner' }).success, true)
 assert.equal(aiRouteSchema.safeParse({ route: 'textPrimary', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner', apiKey: 'sk-secret' }).success, true)
 assert.equal('apiKey' in (aiRouteSchema.parse({ route: 'textPrimary', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner', apiKey: 'sk-secret' })), false)
+assert.equal(agentCapabilityRegistry.diagnose_ai_routing.inputSchema.safeParse({ scope: 'all', includeRecentFallbacks: true }).success, true)
+assert.equal('apiKey' in agentCapabilityRegistry.diagnose_ai_routing.inputSchema.parse({ scope: 'all', apiKey: 'sk-secret' }), false)
+assert.equal(Object.keys(agentCapabilityRegistry.restore_ai_routing_preview.inputSchema.parse({ apiKey: 'sk-secret', model: 'do-not-accept' })).length, 0)
 
 assert.equal(agentCapabilityRegistry.check_schedule_conflicts.inputSchema.safeParse({ startDate: '2026-07-25T14:00', endDate: '2026-07-25T16:00', excludeTaskId: 12 }).success, true)
 assert.equal(agentCapabilityRegistry.query_agenda.inputSchema.safeParse({ startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: 90, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 }).success, true)

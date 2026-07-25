@@ -171,6 +171,24 @@ assert.ok(aiRouteTest.fallbackAnswer.includes('状态：可用'))
 assert.ok(aiRouteTest.fallbackAnswer.includes('API Key 未显示'))
 assert.equal(verifyAgentFactClaims(aiRouteTest.fallbackAnswer, aiRouteTest).passed, true)
 
+const aiRoutingDiagnosis = buildAgentFactSnapshot([evidence('diagnose_ai_routing', {
+  status: 'primary-degraded', activeChoice: 'route:textPrimary',
+  selectedModel: { provider: 'deepseek', model: 'deepseek-v4-pro', ok: false, error: '429 quota exhausted' },
+  routes: [
+    { route: 'textPrimary', provider: 'deepseek', model: 'deepseek-v4-pro', ok: false, error: '429 quota exhausted' },
+    { route: 'textFallback', provider: 'doubao', model: 'doubao-seed', ok: true },
+  ],
+  recentFallbacks: [{ policyCompliant: true }],
+  fallbackPolicy: { targetPrimaryModelRate: 99, sameModelAttemptsBeforeFallback: 2 },
+  recommendations: ['先修复 textPrimary，不要把备用模型当作常规路径。'],
+  secretsExposed: false,
+})])
+assert.ok(aiRoutingDiagnosis.fallbackAnswer.includes('deepseek-v4-pro'))
+assert.ok(aiRoutingDiagnosis.fallbackAnswer.includes('主模型目标 99%'))
+assert.ok(aiRoutingDiagnosis.fallbackAnswer.includes('同一模型尝试 2 次'))
+assert.ok(!aiRoutingDiagnosis.fallbackAnswer.includes('sk-'))
+assert.equal(verifyAgentFactClaims(aiRoutingDiagnosis.fallbackAnswer, aiRoutingDiagnosis).passed, true)
+
 const attachmentEvidence = buildAgentFactSnapshot([evidence('inspect_attachment_evidence', {
   count: 1,
   evidence: [{

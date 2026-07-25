@@ -295,6 +295,23 @@ function renderAiRouteTest(payload: Record<string, unknown>) {
   return ['**模型路由测试结果**', `- 路由：${String(payload.route || '')}`, `- 模型：${String(payload.provider || '')} / ${String(payload.model || '')}`, `- 状态：${payload.ok ? '可用' : '不可用'}`, '- API Key 未显示。'].join('\n')
 }
 
+function renderAiRoutingDiagnosis(payload: Record<string, unknown>) {
+  const selected = record(payload.selectedModel)
+  const policy = record(payload.fallbackPolicy)
+  const routes = list(payload.routes).map(record)
+  const recentFallbacks = list(payload.recentFallbacks).map(record)
+  return [
+    '**已核验模型主备链路**',
+    `- 总体状态：${String(payload.status || 'unknown')}；当前选择：${String(payload.activeChoice || 'auto')}`,
+    `- 当前首选模型：${String(selected.provider || selected.kind || '')} / ${String(selected.model || '')}（${selected.ok ? '可用' : `不可用：${String(selected.error || '未知原因')}`}）`,
+    ...routes.map((route) => `- ${String(route.route || '')}：${String(route.provider || '')} / ${String(route.model || '')}（${route.ok ? '可用' : `不可用：${String(route.error || route.category || '未知原因')}`}）`),
+    `- 回退规则：主模型目标 ${formatNumber(policy.targetPrimaryModelRate)}%；一般故障先由同一模型尝试 ${formatNumber(policy.sameModelAttemptsBeforeFallback)} 次；用户取消不触发备用模型。`,
+    `- 近期回退：${recentFallbacks.length} 条${recentFallbacks.length ? `；其中不符合策略 ${recentFallbacks.filter((item) => item.policyCompliant === false).length} 条` : ''}`,
+    ...list(payload.recommendations).map((item) => `- 建议：${String(item)}`),
+    '- API Key 未进入 Agent 上下文。',
+  ].join('\n')
+}
+
 function renderProactiveWork(payload: Record<string, unknown>) {
   const items = list(payload.items).map(record)
   const summary = record(payload.summary)
@@ -342,6 +359,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'query_attachment_analysis') return renderAttachmentAnalysisQueue(payload)
   if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
   if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
+  if (evidence.toolName === 'diagnose_ai_routing') return renderAiRoutingDiagnosis(payload)
   if (evidence.toolName === 'query_proactive_work') return renderProactiveWork(payload)
   if (evidence.toolName === 'query_enterprise_memory') return renderEnterpriseMemory(payload)
   return ''

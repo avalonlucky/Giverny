@@ -215,10 +215,10 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 67) {
+  if (!response.ok || capabilities.length !== 70) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
-  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan']) {
+  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
     if (!capabilities.some((capability) => capability.name === required)) throw new Error(`Agent capability manifest is missing ${required}`)
   }
   for (const capability of capabilities) {
@@ -753,19 +753,43 @@ async function runAgentBusinessToolCheck(cookie) {
   if (!tested.response.ok || tested.data.ok !== true || tested.data.apiKeyExposed !== false) {
     throw new Error(`AI route test failed: ${JSON.stringify(tested.data)}`)
   }
+  const diagnosed = await request('/api/agent/tools/diagnose-ai-routing', {
+    method: 'POST', headers, body: JSON.stringify({ scope: 'all', includeRecentFallbacks: true }),
+  })
+  const diagnosedText = JSON.stringify(diagnosed.data)
+  if (!diagnosed.response.ok || !diagnosed.data.selectedModel || diagnosed.data.fallbackPolicy?.targetPrimaryModelRate !== 99 || diagnosed.data.fallbackPolicy?.sameModelAttemptsBeforeFallback !== 2 || diagnosed.data.secretsExposed !== false || /eval-model-key|eval-doubao-key/.test(diagnosedText)) {
+    throw new Error(`AI routing diagnosis is incomplete or leaked secrets: ${diagnosedText}`)
+  }
+  const initialFallback = inspected.data.routes.textFallback
+  const initialActiveChoice = inspected.data.activeChoice
+  const staleConfiguredPreview = await preview('configure-ai-route-preview', {
+    route: 'textFallback', provider: 'deepseek', baseUrl: 'http://127.0.0.1:8898', model: 'deepseek-v4-flash', makeActive: false,
+  })
   const configuredPreview = await preview('configure-ai-route-preview', {
-    route: 'textFallback', provider: 'deepseek', baseUrl: 'http://127.0.0.1:8898', model: 'deepseek-v4-pro', makeActive: false,
+    route: 'textFallback', provider: 'deepseek', baseUrl: 'http://127.0.0.1:8898', model: 'deepseek-v4-pro', makeActive: true,
   })
   const configured = await execute('configure-ai-route', configuredPreview.confirmationToken)
   const configuredText = JSON.stringify(configured)
-  if (configured.route !== 'textFallback' || configured.config?.provider !== 'deepseek' || configured.config?.model !== 'deepseek-v4-pro' || configured.apiKeyExposed !== false || /eval-model-key/.test(configuredText)) {
+  if (configured.route !== 'textFallback' || configured.config?.provider !== 'deepseek' || configured.config?.model !== 'deepseek-v4-pro' || configured.activeChoice !== 'route:textFallback' || configured.apiKeyExposed !== false || /eval-model-key/.test(configuredText)) {
     throw new Error(`AI route configuration is unsafe or incomplete: ${configuredText}`)
   }
+  const staleConfigured = await request('/api/agent/tools/configure-ai-route', { method: 'POST', headers, body: JSON.stringify({ confirmationToken: staleConfiguredPreview.confirmationToken }) })
+  if (staleConfigured.response.status !== 409 || !String(staleConfigured.data.error || '').includes('确认期间发生变化')) throw new Error(`Stale AI route configuration was accepted: ${JSON.stringify(staleConfigured.data)}`)
+  const restorePreview = await preview('restore-ai-routing-preview', {})
+  const restored = await execute('restore-ai-routing', restorePreview.confirmationToken)
+  const restoredText = JSON.stringify(restored)
+  if (restored.routes?.textFallback?.provider !== initialFallback.provider || restored.routes?.textFallback?.model !== initialFallback.model || restored.activeChoice !== initialActiveChoice || restored.apiKeyExposed !== false || /eval-model-key|eval-doubao-key/.test(restoredText)) {
+    throw new Error(`AI route restoration is unsafe or incomplete: ${restoredText}`)
+  }
+  const replayRestore = await request('/api/agent/tools/restore-ai-routing', { method: 'POST', headers, body: JSON.stringify({ confirmationToken: restorePreview.confirmationToken }) })
+  if (replayRestore.response.status !== 409 || !String(replayRestore.data.error || '').includes('已使用')) throw new Error(`AI route restore confirmation replay was accepted: ${JSON.stringify(replayRestore.data)}`)
 
   const roleCases = [
     ['viewer', 'prepare-attachment-upload', { taskId: 1, files: [{ name: 'x.png', size: 1 }] }],
     ['collaborator', 'export-settlement-preview', { startDate: '2026-07-01', endDate: '2026-07-31' }],
     ['collaborator', 'inspect-ai-settings', {}],
+    ['collaborator', 'diagnose-ai-routing', { scope: 'all' }],
+    ['collaborator', 'restore-ai-routing-preview', {}],
     ['viewer', 'schedule-reminder-preview', { taskId: 1, goal: '越权提醒', remindAt: '2026-07-26T09:00:00+08:00' }],
   ]
   for (const [role, endpoint, payload] of roleCases) {

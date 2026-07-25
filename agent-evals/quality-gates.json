@@ -11,6 +11,7 @@
     "create_preview": 1,
     "write_preview": 1,
     "orchestration": 1,
+    "security_settings": 1,
     "proactive_work": 1,
     "agenda": 1,
     "enterprise_memory": 1,

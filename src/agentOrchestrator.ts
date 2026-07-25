@@ -112,8 +112,9 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   const asksMoneyDisplayHelp = /(?:显示|隐藏|展示|查看).*(?:金额).*(?:快捷键|怎么|如何|是什么)|(?:金额).*(?:显示|隐藏).*(?:快捷键|怎么|如何|是什么)/.test(value)
   if (!asksMoneyDisplayHelp && /(?:金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时)/.test(value)) add('finance')
   const productSubject = /(?:Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事)/i.test(value)
-  if ((productSubject && /(?:怎么|如何|在哪|入口|设置|开通|为什么|原因|是什么)/.test(value))
-    || /(?:这个网站)?最近更新了?哪些内容/.test(value)) add('product_help')
+  const asksAiFailure = /(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(value)
+  if (!asksAiFailure && ((productSubject && /(?:怎么|如何|在哪|入口|设置|开通|为什么|原因|是什么)/.test(value))
+    || /(?:这个网站)?最近更新了?哪些内容/.test(value))) add('product_help')
   const explicitTaskFacts = /(?:列|哪些|所有|全部|多少|汇总|概况|清单|排查|目前|现在|详情|进展|状态|卡在|卡点|等待|延期|逾期|待验收|已验收|没完成|未完成|做到|为什么|有没有|是否)/.test(value)
   const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(value)
     && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(value)
@@ -161,6 +162,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(turn.question)
     && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(turn.question)
   const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
+  const asksAiRoutingDiagnosis = /(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(turn.question)
   const hasPortfolioScope = /(?:列|哪些|所有|全部|多个|多项|多少|各有|谁|汇总|概况|清单|排查)|(?:从|\d{1,2}月\d{1,2}日).*(?:到|至)/.test(turn.question)
   const stateKinds = ['已验收', '未完成', '逾期', '延期', '等待中', '待验收'].filter((value) => turn.question.includes(value)).length
   const asksPortfolio = !hasExplicitTaskId && hasPortfolioSubject && (hasPortfolioScope || stateKinds > 1)
@@ -191,6 +193,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (asksEnterpriseMemory && !hasDeterministicTool('query_enterprise_memory')) {
     requiredTools.push('query_enterprise_memory')
     issues.push('组织、合作伙伴或项目记忆结论没有读取企业分层记忆及来源。')
+  }
+  if (asksAiRoutingDiagnosis && !hasDeterministicTool('diagnose_ai_routing')) {
+    requiredTools.push('diagnose_ai_routing')
+    issues.push('模型主备链路结论没有经过配置、连接状态和近期回退记录诊断。')
   }
   if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
     requiredTools.push('search_attachments')

@@ -225,6 +225,7 @@ const AUTH_SESSION_TTL_SECONDS = 24 * 60 * 60
 const AI_MODEL_SETTING = 'aiModelConfig'
 const AI_PROVIDER_SETTINGS = 'aiProviderConfigs'
 const AI_ACTIVE_MODEL_SETTING = 'aiActiveModelChoice'
+const AI_ROUTING_HISTORY_SETTING = 'aiRoutingHistory'
 const PASSWORD_ITERATIONS = 100000
 const DOUBAO_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const DOUBAO_SEED_PRO_MODEL = 'doubao-seed-2-1-pro-260628'
@@ -302,6 +303,14 @@ type PublicAiModelConfig = {
   textFallback: PublicAiModelEndpointConfig
   visionPrimary: PublicAiModelEndpointConfig
   visionFallback: PublicAiModelEndpointConfig
+}
+
+type AiRoutingHistoryEntry = {
+  id: string
+  routes: Record<AiModelRouteKey, Pick<StoredAiModelEndpointConfig, 'provider' | 'baseUrl' | 'model'>>
+  activeChoice: ChatModelChoice
+  savedAt: string
+  reason: string
 }
 
 // 角色分级：
@@ -4189,6 +4198,108 @@ async function agentInspectAiSettingsTool(env: Env, request: Request) {
   return agentOk({ tool: 'inspect_ai_settings', activeChoice: await getActiveChatModelChoice(env), routes: { textPrimary: config.textPrimary, textFallback: config.textFallback, visionPrimary: config.visionPrimary, visionFallback: config.visionFallback }, providers: aiModelProviders.map((provider) => publicAiProviderConfig(env, providers[provider])), secretsExposed: false })
 }
 
+function safeAiRoutes(env: Env, config: StoredAiModelConfig): AiRoutingHistoryEntry['routes'] {
+  const routes = { ...defaultAiModelRoutes(env), ...(config.routes || {}) }
+  return Object.fromEntries((['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback'] as AiModelRouteKey[]).map((route) => {
+    const endpoint = normalizeAiEndpoint(route, routes[route], env)
+    return [route, { provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model }]
+  })) as AiRoutingHistoryEntry['routes']
+}
+
+async function getAiRoutingHistory(env: Env) {
+  try {
+    const parsed = JSON.parse(await getSettingValue(env, AI_ROUTING_HISTORY_SETTING) || '[]')
+    return Array.isArray(parsed) ? parsed.slice(0, 20) as AiRoutingHistoryEntry[] : []
+  } catch {
+    return []
+  }
+}
+
+async function aiRoutingStateSnapshot(env: Env) {
+  const config = await getStoredAiModelConfig(env)
+  const snapshot = { routes: safeAiRoutes(env, config), activeChoice: await getActiveChatModelChoice(env), updatedAt: config.updatedAt || '' }
+  return { ...snapshot, checksum: await scheduleSnapshotChecksum(snapshot) }
+}
+
+async function saveAiRoutingHistory(env: Env, entry: AiRoutingHistoryEntry, existing?: AiRoutingHistoryEntry[]) {
+  const history = existing || await getAiRoutingHistory(env)
+  await setSettingValue(env, AI_ROUTING_HISTORY_SETTING, JSON.stringify([entry, ...history.filter((item) => item.id !== entry.id)].slice(0, 20)))
+}
+
+type AiRouteConnectivity = {
+  route: AiModelRouteKey
+  provider: AiModelProvider
+  model: string
+  baseUrl: string
+  hasApiKey: boolean
+  keySource: 'environment' | 'setting' | 'missing'
+  apiKeyExposed: false
+  ok: boolean
+  durationMs: number
+  output?: string
+  error?: string
+  category?: ReturnType<typeof evaluateEmergencyFallback>['category'] | 'invalid-result' | null
+}
+
+async function testAiEndpointConnectivity(env: Env, route: AiModelRouteKey, rawEndpoint?: StoredAiModelEndpointConfig): Promise<AiRouteConnectivity> {
+  const started = Date.now()
+  const endpoint = rawEndpoint ? await resolveEndpointCredentials(env, rawEndpoint) : await resolveAiEndpoint(env, route, false)
+  const publicEndpoint: Pick<AiRouteConnectivity, 'route' | 'provider' | 'model' | 'baseUrl' | 'hasApiKey' | 'keySource' | 'apiKeyExposed'> = { route, provider: endpoint.provider, model: endpoint.model, baseUrl: endpoint.baseUrl, hasApiKey: Boolean(endpoint.apiKey), keySource: endpoint.keySource as AiRouteConnectivity['keySource'], apiKeyExposed: false }
+  if (!endpoint.apiKey) {
+    const error = 'API Key 未配置或无法解密'
+    return { ...publicEndpoint, ok: false, durationMs: Date.now() - started, error, category: evaluateEmergencyFallback(error, 1).category }
+  }
+  try {
+    const output = await callWithAiTimeout(
+      () => route.startsWith('vision')
+        ? callAiEndpointVision(endpoint, '这张图片主要是什么颜色？只回复颜色。', 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZklEQVR4nO3PQQ3AIADAwDFT/53UBoM4ICgm5O5cttV7vQGeTQ/AaAQYjUaD0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQaDcbxAHy3AUGOk0s8AAAAAElFTkSuQmCC')
+        : callAiEndpointText(endpoint, '请只回复：OK'),
+      15_000,
+      `${route} 诊断超时`,
+    )
+    return { ...publicEndpoint, ok: Boolean(output), durationMs: Date.now() - started, output: output.slice(0, 40), category: output ? null : 'invalid-result' }
+  } catch (error) {
+    const message = describeAiCallError(error)
+    return { ...publicEndpoint, ok: false, durationMs: Date.now() - started, error: message, category: evaluateEmergencyFallback(message, 1).category }
+  }
+}
+
+async function agentDiagnoseAiRoutingTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const scope = body.scope === 'text' || body.scope === 'vision' ? body.scope : 'all'
+  const routeKeys = (scope === 'text' ? ['textPrimary', 'textFallback'] : scope === 'vision' ? ['visionPrimary', 'visionFallback'] : ['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback']) as AiModelRouteKey[]
+  const results = await Promise.all(routeKeys.map((route) => testAiEndpointConnectivity(env, route)))
+  const primaryResults = results.filter((item) => item.route.endsWith('Primary'))
+  const fallbackResults = results.filter((item) => item.route.endsWith('Fallback'))
+  const recommendations: string[] = []
+  for (const item of primaryResults.filter((result) => !result.ok)) recommendations.push(`先修复 ${item.route}：${item.error || '模型没有返回有效内容'}；不要因为存在备用模型就跳过主模型故障。`)
+  for (const item of fallbackResults.filter((result) => !result.ok)) recommendations.push(`修复 ${item.route}：${item.error || '模型没有返回有效内容'}，避免主模型极端故障时没有可用兜底。`)
+  if (results.every((item) => item.ok)) recommendations.push('当前所选范围的主备路由均可用，无需切换模型。')
+  let recentFallbacks: Array<Record<string, unknown>> = []
+  if (body.includeRecentFallbacks !== false) {
+    await ensureAgentRunMetricsTable(env)
+    const workspaceId = agentWorkspaceIdFromRequest(request)
+    const rows = await env.DB.prepare("SELECT model, attempts, fallback_reason, created_at FROM agent_turn_runs WHERE workspace_id = ? AND is_eval = 0 AND fallback_used = 1 ORDER BY created_at DESC LIMIT 20").bind(workspaceId).all<{ model: string; attempts: number; fallback_reason: string; created_at: string }>()
+    recentFallbacks = (rows.results || []).map((row) => ({ model: row.model, attempts: Number(row.attempts) || 1, reason: row.fallback_reason, category: evaluateEmergencyFallback(row.fallback_reason, Number(row.attempts) || 1).category, policyCompliant: evaluateEmergencyFallback(row.fallback_reason, Number(row.attempts) || 1).allowed, createdAt: row.created_at }))
+  }
+  const activeChoice = await getActiveChatModelChoice(env)
+  let selectedModel: Record<string, unknown>
+  try {
+    const target = await resolveChatModelTarget(env, activeChoice)
+    selectedModel = target.kind === 'workers-ai'
+      ? { choice: activeChoice, kind: 'workers-ai', model: target.label, ok: Boolean(env.AI), error: env.AI ? '' : 'Workers AI binding 未配置' }
+      : { choice: activeChoice, ...(await testAiEndpointConnectivity(env, 'textPrimary', target.endpoint)), label: target.label }
+  } catch (error) {
+    selectedModel = { choice: activeChoice, ok: false, error: describeAiCallError(error), category: evaluateEmergencyFallback(describeAiCallError(error), 1).category }
+  }
+  if (selectedModel.ok === false) recommendations.unshift(`先修复用户当前选择的主模型：${String(selectedModel.error || '不可用')}。`)
+  const healthyPrimary = primaryResults.every((item) => item.ok)
+  const healthyFallback = fallbackResults.every((item) => item.ok)
+  await audit(env, agentCapabilityRegistry.diagnose_ai_routing.policy.auditEvent, 'ai_model_routing', scope, { activeChoice, healthyPrimary, healthyFallback, secretsExposed: false })
+  return agentOk({ tool: 'diagnose_ai_routing', scope, status: selectedModel.ok !== false && healthyPrimary && healthyFallback ? 'healthy' : selectedModel.ok !== false && healthyPrimary ? 'fallback-degraded' : 'primary-degraded', activeChoice, selectedModel, routes: results, recentFallbacks, fallbackPolicy: { mode: 'emergency-only', targetPrimaryModelRate: 99, sameModelAttemptsBeforeFallback: 2, deterministicFailuresMayFallbackImmediately: ['authentication', 'capability-mismatch'], userCancellationNeverFallsBack: true }, recommendations, secretsExposed: false })
+}
+
 async function agentTestAiRouteTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
@@ -4406,7 +4517,8 @@ async function agentConfigureAiRoutePreviewTool(env: Env, request: Request) {
       : await callAiEndpointText(endpoint, '请只回复：OK')
     if (!output) return agentFail('模型已响应，但没有可读结果', 502)
     const current = publicAiModelConfig(env, await getStoredAiModelConfig(env))[endpoint.route]
-    const draft = { route: endpoint.route, provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model, makeActive: agentBool(body.makeActive), before: { provider: current.provider, baseUrl: current.baseUrl, model: current.model }, credentialSource: endpoint.keySource, apiKeyExposed: false, connectivityVerified: true }
+    const state = await aiRoutingStateSnapshot(env)
+    const draft = { route: endpoint.route, provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model, makeActive: agentBool(body.makeActive), before: { provider: current.provider, baseUrl: current.baseUrl, model: current.model }, beforeState: { routes: state.routes, activeChoice: state.activeChoice, updatedAt: state.updatedAt }, stateChecksum: state.checksum, credentialSource: endpoint.keySource, apiKeyExposed: false, connectivityVerified: true }
     return agentPreview(env, request, 'configure_ai_route_preview', draft, [], ['只修改模型路由，不读取、显示或替换已保存的 API Key。'])
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '模型路由验证失败', 502)
@@ -4418,14 +4530,52 @@ async function agentConfigureAiRouteTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   let draft: Record<string, unknown>
   try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'configure_ai_route', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const currentState = await aiRoutingStateSnapshot(env)
+  if (agentString(draft.stateChecksum, 100) !== currentState.checksum) return agentFail('模型路由在确认期间发生变化，请重新预览', 409)
   const endpoint = await proposedAiRoute(env, draft)
   const existing = await getStoredAiModelConfig(env)
   const routes = { ...defaultAiModelRoutes(env), ...(existing.routes || {}), [endpoint.route]: { provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model } }
   const next = { ...existing, routes, updatedAt: nowIso() }
+  await saveAiRoutingHistory(env, { id: crypto.randomUUID(), routes: currentState.routes, activeChoice: currentState.activeChoice, savedAt: nowIso(), reason: `配置 ${endpoint.route}` })
   await setSettingValue(env, AI_MODEL_SETTING, JSON.stringify(next))
-  if (agentBool(draft.makeActive)) await setSettingValue(env, AI_ACTIVE_MODEL_SETTING, `provider:${endpoint.provider}`)
+  if (agentBool(draft.makeActive)) await setSettingValue(env, AI_ACTIVE_MODEL_SETTING, `route:${endpoint.route}`)
   await audit(env, agentCapabilityRegistry.configure_ai_route.policy.auditEvent, 'setting', endpoint.route, { provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model, makeActive: agentBool(draft.makeActive), apiKeyExposed: false })
   return agentOk({ tool: 'configure_ai_route', mode: 'execute', route: endpoint.route, config: publicAiModelConfig(env, next)[endpoint.route], activeChoice: await getActiveChatModelChoice(env), apiKeyExposed: false })
+}
+
+async function agentRestoreAiRoutingPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const history = await getAiRoutingHistory(env)
+  const target = history[0]
+  if (!target) return agentFail('没有可恢复的历史模型路由', 404)
+  const current = await aiRoutingStateSnapshot(env)
+  const checks = await Promise.all((['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback'] as AiModelRouteKey[]).map((route) => testAiEndpointConnectivity(env, route, target.routes[route])))
+  const primaryFailures = checks.filter((item) => item.route === 'textPrimary' && !item.ok)
+  const warnings = checks.filter((item) => !item.ok).map((item) => `${item.route}：${item.error || '不可用'}`)
+  return agentPreview(env, request, 'restore_ai_routing_preview', { historyId: target.id, target: { routes: target.routes, activeChoice: target.activeChoice, savedAt: target.savedAt, reason: target.reason }, before: { routes: current.routes, activeChoice: current.activeChoice, updatedAt: current.updatedAt }, stateChecksum: current.checksum, connectivity: checks, apiKeyExposed: false }, primaryFailures.length ? ['上一份配置的主模型路由必须可连接'] : [], warnings)
+}
+
+async function agentRestoreAiRoutingTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'restore_ai_routing', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const current = await aiRoutingStateSnapshot(env)
+  if (agentString(draft.stateChecksum, 100) !== current.checksum) return agentFail('模型路由在确认期间发生变化，请重新预览', 409)
+  const history = await getAiRoutingHistory(env)
+  const target = history[0]
+  if (!target || target.id !== agentString(draft.historyId, 160)) return agentFail('可恢复版本已经变化，请重新预览', 409)
+  const textPrimary = await testAiEndpointConnectivity(env, 'textPrimary', target.routes.textPrimary)
+  if (!textPrimary.ok) return agentFail(`上一份文字主模型当前不可用：${textPrimary.error || '没有有效响应'}`, 409)
+  const existing = await getStoredAiModelConfig(env)
+  const next = { ...existing, routes: target.routes, updatedAt: nowIso() }
+  const replacement: AiRoutingHistoryEntry = { id: crypto.randomUUID(), routes: current.routes, activeChoice: current.activeChoice, savedAt: nowIso(), reason: '恢复前自动快照' }
+  await setSettingValue(env, AI_ROUTING_HISTORY_SETTING, JSON.stringify([replacement, ...history.slice(1)].slice(0, 20)))
+  await setSettingValue(env, AI_MODEL_SETTING, JSON.stringify(next))
+  if (target.activeChoice === 'auto') await deleteSettingValue(env, AI_ACTIVE_MODEL_SETTING)
+  else await setSettingValue(env, AI_ACTIVE_MODEL_SETTING, target.activeChoice)
+  await audit(env, agentCapabilityRegistry.restore_ai_routing.policy.auditEvent, 'setting', AI_MODEL_SETTING, { historyId: target.id, restoredAt: nowIso(), activeChoice: target.activeChoice, apiKeyExposed: false })
+  return agentOk({ tool: 'restore_ai_routing', mode: 'execute', routes: safeAiRoutes(env, next), activeChoice: await getActiveChatModelChoice(env), restoredFrom: { id: target.id, savedAt: target.savedAt, reason: target.reason }, apiKeyExposed: false })
 }
 
 async function refreshAgentTaskMemory(env: Env, taskId: number, workspaceId = DEFAULT_WORKSPACE_ID) {
@@ -8192,6 +8342,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/update-attachment-metadata' && request.method === 'POST') return agentUpdateAttachmentMetadataTool(env, request)
   if (url.pathname === '/api/agent/tools/inspect-ai-settings' && (request.method === 'POST' || request.method === 'GET')) return agentInspectAiSettingsTool(env, request)
   if (url.pathname === '/api/agent/tools/test-ai-route' && request.method === 'POST') return agentTestAiRouteTool(env, request)
+  if (url.pathname === '/api/agent/tools/diagnose-ai-routing' && request.method === 'POST') return agentDiagnoseAiRoutingTool(env, request)
   if (url.pathname === '/api/agent/tools/export-settlement-preview' && request.method === 'POST') return agentExportSettlementPreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/export-settlement' && request.method === 'POST') return agentExportSettlementTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-settlement-export-preview' && request.method === 'POST') return agentManageSettlementPreviewTool(env, request)
@@ -8208,6 +8359,8 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/manage-task-plan' && request.method === 'POST') return agentManageTaskPlanTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route-preview' && request.method === 'POST') return agentConfigureAiRoutePreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route' && request.method === 'POST') return agentConfigureAiRouteTool(env, request)
+  if (url.pathname === '/api/agent/tools/restore-ai-routing-preview' && request.method === 'POST') return agentRestoreAiRoutingPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/restore-ai-routing' && request.method === 'POST') return agentRestoreAiRoutingTool(env, request)
   if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {
     return agentCreateTaskPlanTool(env, request)
   }

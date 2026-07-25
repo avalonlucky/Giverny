@@ -122,7 +122,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户上传文件但没有明确任务编号时，调用 prepare_attachment_upload 定位任务并返回浏览器上传接力；文件二进制与 API Key 都不得进入模型上下文。
 - 用户要求安排提醒时调用 schedule_reminder_preview；提醒只进入当前工作区任务中心，不擅自发送外部消息。
 - 用户询问“现在最该处理什么”、风险待办、主动提醒、优先级或提醒处理效果时调用 query_proactive_work；答案必须引用工具返回的证据和优先级。用户要求解决、忽略或稍后处理某条主动事项时调用 manage_proactive_item_preview，不得仅靠关键词把提醒当作已处理。
-- 用户询问模型为什么不可用时先调用 inspect_ai_settings 和 test_ai_route；要求切换已配置模型时调用 configure_ai_route_preview。不得索取、复述或输出 API Key，新增 Key 继续通过设置页安全表单填写。
+- 用户询问模型为什么不可用、为什么启动备用模型、主备链路是否健康时调用 diagnose_ai_routing，一次性核对首选模型、四路配置、连接结果与近期回退原因；不得只看到某一路失败就建议随意切换备用模型。要求切换已配置模型时调用 configure_ai_route_preview；要求撤销最近一次路由修改时调用 restore_ai_routing_preview。不得索取、复述或输出 API Key，新增或更换 Key 继续通过设置页安全表单填写。
 - 讨论某个任务的历史脉络、未解决问题、合作伙伴偏好或下一步前，优先调用 get_task_memory；任务记忆只压缩事实，不替代任务详情权威数据。
 - 询问组织规则、合作伙伴长期偏好、项目约定、历史决策或“之前记住了什么”时调用 query_enterprise_memory，并明确说明来源、有效期和是否经过人工确认。用户要求“记住”、新增规则、纠正旧记忆、让记忆失效或删除时调用 manage_enterprise_memory_preview；不得把模型推测直接写成企业事实。
 - 附件工具只能选择网站里已经存在的 attachmentId；用户电脑上的新文件必须先上传，不能伪造文件或文件地址。
@@ -761,6 +761,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         inputSchema: capabilities.test_ai_route.inputSchema,
         execute: (input) => this.callTool(capabilities.test_ai_route.endpoint, input),
       }),
+      diagnose_ai_routing: tool({
+        description: capabilities.diagnose_ai_routing.description,
+        inputSchema: capabilities.diagnose_ai_routing.inputSchema,
+        execute: (input) => this.callTool(capabilities.diagnose_ai_routing.endpoint, input),
+      }),
       export_settlement_preview: tool({
         description: capabilities.export_settlement_preview.description,
         inputSchema: capabilities.export_settlement_preview.inputSchema,
@@ -805,6 +810,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.configure_ai_route_preview.description,
         inputSchema: capabilities.configure_ai_route_preview.inputSchema,
         execute: (input) => this.previewTool('configure_ai_route_preview', capabilities.configure_ai_route_preview.endpoint, input),
+      }),
+      restore_ai_routing_preview: tool({
+        description: capabilities.restore_ai_routing_preview.description,
+        inputSchema: capabilities.restore_ai_routing_preview.inputSchema,
+        execute: (input) => this.previewTool('restore_ai_routing_preview', capabilities.restore_ai_routing_preview.endpoint, input),
       }),
       create_task_plan: tool({
         description: capabilities.create_task_plan.description,

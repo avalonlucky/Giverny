@@ -40,6 +40,7 @@ assert.equal(inferAgentIntent('暂停这个项目执行计划'), 'write')
 assert.notEqual(inferAgentIntent('安排下周一做三张社媒海报，预估4.5小时'), 'task_data')
 assert.equal(inferAgentIntent('把这个任务的进度修改成80%'), 'write')
 assert.equal(inferAgentIntent('帮我润色一句话'), 'general')
+assert.equal(inferAgentIntent('为什么我的主模型不可用，总是切换备用模型？'), 'general')
 assert.deepEqual(inferAgentIntents('显示金额和隐藏金额的快捷键是什么？'), ['product_help'])
 assert.deepEqual(inferAgentIntents('查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单'), ['product_help', 'finance', 'task_data'])
 assert.deepEqual(inferAgentIntents('查看封套任务的验收附件，并分析陈义君的合作偏好'), ['attachment', 'person_profile'])
@@ -94,6 +95,10 @@ const missingProjectExecution = completeAgentTurn(createAgentTurn({ principal, q
 assert.ok(missingProjectExecution.verification.requiredTools.includes('query_project_execution'))
 const verifiedProjectExecution = { ...missingProjectExecution, plan: [call('query_project_execution')], evidence: [evidence('query_project_execution')] }
 assert.equal(verifyAgentAnswer(verifiedProjectExecution).passed, true)
+const missingAiDiagnosis = completeAgentTurn(createAgentTurn({ principal, question: '为什么我的主模型不可用，总是切换备用模型？', intent: 'general' }), '可能额度不足')
+assert.ok(missingAiDiagnosis.verification.requiredTools.includes('diagnose_ai_routing'))
+const verifiedAiDiagnosis = { ...missingAiDiagnosis, plan: [call('diagnose_ai_routing')], evidence: [evidence('diagnose_ai_routing')] }
+assert.equal(verifyAgentAnswer(verifiedAiDiagnosis).passed, true)
 const missingEnterpriseMemory = completeAgentTurn(createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), '他们喜欢简洁设计')
 assert.ok(missingEnterpriseMemory.verification.requiredTools.includes('query_enterprise_memory'))
 const verifiedEnterpriseMemory = completeAgentTurn({ ...createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), plan: [call('query_enterprise_memory')], evidence: [evidence('query_enterprise_memory')] }, '已查询')
@@ -181,4 +186,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 55 assertions passed')
+console.log('Agent orchestrator deterministic tests: 58 assertions passed')

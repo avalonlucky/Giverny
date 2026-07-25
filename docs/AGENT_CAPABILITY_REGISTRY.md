@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：67 项
-- 分类：finance 7、tasks 4、files 8、product 2、calendar 4、security 4、notifications 5、planning 4、memory 4、analysis 2、write 18、internal 5
+- 注册能力：70 项
+- 分类：finance 7、tasks 4、files 8、product 2、calendar 4、security 7、notifications 5、planning 4、memory 4、analysis 2、write 18、internal 5
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -33,6 +33,7 @@
 `update_attachment_metadata` | 执行修改附件信息 | files | write | signed-execute | admin, collaborator, system | attachments:write | api, workflow | `agent_update_attachment_metadata`
 `inspect_ai_settings` | 检查模型设置 | security | read | none | admin, system | settings:read | model, api | `agent_inspect_ai_settings`
 `test_ai_route` | 测试模型路由 | security | read | none | admin, system | settings:read | model, api | `agent_test_ai_route`
+`diagnose_ai_routing` | 诊断模型主备链路 | security | read | none | admin, system | settings:read | model, api | `agent_diagnose_ai_routing`
 `export_settlement_preview` | 预览导出结算回单 | finance | sensitive | preview | admin, system | finance:write | model, api | `agent_preview_export_settlement`
 `export_settlement` | 执行导出结算回单 | finance | sensitive | signed-execute | admin, system | finance:write | api, workflow | `agent_export_settlement`
 `manage_settlement_export_preview` | 预览管理结算回单 | finance | sensitive | preview | admin, system | finance:write | model, api | `agent_preview_manage_settlement`
@@ -49,6 +50,8 @@
 `manage_task_plan` | 执行管理任务计划 | planning | write | signed-execute | admin, collaborator, system | plans:write | api, workflow | `agent_manage_task_plan`
 `configure_ai_route_preview` | 预览配置模型路由 | security | sensitive | preview | admin, system | settings:write | model, api | `agent_preview_configure_ai_route`
 `configure_ai_route` | 执行配置模型路由 | security | sensitive | signed-execute | admin, system | settings:write | api, workflow | `agent_configure_ai_route`
+`restore_ai_routing_preview` | 预览恢复模型路由 | security | sensitive | preview | admin, system | settings:write | model, api | `agent_preview_restore_ai_routing`
+`restore_ai_routing` | 执行恢复模型路由 | security | sensitive | signed-execute | admin, system | settings:write | api, workflow | `agent_restore_ai_routing`
 `create_task_plan` | 创建持续任务计划 | planning | write | none | admin, collaborator, system | plans:write | model, api | `agent_create_task_plan`
 `get_task_memory` | 读取任务记忆 | memory | read | none | admin, collaborator, viewer, client, mcp-read, system | memory:read | model, api | `agent_get_task_memory`
 `query_enterprise_memory` | 查询企业分层记忆 | memory | read | none | admin, collaborator, viewer, mcp-read, system | memory:read | model, mcp, api | `agent_query_enterprise_memory`

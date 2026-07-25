@@ -17,13 +17,13 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 67, '能力总数必须固定为 67')
+check(manifest.length === 70, '能力总数必须固定为 70')
 check(Object.keys(agentReadToolRegistry).length === 17, 'MCP 读取工具应为 17 项')
-check(manifest.filter((item) => item.exposure.includes('model')).length === 43, '模型能力应为 43 项')
+check(manifest.filter((item) => item.exposure.includes('model')).length === 45, '模型能力应为 45 项')
 check(manifest.filter((item) => item.exposure.includes('mcp')).length === 17, 'MCP 能力应为 17 项')
-check(manifest.filter((item) => item.confirmation === 'preview').length === 19, '写入预览应为 19 项')
-check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 19, '签名执行应为 19 项')
-check(agentWorkflowWriteEndpoints.size === 19, 'Workflow 白名单应为 19 项')
+check(manifest.filter((item) => item.confirmation === 'preview').length === 20, '写入预览应为 20 项')
+check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 20, '签名执行应为 20 项')
+check(agentWorkflowWriteEndpoints.size === 20, 'Workflow 白名单应为 20 项')
 
 for (const capability of manifest) {
   check(Boolean(capability.name), '能力名不能为空')
@@ -51,6 +51,8 @@ check(agentCapabilityAllows('context', 'guest', 'GET'), '访客应能读取产�
 check(agentCapabilityAllows('product-help', 'client', 'GET'), '合作伙伴应能读取产品说明')
 check(agentCapabilityAllows('task-detail', 'client', 'GET'), '合作伙伴应能读取授权任务详情')
 check(!agentCapabilityAllows('month-finance', 'client', 'GET'), '合作伙伴不能读取财务')
+check(agentCapabilityAllows('diagnose-ai-routing', 'admin', 'POST'), '管理员应能诊断模型路由')
+check(!agentCapabilityAllows('diagnose-ai-routing', 'collaborator', 'POST'), '协作者不能读取安全模型配置')
 check(!agentCapabilityAllows('project-execution', 'client', 'GET'), '合作伙伴不能读取内部执行计划')
 check(agentCapabilityAllows('project-execution', 'viewer', 'GET'), '只读成员应能读取执行计划')
 check(agentCapabilityAllows('month-finance', 'viewer', 'GET'), '只读成员应能读取财务')
@@ -72,6 +74,9 @@ check(agentCapabilityRegistry.query_project_execution.inputSchema.safeParse({ ta
 check(!agentCapabilityRegistry.query_project_execution.inputSchema.safeParse({ status: 'cancelled' }).success, '执行计划查询 schema 应拒绝未支持范围')
 check(agentCapabilityRegistry.manage_task_plan_preview.inputSchema.safeParse({ planId: 'plan-1', action: 'retry_step', stepId: 'plan-1:step-1' }).success, '计划管理 schema 应接受失败步骤重试')
 check(!agentCapabilityRegistry.manage_task_plan_preview.inputSchema.safeParse({ planId: 'plan-1', action: 'complete_step', stepId: 'plan-1:step-1' }).success, 'Agent 不得直接完成业务步骤')
+check(agentCapabilityRegistry.diagnose_ai_routing.inputSchema.safeParse({ scope: 'text' }).success, '模型诊断 schema 应接受文字链路范围')
+check(!agentCapabilityRegistry.diagnose_ai_routing.inputSchema.safeParse({ scope: 'provider-secret' }).success, '模型诊断 schema 应拒绝未知范围')
+check(agentCapabilityRegistry.restore_ai_routing_preview.inputSchema.safeParse({}).success, '模型路由恢复预览不接受模型或密钥参数')
 check(agentCapabilityRegistry.append_progress_preview.inputSchema.safeParse({ taskId: 1, note: '完成初稿' }).success, '进展 schema 应接受有效草稿')
 check(!agentCapabilityRegistry.append_progress_preview.inputSchema.safeParse({ taskId: 1 }).success, '进展 schema 应要求备注')
 check(agentCapabilityRegistry.complete_acceptance_preview.inputSchema.safeParse({ taskId: 1, acceptanceNote: '验收通过', progressNote: '完成交付' }).success, '验收 schema 应接受完整草稿')
