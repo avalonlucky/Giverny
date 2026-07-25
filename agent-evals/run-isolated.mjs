@@ -152,7 +152,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -215,10 +215,10 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 64) {
+  if (!response.ok || capabilities.length !== 67) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
-  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda']) {
+  for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan']) {
     if (!capabilities.some((capability) => capability.name === required)) throw new Error(`Agent capability manifest is missing ${required}`)
   }
   for (const capability of capabilities) {
@@ -1936,11 +1936,45 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!listResponse.ok || plan?.status !== 'failed' || plan.steps?.[0]?.status !== 'failed' || plan.steps?.[1]?.status !== 'blocked') {
     throw new Error(`Agent task center plan is inconsistent: ${JSON.stringify(plan)}`)
   }
-  plan = await updatePlan(plan, 'retry_step', plan.steps[0].id)
-  const paused = await updatePlan(plan, 'pause')
-  if (paused.status !== 'paused' || !paused.pausedAt) throw new Error('Agent plan pause was not persisted')
-  plan = await updatePlan(paused, 'resume')
-  if (plan.status !== 'active' || plan.pausedAt) throw new Error('Agent plan resume was not persisted')
+  const toolRequest = async (endpoint, payload, requestHeaders = toolHeaders) => {
+    const response = await fetch(`http://127.0.0.1:8798/api/agent/tools/${endpoint}`, { method: 'POST', headers: requestHeaders, body: JSON.stringify(payload) })
+    return { response, data: await response.json().catch(() => ({})) }
+  }
+  const workflowExecute = async (endpoint, confirmationToken) => {
+    const result = await toolRequest('workflow-write', { operationId: `plan-management-${crypto.randomUUID()}`, endpoint, confirmationToken })
+    if (!result.response.ok) throw new Error(`${endpoint} workflow failed: ${JSON.stringify(result.data)}`)
+    return result.data
+  }
+  const executionQuery = await toolRequest('project-execution', { planId: plan.id, status: 'open' })
+  const queriedPlan = executionQuery.data.plans?.[0]
+  if (!executionQuery.response.ok || queriedPlan?.status !== 'failed' || queriedPlan.failedSteps?.[0]?.id !== plan.steps[0].id || queriedPlan.blockers?.[0]?.dependencies?.[0]?.status !== 'failed' || !executionQuery.data.tasks?.some((item) => item.taskId === 1)) {
+    throw new Error(`Project execution query missed failure, dependency, or task facts: ${JSON.stringify(executionQuery.data)}`)
+  }
+  const tenantQuery = await toolRequest('project-execution', { planId: plan.id, status: 'all' }, { ...toolHeaders, ...agentScopeHeaders('tenant-b', 'project-execution-tenant', 'admin') })
+  if (!tenantQuery.response.ok || tenantQuery.data.plans?.length !== 0) throw new Error(`Project execution leaked across workspaces: ${JSON.stringify(tenantQuery.data)}`)
+  const clientQuery = await toolRequest('project-execution', { planId: plan.id, status: 'all' }, { ...toolHeaders, ...agentScopeHeaders('default', 'project-execution-client', 'client') })
+  if (![401, 403].includes(clientQuery.response.status)) throw new Error(`Client role accessed internal execution plans: ${JSON.stringify(clientQuery.data)}`)
+  const directComplete = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'complete_step', stepId: plan.steps[0].id })
+  if (directComplete.response.status !== 400) throw new Error(`Agent exposed direct business completion: ${JSON.stringify(directComplete.data)}`)
+  const retryPreview = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'retry_step', stepId: plan.steps[0].id })
+  if (!retryPreview.response.ok || !retryPreview.data.confirmationToken) throw new Error(`Agent retry preview failed: ${JSON.stringify(retryPreview.data)}`)
+  plan = (await workflowExecute('manage-task-plan', retryPreview.data.confirmationToken)).plan
+  if (plan.status !== 'active' || plan.steps[0].status !== 'ready') throw new Error(`Agent retry did not restore failed step: ${JSON.stringify(plan)}`)
+
+  const stalePausePreview = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'pause' })
+  const pausedByUi = await updatePlan(plan, 'pause')
+  const stalePause = await toolRequest('manage-task-plan', { confirmationToken: stalePausePreview.data.confirmationToken })
+  if (stalePause.response.status !== 409 || !String(stalePause.data.error || '').includes('发生变化')) throw new Error(`Stale plan confirmation was accepted: ${JSON.stringify(stalePause.data)}`)
+  const resumePreview = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'resume' })
+  plan = (await workflowExecute('manage-task-plan', resumePreview.data.confirmationToken)).plan
+  if (plan.status !== 'active' || plan.pausedAt) throw new Error(`Agent resume was not persisted: ${JSON.stringify(plan)}`)
+  const pausePreview = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'pause' })
+  const paused = await workflowExecute('manage-task-plan', pausePreview.data.confirmationToken)
+  if (paused.plan?.status !== 'paused' || !paused.plan?.pausedAt) throw new Error(`Agent pause was not persisted: ${JSON.stringify(paused)}`)
+  const replayPause = await toolRequest('manage-task-plan', { confirmationToken: pausePreview.data.confirmationToken })
+  if (replayPause.response.status !== 409 || !String(replayPause.data.error || '').includes('已使用')) throw new Error(`Plan confirmation token replay was accepted: ${JSON.stringify(replayPause.data)}`)
+  const finalResumePreview = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'resume' })
+  plan = (await workflowExecute('manage-task-plan', finalResumePreview.data.confirmationToken)).plan
   const progressed = await progressPlan('completed')
   if (progressed.updated !== 1) throw new Error(`Agent plan completion did not persist: ${JSON.stringify(progressed)}`)
   plan = (await (await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })).json()).plans.find((item) => item.id === created.plan.id)
@@ -1955,6 +1989,14 @@ async function runAgentOrchestrationCheck(cookie) {
   plan = await updatePlan(plan, 'start_compensation', plan.steps[0].id)
   plan = await updatePlan(plan, 'complete_compensation', plan.steps[0].id)
   if (plan.status !== 'compensated') throw new Error('Agent plan compensation did not complete')
+
+  const cancellableResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/create-task-plan', { method: 'POST', headers: toolHeaders, body: JSON.stringify({ conversationId: `cancel-${crypto.randomUUID()}`, taskId: 1, goal: '验证安全取消', steps: [{ key: 'one', label: '第一步', action: 'append_progress' }, { key: 'two', label: '第二步', action: 'complete_acceptance' }] }) })
+  const cancellable = await cancellableResponse.json().catch(() => ({}))
+  const cancelPreview = await toolRequest('manage-task-plan-preview', { planId: cancellable.plan?.id, action: 'cancel' })
+  const cancelled = await workflowExecute('manage-task-plan', cancelPreview.data.confirmationToken)
+  if (cancelled.plan?.status !== 'cancelled') throw new Error(`Agent plan cancellation failed: ${JSON.stringify(cancelled)}`)
+  const crossWorkspacePreview = await toolRequest('manage-task-plan-preview', { planId: cancellable.plan?.id, action: 'cancel' }, { ...toolHeaders, ...agentScopeHeaders('tenant-b', 'project-execution-write-tenant', 'admin') })
+  if (crossWorkspacePreview.response.status !== 404) throw new Error(`Cross-workspace plan management found a foreign plan: ${JSON.stringify(crossWorkspacePreview.data)}`)
 
   const updateMemory = async (payload) => {
     const response = await fetch('http://127.0.0.1:8798/api/ai/task-memories/1', {
@@ -2016,7 +2058,7 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!metricsResponse.ok || typeof metrics.summary?.promptTokens !== 'number' || typeof metrics.summary?.completionTokens !== 'number' || !Array.isArray(metrics.models) || !metrics.tuning) {
     throw new Error(`Agent cost and tuning metrics are incomplete: ${JSON.stringify(metrics)}`)
   }
-  process.stdout.write('Persistent Agent plan, step progression, task memory, and enterprise layered memory checks passed.\n')
+  process.stdout.write('Persistent Agent plan, deterministic execution overview, signed pause/resume/retry/cancel management, task memory, and enterprise layered memory checks passed.\n')
 }
 
 async function runBackgroundAnalysisCheck(cookie) {

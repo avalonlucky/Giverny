@@ -102,9 +102,10 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   const onlyReadsAcceptanceAttachment = readsAttachment
     && !/(?:新建|创建|记录|修改|更新|改成|追加|标记|删除).*(?:附件|文件)|验收(?:任务|了|通过|完成)/.test(value)
   const readsAcceptanceState = /(?:已|待|未)验收|验收(?:了多少|情况|状态)|多少.*验收/.test(value)
-  const writesBusinessData = !asksWorkflowHelp && !onlyReadsAcceptanceAttachment && !readsAcceptanceState && (writeAction.test(value) && writeObject.test(value))
+  const writesPlanManagement = /(?:暂停|恢复|继续|重试|取消).*(?:执行计划|任务计划|项目计划)|(?:执行计划|任务计划|项目计划).*(?:暂停|恢复|继续|重试|取消)/.test(value)
+  const writesBusinessData = writesPlanManagement || (!asksWorkflowHelp && !onlyReadsAcceptanceAttachment && !readsAcceptanceState && (writeAction.test(value) && writeObject.test(value))
     && (/(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除).*(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/.test(value)
-      || /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期).*(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/.test(value))
+      || /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期).*(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/.test(value)))
   if (writesBusinessData) add('write')
   const asksStoredMemory = /(?:记忆|之前记住|历史决策|组织规则|公司规则|团队规则|项目约定|长期规则)/.test(value)
   if (!asksStoredMemory && /(?:用户|需求人|合作|客户).*(?:画像|特征|偏好|报价|排期建议)|(?:画像).*(?:用户|需求人|合作|客户)/.test(value)) add('person_profile')
@@ -156,6 +157,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     && /(?:这个任务|那个任务|这个项目|那个项目|刚才那个|上述任务|当前任务).*(?:详情|进展|状态|等|卡|为什么|现在)/.test(turn.question)
   const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
   const asksProactiveWork = /(?:主动事项|风险待办|优先级|最该|优先处理|提醒处理效果|误报率|解决率)/.test(turn.question)
+  const asksProjectExecution = /(?:执行计划|任务计划|项目计划|计划步骤|当前步骤|下一步|做到哪一步|为什么.{0,8}(?:卡住|阻塞)|依赖.{0,8}(?:什么|谁)|失败步骤)/.test(turn.question)
   const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(turn.question)
     && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(turn.question)
   const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
@@ -182,6 +184,10 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('query_proactive_work')
     issues.push('主动工作结论没有读取优先级、证据和处理效果。')
   }
+  if (asksProjectExecution && !hasDeterministicTool('query_project_execution')) {
+    requiredTools.push('query_project_execution')
+    issues.push('项目执行进度、依赖或下一步结论没有读取已保存的执行计划。')
+  }
   if (asksEnterpriseMemory && !hasDeterministicTool('query_enterprise_memory')) {
     requiredTools.push('query_enterprise_memory')
     issues.push('组织、合作伙伴或项目记忆结论没有读取企业分层记忆及来源。')
@@ -195,7 +201,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('inspect_attachment_evidence')
     issues.push('附件内容或质量结论没有读取可引用的文件证据。')
   }
-  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work')) {
+  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work', 'query_project_execution')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')

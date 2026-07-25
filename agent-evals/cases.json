@@ -87,6 +87,7 @@
 
     { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
     { "id": "orchestration-02", "category": "orchestration", "prompt": "根据长期记忆告诉我任务#1还有哪些未解决问题", "expect": { "tools": ["get_task_memory"] } },
+    { "id": "orchestration-03", "category": "orchestration", "prompt": "任务#1的执行计划做到哪一步了，下一步是什么，为什么会阻塞？", "expect": { "tools": ["query_project_execution"] } },
     { "id": "proactive-01", "category": "proactive_work", "prompt": "现在最该优先处理哪些风险待办？也告诉我主动事项的解决率", "expect": { "tools": ["query_proactive_work"] } },
     { "id": "agenda-01", "category": "agenda", "prompt": "把我本周的日程、到期任务和提醒整理出来", "expect": { "tools": ["query_agenda"] } },
     { "id": "agenda-02", "category": "agenda", "prompt": "明天什么时候有空安排一个两小时任务？", "expect": { "tools": ["query_agenda"] } },

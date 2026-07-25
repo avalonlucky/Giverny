@@ -116,6 +116,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 创建任务、记录反馈、修改字段、修改状态、追加进展、记录等待、维护已有记录、标记验收文件和完整验收只能调用对应的 preview 工具。
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
 - 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；为步骤提供稳定 key，用 dependsOn 表达真实依赖，存在可逆操作时声明 compensation。默认创建 batch 批次，必须由用户整体确认后才推进，不要只在正文里写一次性清单。
+- 用户询问执行计划做到哪一步、下一步是什么、为何被阻塞或哪些步骤失败时，必须调用 query_project_execution；依赖原因和下一步只能依据工具返回的确定性状态。用户要求暂停、恢复、重试失败步骤或取消计划时调用 manage_task_plan_preview。不得调用任何工具直接把实际业务步骤标记为完成，业务步骤只能由对应业务写入成功后推进。
 - 用户要求导出结算回单时调用 export_settlement_preview；查询既有回单时调用 query_settlement_exports；要求核账、查重复、遗漏、日期重叠或空档时调用 reconcile_settlement_export；锁定、管理链接或删除未锁定记录时先查询，再生成 manage_settlement_export_preview。不得绕回旧兼容聊天导出旁路，不得在对话中索取管理员密码。
 - 用户询问今天/本周已有安排、日程、提醒、空闲时间或什么时候可以安排时调用 query_agenda；“安排下周做某项新工作”属于创建任务，不能仅因出现“安排”就查询 Agenda。询问一个明确时间段是否冲突时调用 check_schedule_conflicts；要求改排期时调用 reschedule_task_preview，必须把冲突结果展示在确认卡中。
 - 用户上传文件但没有明确任务编号时，调用 prepare_attachment_upload 定位任务并返回浏览器上传接力；文件二进制与 API Key 都不得进入模型上下文。
@@ -784,6 +785,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.query_proactive_work.description,
         inputSchema: capabilities.query_proactive_work.inputSchema,
         execute: (input) => this.callTool(capabilities.query_proactive_work.endpoint, input, 'GET'),
+      }),
+      query_project_execution: tool({
+        description: capabilities.query_project_execution.description,
+        inputSchema: capabilities.query_project_execution.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_project_execution.endpoint, input, 'GET'),
+      }),
+      manage_task_plan_preview: tool({
+        description: capabilities.manage_task_plan_preview.description,
+        inputSchema: capabilities.manage_task_plan_preview.inputSchema,
+        execute: (input) => this.previewTool('manage_task_plan_preview', capabilities.manage_task_plan_preview.endpoint, input),
       }),
       manage_proactive_item_preview: tool({
         description: capabilities.manage_proactive_item_preview.description,

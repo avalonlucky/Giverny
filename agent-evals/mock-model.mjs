@@ -218,6 +218,8 @@ function chooseTool(messages) {
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
   if (/最该.*处理|风险待办|主动事项|提醒处理效果|解决率|误报率/.test(text)) return toolCall('query_proactive_work', { status: 'active', limit: 50 })
+  if (/(?:暂停|恢复|重试|取消).*(?:执行计划|任务计划|项目计划)/.test(text)) return toolCall('manage_task_plan_preview', { planId: 'eval-plan', action: text.includes('恢复') ? 'resume' : text.includes('重试') ? 'retry_step' : text.includes('取消') ? 'cancel' : 'pause', stepId: text.includes('重试') ? 'eval-plan:progress' : undefined })
+  if (/(?:执行计划|任务计划|项目计划|计划步骤|当前步骤|下一步|做到哪一步|为什么.{0,8}(?:卡住|阻塞)|失败步骤)/.test(text)) return toolCall('query_project_execution', { taskId: 1, status: 'open', limit: 20 })
   if (/(?:日程|安排|空闲|空档|有空|时间槽|什么时候能安排|本周计划|今天计划|明天计划)/.test(text) && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(text)) return toolCall('query_agenda', { startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: /两小时|2小时/.test(text) ? 120 : undefined, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 })
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {
     return toolCall('start_monthly_review', { month: /6\s*月|2026-06/.test(text) ? '2026-06' : '2026-07' })

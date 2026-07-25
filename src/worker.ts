@@ -4881,6 +4881,157 @@ async function agentManageProactiveTool(env: Env, request: Request) {
   return agentOk({ tool: 'manage_proactive_item', mode: 'execute', item: updated ? toAgentProactiveItem(updated) : null, summary: await agentProactiveSummary(env, workspaceId) })
 }
 
+function projectExecutionPlanSummary(row: DbAgentTaskPlan) {
+  const steps = executionStepsForPlan(row)
+  const byId = new Map(steps.map((step) => [step.id, step]))
+  const blockers = steps.filter((step) => step.status === 'blocked').map((step) => ({
+    stepId: step.id,
+    label: step.label,
+    dependencies: step.dependsOn.map((id) => {
+      const dependency = byId.get(id)
+      return { stepId: id, label: dependency?.label || id, status: dependency?.status || 'missing' }
+    }).filter((dependency) => !['completed', 'skipped', 'compensated'].includes(dependency.status)),
+  }))
+  const nextSteps = steps.filter((step) => ['ready', 'running', 'compensation_pending', 'compensating'].includes(step.status))
+  const currentStep = steps.find((step) => ['running', 'failed', 'compensating'].includes(step.status))
+    || nextSteps[0]
+    || steps[Number(row.current_step) || 0]
+    || null
+  const count = (status: string) => steps.filter((step) => step.status === status).length
+  return {
+    ...toAgentTaskPlan(row),
+    currentStep,
+    nextSteps,
+    failedSteps: steps.filter((step) => step.status === 'failed'),
+    blockers,
+    progress: {
+      total: steps.length,
+      completed: steps.filter((step) => ['completed', 'skipped', 'compensated'].includes(step.status)).length,
+      ready: count('ready'),
+      running: count('running') + count('compensating'),
+      blocked: count('blocked'),
+      failed: count('failed'),
+    },
+  }
+}
+
+async function agentQueryProjectExecutionTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentWorkspaceColumns(env)
+  await ensureAgentProactiveTable(env)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const taskId = Number(body.taskId) || 0
+  const planId = agentString(body.planId, 160)
+  const requestedStatus = agentString(body.status, 20) || 'active'
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 50)
+  const filters = ['workspace_id = ?']
+  const values: unknown[] = [workspaceId]
+  if (planId) { filters.push('id = ?'); values.push(planId) }
+  if (taskId > 0) { filters.push('task_id = ?'); values.push(String(taskId)) }
+  if (requestedStatus === 'active') filters.push("status IN ('awaiting_confirmation', 'active', 'paused', 'compensating')")
+  else if (requestedStatus === 'open') filters.push("status IN ('awaiting_confirmation', 'active', 'paused', 'failed', 'compensating')")
+  else if (requestedStatus !== 'all') return agentFail('不支持的计划状态范围', 400)
+  values.push(limit)
+  const rows = await env.DB.prepare(
+    `SELECT * FROM agent_task_plans WHERE ${filters.join(' AND ')}
+     ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'failed' THEN 1 WHEN 'paused' THEN 2 WHEN 'awaiting_confirmation' THEN 3 ELSE 4 END,
+       updated_at DESC LIMIT ?`,
+  ).bind(...values).all<DbAgentTaskPlan>()
+  const plans = (rows.results || []).map(projectExecutionPlanSummary)
+  const relatedTaskIds = [...new Set(plans.map((plan) => Number(plan.taskId) || 0).filter(Boolean))]
+  if (taskId > 0 && !relatedTaskIds.includes(taskId)) relatedTaskIds.push(taskId)
+  const tasks = [] as Array<Record<string, unknown>>
+  const reminders = [] as Array<Record<string, unknown>>
+  const risks = [] as Array<Record<string, unknown>>
+  for (const id of relatedTaskIds.slice(0, 50)) {
+    const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(id), workspaceId).first<DbTask>()
+    if (task) tasks.push({ taskId: id, title: task.title, status: task.status, progress: Number(task.progress) || 0, startDate: task.start_date || '', endDate: task.estimated_delivery_date || '', activeWaiting: agentWaitingRecords(task).filter((entry) => entry.active) })
+    const reminderRows = await env.DB.prepare("SELECT id, goal, next_action_at FROM agent_task_plans WHERE workspace_id = ? AND task_id = ? AND kind = 'reminder' AND status = 'active' ORDER BY next_action_at ASC LIMIT 10").bind(workspaceId, String(id)).all<{ id: string; goal: string; next_action_at: string | null }>()
+    reminders.push(...(reminderRows.results || []).map((row) => ({ id: row.id, taskId: id, goal: row.goal, remindAt: row.next_action_at || '' })))
+    const riskRows = await env.DB.prepare("SELECT id, task_id, priority, title, recommendation, status, last_seen_at FROM agent_proactive_items WHERE workspace_id = ? AND task_id = ? AND status IN ('open', 'snoozed') ORDER BY CASE priority WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC LIMIT 10").bind(workspaceId, String(id)).all<Record<string, string>>()
+    risks.push(...(riskRows.results || []).map((row) => ({ id: row.id, taskId: Number(row.task_id), priority: row.priority, title: row.title, recommendation: row.recommendation, status: row.status, lastSeenAt: row.last_seen_at })))
+  }
+  return agentOk({
+    tool: 'query_project_execution',
+    scope: { taskId: taskId || undefined, planId: planId || undefined, status: requestedStatus },
+    summary: { planCount: plans.length, activeCount: plans.filter((plan) => plan.status === 'active').length, pausedCount: plans.filter((plan) => plan.status === 'paused').length, failedCount: plans.filter((plan) => plan.status === 'failed').length, blockedStepCount: plans.reduce((sum, plan) => sum + plan.blockers.length, 0) },
+    plans, tasks, reminders, risks,
+    guardrail: '执行计划只反映编排状态；实际业务步骤必须由对应业务工具成功写入后才能完成。',
+  })
+}
+
+function validateAgentPlanManagement(row: DbAgentTaskPlan, action: string, stepId: string) {
+  const steps = executionStepsForPlan(row)
+  if (action === 'pause' && row.status !== 'active') throw new Error('只有执行中的计划可以暂停')
+  if (action === 'resume' && row.status !== 'paused') throw new Error('只有已暂停的计划可以恢复')
+  if (action === 'retry_step') {
+    if (!stepId) throw new Error('重试失败步骤时必须提供 stepId')
+    if (row.status !== 'failed') throw new Error('只有失败计划可以重试步骤')
+    if (!steps.some((step) => step.id === stepId && step.status === 'failed')) throw new Error('只有该计划中的失败步骤可以重试')
+  }
+  if (action === 'cancel' && ['completed', 'compensated', 'cancelled'].includes(row.status)) throw new Error('已经结束的计划不能取消')
+  return steps
+}
+
+async function agentManageTaskPlanPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentWorkspaceColumns(env)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const planId = agentString(body.planId, 160)
+  const action = agentString(body.action, 30)
+  const stepId = agentString(body.stepId, 220)
+  if (!['pause', 'resume', 'retry_step', 'cancel'].includes(action)) return agentFail('不支持的执行计划操作', 400)
+  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(planId, workspaceId).first<DbAgentTaskPlan>()
+  if (!row) return agentFail('任务计划不存在', 404)
+  let steps
+  try { steps = validateAgentPlanManagement(row, action, stepId) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
+  const selectedStep = stepId ? steps.find((step) => step.id === stepId) : undefined
+  const snapshot = { revision: Number(row.revision) || 1, status: row.status, updatedAt: row.updated_at, step: selectedStep ? { id: selectedStep.id, status: selectedStep.status, attempts: selectedStep.attempts, error: selectedStep.error || '' } : null }
+  return agentPreview(env, request, 'manage_task_plan_preview', {
+    planId: row.id, action, stepId: stepId || undefined, taskId: Number(row.task_id) || undefined, goal: row.goal,
+    before: snapshot, snapshotChecksum: await scheduleSnapshotChecksum(snapshot),
+  }, [], action === 'cancel' ? ['取消只终止后续编排，不会把已经写入的业务数据回滚。'] : [])
+}
+
+async function agentManageTaskPlanTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_task_plan', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  await ensureAgentWorkspaceColumns(env)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const planId = agentString(draft.planId, 160)
+  const action = agentString(draft.action, 30)
+  const stepId = agentString(draft.stepId, 220)
+  const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(planId, workspaceId).first<DbAgentTaskPlan>()
+  if (!row) return agentFail('任务计划不存在', 404)
+  const before = typeof draft.before === 'object' && draft.before ? draft.before as Record<string, unknown> : {}
+  if (Number(before.revision) !== Number(row.revision)) return agentFail('执行计划在确认前已发生变化，请重新预览', 409)
+  let steps
+  try { steps = validateAgentPlanManagement(row, action, stepId) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
+  const selectedStep = stepId ? steps.find((step) => step.id === stepId) : undefined
+  const currentSnapshot = { revision: Number(row.revision) || 1, status: row.status, updatedAt: row.updated_at, step: selectedStep ? { id: selectedStep.id, status: selectedStep.status, attempts: selectedStep.attempts, error: selectedStep.error || '' } : null }
+  if (agentString(draft.snapshotChecksum, 100) !== await scheduleSnapshotChecksum(currentSnapshot)) return agentFail('执行计划在确认前已发生变化，请重新预览', 409)
+  let status: AgentExecutionPlanStatus = row.status
+  let pausedAt = row.paused_at
+  let failedAt = row.failed_at
+  let errorMessage = row.error_message
+  if (action === 'pause') { status = 'paused'; pausedAt = nowIso() }
+  if (action === 'resume') { status = executionPlanStatus(steps); pausedAt = null }
+  if (action === 'retry_step') { steps = retryExecutionStep(steps, stepId); status = executionPlanStatus(steps); failedAt = null; errorMessage = null }
+  if (action === 'cancel') { status = 'cancelled'; pausedAt = null }
+  const result = await env.DB.prepare(
+    `UPDATE agent_task_plans SET steps_json = ?, current_step = ?, status = ?, paused_at = ?, failed_at = ?, error_message = ?,
+     completed_at = NULL, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ? AND revision = ?`,
+  ).bind(JSON.stringify(steps), nextExecutionStepIndex(steps), status, pausedAt, failedAt, errorMessage, row.id, workspaceId, Number(row.revision) || 1).run()
+  if (Number(result.meta?.changes || 0) !== 1) return agentFail('执行计划在确认时被其他会话更新，请重新预览', 409)
+  const updated = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(row.id, workspaceId).first<DbAgentTaskPlan>()
+  await audit(env, agentCapabilityRegistry.manage_task_plan.policy.auditEvent, 'agent_plan', row.id, { action, stepId: stepId || null, beforeRevision: Number(row.revision) || 1, afterRevision: Number(updated?.revision) || Number(row.revision) + 1, status })
+  return agentOk({ tool: 'manage_task_plan', mode: 'execute', plan: updated ? projectExecutionPlanSummary(updated) : null })
+}
+
 async function updateAgentTaskPlan(env: Env, id: string, request: Request, legacyAction?: 'read' | 'cancel') {
   const body = legacyAction ? {} : await request.json().catch(() => ({})) as { action?: string; stepId?: string; error?: string; revision?: number }
   const action = legacyAction || agentString(body.action, 40)
@@ -8052,6 +8203,9 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/proactive-work' && (request.method === 'POST' || request.method === 'GET')) return agentQueryProactiveWorkTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-proactive-item-preview' && request.method === 'POST') return agentManageProactivePreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-proactive-item' && request.method === 'POST') return agentManageProactiveTool(env, request)
+  if (url.pathname === '/api/agent/tools/project-execution' && (request.method === 'POST' || request.method === 'GET')) return agentQueryProjectExecutionTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-task-plan-preview' && request.method === 'POST') return agentManageTaskPlanPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-task-plan' && request.method === 'POST') return agentManageTaskPlanTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route-preview' && request.method === 'POST') return agentConfigureAiRoutePreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route' && request.method === 'POST') return agentConfigureAiRouteTool(env, request)
   if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {

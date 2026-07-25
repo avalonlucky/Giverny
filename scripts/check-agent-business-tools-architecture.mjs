@@ -24,6 +24,9 @@ for (const symbol of [
   'agentScheduleReminderTool',
   'agentConfigureAiRoutePreviewTool',
   'agentConfigureAiRouteTool',
+  'agentQueryProjectExecutionTool',
+  'agentManageTaskPlanPreviewTool',
+  'agentManageTaskPlanTool',
 ]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 
 assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
@@ -45,5 +48,9 @@ assert.match(chat, /上传接力返回的文件清单与当前附件不一致/)
 assert.match(alice, /uploadHandoff = rawHandoff/)
 assert.match(worker, /kind: 'reminder'/)
 assert.match(worker, /isLockedReportMonth\(env, task\.settlement_month, workspaceId\)/)
+assert.match(worker, /执行计划只反映编排状态/)
+assert.match(worker, /执行计划在确认前已发生变化，请重新预览/)
+assert.match(worker, /action === 'retry_step'/)
+assert.doesNotMatch(registry, /manage_task_plan_preview[\s\S]{0,1200}complete_step/)
 
 console.log('Agent business tool architecture guard passed.')

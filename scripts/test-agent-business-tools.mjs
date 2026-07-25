@@ -11,6 +11,7 @@ const previewPairs = [
   ['reschedule_task_preview', 'reschedule_task'],
   ['schedule_reminder_preview', 'schedule_reminder'],
   ['configure_ai_route_preview', 'configure_ai_route'],
+  ['manage_task_plan_preview', 'manage_task_plan'],
 ]
 
 for (const [previewName, executeName] of previewPairs) {
@@ -44,6 +45,10 @@ assert.equal(agentCapabilityAllows('schedule-conflicts', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('schedule-conflicts', 'client', 'GET'), false)
 assert.equal(agentCapabilityAllows('agenda', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('agenda', 'client', 'GET'), false)
+assert.equal(agentCapabilityAllows('project-execution', 'viewer', 'GET'), true)
+assert.equal(agentCapabilityAllows('project-execution', 'client', 'GET'), false)
+assert.equal(agentCapabilityAllows('manage-task-plan-preview', 'collaborator', 'POST'), true)
+assert.equal(agentCapabilityAllows('manage-task-plan-preview', 'viewer', 'POST'), false)
 assert.equal(agentCapabilityAllows('settlement-exports', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-reconciliation', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-exports', 'client', 'GET'), false)
@@ -73,5 +78,8 @@ assert.equal(agentCapabilityRegistry.reconcile_settlement_export.inputSchema.saf
 assert.equal(agentCapabilityRegistry.reconcile_settlement_export.inputSchema.safeParse({ startDate: '2026-07-01', endDate: '2026-07-31' }).success, true)
 assert.equal(agentCapabilityRegistry.manage_settlement_export_preview.inputSchema.safeParse({ exportId: 'settlement-1', action: 'delete_unlocked', password: 'do-not-accept' }).success, true)
 assert.equal('password' in agentCapabilityRegistry.manage_settlement_export_preview.inputSchema.parse({ exportId: 'settlement-1', action: 'delete_unlocked', password: 'do-not-accept' }), false)
+assert.equal(agentCapabilityRegistry.manage_task_plan_preview.inputSchema.safeParse({ planId: 'plan-1', action: 'pause' }).success, true)
+assert.equal(agentCapabilityRegistry.manage_task_plan_preview.inputSchema.safeParse({ planId: 'plan-1', action: 'retry_step' }).success, true, 'stepId 由 Worker 按动作做跨字段校验')
+assert.equal(agentCapabilityRegistry.manage_task_plan_preview.inputSchema.safeParse({ planId: 'plan-1', action: 'complete_step', stepId: 'plan-1:step-1' }).success, false)
 
 console.log('Agent business tool deterministic tests passed.')

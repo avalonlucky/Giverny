@@ -36,6 +36,7 @@ assert.equal(inferAgentIntent('打开封套任务的验收附件'), 'attachment'
 assert.equal(inferAgentIntent('任务#1现在卡在哪里'), 'task_data')
 assert.equal(inferAgentIntent('我本周有哪些安排'), 'task_data')
 assert.equal(inferAgentIntent('明天下午有空安排一个两小时任务吗'), 'task_data')
+assert.equal(inferAgentIntent('暂停这个项目执行计划'), 'write')
 assert.notEqual(inferAgentIntent('安排下周一做三张社媒海报，预估4.5小时'), 'task_data')
 assert.equal(inferAgentIntent('把这个任务的进度修改成80%'), 'write')
 assert.equal(inferAgentIntent('帮我润色一句话'), 'general')
@@ -89,6 +90,10 @@ const missingAgenda = completeAgentTurn(createAgentTurn({ principal, question: '
 assert.ok(missingAgenda.verification.requiredTools.includes('query_agenda'))
 const verifiedAgenda = { ...missingAgenda, plan: [call('query_agenda')], evidence: [evidence('query_agenda')] }
 assert.equal(verifyAgentAnswer(verifiedAgenda).passed, true)
+const missingProjectExecution = completeAgentTurn(createAgentTurn({ principal, question: '任务#1的执行计划做到哪一步，为什么阻塞？', intent: 'task_data' }), '应该快完成了')
+assert.ok(missingProjectExecution.verification.requiredTools.includes('query_project_execution'))
+const verifiedProjectExecution = { ...missingProjectExecution, plan: [call('query_project_execution')], evidence: [evidence('query_project_execution')] }
+assert.equal(verifyAgentAnswer(verifiedProjectExecution).passed, true)
 const missingEnterpriseMemory = completeAgentTurn(createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), '他们喜欢简洁设计')
 assert.ok(missingEnterpriseMemory.verification.requiredTools.includes('query_enterprise_memory'))
 const verifiedEnterpriseMemory = completeAgentTurn({ ...createAgentTurn({ principal, question: '昂楷这个合作伙伴之前记住了哪些长期偏好？', intent: 'knowledge' }), plan: [call('query_enterprise_memory')], evidence: [evidence('query_enterprise_memory')] }, '已查询')
@@ -176,4 +181,4 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 52 assertions passed')
+console.log('Agent orchestrator deterministic tests: 55 assertions passed')
