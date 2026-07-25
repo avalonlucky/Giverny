@@ -1,6 +1,7 @@
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightPeriodType, Task, TaskUpdate, TaxMode } from '../types/domain'
 import type { DesignTypeGroup } from '../config/appConfig'
 import type { AgentEnterpriseMemory, AgentEnterpriseMemorySummary, AgentFailureCase, AgentProactiveItem, AgentProactiveSummary, AgentTaskMemory, AgentTaskPlan } from '../types/agent'
+import type { AgentSloObjective, AgentSloPolicy, AgentSloStatus, EmergencyFallbackCategory } from '../agentGovernance'
 import type { ReceiptExcelOptions } from './receiptExcel'
 import { reportClientError } from './clientErrorReporter'
 
@@ -188,6 +189,46 @@ export type AiOperationsCenter = {
     role: string
     principalId: string
     foundationReady: boolean
+  }
+  governance: {
+    version: string
+    slo: {
+      status: AgentSloStatus
+      policy: AgentSloPolicy
+      objectives: AgentSloObjective[]
+      errorBudget: {
+        allowedErrors: number
+        actualErrors: number
+        consumedPercent: number
+        remainingPercent: number
+      }
+      releaseGate: 'pass' | 'observe' | 'block'
+    }
+    fallbackPolicy: {
+      mode: 'emergency-only'
+      targetPrimaryModelRate: number
+      fallbackRuns: number
+      compliantRuns: number
+      violations: number
+      recent: Array<{
+        allowed: boolean
+        category: EmergencyFallbackCategory
+        attempts: number
+        reason: string
+        model: string
+        createdAt: string
+      }>
+    }
+    release: {
+      status: 'pass' | 'observe' | 'block'
+      strategy: 'candidate-smoke-test-then-promote'
+      automaticRollback: boolean
+    }
+    integrations: {
+      incidentWebhook: boolean
+      signedDelivery: boolean
+      containsBusinessContent: false
+    }
   }
   routing: {
     totalRuns: number

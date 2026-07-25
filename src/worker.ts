@@ -1,4 +1,4 @@
-import { defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
+import { appVersion, defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { getAgentByName } from 'agents'
 import { createMcpHandler } from 'agents/mcp'
@@ -15,6 +15,7 @@ import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
 import { buildAgentProactiveSignals, type AgentProactivePriority, type AgentProactiveSignalType } from './agentProactive'
+import { evaluateAgentSlo, evaluateEmergencyFallback } from './agentGovernance'
 import {
   approveExecutionBatch,
   beginExecutionCompensation,
@@ -108,6 +109,8 @@ type Env = {
   RESET_EMAIL_FROM?: string
   TURNSTILE_SECRET_KEY?: string
   TAVILY_API_KEY?: string
+  GOVERNANCE_WEBHOOK_URL?: string
+  GOVERNANCE_WEBHOOK_SECRET?: string
   AI?: WorkersAiBinding
   WORKERS_AI_MODEL?: string
   VECTORIZE?: VectorizeBinding
@@ -1715,7 +1718,7 @@ async function maybeRefreshOpenRouterFreeModels(env: Env): Promise<void> {
   }
 }
 
-// 统一文本生成链路：文字主模型 → 文字备用模型 → Workers AI 兜底，任一外部厂商全挂时 AI 也不全死。
+// 统一文本生成链路：主模型必须先完成同模型重试，只有明确故障才进入应急链路。
 async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 64, signal?: AbortSignal, skipActiveOverride = false): Promise<string> {
   if (!skipActiveOverride) {
     const activeChoice = await getActiveChatModelChoice(env)
@@ -1737,40 +1740,49 @@ async function callTextWithFallback(env: Env, prompt: string, maxOutputTokens = 
       // 继续使用设置中的文字主 / 备用路线。
     }
   }
-  try {
-    return await callWithAiTimeout(
-      async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textPrimary', !skipActiveOverride), prompt, maxOutputTokens, requestSignal),
-      30_000,
-      '文字主模型响应超时',
-      signal,
-    )
-  } catch (primaryError) {
-    if (signal?.aborted) {
-      throw primaryError
-    }
+  const primaryEndpoint = await resolveAiEndpoint(env, 'textPrimary', !skipActiveOverride)
+  const primaryErrors: unknown[] = []
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      return await callWithAiTimeout(
-        async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textFallback', !skipActiveOverride), prompt, maxOutputTokens, requestSignal),
+      const output = await callWithAiTimeout(
+        (requestSignal) => callAiEndpointText(primaryEndpoint, prompt, maxOutputTokens, requestSignal),
         30_000,
-        '文字备用模型响应超时',
+        `文字主模型第 ${attempt} 次响应超时`,
         signal,
       )
-    } catch (fallbackError) {
-      if (signal?.aborted) {
-        throw fallbackError
-      }
-      if (env.AI) {
-        try {
-          const output = await callWorkersAiText(env, prompt, maxOutputTokens)
-          if (output) {
-            return output
-          }
-        } catch {
-          // Workers AI 也失败则抛出上一层错误
-        }
-      }
-      throw fallbackError instanceof Error ? fallbackError : primaryError
+      if (output.trim()) return output
+      throw new Error('文字主模型未返回内容')
+    } catch (error) {
+      primaryErrors.push(error)
+      if (signal?.aborted) throw error
     }
+  }
+  const primaryReason = primaryErrors.map(describeAiCallError).join('；重试：')
+  const fallbackDecision = evaluateEmergencyFallback(primaryReason, primaryErrors.length)
+  if (!fallbackDecision.allowed) {
+    throw new Error(`主模型尚未达到应急回退条件：${fallbackDecision.reason}`, { cause: primaryErrors.at(-1) })
+  }
+  await recordSelectedModelEmergencyFallback(env, primaryEndpoint.model, 'text', primaryReason, fallbackDecision.category, fallbackDecision.attempts)
+  try {
+    const output = await callWithAiTimeout(
+      async (requestSignal) => callAiEndpointText(await resolveAiEndpoint(env, 'textFallback', !skipActiveOverride), prompt, maxOutputTokens, requestSignal),
+      30_000,
+      '文字备用模型响应超时',
+      signal,
+    )
+    if (output.trim()) return output
+    throw new Error('文字备用模型未返回内容')
+  } catch (fallbackError) {
+    if (signal?.aborted) throw fallbackError
+    if (env.AI) {
+      try {
+        const output = await callWorkersAiText(env, prompt, maxOutputTokens)
+        if (output) return output
+      } catch {
+        // Workers AI 也失败则抛出备用模型错误。
+      }
+    }
+    throw fallbackError
   }
 }
 
@@ -2051,7 +2063,9 @@ async function callTextWithSelectedModel(
       throw new Error('模型重试后仍未返回内容', { cause: firstError })
     } catch (retryError) {
       const reason = `${describeAiCallError(firstError)}；重试：${describeAiCallError(retryError)}`
-      await recordSelectedModelEmergencyFallback(env, target.label, 'text', reason)
+      const decision = evaluateEmergencyFallback(reason, 2)
+      if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`, { cause: retryError })
+      await recordSelectedModelEmergencyFallback(env, target.label, 'text', reason, decision.category, decision.attempts)
       notes.push(`${target.label} 连续失败，已在迫不得已时启动应急备用模型。原因：${reason}`)
       const text = await callTextWithFallback(env, prompt, maxOutputTokens, undefined, true)
       return { text, modelLabel: '应急备用模型链路', fallbackUsed: true, notes }
@@ -2066,16 +2080,57 @@ function describeAiCallError(error: unknown) {
 async function recordSelectedModelEmergencyFallback(
   env: Env,
   modelLabel: string,
-  requestType: 'text' | 'structured_json',
+  requestType: 'text' | 'structured_json' | 'vision',
   reason: string,
+  category: string,
+  attempts: number,
 ) {
   console.warn(JSON.stringify({
     event: 'selected_model_emergency_fallback',
     model: modelLabel,
     requestType,
     reason,
+    category,
+    attempts,
   }))
-  await audit(env, 'emergency_fallback', 'ai_model', modelLabel, { requestType, reason }).catch(() => {})
+  await audit(env, 'emergency_fallback', 'ai_model', modelLabel, { requestType, reason, category, attempts }).catch(() => {})
+  await sendGovernanceIncident(env, {
+    event: 'agent.emergency_fallback',
+    version: appVersion,
+    model: modelLabel,
+    requestType,
+    category,
+    attempts,
+    occurredAt: nowIso(),
+  }).catch((error) => console.error('governance incident delivery failed', error))
+}
+
+async function sendGovernanceIncident(env: Env, payload: Record<string, string | number>) {
+  if (!env.GOVERNANCE_WEBHOOK_URL) return
+  if (!env.GOVERNANCE_WEBHOOK_SECRET) throw new Error('治理 Webhook 已配置地址，但缺少签名密钥')
+  const body = JSON.stringify(payload)
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(env.GOVERNANCE_WEBHOOK_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = Array.from(
+    new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('')
+  const response = await fetch(env.GOVERNANCE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-giverny-event': String(payload.event || 'agent.governance'),
+      'x-giverny-signature': `sha256=${signature}`,
+    },
+    body,
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`治理 Webhook 返回 HTTP ${response.status}`)
 }
 
 async function callTextFallbackJson<T extends object>(
@@ -2118,21 +2173,35 @@ ${JSON.stringify(payload)}`
     const endpoint = await resolveAiEndpoint(env, route, !skipActiveOverride)
     if (!endpoint.apiKey) {
       errors.push(`${route} 未配置 API Key`)
+      if (route === 'textPrimary') {
+        const decision = evaluateEmergencyFallback(`${route} 未配置 API Key`, 1)
+        if (!decision.allowed) return null
+        await recordSelectedModelEmergencyFallback(env, endpoint.model || route, 'structured_json', `${route} 未配置 API Key`, decision.category, decision.attempts)
+      }
       continue
     }
-    try {
-      const output = await callWithAiTimeout(
-        (signal) => callAiEndpointText(endpoint, prompt, maxOutputTokens, signal),
-        30_000,
-        `${route === 'textPrimary' ? '文字主模型' : '文字备用模型'}响应超时`,
-      )
-      const parsed = parseLooseJsonObject(output)
-      if (Object.keys(parsed).length > 0) {
-        return parsed as T
+    const routeErrors: string[] = []
+    const maxAttempts = route === 'textPrimary' ? 2 : 1
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const output = await callWithAiTimeout(
+          (signal) => callAiEndpointText(endpoint, prompt, maxOutputTokens, signal),
+          30_000,
+          `${route === 'textPrimary' ? '文字主模型' : '文字备用模型'}第 ${attempt} 次响应超时`,
+        )
+        const parsed = parseLooseJsonObject(output)
+        if (Object.keys(parsed).length > 0) return parsed as T
+        routeErrors.push(`${endpoint.model} 未返回可解析 JSON`)
+      } catch (error) {
+        routeErrors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
       }
-      errors.push(`${endpoint.model} 未返回可解析 JSON`)
-    } catch (error) {
-      errors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
+    }
+    errors.push(...routeErrors)
+    if (route === 'textPrimary') {
+      const reason = routeErrors.join('；重试：')
+      const decision = evaluateEmergencyFallback(reason, maxAttempts)
+      if (!decision.allowed) return null
+      await recordSelectedModelEmergencyFallback(env, endpoint.model, 'structured_json', reason, decision.category, decision.attempts)
     }
   }
   if (env.AI) {
@@ -2177,7 +2246,9 @@ ${JSON.stringify(payload)}`
     return Object.keys(parsed).length > 0 ? parsed as T : null
   }
   const emergencyFallback = async (reason: string) => {
-    await recordSelectedModelEmergencyFallback(env, target.label, 'structured_json', reason)
+    const decision = evaluateEmergencyFallback(reason, 2)
+    if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+    await recordSelectedModelEmergencyFallback(env, target.label, 'structured_json', reason, decision.category, decision.attempts)
     return callTextFallbackJson<T>(env, systemPrompt, payload, outputShape, outputBudget, true)
   }
   try {
@@ -2276,31 +2347,43 @@ async function callMultimodalWithSelectedModel(
     const target = await resolveChatModelTarget(env, choice)
     if (target.note) notes.push(target.note)
     if (selectedChatModelCanTryVision(choice, target) && target.kind === 'endpoint') {
-      try {
-        if (!target.endpoint.apiKey) throw new Error('模型 API Key 未配置')
-        const compatibleAssets = target.endpoint.provider === 'gemini'
-          ? assets
-          : assets.filter((asset) => asset.mimeType.startsWith('image/'))
-        if (!compatibleAssets.length) throw new Error('当前模型没有可读取的图片预览')
-        const text = await callWithAiTimeout(
-          (signal) => callAiEndpointMultimodal(
-            target.endpoint,
-            prompt,
-            compatibleAssets,
-            signal,
-            options.structuredJson ?? false,
-            options.maxOutputTokens ?? 3200,
-          ),
-          options.timeoutMs ?? 90_000,
-          `${target.label} 识图响应超时`,
-        )
-        if (text.trim()) return { text, modelLabel: target.label, fallbackUsed: false, notes }
-        throw new Error('模型未返回内容')
-      } catch (error) {
-        notes.push(`${target.label} 识图失败：${describeAiCallError(error)}；已回落到识图模型链路。`)
+      const compatibleAssets = target.endpoint.provider === 'gemini'
+        ? assets
+        : assets.filter((asset) => asset.mimeType.startsWith('image/'))
+      const errors: string[] = []
+      if (!target.endpoint.apiKey) errors.push('模型 API Key 未配置')
+      else if (!compatibleAssets.length) errors.push('当前模型没有可读取的图片预览')
+      else {
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            const text = await callWithAiTimeout(
+              (signal) => callAiEndpointMultimodal(
+                target.endpoint,
+                prompt,
+                compatibleAssets,
+                signal,
+                options.structuredJson ?? false,
+                options.maxOutputTokens ?? 3200,
+              ),
+              options.timeoutMs ?? 90_000,
+              `${target.label} 第 ${attempt} 次识图响应超时`,
+            )
+            if (text.trim()) return { text, modelLabel: target.label, fallbackUsed: false, notes }
+            errors.push('模型未返回内容')
+          } catch (error) {
+            errors.push(describeAiCallError(error))
+          }
+        }
       }
+      const reason = errors.join('；重试：')
+      const decision = evaluateEmergencyFallback(reason, compatibleAssets.length && target.endpoint.apiKey ? 2 : 1)
+      if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+      await recordSelectedModelEmergencyFallback(env, target.label, 'vision', reason, decision.category, decision.attempts)
+      notes.push(`${target.label} 识图连续失败，已启动应急识图模型。原因：${reason}`)
     } else {
-      notes.push(`${target.label} 未声明可用的识图能力，已使用识图模型链路。`)
+      const decision = evaluateEmergencyFallback('所选模型不支持当前识图能力', 1)
+      if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+      notes.push(`${target.label} 不支持当前识图能力，已使用专用识图模型。`)
     }
   }
   const fallback = await callMultimodalWithVisionFallbackResult(env, prompt, assets, options)
@@ -2323,34 +2406,54 @@ async function callMultimodalWithVisionFallbackResult(
     const endpoint = await resolveAiEndpoint(env, route)
     if (!endpoint.apiKey) {
       errors.push(`${route} 未配置 API Key`)
+      if (route === 'visionPrimary') {
+        const decision = evaluateEmergencyFallback(`${route} 未配置 API Key`, 1)
+        if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+        await recordSelectedModelEmergencyFallback(env, endpoint.model || route, 'vision', `${route} 未配置 API Key`, decision.category, decision.attempts)
+      }
       continue
     }
-    try {
-      const compatibleAssets = endpoint.provider === 'gemini'
-        ? assets
-        : assets.filter((asset) => asset.mimeType !== 'application/pdf')
-      if (compatibleAssets.length === 0) {
-        errors.push(`${endpoint.model} 不支持当前文件格式，且没有可用预览图`)
-        continue
+    const compatibleAssets = endpoint.provider === 'gemini'
+      ? assets
+      : assets.filter((asset) => asset.mimeType !== 'application/pdf')
+    if (compatibleAssets.length === 0) {
+      const reason = `${endpoint.model} 不支持当前文件格式，且没有可用预览图`
+      errors.push(reason)
+      if (route === 'visionPrimary') {
+        const decision = evaluateEmergencyFallback(reason, 1)
+        if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+        await recordSelectedModelEmergencyFallback(env, endpoint.model, 'vision', reason, decision.category, decision.attempts)
       }
-      const output = await callWithAiTimeout(
-        (signal) => callAiEndpointMultimodal(
-          endpoint,
-          prompt,
-          compatibleAssets,
-          signal,
-          options.structuredJson ?? false,
-          options.maxOutputTokens ?? 3200,
-        ),
-        options.timeoutMs ?? 90_000,
-        `${route === 'visionPrimary' ? '识图主模型' : '识图备用模型'}响应超时`,
-      )
-      if (output.trim()) {
-        return { text: output, route, provider: endpoint.provider, model: endpoint.model }
+      continue
+    }
+    const routeErrors: string[] = []
+    const maxAttempts = route === 'visionPrimary' ? 2 : 1
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const output = await callWithAiTimeout(
+          (signal) => callAiEndpointMultimodal(
+            endpoint,
+            prompt,
+            compatibleAssets,
+            signal,
+            options.structuredJson ?? false,
+            options.maxOutputTokens ?? 3200,
+          ),
+          options.timeoutMs ?? 90_000,
+          `${route === 'visionPrimary' ? '识图主模型' : '识图备用模型'}第 ${attempt} 次响应超时`,
+        )
+        if (output.trim()) return { text: output, route, provider: endpoint.provider, model: endpoint.model }
+        routeErrors.push(`${endpoint.model} 未返回内容`)
+      } catch (error) {
+        routeErrors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
       }
-      errors.push(`${endpoint.model} 未返回内容`)
-    } catch (error) {
-      errors.push(`${endpoint.model}: ${describeAiCallError(error)}`)
+    }
+    errors.push(...routeErrors)
+    if (route === 'visionPrimary') {
+      const reason = routeErrors.join('；重试：')
+      const decision = evaluateEmergencyFallback(reason, maxAttempts)
+      if (!decision.allowed) throw new Error(`主模型尚未达到应急回退条件：${decision.reason}`)
+      await recordSelectedModelEmergencyFallback(env, endpoint.model, 'vision', reason, decision.category, decision.attempts)
     }
   }
   throw new Error(errors.length ? errors.slice(-2).join('；') : '视觉模型暂时不可用')
@@ -18628,6 +18731,22 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   const durations = metrics.map((item) => Number(item.duration_ms) || 0).sort((a, b) => a - b)
   const p95DurationMs = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0
   const activeJobs = jobs.filter((item) => item.status === 'queued' || item.status === 'running')
+  const fallbackAudits = turns.filter((item) => item.fallbackUsed).map((item) => ({
+    ...evaluateEmergencyFallback(item.fallbackReason, item.attempts),
+    model: item.model,
+    createdAt: item.createdAt,
+  }))
+  const fallbackViolations = fallbackAudits.filter((item) => !item.allowed)
+  const slo = evaluateAgentSlo({
+    totalRuns: metrics.length,
+    errorRuns,
+    fallbackRuns,
+    p95DurationMs,
+    verifiedTurns: turns.filter((item) => item.verificationPassed).length,
+    totalTurns: turns.length,
+    failedBackgroundJobs: jobs.filter((item) => item.status === 'failed').length,
+    completedBackgroundJobs: jobs.filter((item) => item.status === 'completed').length,
+  })
   const generatedAlerts: AiOperationAlertInput[] = []
   if (metrics.length >= 5 && errorRuns / metrics.length >= 0.2) generatedAlerts.push({
     fingerprint: 'routing-error-rate', type: 'routing', severity: 'critical', title: 'Agent 失败率偏高',
@@ -18664,6 +18783,14 @@ async function getAiOperationsCenter(env: Env, request: Request) {
     fingerprint: 'client-poor-session-rate', type: 'frontend-performance', severity: 'warning', title: '慢体验会话比例偏高',
     message: `最近 ${periodDays} 天 ${(performancePoor / ratedPerformanceItems.length * 100).toFixed(1)}% 的有效体验样本至少有一项核心指标较差。`,
   })
+  if (fallbackViolations.length > 0) generatedAlerts.push({
+    fingerprint: 'fallback-policy-violation', type: 'governance', severity: 'critical', title: '备用模型启动不符合规则',
+    message: `最近 ${periodDays} 天发现 ${fallbackViolations.length} 次回退缺少同模型重试或明确故障原因。`,
+  })
+  if (slo.releaseGate === 'block') generatedAlerts.push({
+    fingerprint: 'agent-slo-release-blocked', type: 'governance', severity: 'critical', title: 'Agent SLO 已阻止发布',
+    message: '至少一项生产目标突破红线，新版本必须先修复并通过候选验证。',
+  })
   await syncAiOperationAlerts(env, workspaceId, generatedAlerts)
   const alertRows = await env.DB.prepare(
     `SELECT id, alert_type, severity, title, message, status, occurrence_count, first_seen_at, last_seen_at
@@ -18682,6 +18809,28 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       role: principal?.role || 'guest',
       principalId: principal?.principalId || 'guest',
       foundationReady: true,
+    },
+    governance: {
+      version: appVersion,
+      slo,
+      fallbackPolicy: {
+        mode: 'emergency-only',
+        targetPrimaryModelRate: 99,
+        fallbackRuns: fallbackAudits.length,
+        compliantRuns: fallbackAudits.length - fallbackViolations.length,
+        violations: fallbackViolations.length,
+        recent: fallbackAudits.slice(0, 10),
+      },
+      release: {
+        status: slo.releaseGate,
+        strategy: 'candidate-smoke-test-then-promote',
+        automaticRollback: true,
+      },
+      integrations: {
+        incidentWebhook: Boolean(env.GOVERNANCE_WEBHOOK_URL),
+        signedDelivery: Boolean(env.GOVERNANCE_WEBHOOK_URL && env.GOVERNANCE_WEBHOOK_SECRET),
+        containsBusinessContent: false,
+      },
     },
     routing: {
       totalRuns: metrics.length,
@@ -20117,7 +20266,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/health') {
     const agentFactProtocol = runAgentFactProtocolSelfTest()
     if (!agentFactProtocol.ok) return fail('Agent 结构化事实协议自检失败', 503)
-    return ok({ ok: true, storage: 'D1/R2', agentFactProtocol, checkedAt: nowIso() })
+    return ok({ ok: true, version: appVersion, storage: 'D1/R2', agentFactProtocol, checkedAt: nowIso() })
   }
   if (path === '/api/client-errors' && request.method === 'POST') {
     return recordClientError(env, request)

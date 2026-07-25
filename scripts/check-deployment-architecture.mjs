@@ -16,10 +16,13 @@ if (deploySource.includes("'.wrangler'")) failures.push('HTTP API 发布器禁�
 if (!deploySource.includes('refreshCloudflareOAuthToken') || !deploySource.includes('refresh_token')) {
   failures.push('HTTP API 发布器必须支持 OAuth 凭证自动刷新')
 }
+for (const marker of ['/versions?bindings_inherit=strict', '/deployments', 'Cloudflare-Workers-Version-Overrides', '自动回滚']) {
+  if (!deploySource.includes(marker)) failures.push(`HTTP API 发布器缺少受控发布能力：${marker}`)
+}
 
 if (failures.length > 0) {
   console.error(`部署架构守卫失败：\n- ${failures.join('\n- ')}`)
   process.exit(1)
 }
 
-console.log('部署架构守卫通过：正式发布仅使用可自动刷新凭证的 Cloudflare HTTP API Direct Upload，并强制执行生产 Agent 事实协议验收。')
+console.log('部署架构守卫通过：正式发布仅使用 Cloudflare HTTP API，候选版本必须通过定向验证，失败自动回滚。')

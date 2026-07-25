@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Plus, RotateCcw, UserPlus } from 'lucide-react'
+import { AlertTriangle, Plus, RotateCcw, ShieldCheck, UserPlus } from 'lucide-react'
 import type { AiOperationsCenter, WorkspaceSummary } from '../lib/api'
 import { EmptyState } from './EmptyState'
 
@@ -51,6 +51,13 @@ const clientErrorKindLabels: Record<string, string> = {
   'chunk-load': '分包加载',
   'api-error': '接口异常',
 }
+
+const governanceStatusLabels = {
+  healthy: '生产目标正常',
+  'at-risk': '接近红线',
+  breached: '已阻止发布',
+  observing: '正在积累样本',
+} as const
 
 export default function AiOperationsCenterPanel({
   operations,
@@ -173,6 +180,49 @@ export default function AiOperationsCenterPanel({
               <small>直接采用 {operations.learning.adoptionRate}% · 修改后采用 {operations.learning.editedRate}%</small>
             </article>
           </div>
+          <section className={`ai-governance-section status-${operations.governance.slo.status}`} aria-label="生产保护">
+            <div className="ai-agent-audit-heading">
+              <div>
+                <span className="model-section-kicker">生产保护</span>
+                <h3><ShieldCheck size={16} /> {governanceStatusLabels[operations.governance.slo.status]}</h3>
+                <p>
+                  {operations.governance.slo.releaseGate === 'block'
+                    ? '当前指标突破红线，新版本不能直接上线。'
+                    : operations.governance.slo.releaseGate === 'observe'
+                      ? '样本不足时继续观察，但候选版本仍必须通过健康与事实校验。'
+                      : '当前允许发布，候选版本仍会先验证，失败时自动恢复上一版本。'}
+                </p>
+              </div>
+              <small>v{operations.governance.version} · {operations.governance.release.automaticRollback ? '自动回滚已启用' : '未启用自动回滚'}</small>
+            </div>
+            <div className="ai-governance-objectives">
+              {operations.governance.slo.objectives.map((objective) => (
+                <article key={objective.key}>
+                  <span>{objective.label}</span>
+                  <strong>{objective.unit === 'ms' ? formatDuration(objective.value) : `${objective.value}%`}</strong>
+                  <small className={`governance-objective-${objective.status}`}>{objective.summary}</small>
+                </article>
+              ))}
+            </div>
+            <div className="ai-governance-notes">
+              <p>
+                <strong>主模型纪律</strong>
+                <span>目标 {operations.governance.fallbackPolicy.targetPrimaryModelRate}% 由主模型完成；备用模型仅在同模型重试失败或能力明确不匹配时启动。</span>
+              </p>
+              <p>
+                <strong>本周期回退</strong>
+                <span>{operations.governance.fallbackPolicy.fallbackRuns} 次，其中合规 {operations.governance.fallbackPolicy.compliantRuns} 次、违规 {operations.governance.fallbackPolicy.violations} 次。</span>
+              </p>
+              <p>
+                <strong>外部告警</strong>
+                <span>{operations.governance.integrations.signedDelivery ? '签名 Webhook 已接通，只发送运行事件，不发送任务正文。' : '尚未配置签名 Webhook，站内告警继续正常工作。'}</span>
+              </p>
+              <p>
+                <strong>错误预算</strong>
+                <span>本周期已使用 {operations.governance.slo.errorBudget.consumedPercent}%，剩余 {operations.governance.slo.errorBudget.remainingPercent}%。</span>
+              </p>
+            </div>
+          </section>
           <section className="ai-agent-audit-section" aria-label="Agent 执行审计">
             <div className="ai-agent-audit-heading">
               <div>

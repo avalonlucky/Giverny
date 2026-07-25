@@ -166,6 +166,7 @@
 │   │   ├── SharedReportRoute.tsx
 │   │   └── SharedSettlementRoute.tsx
 │   ├── agentToolRegistry.ts
+│   ├── agentGovernance.ts
 │   ├── agentOrchestrator.ts
 │   ├── agentScope.ts
 │   ├── agentAnalysisWorkflow.ts
@@ -352,6 +353,7 @@
 - `agent_conversations` indexes cloud conversation Durable Objects; message bodies and structured approval/task cards remain in each Alice Agent SQLite database.
 - The Agent task center uses persisted unread state. Cron creates deduplicated weekly digests, prior-month reviews, and overdue-risk reports; deep analysis also supports cross-task, batch-attachment, and trend workflows.
 - Agent Runtime is Cloudflare-native only: `AliceAgent` Durable Object + Workflow + D1/R2 tools. The legacy Python Container fallback has been retired.
+- Production Agent governance rules, SLO evaluation, emergency fallback classification and canary decisions: `src/agentGovernance.ts`; deterministic and architecture guards live in `scripts/test-agent-governance.mjs` and `scripts/check-agent-governance-architecture.mjs`.
 - Tenant model API keys are stored in `app_settings` encrypted with `AI_SETTINGS_SECRET`; future multi-tenant work should move the same config shape under tenant-scoped settings.
 - Local CLI devices are paired to the authenticated `principal_id` and the current browser device key. `giverny-bridge.mjs` only makes outbound requests, while D1 stores pairings, devices, detected adapters and short-lived command records.
 - Local CLI discovery/test/selection and `run / stream / cancel` routing are available. Normal chat and read-only business queries prefer the selected CLI on the current browser's paired computer; confirmed site writes, vision requests and unavailable local runtimes use cloud `AliceAgent`.

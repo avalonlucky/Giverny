@@ -16,7 +16,7 @@
 1. 本地修改。
 2. 跑 `npm run agent:quality:gate`（包含 build、lint 和隔离 Agent 全链路评测）。
 3. 涉及新增 D1 migration 时，先用本地 SQLite 验证，再通过 `npm run db:apply:production -- db/migrations/<file>.sql` 调用 Cloudflare D1 HTTP API 应用正式迁移。
-4. 部署正式站。
+4. 部署正式站。HTTP API 发布器先上传候选版本，定向核对健康、事实协议、版本和资源，通过后才推广；失败自动回滚上一版本。
 5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
 6. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
 7. 回归通过后，直接执行 GitHub commit / push / tag / Release 发布闭环。
@@ -26,7 +26,7 @@
 - 每次 Worker 部署后必须分别读取 `https://mayeai.com/` 与 `https://www.mayeai.com/` 的 HTML，确认两边引用的 `assets/index-*.js` 都是本次构建哈希；只检查健康接口不足以证明前端已更新。
 - `npm run deploy:production` 在 HTTP API Direct Upload 后必须执行 `npm run agent:fact:production`；正式 `/api/health` 只有在结构化事实协议正确摘要通过、错误事实被拒绝且来源覆盖完整时才返回健康。
 - Cloudflare 不同主机名或边缘节点可能在部署后的短时间内继续返回旧 HTML。发现哈希不一致时，先对照 workers.dev 入口和裸域名确认源版本，再等待边缘传播并复查；具备 Cache Purge 权限时才执行主动清理。
-- 发布闭环只能在线上健康接口正常、两个正式域名资源一致、关键路由真实浏览器回归通过后继续。
+- 发布闭环只能在线上健康接口正常、两个正式域名资源一致、关键路由真实浏览器回归通过后继续。候选版本验收失败时发布器会把上一稳定版本恢复为 100% 流量并以失败退出。
 
 只有用户明确要求暂停、仅部署或等待人工验收时，才停在 GitHub 闭环之前；其他情况必须在同一轮完整收录本次改动，并保持正式站版本、代码、tag 与 Release 一致。
 
@@ -62,6 +62,8 @@ npm run deploy:production
 发布凭证优先读取 `CLOUDFLARE_API_TOKEN`；本机 OAuth 凭证独立保存在 `~/.config/giverny/cloudflare-auth.json`（权限 `0600`）。HTTP API 发布器每次发布前自动刷新短期访问令牌并原子更新本地凭证，不读取 Wrangler 配置路径。API 认证失败时应修复 Giverny 独立凭证，不能恢复 Wrangler。
 
 D1 migration 同样不使用 Wrangler。`scripts/apply-cloudflare-d1-sql.mjs` 只接受明确传入的 SQL 文件，逐条通过 Cloudflare D1 Query API 执行；正式执行前必须确认 SQL 可重复运行且不包含清表、覆盖金额或改写既有业务数据的语句。
+
+Worker 发布使用 Cloudflare Versions 与 Deployments HTTP API。候选版本只占 0.01% 普通流量，发布器通过版本覆盖请求定向检查候选版本；健康、事实协议、版本号或静态资源任一不一致时立即把上一版本恢复为 100%。代码回滚不会回滚 D1/R2，因此 migration 必须向后兼容。
 
 ## 数据安全
 

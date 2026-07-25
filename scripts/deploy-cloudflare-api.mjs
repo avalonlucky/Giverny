@@ -6,6 +6,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { decideCanaryPromotion } from '../src/agentGovernance.ts'
 
 const accountId = 'ccd312f47f0dca574199fa6e33758c6d'
 const workerName = 'designer-worklog'
@@ -16,6 +17,9 @@ const bundlePath = '/private/tmp/giverny-worker-api-deploy.mjs'
 const authPath = join(homedir(), '.config', 'giverny', 'cloudflare-auth.json')
 const cloudflareOAuthClientId = '54d11594-84e4-41aa-b438-e81b8fa78ee7'
 const cloudflareOAuthTokenUrl = 'https://dash.cloudflare.com/oauth2/token'
+const productionUrl = 'https://mayeai.com'
+const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const releaseVersion = String(packageJson.version || '')
 
 const contentTypes = {
   '.css': 'text/css', '.gif': 'image/gif', '.html': 'text/html; charset=utf-8',
@@ -152,33 +156,113 @@ async function bundleWorker() {
   return readFile(bundlePath)
 }
 
+function deploymentVersions(value) {
+  const deployments = Array.isArray(value) ? value : value?.deployments || []
+  return Array.isArray(deployments[0]?.versions) ? deployments[0].versions : []
+}
+
+async function createDeployment(token, versions, message) {
+  return apiRequest(token, `/workers/scripts/${workerName}/deployments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      strategy: 'percentage',
+      versions,
+      annotations: {
+        'workers/message': message,
+      },
+    }),
+  })
+}
+
+async function probeCandidate(versionId) {
+  const headers = {
+    'cache-control': 'no-cache',
+    'Cloudflare-Workers-Version-Overrides': `${workerName}="${versionId}"`,
+  }
+  const [healthResponse, htmlResponse] = await Promise.all([
+    fetch(`${productionUrl}/api/health?canary=${Date.now()}`, { headers, signal: AbortSignal.timeout(20_000) }),
+    fetch(`${productionUrl}/?canary=${Date.now()}`, { headers, signal: AbortSignal.timeout(20_000) }),
+  ])
+  const health = await healthResponse.json().catch(() => ({}))
+  const html = await htmlResponse.text()
+  const expectedHtml = await readFile(join(assetsDirectory, 'index.html'), 'utf8')
+  const assetPattern = /src="(\/assets\/index-[^"]+\.js)"/
+  const expectedAsset = expectedHtml.match(assetPattern)?.[1] || ''
+  const observedAsset = html.match(assetPattern)?.[1] || ''
+  let assetOk = Boolean(expectedAsset && observedAsset && expectedAsset === observedAsset)
+  if (assetOk) {
+    const assetResponse = await fetch(`${productionUrl}${observedAsset}`, { headers, signal: AbortSignal.timeout(20_000) })
+    assetOk = assetResponse.ok
+  }
+  const decision = decideCanaryPromotion({
+    healthOk: healthResponse.ok && health.ok === true,
+    factProtocolOk: health.agentFactProtocol?.ok === true && health.agentFactProtocol?.rejectedInvalidAnswer === true,
+    assetParityOk: assetOk,
+    expectedVersion: releaseVersion,
+    observedVersion: String(health.version || ''),
+  })
+  return { decision, expectedAsset, observedAsset, health }
+}
+
 async function deploy() {
   if (!existsSync(join(assetsDirectory, 'index.html'))) throw new Error('dist 尚未构建，请先运行 npm run build')
   const token = await loadToken()
   const settings = await apiRequest(token, `/workers/scripts/${workerName}/settings`)
+  const currentDeployments = await apiRequest(token, `/workers/scripts/${workerName}/deployments`)
+  const previousVersions = deploymentVersions(currentDeployments)
+  const previousVersionId = previousVersions.slice().sort((left, right) => Number(right.percentage) - Number(left.percentage))[0]?.version_id || ''
   const { manifest, filesByHash } = await createAssetManifest()
   process.stdout.write(`正在登记 ${Object.keys(manifest).length} 个静态资源…\n`)
   const assetToken = await uploadAssets(token, manifest, filesByHash)
   const workerBundle = await bundleWorker()
-  const keepBindings = [...new Set((settings.bindings || []).map((binding) => binding.type).filter((type) => type !== 'assets'))]
+  const inheritedBindings = (settings.bindings || [])
+    .filter((binding) => binding.type !== 'assets' && binding.name)
+    .map((binding) => ({ name: binding.name, type: 'inherit', version_id: 'latest' }))
   const metadata = {
     main_module: 'worker.mjs',
     compatibility_date: settings.compatibility_date || '2026-06-10',
     compatibility_flags: settings.compatibility_flags || ['nodejs_compat'],
     usage_model: settings.usage_model || 'standard',
-    keep_bindings: keepBindings,
-    bindings: [{ name: 'ASSETS', type: 'assets' }],
+    bindings: [...inheritedBindings, { name: 'ASSETS', type: 'assets' }],
     assets: {
       jwt: assetToken,
       config: { not_found_handling: 'single-page-application', run_worker_first: ['/*'] },
     },
     observability: settings.observability,
+    annotations: {
+      'workers/message': `Giverny v${releaseVersion} candidate`,
+      'workers/tag': `v${releaseVersion}`,
+    },
   }
   const form = new FormData()
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json')
   form.append('worker.mjs', new Blob([workerBundle], { type: 'application/javascript+module' }), 'worker.mjs')
-  const result = await apiRequest(token, `/workers/scripts/${workerName}`, { method: 'PUT', body: form })
-  process.stdout.write(`Cloudflare API 发布完成：${result.id || workerName} · ${result.modified_on || new Date().toISOString()}\n`)
+  const candidate = await apiRequest(token, `/workers/scripts/${workerName}/versions?bindings_inherit=strict`, { method: 'POST', body: form })
+  const candidateVersionId = candidate.id
+  if (!candidateVersionId) throw new Error('Cloudflare 未返回候选版本 ID')
+  if (!previousVersionId || previousVersionId === candidateVersionId) {
+    await createDeployment(token, [{ version_id: candidateVersionId, percentage: 100 }], `v${releaseVersion} 首次受控发布`)
+    process.stdout.write(`Cloudflare 受控发布完成：v${releaseVersion} · ${candidateVersionId}\n`)
+    return
+  }
+  process.stdout.write(`候选版本已上传：${candidateVersionId}；正在进行隔离冒烟验证…\n`)
+  await createDeployment(token, [
+    { version_id: previousVersionId, percentage: 99.99 },
+    { version_id: candidateVersionId, percentage: 0.01 },
+  ], `v${releaseVersion} 候选验证`)
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    const probe = await probeCandidate(candidateVersionId)
+    if (probe.decision.action !== 'promote') {
+      throw new Error(`候选验证失败：${probe.decision.failures.join('；')}（资源 ${probe.observedAsset || '无'} / ${probe.expectedAsset || '无'}）`)
+    }
+    await createDeployment(token, [{ version_id: candidateVersionId, percentage: 100 }], `v${releaseVersion} 候选验证通过，正式推广`)
+    process.stdout.write(`Cloudflare 受控发布完成：v${releaseVersion} · ${candidateVersionId} · 健康、事实协议、版本与资源校验通过\n`)
+  } catch (error) {
+    await createDeployment(token, [{ version_id: previousVersionId, percentage: 100 }], `v${releaseVersion} 候选失败，自动回滚`)
+    throw new Error(`候选版本未通过，已自动回滚到 ${previousVersionId}：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 await deploy()
