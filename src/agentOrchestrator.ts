@@ -97,8 +97,8 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   if (readsAttachment) add('attachment')
   const asksWorkflowHelp = /(?:怎么|如何|在哪).*(?:新建任务|记录进展|验收任务|修改任务|上传附件|导出回单|下载回单|设置大模型|切换主题)/.test(value)
   if (asksWorkflowHelp) add('product_help')
-  const writeAction = /(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/
-  const writeObject = /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/
+  const writeAction = /(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除|上传|导出|锁定|提醒|切换|配置|调整)/
+  const writeObject = /(?:任务|进展|进度|反馈|等待|字段|文件|附件|工时|交付日期|回单|分享|排期|模型|路由|提醒)/
   const onlyReadsAcceptanceAttachment = readsAttachment
     && !/(?:新建|创建|记录|修改|更新|改成|追加|标记|删除).*(?:附件|文件)|验收(?:任务|了|通过|完成)/.test(value)
   const readsAcceptanceState = /(?:已|待|未)验收|验收(?:了多少|情况|状态)|多少.*验收/.test(value)
@@ -133,7 +133,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (detectedIntents.some(requiresBusinessEvidence) && !turn.evidence.some((item) => item.deterministic)) {
     issues.push('业务事实回答缺少确定性工具证据。')
   }
-  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance')) {
+  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance', 'query_settlement_exports', 'export_settlement_preview', 'manage_settlement_export_preview')) {
     requiredTools.push('query_month_finance')
     issues.push('金额或工时结论没有经过财务计算工具。')
   }
@@ -166,11 +166,11 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('get_task_detail')
     issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
   }
-  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments')) {
+  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload')) {
     requiredTools.push('search_attachments')
     issues.push('附件结论没有经过真实附件查询。')
   }
-  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio')) {
+  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'check_schedule_conflicts', 'reschedule_task_preview')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')

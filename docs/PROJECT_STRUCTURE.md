@@ -237,6 +237,7 @@
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
 - Agent capability source of truth and generated catalog: `src/agentToolRegistry.ts`, `docs/AGENT_CAPABILITY_REGISTRY.md`
+- Agent settlement, scheduling, upload handoff, reminder and secure model-setting regression: `scripts/test-agent-business-tools.mjs`, `scripts/check-agent-business-tools-architecture.mjs`, `agent-evals/run-isolated.mjs`
 - Agent tenant scope, prompt-injection boundary and attack matrix: `src/agentScope.ts`, `src/agentSecurity.ts`, `docs/AGENT_TENANT_SECURITY.md`
 - Multi-step execution batches, dependency graph, failure stop and reverse compensation: `src/agentExecutionEngine.ts`, `db/migrations/0030_agent_execution_engine.sql`, `docs/AGENT_WORKFLOWS.md`
 - Shared Agent attachment results and settlement receipt preview: `src/components/AgentAttachmentResults.tsx`

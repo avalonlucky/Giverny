@@ -130,6 +130,47 @@ const plan = buildAgentFactSnapshot([evidence('create_task_plan', {
 assert.ok(plan.fallbackAnswer.includes('持续计划：完成官网改版'))
 assert.equal(verifyAgentFactClaims(plan.fallbackAnswer, plan).passed, true)
 
+const settlementExports = buildAgentFactSnapshot([evidence('query_settlement_exports', {
+  count: 1,
+  records: [{ startDate: '2026-06-01', endDate: '2026-07-22', locked: true, totalAmount: 4200, disabled: false, expiresAt: '2026-08-01T00:00:00+08:00' }],
+})])
+assert.ok(settlementExports.fallbackAnswer.includes('2026-06-01 至 2026-07-22'))
+assert.ok(settlementExports.fallbackAnswer.includes('已锁定'))
+assert.ok(settlementExports.fallbackAnswer.includes('¥4,200'))
+assert.equal(verifyAgentFactClaims(settlementExports.fallbackAnswer, settlementExports).passed, true)
+
+const schedule = buildAgentFactSnapshot([evidence('check_schedule_conflicts', {
+  startDate: '2026-07-25T14:30:00+08:00', endDate: '2026-07-25T16:30:00+08:00', conflictCount: 1, scheduledHours: 2,
+  conflicts: [{ taskId: 12, title: '官网首页轮播图', startDate: '2026-07-25T14:00:00+08:00', endDate: '2026-07-25T15:00:00+08:00' }],
+})])
+assert.ok(schedule.fallbackAnswer.includes('重叠任务：1 项'))
+assert.ok(schedule.fallbackAnswer.includes('任务 #12'))
+assert.equal(verifyAgentFactClaims(schedule.fallbackAnswer, schedule).passed, true)
+
+const upload = buildAgentFactSnapshot([evidence('prepare_attachment_upload', {
+  handoff: { taskId: 12, taskTitle: '官网首页轮播图', scope: 'acceptance', files: [{ name: '验收通过截图.png' }], apiKeyExposed: false },
+})])
+assert.ok(upload.fallbackAnswer.includes('验收通过截图.png'))
+assert.ok(upload.fallbackAnswer.includes('直接上传 R2'))
+assert.equal(verifyAgentFactClaims(upload.fallbackAnswer, upload).passed, true)
+
+const aiSettings = buildAgentFactSnapshot([evidence('inspect_ai_settings', {
+  activeChoice: 'provider:deepseek',
+  routes: { textPrimary: { provider: 'deepseek', model: 'deepseek-reasoner', hasApiKey: true } },
+  secretsExposed: false,
+})])
+assert.ok(aiSettings.fallbackAnswer.includes('deepseek-reasoner'))
+assert.ok(aiSettings.fallbackAnswer.includes('API Key 未进入 Agent 上下文'))
+assert.ok(!aiSettings.fallbackAnswer.includes('sk-'))
+assert.equal(verifyAgentFactClaims(aiSettings.fallbackAnswer, aiSettings).passed, true)
+
+const aiRouteTest = buildAgentFactSnapshot([evidence('test_ai_route', {
+  route: 'textPrimary', provider: 'deepseek', model: 'deepseek-reasoner', ok: true, apiKeyExposed: false,
+})])
+assert.ok(aiRouteTest.fallbackAnswer.includes('状态：可用'))
+assert.ok(aiRouteTest.fallbackAnswer.includes('API Key 未显示'))
+assert.equal(verifyAgentFactClaims(aiRouteTest.fallbackAnswer, aiRouteTest).passed, true)
+
 assert.equal(runAgentFactProtocolSelfTest().ok, true)
 
-console.log('Agent fact guard deterministic tests: 47 assertions passed')
+console.log('Agent fact guard deterministic tests passed')

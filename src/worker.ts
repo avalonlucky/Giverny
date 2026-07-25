@@ -3483,6 +3483,264 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
   }
 }
 
+async function agentQuerySettlementExportsTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const startDate = agentString(body.startDate, 10)
+  const endDate = agentString(body.endDate, 10)
+  const limit = Math.min(Math.max(Number(body.limit) || 30, 1), 100)
+  const rows = await env.DB.prepare(
+    `SELECT * FROM settlement_exports WHERE workspace_id = ?
+     AND (? = '' OR end_date >= ?) AND (? = '' OR start_date <= ?)
+     ORDER BY generated_at DESC LIMIT ?`,
+  ).bind(workspaceId, startDate, startDate, endDate, endDate, limit).all<DbSettlementExport>()
+  return agentOk({ tool: 'query_settlement_exports', count: rows.results?.length || 0, records: (rows.results || []).map(toSettlementExportRecord) })
+}
+
+async function scheduleConflictSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string, excludeTaskId = 0) {
+  const rows = await env.DB.prepare(
+    `SELECT id, title, status, start_date, estimated_delivery_date, estimated_hours, requester, contact_person
+     FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
+       AND status NOT IN ('已验收', '终止', '不计费')
+       AND start_date IS NOT NULL AND estimated_delivery_date IS NOT NULL
+       AND start_date < ? AND estimated_delivery_date > ?
+       AND (? = 0 OR id != ?)
+     ORDER BY start_date ASC LIMIT 100`,
+  ).bind(workspaceId, endDate, startDate, excludeTaskId, String(excludeTaskId)).all<DbTask>()
+  return (rows.results || []).map((task) => ({
+    taskId: Number(task.id), title: task.title, status: task.status,
+    startDate: task.start_date || '', endDate: task.estimated_delivery_date || '',
+    estimatedHours: Number(task.estimated_hours) || 0, requester: task.requester || '', contact: task.contact_person || '',
+  }))
+}
+
+async function agentScheduleConflictsTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const startDate = agentDateTime(body.startDate)
+  const endDate = agentDateTime(body.endDate, startDate)
+  if (!startDate || !endDate || startDate >= endDate) return agentFail('排期时间范围无效', 400)
+  const conflicts = await scheduleConflictSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate, Number(body.excludeTaskId) || 0)
+  const scheduledHours = roundCents(conflicts.reduce((sum, item) => sum + item.estimatedHours, 0))
+  return agentOk({ tool: 'check_schedule_conflicts', startDate, endDate, conflictCount: conflicts.length, scheduledHours, requestedHours: Math.max(0, Number(body.estimatedHours) || 0), conflicts })
+}
+
+async function agentPrepareAttachmentUploadTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const files = (Array.isArray(body.files) ? body.files : []).map((item) => typeof item === 'object' && item ? item as Record<string, unknown> : {}).map((file) => ({
+      name: agentString(file.name, 240), size: Number(file.size) || 0, mimeType: agentString(file.mimeType, 120),
+    })).filter((file) => file.name && file.size > 0)
+    if (!files.length || files.some((file) => file.size > MAX_UPLOAD_FILE_SIZE)) return agentFail('附件为空或超过 200MB 限制', 413)
+    const scope = body.scope === 'acceptance' ? 'acceptance' : 'progress'
+    await audit(env, agentCapabilityRegistry.prepare_attachment_upload.policy.auditEvent, 'task', task.id, { scope, files: files.map(({ name, size }) => ({ name, size })) })
+    return agentOk({ tool: 'prepare_attachment_upload', handoff: { taskId: Number(task.id), taskTitle: task.title, scope, files, maxFileSize: MAX_UPLOAD_FILE_SIZE, maxFiles: 6, uploadEndpoint: '/api/files', transport: 'authenticated-browser-to-r2', apiKeyExposed: false } })
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'prepare_attachment_upload')
+    return agentFail(error instanceof Error ? error.message : '无法准备附件上传', 400)
+  }
+}
+
+async function agentInspectAiSettingsTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const config = publicAiModelConfig(env, await getStoredAiModelConfig(env))
+  const providers = await getStoredAiProviderConfigs(env)
+  return agentOk({ tool: 'inspect_ai_settings', activeChoice: await getActiveChatModelChoice(env), routes: { textPrimary: config.textPrimary, textFallback: config.textFallback, visionPrimary: config.visionPrimary, visionFallback: config.visionFallback }, providers: aiModelProviders.map((provider) => publicAiProviderConfig(env, providers[provider])), secretsExposed: false })
+}
+
+async function agentTestAiRouteTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const route = parseAiRouteKey(body.route)
+  if (!route) return agentFail('未知的模型路由', 400)
+  const endpoint = await resolveAiEndpoint(env, route, false)
+  try {
+    const output = route.startsWith('vision')
+      ? await callAiEndpointVision(endpoint, '这张图片主要是什么颜色？只回复颜色。', 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZklEQVR4nO3PQQ3AIADAwDFT/53UBoM4ICgm5O5cttV7vQGeTQ/AaAQYjUaD0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQaDcbxAHy3AUGOk0s8AAAAAElFTkSuQmCC')
+      : await callAiEndpointText(endpoint, '请只回复：OK')
+    await audit(env, agentCapabilityRegistry.test_ai_route.policy.auditEvent, 'ai_model_route', route, { provider: endpoint.provider, model: endpoint.model, ok: Boolean(output) })
+    return agentOk({ tool: 'test_ai_route', ok: Boolean(output), route, provider: endpoint.provider, model: endpoint.model, output: output.slice(0, 80), apiKeyExposed: false })
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '模型路由测试失败', 502)
+  }
+}
+
+async function settlementSnapshotChecksum(receipt: ReceiptExcelOptions) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ rows: receipt.rows, totalHours: receipt.totalHours, totalAmount: receipt.totalAmount }))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function agentExportSettlementPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const startDate = agentString(body.startDate, 10)
+  const endDate = agentString(body.endDate, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) return agentFail('导出日期范围无效', 400)
+  const receipt = await buildSettlementReceiptSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate)
+  const draft = { startDate, endDate, taskCount: receipt.rows.length, totalHours: receipt.totalHours, totalAmount: receipt.totalAmount, snapshotChecksum: await settlementSnapshotChecksum(receipt) }
+  return agentPreview(env, request, 'export_settlement_preview', draft, [], ['确认后会保存一条未锁定的结算快照并生成分享链接。'])
+}
+
+async function agentExportSettlementTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'export_settlement', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const startDate = agentString(draft.startDate, 10)
+  const endDate = agentString(draft.endDate, 10)
+  const receipt = await buildSettlementReceiptSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate)
+  if (await settlementSnapshotChecksum(receipt) !== draft.snapshotChecksum) return agentFail('结算数据在确认期间发生变化，请重新预览', 409)
+  const row = await persistSettlementExport(env, agentWorkspaceIdFromRequest(request), startDate, endDate, receipt)
+  await audit(env, agentCapabilityRegistry.export_settlement.policy.auditEvent, 'settlement_export', row.id, { startDate, endDate, taskCount: receipt.rows.length })
+  const record = toSettlementExportRecord(row)
+  return agentOk({ tool: 'export_settlement', mode: 'execute', record, files: [{ id: row.id, taskId: 0, taskTitle: '结算回单', name: `结算回单_${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}.xlsx`, type: 'XLSX', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: '', scope: 'acceptance', tag: '结算回单', uploadedAt: formatBeijing(row.generated_at), sourceUrl: `/api/shared-settlement/${row.public_token}/excel`, downloadUrl: `/api/shared-settlement/${row.public_token}/excel`, shareUrl: `/settlement-share/${row.public_token}`, kind: 'settlement-receipt' }] })
+}
+
+async function agentManageSettlementPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(agentString(body.exportId, 180), agentWorkspaceIdFromRequest(request)).first<DbSettlementExport>()
+  if (!row) return agentFail('结算导出记录不存在', 404)
+  const action = body.action === 'lock' ? 'lock' : 'set_access'
+  const draft = { exportId: row.id, action, startDate: row.start_date, endDate: row.end_date, locked: Boolean(row.locked), expiresAt: action === 'set_access' ? agentString(body.expiresAt, 40) : row.expires_at || '', disabled: action === 'set_access' ? agentBool(body.disabled, false) : Boolean(row.disabled) }
+  return agentPreview(env, request, 'manage_settlement_export_preview', draft, [], action === 'lock' ? ['锁定后删除需要管理员密码。'] : [])
+}
+
+async function agentManageSettlementTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'manage_settlement_export', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const exportId = agentString(draft.exportId, 180)
+  if (draft.action === 'lock') await env.DB.prepare('UPDATE settlement_exports SET locked = 1 WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).run()
+  else await env.DB.prepare('UPDATE settlement_exports SET expires_at = ?, disabled = ? WHERE id = ? AND workspace_id = ?').bind(agentString(draft.expiresAt, 40) || null, agentBool(draft.disabled) ? 1 : 0, exportId, workspaceId).run()
+  const row = await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, workspaceId).first<DbSettlementExport>()
+  if (!row) return agentFail('结算导出记录不存在', 404)
+  await audit(env, agentCapabilityRegistry.manage_settlement_export.policy.auditEvent, 'settlement_export', exportId, { action: draft.action, expiresAt: draft.expiresAt, disabled: draft.disabled })
+  return agentOk({ tool: 'manage_settlement_export', mode: 'execute', record: toSettlementExportRecord(row) })
+}
+
+async function agentReschedulePreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const startDate = agentDateTime(body.startDate)
+    const endDate = agentDateTime(body.endDate, startDate)
+    if (startDate >= endDate) return agentFail('预计交付必须晚于预计开始', 400)
+    const conflicts = await scheduleConflictSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate, Number(task.id))
+    const draft = { taskId: Number(task.id), taskTitle: task.title, startDate, endDate, estimatedHours: Math.max(0, agentNumber(body.estimatedHours, Number(task.estimated_hours) || 0)), reason: agentString(body.reason, 500), before: { startDate: task.start_date || '', endDate: task.estimated_delivery_date || '', estimatedHours: Number(task.estimated_hours) || 0 }, conflictCount: conflicts.length, conflicts }
+    return agentPreview(env, request, 'reschedule_task_preview', draft, [], conflicts.length ? [`新排期与 ${conflicts.length} 个未闭环任务重叠，请核对后再确认。`] : [])
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'reschedule_task_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成排期预览', 400)
+  }
+}
+
+async function agentRescheduleTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'reschedule_task', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(draft.taskId), workspaceId).first<DbTask>()
+  if (!task) return agentFail('任务不存在或已作废', 404)
+  if (await isLockedReportMonth(env, task.settlement_month, workspaceId)) return agentFail('任务所属月份已锁定结算，不能调整排期', 409)
+  await env.DB.prepare('UPDATE tasks SET start_date = ?, estimated_delivery_date = ?, estimated_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(agentDateTime(draft.startDate), agentDateTime(draft.endDate), Math.max(0, agentNumber(draft.estimatedHours)), task.id).run()
+  await audit(env, agentCapabilityRegistry.reschedule_task.policy.auditEvent, 'task', task.id, draft)
+  const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
+  return agentOk({ tool: 'reschedule_task', mode: 'execute', task: saved ? toTask(saved) : null })
+}
+
+async function agentScheduleReminderPreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const task = await agentTaskByRef(env, body)
+    const remindAt = agentDateTime(body.remindAt)
+    const draft = { taskId: Number(task.id), taskTitle: task.title, goal: agentString(body.goal, 500), remindAt }
+    return agentPreview(env, request, 'schedule_reminder_preview', draft, [!draft.goal && 'goal'].filter(Boolean) as string[])
+  } catch (error) {
+    if (error instanceof AgentTaskSelectionRequired) return agentTaskSelectionResponse(error, 'schedule_reminder_preview')
+    return agentFail(error instanceof Error ? error.message : '无法生成提醒预览', 400)
+  }
+}
+
+async function agentScheduleReminderTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'schedule_reminder', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const plan = await createAgentTaskPlan(env, { workspaceId: agentWorkspaceIdFromRequest(request), taskId: Number(draft.taskId), kind: 'reminder', goal: agentString(draft.goal, 500), steps: [{ key: 'remind', label: agentString(draft.goal, 120), action: 'follow_up', dependsOn: [] }], nextActionAt: agentDateTime(draft.remindAt) })
+  await audit(env, agentCapabilityRegistry.schedule_reminder.policy.auditEvent, 'agent_plan', plan.id, { taskId: plan.taskId, remindAt: plan.nextActionAt })
+  return agentOk({ tool: 'schedule_reminder', mode: 'execute', plan })
+}
+
+async function proposedAiRoute(env: Env, draft: Record<string, unknown>) {
+  const route = parseAiRouteKey(draft.route)
+  if (!route) throw new Error('未知的模型路由')
+  const provider = normalizeAiProvider(draft.provider)
+  const saved = await resolveAiProviderKey(env, provider)
+  if (!saved.apiKey) throw new Error('该服务商尚未安全保存 API Key，请先在设置页填写')
+  const baseUrl = normalizeProviderBaseUrl(provider, agentString(draft.baseUrl, 500))
+  const target = new URL(baseUrl)
+  const localTarget = ['localhost', '127.0.0.1', '::1'].includes(target.hostname)
+  if (!(env.LOCAL_DEV && localTarget)) {
+    if (target.protocol !== 'https:') throw new Error('Agent 只能配置 HTTPS 模型地址')
+    const storedProviders = await getStoredAiProviderConfigs(env)
+    const storedRoutes = await getStoredAiModelConfig(env)
+    const allowedHosts = new Set([
+      defaultProviderBaseUrl(provider, env),
+      storedProviders[provider]?.baseUrl,
+      ...Object.values({ ...defaultAiModelRoutes(env), ...(storedRoutes.routes || {}) })
+        .filter((item) => item.provider === provider)
+        .map((item) => item.baseUrl),
+    ].filter(Boolean).map((value) => new URL(normalizeProviderBaseUrl(provider, String(value))).hostname))
+    if (!allowedHosts.has(target.hostname)) {
+      throw new Error('Agent 只能使用平台默认地址或已在设置页登记的服务商地址')
+    }
+  }
+  const model = provider === 'deepseek' ? normalizeDeepSeekModel(draft.model) : agentString(draft.model, 200)
+  return { route, provider, baseUrl, model, apiKey: saved.apiKey, keySource: saved.keySource }
+}
+
+async function agentConfigureAiRoutePreviewTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  try {
+    const endpoint = await proposedAiRoute(env, body)
+    const output = endpoint.route.startsWith('vision')
+      ? await callAiEndpointVision(endpoint, '这张图片主要是什么颜色？只回复颜色。', 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZklEQVR4nO3PQQ3AIADAwDFT/53UBoM4ICgm5O5cttV7vQGeTQ/AaAQYjUaD0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQajUaj0Wg0Go1Go9FoNBqNRqPRaDQaDcbxAHy3AUGOk0s8AAAAAElFTkSuQmCC')
+      : await callAiEndpointText(endpoint, '请只回复：OK')
+    if (!output) return agentFail('模型已响应，但没有可读结果', 502)
+    const current = publicAiModelConfig(env, await getStoredAiModelConfig(env))[endpoint.route]
+    const draft = { route: endpoint.route, provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model, makeActive: agentBool(body.makeActive), before: { provider: current.provider, baseUrl: current.baseUrl, model: current.model }, credentialSource: endpoint.keySource, apiKeyExposed: false, connectivityVerified: true }
+    return agentPreview(env, request, 'configure_ai_route_preview', draft, [], ['只修改模型路由，不读取、显示或替换已保存的 API Key。'])
+  } catch (error) {
+    return agentFail(error instanceof Error ? error.message : '模型路由验证失败', 502)
+  }
+}
+
+async function agentConfigureAiRouteTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'configure_ai_route', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const endpoint = await proposedAiRoute(env, draft)
+  const existing = await getStoredAiModelConfig(env)
+  const routes = { ...defaultAiModelRoutes(env), ...(existing.routes || {}), [endpoint.route]: { provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model } }
+  const next = { ...existing, routes, updatedAt: nowIso() }
+  await setSettingValue(env, AI_MODEL_SETTING, JSON.stringify(next))
+  if (agentBool(draft.makeActive)) await setSettingValue(env, AI_ACTIVE_MODEL_SETTING, `provider:${endpoint.provider}`)
+  await audit(env, agentCapabilityRegistry.configure_ai_route.policy.auditEvent, 'setting', endpoint.route, { provider: endpoint.provider, baseUrl: endpoint.baseUrl, model: endpoint.model, makeActive: agentBool(draft.makeActive), apiKeyExposed: false })
+  return agentOk({ tool: 'configure_ai_route', mode: 'execute', route: endpoint.route, config: publicAiModelConfig(env, next)[endpoint.route], activeChoice: await getActiveChatModelChoice(env), apiKeyExposed: false })
+}
+
 async function refreshAgentTaskMemory(env: Env, taskId: number, workspaceId = DEFAULT_WORKSPACE_ID) {
   await ensureAgentWorkspaceColumns(env)
   const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL').bind(String(taskId), workspaceId).first<DbTask>()
@@ -6584,6 +6842,21 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/product-help' && (request.method === 'POST' || request.method === 'GET')) {
     return agentProductHelpTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
+  if (url.pathname === '/api/agent/tools/schedule-conflicts' && (request.method === 'POST' || request.method === 'GET')) return agentScheduleConflictsTool(env, request)
+  if (url.pathname === '/api/agent/tools/prepare-attachment-upload' && request.method === 'POST') return agentPrepareAttachmentUploadTool(env, request)
+  if (url.pathname === '/api/agent/tools/inspect-ai-settings' && (request.method === 'POST' || request.method === 'GET')) return agentInspectAiSettingsTool(env, request)
+  if (url.pathname === '/api/agent/tools/test-ai-route' && request.method === 'POST') return agentTestAiRouteTool(env, request)
+  if (url.pathname === '/api/agent/tools/export-settlement-preview' && request.method === 'POST') return agentExportSettlementPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/export-settlement' && request.method === 'POST') return agentExportSettlementTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-settlement-export-preview' && request.method === 'POST') return agentManageSettlementPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/manage-settlement-export' && request.method === 'POST') return agentManageSettlementTool(env, request)
+  if (url.pathname === '/api/agent/tools/reschedule-task-preview' && request.method === 'POST') return agentReschedulePreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/reschedule-task' && request.method === 'POST') return agentRescheduleTool(env, request)
+  if (url.pathname === '/api/agent/tools/schedule-reminder-preview' && request.method === 'POST') return agentScheduleReminderPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/schedule-reminder' && request.method === 'POST') return agentScheduleReminderTool(env, request)
+  if (url.pathname === '/api/agent/tools/configure-ai-route-preview' && request.method === 'POST') return agentConfigureAiRoutePreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/configure-ai-route' && request.method === 'POST') return agentConfigureAiRouteTool(env, request)
   if (url.pathname === '/api/agent/tools/create-task-plan' && request.method === 'POST') {
     return agentCreateTaskPlanTool(env, request)
   }

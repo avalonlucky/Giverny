@@ -52,6 +52,18 @@ export type AgentResultAttachment = {
   kind?: 'task-file' | 'settlement-receipt'
 }
 
+export type AgentUploadHandoff = {
+  taskId: number
+  taskTitle: string
+  scope: 'progress' | 'acceptance'
+  files: Array<{ name: string; size: number; mimeType?: string }>
+  maxFileSize: number
+  maxFiles: number
+  uploadEndpoint: string
+  transport: 'authenticated-browser-to-r2'
+  apiKeyExposed: false
+}
+
 export type AgentBackgroundTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export type AgentBackgroundTaskPhase = 'queued' | 'collecting' | 'analyzing' | 'completed' | 'failed' | 'cancelled'
@@ -91,6 +103,7 @@ export type AgentConversationMessage = {
   selection?: AgentTaskSelection
   backgroundTask?: AgentBackgroundTask
   attachments?: AgentResultAttachment[]
+  uploadHandoff?: AgentUploadHandoff
   createdAt: number
 }
 

@@ -244,6 +244,30 @@ function renderTaskPlan(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderSettlementExports(payload: Record<string, unknown>) {
+  const records = list(payload.records).map(record)
+  return ['**已核验结算导出记录**', ...(records.length ? records.map((item) => `- ${String(item.startDate || '')} 至 ${String(item.endDate || '')}：${item.locked ? '已锁定' : '未锁定'}，金额 ¥${formatNumber(item.totalAmount)}，分享${item.disabled ? '已停用' : '可用'}${item.expiresAt ? `，有效期至 ${String(item.expiresAt)}` : ''}`) : ['- 当前范围没有导出记录。'])].join('\n')
+}
+
+function renderScheduleConflicts(payload: Record<string, unknown>) {
+  const conflicts = list(payload.conflicts).map(record)
+  return ['**已核验排期冲突**', `- 查询范围：${String(payload.startDate || '')} 至 ${String(payload.endDate || '')}`, `- 重叠任务：${formatNumber(payload.conflictCount ?? conflicts.length)} 项，现有预估工时 ${formatNumber(payload.scheduledHours)} 小时`, ...(conflicts.length ? conflicts.map((item) => `- 任务 #${formatNumber(item.taskId)} ${String(item.title || '')}：${String(item.startDate || '')} 至 ${String(item.endDate || '')}`) : ['- 没有发现时间重叠任务。'])].join('\n')
+}
+
+function renderUploadHandoff(payload: Record<string, unknown>) {
+  const handoff = record(payload.handoff)
+  return [`**附件上传接力已核验**`, `- 目标任务：#${formatNumber(handoff.taskId)} ${String(handoff.taskTitle || '')}`, `- 附件范围：${handoff.scope === 'acceptance' ? '验收附件' : '进展附件'}`, `- 文件：${list(handoff.files).map((item) => String(record(item).name || '')).filter(Boolean).join('、')}`, '- 文件由当前已登录浏览器直接上传 R2，不经过模型上下文。'].join('\n')
+}
+
+function renderAiSettings(payload: Record<string, unknown>) {
+  const routes = record(payload.routes)
+  return ['**已核验模型设置（已脱敏）**', `- 当前选择：${String(payload.activeChoice || 'auto')}`, ...Object.entries(routes).map(([route, value]) => { const endpoint = record(value); return `- ${route}：${String(endpoint.provider || '')} / ${String(endpoint.model || '')}（${endpoint.hasApiKey ? '凭证可用' : '缺少凭证'}）` }), '- API Key 未进入 Agent 上下文。'].join('\n')
+}
+
+function renderAiRouteTest(payload: Record<string, unknown>) {
+  return ['**模型路由测试结果**', `- 路由：${String(payload.route || '')}`, `- 模型：${String(payload.provider || '')} / ${String(payload.model || '')}`, `- 状态：${payload.ok ? '可用' : '不可用'}`, '- API Key 未显示。'].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
@@ -257,6 +281,11 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
   if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
   if (evidence.toolName === 'create_task_plan') return renderTaskPlan(payload)
+  if (evidence.toolName === 'query_settlement_exports') return renderSettlementExports(payload)
+  if (evidence.toolName === 'check_schedule_conflicts') return renderScheduleConflicts(payload)
+  if (evidence.toolName === 'prepare_attachment_upload') return renderUploadHandoff(payload)
+  if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
+  if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
   return ''
 }
 

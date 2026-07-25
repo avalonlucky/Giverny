@@ -26,7 +26,7 @@ import { localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
 import { providerSupportsVision } from '../lib/aiProviders'
 import { agentAnalysisStatusLabel } from '../lib/agentAnalysisPresentation'
 import type { FileAsset } from '../types/domain'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from '../types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
 import type { ToastTone } from '../lib/toastQueue'
 import { AgentAnalysisTaskCard } from './AgentAnalysisTaskCard'
 import { AgentApprovalCard } from './AgentApprovalCard'
@@ -582,10 +582,7 @@ export function ChatPanel({
     if ((!text && attachments.length === 0) || loading) return
     const sentAttachments = [...attachments]
     const targetTaskId = Number(text.match(/(?:任务\s*)?#(\d+)/)?.[1] || 0)
-    if (sentAttachments.some((item) => item.file) && !targetTaskId && sentAttachments.some((item) => item.type === 'file')) {
-      onNotify('上传 PDF、Office 等文件时，请在问题中写明任务 #ID，文件才有明确归属。', 'info')
-      return
-    }
+    let filesUploadedBeforeAgent = false
     if (targetTaskId && sentAttachments.length > 0 && overrideText === undefined) {
       setLoading(true)
       try {
@@ -606,12 +603,16 @@ export function ChatPanel({
             analyze: true,
           }))
         }
+        filesUploadedBeforeAgent = true
         text = `${text}\n\n[已上传到任务 #${targetTaskId} 的真实附件：${uploaded.map((file) => `${file.name}（attachmentId=${file.id}）`).join('、')}]`
       } catch (error) {
         onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error')
         setLoading(false)
         return
       }
+    }
+    if (!targetTaskId && sentAttachments.length > 0) {
+      text = `${text}${text ? '\n\n' : ''}[待上传附件：${sentAttachments.map((item) => `${item.name}（${item.file.size} 字节，${item.mimeType}）`).join('、')}；请先定位所属任务并调用上传接力工具]`
     }
     const displayText = text || `[附件：${attachments.map((a) => a.name).join('、')}]`
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
@@ -667,7 +668,9 @@ export function ChatPanel({
         selection?: AgentTaskSelection
         backgroundTask?: AgentBackgroundTask
         attachments?: AgentResultAttachment[]
+        uploadHandoff?: AgentUploadHandoff
       }
+      let uploadHandoffStarted = false
       const applyAgentResult = (data: AgentChatResult) => {
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         setMessages((prev) => prev.map((m) => {
@@ -698,6 +701,24 @@ export function ChatPanel({
           }
           return m
         }))
+        if (data.uploadHandoff && !filesUploadedBeforeAgent && !uploadHandoffStarted && sentAttachments.length > 0) {
+          uploadHandoffStarted = true
+          const handoff = data.uploadHandoff
+          const allowedNames = new Set(handoff.files.map((file) => file.name))
+          void (async () => {
+            if (!sentAttachments.every((item) => allowedNames.has(item.name))) throw new Error('上传接力返回的文件清单与当前附件不一致')
+            const uploaded: FileAsset[] = []
+            for (const item of sentAttachments) {
+              validateUploadFile(item.file)
+              const preview = await createOptionalPreviewFile(item.file)
+              uploaded.push(await api.uploadFile({ taskId: handoff.taskId, scope: handoff.scope, file: item.file, preview, type: fileTypeForFile(item.file).type, size: formatFileSize(item.file.size), final: handoff.scope === 'acceptance', visible: true, tag: 'Agent 对话附件', analyze: true }))
+            }
+            setMessages((current) => current.map((message) => message.id === assistantId
+              ? { ...message, content: `${message.content}\n\n已将 ${uploaded.length} 个附件上传到“${handoff.taskTitle}”。` }
+              : message))
+            onNotify(`已上传到“${handoff.taskTitle}”`, 'success')
+          })().catch((error) => onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error'))
+        }
       }
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('text/event-stream')) {

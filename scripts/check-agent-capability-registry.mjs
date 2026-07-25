@@ -13,7 +13,7 @@ const writeWorkflow = readFileSync('src/agentWriteWorkflow.ts', 'utf8')
 const analysisWorkflow = readFileSync('src/agentAnalysisWorkflow.ts', 'utf8')
 const docs = readFileSync('docs/AGENT_CAPABILITY_REGISTRY.md', 'utf8')
 
-if (manifest.length < 35) fail(`只登记了 ${manifest.length} 项能力，读取、计划、记忆、后台、预览、执行或内部能力存在缺失`)
+if (manifest.length < 50) fail(`只登记了 ${manifest.length} 项能力，读取、计划、记忆、后台、预览、执行或内部能力存在缺失`)
 if (new Set(manifest.map((item) => item.endpoint)).size !== manifest.length) fail('存在重复 endpoint')
 
 for (const capability of manifest) {

@@ -9,7 +9,7 @@ export type AgentCapabilityExposure = 'model' | 'mcp' | 'api' | 'workflow'
 export type AgentCapabilityDefinition = {
   title: string
   description: string
-  category: 'finance' | 'tasks' | 'files' | 'product' | 'planning' | 'memory' | 'analysis' | 'write' | 'internal'
+  category: 'finance' | 'tasks' | 'files' | 'calendar' | 'notifications' | 'security' | 'product' | 'planning' | 'memory' | 'analysis' | 'write' | 'internal'
   endpoint: string
   methods: readonly ('GET' | 'POST')[]
   inputSchema: z.ZodType
@@ -34,6 +34,7 @@ const allRoles = ['admin', 'collaborator', 'viewer', 'client', 'guest', 'mcp-rea
 const businessReadRoles = ['admin', 'collaborator', 'viewer', 'client', 'mcp-read', 'system'] as const
 const financeReadRoles = ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'] as const
 const writeRoles = ['admin', 'collaborator', 'system'] as const
+const adminRoles = ['admin', 'system'] as const
 const systemRoles = ['system'] as const
 const confirmationInputSchema = z.object({ confirmationToken: z.string().min(1) })
 const taskReferenceSchema = {
@@ -105,6 +106,44 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ query: z.string().min(1).max(500), limit: z.number().int().min(1).max(10).default(5) }),
     trace: { running: '查询产品使用说明', completed: '产品说明已返回' },
   }),
+  query_settlement_exports: readCapability({
+    title: '查询结算导出记录', description: '按日期范围查询当前工作区的结算导出、锁定和分享有效期。', category: 'finance', endpoint: 'settlement-exports',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['finance:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_settlement_exports' },
+    inputSchema: z.object({ startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), limit: z.number().int().min(1).max(100).default(30) }),
+    trace: { running: '查询结算导出记录', completed: '结算导出记录已返回' },
+  }),
+  check_schedule_conflicts: readCapability({
+    title: '检查任务排期冲突', description: '按开始和交付时间检查当前工作区未闭环任务的时间重叠与容量风险。', category: 'calendar', endpoint: 'schedule-conflicts', taskScoped: true,
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read'], roles: businessReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_check_schedule_conflicts' },
+    inputSchema: z.object({ startDate: z.string(), endDate: z.string(), excludeTaskId: z.number().int().positive().optional(), estimatedHours: z.number().min(0).optional() }),
+    trace: { running: '检查排期冲突', completed: '排期冲突已核对' },
+  }),
+  prepare_attachment_upload: defineCapability({
+    title: '准备附件上传接力', description: '核对任务归属、附件范围、文件大小和上传入口；二进制文件仍由已登录浏览器直传 R2，不进入模型上下文。', category: 'files', endpoint: 'prepare-attachment-upload', methods: ['POST'], exposure: ['model', 'api'], taskScoped: true,
+    policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write'], roles: writeRoles, confirmation: 'none', audit: 'workflow', auditEvent: 'agent_prepare_attachment_upload' },
+    inputSchema: z.object({ ...taskReferenceSchema, scope: z.enum(['progress', 'acceptance']).default('progress'), files: z.array(z.object({ name: z.string().min(1).max(240), size: z.number().int().positive().max(200 * 1024 * 1024), mimeType: z.string().max(120).optional() })).min(1).max(6) }),
+    trace: { running: '核对附件上传条件', completed: '附件上传接力已准备' },
+  }),
+  inspect_ai_settings: defineCapability({
+    title: '检查模型设置', description: '读取脱敏后的主模型、备用模型、识图模型和服务商可用状态，不返回 API Key。', category: 'security', endpoint: 'inspect-ai-settings', methods: ['GET', 'POST'], exposure: ['model', 'api'],
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['settings:read'], roles: adminRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_inspect_ai_settings' },
+    inputSchema: z.object({}), trace: { running: '检查模型设置', completed: '模型设置已脱敏返回' },
+  }),
+  test_ai_route: defineCapability({
+    title: '测试模型路由', description: '使用已安全保存的凭证测试指定文字或识图路由，不接受或返回 API Key。', category: 'security', endpoint: 'test-ai-route', methods: ['POST'], exposure: ['model', 'api'],
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['settings:read'], roles: adminRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_test_ai_route' },
+    inputSchema: z.object({ route: z.enum(['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback']) }), trace: { running: '测试模型路由', completed: '模型路由测试完成' },
+  }),
+  export_settlement_preview: writePreviewCapability({ title: '预览导出结算回单', description: '核对日期范围和确定性金额快照，确认后生成 Excel 与合作伙伴分享链接。', category: 'finance', endpoint: 'export-settlement-preview', executeWith: 'export_settlement', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['finance:write'], roles: adminRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_export_settlement' }, inputSchema: z.object({ startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), trace: { running: '核对结算导出范围', completed: '结算导出预览已生成' } }),
+  export_settlement: writeExecuteCapability({ title: '执行导出结算回单', description: '使用签名确认凭证生成结算快照、Excel 和分享链接。', category: 'finance', endpoint: 'export-settlement', previewFor: 'export_settlement_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['finance:write'], roles: adminRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_export_settlement' }, trace: { running: '生成结算回单', completed: '结算回单已生成' } }),
+  manage_settlement_export_preview: writePreviewCapability({ title: '预览管理结算分享', description: '预览锁定结算快照或修改分享链接有效期。', category: 'finance', endpoint: 'manage-settlement-export-preview', executeWith: 'manage_settlement_export', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['finance:write'], roles: adminRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_manage_settlement' }, inputSchema: z.object({ exportId: z.string().min(1), action: z.enum(['lock', 'set_access']), expiresAt: z.string().optional(), disabled: z.boolean().optional() }), trace: { running: '核对结算分享设置', completed: '结算分享设置预览已生成' } }),
+  manage_settlement_export: writeExecuteCapability({ title: '执行管理结算分享', description: '使用签名确认凭证锁定快照或修改分享有效期。', category: 'finance', endpoint: 'manage-settlement-export', previewFor: 'manage_settlement_export_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['finance:write'], roles: adminRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_settlement' }, trace: { running: '更新结算分享设置', completed: '结算分享设置已更新' } }),
+  reschedule_task_preview: writePreviewCapability({ title: '预览调整任务排期', description: '先检查冲突，再预览任务开始、交付和预估工时调整。', category: 'calendar', endpoint: 'reschedule-task-preview', executeWith: 'reschedule_task', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_reschedule_task' }, inputSchema: z.object({ ...taskReferenceSchema, startDate: z.string(), endDate: z.string(), estimatedHours: z.number().min(0).optional(), reason: z.string().max(500).optional() }), trace: { running: '检查并整理新排期', completed: '排期调整预览已生成' } }),
+  reschedule_task: writeExecuteCapability({ title: '执行调整任务排期', description: '使用签名确认凭证更新任务排期。', category: 'calendar', endpoint: 'reschedule-task', previewFor: 'reschedule_task_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_reschedule_task' }, trace: { running: '更新任务排期', completed: '任务排期已更新' } }),
+  schedule_reminder_preview: writePreviewCapability({ title: '预览安排站内提醒', description: '预览与任务关联的站内提醒及触发时间。', category: 'notifications', endpoint: 'schedule-reminder-preview', executeWith: 'schedule_reminder', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_schedule_reminder' }, inputSchema: z.object({ ...taskReferenceSchema, goal: z.string().min(2).max(500), remindAt: z.string() }), trace: { running: '整理提醒草稿', completed: '提醒草稿已生成' } }),
+  schedule_reminder: writeExecuteCapability({ title: '执行安排站内提醒', description: '使用签名确认凭证创建可跨会话恢复的站内提醒。', category: 'notifications', endpoint: 'schedule-reminder', previewFor: 'schedule_reminder_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_schedule_reminder' }, trace: { running: '创建站内提醒', completed: '站内提醒已创建' } }),
+  configure_ai_route_preview: writePreviewCapability({ title: '预览配置模型路由', description: '使用已保存凭证验证服务商、模型和 Base URL，预览后再修改路由；API Key 不进入 Agent。', category: 'security', endpoint: 'configure-ai-route-preview', executeWith: 'configure_ai_route', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['settings:write'], roles: adminRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_configure_ai_route' }, inputSchema: z.object({ route: z.enum(['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback']), provider: z.enum(['deepseek', 'gemini', 'kimi', 'doubao', 'qwen', 'openrouter', 'openai', 'anthropic']), baseUrl: z.string().min(1), model: z.string().min(1), makeActive: z.boolean().default(false) }), trace: { running: '验证模型路由配置', completed: '模型路由配置预览已生成' } }),
+  configure_ai_route: writeExecuteCapability({ title: '执行配置模型路由', description: '使用签名确认凭证保存已验证的模型路由，不处理明文 API Key。', category: 'security', endpoint: 'configure-ai-route', previewFor: 'configure_ai_route_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['settings:write'], roles: adminRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_configure_ai_route' }, trace: { running: '保存模型路由配置', completed: '模型路由配置已保存' } }),
   create_task_plan: defineCapability({
     title: '创建持续任务计划', description: '保存一个可跨会话恢复的多步骤执行批次。步骤可以声明依赖与补偿动作；批次必须由用户整体确认后才能推进。', category: 'planning', endpoint: 'create-task-plan', methods: ['POST'], exposure: ['model', 'api'], taskScoped: true,
     policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'none', audit: 'business', auditEvent: 'agent_create_task_plan' },
@@ -203,7 +242,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'get_giverny_context', 'search_product_help'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'check_schedule_conflicts', 'get_giverny_context', 'search_product_help'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+const worker = readFileSync('src/worker.ts', 'utf8')
+const alice = readFileSync('src/aliceAgent.ts', 'utf8')
+const chat = readFileSync('src/components/ChatPanel.tsx', 'utf8')
+const registry = readFileSync('src/agentToolRegistry.ts', 'utf8')
+
+for (const symbol of [
+  'agentQuerySettlementExportsTool',
+  'agentScheduleConflictsTool',
+  'agentPrepareAttachmentUploadTool',
+  'agentInspectAiSettingsTool',
+  'agentTestAiRouteTool',
+  'agentExportSettlementPreviewTool',
+  'agentExportSettlementTool',
+  'agentManageSettlementPreviewTool',
+  'agentManageSettlementTool',
+  'agentReschedulePreviewTool',
+  'agentRescheduleTool',
+  'agentScheduleReminderPreviewTool',
+  'agentScheduleReminderTool',
+  'agentConfigureAiRoutePreviewTool',
+  'agentConfigureAiRouteTool',
+]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
+
+assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
+assert.match(worker, /transport: 'authenticated-browser-to-r2'/)
+assert.match(worker, /apiKeyExposed: false/)
+assert.match(worker, /Agent 只能使用平台默认地址或已在设置页登记的服务商地址/)
+assert.ok(!registry.match(/apiKey:\s*z\./), 'Agent capability schema must never accept a plaintext API key')
+assert.match(chat, /api\.uploadFile\(\{ taskId: handoff\.taskId/)
+assert.match(chat, /上传接力返回的文件清单与当前附件不一致/)
+assert.match(alice, /uploadHandoff = rawHandoff/)
+assert.match(worker, /kind: 'reminder'/)
+assert.match(worker, /isLockedReportMonth\(env, task\.settlement_month, workspaceId\)/)
+
+console.log('Agent business tool architecture guard passed.')

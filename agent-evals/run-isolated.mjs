@@ -151,7 +151,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'query_month_finance', 'query_settlement_exports', 'query_task_portfolio', 'search_attachments', 'search_product_help', 'search_tasks']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -214,7 +214,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 35) {
+  if (!response.ok || capabilities.length !== 50) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const capability of capabilities) {
@@ -555,6 +555,158 @@ async function runAgentLifecycleWriteCheck() {
     throw new Error(`Acceptance file marking is inconsistent: ${JSON.stringify(fileResult)}`)
   }
   process.stdout.write('Agent waiting, record maintenance, acceptance file, and complete acceptance workflow checks passed.\n')
+}
+
+async function runAgentBusinessToolCheck() {
+  const base = 'http://127.0.0.1:8798'
+  const headers = { authorization: 'Bearer eval-agent-tool-token', 'content-type': 'application/json' }
+  const request = async (path, options = {}) => {
+    const response = await fetch(`${base}${path}`, options)
+    const data = await response.json().catch(() => ({}))
+    return { response, data }
+  }
+  const preview = async (endpoint, payload, requestHeaders = headers) => {
+    const result = await request(`/api/agent/tools/${endpoint}`, { method: 'POST', headers: requestHeaders, body: JSON.stringify(payload) })
+    if (!result.response.ok || result.data.ready !== true || !result.data.confirmationToken) {
+      throw new Error(`${endpoint} preview failed: ${JSON.stringify(result.data)}`)
+    }
+    return result.data
+  }
+  const execute = async (endpoint, confirmationToken) => {
+    const result = await request('/api/agent/tools/workflow-write', {
+      method: 'POST', headers,
+      body: JSON.stringify({ operationId: `business-${crypto.randomUUID()}`, endpoint, confirmationToken }),
+    })
+    if (!result.response.ok) throw new Error(`${endpoint} execute failed: ${JSON.stringify(result.data)}`)
+    return result.data
+  }
+
+  const conflicts = await request('/api/agent/tools/schedule-conflicts', {
+    method: 'POST', headers,
+    body: JSON.stringify({ startDate: '2026-07-09T10:00', endDate: '2026-07-09T17:00', estimatedHours: 2 }),
+  })
+  if (!conflicts.response.ok || conflicts.data.conflictCount < 1 || !conflicts.data.conflicts?.some((item) => item.taskId === 1)) {
+    throw new Error(`Schedule conflict query did not return overlapping tasks: ${JSON.stringify(conflicts.data)}`)
+  }
+
+  const staleSettlement = await preview('export-settlement-preview', { startDate: '2026-06-01', endDate: '2026-07-22' })
+  const reschedule = await preview('reschedule-task-preview', {
+    taskId: 12,
+    startDate: '2026-07-20T09:00',
+    endDate: '2026-07-22T18:00',
+    estimatedHours: 6,
+    reason: '第六项隔离回归',
+  })
+  const rescheduled = await execute('reschedule-task', reschedule.confirmationToken)
+  if (rescheduled.task?.date !== '2026-07-20T09:00' || rescheduled.task?.estimatedDate !== '2026-07-22T18:00') {
+    throw new Error(`Reschedule did not persist the expected dates: ${JSON.stringify(rescheduled.task)}`)
+  }
+  const staleExecute = await request('/api/agent/tools/export-settlement', {
+    method: 'POST', headers, body: JSON.stringify({ confirmationToken: staleSettlement.confirmationToken }),
+  })
+  if (staleExecute.response.status !== 409 || !String(staleExecute.data.error || '').includes('发生变化')) {
+    throw new Error(`Changed settlement snapshot was not rejected: ${staleExecute.response.status} ${JSON.stringify(staleExecute.data)}`)
+  }
+
+  const settlement = await preview('export-settlement-preview', { startDate: '2026-06-01', endDate: '2026-07-22' })
+  const exported = await execute('export-settlement', settlement.confirmationToken)
+  const record = exported.record
+  const file = exported.files?.[0]
+  if (!record?.id || !record?.publicToken || !file?.downloadUrl || file?.kind !== 'settlement-receipt') {
+    throw new Error(`Settlement export did not return a record and file: ${JSON.stringify(exported)}`)
+  }
+  const excel = await fetch(`${base}${file.downloadUrl}`)
+  const share = await fetch(`${base}${file.shareUrl}`)
+  if (!excel.ok || !(await excel.arrayBuffer()).byteLength || !share.ok) {
+    throw new Error(`Settlement export file or share page is unavailable: ${JSON.stringify({ excel: excel.status, share: share.status })}`)
+  }
+  const exportQuery = await request('/api/agent/tools/settlement-exports', {
+    method: 'POST', headers, body: JSON.stringify({ startDate: '2026-06-01', endDate: '2026-07-22' }),
+  })
+  if (!exportQuery.response.ok || !exportQuery.data.records?.some((item) => item.id === record.id)) {
+    throw new Error(`Settlement export query missed the generated record: ${JSON.stringify(exportQuery.data)}`)
+  }
+
+  const accessPreview = await preview('manage-settlement-export-preview', {
+    exportId: record.id, action: 'set_access', expiresAt: '2026-08-31T23:59:59+08:00', disabled: false,
+  })
+  const access = await execute('manage-settlement-export', accessPreview.confirmationToken)
+  if (!String(access.record?.expiresAt || '').startsWith('2026-08-31 23:59') || access.record?.disabled !== false) {
+    throw new Error(`Settlement link access was not updated: ${JSON.stringify(access)}`)
+  }
+  const lockPreview = await preview('manage-settlement-export-preview', { exportId: record.id, action: 'lock' })
+  const locked = await execute('manage-settlement-export', lockPreview.confirmationToken)
+  if (locked.record?.locked !== true) throw new Error(`Settlement snapshot was not locked: ${JSON.stringify(locked)}`)
+
+  const upload = await request('/api/agent/tools/prepare-attachment-upload', {
+    method: 'POST', headers,
+    body: JSON.stringify({ taskId: 1, scope: 'acceptance', files: [{ name: '验收通过截图.png', size: 2048, mimeType: 'image/png' }] }),
+  })
+  const handoffText = JSON.stringify(upload.data)
+  if (!upload.response.ok || upload.data.handoff?.taskId !== 1 || upload.data.handoff?.transport !== 'authenticated-browser-to-r2' || /eval-model-key|eval-agent-tool-token/.test(handoffText)) {
+    throw new Error(`Attachment upload handoff is unsafe or incomplete: ${handoffText}`)
+  }
+
+  const reminderPreview = await preview('schedule-reminder-preview', {
+    taskId: 1, goal: '提醒核对合作伙伴反馈', remindAt: '2026-07-26T09:00:00+08:00',
+  })
+  const reminder = await execute('schedule-reminder', reminderPreview.confirmationToken)
+  if (reminder.plan?.kind !== 'reminder' || reminder.plan?.taskId !== 1 || !String(reminder.plan?.nextActionAt || '').startsWith('2026-07-26T09:00')) {
+    throw new Error(`Task-center reminder was not persisted: ${JSON.stringify(reminder)}`)
+  }
+
+  const inspected = await request('/api/agent/tools/inspect-ai-settings', { method: 'POST', headers, body: '{}' })
+  const inspectedText = JSON.stringify(inspected.data)
+  if (!inspected.response.ok || inspected.data.secretsExposed !== false || !inspected.data.routes?.textPrimary || /eval-model-key|eval-doubao-key/.test(inspectedText)) {
+    throw new Error(`AI settings inspection leaked secrets or missed routes: ${inspectedText}`)
+  }
+  const tested = await request('/api/agent/tools/test-ai-route', {
+    method: 'POST', headers, body: JSON.stringify({ route: 'textPrimary' }),
+  })
+  if (!tested.response.ok || tested.data.ok !== true || tested.data.apiKeyExposed !== false) {
+    throw new Error(`AI route test failed: ${JSON.stringify(tested.data)}`)
+  }
+  const configuredPreview = await preview('configure-ai-route-preview', {
+    route: 'textFallback', provider: 'deepseek', baseUrl: 'http://127.0.0.1:8898', model: 'deepseek-v4-pro', makeActive: false,
+  })
+  const configured = await execute('configure-ai-route', configuredPreview.confirmationToken)
+  const configuredText = JSON.stringify(configured)
+  if (configured.route !== 'textFallback' || configured.config?.provider !== 'deepseek' || configured.config?.model !== 'deepseek-v4-pro' || configured.apiKeyExposed !== false || /eval-model-key/.test(configuredText)) {
+    throw new Error(`AI route configuration is unsafe or incomplete: ${configuredText}`)
+  }
+
+  const roleCases = [
+    ['viewer', 'prepare-attachment-upload', { taskId: 1, files: [{ name: 'x.png', size: 1 }] }],
+    ['collaborator', 'export-settlement-preview', { startDate: '2026-07-01', endDate: '2026-07-31' }],
+    ['collaborator', 'inspect-ai-settings', {}],
+    ['viewer', 'schedule-reminder-preview', { taskId: 1, goal: '越权提醒', remindAt: '2026-07-26T09:00:00+08:00' }],
+  ]
+  for (const [role, endpoint, payload] of roleCases) {
+    const denied = await request(`/api/agent/tools/${endpoint}`, {
+      method: 'POST', headers: { ...agentScopeHeaders('default', `business-${role}`, role), 'content-type': 'application/json' }, body: JSON.stringify(payload),
+    })
+    if (denied.response.status !== 401) throw new Error(`${role} bypassed ${endpoint}: HTTP ${denied.response.status}`)
+  }
+
+  const boundHeaders = { ...agentScopeHeaders('default', 'business-admin-a', 'admin'), 'content-type': 'application/json' }
+  const boundPreview = await preview('schedule-reminder-preview', {
+    taskId: 1, goal: '确认凭证边界测试', remindAt: '2026-07-27T09:00:00+08:00',
+  }, boundHeaders)
+  const wrongPrincipal = await request('/api/agent/tools/schedule-reminder', {
+    method: 'POST', headers: { ...agentScopeHeaders('default', 'business-admin-b', 'admin'), 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationToken: boundPreview.confirmationToken }),
+  })
+  const legitimate = await request('/api/agent/tools/schedule-reminder', {
+    method: 'POST', headers: boundHeaders, body: JSON.stringify({ confirmationToken: boundPreview.confirmationToken }),
+  })
+  const replay = await request('/api/agent/tools/schedule-reminder', {
+    method: 'POST', headers: boundHeaders, body: JSON.stringify({ confirmationToken: boundPreview.confirmationToken }),
+  })
+  if (wrongPrincipal.response.ok || !legitimate.response.ok || replay.response.ok || !String(replay.data.error || '').includes('已使用')) {
+    throw new Error(`New business confirmation token boundary failed: ${JSON.stringify({ wrongPrincipal: wrongPrincipal.data, legitimate: legitimate.data, replay: replay.data })}`)
+  }
+
+  process.stdout.write('Agent settlement, scheduling, upload handoff, reminder, model settings, role boundary, snapshot checksum, and confirmation replay checks passed.\n')
 }
 
 async function runPlannedProgressTransitionCheck(cookie) {
@@ -2218,6 +2370,7 @@ try {
   await runWorkflowWriteCheck(cookie)
   await runWorkflowReplayCheck()
   await runAgentLifecycleWriteCheck()
+  await runAgentBusinessToolCheck()
   await runPlannedProgressTransitionCheck(cookie)
   await runUploadLimitCheck(cookie)
   await runAttachmentPreviewResilienceCheck(cookie)

@@ -44,12 +44,30 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   attachmentIds: '附件 ID',
   files: '验收文件',
   changes: '修改内容',
+  startDate: '开始日期',
+  endDate: '结束日期',
+  taskCount: '任务数量',
+  totalHours: '计费工时',
+  totalAmount: '结算金额',
+  exportId: '导出记录',
+  expiresAt: '链接有效期',
+  disabled: '停用分享',
+  remindAt: '提醒时间',
+  goal: '提醒内容',
+  route: '模型路由',
+  provider: '模型服务商',
+  baseUrl: 'API 地址',
+  model: '模型名称',
+  makeActive: '设为当前模型',
+  conflictCount: '冲突任务数',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (key === 'estimatedHours') return `${value} h`
   if (key === 'progress') return `${value}%`
+  if (key === 'totalAmount') return `¥${value}`
+  if (key === 'totalHours') return `${value} h`
   if (value === null || value === undefined || value === '') return '未填写'
   if (key === 'files' && Array.isArray(value)) {
     return value.map((item) => typeof item === 'object' && item ? String((item as Record<string, unknown>).name || (item as Record<string, unknown>).id || '') : String(item)).filter(Boolean).join('、') || '未选择'
