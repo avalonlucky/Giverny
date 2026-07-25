@@ -1,3 +1,5 @@
+import type { AgentExecutionPlanStatus, AgentExecutionStep } from '../agentExecutionEngine'
+
 export type AgentApprovalStatus = 'pending' | 'processing' | 'executed' | 'cancelled' | 'failed' | 'expired'
 
 export type AgentApproval = {
@@ -103,13 +105,7 @@ export type AgentConversationSummary = {
   projectName?: string
 }
 
-export type AgentPlanStep = {
-  id: string
-  label: string
-  action: string
-  status: 'pending' | 'completed' | 'skipped'
-  completedAt?: string
-}
+export type AgentPlanStep = AgentExecutionStep
 
 export type AgentTaskPlan = {
   id: string
@@ -117,15 +113,21 @@ export type AgentTaskPlan = {
   taskId?: number
   kind: 'goal' | 'reminder'
   goal: string
-  status: 'active' | 'paused' | 'completed' | 'cancelled'
+  status: AgentExecutionPlanStatus
   steps: AgentPlanStep[]
   currentStep: number
+  executionMode: 'guided' | 'batch'
+  failurePolicy: 'stop'
+  revision: number
   nextActionAt?: string
   unread: boolean
   createdAt: string
   updatedAt: string
   completedAt?: string
   pausedAt?: string
+  approvedAt?: string
+  failedAt?: string
+  error?: string
 }
 
 export type AgentTaskMemory = {

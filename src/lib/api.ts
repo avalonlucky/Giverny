@@ -1366,11 +1366,16 @@ export const api = {
     }),
   getAgentPlans: (limit = 50) =>
     requestJson<{ plans: AgentTaskPlan[] }>(`/api/ai/agent-plans?limit=${limit}`),
-  updateAgentPlan: (id: string, action: 'pause' | 'resume' | 'cancel' | 'complete_step' | 'reopen_step', stepId?: string) =>
+  updateAgentPlan: (
+    id: string,
+    action: 'approve_batch' | 'pause' | 'resume' | 'cancel' | 'start_step' | 'complete_step' | 'reopen_step' | 'fail_step' | 'retry_step' | 'begin_compensation' | 'start_compensation' | 'complete_compensation',
+    stepId?: string,
+    options?: { error?: string; revision?: number },
+  ) =>
     requestJson<{ plan: AgentTaskPlan }>(`/api/ai/agent-plans/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, stepId }),
+      body: JSON.stringify({ action, stepId, error: options?.error, revision: options?.revision }),
     }),
   getTaskMemories: (limit = 50) =>
     requestJson<{ memories: AgentTaskMemory[] }>(`/api/ai/task-memories?limit=${limit}`),

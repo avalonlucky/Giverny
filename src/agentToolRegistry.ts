@@ -106,9 +106,21 @@ export const agentCapabilityRegistry = {
     trace: { running: '查询产品使用说明', completed: '产品说明已返回' },
   }),
   create_task_plan: defineCapability({
-    title: '创建持续任务计划', description: '保存一个可跨会话持续推进的任务计划。适用于“从新建跟到验收”“持续提醒我完成这个项目”等目标。', category: 'planning', endpoint: 'create-task-plan', methods: ['POST'], exposure: ['model', 'api'], taskScoped: true,
+    title: '创建持续任务计划', description: '保存一个可跨会话恢复的多步骤执行批次。步骤可以声明依赖与补偿动作；批次必须由用户整体确认后才能推进。', category: 'planning', endpoint: 'create-task-plan', methods: ['POST'], exposure: ['model', 'api'], taskScoped: true,
     policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'none', audit: 'business', auditEvent: 'agent_create_task_plan' },
-    inputSchema: z.object({ goal: z.string().min(2).max(500), taskId: z.number().int().positive().optional(), nextActionAt: z.string().optional(), steps: z.array(z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) })).min(2).max(8) }),
+    inputSchema: z.object({
+      goal: z.string().min(2).max(500),
+      taskId: z.number().int().positive().optional(),
+      nextActionAt: z.string().optional(),
+      executionMode: z.enum(['batch', 'guided']).default('batch'),
+      steps: z.array(z.object({
+        key: z.string().min(1).max(60).optional(),
+        label: z.string().min(1).max(120),
+        action: z.string().min(1).max(60),
+        dependsOn: z.array(z.string().min(1).max(60)).max(8).optional(),
+        compensation: z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) }).optional(),
+      })).min(2).max(8),
+    }),
     trace: { running: '整理持续任务计划', completed: '持续任务计划已创建' },
   }),
   get_task_memory: defineCapability({
@@ -182,7 +194,7 @@ export const agentCapabilityRegistry = {
   manage_record: writeExecuteCapability({ title: '执行维护任务记录', description: '使用签名确认凭证编辑或删除单条任务记录。', category: 'write', endpoint: 'manage-record', previewFor: 'manage_record_preview', taskScoped: true, policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['tasks:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_record' }, trace: { running: '执行记录维护', completed: '记录已维护' } }),
   mark_acceptance_files: writeExecuteCapability({ title: '执行标记验收文件', description: '使用签名确认凭证标记已有验收文件。', category: 'write', endpoint: 'mark-acceptance-files', previewFor: 'mark_acceptance_files_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'r2', scopes: ['attachments:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_mark_acceptance_files' }, trace: { running: '执行验收文件标记', completed: '验收文件已标记' } }),
   complete_acceptance: writeExecuteCapability({ title: '执行完整验收', description: '使用签名确认凭证完成任务验收。', category: 'write', endpoint: 'complete-acceptance', previewFor: 'complete_acceptance_preview', taskScoped: true, policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['tasks:write', 'attachments:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_complete_acceptance' }, trace: { running: '执行完整验收', completed: '任务已验收' } }),
-  progress_task_plan: defineCapability({ title: '推进持续计划', description: '业务写入成功后确定性推进关联计划。', category: 'internal', endpoint: 'progress-task-plan', methods: ['POST'], exposure: ['api'], policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'system-only', audit: 'workflow', auditEvent: 'agent_progress_task_plan' }, inputSchema: z.object({ conversationId: z.string().optional(), action: z.string(), taskId: z.number().int().positive().optional() }), trace: { running: '推进持续计划', completed: '持续计划已推进' } }),
+  progress_task_plan: defineCapability({ title: '推进持续计划', description: '业务 Workflow 开始、成功或失败后确定性推进关联执行批次。', category: 'internal', endpoint: 'progress-task-plan', methods: ['POST'], exposure: ['api'], policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'system-only', audit: 'workflow', auditEvent: 'agent_progress_task_plan' }, inputSchema: z.object({ conversationId: z.string().optional(), planId: z.string().optional(), stepId: z.string().optional(), action: z.string(), taskId: z.number().int().positive().optional(), outcome: z.enum(['started', 'completed', 'failed']).default('completed'), error: z.string().max(500).optional() }), trace: { running: '推进持续计划', completed: '持续计划已推进' } }),
   workflow_write: defineCapability({ title: '执行 Workflow 写入', description: 'Workflow 使用 operationId 和签名确认凭证执行白名单写入。', category: 'internal', endpoint: 'workflow-write', methods: ['POST'], exposure: ['api', 'workflow'], policy: { risk: 'sensitive', deterministic: true, source: 'workflow', scopes: ['workflow:write'], roles: systemRoles, confirmation: 'system-only', audit: 'workflow', auditEvent: 'agent_workflow_write' }, inputSchema: z.object({ operationId: z.string(), endpoint: z.string(), confirmationToken: z.string() }), trace: { running: '执行持久化写入', completed: '持久化写入已完成' } }),
   analysis_job_prepare: defineCapability({ title: '准备后台分析数据', description: 'Workflow 收集后台分析所需的确定性数据。', category: 'internal', endpoint: 'analysis-job-prepare', methods: ['POST'], exposure: ['api', 'workflow'], policy: { risk: 'read', deterministic: true, source: 'workflow', scopes: ['analysis:execute'], roles: systemRoles, confirmation: 'system-only', audit: 'workflow', auditEvent: 'agent_analysis_prepare' }, inputSchema: z.object({ jobId: z.string() }), trace: { running: '收集分析数据', completed: '分析数据已收集' } }),
   analysis_job_generate: defineCapability({ title: '生成后台分析报告', description: 'Workflow 基于确定性快照生成并保存报告。', category: 'internal', endpoint: 'analysis-job-generate', methods: ['POST'], exposure: ['api', 'workflow'], policy: { risk: 'write', deterministic: false, source: 'workflow', scopes: ['analysis:execute'], roles: systemRoles, confirmation: 'system-only', audit: 'workflow', auditEvent: 'agent_analysis_generate' }, inputSchema: z.object({ jobId: z.string() }), trace: { running: '生成分析报告', completed: '分析报告已生成' } }),

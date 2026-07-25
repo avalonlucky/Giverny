@@ -14,6 +14,23 @@ import { searchProductKnowledge } from './productKnowledgeSearch'
 import { AliceAgent } from './aliceAgent'
 import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
+import {
+  approveExecutionBatch,
+  beginExecutionCompensation,
+  buildExecutionSteps,
+  completeExecutionCompensation,
+  completeExecutionStep,
+  executionPlanStatus,
+  failExecutionStep,
+  nextExecutionStepIndex,
+  normalizeExecutionSteps,
+  retryExecutionStep,
+  startExecutionCompensation,
+  startExecutionStep,
+  unlockExecutionSteps,
+  type AgentExecutionPlanStatus,
+  type AgentExecutionStepDraft,
+} from './agentExecutionEngine'
 import { buildReceiptExcelBuffer, type ReceiptExcelOptions, type ReceiptExcelRow } from './lib/receiptExcel'
 import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentFailureCase, AgentPlanStep, AgentResultAttachment, AgentTaskCandidate, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection } from './types/agent'
 import type { AttachmentAnalysis, FileAsset, InsightDiagnosis, InsightHistoryItem, InsightHistoryStatus, InsightPeriodType, Task, TaskFeedbackRating, TaskFeedbackTag, TaskStatus, TaskUpdate, TaxMode, TimeEntry, WaitingEntry, WaitingReason } from './types/domain'
@@ -2969,6 +2986,12 @@ async function ensureAgentWorkspaceColumns(env: Env) {
     "ALTER TABLE agent_conversations ADD COLUMN project_id TEXT",
     "ALTER TABLE agent_conversations ADD COLUMN project_name TEXT",
     "ALTER TABLE agent_task_plans ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE agent_task_plans ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'guided'",
+    "ALTER TABLE agent_task_plans ADD COLUMN failure_policy TEXT NOT NULL DEFAULT 'stop'",
+    "ALTER TABLE agent_task_plans ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE agent_task_plans ADD COLUMN approved_at TEXT",
+    "ALTER TABLE agent_task_plans ADD COLUMN failed_at TEXT",
+    "ALTER TABLE agent_task_plans ADD COLUMN error_message TEXT",
     "ALTER TABLE agent_task_memories ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
   ]) {
     try { await env.DB.prepare(statement).run() } catch { /* Column already exists. */ }
@@ -3283,7 +3306,7 @@ type DbAgentTaskPlan = {
   task_id: string | null
   kind: 'goal' | 'reminder'
   goal: string
-  status: 'active' | 'paused' | 'completed' | 'cancelled'
+  status: AgentExecutionPlanStatus
   steps_json: string
   current_step: number
   next_action_at: string | null
@@ -3292,15 +3315,25 @@ type DbAgentTaskPlan = {
   updated_at: string
   completed_at: string | null
   paused_at: string | null
+  execution_mode: 'guided' | 'batch'
+  failure_policy: 'stop'
+  revision: number
+  approved_at: string | null
+  failed_at: string | null
+  error_message: string | null
 }
 
-function parseAgentPlanSteps(value: string): AgentPlanStep[] {
+function parseAgentPlanSteps(planId: string, value: string): AgentPlanStep[] {
   try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : []
+    return normalizeExecutionSteps(planId, JSON.parse(value))
   } catch {
     return []
   }
+}
+
+function executionStepsForPlan(row: DbAgentTaskPlan) {
+  const steps = parseAgentPlanSteps(row.id, row.steps_json)
+  return row.status === 'active' ? unlockExecutionSteps(steps) : steps
 }
 
 function toAgentTaskPlan(row: DbAgentTaskPlan): AgentTaskPlan {
@@ -3311,14 +3344,20 @@ function toAgentTaskPlan(row: DbAgentTaskPlan): AgentTaskPlan {
     kind: row.kind,
     goal: row.goal,
     status: row.status,
-    steps: parseAgentPlanSteps(row.steps_json),
+    steps: executionStepsForPlan(row),
     currentStep: Number(row.current_step) || 0,
+    executionMode: row.execution_mode || 'guided',
+    failurePolicy: row.failure_policy || 'stop',
+    revision: Number(row.revision) || 1,
     nextActionAt: row.next_action_at || undefined,
     unread: !row.read_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at || undefined,
     pausedAt: row.paused_at || undefined,
+    approvedAt: row.approved_at || undefined,
+    failedAt: row.failed_at || undefined,
+    error: row.error_message || undefined,
   }
 }
 
@@ -3364,23 +3403,50 @@ async function createAgentTaskPlan(env: Env, input: {
   conversationId?: string
   taskId?: number
   kind?: 'goal' | 'reminder'
+  executionMode?: 'guided' | 'batch'
   goal: string
-  steps: Array<{ label: string; action: string }>
+  steps: AgentExecutionStepDraft[]
   nextActionAt?: string
 }) {
   await ensureAgentWorkspaceColumns(env)
   const id = crypto.randomUUID()
-  const steps = input.steps.slice(0, 10).map((step, index): AgentPlanStep => ({
-    id: `${id}:${index + 1}`,
+  const executionMode = input.kind === 'reminder' ? 'guided' : input.executionMode || 'batch'
+  const drafts = input.steps.slice(0, 10).map((step) => ({
+    key: agentString(step.key, 60),
     label: agentString(step.label, 120),
     action: agentString(step.action, 60) || 'follow_up',
-    status: 'pending',
+    dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.map((dependency) => agentString(dependency, 60)).filter(Boolean) : undefined,
+    compensation: step.compensation?.label && step.compensation.action ? {
+      label: agentString(step.compensation.label, 120),
+      action: agentString(step.compensation.action, 60),
+    } : undefined,
   })).filter((step) => step.label)
+  for (const draft of drafts) {
+    if (draft.compensation && !agentWritePreviewConfig(`${draft.compensation.action}_preview`)) {
+      throw new Error(`补偿动作 ${draft.compensation.action} 尚未接入安全写入工具`)
+    }
+  }
+  const builtSteps = buildExecutionSteps(id, drafts)
+  const steps = executionMode === 'guided' ? unlockExecutionSteps(builtSteps) : builtSteps
   if (!input.goal || steps.length === 0) throw new Error('目标和执行步骤不能为空')
   await env.DB.prepare(
-    `INSERT INTO agent_task_plans (id, workspace_id, conversation_id, task_id, kind, goal, steps_json, next_action_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, input.workspaceId || DEFAULT_WORKSPACE_ID, input.conversationId || null, input.taskId ? String(input.taskId) : null, input.kind || 'goal', input.goal.slice(0, 500), JSON.stringify(steps), input.nextActionAt || null).run()
+    `INSERT INTO agent_task_plans (id, workspace_id, conversation_id, task_id, kind, goal, status, steps_json, current_step,
+       next_action_at, execution_mode, failure_policy, approved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stop', ?)`,
+  ).bind(
+    id,
+    input.workspaceId || DEFAULT_WORKSPACE_ID,
+    input.conversationId || null,
+    input.taskId ? String(input.taskId) : null,
+    input.kind || 'goal',
+    input.goal.slice(0, 500),
+    executionMode === 'batch' ? 'awaiting_confirmation' : 'active',
+    JSON.stringify(steps),
+    nextExecutionStepIndex(steps),
+    input.nextActionAt || null,
+    executionMode,
+    executionMode === 'guided' ? nowIso() : null,
+  ).run()
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
   if (!row) throw new Error('任务计划创建失败')
   return toAgentTaskPlan(row)
@@ -3395,14 +3461,22 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
       workspaceId: agentWorkspaceIdFromRequest(request),
       conversationId: agentString(body.conversationId, 160),
       taskId: Number(body.taskId) || undefined,
+      executionMode: body.executionMode === 'guided' ? 'guided' : 'batch',
       goal: agentString(body.goal, 500),
       steps: rawSteps.map((item) => {
         const step = typeof item === 'object' && item ? item as Record<string, unknown> : {}
-        return { label: agentString(step.label, 120), action: agentString(step.action, 60) }
+        const compensation = typeof step.compensation === 'object' && step.compensation ? step.compensation as Record<string, unknown> : null
+        return {
+          key: agentString(step.key, 60),
+          label: agentString(step.label, 120),
+          action: agentString(step.action, 60),
+          dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.map((dependency) => agentString(dependency, 60)).filter(Boolean) : undefined,
+          compensation: compensation ? { label: agentString(compensation.label, 120), action: agentString(compensation.action, 60) } : undefined,
+        }
       }),
       nextActionAt: agentString(body.nextActionAt, 40),
     })
-    await audit(env, agentCapabilityRegistry.create_task_plan.policy.auditEvent, 'agent_plan', plan.id, { taskId: plan.taskId, stepCount: plan.steps.length })
+    await audit(env, agentCapabilityRegistry.create_task_plan.policy.auditEvent, 'agent_plan', plan.id, { taskId: plan.taskId, stepCount: plan.steps.length, executionMode: plan.executionMode })
     return agentOk({ tool: 'create_task_plan', mode: 'execute', plan })
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '任务计划创建失败', 400)
@@ -3455,26 +3529,52 @@ async function agentProgressTaskPlanTool(env: Env, request: Request) {
   const body = await parseAgentToolBody(request)
   const conversationId = agentString(body.conversationId, 160)
   const action = agentString(body.action, 60)
+  const outcome = body.outcome === 'failed' ? 'failed' : body.outcome === 'started' ? 'started' : 'completed'
+  const error = agentString(body.error, 500)
+  const requestedPlanId = agentString(body.planId, 160)
+  const requestedStepId = agentString(body.stepId, 220)
   const taskId = Number(body.taskId) || 0
   const workspaceId = agentWorkspaceIdFromRequest(request)
   if (taskId) await refreshAgentTaskMemory(env, taskId, workspaceId)
-  if (!conversationId || !action) return agentOk({ updated: 0 })
-  const rows = await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND conversation_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5").bind(workspaceId, conversationId).all<DbAgentTaskPlan>()
+  if ((!conversationId && !requestedPlanId) || !action) return agentOk({ updated: 0 })
+  const rows = requestedPlanId
+    ? await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND id = ? AND status = 'active' LIMIT 1").bind(workspaceId, requestedPlanId).all<DbAgentTaskPlan>()
+    : await env.DB.prepare("SELECT * FROM agent_task_plans WHERE workspace_id = ? AND conversation_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5").bind(workspaceId, conversationId).all<DbAgentTaskPlan>()
   let updated = 0
   for (const row of rows.results ?? []) {
-    const steps = parseAgentPlanSteps(row.steps_json)
-    const index = steps.findIndex((step) => step.status === 'pending' && (step.action === action || step.action === 'follow_up'))
+    const steps = executionStepsForPlan(row)
+    const index = steps.findIndex((step) => {
+      if (requestedStepId && step.id !== requestedStepId) return false
+      const normalMatch = (outcome === 'started' ? step.status === 'ready' : ['ready', 'running'].includes(step.status))
+        && (step.action === action || step.action === 'follow_up')
+      const compensationMatch = (outcome === 'started' ? step.status === 'compensation_pending' : ['compensation_pending', 'compensating'].includes(step.status))
+        && step.compensation?.action === action
+      return normalMatch || compensationMatch
+    })
     if (index < 0) continue
-    steps[index] = { ...steps[index], status: 'completed', completedAt: nowIso() }
-    const nextIndex = steps.findIndex((step) => step.status === 'pending')
-    const complete = nextIndex < 0
+    const compensation = ['compensation_pending', 'compensating'].includes(steps[index].status)
+    const nextSteps = compensation
+      ? outcome === 'started'
+        ? startExecutionCompensation(steps, steps[index].id)
+        : outcome === 'failed'
+          ? steps.map((step) => step.id === steps[index].id ? { ...step, status: 'failed' as const, failedAt: nowIso(), error: error || '补偿执行失败' } : step)
+          : completeExecutionCompensation(steps, steps[index].id)
+      : outcome === 'started'
+        ? startExecutionStep(steps, steps[index].id)
+        : outcome === 'failed'
+          ? failExecutionStep(steps, steps[index].id, error || '业务写入失败')
+          : completeExecutionStep(steps, steps[index].id)
+    const status = outcome === 'failed' ? 'failed' : executionPlanStatus(nextSteps)
     await env.DB.prepare(
       `UPDATE agent_task_plans SET task_id = COALESCE(task_id, ?), steps_json = ?, current_step = ?, status = ?,
-       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    ).bind(taskId ? String(taskId) : null, JSON.stringify(steps), complete ? steps.length : nextIndex, complete ? 'completed' : 'active', complete ? 1 : 0, row.id).run()
+       completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+       failed_at = CASE WHEN ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END,
+       error_message = CASE WHEN ? = 'failed' THEN ? ELSE NULL END,
+       revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(taskId ? String(taskId) : null, JSON.stringify(nextSteps), nextExecutionStepIndex(nextSteps), status, status, status, status, error || null, row.id).run()
     updated += 1
   }
-  return agentOk({ tool: 'progress_task_plan', updated })
+  return agentOk({ tool: 'progress_task_plan', updated, outcome })
 }
 
 async function listAgentTaskPlans(env: Env, request: Request) {
@@ -3486,35 +3586,84 @@ async function listAgentTaskPlans(env: Env, request: Request) {
 }
 
 async function updateAgentTaskPlan(env: Env, id: string, request: Request, legacyAction?: 'read' | 'cancel') {
-  const body = legacyAction ? {} : await request.json().catch(() => ({})) as { action?: string; stepId?: string }
+  const body = legacyAction ? {} : await request.json().catch(() => ({})) as { action?: string; stepId?: string; error?: string; revision?: number }
   const action = legacyAction || agentString(body.action, 40)
   await ensureAgentWorkspaceColumns(env)
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAgentTaskPlan>()
   if (!row) return fail('任务计划不存在', 404)
+  if (Number.isInteger(body.revision) && Number(body.revision) !== Number(row.revision || 1)) return fail('计划已在其他会话更新，请刷新后重试', 409)
   if (action === 'read') {
     await env.DB.prepare('UPDATE agent_task_plans SET read_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run()
-  } else if (action === 'cancel') {
-    await env.DB.prepare("UPDATE agent_task_plans SET status = 'cancelled', paused_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run()
-  } else if (action === 'pause') {
-    await env.DB.prepare("UPDATE agent_task_plans SET status = 'paused', paused_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'").bind(id).run()
-  } else if (action === 'resume') {
-    await env.DB.prepare("UPDATE agent_task_plans SET status = 'active', paused_at = NULL, completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('paused', 'completed')").bind(id).run()
-  } else if (action === 'complete_step' || action === 'reopen_step') {
-    const steps = parseAgentPlanSteps(row.steps_json)
-    const index = steps.findIndex((step) => step.id === body.stepId)
-    if (index < 0) return fail('计划步骤不存在', 404)
-    steps[index] = action === 'complete_step'
-      ? { ...steps[index], status: 'completed', completedAt: nowIso() }
-      : { ...steps[index], status: 'pending', completedAt: undefined }
-    const nextIndex = steps.findIndex((step) => step.status === 'pending')
-    const completed = nextIndex < 0
-    await env.DB.prepare(
-      `UPDATE agent_task_plans SET steps_json = ?, current_step = ?, status = ?, paused_at = NULL,
-       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    ).bind(JSON.stringify(steps), completed ? steps.length : nextIndex, completed ? 'completed' : 'active', completed ? 1 : 0, id).run()
-  } else {
+  } else if (!['cancel', 'approve_batch', 'pause', 'resume', 'start_step', 'complete_step', 'reopen_step', 'fail_step', 'retry_step', 'begin_compensation', 'start_compensation', 'complete_compensation'].includes(action)) {
     return fail('不支持的计划操作', 400)
+  } else {
+    let steps = executionStepsForPlan(row)
+    let status: AgentExecutionPlanStatus
+    let errorMessage = row.error_message || ''
+    let approvedAt = row.approved_at
+    let failedAt = row.failed_at
+    let pausedAt = row.paused_at
+    if (action === 'cancel') {
+      status = 'cancelled'
+      pausedAt = null
+    } else if (action === 'approve_batch') {
+      if (row.status !== 'awaiting_confirmation') return fail('当前批次不处于待确认状态', 409)
+      steps = approveExecutionBatch(steps)
+      status = executionPlanStatus(steps)
+      approvedAt = nowIso()
+    } else if (action === 'pause') {
+      if (row.status !== 'active') return fail('只有执行中的计划可以暂停', 409)
+      status = 'paused'
+      pausedAt = nowIso()
+    } else if (action === 'resume') {
+      if (row.status !== 'paused') return fail('只有已暂停的计划可以继续', 409)
+      status = executionPlanStatus(steps)
+      pausedAt = null
+    } else {
+      if (row.status === 'awaiting_confirmation') return fail('请先确认整个执行批次', 409)
+      if (row.status === 'paused') return fail('计划已暂停，请先恢复', 409)
+      const stepId = agentString(body.stepId, 220)
+      if (action !== 'begin_compensation' && !stepId) return fail('缺少计划步骤', 400)
+      try {
+        if (action === 'start_step') steps = startExecutionStep(steps, stepId)
+        if (action === 'complete_step') steps = completeExecutionStep(steps, stepId)
+        if (action === 'fail_step') steps = failExecutionStep(steps, stepId, agentString(body.error, 500) || '执行失败')
+        if (action === 'retry_step') steps = retryExecutionStep(steps, stepId)
+        if (action === 'begin_compensation') steps = beginExecutionCompensation(steps)
+        if (action === 'start_compensation') steps = startExecutionCompensation(steps, stepId)
+        if (action === 'complete_compensation') steps = completeExecutionCompensation(steps, stepId)
+        if (action === 'reopen_step') {
+          const reopening = steps.find((step) => step.id === stepId)
+          if (!reopening || !['completed', 'skipped'].includes(reopening.status)) throw new Error('只有已完成步骤可以重新打开')
+          const resetIds = new Set([stepId])
+          let changed = true
+          while (changed) {
+            changed = false
+            for (const step of steps) {
+              if (!resetIds.has(step.id) && step.dependsOn.some((dependency) => resetIds.has(dependency))) {
+                resetIds.add(step.id)
+                changed = true
+              }
+            }
+          }
+          steps = unlockExecutionSteps(steps.map((step) => resetIds.has(step.id)
+            ? { ...step, status: 'pending' as const, completedAt: undefined, failedAt: undefined, error: undefined }
+            : step))
+        }
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : '计划步骤更新失败', 409)
+      }
+      status = executionPlanStatus(steps)
+      errorMessage = status === 'failed' ? (steps.find((step) => step.status === 'failed')?.error || '执行失败') : ''
+      failedAt = status === 'failed' ? (failedAt || nowIso()) : null
+    }
+    const completedAt = status === 'completed' || status === 'compensated' ? nowIso() : null
+    await env.DB.prepare(
+      `UPDATE agent_task_plans SET steps_json = ?, current_step = ?, status = ?, paused_at = ?, approved_at = ?, failed_at = ?,
+       error_message = ?, completed_at = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?`,
+    ).bind(JSON.stringify(steps), nextExecutionStepIndex(steps), status, pausedAt, approvedAt, failedAt, errorMessage || null, completedAt, id, workspaceId).run()
+    await audit(env, `agent_plan_${action}`, 'agent_plan', id, { stepId: body.stepId || null, revision: Number(row.revision || 1) + 1, status })
   }
   const updated = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ?').bind(id).first<DbAgentTaskPlan>()
   return updated ? ok({ plan: toAgentTaskPlan(updated) }) : fail('任务计划不存在', 404)

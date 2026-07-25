@@ -267,7 +267,13 @@ CREATE TABLE IF NOT EXISTS agent_task_plans (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
-  paused_at TEXT
+  paused_at TEXT,
+  execution_mode TEXT NOT NULL DEFAULT 'guided',
+  failure_policy TEXT NOT NULL DEFAULT 'stop',
+  revision INTEGER NOT NULL DEFAULT 1,
+  approved_at TEXT,
+  failed_at TEXT,
+  error_message TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_task_plans_status

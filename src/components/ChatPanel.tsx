@@ -44,6 +44,30 @@ type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; d
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
 
+const planStatusLabels: Record<AgentTaskPlan['status'], string> = {
+  awaiting_confirmation: '待批次确认',
+  active: '执行中',
+  paused: '已暂停',
+  completed: '已完成',
+  failed: '已停止',
+  compensating: '补偿中',
+  compensated: '已补偿',
+  cancelled: '已取消',
+}
+
+const planStepStatusLabels: Record<AgentTaskPlan['steps'][number]['status'], string> = {
+  pending: '待确认',
+  blocked: '等待依赖',
+  ready: '可执行',
+  running: '执行中',
+  completed: '已完成',
+  failed: '失败',
+  skipped: '已跳过',
+  compensation_pending: '待补偿',
+  compensating: '补偿中',
+  compensated: '已补偿',
+}
+
 type ChatPanelProps = {
   currentMonthValue: string
   aiModelConfig: AiModelConfig | null
@@ -769,20 +793,38 @@ export function ChatPanel({
     }
   }
 
-  const updatePlan = async (plan: AgentTaskPlan, action: 'pause' | 'resume' | 'cancel' | 'complete_step' | 'reopen_step', stepId?: string) => {
+  const updatePlan = async (
+    plan: AgentTaskPlan,
+    action: 'approve_batch' | 'pause' | 'resume' | 'cancel' | 'start_step' | 'complete_step' | 'reopen_step' | 'fail_step' | 'retry_step' | 'begin_compensation' | 'start_compensation' | 'complete_compensation',
+    stepId?: string,
+  ) => {
     const busyKey = `${plan.id}:${action}:${stepId || ''}`
     setTaskCenterBusy(busyKey)
     try {
-      const result = await api.updateAgentPlan(plan.id, action, stepId)
+      const result = await api.updateAgentPlan(plan.id, action, stepId, { revision: plan.revision })
       setAgentPlans((current) => action === 'cancel'
         ? current.filter((item) => item.id !== plan.id)
         : current.map((item) => item.id === plan.id ? result.plan : item))
-      onNotify(action === 'pause' ? '计划已暂停' : action === 'resume' ? '计划已继续' : action === 'cancel' ? '计划已取消' : '计划步骤已更新', 'success')
+      onNotify(
+        action === 'approve_batch' ? '执行批次已确认'
+          : action === 'pause' ? '计划已暂停'
+            : action === 'resume' ? '计划已继续'
+              : action === 'cancel' ? '计划已取消'
+                : action === 'begin_compensation' ? '已进入补偿流程'
+                  : '计划步骤已更新',
+        'success',
+      )
     } catch (error) {
       onNotify(error instanceof Error ? error.message : '计划更新失败', 'error')
     } finally {
       setTaskCenterBusy('')
     }
+  }
+
+  const executePlanCompensation = (plan: AgentTaskPlan, step: AgentTaskPlan['steps'][number]) => {
+    if (!step.compensation) return
+    setShowTaskCenter(false)
+    void send(`请为持续计划“${plan.goal}”执行补偿步骤“${step.compensation.label}”。先核对当前任务数据，生成对应操作草稿，执行前让我确认。`)
   }
 
   const updateMemory = async (memory: AgentTaskMemory, payload: Parameters<typeof api.updateTaskMemory>[1]) => {
@@ -1271,13 +1313,14 @@ export function ChatPanel({
           <div className="chat-history-list">
             {taskCenterTab === 'plans' && agentPlans.map((plan) => {
               const expanded = expandedPlanId === plan.id
-              const completedSteps = plan.steps.filter((step) => step.status === 'completed').length
+              const completedSteps = plan.steps.filter((step) => ['completed', 'skipped', 'compensated'].includes(step.status)).length
+              const canCompensate = plan.steps.some((step) => step.status === 'completed' && step.compensation)
               return (
                 <article key={plan.id} className={`chat-task-plan ${plan.unread ? 'unread' : ''}`}>
                   <button type="button" className="chat-task-item" onClick={() => void openAgentPlan(plan)} aria-expanded={expanded}>
                     <span className="chat-task-item-main">
                       <strong>{plan.goal}</strong>
-                      <small>{plan.kind === 'reminder' ? '主动提醒' : '持续计划'} · {plan.status === 'completed' ? '已完成' : plan.status === 'paused' ? '已暂停' : `${completedSteps}/${plan.steps.length} 步`}</small>
+                      <small>{plan.kind === 'reminder' ? '主动提醒' : plan.executionMode === 'batch' ? '执行批次' : '持续计划'} · {planStatusLabels[plan.status]} · {completedSteps}/{plan.steps.length} 步</small>
                     </span>
                     <span className="chat-task-item-meta">{new Date(plan.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
                     <ChevronDown size={14} aria-hidden="true" />
@@ -1290,22 +1333,31 @@ export function ChatPanel({
                             <button
                               type="button"
                               className="chat-plan-step-toggle"
-                              disabled={taskCenterBusy !== '' || plan.status === 'cancelled'}
-                              onClick={() => void updatePlan(plan, step.status === 'completed' ? 'reopen_step' : 'complete_step', step.id)}
-                              aria-label={step.status === 'completed' ? `重新打开：${step.label}` : `标记完成：${step.label}`}
+                              disabled={taskCenterBusy !== '' || ['cancelled', 'paused', 'awaiting_confirmation'].includes(plan.status) || ['pending', 'blocked', 'compensation_pending', 'compensating'].includes(step.status)}
+                              onClick={() => void updatePlan(plan, step.status === 'completed' ? 'reopen_step' : step.status === 'failed' ? 'retry_step' : 'complete_step', step.id)}
+                              aria-label={step.status === 'completed' ? `重新打开：${step.label}` : step.status === 'failed' ? `重试：${step.label}` : `标记完成：${step.label}`}
                             >
                               <CheckCircle2 size={14} />
                             </button>
-                            <span>{step.label}</span>
+                            <span className="chat-plan-step-content">
+                              <span>{step.label}</span>
+                              <small>{planStepStatusLabels[step.status]}{step.dependsOn.length > 0 && ['pending', 'blocked'].includes(step.status) ? ` · 等待 ${step.dependsOn.length} 项` : ''}</small>
+                              {step.error && <small className="status-error">{step.error}</small>}
+                              {step.status === 'compensation_pending' && step.compensation && (
+                                <button type="button" className="ghost-button compact-button" onClick={() => executePlanCompensation(plan, step)}>生成补偿草稿</button>
+                              )}
+                            </span>
                           </li>
                         ))}
                       </ol>
                       <div className="chat-task-plan-actions">
                         {plan.taskId && <button type="button" className="ghost-button compact-button" onClick={() => onOpenTask(plan.taskId!)}><Eye size={13} />查看任务</button>}
                         {plan.kind === 'reminder' && plan.status === 'active' && <button type="button" className="primary-button compact-button" disabled={loading} onClick={() => executeReminder(plan)}>执行建议</button>}
+                        {plan.status === 'awaiting_confirmation' && <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'approve_batch')}>确认整个批次</button>}
                         {plan.kind === 'goal' && plan.status === 'active' && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'pause')}>暂停</button>}
-                        {plan.kind === 'goal' && (plan.status === 'paused' || plan.status === 'completed') && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'resume')}><RotateCcw size={13} />继续</button>}
-                        <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'cancel')}>取消计划</button>
+                        {plan.kind === 'goal' && plan.status === 'paused' && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'resume')}><RotateCcw size={13} />继续</button>}
+                        {plan.kind === 'goal' && ['failed', 'completed'].includes(plan.status) && canCompensate && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'begin_compensation')}>补偿 / 回滚</button>}
+                        {!['completed', 'compensated', 'cancelled'].includes(plan.status) && <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'cancel')}>取消计划</button>}
                       </div>
                     </div>
                   )}

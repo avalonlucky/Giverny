@@ -1522,49 +1522,79 @@ async function runAgentOrchestrationCheck(cookie) {
       taskId: 1,
       goal: '持续推进公司产品封套修改直到验收',
       steps: [
-        { label: '记录制作进展', action: 'append_progress' },
-        { label: '整理验收文件', action: 'mark_acceptance_files' },
-        { label: '完成验收', action: 'complete_acceptance' },
+        { key: 'progress', label: '记录制作进展', action: 'append_progress', compensation: { label: '撤回错误进展', action: 'manage_record' } },
+        { key: 'files', label: '整理验收文件', action: 'mark_acceptance_files', dependsOn: ['progress'] },
+        { key: 'accept', label: '完成验收', action: 'complete_acceptance', dependsOn: ['files'] },
       ],
     }),
   })
   const created = await planResponse.json().catch(() => ({}))
-  if (!planResponse.ok || created.plan?.steps?.length !== 3) throw new Error(`Agent plan creation failed: ${JSON.stringify(created)}`)
+  if (!planResponse.ok || created.plan?.steps?.length !== 3 || created.plan.status !== 'awaiting_confirmation') throw new Error(`Agent plan creation failed: ${JSON.stringify(created)}`)
 
   const memoryResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/get-task-memory?taskId=1', { headers: toolHeaders })
   const memory = await memoryResponse.json().catch(() => ({}))
   if (!memoryResponse.ok || memory.memory?.taskId !== 1 || !memory.memory?.summary) throw new Error(`Task memory refresh failed: ${JSON.stringify(memory)}`)
 
-  const progressResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/progress-task-plan', {
-    method: 'POST',
-    headers: toolHeaders,
-    body: JSON.stringify({ conversationId, taskId: 1, action: 'append_progress' }),
-  })
-  const progressed = await progressResponse.json().catch(() => ({}))
-  if (!progressResponse.ok || progressed.updated !== 1) throw new Error(`Agent plan progression failed: ${JSON.stringify(progressed)}`)
-
-  const listResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })
-  const listed = await listResponse.json().catch(() => ({}))
-  const plan = listed.plans?.find((item) => item.id === created.plan.id)
-  if (!listResponse.ok || plan?.steps?.[0]?.status !== 'completed' || plan.currentStep !== 1) {
-    throw new Error(`Agent task center plan is inconsistent: ${JSON.stringify(plan)}`)
+  const progressPlan = async (outcome, error = '') => {
+    const response = await fetch('http://127.0.0.1:8798/api/agent/tools/progress-task-plan', {
+      method: 'POST',
+      headers: toolHeaders,
+      body: JSON.stringify({ conversationId, taskId: 1, action: 'append_progress', outcome, error }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(`Agent plan ${outcome} progression failed: ${JSON.stringify(data)}`)
+    return data
   }
-  const updatePlan = async (action, stepId) => {
+  const beforeApproval = await progressPlan('completed')
+  if (beforeApproval.updated !== 0) throw new Error('Unapproved execution batch progressed unexpectedly')
+
+  const updatePlan = async (plan, action, stepId) => {
     const response = await fetch(`http://127.0.0.1:8798/api/ai/agent-plans/${created.plan.id}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ action, stepId }),
+      method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ action, stepId, revision: plan.revision }),
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok || !data.plan) throw new Error(`Plan ${action} failed: ${JSON.stringify(data)}`)
     return data.plan
   }
-  const paused = await updatePlan('pause')
+  let plan = await updatePlan(created.plan, 'approve_batch')
+  if (plan.status !== 'active' || plan.steps[0].status !== 'ready' || !plan.approvedAt) throw new Error(`Agent batch approval failed: ${JSON.stringify(plan)}`)
+  const staleResponse = await fetch(`http://127.0.0.1:8798/api/ai/agent-plans/${created.plan.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ action: 'pause', revision: created.plan.revision }),
+  })
+  if (staleResponse.status !== 409) throw new Error('Stale cross-session execution update was not rejected')
+
+  const started = await progressPlan('started')
+  if (started.updated !== 1) throw new Error(`Agent plan start did not persist: ${JSON.stringify(started)}`)
+  const failed = await progressPlan('failed', '隔离评测模拟失败')
+  if (failed.updated !== 1) throw new Error(`Agent plan failure did not persist: ${JSON.stringify(failed)}`)
+
+  const listResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })
+  const listed = await listResponse.json().catch(() => ({}))
+  plan = listed.plans?.find((item) => item.id === created.plan.id)
+  if (!listResponse.ok || plan?.status !== 'failed' || plan.steps?.[0]?.status !== 'failed' || plan.steps?.[1]?.status !== 'blocked') {
+    throw new Error(`Agent task center plan is inconsistent: ${JSON.stringify(plan)}`)
+  }
+  plan = await updatePlan(plan, 'retry_step', plan.steps[0].id)
+  const paused = await updatePlan(plan, 'pause')
   if (paused.status !== 'paused' || !paused.pausedAt) throw new Error('Agent plan pause was not persisted')
-  const resumed = await updatePlan('resume')
-  if (resumed.status !== 'active' || resumed.pausedAt) throw new Error('Agent plan resume was not persisted')
-  const manuallyCompleted = await updatePlan('complete_step', resumed.steps[1].id)
-  if (manuallyCompleted.steps[1].status !== 'completed') throw new Error('Agent plan manual step completion failed')
-  const reopened = await updatePlan('reopen_step', resumed.steps[1].id)
-  if (reopened.steps[1].status !== 'pending') throw new Error('Agent plan step reopening failed')
+  plan = await updatePlan(paused, 'resume')
+  if (plan.status !== 'active' || plan.pausedAt) throw new Error('Agent plan resume was not persisted')
+  const progressed = await progressPlan('completed')
+  if (progressed.updated !== 1) throw new Error(`Agent plan completion did not persist: ${JSON.stringify(progressed)}`)
+  plan = (await (await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })).json()).plans.find((item) => item.id === created.plan.id)
+  plan = await updatePlan(plan, 'complete_step', plan.steps[1].id)
+  const reopened = await updatePlan(plan, 'reopen_step', plan.steps[1].id)
+  if (reopened.steps[1].status !== 'ready' || reopened.steps[2].status !== 'blocked') throw new Error('Agent plan dependency reopening failed')
+  plan = await updatePlan(reopened, 'complete_step', reopened.steps[1].id)
+  plan = await updatePlan(plan, 'complete_step', plan.steps[2].id)
+  if (plan.status !== 'completed') throw new Error(`Agent plan did not complete: ${JSON.stringify(plan)}`)
+  plan = await updatePlan(plan, 'begin_compensation')
+  if (plan.status !== 'compensating' || plan.steps[0].status !== 'compensation_pending') throw new Error('Agent plan compensation did not start')
+  plan = await updatePlan(plan, 'start_compensation', plan.steps[0].id)
+  plan = await updatePlan(plan, 'complete_compensation', plan.steps[0].id)
+  if (plan.status !== 'compensated') throw new Error('Agent plan compensation did not complete')
 
   const updateMemory = async (payload) => {
     const response = await fetch('http://127.0.0.1:8798/api/ai/task-memories/1', {
