@@ -210,6 +210,33 @@ async function runMcpChecks() {
   process.stdout.write('MCP authentication, tool list, and read-only call checks passed.\n')
 }
 
+async function runCapabilityRegistryChecks() {
+  const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
+  const spec = await response.json().catch(() => ({}))
+  const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
+  if (!response.ok || capabilities.length !== 35) {
+    throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
+  }
+  for (const capability of capabilities) {
+    const path = spec.paths?.[`/api/agent/tools/${capability.endpoint}`]
+    const operation = path?.[String(capability.methods?.[0] || '').toLowerCase()]
+    if (!path || !operation || operation.operationId !== capability.name) {
+      throw new Error(`OpenAPI path was not generated from capability ${capability.name}`)
+    }
+    const policy = operation['x-giverny-policy']
+    if (policy?.risk !== capability.risk || policy?.confirmation !== capability.confirmation || policy?.auditEvent !== capability.auditEvent) {
+      throw new Error(`OpenAPI policy drifted from capability ${capability.name}`)
+    }
+  }
+  const viewerWrite = await fetch('http://127.0.0.1:8798/api/agent/tools/create-task-preview', {
+    method: 'POST',
+    headers: { ...agentScopeHeaders('default', 'viewer-eval', 'viewer'), 'content-type': 'application/json' },
+    body: JSON.stringify({ title: '不应创建', requirement: '权限测试' }),
+  })
+  if (viewerWrite.status !== 401) throw new Error(`Viewer bypassed registered write policy: HTTP ${viewerWrite.status}`)
+  process.stdout.write('Agent capability manifest, OpenAPI generation, policy metadata, and role denial checks passed.\n')
+}
+
 function agentScopeHeaders(workspaceId, principalId = 'scope-eval', role = 'admin') {
   const runId = `scope-${crypto.randomUUID()}`
   const signature = createHmac('sha256', 'eval-agent-tool-token')
@@ -2087,6 +2114,7 @@ try {
   if (!loginResponse.ok || !cookie) throw new Error('Isolated eval login failed')
 
   await runMcpChecks()
+  await runCapabilityRegistryChecks()
   await runAgentScopeChecks()
   await runFinanceAnchorCheck(cookie)
   await runSupplementalActivityDateCheck(cookie)

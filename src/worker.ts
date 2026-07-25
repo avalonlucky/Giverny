@@ -4,7 +4,8 @@ import { getAgentByName } from 'agents'
 import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
-import { agentReadToolRegistry } from './agentToolRegistry'
+import { z } from 'zod'
+import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig } from './agentToolRegistry'
 import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
@@ -3401,6 +3402,7 @@ async function agentCreateTaskPlanTool(env: Env, request: Request) {
       }),
       nextActionAt: agentString(body.nextActionAt, 40),
     })
+    await audit(env, agentCapabilityRegistry.create_task_plan.policy.auditEvent, 'agent_plan', plan.id, { taskId: plan.taskId, stepCount: plan.steps.length })
     return agentOk({ tool: 'create_task_plan', mode: 'execute', plan })
   } catch (error) {
     return agentFail(error instanceof Error ? error.message : '任务计划创建失败', 400)
@@ -3602,14 +3604,7 @@ async function verifyAgentToolRequest(env: Env, request: Request) {
 
 function agentToolPathAllowed(role: AgentPrincipalContext['role'], path: string, method: string) {
   const endpoint = path.split('/').pop() || ''
-  const publicRead = new Set(['context', 'product-help'])
-  const businessRead = new Set(['month-finance', 'search-tasks', 'task-portfolio', 'task-detail', 'requester-profile', 'search-attachments', 'get-task-memory'])
-  if (publicRead.has(endpoint)) return true
-  if (businessRead.has(endpoint) && (method === 'GET' || method === 'POST')) {
-    if (endpoint === 'month-finance') return ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'].includes(role)
-    return ['admin', 'collaborator', 'viewer', 'client', 'mcp-read', 'system'].includes(role)
-  }
-  return ['admin', 'collaborator', 'system'].includes(role)
+  return agentCapabilityAllows(endpoint, role, method)
 }
 
 async function resolveAgentToolPrincipal(env: Env, request: Request): Promise<AgentPrincipalContext | null> {
@@ -3833,6 +3828,8 @@ function agentTaskSelectionResponse(error: AgentTaskSelectionRequired, toolName:
 }
 
 async function agentPreview(env: Env, action: string, draft: Record<string, unknown>, missing: string[] = [], warnings: string[] = []) {
+  const confirmation = agentWritePreviewConfig(action)
+  if (!confirmation) throw new Error(`未注册的 Agent 写入预览：${action}`)
   return agentOk({
     tool: action,
     mode: 'preview',
@@ -3840,7 +3837,7 @@ async function agentPreview(env: Env, action: string, draft: Record<string, unkn
     draft,
     missing,
     warnings,
-    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, action.replace(/_preview$/, ''), draft) : '',
+    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, confirmation.executeName, draft) : '',
     instruction: missing.length === 0
       ? '请把预览内容展示给用户；只有用户明确确认后，才调用对应 execute 工具并传入 confirmationToken。'
       : '请向用户追问缺失字段，不要调用 execute 工具。',
@@ -3931,7 +3928,7 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
     `INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_to_client)
      VALUES (?, ?, ?, ?, ?, 0, 1)`,
   ).bind(`${id}-created`, id, startDate, `项目名称：${agentString(draft.type, 120) || '未分类项目'}`, `任务名称：${agentString(draft.title, 120)}`).run()
-  await audit(env, 'agent_create', 'task', id, draft)
+  await audit(env, agentCapabilityRegistry.create_task.policy.auditEvent, 'task', id, draft)
   ctx?.waitUntil(indexTaskSearch(env, id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<DbTask>()
   return agentOk({ tool: 'create_task', mode: 'execute', ok: true, task: saved ? toTask(saved) : { id } })
@@ -3990,7 +3987,7 @@ async function agentRecordFeedbackTool(env: Env, request: Request, ctx?: WorkerE
   await env.DB.prepare('UPDATE tasks SET time_entries_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(JSON.stringify(nextEntries), task.id)
     .run()
-  await audit(env, 'agent_record_feedback', 'task', task.id, entry)
+  await audit(env, agentCapabilityRegistry.record_feedback.policy.auditEvent, 'task', task.id, entry)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'record_feedback', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
@@ -4047,7 +4044,7 @@ async function agentUpdateTaskStatusTool(env: Env, request: Request, ctx?: Worke
   await env.DB.prepare('UPDATE tasks SET status = ?, stage = ?, progress = ?, actual_delivery_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(status, status, progress, actualDeliveryDate, task.id)
     .run()
-  await audit(env, 'agent_update_status', 'task', task.id, draft)
+  await audit(env, agentCapabilityRegistry.update_task_status.policy.auditEvent, 'task', task.id, draft)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'update_task_status', mode: 'execute', ok: true, task: saved ? toTask(saved) : null })
@@ -4126,7 +4123,7 @@ async function agentUpdateTaskFieldsTool(env: Env, request: Request, ctx?: Worke
   await env.DB.prepare(
     `UPDATE tasks SET title = ?, requirement = ?, design_type = ?, start_date = ?, estimated_delivery_date = ?, settlement_month = ?, estimated_hours = ?, requester = ?, contact_person = ?, reviewer = ?, is_supplemental = ?, is_billable = ?, supplemental_note = ?, acceptance_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
   ).bind(next.title, next.requirement, next.type, next.date, next.estimatedDate, next.settlementMonth || monthPart(next.date), next.estimatedHours, next.requester, next.contact, next.reviewer, next.isSupplemental ? 1 : 0, next.billable ? 1 : 0, next.supplementalNote, next.acceptanceNote, task.id).run()
-  await audit(env, 'agent_update_fields', 'task', task.id, fields)
+  await audit(env, agentCapabilityRegistry.update_task_fields.policy.auditEvent, 'task', task.id, fields)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'update_task_fields', mode: 'execute', ok: true, task: saved ? toTask(saved) : null })
@@ -4194,7 +4191,7 @@ async function agentAppendProgressTool(env: Env, request: Request, ctx?: WorkerE
     .bind(JSON.stringify(entries), actualHours, nextStatus, nextStatus, nextProgress, actualDeliveryDate, task.id)
     .run()
   await updateHourEstimateObservation(env, task.id, actualHours, nextStatus === '已验收')
-  await audit(env, 'agent_append_progress', 'task', task.id, entry)
+  await audit(env, agentCapabilityRegistry.append_progress.policy.auditEvent, 'task', task.id, entry)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'append_progress', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
@@ -4267,7 +4264,7 @@ async function agentAppendWaitingTool(env: Env, request: Request, ctx?: WorkerEx
   const entries = [...parseWaitingEntries(task.waiting_entries_json), entry]
   await env.DB.prepare('UPDATE tasks SET waiting_entries_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(JSON.stringify(entries), task.id).run()
-  await audit(env, 'agent_append_waiting', 'task', task.id, entry)
+  await audit(env, agentCapabilityRegistry.append_waiting.policy.auditEvent, 'task', task.id, entry)
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'append_waiting', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry })
@@ -4361,7 +4358,7 @@ async function agentManageRecordTool(env: Env, request: Request, ctx?: WorkerExe
   }
   await env.DB.batch(statements)
   if (!isWaiting) await updateHourEstimateObservation(env, task.id, agentEntryHours(nextEntries as TimeEntry[]), false)
-  await audit(env, `agent_${action}_record`, 'task', task.id, { recordType, recordId, before, changes })
+  await audit(env, agentCapabilityRegistry.manage_record.policy.auditEvent, 'task', task.id, { action, recordType, recordId, before, changes })
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'manage_record', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, recordId, action })
@@ -4401,7 +4398,7 @@ async function agentMarkAcceptanceFilesTool(env: Env, request: Request, ctx?: Wo
   const placeholders = attachmentIds.map(() => '?').join(', ')
   await env.DB.prepare(`UPDATE attachments SET attachment_scope = 'acceptance', is_final = 1, visible_to_client = 1, file_tag = '验收文件' WHERE task_id = ? AND id IN (${placeholders})`)
     .bind(String(task.id), ...attachmentIds.map(String)).run()
-  await audit(env, 'agent_mark_acceptance_files', 'task', task.id, { attachmentIds })
+  await audit(env, agentCapabilityRegistry.mark_acceptance_files.policy.auditEvent, 'task', task.id, { attachmentIds })
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   return agentOk({ tool: 'mark_acceptance_files', mode: 'execute', ok: true, task: toTask(task), files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) })
 }
@@ -4473,7 +4470,7 @@ async function agentCompleteAcceptanceTool(env: Env, request: Request, ctx?: Wor
   }
   await env.DB.batch(statements)
   await updateHourEstimateObservation(env, task.id, actualHours, true)
-  await audit(env, 'agent_complete_acceptance', 'task', task.id, { acceptanceNote: draft.acceptanceNote, entry, attachmentIds })
+  await audit(env, agentCapabilityRegistry.complete_acceptance.policy.auditEvent, 'task', task.id, { acceptanceNote: draft.acceptanceNote, entry, attachmentIds })
   ctx?.waitUntil(indexTaskSearch(env, task.id))
   const saved = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(task.id).first<DbTask>()
   return agentOk({ tool: 'complete_acceptance', mode: 'execute', ok: true, task: saved ? toTask(saved) : null, entry, files: files.map((file) => ({ id: Number(file.id), name: file.file_name })) })
@@ -4509,36 +4506,42 @@ function agentOpenApiSpec(request: Request) {
       },
     },
   })
-  const writeToolPath = (operationId: string, summary: string) => ({
-    post: {
-      operationId,
-      tags: ['Write Tools'],
-      summary,
-      description: 'Two-step write tool. Preview endpoints return a signed confirmationToken; execute endpoints require that token after explicit user confirmation.',
-      security: [{ BearerAuth: [] }],
-      requestBody: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: { type: 'object', additionalProperties: true },
-          },
+  const registryPaths = Object.entries(agentCapabilityRegistry).reduce<Record<string, Record<string, unknown>>>((paths, [name, capability]) => {
+    if (!capability.exposure.includes('api')) return paths
+    const inputSchema = z.toJSONSchema(capability.inputSchema, { target: 'draft-7' }) as Record<string, unknown>
+    const properties = (inputSchema.properties || {}) as Record<string, Record<string, unknown>>
+    const required = new Set(Array.isArray(inputSchema.required) ? inputSchema.required.map(String) : [])
+    const path = `/api/agent/tools/${capability.endpoint}`
+    const operations: Record<string, unknown> = {}
+    for (const method of capability.methods) {
+      const common = {
+        operationId: method === capability.methods[0] ? name : `${name}_${method.toLowerCase()}`,
+        tags: [capability.category],
+        summary: capability.title,
+        description: capability.description,
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': { description: 'Tool response', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '409': errorResponse,
         },
-      },
-      responses: {
-        '200': {
-          description: 'Tool response',
-          content: {
-            'application/json': {
-              schema: { type: 'object', additionalProperties: true },
-            },
-          },
+        'x-giverny-policy': {
+          risk: capability.policy.risk,
+          scopes: capability.policy.scopes,
+          roles: capability.policy.roles,
+          confirmation: capability.policy.confirmation,
+          auditEvent: capability.policy.auditEvent,
         },
-        '400': errorResponse,
-        '401': errorResponse,
-        '409': errorResponse,
-      },
-    },
-  })
+      }
+      operations[method.toLowerCase()] = method === 'GET'
+        ? { ...common, parameters: Object.entries(properties).map(([propertyName, schema]) => ({ name: propertyName, in: 'query', required: required.has(propertyName), schema })) }
+        : { ...common, requestBody: { required: required.size > 0, content: { 'application/json': { schema: inputSchema } } } }
+    }
+    paths[path] = operations
+    return paths
+  }, {})
   return {
     openapi: '3.0.3',
     info: {
@@ -4554,6 +4557,7 @@ function agentOpenApiSpec(request: Request) {
       { name: 'Context', description: 'Stable assistant context and capability notes.' },
       { name: 'Write Tools', description: 'Preview/execute tools for confirmed writes.' },
     ],
+    'x-giverny-capabilities': agentCapabilityManifest(),
     paths: {
       '/api/agent/tools/month-finance': {
         get: {
@@ -4734,26 +4738,7 @@ function agentOpenApiSpec(request: Request) {
           },
         },
       },
-      '/api/agent/tools/create-task-plan': writeToolPath('create_task_plan', 'Create a persistent multi-step Agent plan'),
-      '/api/agent/tools/get-task-memory': writeToolPath('get_task_memory', 'Read and refresh durable task memory'),
-      '/api/agent/tools/create-task-preview': writeToolPath('create_task_preview', 'Preview a new task'),
-      '/api/agent/tools/create-task': writeToolPath('create_task', 'Create a task after confirmation'),
-      '/api/agent/tools/record-feedback-preview': writeToolPath('record_feedback_preview', 'Preview recording client feedback'),
-      '/api/agent/tools/record-feedback': writeToolPath('record_feedback', 'Record client feedback after confirmation'),
-      '/api/agent/tools/update-task-status-preview': writeToolPath('update_task_status_preview', 'Preview changing task status'),
-      '/api/agent/tools/update-task-status': writeToolPath('update_task_status', 'Update task status after confirmation'),
-      '/api/agent/tools/update-task-fields-preview': writeToolPath('update_task_fields_preview', 'Preview editing task fields'),
-      '/api/agent/tools/update-task-fields': writeToolPath('update_task_fields', 'Update task fields after confirmation'),
-      '/api/agent/tools/append-progress-preview': writeToolPath('append_progress_preview', 'Preview appending task progress'),
-      '/api/agent/tools/append-progress': writeToolPath('append_progress', 'Append task progress after confirmation'),
-      '/api/agent/tools/append-waiting-preview': writeToolPath('append_waiting_preview', 'Preview appending a waiting record'),
-      '/api/agent/tools/append-waiting': writeToolPath('append_waiting', 'Append a waiting record after confirmation'),
-      '/api/agent/tools/manage-record-preview': writeToolPath('manage_record_preview', 'Preview editing or deleting an existing task record'),
-      '/api/agent/tools/manage-record': writeToolPath('manage_record', 'Edit or delete an existing task record after confirmation'),
-      '/api/agent/tools/mark-acceptance-files-preview': writeToolPath('mark_acceptance_files_preview', 'Preview marking existing files as acceptance files'),
-      '/api/agent/tools/mark-acceptance-files': writeToolPath('mark_acceptance_files', 'Mark existing files as acceptance files after confirmation'),
-      '/api/agent/tools/complete-acceptance-preview': writeToolPath('complete_acceptance_preview', 'Preview a complete task acceptance package'),
-      '/api/agent/tools/complete-acceptance': writeToolPath('complete_acceptance', 'Complete task acceptance after confirmation'),
+      ...registryPaths,
     },
     components: {
       securitySchemes: {
@@ -5863,6 +5848,7 @@ async function agentMonthlyReviewStartTool(env: Env, request: Request) {
   const conversationId = agentString(body.conversationId, 160)
   try {
     const row = await createAgentAnalysisJob(env, { type: 'monthly_review', month, conversationId, workspaceId: principal.workspaceId, principalId: principal.principalId })
+    await audit(env, agentCapabilityRegistry.start_monthly_review.policy.auditEvent, 'agent_analysis', row.id, { month, type: row.job_type })
     return agentOk({
       tool: 'start_monthly_review',
       backgroundTask: toAgentBackgroundTask(row),
@@ -5893,6 +5879,7 @@ async function agentAnalysisJobStartTool(env: Env, request: Request) {
       workspaceId: principal.workspaceId,
       principalId: principal.principalId,
     })
+    await audit(env, agentCapabilityRegistry.start_deep_analysis.policy.auditEvent, 'agent_analysis', row.id, { month, type: row.job_type })
     return agentOk({
       tool: 'start_deep_analysis',
       backgroundTask: toAgentBackgroundTask(row),
@@ -6338,18 +6325,6 @@ async function maybeScheduleAgentTaskReminders(env: Env, now = new Date()) {
   }
 }
 
-const agentWorkflowWriteEndpoints = new Set([
-  'create-task',
-  'record-feedback',
-  'update-task-status',
-  'update-task-fields',
-  'append-progress',
-  'append-waiting',
-  'manage-record',
-  'mark-acceptance-files',
-  'complete-acceptance',
-])
-
 async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerExecutionContext): Promise<Response> {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
@@ -6583,78 +6558,17 @@ function mcpToolError(error: unknown) {
 
 function registerGivernyMcpTools(server: McpServer, env: Env, principal: AgentPrincipalContext) {
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  const finance = agentReadToolRegistry.query_month_finance
-  server.registerTool('query_month_finance', {
-    title: finance.title,
-    description: finance.description,
-    inputSchema: finance.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, finance.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const search = agentReadToolRegistry.search_tasks
-  server.registerTool('search_tasks', {
-    title: search.title,
-    description: search.description,
-    inputSchema: search.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, search.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const portfolio = agentReadToolRegistry.query_task_portfolio
-  server.registerTool('query_task_portfolio', {
-    title: portfolio.title,
-    description: portfolio.description,
-    inputSchema: portfolio.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, portfolio.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const detail = agentReadToolRegistry.get_task_detail
-  server.registerTool('get_task_detail', {
-    title: detail.title,
-    description: detail.description,
-    inputSchema: detail.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, detail.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const profile = agentReadToolRegistry.get_requester_profile
-  server.registerTool('get_requester_profile', {
-    title: profile.title,
-    description: profile.description,
-    inputSchema: profile.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, profile.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const attachments = agentReadToolRegistry.search_attachments
-  server.registerTool('search_attachments', {
-    title: attachments.title,
-    description: attachments.description,
-    inputSchema: attachments.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, attachments.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const context = agentReadToolRegistry.get_giverny_context
-  server.registerTool('get_giverny_context', {
-    title: context.title,
-    description: context.description,
-    inputSchema: context.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, context.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
-  const productHelp = agentReadToolRegistry.search_product_help
-  server.registerTool('search_product_help', {
-    title: productHelp.title,
-    description: productHelp.description,
-    inputSchema: productHelp.inputSchema,
-    annotations,
-  }, async (input) => {
-    try { return mcpToolResult(await callMcpReadTool(env, productHelp.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
-  })
+  for (const [name, capability] of Object.entries(agentReadToolRegistry)) {
+    if (!capability.exposure.includes('mcp')) continue
+    server.registerTool(name, {
+      title: capability.title,
+      description: capability.description,
+      inputSchema: capability.inputSchema,
+      annotations,
+    }, async (input: Record<string, unknown>) => {
+      try { return mcpToolResult(await callMcpReadTool(env, capability.endpoint, input, principal)) } catch (error) { return mcpToolError(error) }
+    })
+  }
 }
 
 async function handleMcp(request: Request, env: Env, ctx: WorkerExecutionContext) {

@@ -16,7 +16,7 @@ Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作与�
   -> 缓存写入结果并回传 Agent
 ```
 
-当前覆盖五类操作：创建任务、记录反馈、修改任务状态、修改任务字段、追加任务进展。模型仍然只有 preview 权限，不能直接启动 execute。
+当前覆盖九类操作：创建任务、记录反馈、修改任务状态、修改任务字段、追加任务进展、记录等待、维护单条记录、标记验收文件和完整验收。模型仍然只有 preview 权限，不能直接启动 execute。预览与执行的配对关系、风险、允许角色和 Workflow 白名单均由 `src/agentToolRegistry.ts` 生成。
 
 ## 后台分析任务
 
@@ -45,7 +45,7 @@ Giverny 使用 Cloudflare Workflows 承担爱丽丝确认后的写入操作与�
 
 ## 安全边界
 
-- Workflow 只能调用五个白名单 execute endpoint。
+- Workflow 只能调用统一能力注册表中标记为 `signed-execute + workflow` 的九个 execute endpoint，不维护第二份手写白名单。
 - `operationId` 不能跨 endpoint 复用。
 - 每个 execute 仍必须提供 Worker 签发且未过期的 `confirmationToken`。
 - MCP 不开放 Workflow 写入入口；`MCP 只读`口令也不能调用该入口。

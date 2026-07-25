@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import process from 'node:process'
+import { agentCapabilityRegistry } from '../src/agentToolRegistry.ts'
 
 const failures = []
 const runtime = readFileSync('src/aliceAgent.ts', 'utf8')
@@ -20,7 +21,7 @@ for (const marker of [
 }
 
 if (!orchestrator.includes('taskId: Number(item.args.taskId)')) failures.push('Agent 审计记录未保留非敏感 taskId 供验真')
-if (!worker.includes("server.registerTool('query_task_portfolio'")) failures.push('跨任务工具未接入 MCP')
+if (!agentCapabilityRegistry.query_task_portfolio.exposure.includes('mcp') || !worker.includes('Object.entries(agentReadToolRegistry)')) failures.push('跨任务工具未通过统一注册表接入 MCP')
 if (!worker.includes("method: 'POST'") || !worker.includes('body: JSON.stringify(input)')) failures.push('MCP 工具未保留数组与结构化参数')
 if (!evaluator.includes('multiTurnCases') || !evaluator.includes('taskId=')) failures.push('Agent 评测器未执行多轮 taskId 继承校验')
 

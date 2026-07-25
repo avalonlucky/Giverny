@@ -1,4 +1,5 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers'
+import { agentCapabilityRegistry } from './agentToolRegistry'
 import { createAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 
 export type AgentAnalysisWorkflowParams = {
@@ -34,7 +35,7 @@ export class AgentAnalysisWorkflow extends WorkflowEntrypoint<AgentAnalysisWorkf
   private async callTool(endpoint: string, body: Record<string, unknown>, principal: AgentPrincipalContext) {
     const token = String(this.env.AGENT_TOOL_TOKEN || '').trim()
     if (!token) throw new Error('AGENT_TOOL_TOKEN 未配置，后台分析无法读取数据。')
-    const scopeHeaders = await createAgentScopeHeaders(token, principal)
+    const scopeHeaders = await createAgentScopeHeaders(token, { ...principal, role: 'system' })
     const response = await fetch(`${cleanBaseUrl(this.env.GIVERNY_API_BASE_URL)}/api/agent/tools/${endpoint}`, {
       method: 'POST',
       headers: {
@@ -57,17 +58,17 @@ export class AgentAnalysisWorkflow extends WorkflowEntrypoint<AgentAnalysisWorkf
       await step.do('collect-analysis-data', {
         retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
         timeout: '30 seconds',
-      }, () => this.callTool('analysis-job-prepare', { jobId }, principal))
+      }, () => this.callTool(agentCapabilityRegistry.analysis_job_prepare.endpoint, { jobId }, principal))
 
       const result = await step.do('generate-analysis-report', {
         retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
         timeout: '2 minutes',
-      }, () => this.callTool('analysis-job-generate', { jobId }, principal))
+      }, () => this.callTool(agentCapabilityRegistry.analysis_job_generate.endpoint, { jobId }, principal))
 
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : '后台分析失败'
-      await this.callTool('analysis-job-fail', { jobId, error: message }, principal).catch(() => undefined)
+      await this.callTool(agentCapabilityRegistry.analysis_job_fail.endpoint, { jobId, error: message }, principal).catch(() => undefined)
       throw error
     }
   }

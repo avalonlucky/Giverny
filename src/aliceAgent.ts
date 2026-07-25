@@ -1,8 +1,7 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent, type AgentContext } from 'agents'
 import { generateText, stepCountIs, tool, type ModelMessage } from 'ai'
-import { z } from 'zod'
-import { agentReadToolRegistry, type AgentReadToolName } from './agentToolRegistry'
+import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentReadToolRegistry, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName, type AgentReadToolName } from './agentToolRegistry'
 import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
 import { buildAgentFactSnapshot, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
@@ -122,44 +121,8 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 需要对比多条同类数据时可以输出标准 Markdown 表格，但不要把 Markdown 语法当作普通文字解释。
 - 先给结论，再给必要依据；语言自然、直接，不输出原始思维链或 <think> 标签。`
 
-const PREVIEW_ACTIONS: Record<string, { previewEndpoint: string; executeEndpoint: string; label: string }> = {
-  create_task_preview: { previewEndpoint: 'create-task-preview', executeEndpoint: 'create-task', label: '创建任务' },
-  record_feedback_preview: { previewEndpoint: 'record-feedback-preview', executeEndpoint: 'record-feedback', label: '记录反馈' },
-  update_task_status_preview: { previewEndpoint: 'update-task-status-preview', executeEndpoint: 'update-task-status', label: '修改任务状态' },
-  update_task_fields_preview: { previewEndpoint: 'update-task-fields-preview', executeEndpoint: 'update-task-fields', label: '修改任务字段' },
-  append_progress_preview: { previewEndpoint: 'append-progress-preview', executeEndpoint: 'append-progress', label: '追加任务进展' },
-  append_waiting_preview: { previewEndpoint: 'append-waiting-preview', executeEndpoint: 'append-waiting', label: '记录等待' },
-  manage_record_preview: { previewEndpoint: 'manage-record-preview', executeEndpoint: 'manage-record', label: '维护任务记录' },
-  mark_acceptance_files_preview: { previewEndpoint: 'mark-acceptance-files-preview', executeEndpoint: 'mark-acceptance-files', label: '标记验收文件' },
-  complete_acceptance_preview: { previewEndpoint: 'complete-acceptance-preview', executeEndpoint: 'complete-acceptance', label: '完成任务验收' },
-}
-
-const AGENT_TOOL_TRACE_LABELS: Record<string, { running: string; completed: string }> = {
-  query_month_finance: { running: '核对月份工时与收入', completed: '月份统计已返回' },
-  search_tasks: { running: '检索相关任务', completed: '任务检索已完成' },
-  query_task_portfolio: { running: '汇总跨任务工作概况', completed: '工作概况已核对' },
-  search_attachments: { running: '查找相关附件', completed: '附件检索已完成' },
-  get_task_detail: { running: '读取任务详情', completed: '任务详情已返回' },
-  get_requester_profile: { running: '读取需求人画像', completed: '需求人画像已返回' },
-  get_giverny_context: { running: '确认平台能力边界', completed: '能力范围已确认' },
-  search_product_help: { running: '查询产品使用说明', completed: '产品说明已返回' },
-  create_task_preview: { running: '整理新任务草稿', completed: '任务草稿已生成' },
-  record_feedback_preview: { running: '整理反馈记录', completed: '反馈草稿已生成' },
-  update_task_status_preview: { running: '核对状态变更', completed: '状态变更草稿已生成' },
-  update_task_fields_preview: { running: '核对任务字段', completed: '字段修改草稿已生成' },
-  append_progress_preview: { running: '整理进展记录', completed: '进展草稿已生成' },
-  append_waiting_preview: { running: '整理等待记录', completed: '等待草稿已生成' },
-  manage_record_preview: { running: '核对已有记录', completed: '记录维护草稿已生成' },
-  mark_acceptance_files_preview: { running: '核对验收文件', completed: '验收文件草稿已生成' },
-  complete_acceptance_preview: { running: '整理完整验收包', completed: '验收草稿已生成' },
-  start_monthly_review: { running: '创建月度复盘任务', completed: '月度复盘已进入后台执行' },
-  start_deep_analysis: { running: '创建深度分析任务', completed: '深度分析已进入后台执行' },
-}
-
 function agentToolTraceLabel(toolName: string, phase: 'running' | 'completed') {
-  const label = AGENT_TOOL_TRACE_LABELS[toolName]?.[phase]
-    || (phase === 'running' ? '调用业务工具' : '业务工具已返回')
-  return `${label} [tool:${toolName}]`
+  return `${agentCapabilityTraceLabel(toolName, phase)} [tool:${toolName}]`
 }
 
 const CONFIRM_RE = /^(?:好的?|没问题)?(?:确认(?:执行|创建|记录|修改)?|执行吧|可以(?:执行|创建|记录|修改)|同意(?:执行|创建|记录|修改)|就这样(?:执行|创建|记录)?)$/
@@ -444,7 +407,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
 
   private async previewTool(action: string, endpoint: string, input: Record<string, unknown>) {
     const data = await this.callTool(endpoint, input)
-    const config = PREVIEW_ACTIONS[action]
+    const config = agentWritePreviewConfig(action)
     const confirmationToken = String(data.confirmationToken || '')
     if (config && data.ready === true && confirmationToken) {
       const previous = this.getPendingAction()
@@ -618,11 +581,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private isTaskScopedTool(toolName: string) {
-    return new Set([
-      'get_task_detail', 'get_task_memory', 'create_task_plan', 'record_feedback_preview', 'update_task_status_preview',
-      'update_task_fields_preview', 'append_progress_preview', 'append_waiting_preview',
-      'manage_record_preview', 'mark_acceptance_files_preview', 'complete_acceptance_preview',
-    ]).has(toolName)
+    return Boolean((agentCapabilityRegistry[toolName as AgentCapabilityName] as AgentCapabilityDefinition | undefined)?.taskScoped)
   }
 
   private repairToolInput(toolName: AgentReadToolName, message: string, currentMonth?: string): Record<string, unknown> | null {
@@ -683,208 +642,129 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private buildTools(currentMonth: string | undefined, conversationId: string | undefined, message: string) {
-    const readTools = agentReadToolRegistry
+    const capabilities = agentCapabilityRegistry
     return {
       query_month_finance: tool({
-        description: readTools.query_month_finance.description,
-        inputSchema: readTools.query_month_finance.inputSchema,
-        execute: (input) => this.callTool('month-finance', {
+        description: capabilities.query_month_finance.description,
+        inputSchema: capabilities.query_month_finance.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_month_finance.endpoint, {
           question: input.question,
           currentMonth: input.currentMonth || currentMonth,
           months: input.months,
         }, 'GET'),
       }),
       search_tasks: tool({
-        description: readTools.search_tasks.description,
-        inputSchema: readTools.search_tasks.inputSchema,
-        execute: (input) => this.callTool('search-tasks', input, 'GET'),
+        description: capabilities.search_tasks.description,
+        inputSchema: capabilities.search_tasks.inputSchema,
+        execute: (input) => this.callTool(capabilities.search_tasks.endpoint, input, 'GET'),
       }),
       query_task_portfolio: tool({
-        description: readTools.query_task_portfolio.description,
-        inputSchema: readTools.query_task_portfolio.inputSchema,
-        execute: (input) => this.callTool('task-portfolio', {
+        description: capabilities.query_task_portfolio.description,
+        inputSchema: capabilities.query_task_portfolio.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_task_portfolio.endpoint, {
           ...input,
           month: input.month || (!input.startDate && !input.endDate ? currentMonth : undefined),
         }),
       }),
       get_task_detail: tool({
-        description: readTools.get_task_detail.description,
-        inputSchema: readTools.get_task_detail.inputSchema,
-        execute: (input) => this.callTool('task-detail', this.withTaskReference(input, message), 'GET'),
+        description: capabilities.get_task_detail.description,
+        inputSchema: capabilities.get_task_detail.inputSchema,
+        execute: (input) => this.callTool(capabilities.get_task_detail.endpoint, this.withTaskReference(input, message), 'GET'),
       }),
       get_requester_profile: tool({
-        description: readTools.get_requester_profile.description,
-        inputSchema: readTools.get_requester_profile.inputSchema,
-        execute: (input) => this.callTool('requester-profile', input, 'GET'),
+        description: capabilities.get_requester_profile.description,
+        inputSchema: capabilities.get_requester_profile.inputSchema,
+        execute: (input) => this.callTool(capabilities.get_requester_profile.endpoint, input, 'GET'),
       }),
       search_attachments: tool({
-        description: readTools.search_attachments.description,
-        inputSchema: readTools.search_attachments.inputSchema,
-        execute: (input) => this.callTool('search-attachments', input, 'GET'),
+        description: capabilities.search_attachments.description,
+        inputSchema: capabilities.search_attachments.inputSchema,
+        execute: (input) => this.callTool(capabilities.search_attachments.endpoint, input, 'GET'),
       }),
       get_giverny_context: tool({
-        description: readTools.get_giverny_context.description,
-        inputSchema: readTools.get_giverny_context.inputSchema,
-        execute: () => this.callTool('context', {}, 'GET'),
+        description: capabilities.get_giverny_context.description,
+        inputSchema: capabilities.get_giverny_context.inputSchema,
+        execute: () => this.callTool(capabilities.get_giverny_context.endpoint, {}, 'GET'),
       }),
       search_product_help: tool({
-        description: readTools.search_product_help.description,
-        inputSchema: readTools.search_product_help.inputSchema,
-        execute: (input) => this.callTool('product-help', input, 'GET'),
+        description: capabilities.search_product_help.description,
+        inputSchema: capabilities.search_product_help.inputSchema,
+        execute: (input) => this.callTool(capabilities.search_product_help.endpoint, input, 'GET'),
       }),
       create_task_plan: tool({
-        description: '保存一个可跨会话持续推进的任务计划。适用于“从新建跟到验收”“持续提醒我完成这个项目”等目标。',
-        inputSchema: z.object({
-          goal: z.string().min(2).max(500),
-          taskId: z.number().int().positive().optional(),
-          nextActionAt: z.string().optional(),
-          steps: z.array(z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) })).min(2).max(8),
-        }),
-        execute: (input) => this.callTool('create-task-plan', { ...this.withTaskReference(input, message), conversationId }),
+        description: capabilities.create_task_plan.description,
+        inputSchema: capabilities.create_task_plan.inputSchema,
+        execute: (input) => this.callTool(capabilities.create_task_plan.endpoint, { ...this.withTaskReference(input, message), conversationId }),
       }),
       get_task_memory: tool({
-        description: '读取并刷新某个任务的长期记忆，包括需求摘要、近期记录、合作伙伴反馈偏好和未解决事项。',
-        inputSchema: z.object({ taskId: z.number().int().positive().optional() }),
-        execute: (input) => this.callTool('get-task-memory', this.withTaskReference(input, message), 'GET'),
+        description: capabilities.get_task_memory.description,
+        inputSchema: capabilities.get_task_memory.inputSchema,
+        execute: (input) => this.callTool(capabilities.get_task_memory.endpoint, this.withTaskReference(input, message), 'GET'),
       }),
       start_monthly_review: tool({
-        description: '启动指定月份的持久化后台工作复盘。用于“复盘本月”、“整体分析 7 月工作”等耗时请求，不要用于单个数字查询。',
-        inputSchema: z.object({
-          month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-        }),
-        execute: (input) => this.callTool('monthly-review-start', {
+        description: capabilities.start_monthly_review.description,
+        inputSchema: capabilities.start_monthly_review.inputSchema,
+        execute: (input) => this.callTool(capabilities.start_monthly_review.endpoint, {
           month: input.month || currentMonth,
           conversationId,
         }),
       }),
       start_deep_analysis: tool({
-        description: '启动持久化深度分析。支持周报、风险扫描、跨任务比较、批量附件总结和多月趋势分析。',
-        inputSchema: z.object({
-          type: z.enum(['weekly_digest', 'risk_digest', 'cross_task_analysis', 'batch_attachment_analysis', 'trend_analysis']),
-          month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-          query: z.string().max(1000).optional(),
-          taskIds: z.array(z.number().int().positive()).max(30).optional(),
-        }),
-        execute: (input) => this.callTool('analysis-job-start', {
+        description: capabilities.start_deep_analysis.description,
+        inputSchema: capabilities.start_deep_analysis.inputSchema,
+        execute: (input) => this.callTool(capabilities.start_deep_analysis.endpoint, {
           ...input,
           month: input.month || currentMonth,
           conversationId,
         }),
       }),
       create_task_preview: tool({
-        description: '生成新任务草稿。只预览，不直接创建。',
-        inputSchema: z.object({
-          title: z.string().optional(),
-          requirement: z.string().optional(),
-          type: z.string().optional(),
-          startDate: z.string().optional(),
-          estimatedDate: z.string().optional(),
-          settlementMonth: z.string().optional(),
-          estimatedHours: z.number().optional(),
-          requester: z.string().optional(),
-          contact: z.string().optional(),
-          reviewer: z.string().optional(),
-          billable: z.boolean().optional(),
-          isSupplemental: z.boolean().optional(),
-        }),
-        execute: (input) => this.previewTool('create_task_preview', 'create-task-preview', {
+        description: capabilities.create_task_preview.description,
+        inputSchema: capabilities.create_task_preview.inputSchema,
+        execute: (input) => this.previewTool('create_task_preview', capabilities.create_task_preview.endpoint, {
           ...input,
           currentMonth,
         }),
       }),
       record_feedback_preview: tool({
-        description: '生成记录合作伙伴反馈或修改建议的预览。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          note: z.string(),
-          feedbackVersion: z.string().optional(),
-          feedbackSource: z.string().optional(),
-          dateTime: z.string().optional(),
-        }),
-        execute: (input) => this.previewTool('record_feedback_preview', 'record-feedback-preview', this.withTaskReference(input, message)),
+        description: capabilities.record_feedback_preview.description,
+        inputSchema: capabilities.record_feedback_preview.inputSchema,
+        execute: (input) => this.previewTool('record_feedback_preview', capabilities.record_feedback_preview.endpoint, this.withTaskReference(input, message)),
       }),
       update_task_status_preview: tool({
-        description: '生成任务状态与进度修改预览。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          status: z.enum(['计划中', '进行中', '挂起', '待验收', '已验收', '终止', '不计费']),
-          progress: z.number().min(0).max(100).optional(),
-          reason: z.string().optional(),
-        }),
-        execute: (input) => this.previewTool('update_task_status_preview', 'update-task-status-preview', this.withTaskReference(input, message)),
+        description: capabilities.update_task_status_preview.description,
+        inputSchema: capabilities.update_task_status_preview.inputSchema,
+        execute: (input) => this.previewTool('update_task_status_preview', capabilities.update_task_status_preview.endpoint, this.withTaskReference(input, message)),
       }),
       update_task_fields_preview: tool({
-        description: '生成任务字段修改预览。fields 只包含需要变更的字段。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          fields: z.record(z.string(), z.unknown()),
-        }),
-        execute: (input) => this.previewTool('update_task_fields_preview', 'update-task-fields-preview', this.withTaskReference(input, message)),
+        description: capabilities.update_task_fields_preview.description,
+        inputSchema: capabilities.update_task_fields_preview.inputSchema,
+        execute: (input) => this.previewTool('update_task_fields_preview', capabilities.update_task_fields_preview.endpoint, this.withTaskReference(input, message)),
       }),
       append_progress_preview: tool({
-        description: '生成任务进展和分段计时记录预览。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          note: z.string(),
-          startDateTime: z.string().optional(),
-          endDateTime: z.string().optional(),
-          isUncounted: z.boolean().optional(),
-          isRevision: z.boolean().optional(),
-          isAcceptanceProgress: z.boolean().optional(),
-        }),
-        execute: (input) => this.previewTool('append_progress_preview', 'append-progress-preview', this.withTaskReference(input, message)),
+        description: capabilities.append_progress_preview.description,
+        inputSchema: capabilities.append_progress_preview.inputSchema,
+        execute: (input) => this.previewTool('append_progress_preview', capabilities.append_progress_preview.endpoint, this.withTaskReference(input, message)),
       }),
       append_waiting_preview: tool({
-        description: '生成等待记录预览。等待时长不计入实际工时或结算。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          note: z.string(),
-          reason: z.enum(['等待合作伙伴意见', '等待补充资料', '等待排期', '其他']).optional(),
-          startDateTime: z.string().optional(),
-          endDateTime: z.string().optional(),
-        }),
-        execute: (input) => this.previewTool('append_waiting_preview', 'append-waiting-preview', this.withTaskReference(input, message)),
+        description: capabilities.append_waiting_preview.description,
+        inputSchema: capabilities.append_waiting_preview.inputSchema,
+        execute: (input) => this.previewTool('append_waiting_preview', capabilities.append_waiting_preview.endpoint, this.withTaskReference(input, message)),
       }),
       manage_record_preview: tool({
-        description: '生成编辑或删除已有进展、反馈、等待记录的预览。必须先读取任务详情取得 recordId。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          recordType: z.enum(['progress', 'feedback', 'waiting']),
-          action: z.enum(['edit', 'delete']),
-          recordId: z.string(),
-          changes: z.record(z.string(), z.unknown()).optional(),
-        }),
-        execute: (input) => this.previewTool('manage_record_preview', 'manage-record-preview', this.withTaskReference(input, message)),
+        description: capabilities.manage_record_preview.description,
+        inputSchema: capabilities.manage_record_preview.inputSchema,
+        execute: (input) => this.previewTool('manage_record_preview', capabilities.manage_record_preview.endpoint, this.withTaskReference(input, message)),
       }),
       mark_acceptance_files_preview: tool({
-        description: '把任务已有附件标记为验收文件。必须先通过任务详情或附件搜索获得 attachmentId。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          attachmentIds: z.array(z.number().int().positive()).min(1).max(30),
-        }),
-        execute: (input) => this.previewTool('mark_acceptance_files_preview', 'mark-acceptance-files-preview', this.withTaskReference(input, message)),
+        description: capabilities.mark_acceptance_files_preview.description,
+        inputSchema: capabilities.mark_acceptance_files_preview.inputSchema,
+        execute: (input) => this.previewTool('mark_acceptance_files_preview', capabilities.mark_acceptance_files_preview.endpoint, this.withTaskReference(input, message)),
       }),
       complete_acceptance_preview: tool({
-        description: '生成完整验收包预览，一次确认验收备注、最终进展、实际工时和已有验收附件。',
-        inputSchema: z.object({
-          taskId: z.number().int().positive().optional(),
-          taskTitle: z.string().optional(),
-          acceptanceNote: z.string(),
-          progressNote: z.string(),
-          startDateTime: z.string().optional(),
-          endDateTime: z.string().optional(),
-          countTime: z.boolean().optional(),
-          isRevision: z.boolean().optional(),
-          attachmentIds: z.array(z.number().int().positive()).max(30).optional(),
-        }),
-        execute: (input) => this.previewTool('complete_acceptance_preview', 'complete-acceptance-preview', this.withTaskReference(input, message)),
+        description: capabilities.complete_acceptance_preview.description,
+        inputSchema: capabilities.complete_acceptance_preview.inputSchema,
+        execute: (input) => this.previewTool('complete_acceptance_preview', capabilities.complete_acceptance_preview.endpoint, this.withTaskReference(input, message)),
       }),
     }
   }
@@ -1006,7 +886,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       throw new Error('待确认草稿已变化或不存在，请重新生成。')
     }
     const previewName = `${pending.action}_preview`
-    const config = PREVIEW_ACTIONS[previewName]
+    const config = agentWritePreviewConfig(previewName)
     if (!config) throw new Error('找不到对应的草稿校验工具。')
     const safeDraft = toJsonObject(request.draft)
     const data = await this.previewTool(previewName, config.previewEndpoint, {
@@ -1126,7 +1006,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           name: call.toolName,
           args: effectiveInput,
           reason: '由主模型结合完整语义规划。',
-          risk: call.toolName.endsWith('_preview') ? 'write' : 'read',
+          risk: agentCapabilityRegistry[call.toolName as AgentCapabilityName]?.policy.risk || 'read',
           status: 'pending',
           attempt: 1,
         })
@@ -1153,7 +1033,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
           toolCallId: plannedCalls.find((item) => item.name === toolResult.toolName)?.id || `${agentTurn.id}:tool:unknown`,
           toolName: toolResult.toolName,
-          source: toolResult.toolName === 'search_product_help' || toolResult.toolName === 'get_giverny_context' ? 'product_registry' : 'd1',
+          source: agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'product_registry'
+            ? 'product_registry'
+            : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
           deterministic: !mismatch,
           payload: output,
         })
@@ -1238,7 +1120,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
               id: `${callId}:evidence`,
               toolCallId: callId,
               toolName,
-              source: toolName === 'search_product_help' || toolName === 'get_giverny_context' ? 'product_registry' : 'd1',
+              source: agentCapabilityRegistry[toolName].policy.source === 'product_registry'
+                ? 'product_registry'
+                : agentCapabilityRegistry[toolName].policy.source === 'r2' ? 'r2' : 'd1',
               deterministic: !mismatch,
               payload: output,
             })
