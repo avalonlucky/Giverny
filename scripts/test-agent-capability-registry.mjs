@@ -17,10 +17,10 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 81, '能力总数必须固定为 81')
-check(Object.keys(agentReadToolRegistry).length === 22, 'MCP 读取工具应为 22 项')
-check(manifest.filter((item) => item.exposure.includes('model')).length === 53, '模型能力应为 53 项')
-check(manifest.filter((item) => item.exposure.includes('mcp')).length === 22, 'MCP 能力应为 22 项')
+check(manifest.length === 82, '能力总数必须固定为 82')
+check(Object.keys(agentReadToolRegistry).length === 23, 'MCP 读取工具应为 23 项')
+check(manifest.filter((item) => item.exposure.includes('model')).length === 54, '模型能力应为 54 项')
+check(manifest.filter((item) => item.exposure.includes('mcp')).length === 23, 'MCP 能力应为 23 项')
 check(manifest.filter((item) => item.confirmation === 'preview').length === 22, '写入预览应为 22 项')
 check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 22, '签名执行应为 22 项')
 check(agentWorkflowWriteEndpoints.size === 22, 'Workflow 白名单应为 22 项')

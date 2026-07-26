@@ -55,7 +55,7 @@ for (const name of modelNames) {
   check(agentModelCapabilityAllows(name, 'admin'), `管理员应能使用模型能力 ${name}`)
   check(agentModelCapabilityAllows(name, 'system'), `系统应能使用模型能力 ${name}`)
 }
-check(modelNames.filter((name) => agentModelCapabilityAllows(name, 'guest')).length === 2, '访客模型只应获得两个产品说明能力')
+check(modelNames.filter((name) => agentModelCapabilityAllows(name, 'guest')).length === 3, '访客模型只应获得产品说明与联网读取能力')
 check(modelNames.filter((name) => agentModelCapabilityAllows(name, 'viewer')).every((name) => !name.endsWith('_preview')), '只读角色不得获得写入预览')
 check(!manifest.some((item) => item.confirmation === 'signed-execute' && item.exposure.includes('model')), '签名执行能力不得暴露给模型')
 check(!agentModelCapabilityAllows('workflow_write', 'admin'), '内部 Workflow 能力不得暴露给模型')

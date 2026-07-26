@@ -5,10 +5,11 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { z } from 'zod'
-import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig } from './agentToolRegistry'
+import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig, type AgentCapabilityName } from './agentToolRegistry'
 import {
   AGENT_DIRECTOR_SYSTEM_PROMPT,
   agentDirectorTrace,
+  applyAgentConversationFollowUpPolicy,
   directAgentOperationCatalog,
   groundDirectAgentCalls,
   normalizeAgentDirectorDecision,
@@ -18,7 +19,7 @@ import {
 } from './agentIntentDirector'
 import { runAgentRuntimeGraph, type AgentRuntimeGraphPlan } from './agentRuntimeGraph'
 import { summarizeAgentProductivity } from './agentProductivityMetrics'
-import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
+import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
 import { productCapabilities } from './productCapabilities'
@@ -3110,6 +3111,87 @@ type OpenAiAgentRuntimeResult = {
   }
   orchestration?: { engine: 'langgraph'; path: string[]; modelCalls: number }
   productivity?: { engine: 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
+  grounding?: AgentFactSnapshot
+}
+
+const AGENT_RELEVANCE_STOP_WORDS = new Set([
+  '一下', '什么', '怎么', '怎样', '为什么', '为何', '请问', '帮我', '这个', '那个', '目前', '现在', '最近',
+  '用户', '网站', '可以', '需要', '是否', '还是', '就是', '一个', '一下子', '告诉', '回复', '回答',
+])
+
+function agentQuestionAnchors(question: string) {
+  const normalized = question.normalize('NFKC').toLowerCase()
+  const ascii = [...normalized.matchAll(/[a-z][a-z0-9._+-]{1,}|20\d{2}(?:[-/.]\d{1,2}){0,2}/g)]
+    .map((match) => match[0])
+  const chinese = [...normalized.matchAll(/[\u3400-\u9fff]{2,}/g)]
+    .flatMap((match) => {
+      let segment = match[0]
+      AGENT_RELEVANCE_STOP_WORDS.forEach((word) => { segment = segment.replaceAll(word, ' ') })
+      return segment.split(/\s+/).flatMap((part) => {
+        if (part.length < 2) return []
+        if (part.length === 2) return [part]
+        return Array.from({ length: part.length - 1 }, (_, index) => part.slice(index, index + 2))
+      })
+    })
+  return [...new Set([...ascii, ...chinese])].filter((anchor) => !AGENT_RELEVANCE_STOP_WORDS.has(anchor)).slice(0, 24)
+}
+
+function agentAnswerAddressesQuestion(question: string, answer: string) {
+  const anchors = agentQuestionAnchors(question)
+  if (anchors.length === 0) return true
+  const normalizedAnswer = answer.normalize('NFKC').toLowerCase()
+  return anchors.some((anchor) => normalizedAnswer.includes(anchor))
+}
+
+async function composeNaturalAgentAnswer(
+  env: Env,
+  modelChoice: ChatModelChoice,
+  question: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  snapshot: AgentFactSnapshot,
+) {
+  const context = history.slice(-4).map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`).join('\n')
+  const prompt = `你是 Giverny 工作助手。请根据已经由程序核验的事实，自然、直接地回答用户当前问题。
+
+回答原则：
+- 先回答用户真正问的内容，只使用相关事实；不要把所有明细和全部工具结果倾倒给用户。
+- 结合最近对话理解“这个、上面、刚才、为什么”等指代。发现上一轮结论与核验事实不一致时，直接说明正确结论和出错原因，不套固定道歉模板。
+- 不展示工具名、数据库、编排节点、协议、模型调用次数或内部术语。
+- 金额、工时、日期、状态、任务数量必须严格使用下方事实，不得自行计算或补写。
+- 排版保持简洁；简单问题通常用一到两段，只有用户明确要求明细时才列清单。
+
+最近对话：
+${context || '无'}
+
+当前问题：
+${question}
+
+已核验事实：
+${snapshot.sections.map((section) => section.markdown).join('\n\n')}`
+  const first = await callTextWithSelectedModel(env, prompt, modelChoice, 2200)
+  let answer = first.text.trim()
+  let verification = verifyAgentFactClaims(answer, snapshot, { requireCanonicalSections: false })
+  let addressesQuestion = agentAnswerAddressesQuestion(question, answer)
+  if (!verification.passed || !addressesQuestion) {
+    const repairIssues = [
+      ...verification.issues,
+      ...(!addressesQuestion ? ['回答没有正面回应当前问题，请围绕当前问题的对象和诉求重新组织答案'] : []),
+    ]
+    const repaired = await callTextWithSelectedModel(
+      env,
+      `${prompt}\n\n上一版回答未通过检查，请纠正以下问题并保持自然简洁：${repairIssues.join('；')}`,
+      modelChoice,
+      2200,
+    )
+    answer = repaired.text.trim()
+    verification = verifyAgentFactClaims(answer, snapshot, { requireCanonicalSections: false })
+    addressesQuestion = agentAnswerAddressesQuestion(question, answer)
+  }
+  return {
+    answer: verification.passed && addressesQuestion && answer ? answer : snapshot.fallbackAnswer,
+    verification,
+    fallbackUsed: !verification.passed || !addressesQuestion,
+  }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -3122,6 +3204,21 @@ function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
     })
     .filter(Boolean)
     .slice(0, 8)
+}
+
+function agentVisibleResultTrace(trace: OpenAiAgentRuntimeTraceItem[]) {
+  return trace.flatMap((item) => {
+    const label = String(item.label || '').replace(/\s*\[tool:[^\]]+\]/gi, '').trim()
+    const detail = String(item.detail || '').replace(/\s*\[tool:[^\]]+\]/gi, '').trim()
+    if (!label || item.type === 'tool' || /(?:结构化事实协议|业务事实核验|执行编排路径|主模型调用)/.test(`${label}${detail}`)) return []
+    if (item.type === 'plan') {
+      if (label === '验真后动态补查') return [{ type: 'plan', label: '思考', detail: '第一次取得的信息还不够，我正在补充核对。' }]
+      if (label.startsWith('拆解')) return [{ type: 'plan', label: '思考', detail: `这个请求包含多个目标，我会分别处理后再汇总。` }]
+      return []
+    }
+    if (item.type === 'error') return [{ type: 'error', label: '结果', detail: detail || label }]
+    return [{ type: 'result', label: '结果', detail: detail ? `${label}：${detail}` : label }]
+  })
 }
 
 function agentRuntimeObjectName(principal: AgentPrincipalContext, conversationId: string) {
@@ -3155,17 +3252,17 @@ async function directAgentRequest(
 - proposedCalls 只能从 directOperations 中选择；简单请求尽量一次给出。复杂请求保持空数组，交给后续规划节点。
 - 任何 confirmation=preview 的写入参数都必须在 grounding 中给出用户原话片段；用户没说的字段必须省略，不得把查询误判为写入或用示例值补齐。`,
         { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', role: graphRequest.principal.role, history: graphRequest.history, directOperations: directAgentOperationCatalog(graphRequest.principal.role) },
-        'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|workspace_search|memory|analysis|security)[]; operation: string; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string; complexity: simple|complex; proposedCalls: {name:string; args:object; reason:string; grounding?: Record<string,string>}[]',
+        'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|web|workspace_search|memory|analysis|security)[]; operation: string; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string; complexity: simple|complex; proposedCalls: {name:string; args:object; reason:string; grounding?: Record<string,string>}[]',
         2600,
       )
       return groundDirectAgentCalls(
-        normalizeAgentDirectorDecision(rawDecision),
+        applyAgentConversationFollowUpPolicy(normalizeAgentDirectorDecision(rawDecision), graphRequest.question, graphRequest.history),
         [graphRequest.question, ...graphRequest.history.map((item) => item.content)].join('\n'),
       )
     },
     shortlist: (decision, principal) => shortlistAgentCapabilities(decision, principal.role),
     plan: async (graphRequest, decision, allowedCapabilities): Promise<AgentRuntimeGraphPlan> => {
-      if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite) {
+      if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite && !decision.domains.includes('web')) {
         const direct = await callTextWithSelectedModel(
           env,
           `你是 Giverny 工作助手。请直接回答用户，不要声称查询了网站数据或产品手册，不要展示隐藏思维链。\n\n用户：${graphRequest.question}`,
@@ -3242,21 +3339,33 @@ async function callAgentRuntime(
   const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
   if (env.ALICE_AGENT) {
     try {
+      const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(args.principal, conversationId)) as unknown as AliceAgent
+      const snapshot = await agent.conversationSnapshot()
+      const persistedHistory = snapshot.messages
+        .filter((item) => item.role === 'user' || item.role === 'assistant')
+        .map((item) => ({ role: item.role as 'user' | 'assistant', content: String(item.content || '') }))
+        .filter((item) => item.content.trim())
+      const conversationHistory = (persistedHistory.length ? persistedHistory : (args.history || [])).slice(-12)
       const orchestration = await directAgentRequest(env, {
         question: cleanQuery,
         currentMonth: args.currentMonth,
         modelChoice: args.modelChoice,
         principal: args.principal,
-        history: args.history,
+        history: conversationHistory,
       })
       const openingTrace = agentDirectorTrace(orchestration.decision)
       await args.onTrace?.(openingTrace.detail ? [`${openingTrace.label}：${openingTrace.detail}`] : [openingTrace.label])
-      const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(args.principal, conversationId)) as unknown as AliceAgent
-      const result = await agent.chat({
+      const actionTrace = orchestration.calls.map((call) => ({
+        type: 'tool',
+        label: '动作',
+        detail: agentCapabilityRegistry[call.name as AgentCapabilityName]?.trace.running || `正在处理${agentCapabilityRegistry[call.name as AgentCapabilityName]?.title || '必要步骤'}`,
+      }))
+      for (const item of actionTrace) await args.onTrace?.([`${item.label}：${item.detail}`])
+      let result = await agent.chat({
         message: cleanQuery,
         currentMonth: args.currentMonth,
         conversationId,
-        history: args.history,
+        history: conversationHistory,
         context: args.context,
         principal: args.principal,
         orchestration: {
@@ -3267,11 +3376,25 @@ async function callAgentRuntime(
           modelLabel: orchestration.modelLabel,
         },
       })
+      if (result.grounding && !result.approval && !result.selection && !result.backgroundTask) {
+        await args.onTrace?.(['动作：正在结合查到的信息组织回答。'])
+        const composed = await composeNaturalAgentAnswer(env, args.modelChoice, cleanQuery, conversationHistory, result.grounding)
+        result = {
+          ...result,
+          answer: composed.answer,
+          factVerification: {
+            passed: composed.verification.passed,
+            checkedClaims: composed.verification.checkedClaims,
+            sourceTools: composed.verification.coveredSources,
+            fallbackUsed: composed.fallbackUsed,
+          },
+        }
+      }
       const trace = [
         { type: 'plan', ...agentDirectorTrace(orchestration.decision) },
-        { type: 'plan', label: '执行编排路径', detail: `${orchestration.path.join(' → ')} · 主模型调用 ${orchestration.modelCalls} 次` },
-        ...(orchestration.denied.length ? [{ type: 'error', label: '策略层拒绝了越界能力', detail: orchestration.denied.join('、') }] : []),
-        ...result.trace.slice(1),
+        ...actionTrace,
+        ...(orchestration.denied.length ? [{ type: 'error', label: '结果', detail: '有不符合权限或当前目标的操作已被拦截。' }] : []),
+        ...agentVisibleResultTrace(result.trace.slice(1)),
       ]
       return { ...result, trace, conversationId, orchestration: { engine: 'langgraph', path: orchestration.path, modelCalls: orchestration.modelCalls } }
     } catch (error) {
@@ -3943,6 +4066,17 @@ async function agentQuerySettlementExportsTool(env: Env, request: Request) {
      ORDER BY generated_at DESC LIMIT ?`,
   ).bind(workspaceId, startDate, startDate, endDate, endDate, limit).all<DbSettlementExport>()
   return agentOk({ tool: 'query_settlement_exports', count: rows.results?.length || 0, records: (rows.results || []).map(toAgentSettlementExportRecord) })
+}
+
+async function agentSearchWebTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  if (!env.TAVILY_API_KEY) return agentFail('联网查询尚未配置', 503)
+  const body = await parseAgentToolBody(request)
+  const query = agentString(body.query, 500)
+  if (!query) return agentFail('请提供需要查询的问题', 400)
+  const result = await searchTavilyStructured(env.TAVILY_API_KEY, query)
+  if (!result.answer && result.results.length === 0) return agentFail('没有找到可用的联网结果', 502)
+  return agentOk({ tool: 'search_web', query, ...result, searchedAt: nowIso() })
 }
 
 const settlementDay = /^\d{4}-\d{2}-\d{2}$/
@@ -9347,6 +9481,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/product-help' && (request.method === 'POST' || request.method === 'GET')) {
     return agentProductHelpTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/web-search' && (request.method === 'POST' || request.method === 'GET')) return agentSearchWebTool(env, request)
   if (url.pathname === '/api/agent/tools/workspace-search' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceSearchTool(env, request)
   if (url.pathname === '/api/agent/tools/workspace-consistency-audit' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceConsistencyAuditTool(env, request)
   if (url.pathname === '/api/agent/tools/formal-deliverables' && (request.method === 'POST' || request.method === 'GET')) return agentQueryFormalDeliverablesTool(env, request)
@@ -11951,6 +12086,7 @@ const settlementExportLinks = (row: DbSettlementExport) => ({
 
 const toAgentSettlementExportRecord = (row: DbSettlementExport) => ({
   ...toSettlementExportRecord(row),
+  totalAmount: Number(row.total_amount) || 0,
   links: settlementExportLinks(row),
 })
 
@@ -18527,27 +18663,30 @@ async function deleteKnowledgeNote(env: Env, id: string, request: Request): Prom
 
 // ─── Tavily 网络搜索 ────────────────────────────────────────────────────────
 
-async function searchTavily(apiKey: string, query: string): Promise<string> {
+async function searchTavilyStructured(apiKey: string, query: string) {
   try {
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey, query, max_results: 4, search_depth: 'basic', include_answer: true }),
     })
-    if (!res.ok) return ''
+    if (!res.ok) return { answer: '', results: [] as Array<{ title: string; url: string; content: string }> }
     const data = (await res.json()) as {
       answer?: string
       results?: Array<{ title: string; url: string; content: string }>
     }
-    const parts: string[] = []
-    if (data.answer) parts.push(`搜索概要：${data.answer}`)
-    ;(data.results ?? []).slice(0, 3).forEach((r, i) => {
-      parts.push(`[${i + 1}] ${r.title}\n${String(r.content ?? '').slice(0, 250)}`)
-    })
-    return parts.join('\n\n')
+    return {
+      answer: String(data.answer || '').slice(0, 3000),
+      results: (data.results ?? []).slice(0, 4).map((item) => ({ title: String(item.title || '').slice(0, 240), url: String(item.url || '').slice(0, 1000), content: String(item.content || '').slice(0, 1200) })),
+    }
   } catch {
-    return ''
+    return { answer: '', results: [] as Array<{ title: string; url: string; content: string }> }
   }
+}
+
+async function searchTavily(apiKey: string, query: string): Promise<string> {
+  const result = await searchTavilyStructured(apiKey, query)
+  return [result.answer ? `搜索概要：${result.answer}` : '', ...result.results.map((item, index) => `[${index + 1}] ${item.title}\n${item.content}`)].filter(Boolean).join('\n\n')
 }
 
 type AgentVisibleTraceSink = (trace: string[]) => void | Promise<void>
@@ -18599,7 +18738,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
   const explicitlyRequestsWebSearch = /(?:联网|网上|互联网|搜索网页|查最新消息|实时新闻)/.test(lastMsg)
   const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && explicitlyRequestsWebSearch && !DATA_KW.some((kw) => lastMsg.includes(kw))
   const needsPersonalKnowledge = useKnowledge && /(?:我的|个人|自己的)?(?:知识库|知识笔记|笔记里|之前记录的资料)/.test(lastMsg)
-  const shouldUseDirectedRuntime = imageAttachments.length === 0 && !needsWebSearch
+  const shouldUseDirectedRuntime = imageAttachments.length === 0
 
   const [hourlyRate, monthRows, recentRows, knowledgeNotes, webSearchResult] = shouldUseDirectedRuntime
     ? [defaultHourlyRate, { results: [] as DbTask[] }, { results: [] as DbTask[] }, [] as KnowledgeNoteRow[], ''] as const
@@ -18666,7 +18805,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
             projectName: conversationProjectName,
           })
         }
-        await emitVisibleTrace(formatAgentRuntimeTrace(runtimeResult.trace).slice(1))
+        for (const line of formatAgentRuntimeTrace(runtimeResult.trace).slice(1)) await emitVisibleTrace(line)
         return ok({
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,

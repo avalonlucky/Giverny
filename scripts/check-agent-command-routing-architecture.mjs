@@ -22,6 +22,7 @@ for (const marker of [
   'validateDirectedPlan',
   "names.delete('search_product_help')",
   "names.delete('search_workspace')",
+  "web: ['search_web']",
 ]) if (!director.includes(marker)) failures.push(`意图导演缺少能力隔离：${marker}`)
 
 for (const marker of ['directAgentRequest(', 'callSelectedModelJson<Record<string, unknown>>', 'modelChoice: args.modelChoice', 'needsPersonalKnowledge']) {
@@ -37,6 +38,8 @@ if (!worker.includes('if (shouldUseDirectedRuntime)')) failures.push('纯文本�
 if (!worker.includes("? [defaultHourlyRate, { results: [] as DbTask[] }")) failures.push('意图导演前仍会无条件预取任务、金额或知识数据')
 if (worker.includes("trace: ['开始分析：识别问题目标与需要核对的依据。']")) failures.push('Worker 仍在发送固定处理模板')
 if (chat.includes("trace: ['开始分析：识别问题目标与需要核对的依据。']")) failures.push('聊天界面仍预填固定处理模板')
+if (chat.includes("trace: ['正在识别这次请求…']")) failures.push('聊天界面仍预填无意义的固定识别提示')
+if (!worker.includes('composeNaturalAgentAnswer(')) failures.push('核验事实仍未交回用户主模型自然组织回答')
 
 const cases = suite.cases || []
 const requireCase = (id, tool, forbiddenTool) => {

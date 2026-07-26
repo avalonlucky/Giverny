@@ -158,7 +158,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['audit_workspace_consistency', 'check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_formal_deliverables', 'query_high_risk_actions', 'query_month_finance', 'query_plan_continuation', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks', 'search_workspace']
+  const expected = ['audit_workspace_consistency', 'check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_formal_deliverables', 'query_high_risk_actions', 'query_month_finance', 'query_plan_continuation', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks', 'search_web', 'search_workspace']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -183,7 +183,7 @@ async function runMcpChecks() {
     throw new Error(`MCP product help did not return the model setup workflow: ${JSON.stringify(modelHelpResult.structuredContent)}`)
   }
   const releaseHelpResult = await request(63, 'tools/call', { name: 'search_product_help', arguments: { query: '最近更新了哪些内容', limit: 3 } })
-  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.32.4'))) {
+  if (releaseHelpResult.isError || !releaseHelpResult.structuredContent?.matches?.some((item) => String(item.answer || '').includes('v0.34.2') && String(item.answer || '').includes('自然回答'))) {
     throw new Error(`MCP product help did not return recent releases: ${JSON.stringify(releaseHelpResult.structuredContent)}`)
   }
   const brandHelpResult = await request(64, 'tools/call', { name: 'search_product_help', arguments: { query: '这个网站为什么叫吉维尼', limit: 3 } })
@@ -221,7 +221,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 81) {
+  if (!response.ok || capabilities.length !== 82) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
@@ -376,10 +376,11 @@ async function runWorkflowWriteCheck(cookie) {
   if (result.approval?.status !== 'executed' || !result.approval?.result?.taskId) {
     throw new Error(`Workflow write did not complete: ${JSON.stringify(result.approval || result)}`)
   }
-  if (!Array.isArray(result.trace) || !result.trace.join('\n').includes('Workflow')) {
-    throw new Error('Workflow write response did not expose the durable execution trace')
+  if (result.approval?.result?.verification?.passed !== true || Number(result.approval?.result?.verification?.checks) < 1) {
+    throw new Error(`Workflow write did not expose structural post-write verification: ${JSON.stringify(result.approval || result)}`)
   }
-  if (!result.trace.join('\n').includes('独立验收通过')) throw new Error('Workflow write response did not expose independent acceptance')
+  if (!Array.isArray(result.trace) || !result.trace.join('\n').includes('独立验收通过')) throw new Error('Workflow write response did not expose independent acceptance')
+  if (/Cloudflare|Workflow|D1|签名确认凭证/.test(result.trace.join('\n'))) throw new Error('Workflow write response leaked implementation jargon into the user-visible trace')
   process.stdout.write('Workflow approval and durable write check passed.\n')
 }
 
@@ -1694,7 +1695,11 @@ async function runLocalCliBridgeCheck(cookie) {
     || !productHelpText.includes('Command + Shift + M')
     || !productHelpText.includes('search_product_help')
     || !productHelpText.includes('找到官方产品依据')
+    || !productHelpText.includes('思考')
+    || !productHelpText.includes('动作')
     || productHelpText.includes('不经过本机 CLI')
+    || productHelpText.includes('执行编排路径')
+    || productHelpText.includes('结构化事实协议')
     || productHelpText.includes('模型规划：')
     || productHelpText.includes('工具执行：')
     || productHelpText.includes('"commandId"')) {
@@ -1704,7 +1709,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const productQuestions = [
     { question: '目前我这个网站怎么开通 Giverny 主题？', expected: ['设置 → 外观 → 吉维尼模式'] },
     { question: '我应该怎么设置大模型？', expected: ['设置 → 模型', 'API Key'] },
-    { question: '这个网站最近更新了哪些内容？', expected: ['v0.32.5', '项目化历史', '分析过程'] },
+    { question: '这个网站最近更新了哪些内容？', expected: ['v0.34.2', '自然回答', '受控联网查询'] },
     { question: '这个网站为什么叫吉维尼？作者起这个名字有什么原因？', expected: ['致敬莫奈', '《睡莲》', '让创作在自己的花园里生长'] },
   ]
   for (const [index, item] of productQuestions.entries()) {
@@ -1721,12 +1726,12 @@ async function runLocalCliBridgeCheck(cookie) {
     const responseText = await response.text()
     if (!response.ok
       || !responseText.includes('search_product_help')
-      || !responseText.includes('确认产品使用问题')
-      || !responseText.includes('查询产品使用说明')
+      || !responseText.includes('思考')
+      || !responseText.includes('动作')
       || !responseText.includes('找到官方产品依据')
-      || !responseText.includes('结构化事实协议')
-      || !responseText.includes('业务事实核验通过')
       || item.expected.some((value) => !responseText.includes(value))
+      || responseText.includes('执行编排路径')
+      || responseText.includes('结构化事实协议')
       || responseText.includes('不经过本机 CLI')
       || responseText.includes('模型规划：')
       || responseText.includes('工具执行：')
@@ -1780,9 +1785,10 @@ async function runLocalCliBridgeCheck(cookie) {
   })
   const blockerText = await blockerResponse.text()
   if (!blockerResponse.ok
-    || !blockerText.includes('等待刘总的建议')
+    || !/等待\s*\*{0,2}刘总的建议/.test(blockerText)
     || !blockerText.includes('get_task_detail')
-    || !blockerText.includes('确认需要业务依据')
+    || !blockerText.includes('思考')
+    || !blockerText.includes('动作')
     || blockerText.includes('快捷键')
     || blockerText.includes('⌘ ⌥ 2')) {
     throw new Error(`Task blocker query did not return the concrete waiting reason: ${blockerText}`)

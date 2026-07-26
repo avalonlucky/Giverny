@@ -50,12 +50,15 @@ function ambiguousTitle(text) {
 
 function productHelpAnswer(text) {
   const questionMatch = text.match(/用户问题：\s*([\s\S]*?)\s*工具结果 JSON：/)
+    || text.match(/当前问题：\s*([\s\S]*?)\s*已核验事实：/)
   const subject = questionMatch?.[1]?.trim() || text
   if (/显示金额|隐藏金额/.test(subject)) {
     return '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。'
   }
   if (/最近更新|更新了哪些|更新了什么|最新版本/.test(subject)) {
-    return '当前版本是 **v0.32.3**，最近重点更新了需求人画像后台编排、Agent 可核验分析过程、产品知识验真、动态重规划与执行审计。'
+    const verifiedFacts = text.split('已核验事实：').at(-1)?.trim() || ''
+    const latestSection = verifiedFacts.split(/\n(?=\*\*已核验|\*\*[^*]+\*\*)/)[0]?.trim()
+    return latestSection || '已按当前产品知识库中的最新版本记录整理更新内容。'
   }
   if (/为什么叫.*(?:Giverny|吉维尼)|(?:Giverny|吉维尼).*由来|品牌故事/i.test(subject)) {
     return 'Giverny 的名字是作者为致敬莫奈而取。莫奈晚年居住在法国小镇吉维尼；网站以“莫奈花园”为主题，四季配色取自《睡莲》。品牌理念是让产品加入艺术成分、让创作成为乐趣，Slogan 是“让创作在自己的花园里生长”。'
@@ -98,6 +101,7 @@ function plannedCallFromCompletion(value) {
 
 function directorMetadata(toolName, question) {
   const product = toolName === 'search_product_help' || toolName === 'get_giverny_context'
+  const web = toolName === 'search_web'
   const workspaceSearch = toolName === 'search_workspace'
   const isWrite = toolName.endsWith('_preview') || ['create_task_plan', 'prepare_attachment_upload', 'generate_settlement_receipt'].includes(toolName)
   const operation = toolName === 'create_task_preview' ? 'create_task'
@@ -115,6 +119,7 @@ function directorMetadata(toolName, question) {
                       : toolName.includes('plan') || toolName.includes('project_execution') ? 'task_plan'
                         : 'general'
   const domain = product ? 'product_help'
+    : web ? 'web'
     : workspaceSearch ? 'workspace_search'
       : /finance|settlement/.test(toolName) ? 'finance'
         : /attachment/.test(toolName) ? 'files'
@@ -130,7 +135,7 @@ function directorMetadata(toolName, question) {
   }
   return {
     goal: question.slice(0, 120), domains: [domain], operation,
-    requiresBusinessData: Boolean(toolName) && !product,
+    requiresBusinessData: Boolean(toolName) && !product && !web,
     requiresProductKnowledge: product, isWrite,
     missingInformation: [], confidence: 0.98,
     rationale: product ? '这是产品使用问题。' : isWrite ? '这是站内业务操作。' : toolName ? '需要核对真实业务数据。' : '可以直接回答。',
@@ -142,6 +147,23 @@ function directorMetadata(toolName, question) {
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
+  if (text.includes('已经由程序核验的事实')) {
+    if (/当前问题：[\s\S]*?(?:最近|最新).*(?:导出|结算|回单)/.test(text)) {
+      const range = text.match(/(20\d{2}-\d{2}-\d{2})\s*至\s*(20\d{2}-\d{2}-\d{2})/)
+      if (range) return completion({ role: 'assistant', content: `最近一次导出的结算报表范围是 **${range[1]} 至 ${range[2]}**。` })
+    }
+    if (text.includes('已复核结算快照')) {
+      const amount = text.match(/逐行合计：[^\n]*?(¥[\d,.]+)/)?.[1] || '核验金额'
+      const range = text.match(/日期范围：(20\d{2}-\d{2}-\d{2})\s*至\s*(20\d{2}-\d{2}-\d{2})/)
+      return completion({ role: 'assistant', content: `重新核对后，${range ? `${range[1]} 至 ${range[2]} 的` : ''}结算金额是 **${amount}**，逐行小计与快照汇总一致。` })
+    }
+    if (/显示金额|隐藏金额|Giverny\s*主题|吉维尼|大模型|模型设置|最近更新|更新了哪些|更新了什么|品牌故事/i.test(text)) {
+      return completion({ role: 'assistant', content: productHelpAnswer(text) })
+    }
+    if (text.includes('等待刘总的建议')) return completion({ role: 'assistant', content: '这个任务目前在等待 **刘总的建议**，因此还没有继续交付。' })
+    const facts = text.split('已核验事实：').at(-1)?.trim() || '已完成核对。'
+    return completion({ role: 'assistant', content: facts })
+  }
   if (text.includes('工具结果 JSON')) {
     if (hasToolResult(text, 'get_requester_profile')) {
       return completion({ role: 'assistant', content: '陈义君的需求人画像：共 4 个项目、13.6h，验收通过率 50%，可据此安排报价和排期。' })
@@ -308,9 +330,10 @@ function chooseTool(messages) {
     })
   }
 
-  if (/天气|删掉|所有任务都改成|所有密钥/.test(text)) {
+  if (/删掉|所有任务都改成|所有密钥/.test(text)) {
     return completion({ role: 'assistant', content: '这个请求不在当前安全工具范围内。' })
   }
+  if (/天气|新闻|实时消息/.test(text)) return toolCall('search_web', { query: text })
   if (/(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(text)) return toolCall('diagnose_ai_routing', { scope: 'all', includeRecentFallbacks: true })
   if (/(?:恢复|撤销).*(?:模型路由|模型配置|上一次配置)/.test(text)) return toolCall('restore_ai_routing_preview', {})
   if (/(?:全站|整个网站|所有地方|统一搜索|全域搜索|不记得.*在哪).*(?:搜|查|找)|(?:统一搜索|全域搜索)/.test(text)) return toolCall('search_workspace', { query: text, limit: 20 })
@@ -381,6 +404,7 @@ function chooseTool(messages) {
     return toolCall('search_attachments', { query: text, limit: 30 })
   }
   if (text.includes('最近一次反馈')) return toolCall('search_tasks', { query: '最近任务', month: '2026-07', limit: 5 })
+  if (/(?:最近|最新).*(?:导出|结算报表|结算回单).*(?:几号|日期|范围)|(?:最近|最新).*(?:导出|结算报表|结算回单)/.test(text)) return toolCall('query_settlement_exports', { limit: 1 })
   if (/(?:导出|生成|下载|给我).*(?:结算回单|结算报表|Excel|excel)|(?:结算回单|结算报表).*(?:导出|生成|下载)/i.test(text)) {
     return toolCall('generate_settlement_receipt', { startDate: '2026-06-01', endDate: '2026-06-10' })
   }

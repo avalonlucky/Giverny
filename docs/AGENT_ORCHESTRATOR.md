@@ -27,6 +27,8 @@ Giverny Agent 不把大模型直接等同于产品。大模型负责理解、规
 
 当前实现不再固定串行 Director 和 Planner。Intent Director 在没有任何工具、产品知识或业务数据的条件下理解整句话；对单一明确目标，同一次输出就提出最小动作并经策略授权。只有复合目标、对象不明确或直接动作未通过校验时，LangGraph 才进入 Planner 节点。详见 [`ADR_AGENT_ORCHESTRATION_REPLACEMENT.md`](./ADR_AGENT_ORCHESTRATION_REPLACEMENT.md)。
 
+最终回答不再直接展示完整工具事实块。工具结果先形成结构化事实快照，程序校验金额、工时、日期、状态、任务编号和数量，再由用户选择的主模型结合最近对话组织自然答案；无证据硬事实会由同一模型修正，仍不通过时才使用确定性事实兜底。站内业务、产品知识和外部联网查询分别使用独立能力域，追问会继承上一轮业务语境。
+
 ## 核心契约
 
 `src/agentOrchestrator.ts` 定义统一 `AgentTurn`：

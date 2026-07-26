@@ -97,9 +97,11 @@ test('工作助手的明确创建指令直接进入业务流程且不虚构字�
   await input.fill('你帮我新建一个任务')
   await input.press('Enter')
   await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
-  await expect(dialog.getByText(/主模型调用 1 次/)).toBeAttached()
+  await expect(dialog.getByText('思考过程', { exact: true })).toBeVisible()
+  await expect(dialog.getByText(/思考：/).first()).toBeVisible()
+  await expect(dialog.getByText(/动作：/).first()).toBeVisible()
   await expect(dialog.getByLabel('创建任务确认卡片')).toHaveCount(0)
-  await expect(dialog.getByText(/快捷键：|产品手册|更新日志/)).toHaveCount(0)
+  await expect(dialog.getByText(/快捷键：|产品手册|更新日志|执行编排路径|结构化事实协议|主模型调用/)).toHaveCount(0)
 })
 
 test('工作助手主动事项按优先级展示证据、建议和处理效果', async ({ page }) => {

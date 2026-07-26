@@ -201,6 +201,15 @@ function renderProductHelp(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderWebSearch(payload: Record<string, unknown>) {
+  const results = list(payload.results).map(record)
+  return [
+    '**联网查询结果**',
+    payload.answer ? String(payload.answer) : '',
+    ...results.slice(0, 4).map((item) => `- ${String(item.title || '公开网页')}：${String(item.content || '').slice(0, 500)}${item.url ? `（${String(item.url)}）` : ''}`),
+  ].filter(Boolean).join('\n')
+}
+
 function renderSettlement(payload: Record<string, unknown>) {
   const receipt = record(payload.receipt)
   const recordData = record(payload.record)
@@ -246,7 +255,22 @@ function renderTaskPlan(payload: Record<string, unknown>) {
 
 function renderSettlementExports(payload: Record<string, unknown>) {
   const records = list(payload.records).map(record)
-  return ['**已核验结算导出记录**', ...(records.length ? records.map((item) => `- ${String(item.startDate || '')} 至 ${String(item.endDate || '')}：${item.locked ? '已锁定' : '未锁定'}，金额 ¥${formatNumber(item.totalAmount)}，分享${item.disabled ? '已停用' : '可用'}${item.expiresAt ? `，有效期至 ${String(item.expiresAt)}` : ''}`) : ['- 当前范围没有导出记录。'])].join('\n')
+  return ['**已核验结算导出记录**', ...(records.length ? records.map((item) => `- ${String(item.startDate || '')} 至 ${String(item.endDate || '')}：${item.locked ? '已锁定' : '未锁定'}，金额 ¥${formatNumber(item.amount ?? item.totalAmount)}，分享${item.disabled ? '已停用' : '可用'}${item.expiresAt ? `，有效期至 ${String(item.expiresAt)}` : ''}`) : ['- 当前范围没有导出记录。'])].join('\n')
+}
+
+function renderSettlementReconciliation(payload: Record<string, unknown>) {
+  const range = record(payload.range)
+  const summary = record(payload.summary)
+  const findings = list(payload.findings).map(String).filter(Boolean)
+  return [
+    '**已复核结算快照**',
+    `- 日期范围：${String(range.startDate || '')} 至 ${String(range.endDate || '')}`,
+    `- 逐行合计：${formatNumber(summary.rowHours)} 小时，¥${formatNumber(summary.rowAmount)}，${formatNumber(summary.taskCount)} 项任务`,
+    `- 快照汇总：${formatNumber(summary.statedHours)} 小时，¥${formatNumber(summary.statedAmount)}`,
+    `- 数据库记录：${formatNumber(summary.storedHours)} 小时，¥${formatNumber(summary.storedAmount)}`,
+    `- 核对结果：${payload.integrity === 'fail' ? '不一致' : findings.length ? '存在提醒' : '三方一致'}`,
+    ...findings.map((item) => `- 提醒：${item}`),
+  ].join('\n')
 }
 
 function renderScheduleConflicts(payload: Record<string, unknown>) {
@@ -386,6 +410,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'get_requester_profile') return renderProfile(payload)
   if (evidence.toolName === 'search_attachments') return renderAttachments(payload)
   if (evidence.toolName === 'search_product_help') return renderProductHelp(payload)
+  if (evidence.toolName === 'search_web') return renderWebSearch(payload)
   if (evidence.toolName === 'search_workspace') return renderWorkspaceSearch(payload)
   if (evidence.toolName === 'audit_workspace_consistency') return renderConsistencyAudit(payload)
   if (evidence.toolName === 'query_formal_deliverables') return renderFormalDeliverables(payload)
@@ -395,6 +420,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
   if (evidence.toolName === 'create_task_plan') return renderTaskPlan(payload)
   if (evidence.toolName === 'query_settlement_exports') return renderSettlementExports(payload)
+  if (evidence.toolName === 'reconcile_settlement_export') return renderSettlementReconciliation(payload)
   if (evidence.toolName === 'check_schedule_conflicts') return renderScheduleConflicts(payload)
   if (evidence.toolName === 'prepare_attachment_upload') return renderUploadHandoff(payload)
   if (evidence.toolName === 'inspect_attachment_evidence') return renderAttachmentEvidence(payload)
@@ -477,7 +503,7 @@ function chineseClaims(answer: string, pattern: RegExp) {
   return [...answer.matchAll(pattern)].map((match) => chineseNumber(String(match[1] || '')))
 }
 
-export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapshot): AgentFactVerification {
+export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapshot, options: { requireCanonicalSections?: boolean } = {}): AgentFactVerification {
   const issues: string[] = []
   const answerOutsideCanonicalSections = snapshot.sections.reduce(
     (remaining, section) => remaining.replace(section.markdown, ''),
@@ -502,8 +528,12 @@ export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapsho
   taskStatuses.forEach((status) => {
     if (answerOutsideCanonicalSections.includes(status) && !snapshot.statuses.includes(status)) issues.push(`status=${status} 缺少工具证据`)
   })
-  const coveredSources = snapshot.sections.filter((section) => answer.includes(section.markdown)).map((section) => section.sourceTool)
-  const missingSources = snapshot.sections.filter((section) => !coveredSources.includes(section.sourceTool)).map((section) => section.sourceTool)
+  const coveredSources = options.requireCanonicalSections === false
+    ? [...new Set(snapshot.sources)]
+    : snapshot.sections.filter((section) => answer.includes(section.markdown)).map((section) => section.sourceTool)
+  const missingSources = options.requireCanonicalSections === false
+    ? []
+    : snapshot.sections.filter((section) => !coveredSources.includes(section.sourceTool)).map((section) => section.sourceTool)
   missingSources.forEach((source) => issues.push(`source=${source} 的权威事实区块缺失`))
   return {
     passed: issues.length === 0,

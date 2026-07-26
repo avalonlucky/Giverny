@@ -55,6 +55,16 @@ assert.equal(agentCapabilityAllows('settlement-exports', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-reconciliation', 'viewer', 'GET'), true)
 assert.equal(agentCapabilityAllows('settlement-exports', 'client', 'GET'), false)
 assert.equal(agentCapabilityAllows('settlement-reconciliation', 'client', 'GET'), false)
+assert.equal(agentCapabilityAllows('web-search', 'guest', 'GET'), true)
+assert.equal(agentCapabilityRegistry.search_web.inputSchema.safeParse({ query: '上海明天天气' }).success, true)
+assert.equal(agentCapabilityRegistry.search_web.inputSchema.safeParse({ query: '' }).success, false)
+
+for (const capability of Object.values(agentCapabilityRegistry)) {
+  if (capability.policy.confirmation === 'signed-execute') assert.equal(capability.exposure.includes('model'), false, `${capability.endpoint} 不得暴露给模型`)
+  if (capability.exposure.includes('model') && capability.policy.risk !== 'read' && capability.policy.confirmation !== 'none') {
+    assert.equal(capability.policy.confirmation, 'preview', `${capability.endpoint} 的模型写入能力必须先预览确认`)
+  }
+}
 
 const upload = agentCapabilityRegistry.prepare_attachment_upload.inputSchema.safeParse({
   taskId: 12,

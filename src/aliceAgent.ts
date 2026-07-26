@@ -1,9 +1,9 @@
 import { Agent, type AgentContext } from 'agents'
 import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentReadToolRegistry, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName, type AgentReadToolName } from './agentToolRegistry'
-import type { AgentDirectorDecision, AgentDirectorPlanCall } from './agentIntentDirector'
+import { agentDirectorTrace, type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
 import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
 import { runAgentProductivityGraph, type AgentProductivityCall } from './agentProductivityGraph'
-import { buildAgentFactSnapshot, verifyAgentFactClaims } from './agentFactGuard'
+import { buildAgentFactSnapshot, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
@@ -97,6 +97,7 @@ export type AliceAgentChatResult = {
     sourceTools: string[]
     fallbackUsed: boolean
   }
+  grounding?: AgentFactSnapshot
   productivity?: {
     engine: 'langgraph'
     status: 'complete' | 'needs_input' | 'failed'
@@ -680,6 +681,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         result: {
           taskId: Number(task.id) || undefined,
           taskTitle: String(task.title || pending.draft.taskTitle || pending.draft.title || ''),
+          verification: {
+            passed: pending.workflowId ? independentlyVerified : true,
+            checks: Array.isArray(postcondition.checks) ? postcondition.checks.length : 0,
+          },
         },
       },
       ...(attachments.length ? { attachments } : {}),
@@ -688,12 +693,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         {
           type: 'tool',
           label: `执行${pending.label}`,
-          detail: pending.workflowId ? 'Cloudflare Workflow 已完成持久化写入步骤。' : '使用签名确认凭证写入业务数据。',
+          detail: pending.workflowId ? '已按确认内容完成业务写入。' : '已通过确认校验并写入业务数据。',
         },
         {
           type: 'result',
           label: pending.workflowId ? '独立验收通过' : '写入完成',
-          detail: pending.workflowId ? '已从 D1 权威数据源重新读取，写入结果与预期一致。' : '业务接口已返回成功结果。',
+          detail: pending.workflowId ? '已重新读取业务数据，写入结果与确认内容一致。' : '业务接口已返回成功结果。',
         },
       ],
     }
@@ -956,6 +961,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
             effectiveArgs = { ...effectiveArgs, taskId: references[0].id }
           }
         }
+        if (name === 'reconcile_settlement_export' && !String(effectiveArgs.exportId || '').trim() && !String(effectiveArgs.startDate || '').trim()) {
+          const exportObservation = [...context.observations].reverse().find((item) => item.deterministic && item.call.name === 'query_settlement_exports')
+          const exportPayload = toJsonObject(exportObservation?.output)
+          const recentExport = toJsonObject(Array.isArray(exportPayload.records) ? exportPayload.records[0] : null)
+          if (recentExport.id) effectiveArgs = { exportId: String(recentExport.id) }
+        }
         try {
           const output = call.attempt && call.attempt > 1 && isAgentReadToolName(name)
             ? await this.executeRepairTool(name, effectiveArgs)
@@ -1022,7 +1033,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           toolName: item.call.name,
           source: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'product_registry'
             ? 'product_registry'
-            : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
+            : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'web'
+              ? 'web'
+              : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
           deterministic: item.deterministic,
           payload: item.output,
         }))
@@ -1075,11 +1088,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       })),
     }
     let answer = cleanAnswer(request.orchestration.directAnswer || '') || (calls.length ? '已完成必要的业务处理。' : '请再具体说明你希望我处理的事情。')
-    const trace: AliceAgentTraceItem[] = [{
-      type: 'plan',
-      label: request.orchestration.decision.isWrite ? '确认站内操作目标' : request.orchestration.decision.requiresProductKnowledge ? '确认产品使用问题' : request.orchestration.decision.requiresBusinessData ? '确认需要业务依据' : '确认可直接回答',
-      detail: request.orchestration.decision.rationale || request.orchestration.decision.goal,
-    }]
+    const openingTrace = agentDirectorTrace(request.orchestration.decision)
+    const trace: AliceAgentTraceItem[] = [{ type: 'plan', ...openingTrace }]
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
     let uploadHandoff: AgentUploadHandoff | undefined
@@ -1139,7 +1149,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           toolName: toolResult.toolName,
           source: agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'product_registry'
             ? 'product_registry'
-            : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
+            : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'web'
+              ? 'web'
+              : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
           deterministic: !mismatch,
           payload: output,
         })
@@ -1259,6 +1271,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       ...(attachmentsById.size ? { attachments: [...attachmentsById.values()].slice(0, 30) } : {}),
       ...(uploadHandoff ? { uploadHandoff } : {}),
       ...(factVerificationSummary ? { factVerification: factVerificationSummary } : {}),
+      ...(shouldGroundAnswer ? { grounding: factSnapshot } : {}),
     }
     this.saveMessage('assistant', answer, {
       approval,

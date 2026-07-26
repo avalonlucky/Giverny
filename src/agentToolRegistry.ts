@@ -3,13 +3,13 @@ import type { AgentPrincipalRole } from './agentScope'
 
 export type AgentCapabilityRisk = 'read' | 'write' | 'sensitive'
 export type AgentCapabilityConfirmation = 'none' | 'preview' | 'signed-execute' | 'system-only'
-export type AgentCapabilitySource = 'd1' | 'r2' | 'product_registry' | 'workflow'
+export type AgentCapabilitySource = 'd1' | 'r2' | 'product_registry' | 'web' | 'workflow'
 export type AgentCapabilityExposure = 'model' | 'mcp' | 'api' | 'workflow'
 
 export type AgentCapabilityDefinition = {
   title: string
   description: string
-  category: 'finance' | 'tasks' | 'files' | 'calendar' | 'notifications' | 'security' | 'product' | 'planning' | 'memory' | 'analysis' | 'write' | 'internal'
+  category: 'finance' | 'tasks' | 'files' | 'calendar' | 'notifications' | 'security' | 'product' | 'web' | 'planning' | 'memory' | 'analysis' | 'write' | 'internal'
   endpoint: string
   methods: readonly ('GET' | 'POST')[]
   inputSchema: z.ZodType
@@ -139,6 +139,12 @@ export const agentCapabilityRegistry = {
     policy: { risk: 'read', deterministic: true, source: 'product_registry', scopes: ['product:read'], roles: allRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_search_product_help' },
     inputSchema: z.object({ query: z.string().min(1).max(500), limit: z.number().int().min(1).max(10).default(5) }),
     trace: { running: '查询产品使用说明', completed: '产品说明已返回' },
+  }),
+  search_web: readCapability({
+    title: '联网查询', description: '查询天气、新闻、公开资料和其他需要最新互联网信息的问题；不读取站内业务数据。', category: 'web', endpoint: 'web-search',
+    policy: { risk: 'read', deterministic: true, source: 'web', scopes: ['web:read'], roles: allRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_search_web' },
+    inputSchema: z.object({ query: z.string().min(2).max(500) }),
+    trace: { running: '搜索最新公开信息', completed: '联网结果已返回' },
   }),
   search_workspace: readCapability({
     title: '全域统一搜索', description: '一次检索当前工作区的任务、附件、正式对话、产品知识和企业记忆，合并关键词与向量结果并保留来源。用户要求跨全站查找、记不清内容在哪或同时搜索多类资料时必须调用。', category: 'product', endpoint: 'workspace-search',
@@ -367,7 +373,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'query_agenda', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help', 'search_workspace', 'audit_workspace_consistency', 'query_formal_deliverables', 'query_high_risk_actions'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'query_agenda', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help', 'search_web', 'search_workspace', 'audit_workspace_consistency', 'query_formal_deliverables', 'query_high_risk_actions'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

@@ -15,6 +15,10 @@ export type AgentApproval = {
   result?: {
     taskId?: number
     taskTitle?: string
+    verification?: {
+      passed: boolean
+      checks: number
+    }
   }
 }
 

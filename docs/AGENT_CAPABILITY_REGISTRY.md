@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：81 项
-- 分类：finance 6、tasks 4、files 8、product 3、analysis 6、security 10、calendar 4、notifications 5、planning 5、memory 4、write 20、internal 6
+- 注册能力：82 项
+- 分类：finance 6、tasks 4、files 8、product 3、web 1、analysis 6、security 10、calendar 4、notifications 5、planning 5、memory 4、write 20、internal 6
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -22,6 +22,7 @@
 `query_attachment_analysis` | 查询附件分析状态 | files | read | none | admin, collaborator, viewer, client, mcp-read, system | attachments:read | model, mcp, api | `agent_query_attachment_analysis`
 `get_giverny_context` | 读取工作台能力 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_get_context`
 `search_product_help` | 查询产品使用说明 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_search_product_help`
+`search_web` | 联网查询 | web | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | web:read | model, mcp, api | `agent_search_web`
 `search_workspace` | 全域统一搜索 | product | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, attachments:read, product:read, memory:read | model, mcp, api | `agent_search_workspace`
 `audit_workspace_consistency` | 执行全站数据一致性审计 | analysis | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, attachments:read, finance:read | model, mcp, api | `agent_audit_workspace_consistency`
 `query_formal_deliverables` | 查询正式交付物 | analysis | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, attachments:read | model, mcp, api | `agent_query_formal_deliverables`

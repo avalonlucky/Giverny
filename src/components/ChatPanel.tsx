@@ -654,7 +654,7 @@ export function ChatPanel({
       id: assistantId,
       role: 'assistant',
       content: '',
-      trace: ['正在识别这次请求…'],
+      trace: [],
       traceStatus: 'running',
     }])
     setLoading(true)

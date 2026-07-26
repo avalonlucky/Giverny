@@ -290,6 +290,7 @@
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
 - LangGraph turn-level orchestration, one-model direct path and complex-plan fallback: `src/agentRuntimeGraph.ts`
 - LangGraph execute-observe-replan productivity closure and hard budgets: `src/agentProductivityGraph.ts`
+- User-selected-model natural answer synthesis over program-verified facts: `composeNaturalAgentAnswer` in `src/worker.ts`
 - Anonymous production goal-completion, first-pass, recovery and follow-up metrics: `src/agentProductivityMetrics.ts`, `db/migrations/0036_agent_productivity_metrics.sql`
 - Enterprise Agent priorities, capability rollout and per-release status: `docs/AGENT_ENTERPRISE_ROADMAP.md`
 - Deterministic final-answer fact snapshots and protected-claim verification: `src/agentFactGuard.ts`, `scripts/test-agent-fact-guard.mjs`, `scripts/check-agent-fact-architecture.mjs`

@@ -121,6 +121,16 @@
         { "prompt": "选择任务 #2：公司产品封套延展", "expect": {} },
         { "prompt": "只读取刚才选中的任务详情", "expect": { "tools": ["get_task_detail"], "taskId": 2 } }
       ]
+    },
+    {
+      "id": "workflow-09",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-finance-tool"],
+      "turns": [
+        { "prompt": "看一下我最近导出的结算报表是几号到几号的？", "expect": { "tools": ["query_settlement_exports"], "forbiddenTools": ["search_product_help"] } },
+        { "prompt": "为什么刚才显示的金额不对？", "expect": { "tools": ["query_settlement_exports", "reconcile_settlement_export"], "forbiddenTools": ["search_product_help", "query_month_finance"] } },
+        { "prompt": "所以你重新核对后的结论是什么？", "expect": { "tools": ["query_settlement_exports", "reconcile_settlement_export"], "forbiddenTools": ["search_product_help"] } }
+      ]
     }
   ]
 }

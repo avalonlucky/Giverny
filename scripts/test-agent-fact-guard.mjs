@@ -132,12 +132,22 @@ assert.equal(verifyAgentFactClaims(plan.fallbackAnswer, plan).passed, true)
 
 const settlementExports = buildAgentFactSnapshot([evidence('query_settlement_exports', {
   count: 1,
-  records: [{ startDate: '2026-06-01', endDate: '2026-07-22', locked: true, totalAmount: 4200, disabled: false, expiresAt: '2026-08-01T00:00:00+08:00' }],
+  records: [{ startDate: '2026-06-01', endDate: '2026-07-22', locked: true, amount: 4200, disabled: false, expiresAt: '2026-08-01T00:00:00+08:00' }],
 })])
 assert.ok(settlementExports.fallbackAnswer.includes('2026-06-01 至 2026-07-22'))
 assert.ok(settlementExports.fallbackAnswer.includes('已锁定'))
 assert.ok(settlementExports.fallbackAnswer.includes('¥4,200'))
 assert.equal(verifyAgentFactClaims(settlementExports.fallbackAnswer, settlementExports).passed, true)
+assert.equal(verifyAgentFactClaims('最近导出范围是 2026-06-01 至 2026-07-22，金额 ¥4,200。', settlementExports, { requireCanonicalSections: false }).passed, true)
+assert.equal(verifyAgentFactClaims('最近导出范围是 2026-06-01 至 2026-07-22，金额 ¥0。', settlementExports, { requireCanonicalSections: false }).passed, false)
+
+const settlementReconciliation = buildAgentFactSnapshot([evidence('reconcile_settlement_export', {
+  range: { startDate: '2026-06-01', endDate: '2026-07-22' },
+  summary: { taskCount: 39, rowHours: 107.17, statedHours: 107.17, storedHours: 107.17, rowAmount: 9109.45, statedAmount: 9109.45, storedAmount: 9109.45 },
+  integrity: 'pass', findings: [],
+})])
+assert.ok(settlementReconciliation.fallbackAnswer.includes('¥9,109.45'))
+assert.equal(verifyAgentFactClaims('这份回单复算后是 ¥9,109.45，共 107.17 小时、39 项任务。', settlementReconciliation, { requireCanonicalSections: false }).passed, true)
 
 const schedule = buildAgentFactSnapshot([evidence('check_schedule_conflicts', {
   startDate: '2026-07-25T14:30:00+08:00', endDate: '2026-07-25T16:30:00+08:00', conflictCount: 1, scheduledHours: 2,
