@@ -669,6 +669,7 @@ export type SharedReportState = {
   settings?: {
     pdfTitle: string
     serviceCompanyName: string
+    serviceName?: string
   }
 }
 

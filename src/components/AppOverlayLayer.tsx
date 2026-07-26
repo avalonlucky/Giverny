@@ -74,6 +74,7 @@ export function AppOverlayLayer({
   onOpenSemanticFile,
   createTaskOpen,
   newTaskSupplemental,
+  demoMode,
   designTypeGroups,
   onCloseCreateTask,
   onCreateTask,
@@ -149,6 +150,7 @@ export function AppOverlayLayer({
   onOpenSemanticFile: (fileId: number) => void
   createTaskOpen: boolean
   newTaskSupplemental: boolean
+  demoMode: boolean
   designTypeGroups: DesignTypeGroup[]
   onCloseCreateTask: () => void
   onCreateTask: (task: Task) => void
@@ -256,7 +258,7 @@ export function AppOverlayLayer({
       )}
       {createTaskOpen && (
         <Suspense fallback={<ModalShell className="new-task-modal" labelledBy="new-task-loading-title" onClose={onCloseCreateTask} closeOnEscape><div id="new-task-loading-title" className="office-preview-status">正在载入新建任务…</div></ModalShell>}>
-          <NewTaskModal designTypeGroups={designTypeGroups} currentMonthValue={currentMonthValue} initialSupplemental={newTaskSupplemental} onClose={onCloseCreateTask} onCreate={onCreateTask} onDesignTypeGroupsChange={onDesignTypeGroupsChange} />
+          <NewTaskModal demoMode={demoMode} designTypeGroups={designTypeGroups} currentMonthValue={currentMonthValue} initialSupplemental={newTaskSupplemental} onClose={onCloseCreateTask} onCreate={onCreateTask} onDesignTypeGroupsChange={onDesignTypeGroupsChange} />
         </Suspense>
       )}
       {detailTask && (
@@ -274,6 +276,7 @@ export function AppOverlayLayer({
         <Suspense fallback={<ModalShell className="new-task-modal" labelledBy="edit-task-loading-title" onClose={onCloseTaskEdit} closeOnEscape><div id="edit-task-loading-title" className="office-preview-status">正在载入任务编辑…</div></ModalShell>}>
           <NewTaskModal
             key={`edit-${editTask.id}`}
+            demoMode={demoMode}
             designTypeGroups={designTypeGroups}
             currentMonthValue={currentMonthValue}
             editingTask={editTask}

@@ -16,16 +16,18 @@ export function NewTaskDesignTypeSelector({
   groups,
   value,
   onChange,
+  label = '设计类型',
 }: {
   groups: DesignTypeGroup[]
   value: string
   onChange: (value: string) => void
+  label?: string
 }) {
   const availableGroups = normalizeGroups(groups).filter((group) => group.items.length > 0)
   const selectedGroup = availableGroups.find((group) => group.items.some((item) => `${group.name} / ${item}` === value))
   return (
     <div className="new-task-type-selector">
-      <div className="new-task-type-chips" role="listbox" aria-label="设计类型">
+      <div className="new-task-type-chips" role="listbox" aria-label={label}>
         {availableGroups.map((group) => <div className={`new-task-type-category ${group.name === selectedGroup?.name ? 'active' : ''}`} key={group.name} tabIndex={0}>
           <span>{group.name}</span>
           <div className="new-task-type-menu" role="group" aria-label={`${group.name} 子分类`}>

@@ -51,6 +51,7 @@ function supplementalMonthSelectOptions(currentValue = monthPart(isoDate())) {
 export function NewTaskModal({
   designTypeGroups,
   currentMonthValue,
+  demoMode = false,
   initialSupplemental = false,
   editingTask,
   onClose,
@@ -60,6 +61,7 @@ export function NewTaskModal({
 }: {
   designTypeGroups: DesignTypeGroup[]
   currentMonthValue: string
+  demoMode?: boolean
   initialSupplemental?: boolean
   editingTask?: Task
   onClose: () => void
@@ -69,13 +71,14 @@ export function NewTaskModal({
 }) {
   const availableDesignTypeGroups = normalizeDesignTypeGroups(designTypeGroups)
   const fallbackType = flattenDesignTypeGroups(availableDesignTypeGroups)[0] ?? defaultDesignTypes[0]
+  const draftScope = demoMode ? 'demo' : 'default'
   const defaultStartDateTime = useMemo(() => isoDateTime(), [])
   const isEditing = Boolean(editingTask)
   const initialDraft = useMemo(
     () => editingTask
-      ? newTaskDraftFromTask(editingTask, fallbackType, currentMonthValue)
-      : readNewTaskDraftCache(defaultStartDateTime, fallbackType, currentMonthValue),
-    [currentMonthValue, defaultStartDateTime, editingTask, fallbackType],
+      ? newTaskDraftFromTask(editingTask, fallbackType, currentMonthValue, demoMode ? '' : '黄媚')
+      : readNewTaskDraftCache(defaultStartDateTime, fallbackType, currentMonthValue, draftScope, demoMode ? '' : '黄媚'),
+    [currentMonthValue, defaultStartDateTime, demoMode, draftScope, editingTask, fallbackType],
   )
   const [title, setTitle] = useState(initialDraft.title)
   const [requirement, setRequirement] = useState(initialDraft.requirement)
@@ -183,8 +186,8 @@ export function NewTaskModal({
       contact,
       reviewer,
       supplementalNote,
-    })
-  }, [contact, estimatedDate, estimatedMinutes, isEditing, isSupplemental, requirement, requester, reviewer, scheduleDerivedField, settlementMonth, startDate, supplementalNote, title, type])
+    }, draftScope)
+  }, [contact, draftScope, estimatedDate, estimatedMinutes, isEditing, isSupplemental, requirement, requester, reviewer, scheduleDerivedField, settlementMonth, startDate, supplementalNote, title, type])
 
   const toggleScheduleField = (field: ScheduleAnchor) => {
     setScheduleDerivedField((current) => {
@@ -829,13 +832,13 @@ export function NewTaskModal({
 
         <div className="form-grid new-task-form" onPaste={handleBriefPaste}>
           <div className={`field wide new-task-type-field ${formErrors.type ? 'field-invalid' : ''}`}>
-            <span>设计类型</span>
-            <NewTaskDesignTypeSelector groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
+            <span>{demoMode ? '任务类型' : '设计类型'}</span>
+            <NewTaskDesignTypeSelector label={demoMode ? '任务类型' : '设计类型'} groups={availableDesignTypeGroups} value={type} onChange={(value) => { setType(value); clearFieldError('type') }} />
             {formErrors.type && <small className="field-error">{formErrors.type}</small>}
           </div>
           <label className={`field wide ${formErrors.title ? 'field-invalid' : ''}`}>
             <span>任务名称</span>
-            <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder="例如：金博会邀请函长图设计" aria-required="true" />
+            <input value={title} onChange={(event) => { setTitle(event.target.value); clearFieldError('title') }} placeholder={demoMode ? '例如：完成季度留存分析' : '例如：金博会邀请函长图设计'} aria-required="true" />
             {formErrors.title && <small className="field-error">{formErrors.title}</small>}
           </label>
           <div className={`field wide ${formErrors.requirement ? 'field-invalid' : ''}`}>
@@ -860,7 +863,7 @@ export function NewTaskModal({
               aria-label="任务具体需求"
               value={requirement}
               onChange={(event) => { setRequirement(event.target.value); clearFieldError('requirement') }}
-              placeholder="例如：为金博会制作论坛预热邀请长图，用于各渠道发送"
+              placeholder={demoMode ? '例如：分析不同渠道的次日、7 日和 30 日留存，输出结论与建议' : '例如：为金博会制作论坛预热邀请长图，用于各渠道发送'}
               aria-required="true"
             />
             {formErrors.requirement && <small className="field-error">{formErrors.requirement}</small>}
@@ -1019,14 +1022,14 @@ export function NewTaskModal({
                     clearFieldError('reviewer')
                   }
                 }}
-                placeholder="例如：市场部 · 王敏"
+                placeholder={demoMode ? '例如：增长团队 · 林夏' : '例如：市场部 · 王敏'}
                 aria-required="true"
               />
               {formErrors.requester && <small className="field-error">{formErrors.requester}</small>}
             </label>
             <label className={`field ${formErrors.contact ? 'field-invalid' : ''}`}>
               <span>对接人</span>
-              <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder="例如：黄媚" aria-required="true" />
+              <input value={contact} onChange={(event) => { setContact(event.target.value); clearFieldError('contact') }} placeholder={demoMode ? '例如：周序' : '例如：黄媚'} aria-required="true" />
               {formErrors.contact && <small className="field-error">{formErrors.contact}</small>}
             </label>
             <label className={`field ${formErrors.reviewer ? 'field-invalid' : ''}`}>

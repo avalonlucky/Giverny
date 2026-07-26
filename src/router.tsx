@@ -21,10 +21,10 @@ export const router = createBrowserRouter([
     path: '/settlement-share/:token',
     lazy: () => import('./routes/SharedSettlementRoute'),
   },
-  {
+  ...adminRoutes.map((route) => ({
+    ...route,
     lazy: () => import('./routes/AdminRoute'),
-    children: adminRoutes,
-  },
+  })),
   {
     path: '/',
     element: <Navigate to="/dashboard" replace />,

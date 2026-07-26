@@ -59,7 +59,7 @@ export function useTaskOperations({
   isAdmin: boolean
 }) {
   const {
-    taskItems, setTaskItems, taskItemsRef, setUpdateItems, fileItems, setFileItems,
+    role, taskItems, setTaskItems, taskItemsRef, setUpdateItems, fileItems, setFileItems,
     setBackendStatus, refreshState,
   } = workspace
   const {
@@ -97,7 +97,7 @@ export function useTaskOperations({
       if (taskSettlementMonth(savedTask).length >= 7) {
         setMonthValue(taskSettlementMonth(savedTask))
       }
-      clearNewTaskDraftCache()
+      clearNewTaskDraftCache(role === 'demo' ? 'demo' : 'default')
       setIsModalOpen(false)
       setBackendStatus('已接入 D1/R2')
       notify('任务已写入 D1，最新进展已同步')

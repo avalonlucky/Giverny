@@ -1,4 +1,4 @@
-import { appVersion, defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
+import { appVersion, defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, demoTaskTypeGroups, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
 import { tracing } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
@@ -348,6 +348,10 @@ type AuthPrincipal = {
 
 const DEFAULT_WORKSPACE_ID = 'default'
 const DEMO_WORKSPACE_ID = 'demo'
+const DEMO_HOURLY_RATE = 260
+const DEMO_PDF_TITLE = 'Giverny 结算回单'
+const DEMO_SERVICE_COMPANY_NAME = '澄屿创新实验室'
+const DEMO_SERVICE_NAME = '专业服务'
 const DEMO_PRINCIPAL_ID = 'demo-viewer'
 const DEMO_PRINCIPAL_EMAIL = 'demo@mayeai.com'
 
@@ -6327,11 +6331,15 @@ async function agentBatchTaskOperationsTool(env: Env, request: Request, ctx?: Wo
 async function agentCreateTaskPreviewTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const fallbackType = workspaceId === DEMO_WORKSPACE_ID
+    ? `${demoTaskTypeGroups[0].name} / ${demoTaskTypeGroups[0].items[0]}`
+    : defaultDesignTypes[0]
   const currentMonth = agentString(body.currentMonth, 7) || monthPart(nowIso())
   const draft = {
     title: agentString(body.title, 120),
     requirement: agentString(body.requirement, 3000),
-    type: agentString(body.type ?? body.designType, 120) || defaultDesignTypes[0],
+    type: agentString(body.type ?? body.designType, 120) || fallbackType,
     date: agentDateTime(body.startDate ?? body.date),
     estimatedDate: agentDateTime(body.estimatedDate ?? body.dueDate, nowIso().slice(0, 16)),
     settlementMonth: agentString(body.settlementMonth, 7) || currentMonth,
@@ -6361,7 +6369,8 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
     return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409)
   }
   const id = nextNumericId()
-  const hourlyRate = await getHourlyRate(env)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const hourlyRate = await getWorkspaceHourlyRate(env, workspaceId)
   const billable = agentBool(draft.billable, true)
   const status: TaskStatus = billable ? '计划中' : '不计费'
   const startDate = agentDateTime(draft.date)
@@ -6374,10 +6383,12 @@ async function agentCreateTaskTool(env: Env, request: Request, ctx?: WorkerExecu
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id,
-    agentWorkspaceIdFromRequest(request),
+    workspaceId,
     agentString(draft.title, 120),
     agentString(draft.requirement, 3000),
-    agentString(draft.type, 120) || defaultDesignTypes[0],
+    agentString(draft.type, 120) || (workspaceId === DEMO_WORKSPACE_ID
+      ? `${demoTaskTypeGroups[0].name} / ${demoTaskTypeGroups[0].items[0]}`
+      : defaultDesignTypes[0]),
     startDate,
     estimatedDate,
     null,
@@ -7429,7 +7440,7 @@ async function agentMonthFinanceTool(env: Env, request: Request) {
   if (!months.length) {
     return agentFail('months 不能为空，格式为 YYYY-MM；也可以在 question 中包含月份。', 400)
   }
-  const hourlyRate = await getHourlyRate(env)
+  const hourlyRate = await getWorkspaceHourlyRate(env, principal.workspaceId)
   const stats = await computeMonthFinanceStats(env, months, hourlyRate, principal.workspaceId)
   return agentOk({
     tool: 'query_month_finance',
@@ -8882,7 +8893,7 @@ async function agentAnalysisJobPrepareTool(env: Env, request: Request) {
          AND attachment_analyses.status = 'completed'
        ORDER BY attachment_analyses.completed_at DESC LIMIT 240`,
     ).bind(row.workspace_id).all<DbAttachmentAnalysis>(),
-    getHourlyRate(env),
+    getWorkspaceHourlyRate(env, row.workspace_id),
   ])
   const taskIds = new Set((taskRows.results ?? []).map((task) => Number(task.id)))
   const allUpdates = await env.DB.prepare(
@@ -12247,7 +12258,7 @@ function dbTaskReceiptCompletionDate(task: DbTask, latestUpdate: DbUpdate | unde
 }
 
 async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, startDate: string, endDate: string): Promise<ReceiptExcelOptions> {
-  const [taskResult, updateResult, hourlyRate, pdfTitle, serviceCompanyName] = await Promise.all([
+  const [taskResult, updateResult, receiptIdentity] = await Promise.all([
     env.DB.prepare('SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC, created_at ASC')
       .bind(workspaceId).all<DbTask>(),
     env.DB.prepare(
@@ -12257,10 +12268,9 @@ async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, sta
          AND substr(task_updates.update_date, 1, 10) BETWEEN ? AND ?
        ORDER BY task_updates.update_date DESC, task_updates.created_at DESC`,
     ).bind(workspaceId, startDate, endDate).all<DbUpdate>(),
-    getHourlyRate(env),
-    getPdfTitle(env),
-    getServiceCompanyName(env),
+    getWorkspaceReceiptIdentity(env, workspaceId),
   ])
+  const { hourlyRate, pdfTitle, serviceCompanyName, serviceName } = receiptIdentity
   const latestUpdate = new Map<string, DbUpdate>()
   for (const update of updateResult.results || []) {
     if (!latestUpdate.has(update.task_id)) latestUpdate.set(update.task_id, update)
@@ -12300,7 +12310,7 @@ async function buildSettlementReceiptSnapshot(env: Env, workspaceId: string, sta
     receiptNo: `AK-${key}-${String(rows.length + 1).padStart(3, '0')}`,
     issuedAt: formatBeijing(nowIso()),
     companyName: serviceCompanyName,
-    serviceName: '平面设计兼职',
+    serviceName,
     settlementLabelTitle: '结算日期',
     settlementLabel: `${receiptDateLabel(startDate)} 至 ${receiptDateLabel(endDate)}`,
     hourlyRate,
@@ -12322,6 +12332,27 @@ function parseSettlementReceiptSnapshot(value: string): ReceiptExcelOptions | nu
 async function getHourlyRate(env: Env) {
   const row = await env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind('hourlyRate').first<{ value: string }>()
   return Number(row?.value) || defaultHourlyRate
+}
+
+async function getWorkspaceHourlyRate(env: Env, workspaceId: string) {
+  return workspaceId === DEMO_WORKSPACE_ID ? DEMO_HOURLY_RATE : getHourlyRate(env)
+}
+
+async function getWorkspaceReceiptIdentity(env: Env, workspaceId: string) {
+  if (workspaceId === DEMO_WORKSPACE_ID) {
+    return {
+      hourlyRate: DEMO_HOURLY_RATE,
+      pdfTitle: DEMO_PDF_TITLE,
+      serviceCompanyName: DEMO_SERVICE_COMPANY_NAME,
+      serviceName: DEMO_SERVICE_NAME,
+    }
+  }
+  const [hourlyRate, pdfTitle, serviceCompanyName] = await Promise.all([
+    getWorkspaceHourlyRate(env, workspaceId),
+    getPdfTitle(env),
+    getServiceCompanyName(env),
+  ])
+  return { hourlyRate, pdfTitle, serviceCompanyName, serviceName: '平面设计兼职' }
 }
 
 async function getPdfTitle(env: Env) {
@@ -12622,7 +12653,17 @@ const hourEstimateSystemPrompt = `你是设计兼职任务的工时分析助理�
 - suggestedHours 应代表常规投入；不要编造不存在的历史数据。样本不足或相似度弱时必须降低置信度。
 - 依据要短、具体、可解释。`
 
+const demoHourEstimateSystemPrompt = `你是企业工作任务的工时分析助理。系统已经从当前演示工作区的已验收任务计算统计基线，你只能依据当前任务、同一工作区的历史样本和确定性统计做受控微调。
+
+规则：
+- 工时是实际投入，不是开始到交付之间的自然时间差。
+- 根据当前岗位和任务内容识别调研、沟通、执行、复核、修改与交付成本，不要套用平面设计行业模板。
+- exact、semantic、parent 的证据强度依次降低；优先参考 weightedMedianHours、p80Hours 和 currentEstimatedHours。
+- 不得引用其他工作区的客户、人员、任务或学习偏好，不得提及“演示账号”“测试数据”或“多岗位协作”。
+- 样本不足时降低置信度，不编造历史事实；依据保持简短、具体、可核验。`
+
 const taskAssistantCategoryRules = `\n\n【分类规则】\n- availableDesignTypeGroups 是当前已配置分类，不是封闭选项。\n- 已有大类合适但子类缺失时，复用该大类并输出新的子类。例如「视频剪辑」「短视频剪辑」「直播切片」若没有对应子类，可建议「传播类 / 视频剪辑」或更贴切的新子类。\n- 如果大类也不合适，可以输出新的大类。\n- 不要为了让 categoryExists=true 把任务硬套进「海报」「单页 / 折页」「官网 banner」「邀请函长图」等不准确分类。`
+const demoTaskAssistantCategoryRules = `\n\n【分类规则】\n- availableDesignTypeGroups 是当前演示工作区的岗位与任务分类。\n- 优先复用最贴切的现有岗位大类与任务子类；子类缺失时可以在对应岗位下建议新子类。\n- 分类必须表达实际工作内容，不要把岗位说明写进任务名称，也不要使用“多岗位”作为分类或标题。`
 
 const videoTaskPattern = /视频剪辑|剪视频|短视频|直播切片|切片剪辑|后期剪辑|视频后期|字幕包装|片头片尾|视频包装|视频号|抖音|快手|小红书视频/
 const videoCategoryPattern = /视频|剪辑|切片|后期/
@@ -12938,14 +12979,14 @@ type HourEstimateSampleFeedbackRule = {
   reason: string
 }
 
-async function loadHourEstimateSampleFeedback(env: Env, designType: string) {
+async function loadHourEstimateSampleFeedback(env: Env, designType: string, workspaceId: string) {
   await ensureTaskLearningTables(env)
   const rows = await env.DB.prepare(
     `SELECT task_id, action, metadata_json
      FROM ai_learning_events
-     WHERE context = 'hour_estimate_sample_feedback' AND design_type = ?
+     WHERE context = 'hour_estimate_sample_feedback' AND design_type = ? AND workspace_id = ?
      ORDER BY id DESC LIMIT 300`,
-  ).bind(designType).all<{ task_id: number | null; action: string; metadata_json: string }>()
+  ).bind(designType, workspaceId).all<{ task_id: number | null; action: string; metadata_json: string }>()
   const latest = new Map<string, HourEstimateSampleFeedbackRule>()
   for (const row of rows.results ?? []) {
     const sampleTaskId = String(row.task_id ?? '')
@@ -12962,15 +13003,15 @@ async function loadHourEstimateSampleFeedback(env: Env, designType: string) {
   return latest
 }
 
-async function loadHourEstimateOutcomeCorrections(env: Env, taskIds: string[]) {
+async function loadHourEstimateOutcomeCorrections(env: Env, taskIds: string[], workspaceId: string) {
   const ids = Array.from(new Set(taskIds.filter((id) => /^\d+$/.test(id)))).slice(0, 40)
   if (!ids.length) return new Map<string, string>()
   const placeholders = ids.map(() => '?').join(',')
   const rows = await env.DB.prepare(
     `SELECT task_id, metadata_json FROM ai_learning_events
-     WHERE context = 'hour_estimate_outcome_correction' AND task_id IN (${placeholders})
+     WHERE context = 'hour_estimate_outcome_correction' AND workspace_id = ? AND task_id IN (${placeholders})
      ORDER BY id DESC`,
-  ).bind(...ids.map(Number)).all<{ task_id: number | null; metadata_json: string }>()
+  ).bind(workspaceId, ...ids.map(Number)).all<{ task_id: number | null; metadata_json: string }>()
   const result = new Map<string, string>()
   for (const row of rows.results ?? []) {
     const taskId = String(row.task_id ?? '')
@@ -12983,12 +13024,12 @@ async function loadHourEstimateOutcomeCorrections(env: Env, taskIds: string[]) {
   return result
 }
 
-async function loadHourEstimateSampleQuality(env: Env) {
+async function loadHourEstimateSampleQuality(env: Env, workspaceId: string) {
   await ensureTaskLearningTables(env)
   const rows = await env.DB.prepare(
     `SELECT task_id, action, metadata_json FROM ai_learning_events
-     WHERE context = 'hour_estimate_sample_quality' ORDER BY id DESC LIMIT 1000`,
-  ).all<{ task_id: number | null; action: string; metadata_json: string }>()
+     WHERE context = 'hour_estimate_sample_quality' AND workspace_id = ? ORDER BY id DESC LIMIT 1000`,
+  ).bind(workspaceId).all<{ task_id: number | null; action: string; metadata_json: string }>()
   const result = new Map<string, { excluded: boolean; reason: string }>()
   for (const row of rows.results ?? []) {
     const taskId = String(row.task_id ?? '')
@@ -13144,7 +13185,7 @@ function hourEstimateCompletionOptions(profile: HourEstimateComplexityProfile, r
   return options.slice(0, 8)
 }
 
-async function hourEstimateChangeAudit(env: Env, selectedType: string, requester: string, current: {
+async function hourEstimateChangeAudit(env: Env, selectedType: string, requester: string, workspaceId: string, current: {
   suggestedHours: number
   complexityScore: number
   requirementQualityScore: number
@@ -13154,9 +13195,9 @@ async function hourEstimateChangeAudit(env: Env, selectedType: string, requester
 }): Promise<HourEstimateChangeAudit> {
   const previous = await env.DB.prepare(
     `SELECT suggested_hours, requested_at, basis_json FROM hour_estimate_suggestions
-     WHERE design_type = ? AND (? = '' OR requester = ?)
+     WHERE workspace_id = ? AND design_type = ? AND (? = '' OR requester = ?)
      ORDER BY requested_at DESC LIMIT 1`,
-  ).bind(selectedType, requester, requester).first<{ suggested_hours: number; requested_at: string; basis_json: string | null }>()
+  ).bind(workspaceId, selectedType, requester, requester).first<{ suggested_hours: number; requested_at: string; basis_json: string | null }>()
   if (!previous) {
     return {
       hasPrevious: false,
@@ -13283,6 +13324,7 @@ async function hourEstimateRequesterAdjustment(
   env: Env,
   requester: string,
   selectedType: string,
+  workspaceId: string,
 ): Promise<HourEstimateRequesterAdjustment> {
   const empty: HourEstimateRequesterAdjustment = {
     requester,
@@ -13296,13 +13338,16 @@ async function hourEstimateRequesterAdjustment(
   if (!requester) {
     return empty
   }
-  const parentType = selectedType.split('/')[0]?.trim()
+  const parentType = workspaceId === DEMO_WORKSPACE_ID
+    ? demoTaskTypeGroups.find((group) => selectedType === group.name || selectedType.startsWith(`${group.name} / `))?.name
+    : selectedType.split('/')[0]?.trim()
   const rows = await env.DB.prepare(
     `SELECT tasks.title, tasks.estimated_hours, tasks.actual_hours, tasks.requirement, tasks.time_entries_json, tasks.design_type,
             COALESCE(
               (SELECT COALESCE(hour_estimate_suggestions.selected_hours, hour_estimate_suggestions.suggested_hours)
                FROM hour_estimate_suggestions
                WHERE hour_estimate_suggestions.task_id = CAST(tasks.id AS TEXT)
+                 AND hour_estimate_suggestions.workspace_id = tasks.workspace_id
                  AND hour_estimate_suggestions.status = 'observed'
                ORDER BY hour_estimate_suggestions.updated_at DESC LIMIT 1),
               tasks.estimated_hours
@@ -13310,17 +13355,18 @@ async function hourEstimateRequesterAdjustment(
             (SELECT hour_estimate_suggestions.requirement
              FROM hour_estimate_suggestions
              WHERE hour_estimate_suggestions.task_id = CAST(tasks.id AS TEXT)
+               AND hour_estimate_suggestions.workspace_id = tasks.workspace_id
                AND hour_estimate_suggestions.status = 'observed'
              ORDER BY hour_estimate_suggestions.updated_at DESC LIMIT 1) AS prediction_requirement
      FROM tasks
-     WHERE tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
+     WHERE tasks.workspace_id = ? AND tasks.deleted_at IS NULL AND tasks.voided_at IS NULL
        AND tasks.status = '已验收' AND tasks.actual_hours > 0 AND tasks.estimated_hours > 0
        AND tasks.requester = ?
      ORDER BY
        CASE WHEN tasks.design_type = ? THEN 0 WHEN tasks.design_type LIKE ? THEN 1 ELSE 2 END,
        tasks.actual_delivery_date DESC, tasks.updated_at DESC
      LIMIT 24`,
-  ).bind(requester, selectedType, `${parentType}%`).all<Pick<DbTask, 'title' | 'estimated_hours' | 'actual_hours' | 'requirement' | 'time_entries_json' | 'design_type'> & { prediction_hours: number; prediction_requirement: string | null }>()
+  ).bind(workspaceId, requester, selectedType, `${parentType}%`).all<Pick<DbTask, 'title' | 'estimated_hours' | 'actual_hours' | 'requirement' | 'time_entries_json' | 'design_type'> & { prediction_hours: number; prediction_requirement: string | null }>()
   const samples = (rows.results ?? []).filter((row) => !row.prediction_requirement || !hourEstimateRequirementChange(
     row.prediction_requirement,
     row.requirement ?? '',
@@ -13359,6 +13405,7 @@ async function hourEstimateRequesterAdjustment(
 async function hourEstimateLearningAdjustment(
   env: Env,
   selectedType: string,
+  workspaceId: string,
 ): Promise<HourEstimateLearningAdjustment> {
   const empty: HourEstimateLearningAdjustment = {
     sampleCount: 0,
@@ -13374,10 +13421,10 @@ async function hourEstimateLearningAdjustment(
     const rows = await env.DB.prepare(
       `SELECT ai_output, user_final, metadata_json, created_at
        FROM ai_learning_events
-       WHERE context = 'hour_estimate' AND design_type = ?
+       WHERE context = 'hour_estimate' AND design_type = ? AND workspace_id = ?
        ORDER BY id DESC
        LIMIT 60`,
-    ).bind(selectedType).all<{
+    ).bind(selectedType, workspaceId).all<{
       ai_output: string
       user_final: string
       metadata_json: string
@@ -13654,6 +13701,7 @@ async function persistHourEstimateSuggestion(
   body: HourEstimateRequest,
   result: HourEstimateResult,
   provider: string,
+  workspaceId: string,
 ) {
   const suggestionId = crypto.randomUUID()
   const modelVersion: HourEstimateModelVersion = {
@@ -13671,12 +13719,13 @@ async function persistHourEstimateSuggestion(
   })
   await env.DB.prepare(
     `INSERT INTO hour_estimate_suggestions (
-       id, input_fingerprint, title, requirement, design_type, requester,
+       id, workspace_id, input_fingerprint, title, requirement, design_type, requester,
        suggested_hours, safe_hours, confidence, exact_sample_count, similar_sample_count,
        provider, basis_json
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     suggestionId,
+    workspaceId,
     inputFingerprint,
     String(body.title ?? '').trim(),
     String(body.requirement ?? '').trim(),
@@ -13741,8 +13790,9 @@ async function linkHourEstimateSuggestion(env: Env, suggestionId: string, taskId
      SET task_id = ?, selected_hours = ?,
        status = CASE WHEN ABS(suggested_hours - ?) < 0.01 THEN 'adopted' ELSE 'edited' END,
        updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND task_id IS NULL`,
-  ).bind(taskId, selectedHours, selectedHours, suggestionId).run()
+     WHERE id = ? AND task_id IS NULL
+       AND workspace_id = (SELECT workspace_id FROM tasks WHERE id = ?)`,
+  ).bind(taskId, selectedHours, selectedHours, suggestionId, taskId).run()
 }
 
 async function updateHourEstimateObservation(env: Env, taskId: string, actualHours: number, accepted: boolean) {
@@ -13752,8 +13802,9 @@ async function updateHourEstimateObservation(env: Env, taskId: string, actualHou
   await env.DB.prepare(
     `UPDATE hour_estimate_suggestions
      SET actual_hours = ?, status = CASE WHEN ? THEN 'observed' ELSE status END, updated_at = CURRENT_TIMESTAMP
-     WHERE task_id = ?`,
-  ).bind(actualHours, accepted ? 1 : 0, taskId).run()
+     WHERE task_id = ?
+       AND workspace_id = (SELECT workspace_id FROM tasks WHERE id = ?)`,
+  ).bind(actualHours, accepted ? 1 : 0, taskId, taskId).run()
   if (accepted) {
     await recordHourEstimateOutcome(env, taskId, actualHours)
   }
@@ -13781,11 +13832,14 @@ function hourEstimateOutcomeFactors(task: DbTask, baselineHours: number, actualH
 }
 
 async function recordHourEstimateOutcome(env: Env, taskId: string, actualHours: number) {
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(taskId).first<DbTask>()
+  if (!task || actualHours <= 0) return
+  const workspaceId = task.workspace_id || DEFAULT_WORKSPACE_ID
   const suggestion = await env.DB.prepare(
     `SELECT id, suggested_hours, safe_hours, selected_hours, design_type, requester, requirement, basis_json
      FROM hour_estimate_suggestions
-     WHERE task_id = ? ORDER BY requested_at DESC LIMIT 1`,
-  ).bind(taskId).first<{
+     WHERE task_id = ? AND workspace_id = ? ORDER BY requested_at DESC LIMIT 1`,
+  ).bind(taskId, workspaceId).first<{
     id: string
     suggested_hours: number
     safe_hours: number
@@ -13795,8 +13849,7 @@ async function recordHourEstimateOutcome(env: Env, taskId: string, actualHours: 
     requirement: string | null
     basis_json: string | null
   }>()
-  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(taskId).first<DbTask>()
-  if (!suggestion || !task || actualHours <= 0) {
+  if (!suggestion) {
     return
   }
   const suggestedHours = Number(suggestion.suggested_hours) || 0
@@ -13828,12 +13881,12 @@ async function recordHourEstimateOutcome(env: Env, taskId: string, actualHours: 
     modelVersion,
   }
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_outcome' AND task_id = ?").bind(Number(taskId)),
+    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_outcome' AND task_id = ? AND workspace_id = ?").bind(Number(taskId), workspaceId),
     env.DB.prepare(
       `INSERT INTO ai_learning_events (
          context, action, source_input, ai_output, user_final, design_type,
-         task_id, task_title, metadata_json, created_at
-       ) VALUES ('hour_estimate_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         task_id, task_title, metadata_json, workspace_id, principal_id, created_at
+       ) VALUES ('hour_estimate_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       direction,
       task.requirement ?? '',
@@ -13843,12 +13896,16 @@ async function recordHourEstimateOutcome(env: Env, taskId: string, actualHours: 
       Number(taskId),
       task.title,
       JSON.stringify(metadata),
+      workspaceId,
+      'system',
       Date.now(),
     ),
   ])
 }
 
 async function saveHourEstimateOutcomeCorrection(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
   const body = (await request.json().catch(() => ({}))) as { taskId?: number; factors?: string[]; note?: string }
   const taskId = Number(body.taskId)
   const factors = Array.from(new Set((Array.isArray(body.factors) ? body.factors : [])
@@ -13860,16 +13917,16 @@ async function saveHourEstimateOutcomeCorrection(env: Env, request: Request) {
   const suggestion = await env.DB.prepare(
     `SELECT hs.design_type, t.title
      FROM hour_estimate_suggestions hs JOIN tasks t ON CAST(t.id AS TEXT) = hs.task_id
-     WHERE hs.task_id = ? AND hs.status = 'observed' ORDER BY hs.updated_at DESC LIMIT 1`,
-  ).bind(String(taskId)).first<{ design_type: string | null; title: string }>()
+     WHERE hs.task_id = ? AND hs.workspace_id = ? AND t.workspace_id = ? AND hs.status = 'observed' ORDER BY hs.updated_at DESC LIMIT 1`,
+  ).bind(String(taskId), workspaceId, workspaceId).first<{ design_type: string | null; title: string }>()
   if (!suggestion) return fail('该任务还没有可校正的已验收工时预测', 404)
   await ensureTaskLearningTables(env)
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_outcome_correction' AND task_id = ?").bind(taskId),
+    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_outcome_correction' AND task_id = ? AND workspace_id = ?").bind(taskId, workspaceId),
     env.DB.prepare(
       `INSERT INTO ai_learning_events
-       (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
-       VALUES ('hour_estimate_outcome_correction', 'edited', '', ?, ?, ?, ?, ?, ?, ?)`,
+       (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, workspace_id, principal_id, created_at)
+       VALUES ('hour_estimate_outcome_correction', 'edited', '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       factors.join('、'),
       note,
@@ -13877,6 +13934,8 @@ async function saveHourEstimateOutcomeCorrection(env: Env, request: Request) {
       taskId,
       suggestion.title,
       JSON.stringify({ factors, note }),
+      workspaceId,
+      principal?.principalId || 'guest',
       Date.now(),
     ),
   ])
@@ -13884,6 +13943,8 @@ async function saveHourEstimateOutcomeCorrection(env: Env, request: Request) {
 }
 
 async function saveHourEstimateSampleFeedback(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
   const body = (await request.json().catch(() => ({}))) as {
     suggestionId?: string
     sampleTaskId?: number
@@ -13894,9 +13955,9 @@ async function saveHourEstimateSampleFeedback(env: Env, request: Request) {
   const sampleTaskId = Number(body.sampleTaskId)
   if (!suggestionId || !Number.isFinite(sampleTaskId)) return fail('参考任务反馈参数不完整')
   const suggestion = await env.DB.prepare(
-    'SELECT design_type, title, basis_json FROM hour_estimate_suggestions WHERE id = ?',
-  ).bind(suggestionId).first<{ design_type: string | null; title: string | null; basis_json: string | null }>()
-  const sample = await env.DB.prepare('SELECT title FROM tasks WHERE id = ?').bind(String(sampleTaskId)).first<{ title: string }>()
+    'SELECT design_type, title, basis_json FROM hour_estimate_suggestions WHERE id = ? AND workspace_id = ?',
+  ).bind(suggestionId, workspaceId).first<{ design_type: string | null; title: string | null; basis_json: string | null }>()
+  const sample = await env.DB.prepare('SELECT title FROM tasks WHERE id = ? AND workspace_id = ?').bind(String(sampleTaskId), workspaceId).first<{ title: string }>()
   if (!suggestion) return fail('没有找到对应的工时建议快照', 404)
   if (!sample) return fail(`没有找到参考任务 ${sampleTaskId}`, 404)
   const suggestionBasis = parseJsonRecord(suggestion.basis_json)
@@ -13909,8 +13970,8 @@ async function saveHourEstimateSampleFeedback(env: Env, request: Request) {
   await ensureTaskLearningTables(env)
   await env.DB.prepare(
     `INSERT INTO ai_learning_events
-     (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
-     VALUES ('hour_estimate_sample_feedback', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, workspace_id, principal_id, created_at)
+     VALUES ('hour_estimate_sample_feedback', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     relevant ? 'adopted' : 'rejected',
     suggestionId,
@@ -13920,12 +13981,16 @@ async function saveHourEstimateSampleFeedback(env: Env, request: Request) {
     sampleTaskId,
     sample.title,
     JSON.stringify({ suggestionId, sampleTaskId, relevant, reason, sourceComplexityScore }),
+    workspaceId,
+    principal?.principalId || 'guest',
     Date.now(),
   ).run()
   return ok({ suggestionId, sampleTaskId, relevant, reason })
 }
 
 async function saveHourEstimateSampleQuality(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
   const body = (await request.json().catch(() => ({}))) as { taskId?: number; excluded?: boolean; reason?: string }
   const taskId = Number(body.taskId)
   const excluded = body.excluded !== false
@@ -13933,14 +13998,14 @@ async function saveHourEstimateSampleQuality(env: Env, request: Request) {
   if (!Number.isFinite(taskId)) return fail('样本任务参数不完整')
   const task = await env.DB.prepare(
     `SELECT title, design_type, actual_hours, status FROM tasks
-     WHERE id = ? AND deleted_at IS NULL AND voided_at IS NULL`,
-  ).bind(String(taskId)).first<Pick<DbTask, 'title' | 'design_type' | 'actual_hours' | 'status'>>()
+     WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL`,
+  ).bind(String(taskId), workspaceId).first<Pick<DbTask, 'title' | 'design_type' | 'actual_hours' | 'status'>>()
   if (!task || task.status !== '已验收' || Number(task.actual_hours) <= 0) return fail('只有已验收且有真实工时的任务可以治理', 404)
   await ensureTaskLearningTables(env)
   await env.DB.prepare(
     `INSERT INTO ai_learning_events
-     (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
-     VALUES ('hour_estimate_sample_quality', ?, '', '', ?, ?, ?, ?, ?, ?)`,
+     (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, workspace_id, principal_id, created_at)
+     VALUES ('hour_estimate_sample_quality', ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     excluded ? 'rejected' : 'adopted',
     reason,
@@ -13948,12 +14013,16 @@ async function saveHourEstimateSampleQuality(env: Env, request: Request) {
     taskId,
     task.title,
     JSON.stringify({ excluded, reason }),
+    workspaceId,
+    principal?.principalId || 'guest',
     Date.now(),
   ).run()
   return ok({ taskId, excluded, reason, updatedAt: nowIso() })
 }
 
 async function saveHourEstimateQuoteOutcome(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  const workspaceId = principalWorkspaceId(principal)
   const body = (await request.json().catch(() => ({}))) as {
     taskId?: number
     quotedAmount?: number
@@ -13970,18 +14039,18 @@ async function saveHourEstimateQuoteOutcome(env: Env, request: Request) {
   const suggestion = await env.DB.prepare(
     `SELECT hs.id, hs.design_type, hs.basis_json, t.title
      FROM hour_estimate_suggestions hs JOIN tasks t ON CAST(t.id AS TEXT) = hs.task_id
-     WHERE hs.task_id = ? ORDER BY hs.requested_at DESC LIMIT 1`,
-  ).bind(String(taskId)).first<{ id: string; design_type: string | null; basis_json: string | null; title: string }>()
+     WHERE hs.task_id = ? AND hs.workspace_id = ? AND t.workspace_id = ? ORDER BY hs.requested_at DESC LIMIT 1`,
+  ).bind(String(taskId), workspaceId, workspaceId).first<{ id: string; design_type: string | null; basis_json: string | null; title: string }>()
   if (!suggestion) return fail('该任务没有可关联的 AI 工时建议', 404)
   const basis = parseJsonRecord(suggestion.basis_json)
   const pricing = typeof basis.pricing === 'object' && basis.pricing ? basis.pricing as Record<string, unknown> : {}
   await ensureTaskLearningTables(env)
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_quote_outcome' AND task_id = ?").bind(taskId),
+    env.DB.prepare("DELETE FROM ai_learning_events WHERE context = 'hour_estimate_quote_outcome' AND task_id = ? AND workspace_id = ?").bind(taskId, workspaceId),
     env.DB.prepare(
       `INSERT INTO ai_learning_events
-       (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, created_at)
-       VALUES ('hour_estimate_quote_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (context, action, source_input, ai_output, user_final, design_type, task_id, task_title, metadata_json, workspace_id, principal_id, created_at)
+       VALUES ('hour_estimate_quote_outcome', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       status,
       String(pricing.regularAmount ?? ''),
@@ -13991,6 +14060,8 @@ async function saveHourEstimateQuoteOutcome(env: Env, request: Request) {
       taskId,
       suggestion.title,
       JSON.stringify({ suggestionId: suggestion.id, quotedAmount, settledAmount, status, note, suggestedPricing: pricing }),
+      workspaceId,
+      principal?.principalId || 'guest',
       Date.now(),
     ),
   ])
@@ -15101,12 +15172,12 @@ async function getState(env: Env, role: AuthRole, request: Request) {
     files: (fileRows.results ?? []).map(toFile),
     attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
     settings: {
-      hourlyRate: isDemoWorkspace ? 260 : Number(rateRow?.value) || defaultHourlyRate,
-      pdfTitle: isDemoWorkspace ? 'Giverny 多岗位协作结算回单' : pdfTitle,
-      serviceCompanyName: isDemoWorkspace ? '澄屿创新实验室' : serviceCompanyName,
+      hourlyRate: isDemoWorkspace ? DEMO_HOURLY_RATE : Number(rateRow?.value) || defaultHourlyRate,
+      pdfTitle: isDemoWorkspace ? DEMO_PDF_TITLE : pdfTitle,
+      serviceCompanyName: isDemoWorkspace ? DEMO_SERVICE_COMPANY_NAME : serviceCompanyName,
       taxMode,
-      designTypes: flattenDesignTypeGroups(designTypeGroups),
-      designTypeGroups,
+      designTypes: flattenDesignTypeGroups(isDemoWorkspace ? demoTaskTypeGroups : designTypeGroups),
+      designTypeGroups: isDemoWorkspace ? demoTaskTypeGroups : designTypeGroups,
       aiModel: role === 'admin' || role === 'demo' ? publicAiModelConfig(env, aiModelConfig) : undefined,
     },
     reports: (reportRows.results ?? []).map(toReport),
@@ -15127,7 +15198,7 @@ async function getSharedReport(env: Env, token: string) {
     .bind(report.id)
     .run()
 
-  const [taskRows, updateRows, fileRows, pdfTitle, serviceCompanyName] = await Promise.all([
+  const [taskRows, updateRows, fileRows, receiptIdentity] = await Promise.all([
     env.DB.prepare("SELECT * FROM tasks WHERE workspace_id = ? AND status != '不计费' AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date ASC").bind(reportWorkspaceId).all<DbTask>(),
     env.DB.prepare(
       `SELECT task_updates.* FROM task_updates
@@ -15151,8 +15222,7 @@ async function getSharedReport(env: Env, token: string) {
          AND tasks.voided_at IS NULL
        ORDER BY uploaded_at DESC`,
     ).bind(reportWorkspaceId, `${report.month}%`, report.month).all<DbAttachment>(),
-    getPdfTitle(env),
-    getServiceCompanyName(env),
+    getWorkspaceReceiptIdentity(env, reportWorkspaceId),
   ])
 
   return ok({
@@ -15169,7 +15239,11 @@ async function getSharedReport(env: Env, token: string) {
         sourceUrl: `${mapped.sourceUrl}?token=${token}`,
       }
     }),
-    settings: { pdfTitle, serviceCompanyName },
+    settings: {
+      pdfTitle: receiptIdentity.pdfTitle,
+      serviceCompanyName: receiptIdentity.serviceCompanyName,
+      serviceName: receiptIdentity.serviceName,
+    },
   })
 }
 
@@ -15177,7 +15251,7 @@ async function createTask(env: Env, request: Request, ctx?: WorkerExecutionConte
   const task = (await request.json()) as Task
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const id = nextNumericId()
-  const hourlyRate = await getHourlyRate(env)
+  const hourlyRate = await getWorkspaceHourlyRate(env, workspaceId)
   // 所有任务都从「计划中」开始；是否计费由独立的 billable 标记决定（不随状态变化），
   // 这样「不计费任务」即便后续走完整验收流程，也始终不计费。
   const initialStatus: TaskStatus = task.status === '不计费' ? '不计费' : '计划中'
@@ -16806,6 +16880,8 @@ async function estimateTaskProgressWithAi(env: Env, request: Request) {
 }
 
 async function suggestTaskWithAi(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const isDemoWorkspace = workspaceId === DEMO_WORKSPACE_ID
   const body = (await request.json().catch(() => ({}))) as {
     title?: string
     requirement?: string
@@ -16824,10 +16900,10 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   let attachmentText = String(body.attachmentText ?? '').trim().slice(0, 8000)
   if (attachmentImages.length > 0 && !attachmentText) {
     const assets = attachmentImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType }))
-    const visionPrompt = `你在辅助设计任务需求分析。请对这${assets.length > 1 ? `${assets.length}张` : '张'}图片做完整内容提取，重点要求：
+    const visionPrompt = `你在辅助${isDemoWorkspace ? '企业工作' : '设计'}任务需求分析。请对这${assets.length > 1 ? `${assets.length}张` : '张'}图片做完整内容提取，重点要求：
 1. 【完整名称】所有标题、产品名、品牌名、项目名、页面名必须一字不漏地完整抄录，绝对不能缩写或截断
 2. 【正文内容】记录页面各区块的文字内容、数据指标、功能模块名称
-3. 【视觉结构】描述布局、配色、设计风格等视觉特征
+3. 【内容结构】描述信息层级、布局和与当前任务有关的可执行信息${isDemoWorkspace ? '' : '，并补充配色与设计风格'}
 每张图片单独描述，用"【图片N】"分隔。`
     try {
       const desc = await callMultimodalWithVisionFallback(env, visionPrompt, assets)
@@ -16841,16 +16917,18 @@ async function suggestTaskWithAi(env: Env, request: Request) {
     return fail('请先填写项目名称、任务需求，或上传合作伙伴文案附件')
   }
 
-  const storedGroups = await getDesignTypeGroups(env)
+  const storedGroups = isDemoWorkspace ? demoTaskTypeGroups : await getDesignTypeGroups(env)
   const designTypeGroups = normalizeDesignTypeGroups(body.designTypeGroups?.length ? body.designTypeGroups : storedGroups)
 
   // 并行获取需求文案风格指南 + 历史分类选择样本
   const currentType = body.selectedType ?? ''
-  const [reqStyleGuide, titleStyleGuide, typeChoiceExamples] = await Promise.all([
-    getOrBuildStyleGuide(env, 'requirement', currentType),
-    getOrBuildStyleGuide(env, 'title', currentType),
-    getTypeChoiceExamples(env, 40),
-  ])
+  const [reqStyleGuide, titleStyleGuide, typeChoiceExamples] = isDemoWorkspace
+    ? ['', '', []] as const
+    : await Promise.all([
+        getOrBuildStyleGuide(env, 'requirement', currentType),
+        getOrBuildStyleGuide(env, 'title', currentType),
+        getTypeChoiceExamples(env, 40),
+      ])
 
   // 按大类分组后，每类取最近 3 条作为 few-shot 示例，避免 prompt 过长
   const examplesByType = new Map<string, Array<{ title: string; requirement: string }>>()
@@ -16889,7 +16967,7 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   const taskAssistantContext = [title, requirement, attachmentName, attachmentText].filter(Boolean).join('\n')
 
   const activeModelChoice = await getActiveChatModelChoice(env)
-  const runtimeSuggestion = activeModelChoice === 'auto'
+  const runtimeSuggestion = activeModelChoice === 'auto' && !isDemoWorkspace
     ? await callBamlRuntime<TaskAssistantToolArgs>(env, 'suggest-task', aiPayload)
     : null
   if (runtimeSuggestion) {
@@ -16906,9 +16984,12 @@ async function suggestTaskWithAi(env: Env, request: Request) {
   }
 
   const callFallback = async () => {
+    const systemPrompt = isDemoWorkspace
+      ? `你是企业工作任务助理。根据用户输入整理一份专业、可执行的任务单，并从 availableDesignTypeGroups 中选择最贴切的岗位大类和任务子类。不要提及“演示账号”“测试数据”“多岗位协作”，不要引用平面设计项目、正式网站客户或其他工作区历史。任务名称应像真实岗位日常工作，例如产品需求、运营活动、数据分析、AI 研究、招聘、开发、UI 或视频制作。输出需求严格使用三段：1、任务背景；2、执行要求；3、交付成果。没有提供的信息写“未明确，可在对接时确认”，不得编造。${demoTaskAssistantCategoryRules}`
+      : `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并判断最合适的大类和子类；已有分类能准确覆盖时复用，没有精确匹配时输出新大类或新子类，供前端新增并采用。输入可能带 attachmentText（合作伙伴提供的文案附件，已抽取为纯文本或图片识别内容）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。图片识别内容以「图片内容识别」开头，请充分理解图片整体含义，用图片中的完整准确信息补全用户的简写或不完整描述。不要编造用户和附件都没有提供的事实。${taskAssistantCategoryRules}${styleGuideInjection}`
     const fallbackParsed = await callTextFallbackJson<TaskAssistantToolArgs>(
       env,
-      `你是一个平面设计兼职任务助理。请把用户的原始需求改写成专业、可执行、可直接写入任务单的中文描述，并判断最合适的大类和子类；已有分类能准确覆盖时复用，没有精确匹配时输出新大类或新子类，供前端新增并采用。输入可能带 attachmentText（合作伙伴提供的文案附件，已抽取为纯文本或图片识别内容）：rawRequirement 为空时直接据 attachmentText 分析，非空时与之结合（以用户需求为主）。图片识别内容以「图片内容识别」开头，请充分理解图片整体含义，用图片中的完整准确信息补全用户的简写或不完整描述。不要编造用户和附件都没有提供的事实。${taskAssistantCategoryRules}${styleGuideInjection}`,
+      systemPrompt,
       aiPayload,
       'suggestedTitle:string, optimizedRequirement:string, suggestedParentType:string, suggestedChildType:string, reason:string',
     )
@@ -16923,6 +17004,11 @@ async function suggestTaskWithAi(env: Env, request: Request) {
       provider: 'text-fallback',
     })
     return ok(suggestion)
+  }
+
+  if (isDemoWorkspace) {
+    const fallback = await callFallback()
+    return fallback ?? fail(selectedModelStructuredFailureMessage(activeModelChoice), 503)
   }
 
   if (activeModelChoice !== 'auto' || !env.DEEPSEEK_API_KEY) {
@@ -18210,6 +18296,7 @@ async function ensureTaskLearningTables(env: Env) {
 }
 
 async function saveTaskEditPair(env: Env, request: Request) {
+  if (principalWorkspaceId(await resolveRequestPrincipal(env, request)) === DEMO_WORKSPACE_ID) return ok({ saved: false })
   const body = (await request.json().catch(() => ({}))) as { aiOutput?: string; userFinal?: string; designType?: string }
   const aiOutput = String(body.aiOutput ?? '').trim()
   const userFinal = String(body.userFinal ?? '').trim()
@@ -18228,6 +18315,7 @@ async function saveTaskEditPair(env: Env, request: Request) {
 }
 
 async function saveTaskTitleEditPair(env: Env, request: Request) {
+  if (principalWorkspaceId(await resolveRequestPrincipal(env, request)) === DEMO_WORKSPACE_ID) return ok({ saved: false })
   const body = (await request.json().catch(() => ({}))) as { aiOutput?: string; userFinal?: string; designType?: string }
   const aiOutput = String(body.aiOutput ?? '').trim()
   const userFinal = String(body.userFinal ?? '').trim()
@@ -18245,6 +18333,7 @@ async function saveTaskTitleEditPair(env: Env, request: Request) {
 }
 
 async function saveTaskTypeChoice(env: Env, request: Request) {
+  if (principalWorkspaceId(await resolveRequestPrincipal(env, request)) === DEMO_WORKSPACE_ID) return ok({ saved: false })
   const body = (await request.json().catch(() => ({}))) as { requirement?: string; title?: string; finalType?: string; aiSuggestedType?: string }
   const finalType = String(body.finalType ?? '').trim().slice(0, 120)
   if (!finalType) return ok({ saved: false })
@@ -18377,7 +18466,7 @@ async function saveAiLearningEvent(env: Env, request: Request) {
   ).run()
 
   // 可用于归纳写作偏好的样本继续写入现有增量蒸馏表，兼容既有历史数据。
-  if (userFinal && aiOutput !== userFinal) {
+  if (workspaceId !== DEMO_WORKSPACE_ID && userFinal && aiOutput !== userFinal) {
     if (context === 'task_requirement') {
       await env.DB.prepare(
         'INSERT INTO task_requirement_edits (ai_output, user_final, design_type, created_at) VALUES (?, ?, ?, ?)',
@@ -18398,6 +18487,7 @@ async function saveAiLearningEvent(env: Env, request: Request) {
 }
 
 async function saveTextEditPair(env: Env, request: Request) {
+  if (principalWorkspaceId(await resolveRequestPrincipal(env, request)) === DEMO_WORKSPACE_ID) return ok({ saved: false })
   const body = (await request.json().catch(() => ({}))) as {
     context?: string
     aiOutput?: string
@@ -18895,7 +18985,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
   const [hourlyRate, monthRows, recentRows, knowledgeNotes, webSearchResult] = shouldUseDirectedRuntime
     ? [defaultHourlyRate, { results: [] as DbTask[] }, { results: [] as DbTask[] }, [] as KnowledgeNoteRow[], ''] as const
     : await Promise.all([
-    getHourlyRate(env),
+    getWorkspaceHourlyRate(env, workspaceId),
     month
       ? env.DB.prepare(
           'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC',
@@ -19899,7 +19989,7 @@ async function prepareLocalCliReadContext(env: Env, question: string, currentMon
     : ''
   const requestedMonths = extractRequestedMonths(question, currentMonth)
   if (isFinanceQuestion(question) && requestedMonths.length > 0) {
-    const hourlyRate = await getHourlyRate(env)
+    const hourlyRate = await getWorkspaceHourlyRate(env, workspaceId)
     const stats = await computeMonthFinanceStats(env, requestedMonths, hourlyRate, workspaceId)
     return {
       immediate: renderMonthFinanceAnswer(stats, hourlyRate),
@@ -21415,6 +21505,7 @@ async function planAgentAction(env: Env, request: Request) {
 
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const isDemoWorkspace = workspaceId === DEMO_WORKSPACE_ID
   const body = (await request.json().catch(() => ({}))) as HourEstimateRequest
   const title = String(body.title ?? '').trim().slice(0, 200)
   const requirement = String(body.requirement ?? '').trim().slice(0, 6000)
@@ -21424,17 +21515,17 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const attachmentNames = (Array.isArray(body.attachmentNames) ? body.attachmentNames : []).map(String).map((name) => name.slice(0, 160)).slice(0, 6)
   const currentEstimatedHours = roundToHalfHour(Number(body.currentEstimatedHours) > 0 ? Number(body.currentEstimatedHours) : 2)
   if (!selectedType || (!title && !requirement)) {
-    return fail('请先选择设计类型，并填写任务名称或任务具体需求')
+    return fail(`请先选择${isDemoWorkspace ? '任务类型' : '设计类型'}，并填写任务名称或任务具体需求`)
   }
   const currentProfile = hourEstimateComplexityProfile({ title, requirement, attachmentText, attachmentNames })
   const requirementQuality = hourEstimateRequirementQuality(currentProfile, { ...body, title, requirement })
   const completionOptions = hourEstimateCompletionOptions(currentProfile, requirement)
   const [requesterAdjustment, learningAdjustment, hourlyRate, sampleFeedbackRules, sampleQualityRules] = await Promise.all([
-    hourEstimateRequesterAdjustment(env, requester, selectedType),
-    hourEstimateLearningAdjustment(env, selectedType),
-    getHourlyRate(env),
-    loadHourEstimateSampleFeedback(env, selectedType),
-    loadHourEstimateSampleQuality(env),
+    hourEstimateRequesterAdjustment(env, requester, selectedType, workspaceId),
+    hourEstimateLearningAdjustment(env, selectedType, workspaceId),
+    getWorkspaceHourlyRate(env, workspaceId),
+    loadHourEstimateSampleFeedback(env, selectedType, workspaceId),
+    loadHourEstimateSampleQuality(env, workspaceId),
   ])
 
   const exactRows = selectedType
@@ -21467,7 +21558,9 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   })).slice(0, 6)
   semanticSamples.forEach((sample) => knownIds.add(sample.id))
 
-  const parentType = selectedType.split('/')[0]?.trim()
+  const parentType = isDemoWorkspace
+    ? demoTaskTypeGroups.find((group) => selectedType === group.name || selectedType.startsWith(`${group.name} / `))?.name
+    : selectedType.split('/')[0]?.trim()
   const parentRows = exactSamples.length + semanticSamples.length < 3 && parentType
       ? await env.DB.prepare(
         `SELECT * FROM tasks
@@ -21491,6 +21584,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const outcomeCorrections = await loadHourEstimateOutcomeCorrections(
     env,
     [...exactSamples, ...semanticSamples, ...parentSamples].map((sample) => sample.id),
+    workspaceId,
   )
   const samples = [...exactSamples, ...semanticSamples, ...parentSamples]
     .map((sample) => ({
@@ -21516,7 +21610,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     const riskFactors = hourEstimateRiskFactors(currentProfile, 0, 0, 0, 0)
     const safeHours = roundToHalfHour(currentEstimatedHours + 0.5)
     const decision = hourEstimateDecision('低', requirementQuality, 0, riskFactors, expectedRange)
-    const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, {
+    const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, workspaceId, {
       suggestedHours: currentEstimatedHours,
       complexityScore: currentProfile.score,
       requirementQualityScore: requirementQuality.score,
@@ -21561,7 +21655,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
       changeAudit,
       matchedTasks: [],
     }
-    return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history'))
+    return ok(await persistHourEstimateSuggestion(env, body, result, 'statistical-no-history', workspaceId))
   }
 
   const actualHours = samples.map((sample) => sample.actualHours)
@@ -21579,11 +21673,11 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
                 t.requirement AS final_requirement, t.title
          FROM hour_estimate_suggestions hs
          JOIN tasks t ON CAST(t.id AS TEXT) = hs.task_id
-         WHERE hs.design_type = ? AND hs.status = 'observed'
+         WHERE hs.workspace_id = ? AND t.workspace_id = ? AND hs.design_type = ? AND hs.status = 'observed'
            AND hs.suggested_hours > 0 AND hs.actual_hours > 0
          ORDER BY hs.updated_at DESC
          LIMIT 30`,
-      ).bind(selectedType).all<{
+      ).bind(workspaceId, workspaceId, selectedType).all<{
         suggested_hours: number
         actual_hours: number
         initial_requirement: string | null
@@ -21663,15 +21757,15 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   }
 
   const activeModelChoice = await getActiveChatModelChoice(env)
-  let provider = activeModelChoice === 'auto' ? 'baml-runtime' : 'active-model'
-  let parsed = activeModelChoice === 'auto'
+  let provider = activeModelChoice === 'auto' && !isDemoWorkspace ? 'baml-runtime' : 'active-model'
+  let parsed = activeModelChoice === 'auto' && !isDemoWorkspace
     ? await callBamlRuntime<HourEstimateToolArgs>(env, 'suggest-hours', aiPayload)
     : null
   if (!parsed) {
     provider = 'text-model-chain'
     parsed = await callTextFallbackJson<HourEstimateToolArgs>(
       env,
-      hourEstimateSystemPrompt,
+      isDemoWorkspace ? demoHourEstimateSystemPrompt : hourEstimateSystemPrompt,
       aiPayload,
       'suggestedHours:number, confidence:"低"|"中"|"高"|"Low"|"Medium"|"High", basis:string[], historicalSummary:string',
       1400,
@@ -21701,7 +21795,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const accuracy = hourEstimateAccuracy(stableCalibrationRows)
   const riskFactors = hourEstimateRiskFactors(currentProfile, sampleCount, p25Hours, medianHours, p80Hours)
   const decision = hourEstimateDecision(confidence, requirementQuality, sampleCount, riskFactors, expectedRange)
-  const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, {
+  const changeAudit = await hourEstimateChangeAudit(env, selectedType, requester, workspaceId, {
     suggestedHours,
     complexityScore: currentProfile.score,
     requirementQualityScore: requirementQuality.score,
@@ -21759,7 +21853,7 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
     changeAudit,
     matchedTasks,
   }
-  return ok(await persistHourEstimateSuggestion(env, body, result, provider))
+  return ok(await persistHourEstimateSuggestion(env, body, result, provider, workspaceId))
 }
 
 async function generateMonthlyReport(env: Env, request: Request) {

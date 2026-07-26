@@ -8,6 +8,10 @@ import { taskSettlementMonth } from './taskSettlement'
 
 const NEW_TASK_DRAFT_STORAGE_KEY = 'giverny:new-task-draft:v1'
 
+function newTaskDraftStorageKey(scope = 'default') {
+  return scope === 'default' ? NEW_TASK_DRAFT_STORAGE_KEY : `${NEW_TASK_DRAFT_STORAGE_KEY}:${scope}`
+}
+
 export type NewTaskDraftCache = {
   title: string
   requirement: string
@@ -28,6 +32,8 @@ export function readNewTaskDraftCache(
   fallbackStartDate: string,
   fallbackType: string,
   fallbackSettlementMonth = monthPart(fallbackStartDate),
+  scope = 'default',
+  defaultPerson = '黄媚',
 ): NewTaskDraftCache {
   const fallbackMinutes = 120
   const fallbackDraft: NewTaskDraftCache = {
@@ -40,16 +46,16 @@ export function readNewTaskDraftCache(
     scheduleAnchor: 'end',
     isSupplemental: false,
     settlementMonth: fallbackSettlementMonth,
-    requester: '黄媚',
-    contact: '黄媚',
-    reviewer: '黄媚',
+    requester: defaultPerson,
+    contact: defaultPerson,
+    reviewer: defaultPerson,
     supplementalNote: '',
   }
   if (typeof window === 'undefined') {
     return fallbackDraft
   }
   try {
-    const raw = window.localStorage.getItem(NEW_TASK_DRAFT_STORAGE_KEY)
+    const raw = window.localStorage.getItem(newTaskDraftStorageKey(scope))
     if (!raw) {
       return fallbackDraft
     }
@@ -68,9 +74,9 @@ export function readNewTaskDraftCache(
       scheduleAnchor: 'end',
       isSupplemental: Boolean(parsed.isSupplemental),
       settlementMonth: parsed.settlementMonth || fallbackSettlementMonth,
-      requester: parsed.requester || parsed.contact || '黄媚',
-      contact: parsed.contact || '黄媚',
-      reviewer: parsed.reviewer || parsed.requester || parsed.contact || '黄媚',
+      requester: parsed.requester || parsed.contact || defaultPerson,
+      contact: parsed.contact || defaultPerson,
+      reviewer: parsed.reviewer || parsed.requester || parsed.contact || defaultPerson,
       supplementalNote: parsed.supplementalNote ?? '',
     }
   } catch {
@@ -78,18 +84,19 @@ export function readNewTaskDraftCache(
   }
 }
 
-export function writeNewTaskDraftCache(draft: NewTaskDraftCache) {
-  writeJsonLocalCache(NEW_TASK_DRAFT_STORAGE_KEY, draft)
+export function writeNewTaskDraftCache(draft: NewTaskDraftCache, scope = 'default') {
+  writeJsonLocalCache(newTaskDraftStorageKey(scope), draft)
 }
 
-export function clearNewTaskDraftCache() {
-  removeLocalCache(NEW_TASK_DRAFT_STORAGE_KEY)
+export function clearNewTaskDraftCache(scope = 'default') {
+  removeLocalCache(newTaskDraftStorageKey(scope))
 }
 
 export function newTaskDraftFromTask(
   task: Task,
   fallbackType: string,
   fallbackSettlementMonth: string,
+  defaultPerson = '黄媚',
 ): NewTaskDraftCache {
   const startDate = task.date || isoDateTime()
   const estimatedMinutes = Math.max(ESTIMATED_HOURS_STEP_MINUTES, Math.round((Number(task.estimatedHours) || 2) * 60))
@@ -103,9 +110,9 @@ export function newTaskDraftFromTask(
     scheduleAnchor: 'end',
     isSupplemental: isSupplementalTask(task),
     settlementMonth: taskSettlementMonth(task) || fallbackSettlementMonth,
-    requester: task.requester || task.contact || '黄媚',
-    contact: task.contact || task.requester || '黄媚',
-    reviewer: task.reviewer || task.requester || task.contact || '黄媚',
+    requester: task.requester || task.contact || defaultPerson,
+    contact: task.contact || task.requester || defaultPerson,
+    reviewer: task.reviewer || task.requester || task.contact || defaultPerson,
     supplementalNote: task.supplementalNote ?? '',
   }
 }

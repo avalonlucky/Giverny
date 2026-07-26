@@ -110,10 +110,8 @@ export function formatTaskActivityTime(task: Task) {
 
 export function designTypeColorForTask(type: string, groups: DesignTypeGroup[]) {
   const normalizedType = type.trim()
-  const explicitGroupName = normalizedType.includes(' / ') ? normalizedType.split(' / ')[0].trim() : ''
-  const group = explicitGroupName
-    ? groups.find((item) => item.name === explicitGroupName)
-    : groups.find((item) => item.items.includes(normalizedType))
+  const group = groups.find((item) => normalizedType === item.name || normalizedType.startsWith(`${item.name} / `))
+    || groups.find((item) => item.items.includes(normalizedType))
   return validDesignTypeColor(group?.color) || designTypeColorForIndex(0)
 }
 

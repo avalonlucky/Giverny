@@ -60,6 +60,7 @@ export default function ReportsView({
   currentMonth,
   pdfTitle,
   serviceCompanyName,
+  serviceName,
   reports,
   onReportDeleted,
   onNotify,
@@ -80,6 +81,7 @@ export default function ReportsView({
   currentMonth: { label: string; value: string }
   pdfTitle: string
   serviceCompanyName: string
+  serviceName: string
   reports: ReportRecord[]
   onReportDeleted: (reportId: string) => void
   onNotify: (message: string, tone?: ToastTone) => void
@@ -331,7 +333,7 @@ export default function ReportsView({
     receiptNo,
     issuedAt: hasValidCustomPreviewRange ? nowStamp() : selectedReport?.generatedAt || nowStamp(),
     companyName: serviceCompanyName,
-    serviceName: '平面设计兼职',
+    serviceName,
     settlementLabelTitle: hasValidCustomPreviewRange ? '结算日期' : '结算月份',
     settlementLabel: activeReceiptLabel,
     hourlyRate: activeReceiptHourlyRate,
@@ -433,7 +435,7 @@ export default function ReportsView({
         receiptNo: `AK-${(isRangeExport ? `${rangeStart}-${rangeEnd}` : month).replaceAll('-', '')}-${String(exportRows.length + 1).padStart(3, '0')}`,
         issuedAt: nowStamp(),
         companyName: serviceCompanyName,
-        serviceName: '平面设计兼职',
+        serviceName,
         settlementLabelTitle: isRangeExport ? '结算日期' : '结算月份',
         settlementLabel: isRangeExport ? `${formatReceiptDate(rangeStart)} 至 ${formatReceiptDate(rangeEnd)}` : monthLabelOf(month),
         hourlyRate: exportHourlyRate,

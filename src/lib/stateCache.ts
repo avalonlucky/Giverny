@@ -17,7 +17,8 @@ export function readStateCache(): BackendState | null {
     return null
   }
   try {
-    if (!window.localStorage.getItem(AUTH_STORAGE_KEY)) {
+    const authRaw = window.localStorage.getItem(AUTH_STORAGE_KEY)
+    if (!authRaw) {
       removeLocalCache(STATE_CACHE_KEY)
       return null
     }
@@ -31,6 +32,16 @@ export function readStateCache(): BackendState | null {
       return null
     }
     if (Date.now() - parsed.cachedAt > STATE_CACHE_TTL_MS) {
+      removeLocalCache(STATE_CACHE_KEY)
+      return null
+    }
+    const auth = JSON.parse(authRaw) as { role?: string }
+    const cachedRole = parsed.state.role
+    const cachedWorkspace = parsed.state.workspace
+    const identityMatches = auth.role === cachedRole
+      && (auth.role !== 'demo' || cachedWorkspace?.id === 'demo')
+      && (auth.role === 'demo' || cachedWorkspace?.id !== 'demo')
+    if (!identityMatches) {
       removeLocalCache(STATE_CACHE_KEY)
       return null
     }

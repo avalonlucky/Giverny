@@ -744,6 +744,7 @@ function App() {
                 currentMonth={currentMonth}
                 pdfTitle={pdfTitle}
                 serviceCompanyName={serviceCompanyName}
+                serviceName={isDemo ? '专业服务' : '平面设计兼职'}
                 reports={reports}
                 onReportDeleted={(reportId) => setReports((current) => current.filter((report) => report.id !== reportId))}
                 onNotify={notify}
@@ -853,6 +854,7 @@ function App() {
         onOpenSemanticFile={(fileId) => { setIsSemanticSearchOpen(false); setFileLibraryFocusId(fileId); navigateView('文件库') }}
         createTaskOpen={isModalOpen}
         newTaskSupplemental={newTaskSupplemental}
+        demoMode={isDemo}
         designTypeGroups={designTypeGroups}
         onCloseCreateTask={() => setIsModalOpen(false)}
         onCreateTask={canWrite ? handleCreateTask : async () => requireAdmin()}

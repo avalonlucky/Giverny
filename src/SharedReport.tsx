@@ -60,6 +60,7 @@ export default function SharedReport({ token }: { token: string }) {
   const { report, tasks, updates, files } = state
   const pdfTitle = state.settings?.pdfTitle || defaultPdfTitle
   const serviceCompanyName = state.settings?.serviceCompanyName || defaultServiceCompanyName
+  const serviceName = state.settings?.serviceName || '平面设计兼职'
   // 计费口径与主应用一致：状态不影响计费，只排除「不计费」；仅展示有工时的计费行
   const billableTasks = tasks.filter((task) => task.billable !== false && task.status !== '不计费' && task.actualHours > 0)
   // 用精确单价（不取整）反推，保证每行金额之和恰好等于已锁定的总额
@@ -89,7 +90,7 @@ export default function SharedReport({ token }: { token: string }) {
     receiptNo,
     issuedAt: report.generatedAt || new Date().toLocaleString('zh-CN', { hour12: false }),
     companyName: serviceCompanyName,
-    serviceName: '平面设计兼职',
+    serviceName,
     settlementLabel: monthLabel(report.month),
     hourlyRate,
     rows: receiptRows,
