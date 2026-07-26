@@ -64,7 +64,6 @@
   margin-bottom: 18px;
   padding: 0 18px;
   border: 0;
-  border-left: 3px solid var(--color-alert-accent);
   border-radius: var(--radius-panel);
   background: var(--color-alert-surface);
   color: var(--color-text-secondary);

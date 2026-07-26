@@ -310,16 +310,6 @@
     gap: 0;
   }
 
-  .nav-item.active::before,
-  .sidebar-account-trigger.active::before {
-    left: 50%;
-    top: auto;
-    bottom: 2px;
-    width: 18px;
-    height: 2px;
-    transform: translateX(-50%);
-  }
-
   .sidebar-account {
     width: 100%;
     display: grid;
@@ -414,14 +404,6 @@
     justify-content: center;
     font-size: 11px;
     white-space: nowrap;
-  }
-
-  .nav-item.active::before {
-    left: 50%;
-    top: 0;
-    width: 20px;
-    height: 2px;
-    transform: translateX(-50%);
   }
 
   .sidebar-account {
@@ -558,4 +540,3 @@
     cursor: pointer;
   }
 }
-

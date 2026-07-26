@@ -659,21 +659,31 @@
 .nav-item {
   position: relative;
   height: 36px;
-  padding: 0 0 0 16px;
+  padding: 0 12px;
   border-radius: var(--radius-panel);
   color: var(--color-text-secondary);
   background: transparent;
-  gap: 0;
+  gap: 9px;
   font-size: 14px;
   font-weight: 400;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .nav-item:hover,
 .nav-item.active {
-  color: var(--color-text);
-  background: transparent;
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
   font-weight: 600;
+}
+
+.nav-item.active {
+  color: var(--color-surface-strong);
+  background: var(--color-primary);
+}
+
+.nav-item svg {
+  width: 16px;
+  height: 16px;
 }
 
 .nav-item kbd,
@@ -687,44 +697,36 @@ button.topbar-create-button kbd {
 }
 
 .nav-item.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 2px;
-  height: 16px;
-  background: var(--color-primary);
-  transform: translateY(-50%);
+  content: none;
 }
 
 .sidebar-account-trigger {
   position: relative;
   height: 38px;
-  padding: 0 0 0 16px;
+  padding: 0 12px;
   border-radius: var(--radius-panel);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 400;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 9px;
 }
 
 .sidebar-account-trigger:hover,
 .sidebar-account-trigger.active {
-  color: var(--color-text);
-  background: transparent;
+  color: var(--color-primary-strong);
+  background: var(--color-supplement-bg);
   font-weight: 600;
 }
 
-.sidebar-account-trigger.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 2px;
-  height: 16px;
+.sidebar-account-trigger.active {
+  color: var(--color-surface-strong);
   background: var(--color-primary);
-  transform: translateY(-50%);
+}
+
+.sidebar-account-trigger.active::before {
+  content: none;
 }
 
 .sidebar-account-menu {
