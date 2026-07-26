@@ -3355,6 +3355,7 @@ async function callAgentRuntime(
         .map((item) => ({ role: item.role as 'user' | 'assistant', content: String(item.content || '') }))
         .filter((item) => item.content.trim())
       const conversationHistory = (persistedHistory.length ? persistedHistory : (args.history || [])).slice(-12)
+      await args.onTrace?.(['正在编排：由主模型判断问题类型和最小必要动作。'])
       const orchestration = await directAgentRequest(env, {
         question: cleanQuery,
         currentMonth: args.currentMonth,
@@ -18860,6 +18861,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
+      await emitVisibleTrace('正在编排：判断这句话是否需要读取网站数据或调用业务工具。')
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         context: agentContext,
@@ -20060,6 +20062,7 @@ async function waitForLocalCliChat(
       '理解问题：这项任务需要当前电脑的本机环境。',
       `制定计划：由 ${route.cliName} 处理本机步骤，网站继续负责权限和结果校验。`,
       command.claimed_at ? '执行计划：本机环境已接收任务。' : '执行计划：正在将任务交给当前电脑。',
+      command.claimed_at ? '正在连接 Giverny MCP，读取允许的工作区工具。' : '',
       ...result.trace,
     ])
     const signature = JSON.stringify(routeTrace)
@@ -20104,7 +20107,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     async start(controller) {
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
-        const promptTokens = await estimateAgentRequestTokens(metricsRequest)
+        send({ type: 'trace', status: 'running', trace: ['已收到问题，正在判断需要哪些信息。'] })
+        const promptTokensPromise = estimateAgentRequestTokens(metricsRequest)
         const routingTrace: string[] = []
 
         const localDecision = await queueLocalCliChat(env, localRouteRequest)
@@ -20123,7 +20127,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
             Response.json(payload),
             performance.now() - startedAt,
             request.headers.get('x-giverny-agent-eval') === '1',
-            promptTokens,
+            await promptTokensPromise,
             metricsRequest,
           )
           if (ctx) ctx.waitUntil(metricWrite)
@@ -20161,7 +20165,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
               Response.json(payload),
               performance.now() - startedAt,
               request.headers.get('x-giverny-agent-eval') === '1',
-              promptTokens,
+              await promptTokensPromise,
               metricsRequest,
             )
             if (ctx) ctx.waitUntil(metricWrite)
@@ -20201,7 +20205,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           metricResponse,
           performance.now() - startedAt,
           request.headers.get('x-giverny-agent-eval') === '1',
-          promptTokens,
+          await promptTokensPromise,
           metricsRequest,
         )
         if (ctx) ctx.waitUntil(metricWrite)
@@ -20235,6 +20239,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     headers: {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
+      'x-accel-buffering': 'no',
       connection: 'keep-alive',
     },
   })
