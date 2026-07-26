@@ -11,6 +11,8 @@
 <p align="center">
   <a href="https://mayeai.com">正式站 mayeai.com</a>
   ·
+  <a href="./docs/BRAND.md">品牌设计</a>
+  ·
   <a href="./使用手册.md">使用手册</a>
   ·
   <a href="./CHANGELOG.md">更新日志</a>
@@ -47,6 +49,8 @@
   <a href="https://mayeai.com"><strong>在线查看</strong></a>
   ·
   <a href="#为什么需要-giverny">为什么需要它</a>
+  ·
+  <a href="./docs/BRAND.md">品牌设计</a>
   ·
   <a href="#核心工作流">核心工作流</a>
   ·

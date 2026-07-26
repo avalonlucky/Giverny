@@ -31,6 +31,65 @@
   backdrop-filter: none;
 }
 
+/* 登录是进入 Giverny 的整页场景，不只让弹窗顶部有一块氛围色。 */
+.modal-backdrop:has(.admin-login-modal) {
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary-strong) 14%, transparent), color-mix(in srgb, var(--color-menu) 30%, transparent)),
+    url('/giverny-login-garden.webp') center / cover no-repeat;
+  animation: giverny-login-scene 18s ease-in-out infinite alternate;
+}
+
+.modal-backdrop:has(.admin-login-modal)::before,
+.modal-backdrop:has(.admin-login-modal)::after {
+  position: absolute;
+  inset: -18%;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+}
+
+.modal-backdrop:has(.admin-login-modal)::before {
+  background:
+    radial-gradient(ellipse at 48% 65%, color-mix(in srgb, var(--color-surface-strong) 24%, transparent) 0 8%, transparent 30%),
+    radial-gradient(ellipse at 20% 28%, color-mix(in srgb, var(--color-primary) 24%, transparent), transparent 28%);
+  mix-blend-mode: screen;
+  animation: giverny-login-light 11s ease-in-out infinite alternate;
+}
+
+.modal-backdrop:has(.admin-login-modal)::after {
+  background:
+    radial-gradient(ellipse at 50% 73%, transparent 0 15%, color-mix(in srgb, var(--color-surface-strong) 24%, transparent) 15.4% 15.8%, transparent 16.2% 23%, color-mix(in srgb, var(--color-surface-strong) 13%, transparent) 23.3% 23.6%, transparent 24%),
+    linear-gradient(105deg, transparent 0 38%, color-mix(in srgb, var(--color-surface-strong) 16%, transparent) 48%, transparent 58%);
+  opacity: 0;
+  animation: giverny-login-ripple 8s ease-in-out infinite;
+}
+
+@keyframes giverny-login-scene {
+  0% { background-position: 48% 52%; background-size: 104% auto; }
+  100% { background-position: 53% 48%; background-size: 112% auto; }
+}
+
+@keyframes giverny-login-light {
+  0% { transform: translate3d(-3%, 2%, 0) scale(0.96); opacity: 0.45; }
+  100% { transform: translate3d(4%, -3%, 0) scale(1.08); opacity: 0.9; }
+}
+
+@keyframes giverny-login-ripple {
+  0%, 18% { transform: scale(0.72); opacity: 0; }
+  36% { transform: scale(1); opacity: 0.7; }
+  72%, 100% { transform: scale(1.3); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop:has(.admin-login-modal),
+  .modal-backdrop:has(.admin-login-modal)::before,
+  .modal-backdrop:has(.admin-login-modal)::after {
+    animation: none;
+  }
+}
+
 .new-task-modal .modal-header {
   padding: 28px 32px 0;
   align-items: flex-start;
@@ -2104,4 +2163,3 @@ input::file-selector-button {
 .date-input-wrap:focus-within button {
   border-color: var(--color-primary);
 }
-
