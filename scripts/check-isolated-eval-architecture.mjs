@@ -42,6 +42,9 @@ if (!isolatedEval.includes('runRuntimeRestartRecoveryCheck') || !isolatedEval.in
 if (!isolatedEval.includes('rmSync(isolatedRuntime.persistPath') || !browserEval.includes('rmSync(isolatedRuntime.persistPath')) {
   failures.push('隔离评测必须在进程退出时同步兜底清理临时目录')
 }
+if (browserRunner.includes('spawnSync') || !browserRunner.includes("process.kill(-child.pid, signal)")) {
+  failures.push('浏览器分组启动器必须异步管理整个进程组，确保中断后不遗留 Node、workerd 或 Chromium')
+}
 if (!packageJson.scripts?.['agent:quality:gate']?.includes('agent:eval:isolated') || !packageJson.scripts?.['agent:quality:gate']?.includes('browser:eval')) {
   failures.push('发布前 Agent 质量门必须串行执行工具链和浏览器隔离评测')
 }

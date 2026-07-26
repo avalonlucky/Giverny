@@ -171,6 +171,20 @@ export type AgentRunMetrics = {
     promptTokens: number
     completionTokens: number
     estimatedCostCny: number
+    productivityRuns: number
+    goalCompletionRate: number
+    firstPassCompletionRate: number
+    recoveryRate: number
+    followUpResolutionRate: number
+    completedRuns: number
+    needsInputRuns: number
+    productivityFailedRuns: number
+    replannedRuns: number
+    recoveredRuns: number
+    needsInputFollowUps: number
+    resolvedFollowUps: number
+    averageProductivityCycles: number
+    averageProductivityToolCalls: number
   }
   intents: Array<{ name: string; count: number }>
   tools: Array<{ name: string; count: number }>
@@ -275,6 +289,10 @@ export type AiOperationsCenter = {
     verified: number
     repaired: number
     failed: number
+    completed: number
+    needsInput: number
+    productivityFailed: number
+    firstPassCompleted: number
     recent: Array<{
       id: string
       runtime: string
@@ -291,6 +309,10 @@ export type AiOperationsCenter = {
       fallbackUsed: boolean
       fallbackReason: string
       durationMs: number
+      productivityStatus: string
+      productivityCycles: number
+      productivityToolCalls: number
+      productivityReasonCode: string
       createdAt: string
     }>
   }

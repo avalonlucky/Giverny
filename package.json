@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.34.0",
+  "version": "0.34.1",
   "type": "module",
   "scripts": {
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
@@ -18,6 +18,7 @@
     "agent:director:test": "node scripts/run-bundled-test.mjs scripts/test-agent-intent-director.mjs",
     "agent:runtime-graph:test": "node scripts/run-bundled-test.mjs scripts/test-agent-runtime-graph.mjs",
     "agent:productivity-graph:test": "node scripts/run-bundled-test.mjs scripts/test-agent-productivity-graph.mjs",
+    "agent:productivity-metrics:test": "node scripts/run-bundled-test.mjs scripts/test-agent-productivity-metrics.mjs",
     "agent:capabilities:test": "node scripts/test-agent-capability-registry.mjs",
     "agent:business-tools:test": "node scripts/test-agent-business-tools.mjs",
     "agent:multimodal-tools:test": "node scripts/test-agent-multimodal-tools.mjs",
@@ -33,7 +34,7 @@
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
     "browser:eval": "node scripts/run-browser-eval.mjs",
-    "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run agent:capabilities:test && npm run agent:business-tools:test && npm run agent:multimodal-tools:test && npm run agent:proactive-work:test && npm run agent:enterprise-memory:test && npm run agent:governance:test && npm run agent:security:test && npm run agent:execution:test && npm run agent:director:test && npm run agent:runtime-graph:test && npm run agent:productivity-graph:test && npm run agent:orchestrator:test && npm run agent:fact:test && npm run lint && npm run build",
+    "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run agent:capabilities:test && npm run agent:business-tools:test && npm run agent:multimodal-tools:test && npm run agent:proactive-work:test && npm run agent:enterprise-memory:test && npm run agent:governance:test && npm run agent:security:test && npm run agent:execution:test && npm run agent:director:test && npm run agent:runtime-graph:test && npm run agent:productivity-graph:test && npm run agent:productivity-metrics:test && npm run agent:orchestrator:test && npm run agent:fact:test && npm run lint && npm run build",
     "agent:quality:gate": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:production": "npm run build && node scripts/deploy-cloudflare-api.mjs && npm run agent:fact:production",

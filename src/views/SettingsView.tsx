@@ -1167,9 +1167,29 @@ export default function SettingsView({
                       <small>{agentMetrics.periodDays} 天真实请求</small>
                     </article>
                     <article>
-                      <span>运行成功率</span>
+                      <span>接口成功率</span>
                       <strong>{agentMetrics.summary.totalRuns ? `${agentMetrics.summary.successRate}%` : '—'}</strong>
-                      <small>{agentMetrics.summary.errorRuns} 次失败</small>
+                      <small>仅表示请求未报错 · {agentMetrics.summary.errorRuns} 次失败</small>
+                    </article>
+                    <article>
+                      <span>目标完成率</span>
+                      <strong>{agentMetrics.summary.productivityRuns ? `${agentMetrics.summary.goalCompletionRate}%` : '—'}</strong>
+                      <small>{agentMetrics.summary.completedRuns} / {agentMetrics.summary.productivityRuns} 轮真正完成</small>
+                    </article>
+                    <article>
+                      <span>首轮完成率</span>
+                      <strong>{agentMetrics.summary.productivityRuns ? `${agentMetrics.summary.firstPassCompletionRate}%` : '—'}</strong>
+                      <small>平均 {agentMetrics.summary.averageProductivityCycles} 轮 · {agentMetrics.summary.averageProductivityToolCalls} 次工具</small>
+                    </article>
+                    <article>
+                      <span>补查恢复率</span>
+                      <strong>{agentMetrics.summary.replannedRuns ? `${agentMetrics.summary.recoveryRate}%` : '—'}</strong>
+                      <small>{agentMetrics.summary.recoveredRuns} / {agentMetrics.summary.replannedRuns} 次重规划后完成</small>
+                    </article>
+                    <article>
+                      <span>待补充后解决率</span>
+                      <strong>{agentMetrics.summary.needsInputFollowUps ? `${agentMetrics.summary.followUpResolutionRate}%` : '—'}</strong>
+                      <small>{agentMetrics.summary.resolvedFollowUps} / {agentMetrics.summary.needsInputFollowUps} 次后续已完成</small>
                     </article>
                     <article>
                       <span>P95 响应</span>

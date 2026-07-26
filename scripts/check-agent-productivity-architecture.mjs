@@ -8,6 +8,10 @@ const worker = readFileSync('src/worker.ts', 'utf8')
 const alice = readFileSync('src/aliceAgent.ts', 'utf8')
 const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
 const evaluation = readFileSync('agent-evals/run.mjs', 'utf8')
+const migration = readFileSync('db/migrations/0036_agent_productivity_metrics.sql', 'utf8')
+const metrics = readFileSync('src/agentProductivityMetrics.ts', 'utf8')
+const api = readFileSync('src/lib/api.ts', 'utf8')
+const settings = readFileSync('src/views/SettingsView.tsx', 'utf8')
 
 for (const marker of [
   'StateGraph',
@@ -34,6 +38,22 @@ assert.ok(director.includes('proposedCalls'), 'Director 不能在一次模型调
 assert.ok(evaluation.includes('orchestration?.modelCalls'), '评测没有检查模型调用预算')
 assert.ok(evaluation.includes('irrelevantRetrieval'), '评测没有检查无关检索')
 assert.ok(evaluation.includes('productivity?.status'), '评测没有检查生产力闭环终止状态')
+
+for (const marker of ['productivity_status', 'productivity_cycles', 'productivity_tool_calls', 'productivity_reason_code', 'conversation_hash']) {
+  assert.ok(migration.includes(marker), `生产力指标迁移缺少 ${marker}`)
+  assert.ok(worker.includes(marker), `Worker 未持久化生产力指标 ${marker}`)
+}
+assert.ok(metrics.includes('summarizeAgentProductivity'), '生产力指标缺少统一确定性聚合入口')
+for (const marker of ['goalCompletionRate', 'firstPassCompletionRate', 'recoveryRate', 'followUpResolutionRate']) {
+  assert.ok(metrics.includes(marker), `生产力指标聚合缺少 ${marker}`)
+  assert.ok(api.includes(marker), `前端 API 契约缺少 ${marker}`)
+}
+for (const marker of ['目标完成率', '首轮完成率', '补查恢复率', '待补充后解决率']) {
+  assert.ok(settings.includes(marker), `模型设置页缺少生产力指标：${marker}`)
+}
+assert.ok(worker.includes("crypto.subtle.digest('SHA-256'"), '会话关联没有使用匿名 SHA-256 哈希')
+assert.ok(!/question|answer|prompt|response/i.test(migration), '生产力指标迁移禁止保存问题、回答、提示词或响应正文')
+assert.ok(!/question|answer|prompt|response/i.test(metrics), '生产力指标聚合禁止依赖问题、回答、提示词或响应正文')
 
 const bundle = await build({
   entryPoints: ['src/agentRuntimeGraph.ts'], bundle: true, platform: 'browser', format: 'esm', target: 'es2022',

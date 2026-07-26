@@ -58,6 +58,14 @@ const clientErrorKindLabels: Record<string, string> = {
   'api-error': '接口异常',
 }
 
+const productivityReasonLabels: Record<string, string> = {
+  completed: '目标已完成',
+  missing_input: '等待补充信息',
+  tool_failure: '工具执行失败',
+  evidence_missing: '确定性证据不足',
+  budget_exhausted: '执行预算已耗尽',
+}
+
 const governanceStatusLabels = {
   healthy: '生产目标正常',
   'at-risk': '接近红线',
@@ -233,7 +241,7 @@ export default function AiOperationsCenterPanel({
             <div className="ai-agent-audit-heading">
               <div>
                 <h3>Agent 执行审计</h3>
-                <p>已验真 {operations.agentTurns.verified} · 自动修复 {operations.agentTurns.repaired} · 未完成 {operations.agentTurns.failed}</p>
+                <p>目标完成 {operations.agentTurns.completed} · 首轮完成 {operations.agentTurns.firstPassCompleted} · 待补充 {operations.agentTurns.needsInput} · 失败 {operations.agentTurns.productivityFailed}</p>
               </div>
               <small>仅记录执行状态，不保存对话正文</small>
             </div>
@@ -247,11 +255,12 @@ export default function AiOperationsCenterPanel({
                         <small>{turn.model} · {turn.tools.length ? turn.tools.map((tool) => tool.name).join('、') : '未调用工具'} · {formatDuration(turn.durationMs)}</small>
                       </div>
                       <span className={turn.verificationPassed ? 'status-completed' : turn.outcome === 'failed' ? 'status-failed' : 'status-running'}>
-                        {turn.verificationPassed ? turn.attempts > 1 ? '修复后验真' : '已验真' : turn.outcome === 'failed' ? '未完成' : '待核对'}
+                        {turn.productivityStatus === 'complete' ? turn.productivityCycles > 1 ? '补查后完成' : '已完成' : turn.productivityStatus === 'needs_input' ? '待补充' : turn.productivityStatus === 'failed' ? '失败' : turn.verificationPassed ? '已验真' : '待核对'}
                       </span>
                     </summary>
                     <div className="ai-agent-audit-detail">
-                      <p>执行 {turn.attempts} 次 · 确定性证据 {turn.deterministicEvidenceCount} 条{turn.fallbackUsed ? ' · 已启用备用模型' : ' · 主模型完成'}</p>
+                      <p>闭环 {turn.productivityCycles || turn.attempts} 轮 · 工具 {turn.productivityToolCalls || turn.tools.length} 次 · 确定性证据 {turn.deterministicEvidenceCount} 条{turn.fallbackUsed ? ' · 已启用备用模型' : ' · 主模型完成'}</p>
+                      {turn.productivityReasonCode && <p>终止原因：{productivityReasonLabels[turn.productivityReasonCode] || turn.productivityReasonCode}</p>}
                       {turn.tools.length > 0 && <p>工具：{turn.tools.map((tool) => `${tool.name}（${tool.status === 'success' ? '成功' : tool.status}）`).join('、')}</p>}
                       {turn.issues.length > 0 && <p>验真：{turn.issues.join(' ')}</p>}
                       {turn.fallbackReason && <p>备用原因：{turn.fallbackReason}</p>}

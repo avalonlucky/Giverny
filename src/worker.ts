@@ -17,6 +17,7 @@ import {
   type AgentDirectorPlan,
 } from './agentIntentDirector'
 import { runAgentRuntimeGraph, type AgentRuntimeGraphPlan } from './agentRuntimeGraph'
+import { summarizeAgentProductivity } from './agentProductivityMetrics'
 import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
@@ -19175,6 +19176,11 @@ type AgentRunMetricRow = {
   completion_tokens: number
   estimated_cost_cny: number
   app_version: string
+  productivity_status: string
+  productivity_cycles: number
+  productivity_tool_calls: number
+  productivity_reason_code: string
+  conversation_hash: string
   created_at: string
 }
 
@@ -19205,6 +19211,11 @@ async function ensureAgentRunMetricsTable(env: Env) {
     "ALTER TABLE agent_run_metrics ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
     "ALTER TABLE agent_run_metrics ADD COLUMN principal_id TEXT NOT NULL DEFAULT 'system'",
     "ALTER TABLE agent_run_metrics ADD COLUMN app_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE agent_run_metrics ADD COLUMN productivity_status TEXT NOT NULL DEFAULT ''",
+    'ALTER TABLE agent_run_metrics ADD COLUMN productivity_cycles INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE agent_run_metrics ADD COLUMN productivity_tool_calls INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE agent_run_metrics ADD COLUMN productivity_reason_code TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE agent_run_metrics ADD COLUMN conversation_hash TEXT NOT NULL DEFAULT ''",
   ]) {
     await env.DB.prepare(statement).run().catch(() => undefined)
   }
@@ -19231,7 +19242,16 @@ async function ensureAgentRunMetricsTable(env: Env) {
   ).run()
   await env.DB.prepare('ALTER TABLE agent_turn_runs ADD COLUMN is_eval INTEGER NOT NULL DEFAULT 0').run().catch(() => undefined)
   await env.DB.prepare("ALTER TABLE agent_turn_runs ADD COLUMN app_version TEXT NOT NULL DEFAULT ''").run().catch(() => undefined)
+  for (const statement of [
+    "ALTER TABLE agent_turn_runs ADD COLUMN productivity_status TEXT NOT NULL DEFAULT ''",
+    'ALTER TABLE agent_turn_runs ADD COLUMN productivity_cycles INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE agent_turn_runs ADD COLUMN productivity_tool_calls INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE agent_turn_runs ADD COLUMN productivity_reason_code TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE agent_turn_runs ADD COLUMN conversation_hash TEXT NOT NULL DEFAULT ''",
+  ]) await env.DB.prepare(statement).run().catch(() => undefined)
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_workspace ON agent_turn_runs(workspace_id, created_at DESC)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_productivity ON agent_run_metrics(workspace_id, is_eval, productivity_status, created_at DESC)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_conversation ON agent_run_metrics(workspace_id, conversation_hash, created_at ASC)').run()
   agentRunMetricsTableEnsured = true
 }
 
@@ -19352,6 +19372,22 @@ function estimateAgentTokens(value: string) {
   return Math.max(0, Math.ceil(value.length / 3.5))
 }
 
+function agentProductivityReasonCode(status: string, reason: string) {
+  if (!status) return ''
+  if (status === 'complete') return 'completed'
+  if (/预算上限|超过.*(?:轮|工具)/.test(reason)) return 'budget_exhausted'
+  if (/补充|缺少|必填|明确对象/.test(reason)) return 'missing_input'
+  if (/工具|故障|失败|超时/.test(reason)) return 'tool_failure'
+  if (/证据|验真|核对/.test(reason)) return 'evidence_missing'
+  return status || 'unknown'
+}
+
+async function agentConversationMetricHash(workspaceId: string, conversationId: string) {
+  if (!conversationId) return ''
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${workspaceId}|${conversationId}`))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
+}
+
 function estimateAgentCostCny(model: string, promptTokens: number, completionTokens: number) {
   const normalized = model.toLowerCase()
   const rates = normalized.includes('deepseek') ? { input: 2, output: 8 }
@@ -19395,12 +19431,24 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
     const principal = request ? await resolveRequestPrincipal(env, request).catch(() => null) : null
     const workspaceId = principalWorkspaceId(principal)
     const principalId = principal?.principalId || 'system'
+    const rawProductivity = payload.productivity && typeof payload.productivity === 'object'
+      ? payload.productivity as Record<string, unknown>
+      : {}
+    const productivityStatus = ['complete', 'needs_input', 'failed'].includes(String(rawProductivity.status || ''))
+      ? String(rawProductivity.status)
+      : ''
+    const productivityCycles = Math.min(3, Math.max(0, Number(rawProductivity.cycles) || 0))
+    const productivityToolCalls = Math.min(8, Math.max(0, Number(rawProductivity.toolCalls) || 0))
+    const productivityReason = String(rawProductivity.reason || '').slice(0, 500)
+    const productivityReasonCode = agentProductivityReasonCode(productivityStatus, productivityReason)
+    const conversationHash = await agentConversationMetricHash(workspaceId, String(payload.agentRuntimeConversationId || ''))
     await env.DB.prepare(
       `INSERT INTO agent_run_metrics (
         id, intent, outcome, model, workspace_id, principal_id, tools_json, tool_count, duration_ms,
         approval_action, selection_count, fallback_used, http_status, is_eval,
-        prompt_tokens, completion_tokens, estimated_cost_cny, app_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        prompt_tokens, completion_tokens, estimated_cost_cny, app_version,
+        productivity_status, productivity_cycles, productivity_tool_calls, productivity_reason_code, conversation_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       intent,
@@ -19420,6 +19468,11 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       completionTokens,
       estimatedCostCny,
       appVersion,
+      productivityStatus,
+      productivityCycles,
+      productivityToolCalls,
+      productivityReasonCode,
+      conversationHash,
     ).run()
     const turnPlan = Array.isArray(rawTurn.plan) ? rawTurn.plan : tools.map((name) => ({ name, status: response.ok ? 'success' : 'failed', risk: 'read', attempt: 1 }))
     const turnEvidence = Array.isArray(rawTurn.evidence) ? rawTurn.evidence : []
@@ -19435,8 +19488,9 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       `INSERT OR REPLACE INTO agent_turn_runs (
         id, workspace_id, principal_id, runtime, model, intent, phase, outcome,
         planned_tools_json, evidence_summary_json, verification_json, attempts,
-        fallback_used, fallback_reason, duration_ms, is_eval, app_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        fallback_used, fallback_reason, duration_ms, is_eval, app_version,
+        productivity_status, productivity_cycles, productivity_tool_calls, productivity_reason_code, conversation_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       String(rawTurn.id || crypto.randomUUID()), workspaceId, principalId,
       payload.localCli ? 'local-cli' : String(payload.runtime || 'cloud'), model,
@@ -19446,6 +19500,11 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       fallbackUsed ? 1 : 0, fallbackReason.slice(0, 500), Math.max(0, Math.round(durationMs)),
       isEval ? 1 : 0,
       appVersion,
+      productivityStatus,
+      productivityCycles,
+      productivityToolCalls,
+      productivityReasonCode,
+      conversationHash,
     ).run()
     if (!isEval && (outcome === 'error' || outcome === 'approval_failed')) {
       await learnAgentFailure(env, { intent, outcome, status: response.status, durationMs, tools, approvalAction })
@@ -19975,7 +20034,8 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   const rows = await env.DB.prepare(
     `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
             selection_count, fallback_used, http_status, prompt_tokens, completion_tokens,
-            estimated_cost_cny, created_at
+            estimated_cost_cny, productivity_status, productivity_cycles, productivity_tool_calls,
+            productivity_reason_code, conversation_hash, app_version, created_at
      FROM agent_run_metrics
      WHERE is_eval = 0 AND created_at >= datetime('now', ?)
      ORDER BY created_at DESC
@@ -19991,6 +20051,7 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   const promptTokens = items.reduce((sum, item) => sum + Math.max(0, Number(item.prompt_tokens) || 0), 0)
   const completionTokens = items.reduce((sum, item) => sum + Math.max(0, Number(item.completion_tokens) || 0), 0)
   const estimatedCostCny = Number(items.reduce((sum, item) => sum + Math.max(0, Number(item.estimated_cost_cny) || 0), 0).toFixed(4))
+  const productivitySummary = summarizeAgentProductivity(items)
   const durations = items.map((item) => Math.max(0, Number(item.duration_ms) || 0)).sort((a, b) => a - b)
   const avgDurationMs = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0
   const p95DurationMs = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0
@@ -20044,6 +20105,7 @@ async function getAgentRunMetrics(env: Env, request: Request) {
       promptTokens,
       completionTokens,
       estimatedCostCny,
+      ...productivitySummary,
     },
     intents: [...intentCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     tools: [...toolCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
@@ -20555,7 +20617,8 @@ async function getAiOperationsCenter(env: Env, request: Request) {
     env.DB.prepare(
       `SELECT intent, outcome, model, tools_json, tool_count, duration_ms, approval_action,
               selection_count, fallback_used, http_status, is_eval, prompt_tokens, completion_tokens,
-              estimated_cost_cny, created_at
+              estimated_cost_cny, productivity_status, productivity_cycles, productivity_tool_calls,
+              productivity_reason_code, conversation_hash, app_version, created_at
        FROM agent_run_metrics
        WHERE is_eval = 0 AND workspace_id = ? AND created_at >= datetime('now', ?)
        ORDER BY created_at DESC LIMIT 500`,
@@ -20563,14 +20626,16 @@ async function getAiOperationsCenter(env: Env, request: Request) {
     env.DB.prepare(
       `SELECT id, runtime, model, intent, phase, outcome, planned_tools_json,
               evidence_summary_json, verification_json, attempts, fallback_used,
-              fallback_reason, duration_ms, created_at
+              fallback_reason, duration_ms, productivity_status, productivity_cycles,
+              productivity_tool_calls, productivity_reason_code, created_at
        FROM agent_turn_runs
        WHERE workspace_id = ? AND is_eval = 0 AND created_at >= datetime('now', ?)
        ORDER BY created_at DESC LIMIT 50`,
     ).bind(workspaceId, `-${periodDays} days`).all<{
       id: string; runtime: string; model: string; intent: string; phase: string; outcome: string
       planned_tools_json: string; evidence_summary_json: string; verification_json: string
-      attempts: number; fallback_used: number; fallback_reason: string; duration_ms: number; created_at: string
+      attempts: number; fallback_used: number; fallback_reason: string; duration_ms: number
+      productivity_status: string; productivity_cycles: number; productivity_tool_calls: number; productivity_reason_code: string; created_at: string
     }>(),
     env.DB.prepare('SELECT * FROM agent_analysis_jobs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 30')
       .bind(workspaceId).all<DbAgentAnalysisJob>(),
@@ -20629,6 +20694,10 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       fallbackUsed: Number(item.fallback_used) > 0,
       fallbackReason: item.fallback_reason || '',
       durationMs: Number(item.duration_ms) || 0,
+      productivityStatus: item.productivity_status || '',
+      productivityCycles: Number(item.productivity_cycles) || 0,
+      productivityToolCalls: Number(item.productivity_tool_calls) || 0,
+      productivityReasonCode: item.productivity_reason_code || '',
       createdAt: item.created_at,
     }
   })
@@ -20804,6 +20873,10 @@ async function getAiOperationsCenter(env: Env, request: Request) {
       verified: turns.filter((item) => item.verificationPassed).length,
       repaired: turns.filter((item) => item.attempts > 1 && item.verificationPassed).length,
       failed: turns.filter((item) => item.outcome === 'failed' || item.outcome === 'unverified').length,
+      completed: turns.filter((item) => item.productivityStatus === 'complete').length,
+      needsInput: turns.filter((item) => item.productivityStatus === 'needs_input').length,
+      productivityFailed: turns.filter((item) => item.productivityStatus === 'failed').length,
+      firstPassCompleted: turns.filter((item) => item.productivityStatus === 'complete' && item.productivityCycles <= 1).length,
       recent: turns.slice(0, 20),
     },
     background: {

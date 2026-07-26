@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
@@ -20,6 +20,50 @@ const suites = projects.flatMap((project) =>
   })),
 )
 
+let activeSuiteProcess = null
+let interruptedSignal = ''
+
+function stopActiveSuite(signal = 'SIGTERM') {
+  const child = activeSuiteProcess
+  if (!child?.pid || child.exitCode !== null) return
+  try {
+    process.kill(-child.pid, signal)
+  } catch {
+    try {
+      child.kill(signal)
+    } catch {
+      // The suite already exited while shutdown was propagating.
+    }
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    interruptedSignal = signal
+    stopActiveSuite('SIGTERM')
+    setTimeout(() => stopActiveSuite('SIGKILL'), 3000).unref()
+  })
+}
+
+process.on('exit', () => stopActiveSuite('SIGTERM'))
+
+function runSuite(args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('npx', args, {
+      cwd: process.cwd(),
+      env,
+      stdio: 'inherit',
+      detached: true,
+    })
+    activeSuiteProcess = child
+    child.once('error', reject)
+    child.once('exit', (code, signal) => {
+      if (activeSuiteProcess === child) activeSuiteProcess = null
+      resolve({ status: code, signal })
+    })
+  })
+}
+
 for (const [index, suite] of suites.entries()) {
   let passed = false
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -27,19 +71,18 @@ for (const [index, suite] of suites.entries()) {
     const modelPort = 8899 + index + attempt * 100
     const label = `${suite.project} / 第 ${suite.chunkIndex + 1}/${testChunks.length} 组（${suite.testCount} 条）`
     console.log(`\nBrowser eval: ${label}${attempt ? '（Worker 异常后重试）' : ''}`)
-    const result = spawnSync(
-      'npx',
+    const result = await runSuite(
       ['playwright', 'test', `--project=${suite.project}`, `--grep=${suite.grep}`],
       {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          BROWSER_EVAL_APP_PORT: String(appPort),
-          BROWSER_EVAL_MODEL_PORT: String(modelPort),
-        },
-        stdio: 'inherit',
+        ...process.env,
+        BROWSER_EVAL_APP_PORT: String(appPort),
+        BROWSER_EVAL_MODEL_PORT: String(modelPort),
       },
     )
+    if (interruptedSignal) {
+      process.exitCode = interruptedSignal === 'SIGINT' ? 130 : 143
+      process.exit()
+    }
     if (result.status === 0) {
       passed = true
       break

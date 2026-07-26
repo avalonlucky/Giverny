@@ -482,6 +482,11 @@ CREATE TABLE IF NOT EXISTS agent_run_metrics (
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   estimated_cost_cny REAL NOT NULL DEFAULT 0,
   app_version TEXT NOT NULL DEFAULT '',
+  productivity_status TEXT NOT NULL DEFAULT '',
+  productivity_cycles INTEGER NOT NULL DEFAULT 0,
+  productivity_tool_calls INTEGER NOT NULL DEFAULT 0,
+  productivity_reason_code TEXT NOT NULL DEFAULT '',
+  conversation_hash TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -534,6 +539,11 @@ CREATE TABLE IF NOT EXISTS agent_turn_runs (
   duration_ms INTEGER NOT NULL DEFAULT 0,
   is_eval INTEGER NOT NULL DEFAULT 0,
   app_version TEXT NOT NULL DEFAULT '',
+  productivity_status TEXT NOT NULL DEFAULT '',
+  productivity_cycles INTEGER NOT NULL DEFAULT 0,
+  productivity_tool_calls INTEGER NOT NULL DEFAULT 0,
+  productivity_reason_code TEXT NOT NULL DEFAULT '',
+  conversation_hash TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -785,6 +795,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_confirmation_uses_expiry ON agent_confirmat
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_created ON agent_run_metrics(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_outcome ON agent_run_metrics(is_eval, outcome, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_intent ON agent_run_metrics(is_eval, intent, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_productivity ON agent_run_metrics(workspace_id, is_eval, productivity_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_conversation ON agent_run_metrics(workspace_id, conversation_hash, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_agent_effect_events_workspace_created ON agent_effect_events(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_effect_events_version_type ON agent_effect_events(workspace_id, app_version, event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_effect_snapshots_workspace_period ON agent_effect_snapshots(workspace_id, period_end DESC, app_version);

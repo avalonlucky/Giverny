@@ -290,6 +290,7 @@
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
 - LangGraph turn-level orchestration, one-model direct path and complex-plan fallback: `src/agentRuntimeGraph.ts`
 - LangGraph execute-observe-replan productivity closure and hard budgets: `src/agentProductivityGraph.ts`
+- Anonymous production goal-completion, first-pass, recovery and follow-up metrics: `src/agentProductivityMetrics.ts`, `db/migrations/0036_agent_productivity_metrics.sql`
 - Enterprise Agent priorities, capability rollout and per-release status: `docs/AGENT_ENTERPRISE_ROADMAP.md`
 - Deterministic final-answer fact snapshots and protected-claim verification: `src/agentFactGuard.ts`, `scripts/test-agent-fact-guard.mjs`, `scripts/check-agent-fact-architecture.mjs`
 - Pure Agent entity extraction and deterministic orchestration tests: `src/agentEntityResolver.ts`, `scripts/test-agent-orchestrator.mjs`, `scripts/check-agent-replan-architecture.mjs`
@@ -309,7 +310,7 @@
 
 ## AI Operations And Workspace Foundation
 
-- `AI 运行中心`由 Worker 聚合 `agent_run_metrics`、`agent_analysis_jobs`、`ai_learning_events` 与工时评估结果，前端不再自行拼接多套统计口径，并提供工作区切换、创建与成员添加 / 邀请入口。
+- `AI 运行中心`由 Worker 聚合 `agent_run_metrics`、`agent_turn_runs`、`agent_analysis_jobs`、`ai_learning_events` 与工时评估结果，统一区分接口成功与目标完成，并提供首轮完成、补查恢复和匿名会话续接解决率；前端不再自行拼接多套统计口径。
 - 自动化 Agent 评测继续使用 `is_eval = 1`，运行中心和正式质量指标只统计真实流量。
 - `workspaces` 与 `workspace_memberships` 是多租户的数据边界；现有记录默认归属 `default` 工作区。当前版本已开放第一阶段管理入口：AI 运行中心可创建 / 切换工作区、添加或邀请成员，默认工作区保持兼容。
 - 新增需要租户隔离的表时，应同时保存 `workspace_id` 和 `principal_id`，并在 Worker 查询层先解析当前 principal，再拼接工作区条件。
