@@ -11757,6 +11757,10 @@ async function setAdminPassword(env: Env, password: string) {
   await setSettingValue(env, ADMIN_PASSWORD_SETTING, await hashSecret(password))
 }
 
+async function setDemoPassword(env: Env, password: string) {
+  await setSettingValue(env, DEMO_PASSWORD_SETTING, await hashSecret(password))
+}
+
 const toId = (id: string | number) => String(id)
 
 // Keep numeric IDs compatible with the existing frontend while avoiding same-millisecond collisions.
@@ -14797,6 +14801,30 @@ async function changeAdminPassword(env: Env, request: Request) {
     { ok: true },
     { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
   )
+}
+
+async function changeDemoPassword(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal || principal.role !== 'admin') return fail('需要管理员权限', 403)
+  const body = (await request.json().catch(() => ({}))) as {
+    currentPassword?: string
+    newPassword?: string
+    matchAdminPassword?: boolean
+  }
+  const currentPassword = String(body.currentPassword ?? '')
+  if (!(await verifyAdminPassword(env, currentPassword))) {
+    return fail('当前管理员密码不正确', 401)
+  }
+  const nextPassword = body.matchAdminPassword ? currentPassword : String(body.newPassword ?? '')
+  if (nextPassword.length < 8) {
+    return fail('演示账号密码至少需要 8 位', 400)
+  }
+  await setDemoPassword(env, nextPassword)
+  await revokePrincipalSessions(env, DEMO_PRINCIPAL_ID)
+  await audit(env, 'update', 'setting', DEMO_PASSWORD_SETTING, {
+    method: body.matchAdminPassword ? 'match_admin_password' : 'custom_password',
+  })
+  return ok({ ok: true })
 }
 
 async function sendPasswordResetEmail(env: Env, request: Request, email: string, token: string) {
@@ -22671,6 +22699,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/auth/password' && request.method === 'POST') {
     return changeAdminPassword(env, request)
+  }
+  if (path === '/api/auth/demo-password' && request.method === 'POST') {
+    return changeDemoPassword(env, request)
   }
   if (path === '/api/local-cli/pairings' && request.method === 'POST') {
     return createLocalCliPairing(env, request)

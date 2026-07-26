@@ -111,6 +111,20 @@ export function useSettingsOperations({
     }
   }
 
+  const handleChangeDemoPassword = async (currentPassword: string, newPassword?: string) => {
+    try {
+      await api.changeDemoPassword({
+        currentPassword,
+        newPassword,
+        matchAdminPassword: !newPassword,
+      })
+      notify(newPassword ? '演示账号密码已更新' : '演示账号已同步使用当前管理员密码')
+    } catch (error) {
+      notify(error instanceof Error ? `演示密码更新失败：${error.message}` : '演示密码更新失败')
+      throw error
+    }
+  }
+
   const handleCreateAccessToken = async (label: string, expiresInDays: number | null, scope: TokenScope) => {
     try {
       const created = await api.createAccessToken({ label, expiresInDays, scope })
@@ -255,7 +269,7 @@ export function useSettingsOperations({
   }
 
   return {
-    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
+    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword, handleChangeDemoPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,
