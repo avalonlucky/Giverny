@@ -958,6 +958,19 @@ async function runAgentMultimodalToolCheck(cookie) {
     throw new Error(`Attachment analysis status query is incomplete: ${JSON.stringify(statuses.data)}`)
   }
 
+  const deadLetters = await request('/api/agent/tools/attachment-analysis-status', {
+    method: 'POST', headers, body: JSON.stringify({ taskId: 13, statuses: ['dead_letter'] }),
+  })
+  const deadLetter = deadLetters.data.items?.find((entry) => entry.file?.id === 106)
+  if (!deadLetters.response.ok || deadLetters.data.summary?.dead_letter !== 1 || deadLetter?.deadLetter?.status !== 'open' || deadLetter?.deadLetter?.deliveryAttempts !== 4) {
+    throw new Error(`Attachment DLQ evidence was not queryable: ${JSON.stringify(deadLetters.data)}`)
+  }
+  const deadLetterRetryPreview = await preview('manage-attachment-analysis-preview', { attachmentIds: [106], action: 'retry' })
+  const deadLetterRetried = await execute('manage-attachment-analysis', deadLetterRetryPreview.confirmationToken)
+  if (deadLetterRetried.queued?.[0]?.attachmentId !== 106 || deadLetterRetried.queued?.[0]?.status !== 'pending') {
+    throw new Error(`Dead-letter attachment analysis was not re-queued: ${JSON.stringify(deadLetterRetried)}`)
+  }
+
   const retryPreview = await preview('manage-attachment-analysis-preview', { attachmentIds: [102], action: 'retry' })
   const retried = await execute('manage-attachment-analysis', retryPreview.confirmationToken)
   if (retried.queued?.[0]?.attachmentId !== 102 || retried.queued?.[0]?.status !== 'pending') {

@@ -1,22 +1,17 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, extname, join, relative, resolve } from 'node:path'
+import { readFile, readdir } from 'node:fs/promises'
+import { extname, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { decideCanaryPromotion } from '../src/agentGovernance.ts'
+import { cloudflareAccountApiRoot as apiRoot, cloudflareAccountRequest as apiRequest, loadCloudflareToken as loadToken } from './lib/cloudflare-api.mjs'
 
-const accountId = 'ccd312f47f0dca574199fa6e33758c6d'
 const workerName = 'designer-worklog'
-const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${accountId}`
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const assetsDirectory = join(root, 'dist')
 const bundlePath = '/private/tmp/giverny-worker-api-deploy.mjs'
-const authPath = join(homedir(), '.config', 'giverny', 'cloudflare-auth.json')
-const cloudflareOAuthClientId = '54d11594-84e4-41aa-b438-e81b8fa78ee7'
-const cloudflareOAuthTokenUrl = 'https://dash.cloudflare.com/oauth2/token'
 const productionUrl = 'https://mayeai.com'
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const releaseVersion = String(packageJson.version || '')
@@ -27,65 +22,6 @@ const contentTypes = {
   '.js': 'text/javascript', '.json': 'application/json', '.mjs': 'text/javascript',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8',
   '.webm': 'video/webm', '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2',
-}
-
-async function saveAuthState(authState) {
-  await mkdir(dirname(authPath), { recursive: true, mode: 0o700 })
-  const temporaryPath = `${authPath}.${process.pid}.tmp`
-  await writeFile(temporaryPath, `${JSON.stringify(authState, null, 2)}\n`, { mode: 0o600 })
-  await rename(temporaryPath, authPath)
-}
-
-async function refreshCloudflareOAuthToken(saved) {
-  const response = await fetch(cloudflareOAuthTokenUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: saved.refreshToken,
-      client_id: cloudflareOAuthClientId,
-    }),
-    signal: AbortSignal.timeout(30_000),
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok || !payload.access_token) {
-    const detail = payload.error_description || payload.error || response.statusText
-    throw new Error(`Cloudflare OAuth 刷新失败：${detail}`)
-  }
-  const refreshed = {
-    apiToken: payload.access_token,
-    refreshToken: payload.refresh_token || saved.refreshToken,
-    expirationTime: new Date(Date.now() + Number(payload.expires_in || 3600) * 1000).toISOString(),
-    scopes: typeof payload.scope === 'string' ? payload.scope.split(' ') : saved.scopes,
-  }
-  await saveAuthState(refreshed)
-  process.stdout.write('Cloudflare HTTP API 凭证已自动刷新。\n')
-  return refreshed.apiToken
-}
-
-async function loadToken() {
-  if (process.env.CLOUDFLARE_API_TOKEN) return process.env.CLOUDFLARE_API_TOKEN
-  if (!existsSync(authPath)) {
-    throw new Error(`缺少 Cloudflare API 凭证。请设置 CLOUDFLARE_API_TOKEN 或写入 ${authPath}`)
-  }
-  const saved = JSON.parse(await readFile(authPath, 'utf8'))
-  if (saved.refreshToken) return refreshCloudflareOAuthToken(saved)
-  if (saved.apiToken) return saved.apiToken
-  throw new Error(`${authPath} 中没有可用的 Cloudflare API 凭证`)
-}
-
-async function apiRequest(token, path, options = {}) {
-  const response = await fetch(`${apiRoot}${path}`, {
-    ...options,
-    headers: { authorization: `Bearer ${token}`, ...options.headers },
-    signal: AbortSignal.timeout(120_000),
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok || payload.success === false) {
-    const detail = payload.errors?.map((item) => `${item.code}: ${item.message}`).join('; ') || response.statusText
-    throw new Error(`Cloudflare API ${response.status}: ${detail}`)
-  }
-  return payload.result ?? payload
 }
 
 async function listFiles(directory) {

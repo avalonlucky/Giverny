@@ -105,6 +105,22 @@ CREATE TABLE IF NOT EXISTS attachment_analyses (
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
+CREATE TABLE IF NOT EXISTS attachment_analysis_dead_letters (
+  attachment_id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  queue_message_id TEXT NOT NULL DEFAULT '',
+  delivery_attempts INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  first_failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  requeued_at TEXT,
+  resolved_at TEXT,
+  FOREIGN KEY (attachment_id) REFERENCES attachments(id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
 CREATE TABLE IF NOT EXISTS insight_diagnoses (
   id TEXT PRIMARY KEY,
   period_key TEXT NOT NULL,
@@ -638,6 +654,7 @@ CREATE INDEX IF NOT EXISTS idx_attachments_entry_id ON attachments(task_id, entr
 CREATE INDEX IF NOT EXISTS idx_attachments_scope_uploaded_at ON attachments(attachment_scope, uploaded_at);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_task_id ON attachment_analyses(task_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_analyses_status ON attachment_analyses(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_attachment_analysis_dead_letters_workspace ON attachment_analysis_dead_letters(workspace_id, status, last_failed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_insight_diagnoses_period ON insight_diagnoses(period_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_insights_history_status ON insights_history(status, generated_at);
 CREATE INDEX IF NOT EXISTS idx_insights_history_trigger ON insights_history(trigger_key, generated_at);

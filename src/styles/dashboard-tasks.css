@@ -3019,7 +3019,8 @@
 }
 
 .analysis-status.status-failed,
-.analysis-status.status-unsupported {
+.analysis-status.status-unsupported,
+.analysis-status.status-dead_letter {
   color: var(--color-status-danger);
   background: color-mix(in srgb, var(--color-status-danger) 9%, transparent);
 }

@@ -16,10 +16,11 @@
 1. 本地修改。
 2. 跑 `npm run agent:quality:gate`（包含 build、lint 和隔离 Agent 全链路评测）。
 3. 涉及新增 D1 migration 时，先用本地 SQLite 验证，再通过 `npm run db:apply:production -- db/migrations/<file>.sql` 调用 Cloudflare D1 HTTP API 应用正式迁移。
-4. 部署正式站。HTTP API 发布器先上传候选版本，定向核对健康、事实协议、版本和资源，通过后才推广；失败自动回滚上一版本。
-5. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
-6. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
-7. 回归通过后，直接执行 GitHub commit / push / tag / Release 发布闭环。
+4. 运行 `npm run infra:check` 核对主队列、DLQ、消费者和 Workers Tracing；发布命令会在构建后自动运行 `npm run infra:sync`，发现漂移时通过 Cloudflare HTTP API 幂等修复。
+5. 部署正式站。HTTP API 发布器先上传候选版本，定向核对健康、事实协议、版本和资源，通过后才推广；失败自动回滚上一版本。
+6. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
+7. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
+8. 回归通过后，直接执行 GitHub commit / push / tag / Release 发布闭环。
 
 ### 双域名静态资源核对
 

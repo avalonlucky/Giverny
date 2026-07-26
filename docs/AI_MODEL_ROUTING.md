@@ -2,6 +2,8 @@
 
 模型路由只决定本轮使用哪个“推理员工”，不拥有业务权限。所有模型都必须经过 [`Agent Orchestrator`](./AGENT_ORCHESTRATOR.md) 获取租户上下文、调用工具并校验结果。
 
+Cloudflare AI Gateway Dynamic Routing 暂不接管用户选择的主模型。它适合平台托管固定凭证的统一模型链，而 Giverny 当前允许用户自带 Key、按服务商选择主模型；把这些凭证固化到单一云端 Route 会破坏主模型忠实度和未来租户隔离。当前由应用层执行“同一主模型重试两次 → 仅明确极端故障允许备用”的治理策略，AI Gateway 负责传输、用量和供应商观测。待平台托管凭证按租户隔离后，再为该模式启用 Dynamic Route，不能用随机百分比分流代替用户选择。
+
 ## 当前状态
 
 Giverny 已引入 BAML 工程结构，并新增独立 Node.js AI Runtime：

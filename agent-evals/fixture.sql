@@ -55,7 +55,8 @@ INSERT INTO attachments (
   ('101', '13', NULL, 'acceptance', '当天邀请V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-invite.jpg', 344064, '336 KB', 1, 1, '验收文件', '2026-06-29T18:00:00'),
   ('102', '13', NULL, 'acceptance', '直播封面V1.0B01.jpg', 'JPG', 'image/jpeg', 'eval/live-cover.jpg', 445440, '435 KB', 1, 1, '验收文件', '2026-06-29T18:05:00'),
   ('103', '11', 'supplemental-acceptance-entry', 'progress', '倒计时1天海报.jpg', 'JPG', 'image/jpeg', 'eval/countdown.jpg', 400384, '391 KB', 0, 1, '过程文件', '2026-06-30T18:00:00'),
-  ('104', '1', 'finance-anchor-entry', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00');
+  ('104', '1', 'finance-anchor-entry', 'progress', '封套过程稿V1.jpg', 'JPG', 'image/jpeg', 'eval/package-progress.jpg', 204800, '200 KB', 0, 1, '过程文件', '2026-07-03T18:00:00'),
+  ('106', '13', NULL, 'progress', '直播死信评测.jpg', 'JPG', 'image/jpeg', 'eval/dead-letter.jpg', 1024, '1 KB', 0, 0, '内部评测', '2026-06-29T18:06:00');
 
 INSERT INTO attachments (
   id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,
@@ -75,7 +76,15 @@ INSERT INTO attachment_analyses (
    '["活动标题层级清楚"]', '[]', '["活动主题与直播设计需求一致"]', '[]', '["交付前复核二维码"]',
    '高', NULL, '2026-06-29T18:10:00', '2026-06-29T18:11:00', '2026-06-29T18:11:00'),
   ('102', '13', 'failed', 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-   NULL, '模拟模型暂时不可用', '2026-06-29T18:12:00', '2026-06-29T18:13:00', '2026-06-29T18:13:00');
+   NULL, '模拟模型暂时不可用', '2026-06-29T18:12:00', '2026-06-29T18:13:00', '2026-06-29T18:13:00'),
+  ('106', '13', 'dead_letter', 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, '模拟连续失败进入死信队列', '2026-06-29T18:14:00', '2026-06-29T18:16:00', '2026-06-29T18:16:00');
+
+INSERT INTO attachment_analysis_dead_letters (
+  attachment_id, task_id, workspace_id, queue_message_id, delivery_attempts, error_message, status, first_failed_at, last_failed_at
+) VALUES (
+  '106', '13', 'default', 'eval-dead-letter-106', 4, '模拟连续失败进入死信队列', 'open', '2026-06-29T18:16:00', '2026-06-29T18:16:00'
+);
 
 INSERT INTO attachments (
   id, task_id, entry_id, attachment_scope, file_name, file_type, mime_type, r2_key,

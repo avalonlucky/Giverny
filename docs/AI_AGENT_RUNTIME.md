@@ -49,6 +49,7 @@ React UI -> Worker `/api/ai/chat`
 - `src/agentRuntimeGraph.ts`：LangGraph 回合级主链，负责单模型快速路径、复杂规划、策略拒绝后回规划和模型调用计数。
 - `src/agentProductivityGraph.ts`：LangGraph 执行闭环，统一执行、观察、验真、补规划、循环预算和完成 / 待补充 / 失败终止状态。
 - `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、任务引用、确认状态和已校验计划执行；不再硬编码任何模型。
+- Alice Durable Object 同时以影子模式保存 LangGraph 的 `planned / completed` 检查点，只记录节点路径、操作名、循环次数和验真状态，不记录问题、回答、任务名、金额或密钥。检查点用于故障复盘和后续恢复能力验证，当前不取代业务 Workflow、确认凭证和 D1 的权威状态，避免双状态源。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
 - `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
 - Agent 回答界面：正文使用 GFM 富文本渲染；附件查询返回独立结构化文件卡，支持缩略图、任务归属、格式、大小、预览和打开，不依赖模型在 Markdown 中拼接内部文件地址。

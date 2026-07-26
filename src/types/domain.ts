@@ -115,7 +115,7 @@ export type FileAsset = {
   sourceUrl?: string
 }
 
-export type AttachmentAnalysisStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'unsupported'
+export type AttachmentAnalysisStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'unsupported' | 'dead_letter'
 
 export type AttachmentAnalysis = {
   attachmentId: number
@@ -139,6 +139,12 @@ export type AttachmentAnalysis = {
   errorMessage: string
   requestedAt: string
   completedAt: string
+  deadLetter?: {
+    status: 'open' | 'requeued' | 'resolved'
+    messageId: string
+    deliveryAttempts: number
+    lastFailedAt: string
+  }
 }
 
 export type InsightPeriodType = 'day' | 'week' | 'month' | 'quarter' | 'half' | 'year'

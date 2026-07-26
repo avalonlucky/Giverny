@@ -35,10 +35,19 @@ if (!files.migration.includes('idx_client_performance_version_path')) failures.p
 if (!/\[observability\][\s\S]*enabled\s*=\s*true[\s\S]*head_sampling_rate\s*=\s*0\.1/.test(files.cloudflare)) {
   failures.push('Cloudflare Workers Logs 与请求采样未启用')
 }
+if (!/\[observability\.traces\][\s\S]*enabled\s*=\s*true[\s\S]*head_sampling_rate\s*=\s*0\.05/.test(files.cloudflare)) {
+  failures.push('Cloudflare Workers 原生 Tracing 与独立采样未启用')
+}
+for (const span of ['agent.understand_and_plan', 'agent.execute_tools', 'agent.compose_and_verify', 'attachment.analysis']) {
+  if (!files.worker.includes(`'${span}'`)) failures.push(`Worker 缺少隐私安全业务 span：${span}`)
+}
+for (const forbidden of ['cleanQuery)', 'args.question)', 'row.file_name)', 'payload.answer)']) {
+  if (files.worker.includes(`span.setAttribute(${forbidden}`)) failures.push(`业务 span 禁止记录敏感正文：${forbidden}`)
+}
 
 if (failures.length > 0) {
   console.error(`生产监控架构守卫失败：\n- ${failures.join('\n- ')}`)
   process.exit(1)
 }
 
-console.log('生产监控架构守卫通过：错误、资源、分包、API、Web Vitals、D1 聚合、告警和 Workers Logs 链路完整。')
+console.log('生产监控架构守卫通过：错误、Web Vitals、告警、Workers Logs 与隐私安全 Tracing 链路完整。')

@@ -72,6 +72,11 @@ export type AliceAgentChatRequest = {
     allowedCapabilities: AgentCapabilityName[]
     directAnswer?: string
     modelLabel: string
+    graph: {
+      path: string[]
+      modelCalls: number
+      deniedCount: number
+    }
   }
 }
 
@@ -188,6 +193,19 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         created_at INTEGER NOT NULL
       )
     `
+    void this.sql`
+      CREATE TABLE IF NOT EXISTS alice_graph_checkpoints (
+        id TEXT PRIMARY KEY,
+        turn_id TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK(phase IN ('planned', 'completed')),
+        state_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `
+    void this.sql`
+      CREATE INDEX IF NOT EXISTS idx_alice_graph_checkpoints_turn
+      ON alice_graph_checkpoints(turn_id, created_at DESC)
+    `
     const columns = this.sql<{ name: string }>`PRAGMA table_info(alice_pending_actions)`
     if (!columns.some((column) => column.name === 'warnings_json')) {
       void this.sql`ALTER TABLE alice_pending_actions ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'`
@@ -210,6 +228,22 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       messageCount: this.state.messageCount + 1,
       lastActiveAt: Date.now(),
     })
+  }
+
+  private saveGraphCheckpoint(turnId: string, phase: 'planned' | 'completed', state: Record<string, unknown>) {
+    const checkpoint = {
+      schemaVersion: 1,
+      phase,
+      ...state,
+    }
+    void this.sql`
+      INSERT OR REPLACE INTO alice_graph_checkpoints (id, turn_id, phase, state_json, created_at)
+      VALUES (${`${turnId}:${phase}`}, ${turnId}, ${phase}, ${JSON.stringify(checkpoint)}, ${Date.now()})
+    `
+    void this.sql`
+      DELETE FROM alice_graph_checkpoints
+      WHERE id NOT IN (SELECT id FROM alice_graph_checkpoints ORDER BY created_at DESC LIMIT 200)
+    `
   }
 
   async conversationSnapshot(): Promise<{ messages: AgentConversationMessage[] }> {
@@ -264,6 +298,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   async clearConversation() {
     void this.sql`DELETE FROM alice_messages`
     void this.sql`DELETE FROM alice_pending_actions`
+    void this.sql`DELETE FROM alice_graph_checkpoints`
     this.setState({ ...this.initialState })
     this.activeTaskReference = null
     return { cleared: true }
@@ -904,6 +939,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
 
     const pending = this.getPendingAction()
     this.saveMessage('user', message)
+    this.saveGraphCheckpoint(agentTurn.id, 'planned', {
+      path: request.orchestration.graph.path,
+      modelCalls: request.orchestration.graph.modelCalls,
+      operationNames: request.orchestration.calls.map((call) => call.name),
+      deniedCount: request.orchestration.graph.deniedCount,
+    })
     const selectedReference = this.selectedTaskReference(message)
     this.activeTaskReference = selectedReference || this.state.taskReference || null
     if (selectedReference) this.setTaskReference(selectedReference)
@@ -1280,6 +1321,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       attachments: response.attachments,
       uploadHandoff: response.uploadHandoff,
       trace: response.trace.map((item) => item.detail ? `${item.label}：${item.detail}` : item.label),
+    })
+    this.saveGraphCheckpoint(agentTurn.id, 'completed', {
+      path: [...request.orchestration.graph.path, ...productivity.path],
+      modelCalls: request.orchestration.graph.modelCalls,
+      operationNames: [...usedTools],
+      deniedCount: request.orchestration.graph.deniedCount,
+      status: response.productivity?.status || 'failed',
+      cycles: productivity.cycles,
+      toolCalls: productivity.toolCalls,
+      factVerified: factVerificationSummary?.passed === true,
     })
     return response
   }

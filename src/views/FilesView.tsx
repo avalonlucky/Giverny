@@ -507,7 +507,7 @@ function FileInspector({
           <div>
             <span>交付件理解</span>
             <strong>
-              {!analysis ? '等待分析' : analysis.status === 'completed' ? '已完成' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : '需要重试'}
+              {!analysis ? '等待分析' : analysis.status === 'completed' ? '已完成' : analysis.status === 'processing' ? '分析中' : analysis.status === 'pending' ? '排队中' : analysis.status === 'dead_letter' ? '等待人工重试' : '需要重试'}
             </strong>
           </div>
           {canDelete && <button
@@ -538,7 +538,7 @@ function FileInspector({
             </div>
           </>
         ) : (
-          <p className={`file-understanding-message ${analysis?.status === 'failed' || analysis?.status === 'unsupported' ? 'error' : ''}`}>
+          <p className={`file-understanding-message ${analysis?.status === 'failed' || analysis?.status === 'unsupported' || analysis?.status === 'dead_letter' ? 'error' : ''}`}>
             {analysis?.errorMessage || '文件上传后会自动解析内容，并结合任务需求给出质量与风险判断。'}
           </p>
         )}

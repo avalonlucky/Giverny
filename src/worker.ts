@@ -1,5 +1,6 @@
 import { appVersion, defaultDesignTypeGroups, defaultDesignTypes, defaultHourlyRate, defaultPdfTitle, defaultServiceCompanyName, designTypeColorPalette, type DesignTypeGroup } from './config/appConfig'
 import puppeteer, { type BrowserWorker } from '@cloudflare/puppeteer'
+import { tracing } from 'cloudflare:workers'
 import { getAgentByName } from 'agents'
 import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -138,8 +139,8 @@ const MAX_UPLOAD_FILE_SIZE = 200 * 1024 * 1024
 // Queues 生产者绑定的最小类型。
 type AnalysisMessage = { attachmentId: string }
 type AnalysisQueue = { send: (body: AnalysisMessage) => Promise<void> }
-type QueueMessage = { body: AnalysisMessage; ack: () => void; retry: () => void }
-type QueueBatch = { messages: QueueMessage[] }
+type QueueMessage = { id?: string; attempts?: number; body: AnalysisMessage; ack: () => void; retry: () => void }
+type QueueBatch = { queue?: string; messages: QueueMessage[] }
 
 // Workers AI 绑定的最小类型：文本生成返回 response；向量化返回 data（number[][]）。
 type WorkersAiBinding = {
@@ -493,6 +494,10 @@ type DbAttachmentAnalysis = {
   error_message: string | null
   requested_at: string
   completed_at: string | null
+  dead_letter_status?: 'open' | 'requeued' | 'resolved' | null
+  dead_letter_message_id?: string | null
+  dead_letter_delivery_attempts?: number | null
+  dead_letter_last_failed_at?: string | null
 }
 
 type DbInsightDiagnosis = {
@@ -3242,7 +3247,10 @@ async function directAgentRequest(
   const target = await resolveChatModelTarget(env, args.modelChoice)
   let modelLabel = target.label
   const request = { question: args.question, currentMonth: args.currentMonth, history, principal: args.principal }
-  const graphResult = await runAgentRuntimeGraph({
+  const graphResult = await tracing.enterSpan('agent.understand_and_plan', (span) => {
+    span.setAttribute('agent.role', args.principal.role)
+    span.setAttribute('agent.has_history', history.length > 0)
+    return runAgentRuntimeGraph({
     understand: async (graphRequest) => {
       const rawDecision = await callSelectedModelJson<Record<string, unknown>>(
         env,
@@ -3296,7 +3304,8 @@ async function directAgentRequest(
       }
     },
     authorize: (decision, plan, allowedCapabilities, principal) => validateDirectedPlan({ decision, plan, allowedCapabilities, role: principal.role }),
-  }, request)
+    }, request)
+  })
   return { ...graphResult, modelLabel }
 }
 
@@ -3361,24 +3370,36 @@ async function callAgentRuntime(
         detail: agentCapabilityRegistry[call.name as AgentCapabilityName]?.trace.running || `正在处理${agentCapabilityRegistry[call.name as AgentCapabilityName]?.title || '必要步骤'}`,
       }))
       for (const item of actionTrace) await args.onTrace?.([`${item.label}：${item.detail}`])
-      let result = await agent.chat({
-        message: cleanQuery,
-        currentMonth: args.currentMonth,
-        conversationId,
-        history: conversationHistory,
-        context: args.context,
-        principal: args.principal,
-        orchestration: {
-          decision: orchestration.decision,
-          calls: orchestration.calls,
-          allowedCapabilities: orchestration.allowedCapabilities,
+      let result = await tracing.enterSpan('agent.execute_tools', (span) => {
+        span.setAttribute('agent.operation_count', orchestration.calls.length)
+        span.setAttribute('agent.is_write', orchestration.decision.isWrite)
+        return agent.chat({
+          message: cleanQuery,
+          currentMonth: args.currentMonth,
+          conversationId,
+          history: conversationHistory,
+          context: args.context,
+          principal: args.principal,
+          orchestration: {
+            decision: orchestration.decision,
+            calls: orchestration.calls,
+            allowedCapabilities: orchestration.allowedCapabilities,
           directAnswer: orchestration.directAnswer,
           modelLabel: orchestration.modelLabel,
+          graph: {
+            path: orchestration.path,
+            modelCalls: orchestration.modelCalls,
+            deniedCount: orchestration.denied.length,
+          },
         },
+        })
       })
       if (result.grounding && !result.approval && !result.selection && !result.backgroundTask) {
         await args.onTrace?.(['动作：正在结合查到的信息组织回答。'])
-        const composed = await composeNaturalAgentAnswer(env, args.modelChoice, cleanQuery, conversationHistory, result.grounding)
+        const composed = await tracing.enterSpan('agent.compose_and_verify', (span) => {
+          span.setAttribute('agent.grounding_source_count', result.grounding?.sources.length || 0)
+          return composeNaturalAgentAnswer(env, args.modelChoice, cleanQuery, conversationHistory, result.grounding!)
+        })
         result = {
           ...result,
           answer: composed.answer,
@@ -7991,6 +8012,10 @@ type AgentAttachmentEvidenceRow = AgentAttachmentSearchRow & {
   analysis_error_message: string | null
   analysis_requested_at: string | null
   analysis_completed_at: string | null
+  dead_letter_status?: 'open' | 'requeued' | 'resolved' | null
+  dead_letter_message_id?: string | null
+  dead_letter_delivery_attempts?: number | null
+  dead_letter_last_failed_at?: string | null
 }
 
 function agentAttachmentVisibleToRole(row: Pick<DbAttachment, 'visible_to_client'>, role: AgentPrincipalContext['role']) {
@@ -8010,10 +8035,13 @@ async function agentAttachmentEvidenceRows(env: Env, principal: AgentPrincipalCo
        aa.requirement_matches_json AS analysis_requirement_matches_json, aa.risks_json AS analysis_risks_json,
        aa.suggestions_json AS analysis_suggestions_json, aa.confidence AS analysis_confidence,
        aa.error_message AS analysis_error_message, aa.requested_at AS analysis_requested_at,
-       aa.completed_at AS analysis_completed_at
+       aa.completed_at AS analysis_completed_at,
+       adl.status AS dead_letter_status, adl.queue_message_id AS dead_letter_message_id,
+       adl.delivery_attempts AS dead_letter_delivery_attempts, adl.last_failed_at AS dead_letter_last_failed_at
      FROM attachments a
      INNER JOIN tasks t ON t.id = a.task_id
      LEFT JOIN attachment_analyses aa ON aa.attachment_id = a.id
+     LEFT JOIN attachment_analysis_dead_letters adl ON adl.attachment_id = a.id
      WHERE a.id IN (${placeholders}) AND t.workspace_id = ? AND a.deleted_at IS NULL
        AND t.deleted_at IS NULL AND t.voided_at IS NULL`,
   ).bind(...ids.map(String), principal.workspaceId).all<AgentAttachmentEvidenceRow>()
@@ -8032,6 +8060,7 @@ function toAgentAttachmentAnalysis(row: AgentAttachmentEvidenceRow): AttachmentA
     requirementMatches: analysisJsonArray(row.analysis_requirement_matches_json), risks: analysisJsonArray(row.analysis_risks_json),
     suggestions: analysisJsonArray(row.analysis_suggestions_json), confidence: row.analysis_confidence || '',
     errorMessage: row.analysis_error_message || '', requestedAt: formatBeijing(row.analysis_requested_at), completedAt: formatBeijing(row.analysis_completed_at),
+    ...(row.dead_letter_status ? { deadLetter: { status: row.dead_letter_status, messageId: row.dead_letter_message_id || '', deliveryAttempts: Number(row.dead_letter_delivery_attempts) || 0, lastFailedAt: formatBeijing(row.dead_letter_last_failed_at ?? null) } } : {}),
   }
 }
 
@@ -8175,9 +8204,12 @@ async function agentQueryAttachmentAnalysisTool(env: Env, request: Request) {
        aa.findings_json AS analysis_findings_json, aa.quality_issues_json AS analysis_quality_issues_json,
        aa.requirement_matches_json AS analysis_requirement_matches_json, aa.risks_json AS analysis_risks_json,
        aa.suggestions_json AS analysis_suggestions_json, aa.confidence AS analysis_confidence,
-       aa.error_message AS analysis_error_message, aa.requested_at AS analysis_requested_at, aa.completed_at AS analysis_completed_at
+       aa.error_message AS analysis_error_message, aa.requested_at AS analysis_requested_at, aa.completed_at AS analysis_completed_at,
+       adl.status AS dead_letter_status, adl.queue_message_id AS dead_letter_message_id,
+       adl.delivery_attempts AS dead_letter_delivery_attempts, adl.last_failed_at AS dead_letter_last_failed_at
      FROM attachments a INNER JOIN tasks t ON t.id = a.task_id
      LEFT JOIN attachment_analyses aa ON aa.attachment_id = a.id
+     LEFT JOIN attachment_analysis_dead_letters adl ON adl.attachment_id = a.id
      WHERE t.workspace_id = ? AND a.deleted_at IS NULL AND t.deleted_at IS NULL AND t.voided_at IS NULL
        AND (? = 0 OR a.task_id = ?) ORDER BY a.uploaded_at DESC LIMIT 300`,
   ).bind(principal.workspaceId, taskId, String(taskId)).all<AgentAttachmentEvidenceRow>()
@@ -8185,7 +8217,7 @@ async function agentQueryAttachmentAnalysisTool(env: Env, request: Request) {
   const items = (rows.results || [])
     .filter((row) => agentAttachmentVisibleToRole(row, principal.role))
     .filter((row) => !requestedIds.length || requestedIds.includes(Number(row.id)))
-    .map((row) => ({ file: toAgentResultAttachment(row), status: row.analysis_status || 'missing', attemptCount: Number(row.analysis_attempt_count) || 0, parserKind: row.analysis_parser_kind || '', provider: row.analysis_provider || '', model: row.analysis_model || '', errorMessage: row.analysis_error_message || '', requestedAt: formatBeijing(row.analysis_requested_at), completedAt: formatBeijing(row.analysis_completed_at), evidenceRef: `[attachment:${row.id}:analysis]` }))
+    .map((row) => ({ file: toAgentResultAttachment(row), status: row.analysis_status || 'missing', attemptCount: Number(row.analysis_attempt_count) || 0, parserKind: row.analysis_parser_kind || '', provider: row.analysis_provider || '', model: row.analysis_model || '', errorMessage: row.analysis_error_message || '', requestedAt: formatBeijing(row.analysis_requested_at), completedAt: formatBeijing(row.analysis_completed_at), deadLetter: row.dead_letter_status ? { status: row.dead_letter_status, messageId: row.dead_letter_message_id || '', deliveryAttempts: Number(row.dead_letter_delivery_attempts) || 0, lastFailedAt: formatBeijing(row.dead_letter_last_failed_at ?? null) } : undefined, evidenceRef: `[attachment:${row.id}:analysis]` }))
     .filter((item) => !statuses.size || statuses.has(item.status))
     .slice(0, limit)
   return agentOk({ tool: 'query_attachment_analysis', count: items.length, items, summary: items.reduce((result, item) => ({ ...result, [item.status]: Number(result[item.status] || 0) + 1 }), {} as Record<string, number>) })
@@ -9876,6 +9908,7 @@ const toAttachmentAnalysis = (row: DbAttachmentAnalysis): AttachmentAnalysis => 
   errorMessage: row.error_message || '',
   requestedAt: formatBeijing(row.requested_at),
   completedAt: formatBeijing(row.completed_at),
+  ...(row.dead_letter_status ? { deadLetter: { status: row.dead_letter_status, messageId: row.dead_letter_message_id || '', deliveryAttempts: Number(row.dead_letter_delivery_attempts) || 0, lastFailedAt: formatBeijing(row.dead_letter_last_failed_at ?? null) } } : {}),
 })
 
 type AcceptanceAttachmentAiContext = {
@@ -10283,6 +10316,13 @@ async function createAttachmentAnalysisJob(env: Env, attachmentId: string, taskI
     reset ? 1 : 0,
     reset ? 1 : 0,
   ).run()
+  if (reset) {
+    await env.DB.prepare(
+      `UPDATE attachment_analysis_dead_letters
+       SET status = 'requeued', requeued_at = CURRENT_TIMESTAMP, resolved_at = NULL
+       WHERE attachment_id = ? AND status = 'open'`,
+    ).bind(attachmentId).run()
+  }
 }
 
 // 触发一次交付件分析：优先入队（专用消费者 + 自动重试 + 独立预算）；无队列时回退到请求内 waitUntil 处理。
@@ -10389,9 +10429,16 @@ function calibrateAnalysisConfidence(
     : '中'
 }
 
-type AttachmentAnalysisProcessResult = 'completed' | 'retry' | 'terminal' | 'skipped'
+type AttachmentAnalysisProcessResult = 'completed' | 'retry' | 'terminal' | 'dead-letter' | 'skipped'
 
 async function processAttachmentAnalysis(env: Env, attachmentId: string): Promise<AttachmentAnalysisProcessResult> {
+  return tracing.enterSpan('attachment.analysis', (span) => {
+    span.setAttribute('analysis.pipeline', 'multimodal')
+    return processAttachmentAnalysisInner(env, attachmentId)
+  })
+}
+
+async function processAttachmentAnalysisInner(env: Env, attachmentId: string): Promise<AttachmentAnalysisProcessResult> {
   const claimed = await env.DB.prepare(
     `UPDATE attachment_analyses
      SET status = 'processing', attempt_count = attempt_count + 1, started_at = CURRENT_TIMESTAMP, error_message = NULL, updated_at = CURRENT_TIMESTAMP
@@ -10402,6 +10449,10 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string): Promis
      )`,
   ).bind(attachmentId).run()
   if (!claimed.success || !claimed.meta?.changes) {
+    const exhausted = await env.DB.prepare(
+      `SELECT status, attempt_count FROM attachment_analyses WHERE attachment_id = ?`,
+    ).bind(attachmentId).first<{ status: string; attempt_count: number }>()
+    if (exhausted?.status === 'failed' && Number(exhausted.attempt_count) >= 3) return 'dead-letter'
     return 'skipped'
   }
 
@@ -10522,11 +10573,40 @@ async function processAttachmentAnalysis(env: Env, attachmentId: string): Promis
   } catch (error) {
     const unsupported = error instanceof UnsupportedAttachmentAnalysisError
     await markAnalysisFailure(env, attachmentId, error, unsupported)
-    if (unsupported || Number(row.analysis_attempt_count) >= 3) {
-      return 'terminal'
-    }
+    if (unsupported) return 'terminal'
+    if (Number(row.analysis_attempt_count) >= 3) return 'dead-letter'
     return 'retry'
   }
+}
+
+async function recordAttachmentAnalysisDeadLetter(env: Env, message: QueueMessage) {
+  const attachmentId = String(message.body.attachmentId || '')
+  if (!attachmentId) return
+  const row = await env.DB.prepare(
+    `SELECT a.task_id, t.workspace_id, aa.error_message, aa.attempt_count
+     FROM attachments a
+     INNER JOIN tasks t ON t.id = a.task_id
+     LEFT JOIN attachment_analyses aa ON aa.attachment_id = a.id
+     WHERE a.id = ?`,
+  ).bind(attachmentId).first<{ task_id: string; workspace_id: string; error_message: string | null; attempt_count: number | null }>()
+  if (!row) return
+  await env.DB.prepare(
+    `INSERT INTO attachment_analysis_dead_letters
+       (attachment_id, task_id, workspace_id, queue_message_id, delivery_attempts, error_message, status, first_failed_at, last_failed_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(attachment_id) DO UPDATE SET
+       queue_message_id = excluded.queue_message_id,
+       delivery_attempts = excluded.delivery_attempts,
+       error_message = excluded.error_message,
+       status = 'open',
+       last_failed_at = CURRENT_TIMESTAMP,
+       requeued_at = NULL,
+       resolved_at = NULL`,
+  ).bind(attachmentId, row.task_id, row.workspace_id || DEFAULT_WORKSPACE_ID, String(message.id || ''), Math.max(Number(message.attempts) || Number(row.attempt_count) || 0, Number(row.attempt_count) || 0), String(row.error_message || '附件分析超过自动重试上限').slice(0, 500)).run()
+  await env.DB.prepare(
+    `UPDATE attachment_analyses SET status = 'dead_letter', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE attachment_id = ?`,
+  ).bind(attachmentId).run()
+  await audit(env, 'dead_letter', 'attachment_analysis', attachmentId, { taskId: Number(row.task_id), deliveryAttempts: Number(message.attempts) || Number(row.attempt_count) || 0 })
 }
 
 async function processPendingAttachmentAnalyses(env: Env, limit = 2) {
@@ -16154,10 +16234,13 @@ async function getAttachmentAnalysisStatuses(env: Env, request: Request) {
   }
   const placeholders = ids.map(() => '?').join(',')
   const rows = await env.DB.prepare(
-    `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type
+    `SELECT attachment_analyses.*, attachments.file_name, attachments.file_type,
+       adl.status AS dead_letter_status, adl.queue_message_id AS dead_letter_message_id,
+       adl.delivery_attempts AS dead_letter_delivery_attempts, adl.last_failed_at AS dead_letter_last_failed_at
      FROM attachment_analyses
      INNER JOIN attachments ON attachments.id = attachment_analyses.attachment_id
      INNER JOIN tasks ON tasks.id = attachments.task_id
+     LEFT JOIN attachment_analysis_dead_letters adl ON adl.attachment_id = attachment_analyses.attachment_id
      WHERE attachment_analyses.attachment_id IN (${placeholders})
        AND tasks.workspace_id = ?
        AND attachments.deleted_at IS NULL
@@ -22969,12 +23052,17 @@ export default {
       console.error('agent effectiveness snapshot failed', error)
     })
   },
-  // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。
+  // 交付件分析队列消费者：主队列自动重试，超过上限后由 DLQ 持久记录并等待人工重放。
   async queue(batch: QueueBatch, env: Env) {
     for (const message of batch.messages) {
       try {
+        if (batch.queue === 'worklog-analysis-dlq') {
+          await recordAttachmentAnalysisDeadLetter(env, message)
+          message.ack()
+          continue
+        }
         const result = await processAttachmentAnalysis(env, String(message.body.attachmentId))
-        if (result === 'retry') {
+        if (result === 'retry' || result === 'dead-letter') {
           message.retry()
         } else {
           message.ack()

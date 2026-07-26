@@ -15,6 +15,15 @@ const files = {
   approval: readFileSync('src/components/AgentApprovalCard.tsx', 'utf8'),
 }
 
+const propertyTest = readFileSync('scripts/test-agent-properties.mjs', 'utf8')
+const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
+assert.ok(packageJson.devDependencies?.['fast-check'], 'Agent 状态机必须使用 fast-check 生成边界序列')
+assert.ok(packageJson.scripts?.['agent:property:test'], '缺少 Agent 属性测试入口')
+assert.ok(packageJson.scripts?.['quality:fast']?.includes('agent:property:test'), '快速质量门必须运行 Agent 属性测试')
+for (const marker of ['fc.assert', 'fc.property', 'fc.commands', 'fc.modelRun']) {
+  assert.ok(propertyTest.includes(marker), `Agent 属性测试缺少 ${marker}`)
+}
+
 for (const symbol of [
   'approveExecutionBatch',
   'assertAcyclicExecutionSteps',
