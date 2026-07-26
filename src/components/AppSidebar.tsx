@@ -48,6 +48,7 @@ export function AppSidebar({
   onOpenAbout: () => void
   onSignOut: () => void
 }) {
+  const isDemo = auth?.email === 'Giverny 演示账号'
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -69,6 +70,7 @@ export function AppSidebar({
             <i aria-hidden="true" />
             让创作在自己的花园里生长
           </span>
+          {isDemo && <span className="demo-workspace-label">演示空间 · 虚构数据</span>}
         </div>
       </div>
 
@@ -103,6 +105,7 @@ export function AppSidebar({
                 <strong>{auth?.email || '游客访问'}</strong>
                 <span>{
                   isAdmin ? '最终管理员'
+                    : isDemo ? '只读演示空间 · 全部为虚构数据'
                     : role === 'collaborator' ? '协作者（可录入）'
                     : role === 'viewer' ? '只读全局'
                     : role === 'client' ? '合作伙伴（当月可见）'
@@ -130,7 +133,9 @@ export function AppSidebar({
               </>
             ) : (
               <>
-                <p className="account-menu-note">当前只能查看公开任务、进展和合作伙伴可见文件；编辑、上传、验收和结算需要管理员身份。</p>
+                <p className="account-menu-note">{isDemo
+                  ? '当前空间用于产品展示，任务、人员、工时、金额和附件均为虚构内容；演示账号不能修改数据。'
+                  : '当前只能查看公开任务、进展和合作伙伴可见文件；编辑、上传、验收和结算需要管理员身份。'}</p>
                 <button className="account-menu-item" type="button" role="menuitem" onClick={() => { onAccountMenuOpenChange(false); onLogin() }}>
                   <KeyRound size={17} />
                   <span>登录管理员</span>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Lock, Mail, X } from 'lucide-react'
+import { Eye, Lock, Mail, X } from 'lucide-react'
 import { loadTurnstileScript } from '../lib/turnstile'
 import { ModalShell } from './ModalShell'
 
@@ -14,14 +14,17 @@ export function AdminLoginModal({
   error,
   onClose,
   onSubmit,
+  onDemoLogin,
 }: {
   error: string
   onClose: () => void
   onSubmit: (email: string, key: string, turnstileToken?: string) => void
+  onDemoLogin: () => Promise<void>
 }) {
   const [email, setEmail] = useState('')
   const [key, setKey] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDemoSubmitting, setIsDemoSubmitting] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState('')
   const turnstileRef = useRef<HTMLDivElement | null>(null)
   const turnstileWidgetId = useRef<string | null>(null)
@@ -124,11 +127,25 @@ export function AdminLoginModal({
         {error && <p className="lock-error">{error}</p>}
       </div>
       <footer className="modal-footer">
-        <button className="ghost-button" onClick={onClose}>取消</button>
+        <button
+          className="ghost-button login-demo-button"
+          disabled={isSubmitting || isDemoSubmitting}
+          onClick={async () => {
+            setIsDemoSubmitting(true)
+            try {
+              await onDemoLogin()
+            } finally {
+              setIsDemoSubmitting(false)
+            }
+          }}
+        >
+          <Eye size={16} />
+          {isDemoSubmitting ? '正在准备演示…' : '进入演示'}
+        </button>
         <button
           className="primary-button"
           onClick={() => void submit()}
-          disabled={!key.trim() || (!isLocalPreview && !turnstileToken) || isSubmitting}
+          disabled={!key.trim() || (!isLocalPreview && !turnstileToken) || isSubmitting || isDemoSubmitting}
           title={!isLocalPreview && !turnstileToken ? '请先完成人机验证' : undefined}
         >
           {isSubmitting ? '正在进入…' : '进入工作台'}

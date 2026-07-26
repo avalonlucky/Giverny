@@ -117,11 +117,14 @@ function App() {
     setIsAccountMenuOpen,
   })
   const {
-    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
+    handleExportBackup, handleUnlock, handleDemoLogin, handleSignOut, handleChangeAdminPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,
   } = settingsOperations
+  useEffect(() => {
+    if (isLoaded && !auth && role === 'guest') setIsLoginModalOpen(true)
+  }, [auth, isLoaded, role, setIsLoginModalOpen])
   // 角色能力分级（前端展示用；后端是真正的安全边界）
   const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
   const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
@@ -887,6 +890,7 @@ function App() {
         onCloseLogin={() => { setIsLoginModalOpen(false); setAuthError('') }}
         onCloseAboutGiverny={() => setIsAboutGivernyOpen(false)}
         onUnlock={handleUnlock}
+        onDemoLogin={handleDemoLogin}
         showFireworks={showFireworks}
         toastQueue={toastQueue}
         onDismissToast={dismissToast}

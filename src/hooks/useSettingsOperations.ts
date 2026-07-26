@@ -41,7 +41,7 @@ export function useSettingsOperations({
 }) {
   const {
     setAuth, setRole, accessTokens, setAccessTokens, setNewTokenId,
-    setAuthError, taskItems, updateItems, fileItems, reports,
+    setAuthError, taskItems, setTaskItems, updateItems, setUpdateItems, fileItems, setFileItems, reports, setReports,
     hourlyRate, setHourlyRate, pdfTitle, setPdfTitle, serviceCompanyName, setServiceCompanyName,
     taxMode, setTaxMode, setDesignTypeGroups, setAiModelConfig, setBackendStatus,
   } = workspace
@@ -80,6 +80,28 @@ export function useSettingsOperations({
       setAuthError(error instanceof ApiError && error.status === 401
         ? '账号或密码不正确'
         : error instanceof Error ? `登录失败：${error.message}` : '登录失败，请重试')
+    }
+  }
+
+  const handleDemoLogin = async () => {
+    try {
+      const result = await api.loginDemo()
+      const credentials = { email: 'Giverny 演示账号', role: result.role }
+      setStoredAuth(credentials)
+      clearStateCache()
+      setTaskItems([])
+      setUpdateItems([])
+      setFileItems([])
+      setReports([])
+      setAuthError('')
+      setBackendStatus('连接中')
+      setRole(result.role)
+      setAuth(credentials)
+      setIsLoginModalOpen(false)
+      notify('已进入独立演示空间，当前数据均为虚构内容')
+    } catch (error) {
+      setAuthError(error instanceof Error ? `演示空间进入失败：${error.message}` : '演示空间进入失败，请重试')
+      throw error
     }
   }
 
@@ -250,7 +272,7 @@ export function useSettingsOperations({
   }
 
   return {
-    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
+    handleExportBackup, handleUnlock, handleDemoLogin, handleSignOut, handleChangeAdminPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,

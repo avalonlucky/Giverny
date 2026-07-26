@@ -1,9 +1,11 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.35.6",
+  "version": "0.36.0",
   "type": "module",
   "scripts": {
+    "demo:assets": "node scripts/generate-demo-assets.mjs",
+    "demo:test": "node scripts/test-demo-workspace.mjs",
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
     "agent-capabilities:generate": "node scripts/generate-agent-capability-docs.mjs",
     "baml:generate": "baml-cli generate",
@@ -37,7 +39,7 @@
     "agent:eval": "node agent-evals/run.mjs",
     "agent:eval:isolated": "node agent-evals/run-isolated.mjs",
     "browser:eval": "node scripts/run-browser-eval.mjs",
-    "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run agent:capabilities:test && npm run agent:business-tools:test && npm run agent:multimodal-tools:test && npm run agent:proactive-work:test && npm run agent:enterprise-memory:test && npm run agent:governance:test && npm run agent:security:test && npm run agent:execution:test && npm run agent:property:test && npm run agent:director:test && npm run agent:runtime-graph:test && npm run agent:productivity-graph:test && npm run agent:productivity-metrics:test && npm run agent:orchestrator:test && npm run agent:fact:test && npm run lint && npm run build",
+    "quality:fast": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run demo:test && npm run agent:capabilities:test && npm run agent:business-tools:test && npm run agent:multimodal-tools:test && npm run agent:proactive-work:test && npm run agent:enterprise-memory:test && npm run agent:governance:test && npm run agent:security:test && npm run agent:execution:test && npm run agent:property:test && npm run agent:director:test && npm run agent:runtime-graph:test && npm run agent:productivity-graph:test && npm run agent:productivity-metrics:test && npm run agent:orchestrator:test && npm run agent:fact:test && npm run lint && npm run build",
     "agent:quality:gate": "npm run ui:guard && npm run architecture:guard && npm run accounting:test && npm run build && npm run lint && npm run agent:eval:isolated && npm run browser:eval",
     "preview": "vite preview",
     "deploy:production": "npm run build && npm run infra:sync && node scripts/deploy-cloudflare-api.mjs && npm run agent:fact:production",

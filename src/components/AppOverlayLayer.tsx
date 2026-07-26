@@ -113,6 +113,7 @@ export function AppOverlayLayer({
   onCloseLogin,
   onCloseAboutGiverny,
   onUnlock,
+  onDemoLogin,
   showFireworks,
   toastQueue,
   onDismissToast,
@@ -187,6 +188,7 @@ export function AppOverlayLayer({
   onCloseLogin: () => void
   onCloseAboutGiverny: () => void
   onUnlock: (email: string, key: string, turnstileToken?: string) => void | Promise<void>
+  onDemoLogin: () => Promise<void>
   showFireworks: boolean
   toastQueue: ToastState[]
   onDismissToast: (toastId: number) => void
@@ -309,7 +311,7 @@ export function AppOverlayLayer({
           <FilePreviewModal file={previewFile} onClose={onClosePreviewFile} />
         </Suspense>
       )}
-      {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} />}
+      {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} onDemoLogin={onDemoLogin} />}
       {aboutGivernyOpen && <AboutGivernyModal onClose={onCloseAboutGiverny} />}
       {showFireworks && <Fireworks />}
       {toastQueue.length > 0 && (

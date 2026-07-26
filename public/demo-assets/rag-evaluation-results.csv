@@ -1,0 +1,5 @@
+case_id,scenario,answer_score,citation_score,latency_ms
+RAG-001,policy lookup,4.8,1.0,1840
+RAG-002,multi-hop question,4.2,0.9,2360
+RAG-003,conflicting sources,3.7,0.8,2110
+RAG-004,no-answer boundary,4.6,1.0,1620

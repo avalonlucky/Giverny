@@ -114,6 +114,10 @@
   animation: login-light-bloom 1.4s ease-out;
 }
 
+.login-demo-button {
+  margin-right: auto;
+}
+
 /* 晨光在水面上漫开：一圈柔光从中心缓缓铺开淡去（像阳光落在睡莲池上） */
 @keyframes login-light-bloom {
   0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }

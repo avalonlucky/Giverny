@@ -347,6 +347,9 @@ type AuthPrincipal = {
 }
 
 const DEFAULT_WORKSPACE_ID = 'default'
+const DEMO_WORKSPACE_ID = 'demo'
+const DEMO_PRINCIPAL_ID = 'demo-viewer'
+const DEMO_PRINCIPAL_EMAIL = 'demo@giverny.local'
 
 function principalWorkspaceId(principal: AuthPrincipal | null | undefined) {
   return String(principal?.workspaceId || DEFAULT_WORKSPACE_ID).slice(0, 80)
@@ -1232,6 +1235,7 @@ const SEARCH_EMBED_MODEL = '@cf/baai/bge-m3'
 
 type SearchTaskRow = {
   id: string
+  workspace_id: string | null
   title: string | null
   requirement: string | null
   design_type: string | null
@@ -1262,6 +1266,7 @@ function taskVectorMetadata(row: SearchTaskRow): Record<string, string | number>
     title: (row.title || '').slice(0, 200),
     month: row.settlement_month || '',
     type: row.design_type || '',
+    workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
   }
 }
 
@@ -1303,7 +1308,7 @@ async function indexTaskSearch(env: Env, id: string): Promise<void> {
   }
   try {
     const row = await env.DB.prepare(
-      'SELECT id, title, requirement, design_type, acceptance_note, settlement_month, deleted_at FROM tasks WHERE id = ?',
+      'SELECT id, workspace_id, title, requirement, design_type, acceptance_note, settlement_month, deleted_at FROM tasks WHERE id = ?',
     ).bind(id).first<SearchTaskRow>()
     if (!row) {
       return
@@ -1326,7 +1331,7 @@ async function reindexAllTasks(env: Env): Promise<Response> {
     return fail('Vectorize / Workers AI 未启用', 503)
   }
   const rows = await env.DB.prepare(
-    'SELECT id, title, requirement, design_type, acceptance_note, settlement_month FROM tasks WHERE deleted_at IS NULL',
+    'SELECT id, workspace_id, title, requirement, design_type, acceptance_note, settlement_month FROM tasks WHERE deleted_at IS NULL',
   ).all<SearchTaskRow>()
   const list = rows.results ?? []
   let indexed = 0
@@ -1349,7 +1354,7 @@ async function reindexAllTasks(env: Env): Promise<Response> {
   return ok({ ok: true, indexed, total: list.length })
 }
 
-async function searchTasks(env: Env, query: string): Promise<Response> {
+async function searchTasks(env: Env, query: string, workspaceId: string): Promise<Response> {
   if (!env.VECTORIZE || !env.AI) {
     return fail('Vectorize / Workers AI 未启用', 503)
   }
@@ -1364,6 +1369,7 @@ async function searchTasks(env: Env, query: string): Promise<Response> {
   const res = await env.VECTORIZE.query(vector, { topK: 20, returnMetadata: 'all' })
   const results = (res.matches ?? [])
     .filter((match) => match.score >= 0.4)
+    .filter((match) => String(match.metadata?.workspaceId || DEFAULT_WORKSPACE_ID) === workspaceId)
     .map((match) => ({
       taskId: Number(match.metadata?.taskId ?? match.id.replace('task-', '')),
       score: Math.round(match.score * 100) / 100,
@@ -1375,7 +1381,7 @@ async function searchTasks(env: Env, query: string): Promise<Response> {
   return ok({ results })
 }
 
-async function semanticTaskIds(env: Env, query: string, limit: number, month = '') {
+async function semanticTaskIds(env: Env, query: string, limit: number, month = '', workspaceId = DEFAULT_WORKSPACE_ID) {
   if (!env.VECTORIZE || !env.AI || !query.trim()) {
     return []
   }
@@ -1389,8 +1395,10 @@ async function semanticTaskIds(env: Env, query: string, limit: number, month = '
         id: String(match.metadata?.taskId ?? match.id.replace('task-', '')),
         score: Math.round(match.score * 100) / 100,
         month: String(match.metadata?.month ?? ''),
+        workspaceId: String(match.metadata?.workspaceId || DEFAULT_WORKSPACE_ID),
       }))
       .filter((item) => /^\d+$/.test(item.id))
+      .filter((item) => item.workspaceId === workspaceId)
       .filter((item) => !month || item.month === month)
       .slice(0, limit)
   } catch {
@@ -1398,17 +1406,17 @@ async function semanticTaskIds(env: Env, query: string, limit: number, month = '
   }
 }
 
-async function tasksByIds(env: Env, ids: string[]) {
+async function tasksByIds(env: Env, ids: string[], workspaceId: string) {
   const uniqueIds = Array.from(new Set(ids.filter((id) => /^\d+$/.test(id)))).slice(0, 100)
   if (uniqueIds.length === 0) {
     return []
   }
   const placeholders = uniqueIds.map(() => '?').join(',')
   const rows = await env.DB.prepare(
-    `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
+    `SELECT id, workspace_id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json
      FROM tasks
-     WHERE deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`,
-  ).bind(...uniqueIds).all<DbTask>()
+     WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND id IN (${placeholders})`,
+  ).bind(workspaceId, ...uniqueIds).all<DbTask>()
   const byId = new Map((rows.results ?? []).map((task) => [String(task.id), task]))
   return uniqueIds.map((id) => byId.get(id)).filter((task): task is DbTask => Boolean(task))
 }
@@ -7477,9 +7485,9 @@ async function agentSearchTasksTool(env: Env, request: Request) {
            LIMIT ?`,
         ).bind(principal.workspaceId, limit).all<DbTask>()
     : { results: [] as DbTask[], success: true }
-  const semanticMatches = query && !statusIntent ? await semanticTaskIds(env, query, limit, month) : []
+  const semanticMatches = query && !statusIntent ? await semanticTaskIds(env, query, limit, month, principal.workspaceId) : []
   const semanticRows = semanticMatches.length
-    ? (await tasksByIds(env, semanticMatches.map((item) => item.id))).filter((task) => (task.workspace_id || DEFAULT_WORKSPACE_ID) === principal.workspaceId)
+    ? await tasksByIds(env, semanticMatches.map((item) => item.id), principal.workspaceId)
     : []
   const semanticScoreById = new Map(semanticMatches.map((item) => [item.id, item.score]))
   const mergedById = new Map<string, DbTask>()
@@ -8133,7 +8141,7 @@ async function agentSearchAttachmentsTool(env: Env, request: Request) {
          ORDER BY attachments.uploaded_at DESC
          LIMIT 500`,
       ).bind(principal.workspaceId).all<AgentAttachmentSearchRow>()
-  const semanticMatches = query ? await semanticTaskIds(env, query, 20, month) : []
+  const semanticMatches = query ? await semanticTaskIds(env, query, 20, month, principal.workspaceId) : []
   const semanticScores = new Map(semanticMatches.map((item) => [item.id, item.score]))
   const { normalized, terms } = attachmentSearchTerms(query)
   const ranked = (rows.results ?? []).filter((row) => agentAttachmentVisibleToRole(row, principal.role)).map((row) => {
@@ -13610,7 +13618,7 @@ function toHourEstimateSample(task: DbTask): HourEstimateSample {
   }
 }
 
-async function hourEstimateTasksByIds(env: Env, ids: string[]) {
+async function hourEstimateTasksByIds(env: Env, ids: string[], workspaceId: string) {
   const uniqueIds = Array.from(new Set(ids.filter((id) => /^\d+$/.test(id)))).slice(0, 20)
   if (uniqueIds.length === 0) {
     return []
@@ -13618,10 +13626,10 @@ async function hourEstimateTasksByIds(env: Env, ids: string[]) {
   const placeholders = uniqueIds.map(() => '?').join(',')
   const rows = await env.DB.prepare(
     `SELECT * FROM tasks
-     WHERE id IN (${placeholders})
+     WHERE workspace_id = ? AND id IN (${placeholders})
        AND deleted_at IS NULL AND voided_at IS NULL
        AND status = '已验收' AND actual_hours > 0`,
-  ).bind(...uniqueIds).all<DbTask>()
+  ).bind(workspaceId, ...uniqueIds).all<DbTask>()
   const byId = new Map((rows.results ?? []).map((task) => [String(task.id), task]))
   return uniqueIds.map((id) => byId.get(id)).filter((task): task is DbTask => Boolean(task))
 }
@@ -14535,6 +14543,7 @@ async function resolvePrincipal(env: Env, key: string, email: string): Promise<A
     role: scopeToRole(row.scope),
     email: normalizedEmail,
     principalId: row.id,
+    workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
     expiresAt: row.expires_at ?? undefined,
   }
 }
@@ -14753,6 +14762,25 @@ async function login(env: Env, request: Request) {
   )
 }
 
+async function loginDemo(env: Env) {
+  const workspace = await env.DB.prepare("SELECT id FROM workspaces WHERE id = ? AND status = 'active'")
+    .bind(DEMO_WORKSPACE_ID)
+    .first<{ id: string }>()
+  if (!workspace) return fail('演示空间正在准备中，请稍后再试', 503)
+  const principal: AuthPrincipal = {
+    role: 'viewer',
+    email: DEMO_PRINCIPAL_EMAIL,
+    principalId: DEMO_PRINCIPAL_ID,
+    workspaceId: DEMO_WORKSPACE_ID,
+  }
+  const session = await createAuthSession(env, principal)
+  await audit(env, 'login', 'auth', DEMO_PRINCIPAL_ID, { workspaceId: DEMO_WORKSPACE_ID, demo: true })
+  return Response.json(
+    { role: principal.role, workspaceId: DEMO_WORKSPACE_ID, demo: true },
+    { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
+  )
+}
+
 async function logout(env: Env, request: Request) {
   await deleteRequestSession(env, request)
   return Response.json(
@@ -14851,9 +14879,9 @@ async function confirmPasswordReset(env: Env, request: Request) {
   return ok({ ok: true })
 }
 
-async function listAccessTokens(env: Env) {
+async function listAccessTokens(env: Env, workspaceId: string) {
   await ensureAccessTokenScope(env)
-  const rows = await env.DB.prepare('SELECT * FROM access_tokens ORDER BY created_at DESC').all<DbAccessToken>()
+  const rows = await env.DB.prepare('SELECT * FROM access_tokens WHERE workspace_id = ? ORDER BY created_at DESC').bind(workspaceId).all<DbAccessToken>()
   return (rows.results ?? []).map(toAccessToken)
 }
 
@@ -14866,11 +14894,12 @@ async function createAccessToken(env: Env, request: Request) {
   const days = Number(body.expiresInDays)
   const expiresAt = Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null
   const scope = normalizeTokenScope(body.scope)
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
 
   await env.DB.prepare(
-    `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled) VALUES (?, ?, ?, ?, ?, 0)`,
+    `INSERT INTO access_tokens (id, token, label, scope, expires_at, disabled, workspace_id) VALUES (?, ?, ?, ?, ?, 0, ?)`,
   )
-    .bind(id, token, (body.label ?? '').trim() || '未命名口令', scope, expiresAt)
+    .bind(id, token, (body.label ?? '').trim() || '未命名口令', scope, expiresAt, workspaceId)
     .run()
 
   await audit(env, 'create', 'access_token', id, { label: body.label ?? '', scope, expiresInDays: body.expiresInDays ?? null })
@@ -14880,22 +14909,26 @@ async function createAccessToken(env: Env, request: Request) {
 
 async function updateAccessToken(env: Env, id: string, request: Request) {
   const body = (await request.json().catch(() => ({}))) as { disabled?: boolean }
-  const row = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ?').bind(id).first<DbAccessToken>()
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAccessToken>()
   if (!row) {
     return fail('口令不存在', 404)
   }
-  await env.DB.prepare('UPDATE access_tokens SET disabled = ? WHERE id = ?').bind(body.disabled ? 1 : 0, id).run()
+  await env.DB.prepare('UPDATE access_tokens SET disabled = ? WHERE id = ? AND workspace_id = ?').bind(body.disabled ? 1 : 0, id, workspaceId).run()
   if (body.disabled) {
     await revokePrincipalSessions(env, id)
   }
   await audit(env, body.disabled ? 'disable' : 'enable', 'access_token', id, null)
-  const saved = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ?').bind(id).first<DbAccessToken>()
+  const saved = await env.DB.prepare('SELECT * FROM access_tokens WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<DbAccessToken>()
   return ok(saved ? toAccessToken(saved) : toAccessToken(row))
 }
 
-async function deleteAccessToken(env: Env, id: string) {
+async function deleteAccessToken(env: Env, id: string, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const row = await env.DB.prepare('SELECT id FROM access_tokens WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).first<{ id: string }>()
+  if (!row) return fail('口令不存在', 404)
   await revokePrincipalSessions(env, id)
-  await env.DB.prepare('DELETE FROM access_tokens WHERE id = ?').bind(id).run()
+  await env.DB.prepare('DELETE FROM access_tokens WHERE id = ? AND workspace_id = ?').bind(id, workspaceId).run()
   await audit(env, 'delete', 'access_token', id, null)
   return ok({ ok: true })
 }
@@ -14982,7 +15015,28 @@ async function ensureSeedData(env: Env) {
 
 async function getState(env: Env, role: AuthRole, request: Request) {
   await ensureSeedData(env)
-  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) {
+    return ok({
+      role: 'guest' as AuthRole,
+      tasks: [],
+      updates: [],
+      files: [],
+      attachmentAnalyses: [],
+      settings: {
+        hourlyRate: 0,
+        pdfTitle: 'Giverny',
+        serviceCompanyName: 'Giverny',
+        taxMode: 'salary' as TaxMode,
+        designTypes: flattenDesignTypeGroups(defaultDesignTypeGroups),
+        designTypeGroups: defaultDesignTypeGroups,
+      },
+      reports: [],
+      workspace: { id: 'anonymous', demo: false },
+    })
+  }
+  const workspaceId = principalWorkspaceId(principal)
+  const isDemoWorkspace = workspaceId === DEMO_WORKSPACE_ID
 
   // 数据可见范围分级：
   const full = canSeeFullData(role) // admin/collaborator/viewer：看全量（含作废）
@@ -15059,16 +15113,17 @@ async function getState(env: Env, role: AuthRole, request: Request) {
     files: (fileRows.results ?? []).map(toFile),
     attachmentAnalyses: (analysisRows.results ?? []).map(toAttachmentAnalysis),
     settings: {
-      hourlyRate: Number(rateRow?.value) || defaultHourlyRate,
-      pdfTitle,
-      serviceCompanyName,
+      hourlyRate: isDemoWorkspace ? 260 : Number(rateRow?.value) || defaultHourlyRate,
+      pdfTitle: isDemoWorkspace ? 'Giverny 多岗位协作结算回单' : pdfTitle,
+      serviceCompanyName: isDemoWorkspace ? '澄屿创新实验室' : serviceCompanyName,
       taxMode,
       designTypes: flattenDesignTypeGroups(designTypeGroups),
       designTypeGroups,
       aiModel: role === 'admin' ? publicAiModelConfig(env, aiModelConfig) : undefined,
     },
     reports: (reportRows.results ?? []).map(toReport),
-    accessTokens: role === 'admin' ? await listAccessTokens(env) : undefined,
+    accessTokens: role === 'admin' ? await listAccessTokens(env, workspaceId) : undefined,
+    workspace: { id: workspaceId, demo: isDemoWorkspace },
   })
 }
 
@@ -15612,18 +15667,18 @@ async function createFile(env: Env, request: Request, ctx?: WorkerExecutionConte
   if (!task) {
     return fail('任务不存在或已删除', 404)
   }
-  const r2Key = `uploads/${taskId}/${id}/${sanitizeFileName(file.name)}`
+  const r2Key = `uploads/${workspaceId}/${taskId}/${id}/${sanitizeFileName(file.name)}`
   await env.UPLOADS.put(r2Key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } })
 
   let previewKey: string | null = null
   try {
     if (preview instanceof File && preview.size > 0) {
-      previewKey = `previews/${taskId}/${id}/${sanitizeFileName(preview.name)}`
+      previewKey = `previews/${workspaceId}/${taskId}/${id}/${sanitizeFileName(preview.name)}`
       await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
     } else if (type === 'PNG' || type === 'JPG' || type === 'WEBP' || type === 'GIF' || type === 'SVG' || type === 'BMP') {
       previewKey = r2Key
     } else if (isDocumentPreviewCoverType(type)) {
-      previewKey = await createDocumentPreviewCover(env, taskId, id, file.name, type)
+      previewKey = await createDocumentPreviewCover(env, workspaceId, taskId, id, file.name, type)
     }
 
     const saved = await insertAttachment(env, {
@@ -15671,8 +15726,8 @@ function documentPreviewCoverSvg(fileName: string, fileType: string) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480" role="img" aria-label="${type} 文档封面"><rect width="720" height="480" fill="white"/><rect x="40" y="36" width="640" height="408" fill="none" stroke="black" stroke-width="2"/><path d="M250 116h145l75 75v174H250z" fill="none" stroke="black" stroke-width="8"/><path d="M395 116v82h75" fill="none" stroke="black" stroke-width="8"/><path d="M292 258h136M292 294h136M292 330h98" stroke="black" stroke-width="8" stroke-linecap="round"/><text x="360" y="395" text-anchor="middle" font-family="sans-serif" font-size="22">${type}</text><text x="360" y="425" text-anchor="middle" font-family="sans-serif" font-size="16">${title}</text></svg>`
 }
 
-async function createDocumentPreviewCover(env: Env, taskId: string, attachmentId: string, fileName: string, fileType: string) {
-  const previewKey = `previews/${taskId}/${attachmentId}/${sanitizeFileName(fileName)}.fallback.svg`
+async function createDocumentPreviewCover(env: Env, workspaceId: string, taskId: string, attachmentId: string, fileName: string, fileType: string) {
+  const previewKey = `previews/${workspaceId}/${taskId}/${attachmentId}/${sanitizeFileName(fileName)}.fallback.svg`
   await env.UPLOADS.put(previewKey, documentPreviewCoverSvg(fileName, fileType), {
     httpMetadata: { contentType: 'image/svg+xml' },
   })
@@ -15783,7 +15838,7 @@ async function initMultipartUpload(env: Env, request: Request) {
     return fail('任务不存在或已删除', 404)
   }
   const fileId = nextNumericId()
-  const key = `uploads/${body.taskId}/${fileId}/${sanitizeFileName(body.fileName)}`
+  const key = `uploads/${workspaceId}/${body.taskId}/${fileId}/${sanitizeFileName(body.fileName)}`
   const upload = await env.UPLOADS.createMultipartUpload(key, {
     httpMetadata: { contentType: body.contentType || 'application/octet-stream' },
   })
@@ -15849,12 +15904,12 @@ async function completeMultipartUpload(env: Env, request: Request, ctx?: WorkerE
     const fileType = inferAttachmentFileType(fileName, contentType, String(form.get('type') ?? ''))
     const preview = form.get('preview')
     if (preview instanceof File && preview.size > 0) {
-      previewKey = `previews/${taskId}/${fileId}/${sanitizeFileName(preview.name)}`
+      previewKey = `previews/${workspaceId}/${taskId}/${fileId}/${sanitizeFileName(preview.name)}`
       await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'application/octet-stream' } })
     } else if (['PNG', 'JPG', 'WEBP', 'GIF', 'SVG', 'BMP'].includes(fileType)) {
       previewKey = key
     } else if (isDocumentPreviewCoverType(fileType)) {
-      previewKey = await createDocumentPreviewCover(env, taskId, fileId, fileName, fileType)
+      previewKey = await createDocumentPreviewCover(env, workspaceId, taskId, fileId, fileName, fileType)
     }
 
     const saved = await insertAttachment(env, {
@@ -15974,7 +16029,7 @@ async function setFilePreview(env: Env, id: string, request: Request) {
   if (!(preview instanceof File) || preview.size === 0) {
     return fail('缺少预览图')
   }
-  const previewKey = `previews/${row.task_id}/${id}/${sanitizeFileName(preview.name || 'preview.png')}`
+  const previewKey = `previews/${workspaceId}/${row.task_id}/${id}/${sanitizeFileName(preview.name || 'preview.png')}`
   await env.UPLOADS.put(previewKey, preview.stream(), { httpMetadata: { contentType: preview.type || 'image/png' } })
   await env.DB.prepare('UPDATE attachments SET preview_r2_key = ? WHERE id = ?').bind(previewKey, id).run()
   if (row.preview_r2_key && row.preview_r2_key !== previewKey) {
@@ -16013,6 +16068,14 @@ async function getFilePreview(env: Env, id: string, request: Request) {
         'cache-control': 'private, max-age=3600',
       },
     })
+  }
+  if (row.preview_r2_key.startsWith('demo-static/')) {
+    const assetUrl = new URL(`/demo-assets/${row.preview_r2_key.slice('demo-static/'.length)}`, request.url)
+    const response = await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers }))
+    if (!response.ok) return fail('预览文件不存在', 404)
+    const headers = new Headers(response.headers)
+    headers.set('cache-control', 'private, max-age=3600')
+    return new Response(response.body, { status: response.status, headers })
   }
   const object = await env.UPLOADS.get(row.preview_r2_key)
   if (!object) {
@@ -16067,6 +16130,17 @@ async function getFileSource(env: Env, id: string, request: Request) {
     return fail('文件不存在', 404)
   }
   if (!(await canReadAttachmentResource(env, request, id, row))) return fail('文件不存在或无权访问', 404)
+
+  if (row.r2_key.startsWith('demo-static/')) {
+    const assetUrl = new URL(`/demo-assets/${row.r2_key.slice('demo-static/'.length)}`, request.url)
+    const response = await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers }))
+    if (!response.ok) return fail('源文件不存在', 404)
+    const headers = new Headers(response.headers)
+    headers.set('content-type', row.mime_type || 'application/octet-stream')
+    headers.set('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(row.file_name)}`)
+    headers.set('cache-control', 'private, max-age=3600')
+    return new Response(response.body, { status: response.status, headers })
+  }
 
   const fileSize = Number(row.file_size) || 0
   const requestedRange = parseSingleByteRange(request.headers.get('range'), fileSize)
@@ -21352,6 +21426,7 @@ async function planAgentAction(env: Env, request: Request) {
 }
 
 async function suggestHourEstimateWithAi(env: Env, request: Request) {
+  const workspaceId = principalWorkspaceId(await resolveRequestPrincipal(env, request))
   const body = (await request.json().catch(() => ({}))) as HourEstimateRequest
   const title = String(body.title ?? '').trim().slice(0, 200)
   const requirement = String(body.requirement ?? '').trim().slice(0, 6000)
@@ -21375,13 +21450,13 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   ])
 
   const exactRows = selectedType
-    ? await env.DB.prepare(
+      ? await env.DB.prepare(
         `SELECT * FROM tasks
-         WHERE deleted_at IS NULL AND voided_at IS NULL
+         WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
            AND status = '已验收' AND actual_hours > 0 AND design_type = ?
          ORDER BY actual_delivery_date DESC, updated_at DESC
          LIMIT 16`,
-      ).bind(selectedType).all<DbTask>()
+      ).bind(workspaceId, selectedType).all<DbTask>()
     : { results: [] as DbTask[], success: true }
   const exactSamples = (exactRows.results ?? []).map((task) => ({
     ...toHourEstimateSample(task),
@@ -21392,10 +21467,10 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
   const knownIds = new Set(exactSamples.map((sample) => sample.id))
 
   const semanticQuery = [title, selectedType, requirement, attachmentNames.join(' '), attachmentText.slice(0, 1500)].filter(Boolean).join('\n')
-  const semanticMatches = (await semanticTaskIds(env, semanticQuery, 16))
+  const semanticMatches = (await semanticTaskIds(env, semanticQuery, 16, '', workspaceId))
     .filter((match) => match.score >= 0.52 && !knownIds.has(match.id))
   const semanticScoreById = new Map(semanticMatches.map((match) => [match.id, match.score]))
-  const semanticRows = await hourEstimateTasksByIds(env, semanticMatches.map((match) => match.id))
+  const semanticRows = await hourEstimateTasksByIds(env, semanticMatches.map((match) => match.id), workspaceId)
   const semanticSamples = semanticRows.map((task) => ({
     ...toHourEstimateSample(task),
     relation: 'semantic' as const,
@@ -21406,14 +21481,14 @@ async function suggestHourEstimateWithAi(env: Env, request: Request) {
 
   const parentType = selectedType.split('/')[0]?.trim()
   const parentRows = exactSamples.length + semanticSamples.length < 3 && parentType
-    ? await env.DB.prepare(
+      ? await env.DB.prepare(
         `SELECT * FROM tasks
-         WHERE deleted_at IS NULL AND voided_at IS NULL
+         WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
            AND status = '已验收' AND actual_hours > 0
            AND design_type LIKE ? AND design_type != ?
          ORDER BY actual_delivery_date DESC, updated_at DESC
          LIMIT 8`,
-      ).bind(`${parentType}%`, selectedType).all<DbTask>()
+      ).bind(workspaceId, `${parentType}%`, selectedType).all<DbTask>()
     : { results: [] as DbTask[], success: true }
   const parentSamples = (parentRows.results ?? [])
     .filter((task) => !knownIds.has(String(task.id)))
@@ -22474,6 +22549,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     path.startsWith('/api/agent/') ||
     path.startsWith('/api/local-cli/bridge/') ||
     path === '/api/auth/login' ||
+    path === '/api/auth/demo' ||
     path === '/api/auth/logout' ||
     path === '/api/auth/password-reset/request' ||
     path === '/api/auth/password-reset/confirm' ||
@@ -22595,6 +22671,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)
   }
+  if (path === '/api/auth/demo' && request.method === 'POST') {
+    return loginDemo(env)
+  }
   if (path === '/api/auth/logout' && request.method === 'POST') {
     return logout(env, request)
   }
@@ -22647,7 +22726,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return updateAccessToken(env, path.split('/').pop() ?? '', request)
   }
   if (path.startsWith('/api/tokens/') && request.method === 'DELETE') {
-    return deleteAccessToken(env, path.split('/').pop() ?? '')
+    return deleteAccessToken(env, path.split('/').pop() ?? '', request)
   }
   if (path === '/api/state' && request.method === 'GET') {
     return getState(env, role, request)
@@ -22876,7 +22955,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     return id ? deleteKnowledgeNote(env, id, request) : fail('缺少 id', 400)
   }
   if (path === '/api/search' && request.method === 'GET') {
-    return searchTasks(env, url.searchParams.get('q') ?? '')
+    return searchTasks(env, url.searchParams.get('q') ?? '', principalWorkspaceId(await resolveRequestPrincipal(env, request)))
   }
   if (path === '/api/search/reindex' && request.method === 'POST') {
     return reindexAllTasks(env)

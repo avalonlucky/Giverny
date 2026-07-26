@@ -2,6 +2,7 @@ import type { BackendState } from './api'
 import { removeLocalCache, writeJsonLocalCache } from './localCache'
 
 const STATE_CACHE_KEY = 'designer-worklog-state-cache-v2'
+const AUTH_STORAGE_KEY = 'designer-worklog-auth'
 const STATE_CACHE_SCHEMA_VERSION = 2
 const STATE_CACHE_TTL_MS = 30 * 60 * 1000
 
@@ -16,6 +17,10 @@ export function readStateCache(): BackendState | null {
     return null
   }
   try {
+    if (!window.localStorage.getItem(AUTH_STORAGE_KEY)) {
+      removeLocalCache(STATE_CACHE_KEY)
+      return null
+    }
     const raw = window.localStorage.getItem(STATE_CACHE_KEY)
     if (!raw) {
       return null
