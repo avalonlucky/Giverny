@@ -198,8 +198,8 @@
   height: 34px;
   padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  border: 0;
+  background: var(--color-surface-alt);
   font-family: inherit;
   font-size: 13px;
   color: var(--color-text-secondary);
@@ -208,13 +208,12 @@
 }
 
 .giverny-season-options button:hover {
-  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .giverny-season-options button.active {
   background: var(--color-primary);
   color: var(--color-surface-strong);
-  border-color: var(--color-primary);
   font-weight: 700;
 }
 
@@ -415,8 +414,22 @@
   margin-top: 12vh;
   padding: 28px;
   text-align: center;
-  color: #6d797c;
+  color: var(--color-text-secondary);
   height: fit-content;
+}
+
+.shared-message img {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+}
+
+.shared-message > span {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--color-primary);
+  font-family: var(--font-serif);
+  font-size: 12px;
 }
 
 .shared-message strong {
@@ -428,7 +441,7 @@
 
 .shared-footer {
   padding: 8px 0 4px;
-  color: #98a2a0;
+  color: var(--color-text-muted);
   font-size: 12px;
   text-align: center;
 }

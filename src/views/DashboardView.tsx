@@ -4,6 +4,7 @@ import { DonutChart, type DonutChartItem } from '../components/DonutChart'
 import { TrendChart } from '../components/TrendChart'
 import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from '../components/TaskUi'
 import { EmptyState } from '../components/EmptyState'
+import { givernyCopy } from '../lib/brandCopy'
 import { CreateTaskContextMenu, TaskContextMenu } from '../components/TaskContextMenu'
 import { DashboardTaskSidebar } from '../components/DashboardTaskSidebar'
 import { TaskContextInsightBadge } from '../components/TaskContextInsightBadge'
@@ -299,8 +300,8 @@ export function DashboardView({
                   <EmptyState
                     role="status"
                     variant="feature"
-                    title={activeMonthTaskCount === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
-                    description={activeMonthTaskCount === 0 ? '先建一条真实任务，工时、文件和月报都会从这里串起来。' : '换一个关键词或状态筛选试试。'}
+                    title={activeMonthTaskCount === 0 ? givernyCopy.emptyTasksTitle : '没有找到匹配任务'}
+                    description={activeMonthTaskCount === 0 ? givernyCopy.emptyTasksDescription : '换一个关键词或状态筛选试试。'}
                     action={activeMonthTaskCount === 0 ? (
                       <button className="ghost-button compact-button" onClick={() => onCreateTask()}>
                         <Plus size={15} />

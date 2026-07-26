@@ -35,6 +35,7 @@ import { ActiveTaskFilters, StatusBadge, TaskSearchBox } from '../components/Tas
 import { CreateTaskContextMenu, TaskContextMenu } from '../components/TaskContextMenu'
 import { DashboardTaskSidebar } from '../components/DashboardTaskSidebar'
 import { EmptyState } from '../components/EmptyState'
+import { givernyCopy } from '../lib/brandCopy'
 import { TaskContextInsightBadge } from '../components/TaskContextInsightBadge'
 
 const CalendarView = lazy(() => import('./CalendarView'))
@@ -336,8 +337,8 @@ export default function TasksView({
             <EmptyState
               role="status"
               variant="feature"
-              title={activeMonthTasks.length === 0 ? '这个月还没有任务' : '没有找到匹配任务'}
-              description={activeMonthTasks.length === 0 ? '新建任务后，可以通过双击或右键菜单管理任务。' : '换一个关键词或状态筛选试试。'}
+              title={activeMonthTasks.length === 0 ? givernyCopy.emptyTasksTitle : '没有找到匹配任务'}
+              description={activeMonthTasks.length === 0 ? givernyCopy.emptyTasksDescription : '换一个关键词或状态筛选试试。'}
               action={canWrite && activeMonthTasks.length === 0
                 ? <button className="ghost-button compact-button" onClick={onCreateTask}><Plus size={15} />新建任务</button>
                 : activeMonthTasks.length > 0

@@ -16,10 +16,10 @@ export default function SharedSettlementExport({ token }: { token: string }) {
   }, [token])
 
   if (error) {
-    return <main className="shared-page"><div className="shared-message panel"><strong>无法打开该回单</strong><p>{error}</p></div></main>
+    return <main className="shared-page"><div className="shared-message panel"><img src="/giverny-logo.png" alt="" /><span>Giverny · 吉维尼</span><strong>无法打开该回单</strong><p>{error}</p></div></main>
   }
   if (!state) {
-    return <main className="shared-page"><div className="shared-message panel"><strong>正在加载回单…</strong></div></main>
+    return <main className="shared-page"><div className="shared-message panel"><img src="/giverny-logo.png" alt="" /><span>Giverny · 吉维尼</span><strong>花园正在整理这份回单…</strong></div></main>
   }
 
   return (
@@ -27,6 +27,7 @@ export default function SharedSettlementExport({ token }: { token: string }) {
       <div className="shared-content shared-receipt-view">
         <header className="shared-receipt-toolbar">
           <div>
+            <span className="shared-receipt-wordmark"><img src="/giverny-logo.png" alt="" />Giverny</span>
             <h1>结算回单</h1>
             <p>{state.receipt.settlementLabel} · 在线只读预览</p>
           </div>
@@ -41,6 +42,10 @@ export default function SharedSettlementExport({ token }: { token: string }) {
         </header>
         <SettlementReceipt options={state.receipt} className="shared-settlement-receipt" />
         <SharedProjectAppendix tasks={state.tasks} updates={state.updates} files={state.files} />
+        <footer className="shared-brand-signoff">
+          <span>Giverny · 吉维尼</span>
+          <strong>让创作在自己的花园里生长</strong>
+        </footer>
       </div>
     </main>
   )

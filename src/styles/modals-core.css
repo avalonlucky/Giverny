@@ -52,6 +52,9 @@
 
 .modal-backdrop:has(.admin-login-modal)::before {
   background:
+    radial-gradient(ellipse at 16% 76%, color-mix(in srgb, var(--color-primary) 34%, transparent) 0 2.6%, transparent 3.2%),
+    radial-gradient(ellipse at 82% 72%, color-mix(in srgb, var(--color-primary) 28%, transparent) 0 2.2%, transparent 2.8%),
+    radial-gradient(circle at 76% 68%, color-mix(in srgb, var(--color-surface-strong) 42%, transparent) 0 0.8%, transparent 1.5%),
     radial-gradient(ellipse at 48% 65%, color-mix(in srgb, var(--color-surface-strong) 24%, transparent) 0 8%, transparent 30%),
     radial-gradient(ellipse at 20% 28%, color-mix(in srgb, var(--color-primary) 24%, transparent), transparent 28%);
   mix-blend-mode: screen;
@@ -72,14 +75,27 @@
 }
 
 @keyframes giverny-login-light {
-  0% { transform: translate3d(-3%, 2%, 0) scale(0.96); opacity: 0.45; }
-  100% { transform: translate3d(4%, -3%, 0) scale(1.08); opacity: 0.9; }
+  0% { transform: translate3d(-3%, 2%, 0) scale(0.96) rotate(-0.4deg); opacity: 0.45; }
+  100% { transform: translate3d(4%, -3%, 0) scale(1.08) rotate(0.5deg); opacity: 0.9; }
 }
 
 @keyframes giverny-login-ripple {
   0%, 18% { transform: scale(0.72); opacity: 0; }
   36% { transform: scale(1); opacity: 0.7; }
   72%, 100% { transform: scale(1.3); opacity: 0; }
+}
+
+@media (max-width: 700px) {
+  .modal-backdrop:has(.admin-login-modal) {
+    background-position: center, center;
+    background-size: 100% 100%, auto 108%;
+    animation-name: giverny-login-scene-mobile;
+  }
+
+  @keyframes giverny-login-scene-mobile {
+    0% { background-position: center, 48% 50%; background-size: 100% 100%, auto 108%; }
+    100% { background-position: center, 53% 47%; background-size: 100% 100%, auto 116%; }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

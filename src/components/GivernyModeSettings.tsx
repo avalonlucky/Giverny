@@ -38,11 +38,11 @@ export function GivernyModeSettings() {
     document.documentElement.dataset.season = resolveSeason(pref)
   }
 
-  const seasons: Array<[SeasonKey, string]> = [
-    ['spring', '春 · 萌芽'],
-    ['summer', '夏 · 盛放'],
-    ['autumn', '秋 · 暮光'],
-    ['winter', '冬 · 冷静'],
+  const seasons: Array<{ key: SeasonKey; label: string; description: string }> = [
+    { key: 'spring', label: '春 · 萌芽', description: '嫩芽初生的浅绿' },
+    { key: 'summer', label: '夏 · 睡莲', description: '睡莲池的清水青' },
+    { key: 'autumn', label: '秋 · 暮光', description: '花园与晚霞的暖色' },
+    { key: 'winter', label: '冬 · 雾蓝', description: '雾气中的水面蓝' },
   ]
   const autoLabel: Record<SeasonKey, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
 
@@ -51,7 +51,7 @@ export function GivernyModeSettings() {
       <summary className="settings-group-summary">
         <div>
           <h2>外观 · 吉维尼模式</h2>
-          <p>莫奈花园主题，随季节自然流转</p>
+          <p>来自莫奈《睡莲》的低饱和季节色彩</p>
         </div>
         <ChevronDown size={18} />
       </summary>
@@ -60,7 +60,7 @@ export function GivernyModeSettings() {
           <div className="panel-header compact">
             <div>
               <h2>吉维尼模式</h2>
-              <p>致敬莫奈的睡莲池。开启后整站切换到莫奈花园色系，主题随季节流转。默认关闭，冷静的工具模式不受影响。</p>
+              <p>使用来自莫奈《睡莲》的低饱和季节色彩，让工作空间随着四季变化。</p>
             </div>
             <button
               type="button"
@@ -80,13 +80,17 @@ export function GivernyModeSettings() {
                 <button type="button" className={seasonPref === 'auto' ? 'active' : ''} onClick={() => applySeason('auto')}>
                   跟随当前季节（{autoLabel[currentSeason()]}）
                 </button>
-                {seasons.map(([key, label]) => (
-                  <button type="button" key={key} className={seasonPref === key ? 'active' : ''} onClick={() => applySeason(key)}>
-                    {label}
+                {seasons.map((season) => (
+                  <button type="button" key={season.key} className={seasonPref === season.key ? 'active' : ''} onClick={() => applySeason(season.key)} title={season.description}>
+                    {season.label}
                   </button>
                 ))}
               </div>
-              <p className="giverny-season-hint">默认跟随当前真实季节；也可手动锁定某一季。</p>
+              <p className="giverny-season-hint">
+                {seasonPref === 'auto'
+                  ? `当前跟随真实季节：${seasons.find((season) => season.key === currentSeason())?.description}`
+                  : seasons.find((season) => season.key === seasonPref)?.description}
+              </p>
             </div>
           )}
         </section>

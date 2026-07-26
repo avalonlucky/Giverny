@@ -92,8 +92,9 @@ export function AdminLoginModal({
       </div>
       <header className="modal-header login-functional-header">
         <div>
-          <h2 id="admin-login-title">登录后才能编辑</h2>
-          <small>游客可直接浏览；新建、修改、上传、验收和结算需要管理员身份。</small>
+          <p className="eyebrow">Giverny 工作花园</p>
+          <h2 id="admin-login-title">回到你的创作花园</h2>
+          <small>管理员登录后可继续新建、修改、上传、验收和结算。</small>
         </div>
       </header>
       <div className="admin-login-body">

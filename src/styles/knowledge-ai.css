@@ -318,6 +318,49 @@
   gap: 10px;
 }
 
+.alice-welcome-lily {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 48px;
+  place-items: center;
+  margin-bottom: 4px;
+  color: var(--color-primary);
+}
+
+.alice-welcome-lily svg:first-child {
+  position: absolute;
+  bottom: 0;
+  width: 68px;
+  height: 30px;
+  opacity: 0.48;
+  animation: alice-water-breathe 4.2s ease-in-out infinite;
+}
+
+.alice-welcome-lily svg:last-child {
+  position: relative;
+  width: 31px;
+  height: 31px;
+  animation: alice-lily-sway 3.4s ease-in-out infinite alternate;
+}
+
+@keyframes alice-water-breathe {
+  0%, 100% { transform: scaleX(0.9); opacity: 0.3; }
+  50% { transform: scaleX(1.08); opacity: 0.58; }
+}
+
+@keyframes alice-lily-sway {
+  from { transform: translateY(1px) rotate(-3deg); }
+  to { transform: translateY(-3px) rotate(3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alice-welcome-lily svg:first-child,
+  .alice-welcome-lily svg:last-child {
+    animation: none;
+  }
+}
+
 .alice-welcome-kicker {
   color: var(--color-primary);
   font-size: 12px;

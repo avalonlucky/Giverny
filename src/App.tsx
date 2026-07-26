@@ -9,6 +9,8 @@ import {
   KeyRound,
   LayoutDashboard,
   LoaderCircle,
+  Flower2,
+  Waves,
   RotateCcw,
   Sparkles,
   BookOpen,
@@ -432,11 +434,12 @@ function App() {
           <div className="brand-mark">
             <img className="brand-logo" src="/giverny-logo.png" alt="" />
           </div>
-          <strong>正在连接工作台</strong>
-          <p>正在读取任务、文件和结算数据</p>
+          <span className="boot-lily" aria-hidden="true"><Waves /><Flower2 /></span>
+          <strong>花园正在苏醒</strong>
+          <p>正在让任务、文件与结算记录回到各自的位置</p>
           <span className="loading-indicator">
             <LoaderCircle size={15} />
-            Cloudflare D1 / R2
+            正在连接 Giverny
           </span>
         </div>
       </main>

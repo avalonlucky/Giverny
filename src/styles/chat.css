@@ -2456,6 +2456,41 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.boot-lily {
+  position: relative;
+  display: grid;
+  width: 66px;
+  height: 42px;
+  place-items: center;
+  color: var(--color-primary);
+}
+
+.boot-lily svg:first-child {
+  position: absolute;
+  bottom: 0;
+  width: 62px;
+  height: 26px;
+  opacity: 0.42;
+  animation: boot-water-breathe 2.4s ease-in-out infinite;
+}
+
+.boot-lily svg:last-child {
+  position: relative;
+  width: 27px;
+  height: 27px;
+  animation: boot-lily-rise 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes boot-water-breathe {
+  0%, 100% { transform: scaleX(0.88); opacity: 0.28; }
+  50% { transform: scaleX(1.08); opacity: 0.55; }
+}
+
+@keyframes boot-lily-rise {
+  from { transform: translateY(2px) rotate(-2deg); }
+  to { transform: translateY(-2px) rotate(2deg); }
+}
+
 .boot-card strong {
   color: var(--color-text);
   font-size: 18px;
@@ -2463,7 +2498,7 @@ textarea:focus-visible {
 
 .boot-card p {
   margin: 0;
-  color: #6d797c;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -2484,6 +2519,13 @@ textarea:focus-visible {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-lily svg,
+  .loading-indicator svg {
+    animation: none;
   }
 }
 

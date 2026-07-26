@@ -1531,6 +1531,9 @@ function buildReceiptHtml(data: {
     body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #243033; font-variant-numeric: tabular-nums; }
     .sheet { padding: 4px 8px; }
     .head { text-align: center; padding: 6px 0 2px; }
+    .brand { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; color: #3f5e4a; }
+    .brand strong { font-family: Georgia, "Times New Roman", serif; font-size: 15px; }
+    .brand span { color: #8a9598; font-size: 9px; }
     .head h1 { margin: 0; font-size: 20px; letter-spacing: 1px; }
     .head .en { color: #97a3a5; font-size: 10px; letter-spacing: 3px; }
     .meta { display: flex; justify-content: space-between; color: #6b7679; font-size: 11px; margin-top: 8px; }
@@ -1558,9 +1561,11 @@ function buildReceiptHtml(data: {
     .uncounted li { display: grid; grid-template-columns: 1.3fr 0.6fr 2fr; gap: 12px; font-size: 12px; padding: 3px 0; }
     .u-type, .u-reason { color: #8a9598; }
     .remarks { margin-top: 14px; color: #6b7679; font-size: 11px; line-height: 1.7; }
+    .brand-signoff { margin-top: 16px; padding-top: 8px; border-top: 1px solid rgba(39,54,58,0.12); color: #8a9598; font-size: 9px; text-align: right; }
   </style></head>
   <body>
     <div class="sheet">
+      <div class="brand"><strong>Giverny</strong><span>让创作在自己的花园里生长</span></div>
       <div class="head">
         <h1>${escapeHtml(data.pdfTitle)}</h1>
         <div class="en">MONTHLY SETTLEMENT RECEIPT</div>
@@ -1584,6 +1589,7 @@ function buildReceiptHtml(data: {
         <p>备注：本月共 ${data.taskCount} 项任务，已验收 ${data.acceptedCount} 项，待验收 ${data.pendingCount} 项。</p>
         <p>本回单由系统根据任务与工时记录自动生成，验收状态以合作伙伴确认为准。</p>
       </div>
+      <div class="brand-signoff">Giverny · 吉维尼 · 让创作在自己的花园里生长</div>
     </div>
   </body></html>`
 }
@@ -14792,7 +14798,7 @@ async function sendPasswordResetEmail(env: Env, request: Request, email: string,
       from: env.RESET_EMAIL_FROM || 'Giverny <onboarding@resend.dev>',
       to: email,
       subject: 'Giverny 管理员密码重置',
-      html: `<p>点击下面的链接重置 Giverny 管理员密码：</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>链接 30 分钟内有效。如果不是你本人操作，请忽略这封邮件。</p>`,
+      html: `<div style="margin:0 auto;max-width:560px;padding:32px;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2a27;background:#fbfbf8"><div style="margin-bottom:28px"><strong style="display:block;font-family:Georgia,'Times New Roman',serif;font-size:24px;color:#3f5e4a">Giverny</strong><span style="font-size:12px;color:#66716d">让创作在自己的花园里生长</span></div><h1 style="margin:0 0 12px;font-size:20px;font-weight:600">回到你的创作花园</h1><p style="margin:0 0 24px;color:#586460;line-height:1.7">点击下面的按钮重置管理员密码。链接将在 30 分钟后失效。</p><p style="margin:0 0 24px"><a href="${resetUrl}" style="display:inline-block;padding:11px 18px;border-radius:4px;color:#ffffff;background:#3f5e4a;text-decoration:none">重置管理员密码</a></p><p style="margin:0;color:#66716d;font-size:12px;line-height:1.7">如果不是你本人操作，请忽略这封邮件。</p><div style="margin-top:30px;padding-top:12px;border-top:1px solid rgba(31,42,39,.1);color:#66716d;font-size:11px;text-align:right">Giverny · 吉维尼</div></div>`,
     }),
   })
   return response.ok

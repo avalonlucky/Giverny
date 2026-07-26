@@ -291,6 +291,14 @@ export async function buildReceiptExcelBuffer(options: ReceiptExcelOptions) {
   totalRow.getCell(11).numFmt = hourFormat
   totalRow.getCell(13).numFmt = currencyFormat
 
+  const signoffRowNumber = totalRowNumber + 2
+  sheet.mergeCells(`A${signoffRowNumber}:N${signoffRowNumber}`)
+  const signoffCell = sheet.getCell(`A${signoffRowNumber}`)
+  signoffCell.value = 'Giverny · 让创作在自己的花园里生长'
+  signoffCell.font = { name: 'Noto Sans CJK SC', size: 8, color: { argb: palette.muted } }
+  signoffCell.alignment = { horizontal: 'right', vertical: 'middle' }
+  sheet.getRow(signoffRowNumber).height = 18
+
   sheet.eachRow((row) => {
     row.eachCell((cell) => {
       cell.protection = { locked: true }

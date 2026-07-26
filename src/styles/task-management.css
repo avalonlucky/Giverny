@@ -2773,6 +2773,16 @@ button.file-chip:focus-visible {
   animation: empty-state-lily-breathe 3.6s ease-in-out infinite;
 }
 
+.task-brand-state-copy {
+  max-width: 620px;
+  margin: 7px 0 0;
+  color: var(--color-primary);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
 @keyframes empty-state-lily-breathe {
   0%, 100% { transform: translateY(0) rotate(-2deg); }
   50% { transform: translateY(-3px) rotate(2deg); }

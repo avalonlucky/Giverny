@@ -3,6 +3,7 @@ import { ChevronLeft, Pencil, Plus, Sparkles } from 'lucide-react'
 import { authedPreviewUrl, type TaskProgressAssessment } from '../lib/api'
 import { AttachmentHoverThumbnail } from './AttachmentHoverThumbnail'
 import { EmptyState } from './EmptyState'
+import { givernyCopy } from '../lib/brandCopy'
 import { StatusDotLabel } from './TaskUi'
 import { formatPlanDateTime, isoDateTime } from '../lib/dateTime'
 import { formatYuan, roundCents } from '../lib/money'
@@ -320,7 +321,7 @@ export function DashboardTaskSidebar({
               </div>
               <p className="dashboard-side-subsection-meta">可结算 · {progressBillableEntries.length} 段 · {billableHours.toFixed(1)}h · ¥{formatYuan(billableAmount)}</p>
               {timeEntries.length === 0 && !shouldShowAcceptanceSummary ? (
-                <EmptyState variant="compact" title="暂无分段计时" description="点击记录进展后添加。" />
+                <EmptyState variant="compact" title={givernyCopy.emptyProgressTitle} description={givernyCopy.emptyProgressDescription} />
               ) : (
                 <>
                   <div className="dashboard-side-timeline">

@@ -1,5 +1,5 @@
 import { type ClipboardEvent as ReactClipboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Eye, FileText as FileTextIcon, Folder, Globe, History, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Eye, FileText as FileTextIcon, Flower2, Folder, Globe, History, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Trash2, Waves, X } from 'lucide-react'
 import { api, type AiModelConfig, type AiProviderConfig, type OpenRouterFreeModel } from '../lib/api'
 import { aiBrandForValue, type AiBrandKey } from '../lib/aiBrands'
 import { aiProviderDisplayLabel, chatModelChoiceLabel } from '../lib/chatModelPresentation'
@@ -25,6 +25,7 @@ import { formatFileSize } from '../lib/format'
 import { localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
 import { providerSupportsVision } from '../lib/aiProviders'
 import { agentAnalysisStatusLabel } from '../lib/agentAnalysisPresentation'
+import { givernyCopy } from '../lib/brandCopy'
 import type { FileAsset } from '../types/domain'
 import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentEnterpriseMemory, AgentEnterpriseMemorySummary, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
 import type { ToastTone } from '../lib/toastQueue'
@@ -1109,9 +1110,10 @@ export function ChatPanel({
       <div className="chat-panel-messages">
         {isWelcome ? (
           <div className="alice-welcome">
+            <span className="alice-welcome-lily" aria-hidden="true"><Waves /><Flower2 /></span>
             <div className="alice-welcome-kicker">Giverny Agent</div>
-            <h2 className="alice-welcome-title">嗨，来和爱丽丝聊一聊</h2>
-            <p className="alice-welcome-sub">查工作数据、分析收入，或者聊聊设计行业问题</p>
+            <h2 className="alice-welcome-title">{givernyCopy.assistantWelcomeTitle}</h2>
+            <p className="alice-welcome-sub">{givernyCopy.assistantWelcomeDescription}</p>
             <div className="alice-suggested">
               {ALICE_SUGGESTED.map((s, index) => (
                 <button key={s} type="button" className="alice-suggested-btn" onClick={() => void send(s)}>

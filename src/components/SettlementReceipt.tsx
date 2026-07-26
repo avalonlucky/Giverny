@@ -115,6 +115,10 @@ export function SettlementReceipt({
           </tfoot>
         </table>
       </div>
+      <footer className="settlement-receipt-signoff">
+        <span>Giverny · 吉维尼</span>
+        <strong>让创作在自己的花园里生长</strong>
+      </footer>
     </section>
   )
 }

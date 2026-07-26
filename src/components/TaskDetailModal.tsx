@@ -7,6 +7,7 @@ import { taskSettlementMonth } from '../lib/taskSettlement'
 import { taskDisplayProgress } from '../lib/taskProgress'
 import { taskDueState } from '../lib/taskListPresentation'
 import { monthLabelOf } from '../lib/month'
+import { givernyTaskStatusCopy } from '../lib/brandCopy'
 import type { Task } from '../types/domain'
 
 export function TaskDetailModal({
@@ -36,7 +37,7 @@ export function TaskDetailModal({
   return (
     <ModalShell className="task-detail-modal" labelledBy="task-detail-title" onClose={onClose}>
       <header className="modal-header">
-        <div><p className="eyebrow">{task.type} · {task.contact || '待确认'}</p><h2 id="task-detail-title">{task.title}</h2></div>
+        <div><p className="eyebrow">{task.type} · {task.contact || '待确认'}</p><h2 id="task-detail-title">{task.title}</h2><p className="task-brand-state-copy">{givernyTaskStatusCopy(task.status)}</p></div>
         <div className="modal-header-actions">
           {task.status === '待验收' && canAccept ? (
             <button type="button" className="status-badge status-待验收 detail-acceptance-status-button" aria-label="去验收" title="去验收" onClick={() => onOpenAcceptance(task.id)}>

@@ -36,6 +36,8 @@ export default function SharedReport({ token }: { token: string }) {
     return (
       <main className="shared-page">
         <div className="shared-message panel">
+          <img src="/giverny-logo.png" alt="" />
+          <span>Giverny · 吉维尼</span>
           <strong>无法打开该报告</strong>
           <p>{error}</p>
         </div>
@@ -47,7 +49,9 @@ export default function SharedReport({ token }: { token: string }) {
     return (
       <main className="shared-page">
         <div className="shared-message panel">
-          <strong>正在加载报告…</strong>
+          <img src="/giverny-logo.png" alt="" />
+          <span>Giverny · 吉维尼</span>
+          <strong>花园正在整理这份报告…</strong>
         </div>
       </main>
     )
@@ -118,6 +122,7 @@ export default function SharedReport({ token }: { token: string }) {
       <div className="shared-content shared-receipt-view">
         <header className="shared-receipt-toolbar">
           <div>
+            <span className="shared-receipt-wordmark"><img src="/giverny-logo.png" alt="" />Giverny</span>
             <h1>结算回单</h1>
             <p>{monthLabel(report.month)} · 数据已锁定，只读查看</p>
           </div>
@@ -136,7 +141,7 @@ export default function SharedReport({ token }: { token: string }) {
         <SettlementReceipt options={receiptOptions} className="shared-receipt" />
 
         <SharedProjectAppendix tasks={billableTasks} updates={updates} files={files} />
-        <footer className="shared-footer">本页面为只读结算回单，由 Giverny 自动生成。</footer>
+        <footer className="shared-brand-signoff"><span>Giverny · 吉维尼</span><strong>让创作在自己的花园里生长</strong></footer>
       </div>
     </main>
   )
