@@ -11,6 +11,8 @@ export function splitAgentGoalClauses(question: string) {
 const toolClausePatterns: Record<string, RegExp> = {
   query_month_finance: /金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时/,
   search_product_help: /Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事|怎么|如何|在哪/i,
+  search_workspace: /全站|整个网站|所有地方|统一搜索|全域搜索|到处|不记得.*在哪|任务|附件|对话|知识|记忆/,
+  query_plan_continuation: /继续|接着|续接|往下推进|执行下一步|执行计划|任务计划|项目计划/,
   get_requester_profile: /用户画像|需求人画像|合作画像|客户画像|合作特征|合作偏好|报价建议|排期建议/,
   query_task_portfolio: /哪些|所有|全部|多个|多项|汇总|概况|清单|延期|逾期|等待|未完成|已验收|待验收/,
   get_task_detail: /任务|项目|工作|详情|进展|状态|卡在|卡点|等待|延期|逾期|交付/,

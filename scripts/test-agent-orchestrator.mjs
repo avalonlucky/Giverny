@@ -55,6 +55,8 @@ assert.equal(scopedQuestionForAgentTool(compoundQuestion, 'search_product_help')
 assert.equal(requesterNameFromQuestion('分析陈义君的合作画像，再告诉我网站里在哪里设置大模型'), '陈义君')
 assert.equal(taskTitleFromQuestion('打开公司产品封套修改的验收附件，并告诉我这个任务现在的状态'), '公司产品封套修改')
 assert.equal(scopedQuestionForAgentTool('告诉我6月计费工时，并打开直播设计的验收附件', 'search_attachments'), '打开直播设计的验收附件')
+assert.equal(scopedQuestionForAgentTool('全站找一下验收通过截图，再告诉我本月金额', 'search_workspace'), '全站找一下验收通过截图')
+assert.equal(scopedQuestionForAgentTool('继续推进这个执行计划，再告诉我本月金额', 'query_plan_continuation'), '继续推进这个执行计划')
 
 const missingFinance = completeAgentTurn(createAgentTurn({ principal, question: '本月收入多少', intent: 'finance' }), '大概一万')
 assert.equal(missingFinance.phase, 'needs_input')
@@ -95,6 +97,14 @@ const missingProjectExecution = completeAgentTurn(createAgentTurn({ principal, q
 assert.ok(missingProjectExecution.verification.requiredTools.includes('query_project_execution'))
 const verifiedProjectExecution = { ...missingProjectExecution, plan: [call('query_project_execution')], evidence: [evidence('query_project_execution')] }
 assert.equal(verifyAgentAnswer(verifiedProjectExecution).passed, true)
+const missingPlanContinuation = completeAgentTurn(createAgentTurn({ principal, question: '继续推进任务#1的执行计划', intent: 'task_data' }), '接下来直接验收')
+assert.ok(missingPlanContinuation.verification.requiredTools.includes('query_plan_continuation'))
+const verifiedPlanContinuation = { ...missingPlanContinuation, plan: [call('query_plan_continuation')], evidence: [evidence('query_plan_continuation')] }
+assert.equal(verifyAgentAnswer(verifiedPlanContinuation).passed, true)
+const missingWorkspaceSearch = completeAgentTurn(createAgentTurn({ principal, question: '全站找一下公司产品封套的任务、附件和历史对话', intent: 'task_data' }), '没有找到')
+assert.ok(missingWorkspaceSearch.verification.requiredTools.includes('search_workspace'))
+const verifiedWorkspaceSearch = { ...missingWorkspaceSearch, plan: [call('search_workspace')], evidence: [evidence('search_workspace')] }
+assert.equal(verifyAgentAnswer(verifiedWorkspaceSearch).passed, true)
 const missingAiDiagnosis = completeAgentTurn(createAgentTurn({ principal, question: '为什么我的主模型不可用，总是切换备用模型？', intent: 'general' }), '可能额度不足')
 assert.ok(missingAiDiagnosis.verification.requiredTools.includes('diagnose_ai_routing'))
 const verifiedAiDiagnosis = { ...missingAiDiagnosis, plan: [call('diagnose_ai_routing')], evidence: [evidence('diagnose_ai_routing')] }

@@ -51,6 +51,15 @@ export type AgentExecutionStepDraft = {
 }
 
 const terminalStatuses = new Set<AgentExecutionStepStatus>(['completed', 'skipped', 'compensated'])
+const protectedRevisionStatuses = new Set<AgentExecutionStepStatus>([
+  'running',
+  'completed',
+  'failed',
+  'skipped',
+  'compensation_pending',
+  'compensating',
+  'compensated',
+])
 
 function cleanKey(value: unknown, fallback: string) {
   const key = String(value || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
@@ -132,6 +141,30 @@ export function normalizeExecutionSteps(planId: string, value: unknown): AgentEx
   })
   assertAcyclicExecutionSteps(legacy)
   return legacy
+}
+
+export function revisePendingExecutionSteps(
+  planId: string,
+  current: AgentExecutionStep[],
+  futureDrafts: AgentExecutionStepDraft[],
+): AgentExecutionStep[] {
+  const protectedSteps = current.filter((step) => protectedRevisionStatuses.has(step.status))
+  if (futureDrafts.length === 0) throw new Error('修订后至少需要保留一个未执行步骤')
+  if (protectedSteps.length + futureDrafts.length > 8) throw new Error('执行计划最多包含 8 个步骤')
+
+  const protectedDrafts = protectedSteps.map((step): AgentExecutionStepDraft => ({
+    key: step.key,
+    label: step.label,
+    action: step.action,
+    dependsOn: step.dependsOn.map((dependency) => dependency.split(':').pop() || dependency),
+    compensation: step.compensation,
+  }))
+  const rebuilt = buildExecutionSteps(planId, [...protectedDrafts, ...futureDrafts])
+  const protectedByKey = new Map(protectedSteps.map((step) => [step.key, step]))
+  return rebuilt.map((step) => {
+    const protectedStep = protectedByKey.get(step.key)
+    return protectedStep ? { ...protectedStep, dependsOn: step.dependsOn } : step
+  })
 }
 
 function isExecutionStepStatus(value: string): value is AgentExecutionStepStatus {

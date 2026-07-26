@@ -19,6 +19,7 @@ for (const symbol of [
   'assertAcyclicExecutionSteps',
   'failExecutionStep',
   'retryExecutionStep',
+  'revisePendingExecutionSteps',
   'beginExecutionCompensation',
   'completeExecutionCompensation',
 ]) assert.ok(files.engine.includes(symbol), `execution engine missing ${symbol}`)
@@ -31,6 +32,9 @@ for (const column of ['execution_mode', 'failure_policy', 'revision', 'approved_
 assert.match(files.registry, /executionMode: z\.enum\(\['batch', 'guided'\]\)/)
 assert.match(files.registry, /dependsOn: z\.array/)
 assert.match(files.registry, /compensation: z\.object/)
+assert.match(files.registry, /action: z\.enum\(\['pause', 'resume', 'retry_step', 'revise_steps', 'cancel'\]\)/)
+assert.match(files.registry, /query_plan_continuation/)
+assert.match(files.registry, /search_workspace/)
 assert.match(files.worker, /outcome === 'failed'/)
 assert.match(files.worker, /revision = revision \+ 1/)
 assert.match(files.worker, /计划已在其他会话更新/)
@@ -69,6 +73,14 @@ assert.match(files.worker, /endpoint === 'batch-task-operations'/)
 assert.match(files.alice, /batch_task_operations_preview/)
 assert.match(files.approval, /approval\.action !== 'batch_task_operations'/)
 assert.match(files.approval, /失败全部回滚/)
+assert.match(files.approval, /修订后的未来步骤/)
+assert.match(files.worker, /agentPlanConcurrencySnapshot/)
+assert.match(files.worker, /planContinuationSuggestion/)
+assert.match(files.worker, /workspaceConversationSearch/)
+assert.match(files.worker, /workspaceSearchQueryVariants/)
+assert.match(files.worker, /semantic-vector\+keyword\+structured/)
+assert.match(files.alice, /用户明确要求“继续 \/ 接着推进 \/ 往下推进 \/ 执行下一步”时必须调用 query_plan_continuation/)
+assert.match(files.alice, /必须调用 search_workspace/)
 assert.ok(!files.worker.includes("status = 'active', paused_at = NULL, completed_at = NULL"), 'legacy resume must not erase execution result')
 
 console.log('Agent execution engine architecture guard passed.')

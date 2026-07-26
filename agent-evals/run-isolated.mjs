@@ -158,7 +158,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks']
+  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_plan_continuation', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks', 'search_workspace']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -221,7 +221,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 72) {
+  if (!response.ok || capabilities.length !== 74) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
@@ -809,18 +809,23 @@ async function runAgentBusinessToolCheck(cookie) {
     throw new Error(`Attachment upload handoff is unsafe or incomplete: ${handoffText}`)
   }
 
+  const futureTaskPreview = await preview('create-task-preview', {
+    title: '长期有效日程评测任务', requirement: '验证未来任务与提醒可以进入 Agenda', type: '隔离评测',
+    startDate: '2099-01-15T10:00:00+08:00', estimatedDate: '2099-01-15T12:00:00+08:00', settlementMonth: '2099-01', estimatedHours: 2,
+  })
+  const futureTask = await execute('create-task', futureTaskPreview.confirmationToken)
   const reminderPreview = await preview('schedule-reminder-preview', {
-    taskId: 1, goal: '提醒核对合作伙伴反馈', remindAt: '2026-07-26T09:00:00+08:00',
+    taskId: futureTask.task?.id, goal: '提醒核对合作伙伴反馈', remindAt: '2099-01-15T09:00:00+08:00',
   })
   const reminder = await execute('schedule-reminder', reminderPreview.confirmationToken)
-  if (reminder.plan?.kind !== 'reminder' || reminder.plan?.taskId !== 1 || !String(reminder.plan?.nextActionAt || '').startsWith('2026-07-26T09:00')) {
+  if (reminder.plan?.kind !== 'reminder' || reminder.plan?.taskId !== futureTask.task?.id || !String(reminder.plan?.nextActionAt || '').startsWith('2099-01-15T09:00')) {
     throw new Error(`Task-center reminder was not persisted: ${JSON.stringify(reminder)}`)
   }
   const futureAgenda = await request('/api/agent/tools/agenda', {
     method: 'POST', headers,
-    body: JSON.stringify({ startDate: '2026-07-26', endDate: '2026-07-29', durationMinutes: 60, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 }),
+    body: JSON.stringify({ startDate: '2099-01-15', endDate: '2099-01-16', durationMinutes: 60, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 }),
   })
-  if (!futureAgenda.response.ok || !futureAgenda.data.reminders?.some((item) => item.id === reminder.plan.id) || !futureAgenda.data.tasks?.some((item) => item.taskId === 10) || !futureAgenda.data.availableSlots?.length || futureAgenda.data.availableSlots.some((slot) => new Date(`${slot.startAt}:00+08:00`).getTime() < Date.now())) {
+  if (!futureAgenda.response.ok || !futureAgenda.data.reminders?.some((item) => item.id === reminder.plan.id) || !futureAgenda.data.tasks?.some((item) => item.taskId === futureTask.task?.id) || !futureAgenda.data.availableSlots?.length || futureAgenda.data.availableSlots.some((slot) => new Date(`${slot.startAt}:00+08:00`).getTime() < Date.now())) {
     throw new Error(`Agenda did not return future reminder, task, and usable slots: ${JSON.stringify(futureAgenda.data)}`)
   }
 
@@ -872,7 +877,7 @@ async function runAgentBusinessToolCheck(cookie) {
     ['collaborator', 'inspect-ai-settings', {}],
     ['collaborator', 'diagnose-ai-routing', { scope: 'all' }],
     ['collaborator', 'restore-ai-routing-preview', {}],
-    ['viewer', 'schedule-reminder-preview', { taskId: 1, goal: '越权提醒', remindAt: '2026-07-26T09:00:00+08:00' }],
+    ['viewer', 'schedule-reminder-preview', { taskId: 1, goal: '越权提醒', remindAt: '2099-01-15T09:00:00+08:00' }],
   ]
   for (const [role, endpoint, payload] of roleCases) {
     const denied = await request(`/api/agent/tools/${endpoint}`, {
@@ -883,7 +888,7 @@ async function runAgentBusinessToolCheck(cookie) {
 
   const boundHeaders = { ...agentScopeHeaders('default', 'business-admin-a', 'admin'), 'content-type': 'application/json' }
   const boundPreview = await preview('schedule-reminder-preview', {
-    taskId: 1, goal: '确认凭证边界测试', remindAt: '2026-07-27T09:00:00+08:00',
+    taskId: 1, goal: '确认凭证边界测试', remindAt: '2099-01-16T09:00:00+08:00',
   }, boundHeaders)
   const wrongPrincipal = await request('/api/agent/tools/schedule-reminder', {
     method: 'POST', headers: { ...agentScopeHeaders('default', 'business-admin-b', 'admin'), 'content-type': 'application/json' },
@@ -2086,11 +2091,29 @@ async function runAgentOrchestrationCheck(cookie) {
   const progressed = await progressPlan('completed')
   if (progressed.updated !== 1) throw new Error(`Agent plan completion did not persist: ${JSON.stringify(progressed)}`)
   plan = (await (await fetch('http://127.0.0.1:8798/api/ai/agent-plans', { headers: { cookie } })).json()).plans.find((item) => item.id === created.plan.id)
+  const continuationBeforeRevision = await toolRequest('plan-continuation', { planId: plan.id })
+  if (!continuationBeforeRevision.response.ok || continuationBeforeRevision.data.next?.state !== 'ready' || continuationBeforeRevision.data.next?.nextStep?.key !== 'files') throw new Error(`Plan continuation did not find the real ready step: ${JSON.stringify(continuationBeforeRevision.data)}`)
+  const revisePreview = await toolRequest('manage-task-plan-preview', {
+    planId: plan.id,
+    action: 'revise_steps',
+    reason: '增加内部复核',
+    steps: [
+      { key: 'files-v2', label: '整理两套验收文件', action: 'mark_acceptance_files', dependsOn: ['progress'] },
+      { key: 'review-v2', label: '内部复核文件', action: 'append_progress', dependsOn: ['files-v2'] },
+      { key: 'accept-v2', label: '完成验收', action: 'complete_acceptance', dependsOn: ['review-v2'] },
+    ],
+  })
+  if (!revisePreview.response.ok || !revisePreview.data.confirmationToken || revisePreview.data.draft?.protectedStepCount !== 1) throw new Error(`Plan revision preview did not protect completed work: ${JSON.stringify(revisePreview.data)}`)
+  plan = (await workflowExecute('manage-task-plan', revisePreview.data.confirmationToken)).plan
+  if (plan.steps?.[0]?.key !== 'progress' || plan.steps[0].status !== 'completed' || plan.steps?.[1]?.key !== 'files-v2' || plan.steps?.length !== 4) throw new Error(`Plan revision changed completed evidence or missed future steps: ${JSON.stringify(plan)}`)
+  const illegalRevision = await toolRequest('manage-task-plan-preview', { planId: plan.id, action: 'revise_steps', steps: [{ key: 'progress', label: '篡改已完成步骤', action: 'append_progress' }] })
+  if (illegalRevision.response.status !== 409) throw new Error(`Plan revision allowed reuse of a protected step: ${JSON.stringify(illegalRevision.data)}`)
   plan = await updatePlan(plan, 'complete_step', plan.steps[1].id)
   const reopened = await updatePlan(plan, 'reopen_step', plan.steps[1].id)
   if (reopened.steps[1].status !== 'ready' || reopened.steps[2].status !== 'blocked') throw new Error('Agent plan dependency reopening failed')
   plan = await updatePlan(reopened, 'complete_step', reopened.steps[1].id)
   plan = await updatePlan(plan, 'complete_step', plan.steps[2].id)
+  plan = await updatePlan(plan, 'complete_step', plan.steps[3].id)
   if (plan.status !== 'completed') throw new Error(`Agent plan did not complete: ${JSON.stringify(plan)}`)
   plan = await updatePlan(plan, 'begin_compensation')
   if (plan.status !== 'compensating' || plan.steps[0].status !== 'compensation_pending') throw new Error('Agent plan compensation did not start')
@@ -2134,6 +2157,13 @@ async function runAgentOrchestrationCheck(cookie) {
   const enterpriseToolResponse = await fetch('http://127.0.0.1:8798/api/agent/tools/enterprise-memory?scopeType=partner&scopeKey=%E6%98%82%E6%A5%B7', { headers: toolHeaders })
   const enterpriseTool = await enterpriseToolResponse.json().catch(() => ({}))
   if (!enterpriseToolResponse.ok || enterpriseTool.memories?.length !== 1 || enterpriseTool.memories[0].version !== 2 || !enterpriseTool.memories[0].sourceLabel) throw new Error(`Enterprise memory tool query failed: ${JSON.stringify(enterpriseTool)}`)
+  const workspaceSearch = await toolRequest('workspace-search', { query: '公司产品封套 PDF 验收', sources: ['task', 'attachment', 'conversation', 'product', 'memory'], limit: 20 })
+  const workspaceSources = new Set((workspaceSearch.data.results || []).map((item) => item.source))
+  if (!workspaceSearch.response.ok || !workspaceSources.has('task') || !workspaceSources.has('attachment') || !workspaceSources.has('memory') || !['semantic-vector+keyword+structured', 'keyword+structured'].includes(workspaceSearch.data.searchMode)) throw new Error(`Workspace search did not merge task, attachment, and memory results: ${JSON.stringify(workspaceSearch.data)}`)
+  const workspaceTenant = await toolRequest('workspace-search', { query: '公司产品封套 PDF 验收', sources: ['task', 'attachment', 'conversation', 'memory'], limit: 20 }, { ...toolHeaders, ...agentScopeHeaders('tenant-b', 'workspace-search-tenant', 'admin') })
+  if (!workspaceTenant.response.ok || !workspaceTenant.data.results?.length || workspaceTenant.data.results.some((item) => Number(item.taskId) !== 9001)) throw new Error(`Workspace search leaked cross-tenant data or hid tenant-local matches: ${JSON.stringify(workspaceTenant.data)}`)
+  const workspaceClient = await toolRequest('workspace-search', { query: '公司产品封套', limit: 10 }, { ...toolHeaders, ...agentScopeHeaders('default', 'workspace-search-client', 'client') })
+  if (![401, 403].includes(workspaceClient.response.status)) throw new Error(`Client role accessed internal workspace search: ${JSON.stringify(workspaceClient.data)}`)
   const enterpriseHistoryResponse = await fetch('http://127.0.0.1:8798/api/ai/enterprise-memories?includeHistory=true', { headers: { cookie } })
   const enterpriseHistory = await enterpriseHistoryResponse.json().catch(() => ({}))
   if (!enterpriseHistoryResponse.ok || !enterpriseHistory.memories?.some((item) => item.id === createdEnterprise.memory.id && item.status === 'superseded')) throw new Error('Enterprise memory correction history was not retained')

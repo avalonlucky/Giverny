@@ -220,6 +220,7 @@ function chooseTool(messages) {
   }
   if (/(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(text)) return toolCall('diagnose_ai_routing', { scope: 'all', includeRecentFallbacks: true })
   if (/(?:恢复|撤销).*(?:模型路由|模型配置|上一次配置)/.test(text)) return toolCall('restore_ai_routing_preview', {})
+  if (/(?:全站|整个网站|所有地方|统一搜索|全域搜索|不记得.*在哪).*(?:搜|查|找)|(?:统一搜索|全域搜索)/.test(text)) return toolCall('search_workspace', { query: text, limit: 20 })
   if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
   }
@@ -230,7 +231,9 @@ function chooseTool(messages) {
   }
   if (/当前网站能做什么/.test(text)) return toolCall('get_giverny_context', {})
   if (/最该.*处理|风险待办|主动事项|提醒处理效果|解决率|误报率/.test(text)) return toolCall('query_proactive_work', { status: 'active', limit: 50 })
+  if (/(?:调整|修订|修改).*(?:执行计划|任务计划|项目计划).*(?:后续|未来|未执行|步骤)/.test(text)) return toolCall('manage_task_plan_preview', { planId: 'eval-plan', action: 'revise_steps', reason: '调整后续执行方式', steps: [{ key: 'progress-v2', label: '补充两版进展', action: 'append_progress', dependsOn: ['research'] }, { key: 'accept', label: '完成最终验收', action: 'complete_acceptance', dependsOn: ['progress-v2'] }] })
   if (/(?:暂停|恢复|重试|取消).*(?:执行计划|任务计划|项目计划)/.test(text)) return toolCall('manage_task_plan_preview', { planId: 'eval-plan', action: text.includes('恢复') ? 'resume' : text.includes('重试') ? 'retry_step' : text.includes('取消') ? 'cancel' : 'pause', stepId: text.includes('重试') ? 'eval-plan:progress' : undefined })
+  if (/(?:继续|接着|续接|往下推进|执行下一步).*(?:执行计划|任务计划|项目计划|这个计划)|(?:执行计划|任务计划|项目计划).*(?:继续|接着|续接|往下推进|执行下一步)/.test(text)) return toolCall('query_plan_continuation', { taskId: 1, limit: 10 })
   if (/(?:执行计划|任务计划|项目计划|计划步骤|当前步骤|下一步|做到哪一步|为什么.{0,8}(?:卡住|阻塞)|失败步骤)/.test(text)) return toolCall('query_project_execution', { taskId: 1, status: 'open', limit: 20 })
   if (/(?:日程|安排|空闲|空档|有空|时间槽|什么时候能安排|本周计划|今天计划|明天计划)/.test(text) && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(text)) return toolCall('query_agenda', { startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: /两小时|2小时/.test(text) ? 120 : undefined, workingDayStart: '09:00', workingDayEnd: '18:00', slotStepMinutes: 30 })
   if (/月度复盘|工作复盘|复盘|整月.*分析|后台分析.*月|本月工作总结/.test(text)) {

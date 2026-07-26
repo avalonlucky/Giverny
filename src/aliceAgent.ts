@@ -102,6 +102,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 先理解用户整句话的真实目的，再决定工具；不得因为看到单个关键词就立即回答。
 - 先区分“查真实任务数据”与“问网站怎么用”。用户提到具体任务名、状态、进展、等待、延期、卡点或为何未交付时，必须优先查任务数据，不得调用产品快捷键帮助。
 - 用户询问 Giverny 的快捷键、入口、功能、设置、操作方法、版本更新、品牌名称或设计原因、模型路由或权限边界时，必须调用 search_product_help，以产品能力注册表为准。
+- 用户要求“全站搜索 / 到处找 / 不记得在哪”、需要同时查任务、附件、正式对话、产品知识和企业记忆，或问题可能跨两类以上数据时，必须调用 search_workspace；不得让模型分别猜测五套结果。
 - 用户询问某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；画像指标必须来自后台聚合结果，不得用 search_tasks 代替。
 - 产品知识工具标记为“部分确认”或明确说资料未记录时，必须保留这个边界；可以说明已确认线索，但不得把推断改写成作者事实。
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
@@ -117,7 +118,7 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 用户在同一句话中要求 2–20 个可兼容的任务修改（改字段、改状态、记反馈、追加进展或记录等待）时，先查出每个明确 taskId，再调用 batch_task_operations_preview 生成一张整体确认卡；不要连续生成多张单操作确认卡。结算、完整验收、附件、模型配置和其他高风险跨域操作不得混入批量事务。
 - 用户要求验收时优先调用 complete_acceptance_preview，把验收备注、最终进展、工时和已有附件放进同一张确认卡；不要拆成修改状态和普通进展两次写入。
 - 用户要求你持续推进一个目标、从创建跟到验收或安排后续步骤时，调用 create_task_plan，保存 2-8 个可核对步骤；为步骤提供稳定 key，用 dependsOn 表达真实依赖，存在可逆操作时声明 compensation。默认创建 batch 批次，必须由用户整体确认后才推进，不要只在正文里写一次性清单。
-- 用户询问执行计划做到哪一步、下一步是什么、为何被阻塞或哪些步骤失败时，必须调用 query_project_execution；依赖原因和下一步只能依据工具返回的确定性状态。用户要求暂停、恢复、重试失败步骤或取消计划时调用 manage_task_plan_preview。不得调用任何工具直接把实际业务步骤标记为完成，业务步骤只能由对应业务写入成功后推进。
+- 用户询问执行计划做到哪一步、下一步是什么、为何被阻塞或哪些步骤失败时，必须调用 query_project_execution；用户明确要求“继续 / 接着推进 / 往下推进 / 执行下一步”时必须调用 query_plan_continuation，从真实停顿点选择续接方式。用户要求暂停、恢复、重试失败步骤、修订未来步骤或取消计划时调用 manage_task_plan_preview；修订只能提交完整的未来步骤，不能改写已运行、完成、失败或补偿步骤。不得调用任何工具直接把实际业务步骤标记为完成，业务步骤只能由对应业务写入成功后推进。
 - 用户要求导出结算回单时调用 export_settlement_preview；查询既有回单时调用 query_settlement_exports；要求核账、查重复、遗漏、日期重叠或空档时调用 reconcile_settlement_export；锁定、管理链接或删除未锁定记录时先查询，再生成 manage_settlement_export_preview。不得绕回旧兼容聊天导出旁路，不得在对话中索取管理员密码。
 - 用户询问今天/本周已有安排、日程、提醒、空闲时间或什么时候可以安排时调用 query_agenda；“安排下周做某项新工作”属于创建任务，不能仅因出现“安排”就查询 Agenda。询问一个明确时间段是否冲突时调用 check_schedule_conflicts；要求改排期时调用 reschedule_task_preview，必须把冲突结果展示在确认卡中。
 - 用户上传文件但没有明确任务编号时，调用 prepare_attachment_upload 定位任务并返回浏览器上传接力；文件二进制与 API Key 都不得进入模型上下文。
@@ -603,6 +604,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const scopedQuestion = scopedQuestionForAgentTool(message, toolName)
     if (toolName === 'query_month_finance') return { question: scopedQuestion, currentMonth }
     if (toolName === 'search_product_help') return { query: scopedQuestion, limit: 5 }
+    if (toolName === 'search_workspace') return { query: scopedQuestion, month: currentMonth, limit: 20 }
     if (toolName === 'get_requester_profile') {
       const name = requesterNameFromQuestion(message)
       return name ? { name } : null
@@ -628,6 +630,10 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     }
     if (toolName === 'search_tasks') return { query: scopedQuestion, month: currentMonth, limit: 30 }
     if (toolName === 'search_attachments') return { query: scopedQuestion, month: currentMonth, limit: 30 }
+    if (toolName === 'query_plan_continuation') {
+      const reference = this.activeTaskReference || this.state.taskReference
+      return reference && this.referencesCurrentTask(message) ? { taskId: reference.id, limit: 10 } : { limit: 10 }
+    }
     if (toolName === 'get_giverny_context') return {}
     return null
   }
@@ -717,6 +723,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         inputSchema: capabilities.search_product_help.inputSchema,
         execute: (input) => this.callTool(capabilities.search_product_help.endpoint, input, 'GET'),
       }),
+      search_workspace: tool({
+        description: capabilities.search_workspace.description,
+        inputSchema: capabilities.search_workspace.inputSchema,
+        execute: (input) => this.callTool(capabilities.search_workspace.endpoint, input, 'GET'),
+      }),
       query_settlement_exports: tool({
         description: capabilities.query_settlement_exports.description,
         inputSchema: capabilities.query_settlement_exports.inputSchema,
@@ -796,6 +807,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.query_project_execution.description,
         inputSchema: capabilities.query_project_execution.inputSchema,
         execute: (input) => this.callTool(capabilities.query_project_execution.endpoint, input, 'GET'),
+      }),
+      query_plan_continuation: tool({
+        description: capabilities.query_plan_continuation.description,
+        inputSchema: capabilities.query_plan_continuation.inputSchema,
+        execute: (input) => this.callTool(capabilities.query_plan_continuation.endpoint, this.withTaskReference(input, message), 'GET'),
       }),
       manage_task_plan_preview: tool({
         description: capabilities.manage_task_plan_preview.description,
@@ -1287,7 +1303,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         ? 'attachment'
         : [...usedTools].some((name) => name.endsWith('_preview'))
           ? 'write'
-          : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('query_task_portfolio')
+      : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('search_workspace') || usedTools.has('query_task_portfolio') || usedTools.has('query_plan_continuation')
             ? 'task_data'
             : usedTools.has('search_product_help')
               ? 'product_help'

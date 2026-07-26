@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：72 项
-- 分类：finance 7、tasks 4、files 8、product 2、calendar 4、security 7、notifications 5、planning 4、memory 4、analysis 2、write 20、internal 5
+- 注册能力：74 项
+- 分类：finance 7、tasks 4、files 8、product 3、calendar 4、security 7、notifications 5、planning 5、memory 4、analysis 2、write 20、internal 5
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -22,6 +22,7 @@
 `query_attachment_analysis` | 查询附件分析状态 | files | read | none | admin, collaborator, viewer, client, mcp-read, system | attachments:read | model, mcp, api | `agent_query_attachment_analysis`
 `get_giverny_context` | 读取工作台能力 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_get_context`
 `search_product_help` | 查询产品使用说明 | product | read | none | admin, collaborator, viewer, client, guest, mcp-read, system | product:read | model, mcp, api | `agent_search_product_help`
+`search_workspace` | 全域统一搜索 | product | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, attachments:read, product:read, memory:read | model, mcp, api | `agent_search_workspace`
 `query_settlement_exports` | 查询结算导出记录 | finance | read | none | admin, collaborator, viewer, mcp-read, system | finance:read | model, mcp, api | `agent_query_settlement_exports`
 `reconcile_settlement_export` | 核对结算回单 | finance | read | none | admin, collaborator, viewer, mcp-read, system | finance:read | model, mcp, api | `agent_reconcile_settlement_export`
 `query_agenda` | 查询日程与可用时间 | calendar | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, plans:read | model, mcp, api | `agent_query_agenda`
@@ -46,6 +47,7 @@
 `manage_proactive_item_preview` | 预览处理主动事项 | notifications | write | preview | admin, collaborator, system | plans:write | model, api | `agent_preview_manage_proactive_item`
 `manage_proactive_item` | 执行处理主动事项 | notifications | write | signed-execute | admin, collaborator, system | plans:write | api, workflow | `agent_manage_proactive_item`
 `query_project_execution` | 查询项目执行状态 | planning | read | none | admin, collaborator, viewer, mcp-read, system | plans:read | model, mcp, api | `agent_query_project_execution`
+`query_plan_continuation` | 查询计划续接建议 | planning | read | none | admin, collaborator, viewer, mcp-read, system | plans:read | model, mcp, api | `agent_query_plan_continuation`
 `manage_task_plan_preview` | 预览管理执行计划 | planning | write | preview | admin, collaborator, system | plans:write | model, api | `agent_preview_manage_task_plan`
 `manage_task_plan` | 执行管理任务计划 | planning | write | signed-execute | admin, collaborator, system | plans:write | api, workflow | `agent_manage_task_plan`
 `configure_ai_route_preview` | 预览配置模型路由 | security | sensitive | preview | admin, system | settings:write | model, api | `agent_preview_configure_ai_route`

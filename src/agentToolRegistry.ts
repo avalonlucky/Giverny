@@ -56,6 +56,13 @@ const batchTaskOperationSchema = z.object({
   isUncounted: z.boolean().optional(), isRevision: z.boolean().optional(), feedbackVersion: z.string().max(30).optional(),
   feedbackSource: z.string().max(80).optional(), waitingReason: z.string().max(30).optional(),
 })
+const agentPlanStepDraftSchema = z.object({
+  key: z.string().min(1).max(60).optional(),
+  label: z.string().min(1).max(120),
+  action: z.string().min(1).max(60),
+  dependsOn: z.array(z.string().min(1).max(60)).max(8).optional(),
+  compensation: z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) }).optional(),
+})
 
 function defineCapability<const T extends AgentCapabilityDefinition>(definition: T) {
   return definition
@@ -133,6 +140,12 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ query: z.string().min(1).max(500), limit: z.number().int().min(1).max(10).default(5) }),
     trace: { running: '查询产品使用说明', completed: '产品说明已返回' },
   }),
+  search_workspace: readCapability({
+    title: '全域统一搜索', description: '一次检索当前工作区的任务、附件、正式对话、产品知识和企业记忆，合并关键词与向量结果并保留来源。用户要求跨全站查找、记不清内容在哪或同时搜索多类资料时必须调用。', category: 'product', endpoint: 'workspace-search',
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read', 'attachments:read', 'product:read', 'memory:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_search_workspace' },
+    inputSchema: z.object({ query: z.string().min(1).max(500), month: z.string().regex(/^\d{4}-\d{2}$/).optional(), sources: z.array(z.enum(['task', 'attachment', 'conversation', 'product', 'memory'])).min(1).max(5).optional(), limit: z.number().int().min(1).max(50).default(20) }),
+    trace: { running: '跨任务、附件、对话与知识统一检索', completed: '全域搜索结果已整理' },
+  }),
   query_settlement_exports: readCapability({
     title: '查询结算导出记录', description: '按日期范围查询当前工作区的结算导出、锁定、分享有效期以及预览、Excel、PDF 入口。', category: 'finance', endpoint: 'settlement-exports',
     policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['finance:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_settlement_exports' },
@@ -199,13 +212,19 @@ export const agentCapabilityRegistry = {
     inputSchema: z.object({ taskId: z.number().int().positive().optional(), planId: z.string().min(1).max(160).optional(), status: z.enum(['active', 'open', 'all']).default('active'), limit: z.number().int().min(1).max(50).default(20) }),
     trace: { running: '核对项目执行计划与阻塞', completed: '项目执行状态已整理' },
   }),
+  query_plan_continuation: readCapability({
+    title: '查询计划续接建议', description: '从执行计划真实停顿点生成下一步建议，明确暂停、失败、待确认、可执行步骤或依赖阻塞，并返回需要调用的确认工具。用户说继续推进、接着做或询问下一步时必须调用。', category: 'planning', endpoint: 'plan-continuation', taskScoped: true,
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['plans:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_query_plan_continuation' },
+    inputSchema: z.object({ taskId: z.number().int().positive().optional(), planId: z.string().min(1).max(160).optional(), limit: z.number().int().min(1).max(20).default(10) }),
+    trace: { running: '定位计划停顿点与下一步', completed: '计划续接建议已生成' },
+  }),
   manage_task_plan_preview: writePreviewCapability({
-    title: '预览管理执行计划', description: '预览暂停、恢复、重试失败步骤或取消一个执行计划。仅管理编排状态，不能把业务工作直接标记为完成。', category: 'planning', endpoint: 'manage-task-plan-preview', executeWith: 'manage_task_plan', taskScoped: true,
+    title: '预览管理执行计划', description: '预览暂停、恢复、重试、修订未执行步骤或取消计划。修订会保护已经运行、完成或失败的步骤与证据。', category: 'planning', endpoint: 'manage-task-plan-preview', executeWith: 'manage_task_plan', taskScoped: true,
     policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_manage_task_plan' },
-    inputSchema: z.object({ planId: z.string().min(1).max(160), action: z.enum(['pause', 'resume', 'retry_step', 'cancel']), stepId: z.string().min(1).max(220).optional() }),
+    inputSchema: z.object({ planId: z.string().min(1).max(160), action: z.enum(['pause', 'resume', 'retry_step', 'revise_steps', 'cancel']), stepId: z.string().min(1).max(220).optional(), steps: z.array(agentPlanStepDraftSchema).min(1).max(8).optional(), reason: z.string().max(500).optional() }),
     trace: { running: '核对执行计划操作', completed: '执行计划操作草稿已生成' },
   }),
-  manage_task_plan: writeExecuteCapability({ title: '执行管理任务计划', description: '使用签名确认凭证暂停、恢复、重试失败步骤或取消执行计划，并执行版本冲突校验。', category: 'planning', endpoint: 'manage-task-plan', previewFor: 'manage_task_plan_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_task_plan' }, trace: { running: '更新执行计划状态', completed: '执行计划状态已更新' } }),
+  manage_task_plan: writeExecuteCapability({ title: '执行管理任务计划', description: '使用签名确认凭证暂停、恢复、重试、修订未执行步骤或取消执行计划，并执行完整快照与版本冲突校验。', category: 'planning', endpoint: 'manage-task-plan', previewFor: 'manage_task_plan_preview', taskScoped: true, policy: { risk: 'write', deterministic: true, source: 'd1', scopes: ['plans:write'], roles: writeRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_manage_task_plan' }, trace: { running: '更新执行计划状态', completed: '执行计划状态已更新' } }),
   configure_ai_route_preview: writePreviewCapability({ title: '预览配置模型路由', description: '使用已保存凭证验证服务商、模型和 Base URL，预览后再修改路由；API Key 不进入 Agent。', category: 'security', endpoint: 'configure-ai-route-preview', executeWith: 'configure_ai_route', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['settings:write'], roles: adminRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_configure_ai_route' }, inputSchema: z.object({ route: z.enum(['textPrimary', 'textFallback', 'visionPrimary', 'visionFallback']), provider: z.enum(['deepseek', 'gemini', 'kimi', 'doubao', 'qwen', 'openrouter', 'openai', 'anthropic']), baseUrl: z.string().min(1), model: z.string().min(1), makeActive: z.boolean().default(false) }), trace: { running: '验证模型路由配置', completed: '模型路由配置预览已生成' } }),
   configure_ai_route: writeExecuteCapability({ title: '执行配置模型路由', description: '使用签名确认凭证保存已验证的模型路由，不处理明文 API Key。', category: 'security', endpoint: 'configure-ai-route', previewFor: 'configure_ai_route_preview', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['settings:write'], roles: adminRoles, confirmation: 'signed-execute', audit: 'business', auditEvent: 'agent_configure_ai_route' }, trace: { running: '保存模型路由配置', completed: '模型路由配置已保存' } }),
   restore_ai_routing_preview: writePreviewCapability({ title: '预览恢复模型路由', description: '读取最近一次脱敏路由快照，验证目标主备链路并预览恢复；不读取、替换或展示 API Key。', category: 'security', endpoint: 'restore-ai-routing-preview', executeWith: 'restore_ai_routing', policy: { risk: 'sensitive', deterministic: true, source: 'd1', scopes: ['settings:write'], roles: adminRoles, confirmation: 'preview', audit: 'turn', auditEvent: 'agent_preview_restore_ai_routing' }, inputSchema: z.object({}), trace: { running: '核对上一份模型路由', completed: '模型路由恢复预览已生成' } }),
@@ -218,13 +237,7 @@ export const agentCapabilityRegistry = {
       taskId: z.number().int().positive().optional(),
       nextActionAt: z.string().optional(),
       executionMode: z.enum(['batch', 'guided']).default('batch'),
-      steps: z.array(z.object({
-        key: z.string().min(1).max(60).optional(),
-        label: z.string().min(1).max(120),
-        action: z.string().min(1).max(60),
-        dependsOn: z.array(z.string().min(1).max(60)).max(8).optional(),
-        compensation: z.object({ label: z.string().min(1).max(120), action: z.string().min(1).max(60) }).optional(),
-      })).min(2).max(8),
+      steps: z.array(agentPlanStepDraftSchema).min(2).max(8),
     }),
     trace: { running: '整理持续任务计划', completed: '持续任务计划已创建' },
   }),
@@ -327,7 +340,7 @@ export const agentCapabilityRegistry = {
 
 export type AgentCapabilityName = keyof typeof agentCapabilityRegistry
 
-const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'query_agenda', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_project_execution', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help'] as const
+const readToolNames = ['query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'query_agenda', 'search_tasks', 'query_task_portfolio', 'get_task_detail', 'get_requester_profile', 'search_attachments', 'inspect_attachment_evidence', 'query_attachment_analysis', 'check_schedule_conflicts', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation', 'query_enterprise_memory', 'get_giverny_context', 'search_product_help', 'search_workspace'] as const
 export type AgentReadToolName = typeof readToolNames[number]
 export const agentReadToolRegistry = Object.fromEntries(readToolNames.map((name) => [name, agentCapabilityRegistry[name]])) as Pick<typeof agentCapabilityRegistry, AgentReadToolName>
 

@@ -339,6 +339,28 @@ function renderEnterpriseMemory(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderWorkspaceSearch(payload: Record<string, unknown>) {
+  const results = list(payload.results).map(record)
+  return [
+    '**全域搜索结果**',
+    `- 查询：${String(payload.query || '')}；共找到 ${formatNumber(payload.count)} 条；模式：${String(payload.searchMode || 'keyword')}`,
+    ...(results.length ? results.map((item) => `- [${String(item.sourceLabel || item.source || '结果')}] ${String(item.title || '')}${item.taskId ? `（任务 #${formatNumber(item.taskId)}）` : ''}\n  - ${String(item.snippet || '')}`) : ['- 当前工作区没有找到匹配内容。']),
+  ].join('\n')
+}
+
+function renderPlanContinuation(payload: Record<string, unknown>) {
+  const items = list(payload.continuations).map(record)
+  return [
+    '**执行计划续接建议**',
+    ...(items.length ? items.map((item) => {
+      const nextStep = record(item.nextStep)
+      const confirmation = record(item.confirmation)
+      return `- ${String(item.goal || '')}：${String(item.reason || '')}${nextStep.label ? `\n  - 下一步：${String(nextStep.label)}` : ''}${confirmation.label ? `\n  - 需要确认：${String(confirmation.label)}` : ''}`
+    }) : ['- 当前没有需要续接的开放计划。']),
+    `- 安全边界：${String(payload.guardrail || '')}`,
+  ].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
@@ -348,6 +370,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'get_requester_profile') return renderProfile(payload)
   if (evidence.toolName === 'search_attachments') return renderAttachments(payload)
   if (evidence.toolName === 'search_product_help') return renderProductHelp(payload)
+  if (evidence.toolName === 'search_workspace') return renderWorkspaceSearch(payload)
   if (evidence.toolName === 'get_giverny_context') return renderContext(payload)
   if (evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
   if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
@@ -361,6 +384,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
   if (evidence.toolName === 'diagnose_ai_routing') return renderAiRoutingDiagnosis(payload)
   if (evidence.toolName === 'query_proactive_work') return renderProactiveWork(payload)
+  if (evidence.toolName === 'query_plan_continuation') return renderPlanContinuation(payload)
   if (evidence.toolName === 'query_enterprise_memory') return renderEnterpriseMemory(payload)
   return ''
 }

@@ -83,10 +83,13 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   operationCount: '操作数量',
   atomic: '提交方式',
   operations: '操作清单',
+  steps: '修订后的未来步骤',
+  revisedStepCount: '修订后总步骤',
+  protectedStepCount: '受保护步骤',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
-  if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒', create: '新增记忆', correct: '纠正记忆', expire: '设为失效', delete: '删除记忆' } as Record<string, string>)[String(value)] || String(value)
+  if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒', create: '新增记忆', correct: '纠正记忆', expire: '设为失效', delete: '删除记忆', pause: '暂停计划', resume: '恢复计划', retry_step: '重试失败步骤', revise_steps: '修订未执行步骤', cancel: '取消计划' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'scopeType') return ({ organization: '组织', partner: '合作伙伴', project: '项目' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'memoryType') return ({ fact: '事实', preference: '偏好', rule: '规则', decision: '决策' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'sourceType') return ({ manual: '人工记录', task: '任务事实', conversation: '当前对话', document: '文档', system: '系统规则' } as Record<string, string>)[String(value)] || String(value)
@@ -106,6 +109,13 @@ function formatAgentApprovalValue(key: string, value: unknown): string {
         : operation.status ? `${operation.status}${operation.progress !== undefined ? ` · ${operation.progress}%` : ''}`
           : operation.entry && typeof operation.entry === 'object' ? String((operation.entry as Record<string, unknown>).note || '') : ''
       return `${index + 1}. ${String(operation.taskTitle || `任务 #${operation.taskId || ''}`)} · ${action}${detail ? `：${detail}` : ''}`
+    }).join('\n')
+  }
+  if (key === 'steps' && Array.isArray(value)) {
+    return value.map((item, index) => {
+      const step = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const dependencies = Array.isArray(step.dependsOn) ? step.dependsOn.map(String).filter(Boolean) : []
+      return `${index + 1}. ${String(step.label || '未命名步骤')} · ${String(step.action || '待确定')}${dependencies.length ? ` · 依赖 ${dependencies.join('、')}` : ''}`
     }).join('\n')
   }
   if (value === null || value === undefined || value === '') return '未填写'
@@ -176,7 +186,9 @@ export function AgentApprovalCard({
   const [activePickerId, setActivePickerId] = useState<string | null>(null)
   const rows = agentApprovalRows(approval)
   const canDecide = approval.status === 'pending' || approval.status === 'failed'
-  const canEdit = canDecide && approval.action !== 'batch_task_operations'
+  const canEdit = canDecide
+    && approval.action !== 'batch_task_operations'
+    && !(approval.action === 'manage_task_plan' && approval.draft.action === 'revise_steps')
   const setDraftField = (key: string, value: unknown) => setEditDraft((current) => ({ ...current, [key]: value }))
   const nestedKey = editDraft.fields && typeof editDraft.fields === 'object' ? 'fields' : editDraft.changes && typeof editDraft.changes === 'object' ? 'changes' : ''
   const editableSource = nestedKey

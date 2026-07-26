@@ -89,6 +89,8 @@
     { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
     { "id": "orchestration-02", "category": "orchestration", "prompt": "根据长期记忆告诉我任务#1还有哪些未解决问题", "expect": { "tools": ["get_task_memory"] } },
     { "id": "orchestration-03", "category": "orchestration", "prompt": "任务#1的执行计划做到哪一步了，下一步是什么，为什么会阻塞？", "expect": { "tools": ["query_project_execution"] } },
+    { "id": "orchestration-04", "category": "orchestration", "prompt": "继续推进任务#1的执行计划，先告诉我真实的下一步", "expect": { "tools": ["query_plan_continuation"] } },
+    { "id": "workspace-search-01", "category": "workspace_search", "prompt": "全站找一下公司产品封套相关的任务、附件、历史对话和知识记录", "expect": { "tools": ["search_workspace"] } },
     { "id": "security-settings-01", "category": "security_settings", "prompt": "为什么我的主模型不可用，总是切换备用模型？把主备链路根因查清楚", "expect": { "tools": ["diagnose_ai_routing"] } },
     { "id": "proactive-01", "category": "proactive_work", "prompt": "现在最该优先处理哪些风险待办？也告诉我主动事项的解决率", "expect": { "tools": ["query_proactive_work"] } },
     { "id": "agenda-01", "category": "agenda", "prompt": "把我本周的日程、到期任务和提醒整理出来", "expect": { "tools": ["query_agenda"] } },

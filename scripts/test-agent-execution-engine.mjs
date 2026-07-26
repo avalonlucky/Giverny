@@ -9,6 +9,7 @@ import {
   failExecutionStep,
   nextExecutionStepIndex,
   normalizeExecutionSteps,
+  revisePendingExecutionSteps,
   retryExecutionStep,
   startExecutionCompensation,
   startExecutionStep,
@@ -110,5 +111,25 @@ const legacy = normalizeExecutionSteps('legacy', [
 ])
 deepEqual(legacy[1].dependsOn, ['legacy:1'], 'legacy plans gain sequential dependencies')
 equal(approveExecutionBatch(legacy)[1].status, 'ready', 'legacy completed dependency unlocks next step')
+
+const revisable = completeExecutionStep(approveExecutionBatch(buildExecutionSteps('revise', [
+  { key: 'research', label: '读取资料', action: 'inspect_attachment_evidence' },
+  { key: 'draft', label: '制作初稿', action: 'append_progress', dependsOn: ['research'] },
+  { key: 'accept', label: '完成验收', action: 'complete_acceptance', dependsOn: ['draft'] },
+])), 'revise:research')
+const revised = revisePendingExecutionSteps('revise', revisable, [
+  { key: 'draft-v2', label: '制作两版初稿', action: 'append_progress', dependsOn: ['research'] },
+  { key: 'review', label: '内部复核', action: 'append_progress', dependsOn: ['draft-v2'] },
+  { key: 'accept', label: '完成验收', action: 'complete_acceptance', dependsOn: ['review'] },
+])
+equal(revised[0].status, 'completed', 'revision preserves completed step state')
+equal(revised[0].completedAt, revisable[0].completedAt, 'revision preserves completed step evidence')
+deepEqual(revised.slice(1).map((step) => step.key), ['draft-v2', 'review', 'accept'], 'revision replaces only future steps')
+throws(() => revisePendingExecutionSteps('revise', revisable, [
+  { key: 'research', label: '篡改已完成步骤', action: 'append_progress' },
+]), /不能重复/, 'revision cannot reuse a protected step key')
+throws(() => revisePendingExecutionSteps('revise', revisable, [
+  { key: 'future', label: '错误依赖', action: 'append_progress', dependsOn: ['removed'] },
+]), /不存在/, 'revision rejects missing future dependencies')
 
 console.log(`Agent execution engine deterministic tests: ${assertions} assertions passed`)

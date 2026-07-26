@@ -26,6 +26,7 @@ import {
   failExecutionStep,
   nextExecutionStepIndex,
   normalizeExecutionSteps,
+  revisePendingExecutionSteps,
   retryExecutionStep,
   startExecutionCompensation,
   startExecutionStep,
@@ -3641,6 +3642,35 @@ function executionStepsForPlan(row: DbAgentTaskPlan) {
   return row.status === 'active' ? unlockExecutionSteps(steps) : steps
 }
 
+function agentPlanStepDrafts(value: unknown): AgentExecutionStepDraft[] {
+  return (Array.isArray(value) ? value : []).slice(0, 8).map((item) => {
+    const step = typeof item === 'object' && item ? item as Record<string, unknown> : {}
+    const compensation = typeof step.compensation === 'object' && step.compensation ? step.compensation as Record<string, unknown> : null
+    return {
+      key: agentString(step.key, 60),
+      label: agentString(step.label, 120),
+      action: agentString(step.action, 60),
+      dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.map((dependency) => agentString(dependency, 60)).filter(Boolean) : undefined,
+      compensation: compensation?.label && compensation.action
+        ? { label: agentString(compensation.label, 120), action: agentString(compensation.action, 60) }
+        : undefined,
+    }
+  }).filter((step) => step.label && step.action)
+}
+
+function agentPlanConcurrencySnapshot(row: DbAgentTaskPlan, steps = executionStepsForPlan(row)) {
+  return {
+    revision: Number(row.revision) || 1,
+    status: row.status,
+    updatedAt: row.updated_at,
+    steps: steps.map((step) => ({
+      id: step.id, key: step.key, label: step.label, action: step.action, status: step.status,
+      dependsOn: step.dependsOn, attempts: step.attempts, startedAt: step.startedAt || '',
+      completedAt: step.completedAt || '', failedAt: step.failedAt || '', error: step.error || '',
+    })),
+  }
+}
+
 function toAgentTaskPlan(row: DbAgentTaskPlan): AgentTaskPlan {
   return {
     id: row.id,
@@ -5111,7 +5141,77 @@ async function agentQueryProjectExecutionTool(env: Env, request: Request) {
   })
 }
 
-function validateAgentPlanManagement(row: DbAgentTaskPlan, action: string, stepId: string) {
+function planContinuationSuggestion(row: DbAgentTaskPlan) {
+  const plan = projectExecutionPlanSummary(row)
+  const failed = plan.failedSteps[0]
+  const ready = plan.nextSteps.find((step) => step.status === 'ready' || step.status === 'compensation_pending')
+  const running = plan.nextSteps.find((step) => step.status === 'running' || step.status === 'compensating')
+  if (row.status === 'awaiting_confirmation') return {
+    planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'awaiting_confirmation', priority: 5,
+    reason: '整个执行批次尚未确认。', nextStep: plan.steps[0] || null,
+    confirmation: { kind: 'task_center', action: 'approve_batch', label: '确认整个批次' },
+    suggestedPrompt: `请打开计划“${row.goal}”并确认整个执行批次。`,
+  }
+  if (row.status === 'paused') return {
+    planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'paused', priority: 4,
+    reason: '计划已暂停，需要确认恢复后才能继续。', nextStep: plan.currentStep,
+    confirmation: { kind: 'agent_preview', tool: 'manage_task_plan_preview', input: { planId: row.id, action: 'resume' }, label: '恢复计划' },
+    suggestedPrompt: `请恢复执行计划“${row.goal}”，先生成确认草稿。`,
+  }
+  if (failed) return {
+    planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'failed', priority: 6,
+    reason: failed.error || '上一次执行失败，需要确认后重试。', nextStep: failed,
+    confirmation: { kind: 'agent_preview', tool: 'manage_task_plan_preview', input: { planId: row.id, action: 'retry_step', stepId: failed.id }, label: '重试失败步骤' },
+    suggestedPrompt: `请重试计划“${row.goal}”中的“${failed.label}”，先核对失败原因并生成确认草稿。`,
+  }
+  if (running) return {
+    planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'running', priority: 2,
+    reason: `步骤“${running.label}”正在执行，暂不重复启动。`, nextStep: running,
+    confirmation: null, suggestedPrompt: '',
+  }
+  if (ready) {
+    const previewTool = `${ready.action}_preview`
+    const canPreview = Boolean(agentWritePreviewConfig(previewTool))
+    return {
+      planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'ready', priority: 3,
+      reason: `依赖已经满足，可以继续“${ready.label}”。`, nextStep: ready,
+      confirmation: canPreview ? { kind: 'business_preview', tool: previewTool, label: `准备${ready.label}` } : { kind: 'conversation', label: '补充执行信息' },
+      suggestedPrompt: canPreview
+        ? `请继续计划“${row.goal}”的下一步“${ready.label}”。先读取当前任务事实，再生成 ${previewTool} 确认草稿，不要直接宣称完成。`
+        : `请继续计划“${row.goal}”的下一步“${ready.label}”，先确认需要哪些业务信息和工具。`,
+    }
+  }
+  const blocker = plan.blockers[0]
+  return {
+    planId: row.id, taskId: plan.taskId, goal: row.goal, state: 'blocked', priority: 1,
+    reason: blocker ? `步骤“${blocker.label}”仍在等待：${blocker.dependencies.map((item) => `${item.label}（${item.status}）`).join('、')}` : '当前没有可执行步骤。',
+    nextStep: blocker || null, confirmation: null, suggestedPrompt: '',
+  }
+}
+
+async function agentQueryPlanContinuationTool(env: Env, request: Request) {
+  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
+  await ensureAgentWorkspaceColumns(env)
+  const body = await parseAgentToolBody(request)
+  const workspaceId = agentWorkspaceIdFromRequest(request)
+  const planId = agentString(body.planId, 160)
+  const taskId = Number(body.taskId) || 0
+  const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 20)
+  const filters = ['workspace_id = ?', "kind = 'goal'", "status IN ('awaiting_confirmation', 'active', 'paused', 'failed', 'compensating')"]
+  const values: unknown[] = [workspaceId]
+  if (planId) { filters.push('id = ?'); values.push(planId) }
+  if (taskId > 0) { filters.push('task_id = ?'); values.push(String(taskId)) }
+  const rows = await env.DB.prepare(`SELECT * FROM agent_task_plans WHERE ${filters.join(' AND ')} ORDER BY updated_at DESC LIMIT ?`)
+    .bind(...values, limit).all<DbAgentTaskPlan>()
+  const continuations = (rows.results || []).map(planContinuationSuggestion).sort((left, right) => right.priority - left.priority)
+  return agentOk({
+    tool: 'query_plan_continuation', count: continuations.length, continuations,
+    next: continuations[0] || null,
+    guardrail: '续接建议只定位下一步；任何业务写入仍需对应预览、人工确认、Workflow 与写入后独立验收。',
+  })
+}
+
+function validateAgentPlanManagement(row: DbAgentTaskPlan, action: string, stepId: string, futureDrafts: AgentExecutionStepDraft[] = []) {
   const steps = executionStepsForPlan(row)
   if (action === 'pause' && row.status !== 'active') throw new Error('只有执行中的计划可以暂停')
   if (action === 'resume' && row.status !== 'paused') throw new Error('只有已暂停的计划可以恢复')
@@ -5119,6 +5219,14 @@ function validateAgentPlanManagement(row: DbAgentTaskPlan, action: string, stepI
     if (!stepId) throw new Error('重试失败步骤时必须提供 stepId')
     if (row.status !== 'failed') throw new Error('只有失败计划可以重试步骤')
     if (!steps.some((step) => step.id === stepId && step.status === 'failed')) throw new Error('只有该计划中的失败步骤可以重试')
+  }
+  if (action === 'revise_steps') {
+    if (['completed', 'compensating', 'compensated', 'cancelled'].includes(row.status)) throw new Error('已经结束或正在补偿的计划不能修订')
+    if (!futureDrafts.length) throw new Error('修订计划时必须提供新的未执行步骤')
+    for (const draft of futureDrafts) {
+      if (draft.compensation && !agentWritePreviewConfig(`${draft.compensation.action}_preview`)) throw new Error(`补偿动作 ${draft.compensation.action} 尚未接入安全写入工具`)
+    }
+    revisePendingExecutionSteps(row.id, steps, futureDrafts)
   }
   if (action === 'cancel' && ['completed', 'compensated', 'cancelled'].includes(row.status)) throw new Error('已经结束的计划不能取消')
   return steps
@@ -5132,17 +5240,24 @@ async function agentManageTaskPlanPreviewTool(env: Env, request: Request) {
   const planId = agentString(body.planId, 160)
   const action = agentString(body.action, 30)
   const stepId = agentString(body.stepId, 220)
-  if (!['pause', 'resume', 'retry_step', 'cancel'].includes(action)) return agentFail('不支持的执行计划操作', 400)
+  const futureDrafts = agentPlanStepDrafts(body.steps)
+  if (!['pause', 'resume', 'retry_step', 'revise_steps', 'cancel'].includes(action)) return agentFail('不支持的执行计划操作', 400)
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(planId, workspaceId).first<DbAgentTaskPlan>()
   if (!row) return agentFail('任务计划不存在', 404)
   let steps
-  try { steps = validateAgentPlanManagement(row, action, stepId) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
-  const selectedStep = stepId ? steps.find((step) => step.id === stepId) : undefined
-  const snapshot = { revision: Number(row.revision) || 1, status: row.status, updatedAt: row.updated_at, step: selectedStep ? { id: selectedStep.id, status: selectedStep.status, attempts: selectedStep.attempts, error: selectedStep.error || '' } : null }
+  try { steps = validateAgentPlanManagement(row, action, stepId, futureDrafts) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
+  const snapshot = agentPlanConcurrencySnapshot(row, steps)
+  const revisedSteps = action === 'revise_steps' ? revisePendingExecutionSteps(row.id, steps, futureDrafts) : null
   return agentPreview(env, request, 'manage_task_plan_preview', {
     planId: row.id, action, stepId: stepId || undefined, taskId: Number(row.task_id) || undefined, goal: row.goal,
+    steps: action === 'revise_steps' ? futureDrafts : undefined,
+    revisedStepCount: revisedSteps?.length,
+    protectedStepCount: action === 'revise_steps' ? steps.filter((step) => !['pending', 'blocked', 'ready'].includes(step.status)).length : undefined,
+    reason: action === 'revise_steps' ? agentString(body.reason, 500) : undefined,
     before: snapshot, snapshotChecksum: await scheduleSnapshotChecksum(snapshot),
-  }, [], action === 'cancel' ? ['取消只终止后续编排，不会把已经写入的业务数据回滚。'] : [])
+  }, [], action === 'cancel'
+    ? ['取消只终止后续编排，不会把已经写入的业务数据回滚。']
+    : action === 'revise_steps' ? ['已经运行、完成、失败或补偿的步骤及其证据不会被修改。'] : [])
 }
 
 async function agentManageTaskPlanTool(env: Env, request: Request) {
@@ -5155,14 +5270,14 @@ async function agentManageTaskPlanTool(env: Env, request: Request) {
   const planId = agentString(draft.planId, 160)
   const action = agentString(draft.action, 30)
   const stepId = agentString(draft.stepId, 220)
+  const futureDrafts = agentPlanStepDrafts(draft.steps)
   const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(planId, workspaceId).first<DbAgentTaskPlan>()
   if (!row) return agentFail('任务计划不存在', 404)
   const before = typeof draft.before === 'object' && draft.before ? draft.before as Record<string, unknown> : {}
   if (Number(before.revision) !== Number(row.revision)) return agentFail('执行计划在确认前已发生变化，请重新预览', 409)
   let steps
-  try { steps = validateAgentPlanManagement(row, action, stepId) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
-  const selectedStep = stepId ? steps.find((step) => step.id === stepId) : undefined
-  const currentSnapshot = { revision: Number(row.revision) || 1, status: row.status, updatedAt: row.updated_at, step: selectedStep ? { id: selectedStep.id, status: selectedStep.status, attempts: selectedStep.attempts, error: selectedStep.error || '' } : null }
+  try { steps = validateAgentPlanManagement(row, action, stepId, futureDrafts) } catch (error) { return agentFail(error instanceof Error ? error.message : '执行计划状态不允许该操作', 409) }
+  const currentSnapshot = agentPlanConcurrencySnapshot(row, steps)
   if (agentString(draft.snapshotChecksum, 100) !== await scheduleSnapshotChecksum(currentSnapshot)) return agentFail('执行计划在确认前已发生变化，请重新预览', 409)
   let status: AgentExecutionPlanStatus = row.status
   let pausedAt = row.paused_at
@@ -5171,6 +5286,11 @@ async function agentManageTaskPlanTool(env: Env, request: Request) {
   if (action === 'pause') { status = 'paused'; pausedAt = nowIso() }
   if (action === 'resume') { status = executionPlanStatus(steps); pausedAt = null }
   if (action === 'retry_step') { steps = retryExecutionStep(steps, stepId); status = executionPlanStatus(steps); failedAt = null; errorMessage = null }
+  if (action === 'revise_steps') {
+    steps = revisePendingExecutionSteps(row.id, steps, futureDrafts)
+    if (row.status === 'active' || row.status === 'failed') steps = unlockExecutionSteps(steps)
+    status = row.status === 'failed' && steps.some((step) => step.status === 'failed') ? 'failed' : row.status === 'paused' ? 'paused' : row.status === 'awaiting_confirmation' ? 'awaiting_confirmation' : executionPlanStatus(steps)
+  }
   if (action === 'cancel') { status = 'cancelled'; pausedAt = null }
   const result = await env.DB.prepare(
     `UPDATE agent_task_plans SET steps_json = ?, current_step = ?, status = ?, paused_at = ?, failed_at = ?, error_message = ?,
@@ -7919,6 +8039,147 @@ async function agentProductHelpTool(env: Env, request: Request) {
   })
 }
 
+type AgentWorkspaceSearchSource = 'task' | 'attachment' | 'conversation' | 'product' | 'memory'
+type AgentWorkspaceSearchResult = {
+  id: string
+  source: AgentWorkspaceSearchSource
+  title: string
+  snippet: string
+  score: number
+  updatedAt?: string
+  taskId?: number
+  conversationId?: string
+  attachmentId?: number
+  route?: string
+  sourceLabel: string
+}
+
+function agentSubtoolRequest(request: Request, body: Record<string, unknown>) {
+  return new Request(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(body) })
+}
+
+async function agentSubtoolData(response: Response) {
+  const data = await response.json().catch(() => null) as Record<string, unknown> | null
+  return response.ok && data ? data : null
+}
+
+function workspaceSearchQueryVariants(query: string) {
+  const generic = /^(?:PDF|文件|附件|任务|项目|对话|知识|记忆|验收)$/i
+  const parts = query.split(/[\s,，;；、/]+/).map((item) => item.trim()).filter((item) => item.length >= 2 && !generic.test(item))
+  return [...new Set([query, ...parts.sort((left, right) => right.length - left.length)])].slice(0, 4)
+}
+
+async function workspaceSubtoolSearch(
+  request: Request,
+  queries: string[],
+  resultKey: string,
+  call: (request: Request) => Promise<Response>,
+  extra: Record<string, unknown>,
+) {
+  let last: Record<string, unknown> | null = null
+  for (const query of queries) {
+    last = await call(agentSubtoolRequest(request, { ...extra, query })).then(agentSubtoolData)
+    if (Array.isArray(last?.[resultKey]) && (last[resultKey] as unknown[]).length > 0) return last
+  }
+  return last
+}
+
+async function workspaceConversationSearch(env: Env, workspaceId: string, query: string, limit: number) {
+  await ensureAgentWorkspaceColumns(env)
+  const like = `%${query.replace(/[\\%_]/g, '\\$&')}%`
+  const rows = await env.DB.prepare(
+    `SELECT id, title, last_message_preview, project_name, updated_at
+     FROM agent_conversations
+     WHERE workspace_id = ? AND deleted_at IS NULL
+       AND (title LIKE ? ESCAPE '\\' OR last_message_preview LIKE ? ESCAPE '\\' OR project_name LIKE ? ESCAPE '\\')
+     ORDER BY updated_at DESC LIMIT ?`,
+  ).bind(workspaceId, like, like, like, limit).all<{ id: string; title: string; last_message_preview: string; project_name: string | null; updated_at: string }>()
+  const byId = new Map<string, { id: string; title: string; preview: string; projectName: string; updatedAt: string; semanticScore: number }>()
+  for (const row of rows.results || []) byId.set(row.id, { id: row.id, title: row.title, preview: row.last_message_preview, projectName: row.project_name || '', updatedAt: row.updated_at, semanticScore: 0 })
+  if (env.VECTORIZE && env.AI) {
+    try {
+      const [vector] = await embedTexts(env, [query])
+      if (vector) {
+        const matches = await env.VECTORIZE.query(vector, { topK: Math.max(20, limit), returnMetadata: 'all' })
+        const scoped = (matches.matches || []).filter((match) => match.id.startsWith('conversation-') && match.score >= 0.35 && String(match.metadata?.workspaceId || DEFAULT_WORKSPACE_ID) === workspaceId).slice(0, limit)
+        if (scoped.length) {
+          const ids = scoped.map((match) => match.id.slice('conversation-'.length))
+          const placeholders = ids.map(() => '?').join(',')
+          const semanticRows = await env.DB.prepare(`SELECT id, title, last_message_preview, project_name, updated_at FROM agent_conversations WHERE workspace_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`)
+            .bind(workspaceId, ...ids).all<{ id: string; title: string; last_message_preview: string; project_name: string | null; updated_at: string }>()
+          const scoreById = new Map(scoped.map((match) => [match.id.slice('conversation-'.length), match.score]))
+          for (const row of semanticRows.results || []) byId.set(row.id, { id: row.id, title: row.title, preview: row.last_message_preview, projectName: row.project_name || '', updatedAt: row.updated_at, semanticScore: scoreById.get(row.id) || 0 })
+        }
+      }
+    } catch {
+      // 关键词结果仍然可用。
+    }
+  }
+  return [...byId.values()].sort((left, right) => right.semanticScore - left.semanticScore || right.updatedAt.localeCompare(left.updatedAt)).slice(0, limit)
+}
+
+async function agentWorkspaceSearchTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const query = agentString(body.query, 500)
+  if (!query) return agentFail('query 不能为空', 400)
+  const month = agentString(body.month, 7)
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 50)
+  const requested = new Set<AgentWorkspaceSearchSource>((Array.isArray(body.sources) ? body.sources : ['task', 'attachment', 'conversation', 'product', 'memory']).filter((source): source is AgentWorkspaceSearchSource => ['task', 'attachment', 'conversation', 'product', 'memory'].includes(String(source))))
+  const perSourceLimit = Math.min(20, Math.max(5, Math.ceil(limit / Math.max(1, requested.size)) * 2))
+  const queryVariants = workspaceSearchQueryVariants(query)
+  const searches = await Promise.all([
+    requested.has('task') ? workspaceSubtoolSearch(request, queryVariants, 'results', (subrequest) => agentSearchTasksTool(env, subrequest), { month, limit: perSourceLimit }) : null,
+    requested.has('attachment') ? workspaceSubtoolSearch(request, queryVariants, 'files', (subrequest) => agentSearchAttachmentsTool(env, subrequest), { month, limit: perSourceLimit }) : null,
+    requested.has('product') ? workspaceSubtoolSearch(request, queryVariants, 'matches', (subrequest) => agentProductHelpTool(env, subrequest), { limit: Math.min(10, perSourceLimit) }) : null,
+    requested.has('memory') ? workspaceSubtoolSearch(request, queryVariants, 'memories', (subrequest) => agentQueryEnterpriseMemoryTool(env, subrequest), { limit: perSourceLimit }) : null,
+    requested.has('conversation') ? (async () => {
+      for (const variant of queryVariants) {
+        const rows = await workspaceConversationSearch(env, principal.workspaceId, variant, perSourceLimit)
+        if (rows.length > 0) return rows
+      }
+      return []
+    })() : null,
+  ])
+  const [tasks, attachments, products, memories, conversations] = searches
+  const results: AgentWorkspaceSearchResult[] = []
+  const taskRows = Array.isArray(tasks?.results) ? tasks.results as Array<Record<string, unknown>> : []
+  taskRows.forEach((item, index) => results.push({
+    id: `task:${Number(item.id)}`, source: 'task', taskId: Number(item.id), title: String(item.title || ''),
+    snippet: String(item.requirement || item.status || '').slice(0, 320), score: Number(item.semanticScore) || Math.max(0.5, 0.9 - index * 0.03),
+    updatedAt: String(item.actualDeliveryDate || item.estimatedDate || item.startDate || ''), sourceLabel: '任务',
+  }))
+  const files = Array.isArray(attachments?.files) ? attachments.files as Array<Record<string, unknown>> : []
+  files.forEach((item, index) => results.push({
+    id: `attachment:${Number(item.id)}`, source: 'attachment', attachmentId: Number(item.id), taskId: Number(item.taskId),
+    title: String(item.name || ''), snippet: `${String(item.taskTitle || '')} · ${String(item.scope || '')} · ${String(item.tag || '')}`,
+    score: Math.max(0.45, 0.86 - index * 0.03), updatedAt: String(item.uploadedAt || ''), sourceLabel: '附件',
+  }))
+  const matches = Array.isArray(products?.matches) ? products.matches as Array<Record<string, unknown>> : []
+  matches.forEach((item, index) => results.push({
+    id: `product:${String(item.id || index)}`, source: 'product', title: String(item.title || ''), snippet: String(item.summary || '').slice(0, 320),
+    score: Math.min(1, Math.max(0.4, Number(item.score || 0) / 100)), route: String(item.route || ''), sourceLabel: String(item.sourceLabel || '产品知识'),
+  }))
+  const memoryRows = Array.isArray(memories?.memories) ? memories.memories as Array<Record<string, unknown>> : []
+  memoryRows.forEach((item, index) => results.push({
+    id: `memory:${String(item.id || index)}`, source: 'memory', title: String(item.title || ''), snippet: String(item.content || '').slice(0, 320),
+    score: Math.max(0.45, 0.82 - index * 0.03), updatedAt: String(item.updatedAt || ''), sourceLabel: `企业记忆 · ${String(item.scopeKey || item.scopeType || '组织')}`,
+  }))
+  ;(Array.isArray(conversations) ? conversations : []).forEach((item, index) => results.push({
+    id: `conversation:${item.id}`, source: 'conversation', conversationId: publicAgentConversationId(principal.workspaceId, item.id), title: item.title,
+    snippet: item.preview.slice(0, 320), score: item.semanticScore || Math.max(0.45, 0.8 - index * 0.03), updatedAt: item.updatedAt,
+    sourceLabel: item.projectName ? `对话 · ${item.projectName}` : '对话',
+  }))
+  const sourceOrder: Record<AgentWorkspaceSearchSource, number> = { task: 5, attachment: 4, memory: 3, conversation: 2, product: 1 }
+  const ranked = results.sort((left, right) => right.score - left.score || sourceOrder[right.source] - sourceOrder[left.source] || String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))).slice(0, limit)
+  const counts = Object.fromEntries((['task', 'attachment', 'conversation', 'product', 'memory'] as AgentWorkspaceSearchSource[]).map((source) => [source, ranked.filter((item) => item.source === source).length]))
+  return agentOk({
+    tool: 'search_workspace', query, month: month || undefined, searchMode: env.VECTORIZE && env.AI ? 'semantic-vector+keyword+structured' : 'keyword+structured',
+    semanticEnabled: Boolean(env.VECTORIZE && env.AI), requestedSources: [...requested], count: ranked.length, counts, results: ranked, generatedAt: nowIso(),
+  })
+}
+
 function toAgentBackgroundTask(row: DbAgentAnalysisJob): AgentBackgroundTask {
   return {
     id: row.id,
@@ -8509,7 +8770,15 @@ type AgentPostcondition = {
 }
 
 function postconditionCheck(name: string, expected: unknown, actual: unknown): AgentPostconditionItem {
-  return { name, passed: agentCanonicalize(expected) === agentCanonicalize(actual), expected, actual }
+  const normalizePersistedValue = (value: unknown) => value === undefined ? null : JSON.parse(JSON.stringify(value)) as unknown
+  const normalizedExpected = normalizePersistedValue(expected)
+  const normalizedActual = normalizePersistedValue(actual)
+  return {
+    name,
+    passed: agentCanonicalize(normalizedExpected) === agentCanonicalize(normalizedActual),
+    expected: normalizedExpected,
+    actual: normalizedActual,
+  }
 }
 
 const agentTaskPostconditionEndpoints = new Set([
@@ -8621,7 +8890,8 @@ async function verifyAgentWritePostcondition(env: Env, principal: AgentPrincipal
   if (endpoint === 'schedule-reminder' || endpoint === 'manage-task-plan') {
     const plan = result.plan && typeof result.plan === 'object' ? result.plan as Record<string, unknown> : {}
     const row = await env.DB.prepare('SELECT * FROM agent_task_plans WHERE id = ? AND workspace_id = ?').bind(String(plan.id), principal.workspaceId).first<DbAgentTaskPlan>()
-    checks.push(postconditionCheck('执行计划已保存', { id: plan.id, status: plan.status, revision: Number(plan.revision) || 0, goal: plan.goal }, row ? { id: row.id, status: row.status, revision: Number(row.revision) || 0, goal: row.goal } : null))
+    const expectedSteps = Array.isArray(plan.steps) ? plan.steps : []
+    checks.push(postconditionCheck('执行计划已保存', { id: plan.id, status: plan.status, revision: Number(plan.revision) || 0, goal: plan.goal, steps: expectedSteps }, row ? { id: row.id, status: row.status, revision: Number(row.revision) || 0, goal: row.goal, steps: executionStepsForPlan(row) } : null))
   }
   if (endpoint === 'manage-proactive-item') {
     const item = result.item && typeof result.item === 'object' ? result.item as Record<string, unknown> : {}
@@ -8758,6 +9028,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/product-help' && (request.method === 'POST' || request.method === 'GET')) {
     return agentProductHelpTool(env, request)
   }
+  if (url.pathname === '/api/agent/tools/workspace-search' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceSearchTool(env, request)
   if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
   if (url.pathname === '/api/agent/tools/settlement-reconciliation' && (request.method === 'POST' || request.method === 'GET')) return agentReconcileSettlementTool(env, request)
   if (url.pathname === '/api/agent/tools/agenda' && (request.method === 'POST' || request.method === 'GET')) return agentAgendaTool(env, request)
@@ -8782,6 +9053,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/manage-proactive-item-preview' && request.method === 'POST') return agentManageProactivePreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-proactive-item' && request.method === 'POST') return agentManageProactiveTool(env, request)
   if (url.pathname === '/api/agent/tools/project-execution' && (request.method === 'POST' || request.method === 'GET')) return agentQueryProjectExecutionTool(env, request)
+  if (url.pathname === '/api/agent/tools/plan-continuation' && (request.method === 'POST' || request.method === 'GET')) return agentQueryPlanContinuationTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-task-plan-preview' && request.method === 'POST') return agentManageTaskPlanPreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-task-plan' && request.method === 'POST') return agentManageTaskPlanTool(env, request)
   if (url.pathname === '/api/agent/tools/configure-ai-route-preview' && request.method === 'POST') return agentConfigureAiRoutePreviewTool(env, request)

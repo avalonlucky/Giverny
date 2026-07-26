@@ -143,7 +143,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('query_month_finance')
     issues.push('金额或工时结论没有经过财务计算工具。')
   }
-  if (hasIntent('product_help') && !hasDeterministicTool('search_product_help')) {
+  if (hasIntent('product_help') && !hasDeterministicTool('search_product_help', 'search_workspace')) {
     requiredTools.push('search_product_help')
     issues.push('产品说明没有经过官方产品知识工具核对。')
   }
@@ -159,6 +159,9 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   const hasPortfolioSubject = /(?:任务|项目|工作|等待|延期|逾期|待验收|已验收|未完成|没闭环)/.test(turn.question)
   const asksProactiveWork = /(?:主动事项|风险待办|优先级|最该|优先处理|提醒处理效果|误报率|解决率)/.test(turn.question)
   const asksProjectExecution = /(?:执行计划|任务计划|项目计划|计划步骤|当前步骤|下一步|做到哪一步|为什么.{0,8}(?:卡住|阻塞)|依赖.{0,8}(?:什么|谁)|失败步骤)/.test(turn.question)
+  const asksPlanContinuation = !/(?:做到哪一步|当前步骤|为什么.{0,8}(?:卡住|阻塞)|失败步骤|下一步是什么)/.test(turn.question)
+    && /(?:继续|接着|续接|往下推进|执行下一步).*(?:计划|项目|任务|执行)|(?:计划|项目|任务|执行).*(?:继续|接着|续接|往下推进|执行下一步)/.test(turn.question)
+  const asksWorkspaceSearch = /(?:全站|整个网站|所有地方|到处|跨(?:任务|附件|对话|知识)|不记得.*在哪).*(?:搜|查|找)|(?:统一搜索|全域搜索)/.test(turn.question)
   const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(turn.question)
     && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(turn.question)
   const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
@@ -186,9 +189,16 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('query_proactive_work')
     issues.push('主动工作结论没有读取优先级、证据和处理效果。')
   }
-  if (asksProjectExecution && !hasDeterministicTool('query_project_execution')) {
+  if (asksPlanContinuation && !hasDeterministicTool('query_plan_continuation')) {
+    requiredTools.push('query_plan_continuation')
+    issues.push('计划续接没有从真实停顿点生成下一步建议。')
+  } else if (asksProjectExecution && !hasDeterministicTool('query_project_execution', 'query_plan_continuation')) {
     requiredTools.push('query_project_execution')
     issues.push('项目执行进度、依赖或下一步结论没有读取已保存的执行计划。')
+  }
+  if (asksWorkspaceSearch && !hasDeterministicTool('search_workspace')) {
+    requiredTools.push('search_workspace')
+    issues.push('跨域查找没有经过全域统一搜索。')
   }
   if (asksEnterpriseMemory && !hasDeterministicTool('query_enterprise_memory')) {
     requiredTools.push('query_enterprise_memory')
@@ -198,7 +208,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('diagnose_ai_routing')
     issues.push('模型主备链路结论没有经过配置、连接状态和近期回退记录诊断。')
   }
-  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
+  if (hasIntent('attachment') && !hasDeterministicTool('search_attachments', 'search_workspace', 'prepare_attachment_upload', 'inspect_attachment_evidence', 'query_attachment_analysis')) {
     requiredTools.push('search_attachments')
     issues.push('附件结论没有经过真实附件查询。')
   }
@@ -207,7 +217,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('inspect_attachment_evidence')
     issues.push('附件内容或质量结论没有读取可引用的文件证据。')
   }
-  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work', 'query_project_execution')) {
+  if (hasIntent('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'search_workspace', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')
