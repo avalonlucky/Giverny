@@ -38,6 +38,7 @@ type UiStore = {
   calendarDisplayMode: CalendarDisplayMode
   calendarFocusDate: string
   isLoginModalOpen: boolean
+  isAboutGivernyOpen: boolean
   monthValue: string
   selectedTaskId: number
   isTaskDetailCollapsed: boolean
@@ -72,6 +73,7 @@ type UiStore = {
   setCalendarDisplayMode: StateSetter<CalendarDisplayMode>
   setCalendarFocusDate: StateSetter<string>
   setIsLoginModalOpen: StateSetter<boolean>
+  setIsAboutGivernyOpen: StateSetter<boolean>
   setMonthValue: StateSetter<string>
   setSelectedTaskId: StateSetter<number>
   setIsTaskDetailCollapsed: StateSetter<boolean>
@@ -112,6 +114,7 @@ export const useUiStore = create<UiStore>((set) => ({
   calendarDisplayMode: '月',
   calendarFocusDate: isoDate(),
   isLoginModalOpen: false,
+  isAboutGivernyOpen: false,
   monthValue: isoDate().slice(0, 7),
   selectedTaskId: 0,
   isTaskDetailCollapsed: storedBoolean('giverny-task-detail-collapsed', '1'),
@@ -146,6 +149,7 @@ export const useUiStore = create<UiStore>((set) => ({
   setCalendarDisplayMode: (value) => set((state) => ({ calendarDisplayMode: resolveStateValue(value, state.calendarDisplayMode) })),
   setCalendarFocusDate: (value) => set((state) => ({ calendarFocusDate: resolveStateValue(value, state.calendarFocusDate) })),
   setIsLoginModalOpen: (value) => set((state) => ({ isLoginModalOpen: resolveStateValue(value, state.isLoginModalOpen) })),
+  setIsAboutGivernyOpen: (value) => set((state) => ({ isAboutGivernyOpen: resolveStateValue(value, state.isAboutGivernyOpen) })),
   setMonthValue: (value) => set((state) => ({ monthValue: resolveStateValue(value, state.monthValue) })),
   setSelectedTaskId: (value) => set((state) => ({ selectedTaskId: resolveStateValue(value, state.selectedTaskId) })),
   setIsTaskDetailCollapsed: (value) => set((state) => ({ isTaskDetailCollapsed: resolveStateValue(value, state.isTaskDetailCollapsed) })),

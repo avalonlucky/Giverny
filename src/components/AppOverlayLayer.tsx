@@ -18,6 +18,7 @@ import { CommandPalette, ShortcutHelpModal } from './CommandPalette'
 import type { ConfirmDialogState } from './ConfirmDialogModal'
 import { ConfirmDialogModal } from './ConfirmDialogModal'
 import { AdminLoginModal } from './AdminLoginModal'
+import { AboutGivernyModal } from './AboutGivernyModal'
 import { AttachmentHoverThumbnail } from './AttachmentHoverThumbnail'
 import { DailyKnowledgeModal } from './DailyKnowledgeModal'
 import { ModalShell } from './ModalShell'
@@ -107,8 +108,10 @@ export function AppOverlayLayer({
   previewFile,
   onClosePreviewFile,
   loginModalOpen,
+  aboutGivernyOpen,
   authError,
   onCloseLogin,
+  onCloseAboutGiverny,
   onUnlock,
   showFireworks,
   toastQueue,
@@ -179,8 +182,10 @@ export function AppOverlayLayer({
   previewFile: FileAsset | null
   onClosePreviewFile: () => void
   loginModalOpen: boolean
+  aboutGivernyOpen: boolean
   authError: string
   onCloseLogin: () => void
+  onCloseAboutGiverny: () => void
   onUnlock: (email: string, key: string, turnstileToken?: string) => void | Promise<void>
   showFireworks: boolean
   toastQueue: ToastState[]
@@ -305,6 +310,7 @@ export function AppOverlayLayer({
         </Suspense>
       )}
       {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} />}
+      {aboutGivernyOpen && <AboutGivernyModal onClose={onCloseAboutGiverny} />}
       {showFireworks && <Fireworks />}
       {toastQueue.length > 0 && (
         <div className="toast-stack" role="region" aria-label="操作提示">

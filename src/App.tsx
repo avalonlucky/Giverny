@@ -82,7 +82,7 @@ function App() {
   const taskViewMode = taskViewModeFromSearch(location.search)
   const {
     calendarDisplayMode, setCalendarDisplayMode, calendarFocusDate, setCalendarFocusDate,
-    isLoginModalOpen, setIsLoginModalOpen, monthValue, setMonthValue,
+    isLoginModalOpen, setIsLoginModalOpen, isAboutGivernyOpen, setIsAboutGivernyOpen, monthValue, setMonthValue,
     selectedTaskId, setSelectedTaskId, isTaskDetailCollapsed, detailTaskId, setDetailTaskId,
     editTaskId, setEditTaskId, progressModalTarget, setProgressModalTarget,
     isModalOpen, setIsModalOpen, newTaskSupplemental, setNewTaskSupplemental,
@@ -464,6 +464,7 @@ function App() {
         onAccountMenuOpenChange={setIsAccountMenuOpen}
         onOpenSettings={(tab) => { setSettingsEntry({ tab, nonce: Date.now() }); navigateView('设置') }}
         onLogin={() => setIsLoginModalOpen(true)}
+        onOpenAbout={() => setIsAboutGivernyOpen(true)}
         onSignOut={handleSignOut}
       />
 
@@ -881,8 +882,10 @@ function App() {
         previewFile={previewFile}
         onClosePreviewFile={() => setPreviewFile(null)}
         loginModalOpen={isLoginModalOpen}
+        aboutGivernyOpen={isAboutGivernyOpen}
         authError={authError}
         onCloseLogin={() => { setIsLoginModalOpen(false); setAuthError('') }}
+        onCloseAboutGiverny={() => setIsAboutGivernyOpen(false)}
         onUnlock={handleUnlock}
         showFireworks={showFireworks}
         toastQueue={toastQueue}

@@ -1,6 +1,6 @@
 import type { RefObject } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Archive, KeyRound, LogOut, Settings, UserCircle } from 'lucide-react'
+import { Archive, Info, KeyRound, LogOut, Settings, UserCircle } from 'lucide-react'
 import { appReleaseDate, appVersion } from '../config/appConfig'
 import type { AuthRole, StorageUsage, StoredAuth } from '../lib/api'
 import type { AppView } from '../types/domain'
@@ -27,6 +27,7 @@ export function AppSidebar({
   onAccountMenuOpenChange,
   onOpenSettings,
   onLogin,
+  onOpenAbout,
   onSignOut,
 }: {
   activeView: AppView
@@ -44,6 +45,7 @@ export function AppSidebar({
   onAccountMenuOpenChange: (open: boolean | ((current: boolean) => boolean)) => void
   onOpenSettings: (tab: SettingsTab) => void
   onLogin: () => void
+  onOpenAbout: () => void
   onSignOut: () => void
 }) {
   return (
@@ -141,6 +143,10 @@ export function AppSidebar({
                 )}
               </>
             )}
+            <button className="account-menu-item" type="button" role="menuitem" onClick={() => { onAccountMenuOpenChange(false); onOpenAbout() }}>
+              <Info size={17} />
+              <span>关于 Giverny</span>
+            </button>
             <div className="account-menu-version" title={`发布于 ${appReleaseDate}`}>v{appVersion}</div>
           </div>
         )}
