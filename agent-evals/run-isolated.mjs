@@ -221,7 +221,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 82) {
+  if (!response.ok || capabilities.length !== 81) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
@@ -700,7 +700,6 @@ async function runAgentBusinessToolCheck(cookie) {
     throw new Error(`Changed schedule conflicts did not invalidate the confirmation: ${JSON.stringify(staleConflictExecute.data)}`)
   }
 
-  const staleSettlement = await preview('export-settlement-preview', { startDate: '2026-06-01', endDate: '2026-07-22' })
   const reschedule = await preview('reschedule-task-preview', {
     taskId: 12,
     startDate: '2026-07-20T09:00',
@@ -712,15 +711,11 @@ async function runAgentBusinessToolCheck(cookie) {
   if (rescheduled.task?.date !== '2026-07-20T09:00' || rescheduled.task?.estimatedDate !== '2026-07-22T18:00') {
     throw new Error(`Reschedule did not persist the expected dates: ${JSON.stringify(rescheduled.task)}`)
   }
-  const staleExecute = await request('/api/agent/tools/export-settlement', {
-    method: 'POST', headers, body: JSON.stringify({ confirmationToken: staleSettlement.confirmationToken }),
+  const generatedSettlement = await request('/api/agent/tools/generate-settlement-receipt', {
+    method: 'POST', headers, body: JSON.stringify({ startDate: '2026-06-01', endDate: '2026-07-22' }),
   })
-  if (staleExecute.response.status !== 409 || !String(staleExecute.data.error || '').includes('发生变化')) {
-    throw new Error(`Changed settlement snapshot was not rejected: ${staleExecute.response.status} ${JSON.stringify(staleExecute.data)}`)
-  }
-
-  const settlement = await preview('export-settlement-preview', { startDate: '2026-06-01', endDate: '2026-07-22' })
-  const exported = await execute('export-settlement', settlement.confirmationToken)
+  if (!generatedSettlement.response.ok) throw new Error(`Settlement receipt generation failed: ${JSON.stringify(generatedSettlement.data)}`)
+  const exported = generatedSettlement.data
   const record = exported.record
   const file = exported.files?.[0]
   if (!record?.id || !record?.publicToken || !file?.downloadUrl || file?.kind !== 'settlement-receipt') {
@@ -754,8 +749,11 @@ async function runAgentBusinessToolCheck(cookie) {
     throw new Error(`Cross-workspace settlement reconciliation leaked a record: ${JSON.stringify(crossWorkspaceReconciliation.data)}`)
   }
 
-  const disposablePreview = await preview('export-settlement-preview', { startDate: '2026-07-01', endDate: '2026-07-10' })
-  const disposable = await execute('export-settlement', disposablePreview.confirmationToken)
+  const disposableResponse = await request('/api/agent/tools/generate-settlement-receipt', {
+    method: 'POST', headers, body: JSON.stringify({ startDate: '2026-07-01', endDate: '2026-07-10' }),
+  })
+  if (!disposableResponse.response.ok) throw new Error(`Disposable settlement receipt generation failed: ${JSON.stringify(disposableResponse.data)}`)
+  const disposable = disposableResponse.data
   const deletePreview = await preview('manage-settlement-export-preview', { exportId: disposable.record.id, action: 'delete_unlocked' })
   const mutatePreview = await preview('manage-settlement-export-preview', { exportId: disposable.record.id, action: 'set_access', expiresAt: '2026-08-31T20:00:00+08:00', disabled: false })
   await execute('manage-settlement-export', mutatePreview.confirmationToken)
@@ -873,7 +871,7 @@ async function runAgentBusinessToolCheck(cookie) {
 
   const roleCases = [
     ['viewer', 'prepare-attachment-upload', { taskId: 1, files: [{ name: 'x.png', size: 1 }] }],
-    ['collaborator', 'export-settlement-preview', { startDate: '2026-07-01', endDate: '2026-07-31' }],
+    ['collaborator', 'generate-settlement-receipt', { startDate: '2026-07-01', endDate: '2026-07-31' }],
     ['collaborator', 'inspect-ai-settings', {}],
     ['collaborator', 'diagnose-ai-routing', { scope: 'all' }],
     ['collaborator', 'restore-ai-routing-preview', {}],
@@ -1695,12 +1693,12 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!productHelpResponse.ok
     || !productHelpText.includes('Command + Shift + M')
     || !productHelpText.includes('search_product_help')
-    || !productHelpText.includes('查找依据')
+    || !productHelpText.includes('找到官方产品依据')
     || productHelpText.includes('不经过本机 CLI')
     || productHelpText.includes('模型规划：')
     || productHelpText.includes('工具执行：')
     || productHelpText.includes('"commandId"')) {
-    throw new Error(`Product help did not bypass model and local CLI routing: ${productHelpText}`)
+    throw new Error(`Product help did not stay inside the directed product-knowledge route: ${productHelpText}`)
   }
 
   const productQuestions = [
@@ -1723,11 +1721,11 @@ async function runLocalCliBridgeCheck(cookie) {
     const responseText = await response.text()
     if (!response.ok
       || !responseText.includes('search_product_help')
-      || !responseText.includes('理解问题：')
-      || !responseText.includes('制定计划：')
-      || !responseText.includes('查找依据：')
-      || !responseText.includes('提取事实：')
-      || !responseText.includes('核对结论：')
+      || !responseText.includes('确认产品使用问题')
+      || !responseText.includes('查询产品使用说明')
+      || !responseText.includes('找到官方产品依据')
+      || !responseText.includes('结构化事实协议')
+      || !responseText.includes('业务事实核验通过')
       || item.expected.some((value) => !responseText.includes(value))
       || responseText.includes('不经过本机 CLI')
       || responseText.includes('模型规划：')
@@ -1762,7 +1760,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!profileResponse.ok
     || !profileText.includes('get_requester_profile')
     || !profileText.includes('陈义君')
-    || !profileText.includes(`${expectedProfile.profile.projects} 个项目`)
+    || !profileText.includes(`项目：${expectedProfile.profile.projects} 个`)
     || !profileText.includes(String(expectedProfile.profile.hours))
     || profileResult?.factVerification?.passed !== true
     || profileText.includes('没有任何关于')
@@ -1784,7 +1782,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!blockerResponse.ok
     || !blockerText.includes('等待刘总的建议')
     || !blockerText.includes('get_task_detail')
-    || !blockerText.includes('制定计划')
+    || !blockerText.includes('确认需要业务依据')
     || blockerText.includes('快捷键')
     || blockerText.includes('⌘ ⌥ 2')) {
     throw new Error(`Task blocker query did not return the concrete waiting reason: ${blockerText}`)

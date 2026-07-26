@@ -15,7 +15,7 @@ for (const marker of [
   'withTaskReference(input',
   'taskEvidenceMismatch(',
   'deterministic: !mismatch',
-  '当前会话已确认任务',
+  'this.activeTaskReference = selectedReference || this.state.taskReference || null',
 ]) {
   if (!runtime.includes(marker)) failures.push(`AliceAgent 缺少会话引用契约：${marker}`)
 }

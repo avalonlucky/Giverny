@@ -11,7 +11,7 @@ const suite = JSON.parse(readFileSync('agent-evals/cases.json', 'utf8'))
 for (const marker of ['decideAgentReplan', 'repairToolInput(', 'executeRepairTool(', 'scopedQuestionForAgentTool', '验真后动态补查', '结构化事实协议生成答案', '拆解 ${verifiedIntents.length} 个目标']) {
   if (!runtime.includes(marker)) failures.push(`AliceAgent 缺少动态重规划契约：${marker}`)
 }
-for (const marker of ['inferAgentIntent', 'inferAgentIntents', 'detectedIntents', 'hasDeterministicTool', "hasIntent('attachment')", "hasIntent('task_data')", 'hasSuccessfulWritePreview', 'successfulTools']) {
+for (const marker of ['inferAgentIntent', 'inferAgentIntents', 'detectedIntents', 'hasDeterministicTool', "hasIntent('attachment')", "hasIntent('task_data')", 'confirmationRequiredPlan', 'hasUnpreviewedWrite', 'successfulTools']) {
   if (!orchestrator.includes(marker)) failures.push(`Agent 验真器缺少契约：${marker}`)
 }
 for (const marker of ['missingFinance', 'missingProduct', 'missingPortfolio', 'missingAttachment', 'uncertainFinance', 'repairedTask', 'exhaustedTurn', 'compoundTurn', 'partiallyVerifiedCompound', 'verifiedWritePreview', 'requesterNameFromQuestion', 'taskTitleFromQuestion', 'splitAgentGoalClauses', 'scopedQuestionForAgentTool']) {

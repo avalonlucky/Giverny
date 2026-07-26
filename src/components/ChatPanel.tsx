@@ -654,7 +654,7 @@ export function ChatPanel({
       id: assistantId,
       role: 'assistant',
       content: '',
-      trace: ['开始分析：识别问题目标与需要核对的依据。'],
+      trace: ['正在识别这次请求…'],
       traceStatus: 'running',
     }])
     setLoading(true)

@@ -6,6 +6,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { z } from 'zod'
 import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig } from './agentToolRegistry'
+import {
+  AGENT_DIRECTOR_SYSTEM_PROMPT,
+  agentDirectorTrace,
+  normalizeAgentDirectorDecision,
+  shortlistAgentCapabilities,
+  validateDirectedPlan,
+  type AgentDirectorPlan,
+} from './agentIntentDirector'
 import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
@@ -3123,6 +3131,61 @@ function publicAgentConversationId(workspaceId: string, storageId: string) {
   return workspaceId !== DEFAULT_WORKSPACE_ID && storageId.startsWith(prefix) ? storageId.slice(prefix.length) : storageId
 }
 
+async function directAgentRequest(
+  env: Env,
+  args: { question: string; currentMonth?: string; modelChoice: ChatModelChoice; principal: AgentPrincipalContext; history?: Array<{ role: 'user' | 'assistant'; content: string }> },
+) {
+  const history = (args.history || []).slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) }))
+  const rawDecision = await callSelectedModelJson<Record<string, unknown>>(
+    env,
+    args.modelChoice,
+    AGENT_DIRECTOR_SYSTEM_PROMPT,
+    { question: args.question, currentMonth: args.currentMonth || '', role: args.principal.role, history },
+    'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|workspace_search|memory|analysis|security)[]; operation: string（优先使用 create_task/update_task/progress/waiting/feedback/acceptance/task_records/task_plan/attachment_upload/attachment_inspect/attachment_manage/settlement_export/schedule/model_config/enterprise_memory/proactive/formal_deliverable/high_risk/general）; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string',
+    1800,
+  )
+  const decision = normalizeAgentDirectorDecision(rawDecision)
+  const allowedCapabilities = shortlistAgentCapabilities(decision, args.principal.role)
+  const target = await resolveChatModelTarget(env, args.modelChoice)
+  const modelLabel = target.label
+  if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite) {
+    const direct = await callTextWithSelectedModel(
+      env,
+      `你是 Giverny 工作助手。请直接回答用户，不要声称查询了网站数据或产品手册，不要展示隐藏思维链。\n\n用户：${args.question}`,
+      args.modelChoice,
+      1800,
+    )
+    return { decision, calls: [], allowedCapabilities, directAnswer: direct.text, modelLabel: direct.modelLabel, denied: [] as string[] }
+  }
+  const capabilities = allowedCapabilities.map((name) => {
+    const capability = agentCapabilityRegistry[name]
+    let inputSchema: unknown = {}
+    try { inputSchema = z.toJSONSchema(capability.inputSchema) } catch { /* Planner can still use title and description. */ }
+    return { name, title: capability.title, description: capability.description, risk: capability.policy.risk, confirmation: capability.policy.confirmation, inputSchema }
+  })
+  const rawPlan = await callSelectedModelJson<AgentDirectorPlan>(
+    env,
+    args.modelChoice,
+    `你是 Giverny Agent 的工具规划器。你只能从输入的候选能力中选择完成目标所必需的最小工具集。
+不得增加候选列表以外的工具；不得为了“多了解一点”而扩大检索；信息不足时允许调用 preview 让后端返回缺失字段。不得编造用户没有提供的任务名、需求、日期、工时、人员或附件 ID；未提供的字段必须省略。
+会修改业务实体的动作只能选 preview 能力，不得直接执行。候选能力中 confirmation=none 的确定性文件生成动作可以立即执行。answerIfNoTools 只用于不需要工具或需向用户追问时。`,
+    { question: args.question, currentMonth: args.currentMonth || '', history, decision, capabilities },
+    'calls: {name: string; args: object; reason: string}[]; needsInput: boolean; followUpQuestion: string; answerIfNoTools: string',
+    3000,
+  )
+  const plan: AgentDirectorPlan = {
+    calls: Array.isArray(rawPlan?.calls) ? rawPlan.calls : [],
+    needsInput: rawPlan?.needsInput === true,
+    followUpQuestion: String(rawPlan?.followUpQuestion || ''),
+    answerIfNoTools: String(rawPlan?.answerIfNoTools || ''),
+  }
+  const validated = validateDirectedPlan({ decision, plan, allowedCapabilities, role: args.principal.role })
+  const directAnswer = validated.calls.length === 0
+    ? plan.followUpQuestion || plan.answerIfNoTools || (decision.missingInformation.length ? `请补充：${decision.missingInformation.join('、')}。` : '')
+    : ''
+  return { decision, calls: validated.calls, allowedCapabilities, directAnswer, modelLabel, denied: validated.denied }
+}
+
 let agentWorkspaceColumnsEnsured = false
 async function ensureAgentWorkspaceColumns(env: Env) {
   if (agentWorkspaceColumnsEnsured) return
@@ -3153,6 +3216,8 @@ async function callAgentRuntime(
     conversationId?: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
     principal: AgentPrincipalContext
+    modelChoice: ChatModelChoice
+    onTrace?: AgentVisibleTraceSink
   },
 ): Promise<OpenAiAgentRuntimeResult | null> {
   const cleanQuery = String(args.query || '').trim()
@@ -3160,6 +3225,15 @@ async function callAgentRuntime(
   const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
   if (env.ALICE_AGENT) {
     try {
+      const orchestration = await directAgentRequest(env, {
+        question: cleanQuery,
+        currentMonth: args.currentMonth,
+        modelChoice: args.modelChoice,
+        principal: args.principal,
+        history: args.history,
+      })
+      const openingTrace = agentDirectorTrace(orchestration.decision)
+      await args.onTrace?.(openingTrace.detail ? [`${openingTrace.label}：${openingTrace.detail}`] : [openingTrace.label])
       const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(args.principal, conversationId)) as unknown as AliceAgent
       const result = await agent.chat({
         message: cleanQuery,
@@ -3168,8 +3242,20 @@ async function callAgentRuntime(
         history: args.history,
         context: args.context,
         principal: args.principal,
+        orchestration: {
+          decision: orchestration.decision,
+          calls: orchestration.calls,
+          allowedCapabilities: orchestration.allowedCapabilities,
+          directAnswer: orchestration.directAnswer,
+          modelLabel: orchestration.modelLabel,
+        },
       })
-      return { ...result, conversationId }
+      const trace = [
+        { type: 'plan', ...agentDirectorTrace(orchestration.decision) },
+        ...(orchestration.denied.length ? [{ type: 'error', label: '策略层拒绝了越界能力', detail: orchestration.denied.join('、') }] : []),
+        ...result.trace.slice(1),
+      ]
+      return { ...result, trace, conversationId }
     } catch (error) {
       console.warn(JSON.stringify({ event: 'cloudflare_alice_agent_failed', error: describeAiCallError(error) }))
       throw error
@@ -4367,30 +4453,23 @@ async function settlementExportFingerprint(row: DbSettlementExport) {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function agentExportSettlementPreviewTool(env: Env, request: Request) {
+async function agentGenerateSettlementReceiptTool(env: Env, request: Request) {
   if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
   const body = await parseAgentToolBody(request)
   const startDate = agentString(body.startDate, 10)
   const endDate = agentString(body.endDate, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) return agentFail('导出日期范围无效', 400)
   const receipt = await buildSettlementReceiptSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate)
-  const draft = { startDate, endDate, taskCount: receipt.rows.length, totalHours: receipt.totalHours, totalAmount: receipt.totalAmount, snapshotChecksum: await settlementSnapshotChecksum(receipt) }
-  return agentPreview(env, request, 'export_settlement_preview', draft, [], ['确认后会保存一条未锁定的结算快照并生成分享链接。'])
-}
-
-async function agentExportSettlementTool(env: Env, request: Request) {
-  if (!(await verifyAgentToolRequest(env, request))) return agentFail('Agent tool token missing or invalid', 401)
-  const body = await parseAgentToolBody(request)
-  let draft: Record<string, unknown>
-  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'export_settlement', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
-  const startDate = agentString(draft.startDate, 10)
-  const endDate = agentString(draft.endDate, 10)
-  const receipt = await buildSettlementReceiptSnapshot(env, agentWorkspaceIdFromRequest(request), startDate, endDate)
-  if (await settlementSnapshotChecksum(receipt) !== draft.snapshotChecksum) return agentFail('结算数据在确认期间发生变化，请重新预览', 409)
   const row = await persistSettlementExport(env, agentWorkspaceIdFromRequest(request), startDate, endDate, receipt)
-  await audit(env, agentCapabilityRegistry.export_settlement.policy.auditEvent, 'settlement_export', row.id, { startDate, endDate, taskCount: receipt.rows.length })
+  await audit(env, agentCapabilityRegistry.generate_settlement_receipt.policy.auditEvent, 'settlement_export', row.id, { startDate, endDate, taskCount: receipt.rows.length, snapshotChecksum: await settlementSnapshotChecksum(receipt) })
   const record = toAgentSettlementExportRecord(row)
-  return agentOk({ tool: 'export_settlement', mode: 'execute', record, files: [{ id: row.id, taskId: 0, taskTitle: '结算回单', name: `结算回单_${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}.xlsx`, type: 'XLSX', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: '', scope: 'acceptance', tag: '结算回单', uploadedAt: formatBeijing(row.generated_at), sourceUrl: `/api/shared-settlement/${row.public_token}/excel`, downloadUrl: `/api/shared-settlement/${row.public_token}/excel`, shareUrl: `/settlement-share/${row.public_token}`, kind: 'settlement-receipt' }] })
+  return agentOk({
+    tool: 'generate_settlement_receipt',
+    mode: 'generated',
+    receipt: { taskCount: receipt.rows.length, totalHours: receipt.totalHours, totalAmount: receipt.totalAmount, snapshotChecksum: await settlementSnapshotChecksum(receipt) },
+    record,
+    files: [{ id: row.id, taskId: 0, taskTitle: '结算回单', name: `结算回单_${startDate.replaceAll('-', '')}-${endDate.replaceAll('-', '')}.xlsx`, type: 'XLSX', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: '', scope: 'acceptance', tag: '结算回单', uploadedAt: formatBeijing(row.generated_at), sourceUrl: `/api/shared-settlement/${row.public_token}/excel`, downloadUrl: `/api/shared-settlement/${row.public_token}/excel`, shareUrl: `/settlement-share/${row.public_token}`, kind: 'settlement-receipt' }],
+  })
 }
 
 async function agentManageSettlementPreviewTool(env: Env, request: Request) {
@@ -7169,20 +7248,26 @@ async function agentSearchTasksTool(env: Env, request: Request) {
   const query = String(body.query ?? '').trim().slice(0, 120)
   const month = String(body.month ?? '').trim().slice(0, 7)
   const limit = Math.min(Math.max(Number(body.limit ?? 30) || 30, 1), 100)
-  const like = `%${query}%`
+  const like = `%${query.replace(/[\\%_]/g, '\\$&')}%`
   const statusIntent = /(?:未完成|没完成|没做完|没做|未做完|逾期|过期|延期|还(?:有|没)|待验收|进行中|计划中|挂起)/.test(query)
   const unfinishedIntent = /(?:未完成|没完成|没做完|没做|未做完|还(?:有|没)|逾期|过期|延期)/.test(query)
   const overdueIntent = /(?:逾期|过期|延期)/.test(query)
   const today = formatBeijing(nowIso()).slice(0, 10)
   const monthWhere = month ? '(settlement_month = ? OR start_date LIKE ?)' : ''
   const monthBindings = month ? [month, `${month}%`] : []
-  const keywordRows = query && !statusIntent
-    ? month
+  const explicitTaskId = Number(query.match(/(?:任务|项目)?\s*#\s*(\d+)/)?.[1]) || 0
+  const keywordRows = explicitTaskId > 0
+    ? await env.DB.prepare(
+        `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
+         FROM tasks WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL AND voided_at IS NULL LIMIT 1`,
+      ).bind(principal.workspaceId, explicitTaskId).all<DbTask>()
+    : query && !statusIntent
+      ? month
       ? await env.DB.prepare(
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
            WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND ${monthWhere}
-             AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
+             AND (title LIKE ? ESCAPE '\\' OR requirement LIKE ? ESCAPE '\\' OR design_type LIKE ? ESCAPE '\\')
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(principal.workspaceId, ...monthBindings, like, like, like, limit).all<DbTask>()
@@ -7190,11 +7275,11 @@ async function agentSearchTasksTool(env: Env, request: Request) {
           `SELECT id, title, requirement, design_type, status, progress, actual_hours, start_date, estimated_delivery_date, actual_delivery_date, settlement_month, is_billable, time_entries_json, waiting_entries_json
            FROM tasks
            WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL
-             AND (title LIKE ? OR requirement LIKE ? OR design_type LIKE ?)
+             AND (title LIKE ? ESCAPE '\\' OR requirement LIKE ? ESCAPE '\\' OR design_type LIKE ? ESCAPE '\\')
            ORDER BY start_date DESC, created_at DESC
            LIMIT ?`,
         ).bind(principal.workspaceId, like, like, like, limit).all<DbTask>()
-    : { results: [] as DbTask[], success: true }
+      : { results: [] as DbTask[], success: true }
   const scopeRows = statusIntent || !query
     ? month
       ? await env.DB.prepare(
@@ -8084,8 +8169,15 @@ async function agentSubtoolData(response: Response) {
 
 function workspaceSearchQueryVariants(query: string) {
   const generic = /^(?:PDF|文件|附件|任务|项目|对话|知识|记忆|验收)$/i
-  const parts = query.split(/[\s,，;；、/]+/).map((item) => item.trim()).filter((item) => item.length >= 2 && !generic.test(item))
-  return [...new Set([query, ...parts.sort((left, right) => right.length - left.length)])].slice(0, 4)
+  const subject = query
+    .replace(/(?:帮我|请)?(?:全站|整个网站|所有地方)?(?:找一下|查一下|搜索|查找)/g, '')
+    .replace(/(?:相关的|相关)?(?:任务|项目|附件|文件|历史对话|对话|知识记录|知识|记忆)/g, ' ')
+    .replace(/[\s,，;；、/]+/g, ' ')
+    .trim()
+  const parts = [subject, ...query.split(/[\s,，;；、/]+/)]
+    .map((item) => item.trim()).filter((item) => item.length >= 2 && item.length <= 80 && !generic.test(item))
+  if (query.length <= 80 && !/(?:任务|附件|对话|知识).*(?:任务|附件|对话|知识)/.test(query)) parts.push(query)
+  return [...new Set(parts.sort((left, right) => left.length - right.length))].slice(0, 4)
 }
 
 async function workspaceSubtoolSearch(
@@ -9067,7 +9159,7 @@ async function verifyAgentWritePostcondition(env: Env, principal: AgentPrincipal
       checks.push(postconditionCheck(`附件 ${Number(file.id)} 已标记为验收文件`, { scope: 'acceptance', tag: '验收文件' }, row ? { scope: row.attachment_scope, tag: row.file_tag || '' } : null))
     }
   }
-  if (endpoint === 'export-settlement' || endpoint === 'manage-settlement-export') {
+  if (endpoint === 'manage-settlement-export') {
     const record = result.record && typeof result.record === 'object' ? result.record as Record<string, unknown> : null
     const exportId = String(record?.id || result.exportId || '')
     const row = exportId ? await env.DB.prepare('SELECT * FROM settlement_exports WHERE id = ? AND workspace_id = ?').bind(exportId, principal.workspaceId).first<DbSettlementExport>() : null
@@ -9258,8 +9350,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   if (url.pathname === '/api/agent/tools/inspect-ai-settings' && (request.method === 'POST' || request.method === 'GET')) return agentInspectAiSettingsTool(env, request)
   if (url.pathname === '/api/agent/tools/test-ai-route' && request.method === 'POST') return agentTestAiRouteTool(env, request)
   if (url.pathname === '/api/agent/tools/diagnose-ai-routing' && request.method === 'POST') return agentDiagnoseAiRoutingTool(env, request)
-  if (url.pathname === '/api/agent/tools/export-settlement-preview' && request.method === 'POST') return agentExportSettlementPreviewTool(env, request)
-  if (url.pathname === '/api/agent/tools/export-settlement' && request.method === 'POST') return agentExportSettlementTool(env, request)
+  if (url.pathname === '/api/agent/tools/generate-settlement-receipt' && request.method === 'POST') return agentGenerateSettlementReceiptTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-settlement-export-preview' && request.method === 'POST') return agentManageSettlementPreviewTool(env, request)
   if (url.pathname === '/api/agent/tools/manage-settlement-export' && request.method === 'POST') return agentManageSettlementTool(env, request)
   if (url.pathname === '/api/agent/tools/reschedule-task-preview' && request.method === 'POST') return agentReschedulePreviewTool(env, request)
@@ -18487,9 +18578,14 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
   // 判断是否需要联网搜索（用户在问自身数据则不搜）
   const lastMsg = messages.at(-1)?.content ?? ''
   const DATA_KW = ['今天', '今日', '本月', '上月', '工时', '任务', '收入', '赚', '计时', '结算', '明细', '近期', '最近', '历史', '验收']
-  const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && !DATA_KW.some((kw) => lastMsg.includes(kw))
+  const explicitlyRequestsWebSearch = /(?:联网|网上|互联网|搜索网页|查最新消息|实时新闻)/.test(lastMsg)
+  const needsWebSearch = useWebSearch && env.TAVILY_API_KEY && explicitlyRequestsWebSearch && !DATA_KW.some((kw) => lastMsg.includes(kw))
+  const needsPersonalKnowledge = useKnowledge && /(?:我的|个人|自己的)?(?:知识库|知识笔记|笔记里|之前记录的资料)/.test(lastMsg)
+  const shouldUseDirectedRuntime = imageAttachments.length === 0 && !needsWebSearch
 
-  const [hourlyRate, monthRows, recentRows, knowledgeNotes, webSearchResult] = await Promise.all([
+  const [hourlyRate, monthRows, recentRows, knowledgeNotes, webSearchResult] = shouldUseDirectedRuntime
+    ? [defaultHourlyRate, { results: [] as DbTask[] }, { results: [] as DbTask[] }, [] as KnowledgeNoteRow[], ''] as const
+    : await Promise.all([
     getHourlyRate(env),
     month
       ? env.DB.prepare(
@@ -18501,15 +18597,15 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     env.DB.prepare(
       'SELECT title, design_type, status, actual_hours, start_date, settlement_month, is_supplemental, is_billable, time_entries_json FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL ORDER BY start_date DESC LIMIT 50',
     ).bind(workspaceId).all<DbTask>(),
-    useKnowledge ? listKnowledgeNotes(env, workspaceId) : Promise.resolve([] as KnowledgeNoteRow[]),
+    needsPersonalKnowledge ? listKnowledgeNotes(env, workspaceId) : Promise.resolve([] as KnowledgeNoteRow[]),
     needsWebSearch ? searchTavily(env.TAVILY_API_KEY!, lastMsg) : Promise.resolve(''),
-  ])
+      ])
   const requestedMonths = extractRequestedMonths(lastMsg, month)
 
   // ===== Agent Runtime 优先 =====
   // 工作数据问题必须进入项目自有 Runtime；失败时显式报错，避免旧本地逻辑伪装成智能体。
   // 触发联网搜索或带图片时仍走本地链路。
-  if (modelChoice === 'auto' && imageAttachments.length === 0 && !webSearchResult && !isSettlementExportQuestion(lastMsg)) {
+  if (shouldUseDirectedRuntime) {
     const knowledgeSection = useKnowledge && knowledgeNotes.length
       ? `\n\n[参考资料：用户的个人知识库笔记，仅在与问题相关时引用]\n${knowledgeNotes
           .map((n) => `【${n.title || '笔记'}】\n${n.content}`)
@@ -18524,10 +18620,6 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     const requiresRuntime = isWorkDataQuestion(lastMsg)
 
     try {
-      await emitVisibleTrace([
-        '理解问题：先判断是否需要进入长期 Agent Runtime。',
-        '制定计划：由网站编排层准备工作区上下文，再交给 Agent Runtime 分析。',
-      ])
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         context: agentContext,
@@ -18538,6 +18630,8 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           content: message.content,
         })),
         principal: agentPrincipal,
+        modelChoice,
+        onTrace: emitVisibleTrace,
       })
       if (runtimeResult?.answer) {
         const conversationId = String(runtimeResult.conversationId || '').trim()
@@ -18554,10 +18648,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
             projectName: conversationProjectName,
           })
         }
-        await emitVisibleTrace([
-          ...formatAgentRuntimeTrace(runtimeResult.trace),
-          '整理回答：Agent Runtime 已返回结果，准备展示最终答案。',
-        ])
+        await emitVisibleTrace(formatAgentRuntimeTrace(runtimeResult.trace).slice(1))
         return ok({
           content: runtimeResult.answer,
           agentRuntimeConversationId: runtimeResult.conversationId,
@@ -18655,7 +18746,6 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
 
   if (imageAttachments.length === 0 && textAttachments.length === 0) {
     let orchestratedTurn = createAgentTurn({ principal: agentPrincipal, question: lastMsg })
-    await emitVisibleTrace('理解问题：识别用户目标，并判断需要核对哪些站内依据。')
     const rawPlan = await planChatAgentTurn(env, modelChoice, {
       question: lastMsg,
       currentMonth: month,
@@ -19715,9 +19805,7 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
         const promptTokens = await estimateAgentRequestTokens(metricsRequest)
-        send({ type: 'trace', status: 'running', trace: ['开始分析：识别问题目标与需要核对的依据。'] })
-        const routingTrace = ['开始分析：识别问题目标与需要核对的依据。']
-        send({ type: 'trace', status: 'running', trace: routingTrace })
+        const routingTrace: string[] = []
 
         const localDecision = await queueLocalCliChat(env, localRouteRequest)
         if (localDecision.immediate) {

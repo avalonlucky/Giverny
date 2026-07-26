@@ -8,6 +8,7 @@ const fail = (message) => {
 
 const manifest = agentCapabilityManifest()
 const alice = readFileSync('src/aliceAgent.ts', 'utf8')
+const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
 const worker = readFileSync('src/worker.ts', 'utf8')
 const writeWorkflow = readFileSync('src/agentWriteWorkflow.ts', 'utf8')
 const analysisWorkflow = readFileSync('src/agentAnalysisWorkflow.ts', 'utf8')
@@ -19,8 +20,11 @@ if (new Set(manifest.map((item) => item.endpoint)).size !== manifest.length) fai
 for (const capability of manifest) {
   if (!capability.scopes.length || !capability.roles.length || !capability.auditEvent) fail(`${capability.name} 缺少 scope、role 或审计事件`)
   if (!docs.includes(`\`${capability.name}\``)) fail(`生成文档缺少 ${capability.name}`)
-  if (capability.exposure.includes('model') && !alice.includes(`capabilities.${capability.name}.inputSchema`)) fail(`AliceAgent 未从注册表读取 ${capability.name} schema`)
 }
+
+if (!alice.includes('capability.inputSchema.safeParse(args)')) fail('AliceAgent 执行已规划能力前未使用注册表 schema 校验')
+if (!worker.includes('z.toJSONSchema(capability.inputSchema)')) fail('工具规划器未从注册表生成候选能力 schema')
+if (!director.includes('agentCapabilityRegistry[name]')) fail('意图导演未使用统一能力注册表完成授权')
 
 for (const [name, capability] of Object.entries(agentCapabilityRegistry)) {
   if (capability.policy.confirmation === 'preview') {

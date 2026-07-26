@@ -81,6 +81,57 @@ function hasToolResult(text, toolName) {
   return new RegExp(`"name"\\s*:\\s*"${escapedName}"|"tool"\\s*:\\s*"${escapedName}"`).test(resultText)
 }
 
+function structuredInput(text) {
+  const marker = '输入数据：'
+  const index = text.lastIndexOf(marker)
+  if (index < 0) return {}
+  try { return JSON.parse(text.slice(index + marker.length).trim()) } catch { return {} }
+}
+
+function plannedCallFromCompletion(value) {
+  const call = value?.choices?.[0]?.message?.tool_calls?.[0]?.function
+  if (!call?.name) return null
+  let args = {}
+  try { args = JSON.parse(call.arguments || '{}') } catch { /* Keep empty args for schema validation. */ }
+  return { name: String(call.name), args, reason: '隔离评测按完整语义选择的必要能力。' }
+}
+
+function directorMetadata(toolName, question) {
+  const product = toolName === 'search_product_help' || toolName === 'get_giverny_context'
+  const workspaceSearch = toolName === 'search_workspace'
+  const isWrite = toolName.endsWith('_preview') || ['create_task_plan', 'prepare_attachment_upload', 'generate_settlement_receipt'].includes(toolName)
+  const operation = toolName === 'create_task_preview' ? 'create_task'
+    : toolName.includes('feedback') ? 'feedback'
+      : toolName.includes('waiting') ? 'waiting'
+        : toolName.includes('progress') ? 'progress'
+          : toolName.includes('acceptance') ? 'acceptance'
+            : toolName.includes('settlement') || toolName.includes('month_finance') ? 'settlement_export'
+          : toolName === 'inspect_attachment_evidence' ? 'attachment_inspect'
+            : toolName.includes('attachment') ? 'attachment_manage'
+              : toolName.includes('formal_deliverable') ? 'formal_deliverable'
+                : toolName.includes('agenda') || toolName.includes('schedule') || toolName.includes('reminder') ? 'schedule'
+                  : toolName.includes('ai_') || toolName.includes('route') ? 'model_config'
+                    : toolName.includes('enterprise_memory') ? 'enterprise_memory'
+                      : toolName.includes('plan') || toolName.includes('project_execution') ? 'task_plan'
+                        : 'general'
+  const domain = product ? 'product_help'
+    : workspaceSearch ? 'workspace_search'
+      : /finance|settlement/.test(toolName) ? 'finance'
+        : /attachment/.test(toolName) ? 'files'
+          : /agenda|schedule|reminder/.test(toolName) ? 'calendar'
+            : /memory/.test(toolName) ? 'memory'
+              : /analysis|audit|deliverable|monthly_review/.test(toolName) ? 'analysis'
+                : /risk|security|diagnose_ai/.test(toolName) ? 'security'
+                  : toolName ? 'tasks' : 'conversation'
+  return {
+    goal: question.slice(0, 120), domains: [domain], operation,
+    requiresBusinessData: Boolean(toolName) && !product,
+    requiresProductKnowledge: product, isWrite,
+    missingInformation: [], confidence: 0.98,
+    rationale: product ? '这是产品使用问题。' : isWrite ? '这是站内业务操作。' : toolName ? '需要核对真实业务数据。' : '可以直接回答。',
+  }
+}
+
 function chooseTool(messages) {
   const text = userText(messages)
   const tools = calledTools(messages)
@@ -101,6 +152,41 @@ function chooseTool(messages) {
       return completion({ role: 'assistant', content: '已按附件分析状态返回失败记录和重试次数。' })
     }
     return completion({ role: 'assistant', content: '已根据站内工具返回的真实数据完成回答。' })
+  }
+  const isIntentDirector = text.includes('Giverny Agent 的意图导演')
+    || messages.some((message) => message.role === 'system' && String(message.content || '').includes('Giverny Agent 的意图导演'))
+  if (isIntentDirector) {
+    const input = structuredInput(text)
+    const question = String(input.question || '')
+    const planned = plannedCallFromCompletion(chooseTool([{ role: 'user', content: question }]))
+    const decision = directorMetadata(planned?.name || '', question)
+    if (process.env.MOCK_MODEL_DEBUG === '1') console.error('[director]', { question, planned: planned?.name, decision })
+    return completion({ role: 'assistant', content: JSON.stringify(decision) })
+  }
+  const isDirectedPlanner = text.includes('Giverny Agent 的工具规划器')
+    || messages.some((message) => message.role === 'system' && String(message.content || '').includes('Giverny Agent 的工具规划器'))
+  if (isDirectedPlanner) {
+    const input = structuredInput(text)
+    const question = String(input.question || '')
+    const allowed = new Set((input.capabilities || []).map((item) => String(item.name || '')))
+    const planned = plannedCallFromCompletion(chooseTool([{ role: 'user', content: question }]))
+    let calls = planned && allowed.has(planned.name) ? [planned] : []
+    if (/最近一次反馈/.test(question)) {
+      calls = [
+        { name: 'search_tasks', args: { query: '最近任务', month: '2026-07', limit: 5 }, reason: '先定位最近任务。' },
+        { name: 'get_task_detail', args: {}, reason: '读取上一步定位到的最近任务反馈。' },
+      ].filter((call) => allowed.has(call.name))
+    } else if (/(?:所有|全部|概况|没闭环|负责人和最近进展).*(?:项目|任务|工作)|(?:项目|任务|工作).*(?:正在等待|概况|没闭环|负责人和最近进展)|哪些项目正在等待/.test(question)) {
+      calls = allowed.has('query_task_portfolio') ? [{ name: 'query_task_portfolio', args: { scope: question.includes('等待') ? 'waiting' : 'all', limit: 100 }, reason: '需要跨任务聚合，不能用标题搜索代替。' }] : []
+    } else if (/^\s*你?帮我新建一个任务[\s。！!]*$/.test(question)) {
+      calls = allowed.has('create_task_preview') ? [{ name: 'create_task_preview', args: {}, reason: '进入新任务草稿并由后端返回缺失字段。' }] : []
+    } else if (/平均每个任务.*(?:多久|时间)|每个任务.*平均/.test(question)) {
+      calls = allowed.has('query_month_finance') ? [{ name: 'query_month_finance', args: { question, currentMonth: '2026-07', months: '2026-07' }, reason: '需要用确定性工时统计计算任务均值。' }] : []
+    } else if (/(?:生成|制作).*(?:项目状态报告|验收报告|一致性审计报告)/.test(question)) {
+      calls = allowed.has('generate_formal_deliverable_preview') ? [{ name: 'generate_formal_deliverable_preview', args: { type: question.includes('验收报告') ? 'acceptance_report' : question.includes('审计报告') ? 'consistency_audit' : 'project_status', taskId: question.includes('审计报告') ? undefined : 1, title: '隔离评测正式报告' }, reason: '生成绑定权威快照的正式交付物草稿。' }] : []
+    }
+    if (process.env.MOCK_MODEL_DEBUG === '1') console.error('[planner]', { question, allowed: [...allowed], planned: planned?.name, calls: calls.map((call) => call.name) })
+    return completion({ role: 'assistant', content: JSON.stringify({ calls, needsInput: false, followUpQuestion: '', answerIfNoTools: calls.length ? '' : '请补充需要处理的具体信息。' }) })
   }
   const isChatPlanner = messages.some((message) => message.role === 'system' && String(message.content || '').includes('Giverny 的聊天智能体规划器'))
     || (text.includes('requestedMonthCandidates') && text.includes('hasAttachments') && text.includes('useKnowledge'))
@@ -123,7 +209,7 @@ function chooseTool(messages) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'task_data', tools: [{ name: 'query_agenda', args: { startDate: '2026-07-25', endDate: '2026-07-31', durationMinutes: /两小时|2小时/.test(plannerQuestion) ? 120 : undefined }, reason: '需要读取任务、提醒和可用时间' }], confidence: 0.99 }) })
     }
     if (/(?:导出|生成|下载).*(?:结算回单|Excel|excel)/.test(plannerQuestion)) {
-      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'export_settlement_receipt', args: { startDate: '2026-06-01', endDate: '2026-06-10' }, reason: '需要生成可下载的正式回单' }], confidence: 0.99 }) })
+      return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'generate_settlement_receipt', args: { startDate: '2026-06-01', endDate: '2026-06-10' }, reason: '需要生成可下载的正式回单' }], confidence: 0.99 }) })
     }
     if (/收入|金额|工时|结算|工资/.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'finance', tools: [{ name: 'query_month_finance', args: { months: /6月/.test(plannerQuestion) ? ['2026-06'] : ['2026-07'] }, reason: '需要读取确定性结算数据' }], confidence: 0.98 }) })
@@ -288,6 +374,9 @@ function chooseTool(messages) {
     return toolCall('search_attachments', { query: text, limit: 30 })
   }
   if (text.includes('最近一次反馈')) return toolCall('search_tasks', { query: '最近任务', month: '2026-07', limit: 5 })
+  if (/(?:导出|生成|下载|给我).*(?:结算回单|结算报表|Excel|excel)|(?:结算回单|结算报表).*(?:导出|生成|下载)/i.test(text)) {
+    return toolCall('generate_settlement_receipt', { startDate: '2026-06-01', endDate: '2026-06-10' })
+  }
   if (/预计收入|总工时|计费工时|收入|结算趋势|不计费工时|平均每个任务|最高|待验收金额|结算多少钱/.test(text)) {
     return toolCall('query_month_finance', {
       question: text,

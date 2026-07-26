@@ -10,6 +10,10 @@ const multiTurnSuite = JSON.parse(await readFile(multiTurnSuiteUrl, 'utf8'))
 const gates = JSON.parse(await readFile(gatesUrl, 'utf8'))
 const cases = Array.isArray(suite.cases) ? suite.cases : []
 const multiTurnCases = Array.isArray(multiTurnSuite.cases) ? multiTurnSuite.cases : []
+const requestedCaseIds = new Set(String(process.env.GIVERNY_AGENT_EVAL_CASES || '').split(',').map((item) => item.trim()).filter(Boolean))
+const filteredRun = requestedCaseIds.size > 0
+const runnableCases = filteredRun ? cases.filter((item) => requestedCaseIds.has(item.id)) : cases
+const runnableMultiTurnCases = filteredRun ? multiTurnCases.filter((item) => requestedCaseIds.has(item.id)) : multiTurnCases
 const ids = new Set()
 const errors = []
 
@@ -20,7 +24,7 @@ for (const testCase of cases) {
   }
   if (ids.has(testCase.id)) errors.push(`重复用例 ID：${testCase.id}`)
   ids.add(testCase.id)
-  for (const key of ['tools', 'forbiddenTools']) {
+  for (const key of ['tools', 'forbiddenTools', 'traceContains', 'forbiddenTrace']) {
     if (testCase.expect[key] && !Array.isArray(testCase.expect[key])) errors.push(`${testCase.id}.${key} 必须是数组`)
   }
 }
@@ -115,6 +119,12 @@ function evaluateResponse(testCase, data) {
   for (const tool of testCase.expect.forbiddenTools || []) {
     if (plannedTools.has(tool) || trace.includes(tool)) failures.push(`误调用 ${tool}`)
   }
+  for (const value of testCase.expect.traceContains || []) {
+    if (!trace.includes(value)) failures.push(`处理轨迹缺少“${value}”`)
+  }
+  for (const value of testCase.expect.forbiddenTrace || []) {
+    if (trace.includes(value)) failures.push(`处理轨迹意外包含“${value}”`)
+  }
   if (testCase.expect.taskId) {
     const expectedTools = testCase.expect.tools || []
     const scopedCalls = plan.filter((item) => expectedTools.length === 0 || expectedTools.includes(item.name))
@@ -137,7 +147,7 @@ function evaluateResponse(testCase, data) {
   return failures
 }
 
-for (const testCase of cases) {
+for (const testCase of runnableCases) {
   const conversationId = `eval-${testCase.id}-${crypto.randomUUID()}`
   try {
     const response = await fetch(`${baseUrl}/api/ai/chat`, {
@@ -158,7 +168,7 @@ for (const testCase of cases) {
   }
 }
 
-for (const testCase of multiTurnCases) {
+for (const testCase of runnableMultiTurnCases) {
   const conversationId = `eval-${testCase.id}-${crypto.randomUUID()}`
   for (let index = 0; index < testCase.turns.length; index += 1) {
     const turn = testCase.turns[index]
@@ -188,13 +198,16 @@ const failed = results.filter((item) => !item.ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed`)
 const gateFailures = []
 const overallRate = results.length ? (results.length - failed.length) / results.length : 0
-if (overallRate < gates.overall) gateFailures.push(`总体通过率 ${(overallRate * 100).toFixed(1)}% < ${(gates.overall * 100).toFixed(1)}%`)
-for (const category of Object.keys(categories)) {
+if (filteredRun) {
+  failed.forEach((item) => gateFailures.push(`${item.id}: ${item.detail || '未通过'}`))
+} else if (overallRate < gates.overall) gateFailures.push(`总体通过率 ${(overallRate * 100).toFixed(1)}% < ${(gates.overall * 100).toFixed(1)}%`)
+const evaluatedCategories = filteredRun ? [...new Set(results.map((item) => item.category))] : Object.keys(categories)
+for (const category of evaluatedCategories) {
   const categoryResults = results.filter((item) => item.category === category)
   const categoryRate = categoryResults.filter((item) => item.ok).length / categoryResults.length
   const threshold = gates.categories[category]
   console.log(`${category}: ${(categoryRate * 100).toFixed(1)}% (gate ${(threshold * 100).toFixed(1)}%)`)
-  if (categoryRate < threshold) gateFailures.push(`${category} 通过率 ${(categoryRate * 100).toFixed(1)}% < ${(threshold * 100).toFixed(1)}%`)
+  if (!filteredRun && categoryRate < threshold) gateFailures.push(`${category} 通过率 ${(categoryRate * 100).toFixed(1)}% < ${(threshold * 100).toFixed(1)}%`)
 }
 if (gateFailures.length) {
   console.error(`\nAgent quality gate failed:\n${gateFailures.join('\n')}`)

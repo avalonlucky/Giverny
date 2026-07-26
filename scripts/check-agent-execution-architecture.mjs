@@ -10,6 +10,7 @@ const files = {
   ui: readFileSync('src/components/ChatPanel.tsx', 'utf8'),
   workflow: readFileSync('src/agentWriteWorkflow.ts', 'utf8'),
   alice: readFileSync('src/aliceAgent.ts', 'utf8'),
+  director: readFileSync('src/agentIntentDirector.ts', 'utf8'),
   batchMigration: readFileSync('db/migrations/0033_agent_operation_batches.sql', 'utf8'),
   approval: readFileSync('src/components/AgentApprovalCard.tsx', 'utf8'),
 }
@@ -50,7 +51,7 @@ const postconditionVerifier = files.worker.slice(
   files.worker.indexOf('const agentTaskPostconditionEndpoints'),
   files.worker.indexOf('async function agentWorkflowWriteTool'),
 )
-assert.equal(signedWriteEndpoints.length, 23, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
+assert.equal(signedWriteEndpoints.length, 22, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
 for (const endpoint of signedWriteEndpoints) {
   assert.ok(postconditionVerifier.includes(`'${endpoint}'`), `signed write endpoint missing independent postcondition: ${endpoint}`)
 }
@@ -70,7 +71,7 @@ assert.match(files.worker, /agentBatchPreconditionStatement/)
 assert.match(files.worker, /env\.DB\.batch\(statements\)/)
 assert.match(files.worker, /全部操作已回滚/)
 assert.match(files.worker, /endpoint === 'batch-task-operations'/)
-assert.match(files.alice, /batch_task_operations_preview/)
+assert.match(files.director, /batch_task_operations_preview/)
 assert.match(files.approval, /approval\.action !== 'batch_task_operations'/)
 assert.match(files.approval, /失败全部回滚/)
 assert.match(files.approval, /修订后的未来步骤/)
@@ -79,8 +80,8 @@ assert.match(files.worker, /planContinuationSuggestion/)
 assert.match(files.worker, /workspaceConversationSearch/)
 assert.match(files.worker, /workspaceSearchQueryVariants/)
 assert.match(files.worker, /semantic-vector\+keyword\+structured/)
-assert.match(files.alice, /用户明确要求“继续 \/ 接着推进 \/ 往下推进 \/ 执行下一步”时必须调用 query_plan_continuation/)
-assert.match(files.alice, /必须调用 search_workspace/)
+assert.match(files.director, /query_plan_continuation/)
+assert.match(files.director, /search_workspace/)
 assert.ok(!files.worker.includes("status = 'active', paused_at = NULL, completed_at = NULL"), 'legacy resume must not erase execution result')
 
 console.log('Agent execution engine architecture guard passed.')

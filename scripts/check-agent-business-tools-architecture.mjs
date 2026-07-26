@@ -14,8 +14,7 @@ for (const symbol of [
   'agentPrepareAttachmentUploadTool',
   'agentInspectAiSettingsTool',
   'agentTestAiRouteTool',
-  'agentExportSettlementPreviewTool',
-  'agentExportSettlementTool',
+  'agentGenerateSettlementReceiptTool',
   'agentManageSettlementPreviewTool',
   'agentManageSettlementTool',
   'agentReschedulePreviewTool',
@@ -32,7 +31,8 @@ for (const symbol of [
   'agentRestoreAiRoutingTool',
 ]) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 
-assert.match(worker, /settlementSnapshotChecksum\(receipt\) !== draft\.snapshotChecksum/)
+assert.match(worker, /agentGenerateSettlementReceiptTool[\s\S]{0,1800}persistSettlementExport/)
+assert.match(worker, /agentCapabilityRegistry\.generate_settlement_receipt\.policy\.auditEvent/)
 assert.match(worker, /scheduleSnapshotChecksum/)
 assert.match(worker, /任务排期在确认期间发生变化，请重新预览/)
 assert.match(worker, /相关任务或冲突列表在确认期间发生变化，请重新预览/)

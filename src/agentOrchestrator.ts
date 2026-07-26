@@ -12,6 +12,7 @@ export type AgentPlannedToolCall = {
   args: Record<string, unknown>
   reason: string
   risk: AgentRiskLevel
+  confirmation?: 'none' | 'preview' | 'signed-execute' | 'system-only'
   status?: AgentToolExecutionStatus
   attempt?: number
   error?: string
@@ -102,8 +103,10 @@ export function inferAgentIntents(question: string, modelIntent: AgentIntent = '
   const onlyReadsAcceptanceAttachment = readsAttachment
     && !/(?:新建|创建|记录|修改|更新|改成|追加|标记|删除).*(?:附件|文件)|验收(?:任务|了|通过|完成)/.test(value)
   const readsAcceptanceState = /(?:已|待|未)验收|验收(?:了多少|情况|状态)|多少.*验收/.test(value)
+  const clearlyReadOnlyRequest = /(?:查一下|帮我查|帮我看|看一下|告诉我|为什么|卡在|卡点|现在什么状态|有没有|是否)/.test(value)
+    && !/(?:把|将|给).{0,12}(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除).{0,16}(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期|状态)/.test(value)
   const writesPlanManagement = /(?:暂停|恢复|继续|重试|取消).*(?:执行计划|任务计划|项目计划)|(?:执行计划|任务计划|项目计划).*(?:暂停|恢复|继续|重试|取消)/.test(value)
-  const writesBusinessData = writesPlanManagement || (!asksWorkflowHelp && !onlyReadsAcceptanceAttachment && !readsAcceptanceState && (writeAction.test(value) && writeObject.test(value))
+  const writesBusinessData = writesPlanManagement || (!clearlyReadOnlyRequest && !asksWorkflowHelp && !onlyReadsAcceptanceAttachment && !readsAcceptanceState && (writeAction.test(value) && writeObject.test(value))
     && (/(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除).*(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期)/.test(value)
       || /(?:任务|进展|进度|反馈|等待|字段|文件|工时|交付日期).*(?:新建|创建|记录|修改|更新|改成|追加|验收|标记|删除)/.test(value)))
   if (writesBusinessData) add('write')
@@ -139,7 +142,7 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   if (detectedIntents.some(requiresBusinessEvidence) && !turn.evidence.some((item) => item.deterministic)) {
     issues.push('业务事实回答缺少确定性工具证据。')
   }
-  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'export_settlement_preview', 'manage_settlement_export_preview')) {
+  if (hasIntent('finance') && !hasDeterministicTool('query_month_finance', 'query_settlement_exports', 'reconcile_settlement_export', 'generate_settlement_receipt', 'manage_settlement_export_preview')) {
     requiredTools.push('query_month_finance')
     issues.push('金额或工时结论没有经过财务计算工具。')
   }
@@ -228,9 +231,9 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')
   }
-  const hasWritePlan = turn.plan.some((item) => item.risk !== 'read')
-  const hasSuccessfulWritePreview = turn.plan.some((item) => item.risk !== 'read' && item.status === 'success' && item.name.endsWith('_preview'))
-  if (hasWritePlan && !hasSuccessfulWritePreview) {
+  const confirmationRequiredPlan = turn.plan.filter((item) => item.confirmation === 'preview' || item.name.endsWith('_preview'))
+  const hasUnpreviewedWrite = confirmationRequiredPlan.some((item) => item.status !== 'success')
+  if (hasUnpreviewedWrite) {
     issues.push('写入动作没有进入人工确认流程。')
   }
   const successfulTools = new Set(turn.plan.filter((item) => item.status === 'success').map((item) => item.name))

@@ -391,7 +391,7 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'query_formal_deliverables') return renderFormalDeliverables(payload)
   if (evidence.toolName === 'query_high_risk_actions') return renderHighRiskActions(payload)
   if (evidence.toolName === 'get_giverny_context') return renderContext(payload)
-  if (evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
+  if (evidence.toolName === 'generate_settlement_receipt' || evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
   if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
   if (evidence.toolName === 'create_task_plan') return renderTaskPlan(payload)
   if (evidence.toolName === 'query_settlement_exports') return renderSettlementExports(payload)

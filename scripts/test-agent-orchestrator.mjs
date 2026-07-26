@@ -156,6 +156,14 @@ const verifiedWritePreview = {
 }
 assert.equal(verifyAgentAnswer(verifiedWritePreview).passed, true)
 
+const verifiedImmediateArtifact = {
+  ...createAgentTurn({ principal, question: '导出6月1日到6月10日的结算回单', intent: 'finance' }),
+  plan: [{ ...call('generate_settlement_receipt'), risk: 'write', confirmation: 'none' }],
+  evidence: [evidence('generate_settlement_receipt')],
+  answer: '结算回单已经生成',
+}
+assert.equal(verifyAgentAnswer(verifiedImmediateArtifact).passed, true)
+
 const verifiedFinance = {
   ...createAgentTurn({ principal, question: '本月收入', intent: 'finance' }),
   plan: [call('query_month_finance')],
@@ -196,4 +204,9 @@ const exhaustedTurn = {
 }
 assert.equal(decideAgentReplan(exhaustedTurn).shouldReplan, false)
 
-console.log('Agent orchestrator deterministic tests: 58 assertions passed')
+assert.deepEqual(
+  inferAgentIntents('查一下这个公司产品分套的修改，这个任务现在卡在哪里？', 'task_data'),
+  ['task_data'],
+)
+
+console.log('Agent orchestrator deterministic tests: 60 assertions passed')

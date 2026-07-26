@@ -4,8 +4,8 @@
 
 ## 概览
 
-- 注册能力：82 项
-- 分类：finance 7、tasks 4、files 8、product 3、analysis 6、security 10、calendar 4、notifications 5、planning 5、memory 4、write 20、internal 6
+- 注册能力：81 项
+- 分类：finance 6、tasks 4、files 8、product 3、analysis 6、security 10、calendar 4、notifications 5、planning 5、memory 4、write 20、internal 6
 - 单一来源：输入 schema、权限角色、scope、风险、确认方式、审计事件、Runtime 暴露面和执行关系均来自统一注册表。
 
 ## 能力清单
@@ -28,6 +28,7 @@
 `query_high_risk_actions` | 查询高风险操作案件 | security | read | none | admin, system | security:read | model, mcp, api | `agent_query_high_risk_actions`
 `query_settlement_exports` | 查询结算导出记录 | finance | read | none | admin, collaborator, viewer, mcp-read, system | finance:read | model, mcp, api | `agent_query_settlement_exports`
 `reconcile_settlement_export` | 核对结算回单 | finance | read | none | admin, collaborator, viewer, mcp-read, system | finance:read | model, mcp, api | `agent_reconcile_settlement_export`
+`generate_settlement_receipt` | 生成结算回单 | finance | write | none | admin, system | finance:write | model, api | `agent_generate_settlement_receipt`
 `query_agenda` | 查询日程与可用时间 | calendar | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read, plans:read | model, mcp, api | `agent_query_agenda`
 `check_schedule_conflicts` | 检查任务排期冲突 | calendar | read | none | admin, collaborator, viewer, mcp-read, system | tasks:read | model, mcp, api | `agent_check_schedule_conflicts`
 `prepare_attachment_upload` | 准备附件上传接力 | files | write | none | admin, collaborator, system | attachments:write | model, api | `agent_prepare_attachment_upload`
@@ -38,8 +39,6 @@
 `inspect_ai_settings` | 检查模型设置 | security | read | none | admin, system | settings:read | model, api | `agent_inspect_ai_settings`
 `test_ai_route` | 测试模型路由 | security | read | none | admin, system | settings:read | model, api | `agent_test_ai_route`
 `diagnose_ai_routing` | 诊断模型主备链路 | security | read | none | admin, system | settings:read | model, api | `agent_diagnose_ai_routing`
-`export_settlement_preview` | 预览导出结算回单 | finance | sensitive | preview | admin, system | finance:write | model, api | `agent_preview_export_settlement`
-`export_settlement` | 执行导出结算回单 | finance | sensitive | signed-execute | admin, system | finance:write | api, workflow | `agent_export_settlement`
 `manage_settlement_export_preview` | 预览管理结算回单 | finance | sensitive | preview | admin, system | finance:write | model, api | `agent_preview_manage_settlement`
 `manage_settlement_export` | 执行管理结算回单 | finance | sensitive | signed-execute | admin, system | finance:write | api, workflow | `agent_manage_settlement`
 `reschedule_task_preview` | 预览调整任务排期 | calendar | write | preview | admin, collaborator, system | tasks:write | model, api | `agent_preview_reschedule_task`

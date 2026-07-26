@@ -17,13 +17,13 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 82, '能力总数必须固定为 82')
+check(manifest.length === 81, '能力总数必须固定为 81')
 check(Object.keys(agentReadToolRegistry).length === 22, 'MCP 读取工具应为 22 项')
 check(manifest.filter((item) => item.exposure.includes('model')).length === 53, '模型能力应为 53 项')
 check(manifest.filter((item) => item.exposure.includes('mcp')).length === 22, 'MCP 能力应为 22 项')
-check(manifest.filter((item) => item.confirmation === 'preview').length === 23, '写入预览应为 23 项')
-check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 23, '签名执行应为 23 项')
-check(agentWorkflowWriteEndpoints.size === 23, 'Workflow 白名单应为 23 项')
+check(manifest.filter((item) => item.confirmation === 'preview').length === 22, '写入预览应为 22 项')
+check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 22, '签名执行应为 22 项')
+check(agentWorkflowWriteEndpoints.size === 22, 'Workflow 白名单应为 22 项')
 
 for (const capability of manifest) {
   check(Boolean(capability.name), '能力名不能为空')
@@ -52,6 +52,8 @@ check(agentCapabilityAllows('product-help', 'client', 'GET'), '合作伙伴应�
 check(agentCapabilityAllows('task-detail', 'client', 'GET'), '合作伙伴应能读取授权任务详情')
 check(!agentCapabilityAllows('month-finance', 'client', 'GET'), '合作伙伴不能读取财务')
 check(agentCapabilityAllows('diagnose-ai-routing', 'admin', 'POST'), '管理员应能诊断模型路由')
+check(agentCapabilityAllows('generate-settlement-receipt', 'admin', 'POST'), '管理员应能立即生成未锁定结算回单')
+check(!agentCapabilityAllows('generate-settlement-receipt', 'collaborator', 'POST'), '协作者不能生成财务回单')
 check(!agentCapabilityAllows('diagnose-ai-routing', 'collaborator', 'POST'), '协作者不能读取安全模型配置')
 check(!agentCapabilityAllows('project-execution', 'client', 'GET'), '合作伙伴不能读取内部执行计划')
 check(agentCapabilityAllows('project-execution', 'viewer', 'GET'), '只读成员应能读取执行计划')

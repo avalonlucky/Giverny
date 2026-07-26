@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const worker = readFileSync('src/worker.ts', 'utf8')
 const registry = readFileSync('src/agentToolRegistry.ts', 'utf8')
-const alice = readFileSync('src/aliceAgent.ts', 'utf8')
+const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
 const orchestrator = readFileSync('src/agentOrchestrator.ts', 'utf8')
 const component = readFileSync('src/components/EnterpriseMemoryPanel.tsx', 'utf8')
 const schema = readFileSync('db/schema.sql', 'utf8')
@@ -16,7 +16,7 @@ for (const marker of ['agent_enterprise_memories', 'scope_type', 'scope_key', 's
 for (const symbol of ['queryEnterpriseMemories', 'mutateEnterpriseMemory', 'agentQueryEnterpriseMemoryTool', 'agentManageEnterpriseMemoryPreviewTool', 'agentManageEnterpriseMemoryTool', 'enterpriseMemorySummary']) assert.ok(worker.includes(symbol), `Worker missing ${symbol}`)
 assert.match(registry, /query_enterprise_memory/)
 assert.match(registry, /manage_enterprise_memory_preview/)
-assert.match(alice, /组织规则、合作伙伴长期偏好、项目约定/)
+assert.match(director, /enterprise_memory: \['query_enterprise_memory', 'manage_enterprise_memory_preview'\]/)
 assert.match(orchestrator, /asksEnterpriseMemory/)
 assert.match(component, /来源说明/)
 assert.match(component, /显示已纠正、失效和删除记录/)

@@ -17,37 +17,20 @@
 
 ## 正式方向
 
-正式主链路已经迁移到 Cloudflare Agents SDK：
+正式主链路使用 Worker 意图编排与 Cloudflare Agents SDK 持久执行：
 
 ```text
-React UI / Cloudflare Worker `/api/ai/chat`
-        │
-        ▼
-AliceAgent Durable Object
-        ├── Agent SQLite 会话历史
-        ├── DeepSeek / OpenAI-compatible AI SDK
-        ├── 类型化工具调用与执行轨迹
-        └── 持久待确认写入状态
-        │
-        ├── query_month_finance
-        ├── search_tasks
-        ├── search_attachments
-        ├── get_task_detail
-        ├── get_giverny_context
-        ├── search_product_help
-        ├── create_task_preview / create_task
-        ├── record_feedback_preview / record_feedback
-        ├── update_task_status_preview / update_task_status
-        ├── update_task_fields_preview / update_task_fields
-        ├── append_progress_preview / append_progress
-        ├── start_monthly_review
-        └── start_deep_analysis
-        │
-        ▼
-Giverny Worker Tool API
-        │
-        ▼
-D1 / R2 / app data
+React UI -> Worker `/api/ai/chat`
+  -> 用户选择的主模型：Intent Director（无工具、无知识上下文）
+  -> 程序根据意图、角色和风险缩小到 0-16 项候选能力
+  -> 同一主模型：最小工具计划
+  -> Policy Validator（schema、角色、知识资格、写入预览）
+  -> AliceAgent Durable Object
+       ├── Agent SQLite 会话历史与任务引用
+       ├── 执行已校验计划，不再自选模型或全量工具
+       └── 持久待确认写入状态
+  -> Giverny Worker Tool API -> D1 / R2 / Workflows
+  -> 结构化事实验真 -> 用户
 ```
 
 选择 Cloudflare 原生 Runtime 的原因：
@@ -62,7 +45,8 @@ D1 / R2 / app data
 
 ## 当前已落地
 
-- `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、类型化 Tool Calling、确认状态和执行轨迹。
+- `src/agentIntentDirector.ts`：供应商中立的意图决策、能力缩选和计划校验；产品知识默认不可用。
+- `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、任务引用、确认状态和已校验计划执行；不再硬编码任何模型。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
 - `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
 - Agent 回答界面：正文使用 GFM 富文本渲染；附件查询返回独立结构化文件卡，支持缩略图、任务归属、格式、大小、预览和打开，不依赖模型在 Markdown 中拼接内部文件地址。
@@ -70,15 +54,15 @@ D1 / R2 / app data
 - 前端确认卡：Tool Calling 生成的写入草稿通过结构化 `approval` 协议展示，用户可直接核对并确认或取消；签名 token 始终只保存在 Agent SQLite，不下发浏览器。
 - 任务消歧：标题检索命中多个任务时返回结构化候选卡，用户选择明确任务 ID 后再继续读取或生成写入预览，模型不得猜测。
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
-- `agent-evals/`：126 条单轮用例与 14 组、28 轮会话回归覆盖查询、任务引用、等待原因、附件证据、确认式写入、正式交付物、产品知识、主动事项、企业分层记忆、完整任务生命周期和安全边界。
+- `agent-evals/`：127 条单轮用例与 14 组、28 轮会话回归覆盖查询、任务引用、等待原因、附件证据、确认式写入、正式交付物、产品知识、主动事项、企业分层记忆、完整任务生命周期和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
 - AI 反馈学习：任务需求、名称、分类、进展、修改意见、验收备注和附件命名会记录“原始输入 → AI 建议 → 最终人工结果”及采用动作；工时继续以验收后的真实投入做偏差校准。详见 `docs/AI_LEARNING.md`。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - 产品能力注册表：`src/productCapabilities.ts` 是快捷键、功能入口、流程、模型路由与权限说明的单一权威来源；页面快捷键面板、确定性快速路由、云端 Agent 和 MCP/CLI 共用 `search_product_help`，不再把产品知识散落在模型 Prompt 中。
-- Agent 工具能力注册表：`src/agentToolRegistry.ts` 统一登记 82 项读取、项目执行、批量事务、计划编辑与续接、全域搜索、一致性审计、正式交付物、高风险治理、安全诊断与恢复、任务记忆、企业分层记忆、结算、Agenda、排期、附件、多模态分析、主动事项、提醒、后台分析、写入预览、签名执行与内部 Workflow 能力。输入 schema、角色、scope、风险、确认关系、审计事件、任务作用域、执行轨迹、MCP 暴露面、Workflow 白名单和 OpenAPI 元数据均从这里派生；自动生成清单见 [`AGENT_CAPABILITY_REGISTRY.md`](./AGENT_CAPABILITY_REGISTRY.md)。
+- Agent 工具能力注册表：`src/agentToolRegistry.ts` 统一登记 81 项读取、确定性文件生成、项目执行、批量事务、计划编辑与续接、全域搜索、一致性审计、正式交付物、高风险治理、安全诊断与恢复、任务记忆、企业分层记忆、结算、Agenda、排期、附件、多模态分析、主动事项、提醒、后台分析、写入预览、签名执行与内部 Workflow 能力。输入 schema、角色、scope、风险、确认关系、审计事件、任务作用域、执行轨迹、MCP 暴露面、Workflow 白名单和 OpenAPI 元数据均从这里派生；自动生成清单见 [`AGENT_CAPABILITY_REGISTRY.md`](./AGENT_CAPABILITY_REGISTRY.md)。
 - 租户安全门禁：模型工具先按当前角色裁剪，Worker 再校验 HMAC scope、工作区 SQL 过滤和确认凭证；附件源/预览、月报分享与结算分享均校验工作区关联。跨租户 ID、模糊搜索、附件路径、提示注入和凭证攻击矩阵见 [`AGENT_TENANT_SECURITY.md`](./AGENT_TENANT_SECURITY.md)。
 - 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露 22 个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；企业记忆、主动事项和项目执行计划均为内部信息，合作伙伴角色不可读取。MCP 仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
-- 持久写入：23 类确认操作均由 `AgentWriteWorkflow` 等待人工批准后执行，覆盖任务生命周期、批量任务事务、项目计划管理、结算导出/分享管理/未锁定记录删除、排期调整、站内提醒、模型路由配置与恢复、附件分析恢复、附件元数据修改、主动事项处理、企业记忆、正式交付物和高风险撤销；步骤支持重试，`agent_write_operations` 缓存完成结果和独立验收快照，重复恢复不会重复写入。
+- 持久写入：22 类会修改业务实体的确认操作均由 `AgentWriteWorkflow` 等待人工批准后执行，覆盖任务生命周期、批量任务事务、项目计划管理、结算分享管理/未锁定记录删除、排期调整、站内提醒、模型路由配置与恢复、附件分析恢复、附件元数据修改、主动事项处理、企业记忆、正式交付物和高风险撤销；步骤支持重试，`agent_write_operations` 缓存完成结果和独立验收快照，重复恢复不会重复写入。结算回单生成是独立的确定性文件生成能力，会新增未锁定审计快照但不修改任务、工时、金额或验收数据，因此按用户明确日期范围立即执行。
 - 批量任务事务：用户一次提出多个兼容任务修改时，Alice 生成单张批量确认卡。Worker 在单个 D1 `batch` 中提交前置检查、所有任务更新、逐项审计和批次记录；失败不留部分成功，成功后继续对所有任务独立验收。
 - 写入后独立验收：Workflow 业务接口返回后，Worker 使用当前主体的 `workspace_id` 从 D1 重新读取任务、附件、结算、计划、主动事项、企业记忆或模型路由。Alice 仅在 `postcondition.passed=true` 时宣称完成并推进计划；否则标记失败、列出未通过项并保留审计记录。
 - 命令式任务链：当前可在同一会话内连续完成创建任务、修改字段 / 状态、记录合作伙伴反馈、追加进展 / 工时、记录等待、维护单条记录、标记验收文件、完整验收、结算查询 / 核对 / 导出 / 分享管理 / 未锁定记录删除、Agenda 查询 / 空闲时间建议 / 排期冲突核对 / 排期调整、站内提醒、安全模型路由配置、附件分析恢复和附件元数据修改。每次写入都必须独立预览和确认。新附件由 Agent 确定任务后交给登录浏览器直传 R2；整任务删除 / 作废 / 恢复、锁定结算记录删除、付款和部署不开放为 Agent 工具，因此不是无确认、全权限的无人值守自动化。
@@ -98,7 +82,7 @@ D1 / R2 / app data
 
 当前 Worker 已接入路径：纯文本工作助手请求调用 `ALICE_AGENT` Durable Object；涉及工作数据或写入意图且 Runtime 不可用时显式报错，避免旧模板伪装成智能体。
 
-正式站主链路使用 `DEEPSEEK_API_KEY` 与 `AGENT_TOOL_TOKEN`；`AI_RUNTIME_URL` 仍只用于 BAML runtime，与 Agent 无关。
+正式站 Agent 使用设置中的当前主模型及其安全凭据，`AliceAgent` 不再要求 `DEEPSEEK_API_KEY`；业务工具仍使用 `AGENT_TOOL_TOKEN` 完成服务端授权。
 
 ## 本机 CLI Runtime
 
