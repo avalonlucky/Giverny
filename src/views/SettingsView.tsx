@@ -164,7 +164,6 @@ export default function SettingsView({
   onExportBackup,
   onSignOut,
   onChangePassword,
-  onChangeDemoPassword,
   onCreateToken,
   onToggleToken,
   onDeleteToken,
@@ -200,7 +199,6 @@ export default function SettingsView({
   onExportBackup: () => void
   onSignOut: () => void
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
-  onChangeDemoPassword: (currentPassword: string, newPassword?: string) => Promise<void>
   onCreateToken: (label: string, expiresInDays: number | null, scope: TokenScope) => void
   onToggleToken: (tokenId: string, disabled: boolean) => void
   onDeleteToken: (tokenId: string) => void
@@ -262,12 +260,6 @@ export default function SettingsView({
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [isPasswordSaving, setIsPasswordSaving] = useState(false)
-  const [demoAdminPassword, setDemoAdminPassword] = useState('')
-  const [demoPasswordMatchesAdmin, setDemoPasswordMatchesAdmin] = useState(true)
-  const [newDemoPassword, setNewDemoPassword] = useState('')
-  const [confirmDemoPassword, setConfirmDemoPassword] = useState('')
-  const [demoPasswordError, setDemoPasswordError] = useState('')
-  const [isDemoPasswordSaving, setIsDemoPasswordSaving] = useState(false)
   const [aiProviderConfigs, setAiProviderConfigs] = useState<AiProviderConfig[]>(initialAiProviderConfigs)
   const [aiProvidersLoading, setAiProvidersLoading] = useState(false)
   const [providerModal, setProviderModal] = useState<AiModelProvider | null>(null)
@@ -902,30 +894,6 @@ export default function SettingsView({
       setPasswordError(error instanceof Error ? error.message : '密码更新失败')
     } finally {
       setIsPasswordSaving(false)
-    }
-  }
-
-  const submitDemoPasswordChange = async () => {
-    if (isDemoPasswordSaving) return
-    if (!demoPasswordMatchesAdmin && newDemoPassword.length < 8) {
-      setDemoPasswordError('演示账号密码至少需要 8 位')
-      return
-    }
-    if (!demoPasswordMatchesAdmin && newDemoPassword !== confirmDemoPassword) {
-      setDemoPasswordError('两次输入的演示账号密码不一致')
-      return
-    }
-    setIsDemoPasswordSaving(true)
-    setDemoPasswordError('')
-    try {
-      await onChangeDemoPassword(demoAdminPassword, demoPasswordMatchesAdmin ? undefined : newDemoPassword)
-      setDemoAdminPassword('')
-      setNewDemoPassword('')
-      setConfirmDemoPassword('')
-    } catch (error) {
-      setDemoPasswordError(error instanceof Error ? error.message : '演示账号密码更新失败')
-    } finally {
-      setIsDemoPasswordSaving(false)
     }
   }
 
@@ -1885,107 +1853,47 @@ export default function SettingsView({
               </div>
               <p className="settings-tool-note">当前身份：{role === 'admin' ? '管理员（最高权限）' : '访问口令用户'}；公共电脑用完请退出。</p>
               {role === 'admin' && (
-                <>
-                  <details className="settings-password-collapse">
-                    <summary>
-                      <KeyRound size={15} />
-                      <span>修改管理员密码</span>
-                      <ChevronDown size={16} />
-                    </summary>
-                    <div className="password-change-form">
-                      <label className="field">
-                        <span>当前密码</span>
-                        <input
-                          type="password"
-                          value={currentPassword}
-                          placeholder="输入当前密码"
-                          onChange={(event) => setCurrentPassword(event.target.value)}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>新密码</span>
-                        <input
-                          type="password"
-                          value={newPassword}
-                          placeholder="至少 8 位"
-                          onChange={(event) => setNewPassword(event.target.value)}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>确认新密码</span>
-                        <input
-                          type="password"
-                          value={confirmPassword}
-                          placeholder="再次输入新密码"
-                          onChange={(event) => setConfirmPassword(event.target.value)}
-                        />
-                      </label>
-                      {passwordError && <p className="settings-inline-error">{passwordError}</p>}
-                      <button className="ghost-button" onClick={() => void submitPasswordChange()} disabled={!currentPassword || !newPassword || !confirmPassword || isPasswordSaving}>
-                        <KeyRound size={16} />
-                        {isPasswordSaving ? '保存中…' : '修改管理员密码'}
-                      </button>
-                    </div>
-                  </details>
-                  <details className="settings-password-collapse">
-                    <summary>
-                      <UserCircle size={15} />
-                      <span>修改演示账号密码</span>
-                      <ChevronDown size={16} />
-                    </summary>
-                    <div className="password-change-form">
-                      <p className="settings-tool-note">账号 demo@mayeai.com；保存后会注销已登录的演示会话。</p>
-                      <label className="field">
-                        <span>当前管理员密码</span>
-                        <input
-                          type="password"
-                          value={demoAdminPassword}
-                          placeholder="用于验证管理员身份"
-                          onChange={(event) => setDemoAdminPassword(event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-password-match">
-                        <input
-                          type="checkbox"
-                          checked={demoPasswordMatchesAdmin}
-                          onChange={(event) => setDemoPasswordMatchesAdmin(event.target.checked)}
-                        />
-                        <span>与当前管理员密码保持一致</span>
-                      </label>
-                      {!demoPasswordMatchesAdmin && (
-                        <>
-                          <label className="field">
-                            <span>新演示账号密码</span>
-                            <input
-                              type="password"
-                              value={newDemoPassword}
-                              placeholder="至少 8 位"
-                              onChange={(event) => setNewDemoPassword(event.target.value)}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>确认演示账号密码</span>
-                            <input
-                              type="password"
-                              value={confirmDemoPassword}
-                              placeholder="再次输入新密码"
-                              onChange={(event) => setConfirmDemoPassword(event.target.value)}
-                            />
-                          </label>
-                        </>
-                      )}
-                      {demoPasswordError && <p className="settings-inline-error">{demoPasswordError}</p>}
-                      <button
-                        className="ghost-button"
-                        onClick={() => void submitDemoPasswordChange()}
-                        disabled={!demoAdminPassword || (!demoPasswordMatchesAdmin && (!newDemoPassword || !confirmDemoPassword)) || isDemoPasswordSaving}
-                      >
-                        <KeyRound size={16} />
-                        {isDemoPasswordSaving ? '保存中…' : demoPasswordMatchesAdmin ? '同步管理员密码' : '保存演示密码'}
-                      </button>
-                    </div>
-                  </details>
-                </>
+                <details className="settings-password-collapse">
+                  <summary>
+                    <KeyRound size={15} />
+                    <span>修改密码</span>
+                    <ChevronDown size={16} />
+                  </summary>
+                  <div className="password-change-form">
+                    <label className="field">
+                      <span>当前密码</span>
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        placeholder="输入当前密码"
+                        onChange={(event) => setCurrentPassword(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>新密码</span>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        placeholder="至少 8 位"
+                        onChange={(event) => setNewPassword(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>确认新密码</span>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        placeholder="再次输入新密码"
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                      />
+                    </label>
+                    {passwordError && <p className="settings-inline-error">{passwordError}</p>}
+                    <button className="ghost-button" onClick={() => void submitPasswordChange()} disabled={!currentPassword || !newPassword || !confirmPassword || isPasswordSaving}>
+                      <KeyRound size={16} />
+                      {isPasswordSaving ? '保存中…' : '修改密码'}
+                    </button>
+                  </div>
+                </details>
               )}
               <button className="danger-button" onClick={onSignOut}>
                 <LogOut size={17} />

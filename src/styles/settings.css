@@ -1392,21 +1392,6 @@
   padding: 0 14px 14px;
 }
 
-.settings-password-match {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin: 2px 0 12px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.settings-password-match input {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-}
 
 /* Workers AI 卡：参考「税务估算参数」的展开样式——浅绿色块底、无描边、靠色块区分。 */
 .settings-workers-ai {

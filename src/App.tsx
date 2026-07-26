@@ -117,7 +117,7 @@ function App() {
     setIsAccountMenuOpen,
   })
   const {
-    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword, handleChangeDemoPassword,
+    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,
@@ -787,7 +787,6 @@ function App() {
                 onExportBackup={handleExportBackup}
                 onSignOut={handleSignOut}
                 onChangePassword={handleChangeAdminPassword}
-                onChangeDemoPassword={handleChangeDemoPassword}
                 onCreateToken={handleCreateAccessToken}
                 onToggleToken={handleToggleAccessToken}
                 onDeleteToken={handleDeleteAccessToken}

@@ -1014,12 +1014,6 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  changeDemoPassword: (payload: { currentPassword: string; newPassword?: string; matchAdminPassword: boolean }) =>
-    requestJson<{ ok: true }>('/api/auth/demo-password', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
   requestPasswordReset: (email: string) =>
     requestJson<{ ok: true }>(
       '/api/auth/password-reset/request',

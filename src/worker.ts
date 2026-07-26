@@ -235,7 +235,6 @@ const getStorageUsage = async (env: Env) => {
 // 管理员账号：该邮箱 + 平台密码拥有最高权限（含口令管理）
 const ADMIN_EMAIL = 'bh141425@gmail.com'
 const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
-const DEMO_PASSWORD_SETTING = 'demoAccountPasswordHash'
 const ADMIN_RESET_SETTING = 'adminPasswordReset'
 const AUTH_SESSION_COOKIE = 'giverny_session'
 const AUTH_SESSION_TTL_SECONDS = 24 * 60 * 60
@@ -11757,10 +11756,6 @@ async function setAdminPassword(env: Env, password: string) {
   await setSettingValue(env, ADMIN_PASSWORD_SETTING, await hashSecret(password))
 }
 
-async function setDemoPassword(env: Env, password: string) {
-  await setSettingValue(env, DEMO_PASSWORD_SETTING, await hashSecret(password))
-}
-
 const toId = (id: string | number) => String(id)
 
 // Keep numeric IDs compatible with the existing frontend while avoiding same-millisecond collisions.
@@ -14541,8 +14536,7 @@ async function resolvePrincipal(env: Env, key: string, email: string): Promise<A
       : null
   }
   if (normalizedEmail === DEMO_PRINCIPAL_EMAIL) {
-    const valid = await verifySecret(trimmedKey, await getSettingValue(env, DEMO_PASSWORD_SETTING))
-    return valid
+    return (await verifyAdminPassword(env, trimmedKey))
       ? { role: 'demo', email: DEMO_PRINCIPAL_EMAIL, principalId: DEMO_PRINCIPAL_ID, workspaceId: DEMO_WORKSPACE_ID }
       : null
   }
@@ -14794,6 +14788,7 @@ async function changeAdminPassword(env: Env, request: Request) {
   }
   await setAdminPassword(env, newPassword)
   await revokePrincipalSessions(env, 'admin')
+  await revokePrincipalSessions(env, DEMO_PRINCIPAL_ID)
   const session = await createAuthSession(env, { role: 'admin', email: ADMIN_EMAIL, principalId: 'admin' })
   await deleteSettingValue(env, ADMIN_RESET_SETTING)
   await audit(env, 'update', 'setting', ADMIN_PASSWORD_SETTING, { method: 'change_password' })
@@ -14801,30 +14796,6 @@ async function changeAdminPassword(env: Env, request: Request) {
     { ok: true },
     { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
   )
-}
-
-async function changeDemoPassword(env: Env, request: Request) {
-  const principal = await resolveRequestPrincipal(env, request)
-  if (!principal || principal.role !== 'admin') return fail('需要管理员权限', 403)
-  const body = (await request.json().catch(() => ({}))) as {
-    currentPassword?: string
-    newPassword?: string
-    matchAdminPassword?: boolean
-  }
-  const currentPassword = String(body.currentPassword ?? '')
-  if (!(await verifyAdminPassword(env, currentPassword))) {
-    return fail('当前管理员密码不正确', 401)
-  }
-  const nextPassword = body.matchAdminPassword ? currentPassword : String(body.newPassword ?? '')
-  if (nextPassword.length < 8) {
-    return fail('演示账号密码至少需要 8 位', 400)
-  }
-  await setDemoPassword(env, nextPassword)
-  await revokePrincipalSessions(env, DEMO_PRINCIPAL_ID)
-  await audit(env, 'update', 'setting', DEMO_PASSWORD_SETTING, {
-    method: body.matchAdminPassword ? 'match_admin_password' : 'custom_password',
-  })
-  return ok({ ok: true })
 }
 
 async function sendPasswordResetEmail(env: Env, request: Request, email: string, token: string) {
@@ -22699,9 +22670,6 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/auth/password' && request.method === 'POST') {
     return changeAdminPassword(env, request)
-  }
-  if (path === '/api/auth/demo-password' && request.method === 'POST') {
-    return changeDemoPassword(env, request)
   }
   if (path === '/api/local-cli/pairings' && request.method === 'POST') {
     return createLocalCliPairing(env, request)
