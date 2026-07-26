@@ -3108,6 +3108,7 @@ type OpenAiAgentRuntimeResult = {
     fallbackUsed: boolean
   }
   orchestration?: { engine: 'langgraph'; path: string[]; modelCalls: number }
+  productivity?: { engine: 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -3151,7 +3152,7 @@ async function directAgentRequest(
         `${AGENT_DIRECTOR_SYSTEM_PROMPT}
 - complexity=simple 仅用于一个明确目标，且 proposedCalls 已能直接表达最小必要动作；复合目标、先查后做、对象不明确或需要比较时必须为 complex。
 - proposedCalls 只能从 directOperations 中选择；简单请求尽量一次给出。复杂请求保持空数组，交给后续规划节点。
-- create_task_preview 的每个参数必须在 grounding 中给出用户原话片段；用户没说的字段必须省略，不得用示例值补齐。`,
+- 任何 confirmation=preview 的写入参数都必须在 grounding 中给出用户原话片段；用户没说的字段必须省略，不得把查询误判为写入或用示例值补齐。`,
         { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', role: graphRequest.principal.role, history: graphRequest.history, directOperations: directAgentOperationCatalog(graphRequest.principal.role) },
         'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|workspace_search|memory|analysis|security)[]; operation: string; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string; complexity: simple|complex; proposedCalls: {name:string; args:object; reason:string; grounding?: Record<string,string>}[]',
         2600,
@@ -18677,6 +18678,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           factVerification: runtimeResult.factVerification,
           model: runtimeResult.model,
           orchestration: runtimeResult.orchestration,
+          productivity: runtimeResult.productivity,
         })
       }
       if (requiresRuntime) {

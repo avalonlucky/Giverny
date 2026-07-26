@@ -148,7 +148,8 @@ export function groundDirectAgentCalls(decision: AgentDirectorDecision, sourceTe
   return {
     ...decision,
     proposedCalls: decision.proposedCalls.map((call) => {
-      if (call.name !== 'create_task_preview') return call
+      const capability = agentCapabilityRegistry[call.name as AgentCapabilityName]
+      if (capability?.policy.confirmation !== 'preview') return call
       const grounding = call.grounding || {}
       const args = Object.fromEntries(Object.entries(call.args).filter(([field]) => {
         const quote = String(grounding[field] || '').replace(/\s+/g, '')

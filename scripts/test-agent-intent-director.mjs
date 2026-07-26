@@ -69,4 +69,11 @@ const groundedCreate = groundDirectAgentCalls(normalizeAgentDirectorDecision({
 }), '新建 Logo 提案，预估 4 小时')
 assert.deepEqual(groundedCreate.proposedCalls[0].args, { title: 'Logo 提案', estimatedHours: 4 })
 
+const fabricatedFeedback = groundDirectAgentCalls(normalizeAgentDirectorDecision({
+  goal: '查询之前反馈', domains: ['tasks'], operation: 'feedback', complexity: 'simple',
+  requiresBusinessData: true, requiresProductKnowledge: false, isWrite: true,
+  proposedCalls: [{ name: 'record_feedback_preview', args: { taskId: 1, note: '模型虚构的修改意见' }, reason: '误判为写入' }],
+}), '查询这个任务之前的反馈')
+assert.deepEqual(fabricatedFeedback.proposedCalls[0].args, {})
+
 console.log('Agent 意图导演单测通过：普通问答、业务写入、参数原话依据、产品帮助、全域搜索、越界拒绝和角色裁剪均已覆盖。')

@@ -47,6 +47,7 @@ React UI -> Worker `/api/ai/chat`
 
 - `src/agentIntentDirector.ts`：供应商中立的意图决策、能力缩选和计划校验；产品知识默认不可用。
 - `src/agentRuntimeGraph.ts`：LangGraph 回合级主链，负责单模型快速路径、复杂规划、策略拒绝后回规划和模型调用计数。
+- `src/agentProductivityGraph.ts`：LangGraph 执行闭环，统一执行、观察、验真、补规划、循环预算和完成 / 待补充 / 失败终止状态。
 - `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、任务引用、确认状态和已校验计划执行；不再硬编码任何模型。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
 - `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
@@ -57,6 +58,7 @@ React UI -> Worker `/api/ai/chat`
 - 确认体验：字段修改展示原值与新值；创建任务草稿可在确认卡内修订；执行成功后可直接打开对应任务。
 - `agent-evals/`：127 条单轮用例与 14 组、28 轮会话回归覆盖查询、任务引用、等待原因、附件证据、确认式写入、正式交付物、产品知识、主动事项、企业分层记忆、完整任务生命周期和安全边界。
 - Agent 运行质量：管理员可在“设置 → AI”查看 7/30 天成功率、工具调用、P95 耗时、确认/消歧/回退与近期失败；只记录意图、工具名、耗时和结果，不保存问题、回答、任务标题或操作草稿。
+- 生产力运行记录：每个工具回合返回 `productivity.status/path/cycles/toolCalls`，可以区分真正完成、等待用户补充和执行失败，并识别无限重试或工具滥用。
 - AI 反馈学习：任务需求、名称、分类、进展、修改意见、验收备注和附件命名会记录“原始输入 → AI 建议 → 最终人工结果”及采用动作；工时继续以验收后的真实投入做偏差校准。详见 `docs/AI_LEARNING.md`。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - 产品能力注册表：`src/productCapabilities.ts` 是快捷键、功能入口、流程、模型路由与权限说明的单一权威来源；页面快捷键面板、确定性快速路由、云端 Agent 和 MCP/CLI 共用 `search_product_help`，不再把产品知识散落在模型 Prompt 中。

@@ -2,6 +2,7 @@ import { Agent, type AgentContext } from 'agents'
 import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentReadToolRegistry, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName, type AgentReadToolName } from './agentToolRegistry'
 import type { AgentDirectorDecision, AgentDirectorPlanCall } from './agentIntentDirector'
 import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
+import { runAgentProductivityGraph, type AgentProductivityCall } from './agentProductivityGraph'
 import { buildAgentFactSnapshot, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
@@ -95,6 +96,14 @@ export type AliceAgentChatResult = {
     checkedClaims: number
     sourceTools: string[]
     fallbackUsed: boolean
+  }
+  productivity?: {
+    engine: 'langgraph'
+    status: 'complete' | 'needs_input' | 'failed'
+    path: string[]
+    cycles: number
+    toolCalls: number
+    reason: string
   }
 }
 
@@ -933,29 +942,138 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       if (name === 'search_workspace' && !request.orchestration.decision.domains.includes('workspace_search')) return false
       return true
     })
-    const toolCalls: Array<{ toolName: string; input: Record<string, unknown> }> = []
-    const toolResults: Array<{ toolName: string; output: unknown }> = []
-    let previousOutput: unknown = null
-    for (const call of calls) {
-      const name = call.name as AgentCapabilityName
-      let effectiveArgs = call.args
-      const capability = agentCapabilityRegistry[name] as AgentCapabilityDefinition
-      if (capability.taskScoped && !Number(effectiveArgs.taskId) && !String(effectiveArgs.taskTitle || effectiveArgs.title || '').trim()) {
-        const references = this.taskReferencesFromResult(previousOutput)
-        if (references.length === 1 || (references.length > 1 && /(?:最近|最新|第一个|第一条)/.test(message))) {
-          effectiveArgs = { ...effectiveArgs, taskId: references[0].id }
+    const initialCalls: AgentProductivityCall[] = calls.map((call) => ({ ...call, attempt: 1 }))
+    const productivity = await runAgentProductivityGraph({
+      execute: async (call, context) => {
+        const startedAt = Date.now()
+        const name = call.name as AgentCapabilityName
+        let effectiveArgs = call.args
+        const capability = agentCapabilityRegistry[name] as AgentCapabilityDefinition
+        if (capability.taskScoped && !Number(effectiveArgs.taskId) && !String(effectiveArgs.taskTitle || effectiveArgs.title || '').trim()) {
+          const previousOutput = context.observations.at(-1)?.output
+          const references = this.taskReferencesFromResult(previousOutput)
+          if (references.length === 1 || (references.length > 1 && /(?:最近|最新|第一个|第一条)/.test(message))) {
+            effectiveArgs = { ...effectiveArgs, taskId: references[0].id }
+          }
         }
-      }
-      toolCalls.push({ toolName: name, input: effectiveArgs })
-      try {
-        const output = await this.executeDirectedCapability(name, effectiveArgs, request, message)
-        toolResults.push({ toolName: name, output })
-        previousOutput = output
-      } catch (error) {
-        toolResults.push({ toolName: name, output: { error: error instanceof Error ? error.message : String(error), toolFailed: true } })
-      }
+        try {
+          const output = call.attempt && call.attempt > 1 && isAgentReadToolName(name)
+            ? await this.executeRepairTool(name, effectiveArgs)
+            : await this.executeDirectedCapability(name, effectiveArgs, request, message)
+          const record = toJsonObject(output)
+          const mismatch = this.taskEvidenceMismatch(name, effectiveArgs, record)
+          const halt = record.needsDisambiguation === true
+            ? 'selection' as const
+            : record.ready === false && Array.isArray(record.missing)
+              ? 'needs_input' as const
+              : undefined
+          return {
+            call: { ...call, args: effectiveArgs },
+            output,
+            deterministic: !mismatch,
+            ...(mismatch ? { error: mismatch } : {}),
+            ...(halt ? { halt } : {}),
+            durationMs: Date.now() - startedAt,
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          return {
+            call: { ...call, args: effectiveArgs },
+            output: { error: errorMessage, toolFailed: true },
+            deterministic: false,
+            error: errorMessage,
+            durationMs: Date.now() - startedAt,
+          }
+        }
+      },
+      observe: (observations, cycle) => {
+        const latest = observations.at(-1)
+        if (latest?.halt === 'selection') return { status: 'needs_input', requiredTools: [], reason: '需要用户选择明确任务。' }
+        if (latest?.halt === 'needs_input') return { status: 'needs_input', requiredTools: [], reason: '写入草稿需要用户补充必填字段。' }
+        const observedTools = new Set(observations.map((item) => item.call.name))
+        const inferredIntent: AgentIntent = observedTools.has('query_month_finance') || observedTools.has('generate_settlement_receipt')
+          ? 'finance'
+          : observedTools.has('get_requester_profile')
+            ? 'person_profile'
+            : observedTools.has('search_attachments')
+              ? 'attachment'
+              : [...observedTools].some((name) => name.endsWith('_preview'))
+                ? 'write'
+                : observedTools.has('get_task_detail') || observedTools.has('search_tasks') || observedTools.has('search_workspace') || observedTools.has('query_task_portfolio') || observedTools.has('query_plan_continuation')
+                  ? 'task_data'
+                  : observedTools.has('search_product_help')
+                    ? 'product_help'
+                    : 'general'
+        const observedPlan: AgentPlannedToolCall[] = observations.map((item, index) => ({
+          id: `${agentTurn.id}:graph:${index + 1}`,
+          name: item.call.name,
+          args: item.call.args,
+          reason: item.call.reason,
+          risk: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.risk || 'read',
+          confirmation: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.confirmation || 'none',
+          status: item.error ? 'failed' : 'success',
+          attempt: item.call.attempt || cycle,
+          error: item.error,
+          durationMs: item.durationMs,
+        }))
+        const observedEvidence: AgentEvidence[] = observations.map((item, index) => ({
+          id: `${agentTurn.id}:graph-evidence:${index + 1}`,
+          toolCallId: observedPlan[index].id,
+          toolName: item.call.name,
+          source: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'product_registry'
+            ? 'product_registry'
+            : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
+          deterministic: item.deterministic,
+          payload: item.output,
+        }))
+        const checked = completeAgentTurn({
+          ...agentTurn,
+          intent: inferAgentIntent(message, inferredIntent),
+          phase: 'analyze',
+          plan: observedPlan,
+          evidence: observedEvidence,
+          attempts: cycle,
+        }, '')
+        const replan = decideAgentReplan(checked)
+        if (checked.verification.passed) return { status: 'complete', requiredTools: [], reason: '目标所需的确定性证据已齐全。' }
+        if (replan.shouldReplan) return { status: 'replan', requiredTools: replan.requiredTools, reason: replan.reason }
+        const failed = observations.some((item) => item.error)
+        return { status: failed ? 'failed' : 'needs_input', requiredTools: replan.requiredTools, reason: replan.reason || '需要用户补充信息。' }
+      },
+      replan: async (decision, observations, cycle) => {
+        const replanned: AgentProductivityCall[] = []
+        for (const toolName of decision.requiredTools.filter(isAgentReadToolName)) {
+          if (!agentModelCapabilityAllows(toolName, this.activePrincipal.role)) continue
+          let input = this.repairToolInput(toolName, message, request.currentMonth)
+          if (!input) {
+            const parsedDefaults = agentCapabilityRegistry[toolName].inputSchema.safeParse({})
+            if (parsedDefaults.success) input = parsedDefaults.data as Record<string, unknown>
+          }
+          if (toolName === 'get_task_detail' && !input) {
+            const searchObservation = [...observations].reverse().find((item) => item.deterministic && item.call.name === 'search_tasks')
+            const searchResult = toJsonObject(searchObservation?.output)
+            const results = Array.isArray(searchResult.results) ? searchResult.results : []
+            const first = results[0]
+            const taskId = Number(toJsonObject(first).id)
+            if (results.length === 1 && Number.isInteger(taskId) && taskId > 0) input = { taskId }
+          }
+          if (!input && toolName === 'get_task_detail' && /(?:最近|最新|上一条|上一个)/.test(message)) {
+            const searchObservation = [...observations].reverse().find((item) => item.deterministic && item.call.name === 'search_tasks')
+            const searchResult = toJsonObject(searchObservation?.output)
+            const taskId = Number(toJsonObject(Array.isArray(searchResult.results) ? searchResult.results[0] : null).id)
+            if (Number.isInteger(taskId) && taskId > 0) input = { taskId }
+          }
+          if (input) replanned.push({ name: toolName, args: input, reason: decision.reason, attempt: cycle + 1 })
+        }
+        return replanned
+      },
+    }, initialCalls)
+    const result = {
+      steps: productivity.observations.map((observation) => ({
+        toolCalls: [{ toolName: observation.call.name, input: observation.call.args, attempt: observation.call.attempt || 1, durationMs: observation.durationMs }],
+        toolResults: [{ toolName: observation.call.name, output: observation.output }],
+      })),
     }
-    const result = { steps: calls.length ? [{ toolCalls, toolResults }] : [] }
     let answer = cleanAnswer(request.orchestration.directAnswer || '') || (calls.length ? '已完成必要的业务处理。' : '请再具体说明你希望我处理的事情。')
     const trace: AliceAgentTraceItem[] = [{
       type: 'plan',
@@ -982,7 +1100,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           risk: agentCapabilityRegistry[call.toolName as AgentCapabilityName]?.policy.risk || 'read',
           confirmation: agentCapabilityRegistry[call.toolName as AgentCapabilityName]?.policy.confirmation || 'none',
           status: 'pending',
-          attempt: 1,
+          attempt: call.attempt,
+          durationMs: call.durationMs,
         })
         trace.push({ type: 'tool', label: agentToolTraceLabel(call.toolName, 'running') })
       }
@@ -1016,7 +1135,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         const mismatch = toolError || (planned ? this.taskEvidenceMismatch(toolResult.toolName, planned.args, output) : '')
         evidence.push({
           id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
-          toolCallId: plannedCalls.find((item) => item.name === toolResult.toolName)?.id || `${agentTurn.id}:tool:unknown`,
+          toolCallId: planned?.id || `${agentTurn.id}:tool:unknown`,
           toolName: toolResult.toolName,
           source: agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'product_registry'
             ? 'product_registry'
@@ -1060,85 +1179,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     if (verifiedIntents.length > 1) {
       trace.push({ type: 'plan', label: `拆解 ${verifiedIntents.length} 个目标`, detail: verifiedIntents.join('、') })
     }
-    let workingTurn = { ...agentTurn, intent: verifiedIntent, phase: 'analyze' as const, plan: plannedCalls, evidence, attempts: 1, answer }
-    for (let attempt = 2; attempt <= 3 && !selection; attempt += 1) {
-        const checkedTurn = completeAgentTurn(workingTurn, answer)
-        const decision = decideAgentReplan(checkedTurn)
-        const requiredTools = decision.requiredTools.filter(isAgentReadToolName)
-        if (!decision.shouldReplan || requiredTools.length === 0) break
-        trace.push({ type: 'plan', label: '验真后动态补查', detail: decision.reason })
-        let addedEvidence = false
-        for (const toolName of requiredTools) {
-          let input = this.repairToolInput(toolName, message, request.currentMonth)
-          if (toolName === 'get_task_detail' && /(?:最近|最新|上一条|上一个)/.test(message)) {
-            const searchEvidence = [...evidence].reverse().find((item) => item.deterministic && item.toolName === 'search_tasks')
-            const searchResult = toJsonObject(searchEvidence?.payload)
-            const first = Array.isArray(searchResult.results) ? searchResult.results[0] : null
-            const taskId = Number(toJsonObject(first).id)
-            if (Number.isInteger(taskId) && taskId > 0) input = { taskId }
-          }
-          if (!input) {
-            trace.push({ type: 'error', label: `无法补全 ${toolName} 参数`, detail: '需要用户补充明确对象。' })
-            continue
-          }
-          const callId = `${agentTurn.id}:repair:${plannedCalls.length + 1}`
-          const planned: AgentPlannedToolCall = {
-            id: callId,
-            name: toolName,
-            args: input,
-            reason: `验真阶段动态重规划：${decision.reason}`,
-            risk: 'read',
-            status: 'running',
-            attempt,
-          }
-          plannedCalls.push(planned)
-          trace.push({ type: 'tool', label: `补查必要依据 [tool:${toolName}]` })
-          try {
-            const output = toJsonObject(await this.executeRepairTool(toolName, input))
-            const repairSelection = this.taskSelection(output)
-            if (repairSelection) {
-              selection = repairSelection
-              planned.status = 'success'
-              answer = repairSelection.prompt
-              trace.push({ type: 'result', label: '补查需要任务消歧' })
-              break
-            }
-            const mismatch = this.taskEvidenceMismatch(toolName, input, output)
-            planned.status = mismatch ? 'failed' : 'success'
-            planned.error = mismatch
-            evidence.push({
-              id: `${callId}:evidence`,
-              toolCallId: callId,
-              toolName,
-              source: agentCapabilityRegistry[toolName].policy.source === 'product_registry'
-                ? 'product_registry'
-                : agentCapabilityRegistry[toolName].policy.source === 'r2' ? 'r2' : 'd1',
-              deterministic: !mismatch,
-              payload: output,
-            })
-            usedTools.add(toolName)
-            if (mismatch) {
-              trace.push({ type: 'error', label: '补查证据未通过', detail: mismatch })
-              continue
-            }
-            addedEvidence = true
-            const references = this.taskReferencesFromResult(output)
-            if (references.length === 1) this.setTaskReference(references[0])
-            if (toolName === 'search_attachments') {
-              this.resultAttachments(output).forEach((file) => attachmentsById.set(file.id, file))
-            }
-            trace.push({ type: 'result', label: `补查完成 [tool:${toolName}]` })
-          } catch (error) {
-            planned.status = 'failed'
-            planned.error = error instanceof Error ? error.message : String(error)
-            trace.push({ type: 'error', label: `补查失败 [tool:${toolName}]`, detail: planned.error })
-          }
-        }
-        if (selection || !addedEvidence) {
-          workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
-          break
-        }
-        workingTurn = { ...workingTurn, plan: plannedCalls, evidence, attempts: attempt, answer }
+    let workingTurn = { ...agentTurn, intent: verifiedIntent, phase: 'analyze' as const, plan: plannedCalls, evidence, attempts: productivity.cycles, answer }
+    if (productivity.path.includes('replan')) {
+      trace.push({ type: 'plan', label: '验真后动态补查', detail: `${productivity.decision.reason}；执行 ${productivity.cycles} 轮、${productivity.toolCalls} 次工具。` })
+    }
+    if (productivity.decision.status === 'failed') {
+      trace.push({ type: 'error', label: '生产力闭环未完成', detail: productivity.decision.reason })
     }
     const deterministicEvidence = evidence.filter((item) => item.deterministic)
     const factSnapshot = buildAgentFactSnapshot(deterministicEvidence)
@@ -1199,6 +1245,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       trace: [...trace, finalTrace],
       model: request.orchestration.modelLabel,
       agentTurn: { ...sanitizeAgentTurnAudit(agentTurn), evidenceCount: agentTurn.evidence.length },
+      productivity: {
+        engine: 'langgraph',
+        status: productivity.decision.status === 'replan' ? 'needs_input' : productivity.decision.status,
+        path: productivity.path,
+        cycles: productivity.cycles,
+        toolCalls: productivity.toolCalls,
+        reason: productivity.decision.reason,
+      },
       ...(approval ? { approval } : {}),
       ...(selection ? { selection } : {}),
       ...(backgroundTask ? { backgroundTask } : {}),

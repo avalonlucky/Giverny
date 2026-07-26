@@ -23,6 +23,8 @@ Giverny Agent 不把大模型直接等同于产品。大模型负责理解、规
   -> 最终回答
 ```
 
+该链路由两张状态图组成：`agentRuntimeGraph` 完成“理解到授权”，`agentProductivityGraph` 完成“执行到可验收终止状态”。Alice 不再自己维护手写三轮补查循环。
+
 当前实现不再固定串行 Director 和 Planner。Intent Director 在没有任何工具、产品知识或业务数据的条件下理解整句话；对单一明确目标，同一次输出就提出最小动作并经策略授权。只有复合目标、对象不明确或直接动作未通过校验时，LangGraph 才进入 Planner 节点。详见 [`ADR_AGENT_ORCHESTRATION_REPLACEMENT.md`](./ADR_AGENT_ORCHESTRATION_REPLACEMENT.md)。
 
 ## 核心契约

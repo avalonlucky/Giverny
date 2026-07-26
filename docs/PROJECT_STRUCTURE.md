@@ -183,6 +183,7 @@
 ├── package.json
 ├── package-lock.json
 │   ├── agentRuntimeGraph.ts
+│   ├── agentProductivityGraph.ts
 ├── vite.config.ts
 └── wrangler.toml
 ```
@@ -288,6 +289,7 @@
 - Conversation-scoped task reference, evidence consistency guard and multi-turn evaluations: `src/aliceAgent.ts`, `agent-evals/multiturn-cases.json`, `scripts/check-agent-reference-architecture.mjs`
 - Shared Agent turn contract and deterministic verification: `src/agentOrchestrator.ts`
 - LangGraph turn-level orchestration, one-model direct path and complex-plan fallback: `src/agentRuntimeGraph.ts`
+- LangGraph execute-observe-replan productivity closure and hard budgets: `src/agentProductivityGraph.ts`
 - Enterprise Agent priorities, capability rollout and per-release status: `docs/AGENT_ENTERPRISE_ROADMAP.md`
 - Deterministic final-answer fact snapshots and protected-claim verification: `src/agentFactGuard.ts`, `scripts/test-agent-fact-guard.mjs`, `scripts/check-agent-fact-architecture.mjs`
 - Pure Agent entity extraction and deterministic orchestration tests: `src/agentEntityResolver.ts`, `scripts/test-agent-orchestrator.mjs`, `scripts/check-agent-replan-architecture.mjs`

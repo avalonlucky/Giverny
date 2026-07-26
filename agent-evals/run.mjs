@@ -117,6 +117,12 @@ function evaluateResponse(testCase, data) {
   const plannedTools = new Set(plan.map((item) => String(item.name || '')))
   const failures = []
   const irrelevantRetrieval = [...plannedTools].filter((tool) => ['search_product_help', 'get_giverny_context', 'search_workspace'].includes(tool) && !(testCase.expect.tools || []).includes(tool))
+  if (plannedTools.size > 0) {
+    if (data.productivity?.engine !== 'langgraph') failures.push('工具任务未进入 LangGraph 生产力闭环')
+    if (!['complete', 'needs_input', 'failed'].includes(data.productivity?.status)) failures.push('生产力闭环缺少明确终止状态')
+    if (Number(data.productivity?.cycles || 0) < 1 || Number(data.productivity?.cycles || 0) > 3) failures.push(`生产力闭环轮次越界：${data.productivity?.cycles || 0}`)
+    if (Number(data.productivity?.toolCalls || 0) < 1 || Number(data.productivity?.toolCalls || 0) > 8) failures.push(`生产力工具调用越界：${data.productivity?.toolCalls || 0}`)
+  }
   for (const tool of testCase.expect.tools || []) {
     if (!plannedTools.has(tool) && !trace.includes(tool)) failures.push(`未调用 ${tool}`)
   }
@@ -170,6 +176,9 @@ for (const testCase of runnableCases) {
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
+    if (process.env.GIVERNY_AGENT_EVAL_DEBUG === '1') {
+      console.error('[eval-response]', JSON.stringify({ id: testCase.id, trace: data.trace, plan: data.agentTurn?.plan, orchestration: data.orchestration, productivity: data.productivity, content: data.content }, null, 2))
+    }
     const failures = evaluateResponse(testCase, data)
     results.push({ id: testCase.id, category: testCase.category, ok: failures.length === 0, detail: failures.join('；') })
   } catch (error) {
