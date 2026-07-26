@@ -10,7 +10,7 @@ export function splitAgentGoalClauses(question: string) {
 
 const toolClausePatterns: Record<string, RegExp> = {
   query_month_finance: /金额|收入|工资|结算|计费工时|待验收金额|多少钱|月度工时/,
-  search_product_help: /Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事|怎么|如何|在哪/i,
+  search_product_help: /Giverny|吉维尼|网站|工作助手|大模型|主题|快捷键|设置页|功能入口|品牌故事|品牌理念|Slogan|口号|怎么|如何|在哪/i,
   search_workspace: /全站|整个网站|所有地方|统一搜索|全域搜索|到处|不记得.*在哪|任务|附件|对话|知识|记忆/,
   audit_workspace_consistency: /一致性|数据审计|数据矛盾|附件丢失|快照损坏|对不上/,
   query_formal_deliverables: /正式交付物|项目状态报告|验收报告|审计报告/,

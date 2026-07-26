@@ -527,8 +527,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     const taskId = Number(input.taskId)
     const reference = this.activeTaskReference || this.state.taskReference
     const hasExplicitReference = /(?:选择)?任务\s*#\d+/.test(message)
-    if ((Number.isInteger(taskId) && taskId > 0) || !reference || (!hasExplicitReference && !this.referencesCurrentTask(message))) return input
-    return { ...input, taskId: reference.id, taskTitle: reference.title }
+    if (reference && (hasExplicitReference || this.referencesCurrentTask(message))) {
+      return { ...input, taskId: reference.id, taskTitle: reference.title }
+    }
+    if (Number.isInteger(taskId) && taskId > 0) return input
+    return reference ? { ...input, taskId: reference.id, taskTitle: reference.title } : input
   }
 
   private taskReferencesFromResult(value: unknown) {

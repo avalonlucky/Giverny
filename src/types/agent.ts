@@ -233,6 +233,9 @@ export type AgentFailureCase = {
   httpStatus: number
   occurrences: number
   regressionStatus: 'candidate' | 'required' | 'covered' | 'ignored'
+  regressionCaseId: string
+  lastVerifiedVersion: string
+  coveredAt?: string
   resolutionNote: string
   firstSeenAt: string
   lastSeenAt: string

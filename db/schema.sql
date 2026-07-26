@@ -451,6 +451,9 @@ CREATE TABLE IF NOT EXISTS agent_failure_cases (
   http_status INTEGER NOT NULL DEFAULT 0,
   occurrences INTEGER NOT NULL DEFAULT 1,
   regression_status TEXT NOT NULL DEFAULT 'candidate',
+  regression_case_id TEXT NOT NULL DEFAULT '',
+  last_verified_version TEXT NOT NULL DEFAULT '',
+  covered_at TEXT,
   resolution_note TEXT NOT NULL DEFAULT '',
   first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -478,7 +481,39 @@ CREATE TABLE IF NOT EXISTS agent_run_metrics (
   prompt_tokens INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   estimated_cost_cny REAL NOT NULL DEFAULT 0,
+  app_version TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_effect_events (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  principal_id TEXT NOT NULL DEFAULT 'system',
+  event_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL DEFAULT '',
+  app_version TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  estimated_minutes_saved REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_effect_snapshots (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  app_version TEXT NOT NULL DEFAULT '',
+  total_turns INTEGER NOT NULL DEFAULT 0,
+  completed_turns INTEGER NOT NULL DEFAULT 0,
+  approval_previews INTEGER NOT NULL DEFAULT 0,
+  approval_revisions INTEGER NOT NULL DEFAULT 0,
+  verified_turns INTEGER NOT NULL DEFAULT 0,
+  executed_writes INTEGER NOT NULL DEFAULT 0,
+  failed_writes INTEGER NOT NULL DEFAULT 0,
+  estimated_minutes_saved REAL NOT NULL DEFAULT 0,
+  metrics_json TEXT NOT NULL DEFAULT '{}',
+  generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(workspace_id, period_start, period_end, app_version)
 );
 
 CREATE TABLE IF NOT EXISTS agent_turn_runs (
@@ -498,6 +533,7 @@ CREATE TABLE IF NOT EXISTS agent_turn_runs (
   fallback_reason TEXT NOT NULL DEFAULT '',
   duration_ms INTEGER NOT NULL DEFAULT 0,
   is_eval INTEGER NOT NULL DEFAULT 0,
+  app_version TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -749,6 +785,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_confirmation_uses_expiry ON agent_confirmat
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_created ON agent_run_metrics(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_outcome ON agent_run_metrics(is_eval, outcome, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_metrics_intent ON agent_run_metrics(is_eval, intent, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_effect_events_workspace_created ON agent_effect_events(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_effect_events_version_type ON agent_effect_events(workspace_id, app_version, event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_effect_snapshots_workspace_period ON agent_effect_snapshots(workspace_id, period_end DESC, app_version);
 CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_workspace ON agent_turn_runs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_outcome ON agent_turn_runs(workspace_id, outcome, created_at DESC);
 

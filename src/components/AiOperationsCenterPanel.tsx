@@ -43,6 +43,12 @@ function formatObservedDuration(value: number, samples: number) {
   return samples > 0 ? formatDuration(value) : '—'
 }
 
+function formatSavedTime(minutes: number) {
+  if (!minutes) return '—'
+  if (minutes < 60) return `${Math.round(minutes)} 分钟`
+  return `${(minutes / 60).toFixed(minutes >= 600 ? 0 : 1)} 小时`
+}
+
 const clientErrorKindLabels: Record<string, string> = {
   render: 'React 渲染',
   'window-error': '脚本异常',
@@ -254,6 +260,62 @@ export default function AiOperationsCenterPanel({
                 ))}
               </div>
             ) : <EmptyState variant="inline" title="暂无 Agent 执行记录" description="新的 Agent 请求完成后，这里会显示可核对的执行记录。" />}
+          </section>
+          <section className="ai-agent-audit-section" aria-label="Agent 长期效果">
+            <div className="ai-agent-audit-heading">
+              <div>
+                <h3>Agent 长期效果</h3>
+                <p>{operations.effectiveness.observation.note}</p>
+              </div>
+              <small>v{operations.effectiveness.currentVersion} · 最近 {operations.effectiveness.periodDays} 天</small>
+            </div>
+            <div className="ai-governance-objectives" aria-label="长期效果核心指标">
+              <article>
+                <span>任务完成率</span>
+                <strong>{operations.effectiveness.summary.terminalTasks ? `${operations.effectiveness.summary.taskCompletionRate}%` : '—'}</strong>
+                <small>{operations.effectiveness.summary.completedTasks}/{operations.effectiveness.summary.terminalTasks} 项确认式操作完成</small>
+              </article>
+              <article>
+                <span>人工修正率</span>
+                <strong>{operations.effectiveness.summary.approvalPreviews ? `${operations.effectiveness.summary.humanCorrectionRate}%` : '—'}</strong>
+                <small>{operations.effectiveness.summary.approvalRevisions} 次修改 / {operations.effectiveness.summary.approvalPreviews} 张确认卡</small>
+              </article>
+              <article>
+                <span>执行质量</span>
+                <strong>{operations.effectiveness.summary.totalTurns ? `${operations.effectiveness.summary.executionQualityRate}%` : '—'}</strong>
+                <small>{operations.effectiveness.summary.verifiedTurns}/{operations.effectiveness.summary.totalTurns} 次通过确定性验真</small>
+              </article>
+              <article>
+                <span>估算节省时间</span>
+                <strong>{formatSavedTime(operations.effectiveness.summary.estimatedMinutesSaved)}</strong>
+                <small>按成功工具类型保守估算，单次最多 30 分钟</small>
+              </article>
+            </div>
+            {operations.effectiveness.versions.length > 0 && (
+              <div className="ai-operations-list ai-agent-audit-list">
+                {operations.effectiveness.versions.slice(0, 6).map((version) => (
+                  <details key={version.appVersion}>
+                    <summary>
+                      <div>
+                        <strong>v{version.appVersion}</strong>
+                        <small>{version.runs} 次运行 · 估算节省 {formatSavedTime(version.estimatedMinutesSaved)}</small>
+                      </div>
+                      <span>{version.executionQualityRate}% 验真</span>
+                    </summary>
+                    <div className="ai-agent-audit-detail">
+                      <p>确认式任务完成率 {version.taskCompletionRate}% · 执行质量 {version.executionQualityRate}%</p>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+            <details className="ai-governance-notes">
+              <summary>查看统计口径</summary>
+              <p><strong>任务完成率</strong><span>{operations.effectiveness.policy.taskCompletion}</span></p>
+              <p><strong>人工修正率</strong><span>{operations.effectiveness.policy.humanCorrection}</span></p>
+              <p><strong>执行质量</strong><span>{operations.effectiveness.policy.executionQuality}</span></p>
+              <p><strong>节省时间</strong><span>{operations.effectiveness.policy.timeSaved}</span></p>
+            </details>
           </section>
           <section className="ai-agent-audit-section" aria-label="真实用户体验">
             <div className="ai-agent-audit-heading">

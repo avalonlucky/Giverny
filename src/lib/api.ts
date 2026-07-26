@@ -180,9 +180,32 @@ export type AgentRunMetrics = {
   recentFailures: Array<{ createdAt: string; intent: string; status: number; durationMs: number }>
 }
 
+export type AgentEffectiveness = {
+  periodDays: number
+  generatedAt: string
+  currentVersion: string
+  summary: {
+    taskCompletionRate: number
+    completedTasks: number
+    terminalTasks: number
+    humanCorrectionRate: number
+    approvalRevisions: number
+    approvalPreviews: number
+    executionQualityRate: number
+    verifiedTurns: number
+    totalTurns: number
+    estimatedMinutesSaved: number
+  }
+  observation: { sufficient: boolean; observationDays: number; minimumDays: number; minimumTurns: number; note: string }
+  versions: Array<{ appVersion: string; runs: number; taskCompletionRate: number; executionQualityRate: number; estimatedMinutesSaved: number }>
+  trend: Array<{ periodStart: string; periodEnd: string; appVersion: string; taskCompletionRate: number; humanCorrectionRate: number; executionQualityRate: number; estimatedMinutesSaved: number }>
+  policy: { taskCompletion: string; humanCorrection: string; executionQuality: string; timeSaved: string }
+}
+
 export type AiOperationsCenter = {
   periodDays: number
   generatedAt: string
+  effectiveness: AgentEffectiveness
   workspace: {
     id: string
     name: string
@@ -1379,6 +1402,8 @@ export const api = {
     requestJson<{ ok: boolean }>(`/api/local-cli/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
   getAgentRunMetrics: (days = 7) =>
     requestJson<AgentRunMetrics>(`/api/ai/agent-metrics?days=${encodeURIComponent(String(days))}`),
+  getAgentEffectiveness: (days = 30) =>
+    requestJson<AgentEffectiveness>(`/api/ai/agent-effectiveness?days=${encodeURIComponent(String(days))}`),
   getAiOperationsCenter: (days = 7) =>
     requestJson<AiOperationsCenter>(`/api/ai/operations-center?days=${encodeURIComponent(String(days))}`),
   getWorkspaces: () =>

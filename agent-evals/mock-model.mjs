@@ -107,7 +107,7 @@ function chooseTool(messages) {
   if (isChatPlanner) {
     const questionMatch = text.match(/"question"\s*:\s*"((?:\\.|[^"\\])*)"/)
     const plannerQuestion = questionMatch ? JSON.parse(`"${questionMatch[1]}"`) : text
-    if (/快捷键|怎么用键盘|功能入口|网站怎么用|怎么设置|如何设置|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(plannerQuestion)) {
+    if (/快捷键|怎么用键盘|功能入口|网站怎么用|怎么设置|如何设置|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事|品牌理念|Slogan|口号/i.test(plannerQuestion)) {
       return completion({ role: 'assistant', content: JSON.stringify({ intent: 'product_help', tools: [{ name: 'search_product_help', args: { query: plannerQuestion }, reason: '用户在询产品用法' }], confidence: 0.99 }) })
     }
     if (/(?:组织规则|合作伙伴|项目).*(?:记忆|长期偏好|历史决策|之前记住)/.test(plannerQuestion)) {
@@ -221,10 +221,10 @@ function chooseTool(messages) {
   if (/(?:主模型|备用模型|大模型|模型路由).*(?:不可用|失败|异常|故障|回退|回落|切换)|(?:为什么|为何).*(?:备用模型|模型).*(?:启动|切换|不可用)/.test(text)) return toolCall('diagnose_ai_routing', { scope: 'all', includeRecentFallbacks: true })
   if (/(?:恢复|撤销).*(?:模型路由|模型配置|上一次配置)/.test(text)) return toolCall('restore_ai_routing_preview', {})
   if (/(?:全站|整个网站|所有地方|统一搜索|全域搜索|不记得.*在哪).*(?:搜|查|找)|(?:统一搜索|全域搜索)/.test(text)) return toolCall('search_workspace', { query: text, limit: 20 })
-  if (/(?:一致性审计|数据一致性|数据.*(?:矛盾|对不上)|附件.*丢失|结算快照.*损坏)/.test(text)) return toolCall('audit_workspace_consistency', { trigger: 'manual', includeR2: false, limit: 200 })
   if (/(?:生成|制作).*(?:项目状态报告|验收报告|一致性审计报告)/.test(text)) return toolCall('generate_formal_deliverable_preview', { type: text.includes('验收报告') ? 'acceptance_report' : text.includes('审计报告') ? 'consistency_audit' : 'project_status', taskId: text.includes('审计报告') ? undefined : 1, title: '隔离评测正式报告' })
+  if (/(?:一致性审计|数据一致性|数据.*(?:矛盾|对不上)|附件.*丢失|结算快照.*损坏)/.test(text)) return toolCall('audit_workspace_consistency', { trigger: 'manual', includeR2: false, limit: 200 })
   if (/(?:查询|查看|哪些|有没有).*(?:高风险操作|风险案件|审批证据)/.test(text)) return toolCall('query_high_risk_actions', { status: 'all', limit: 30 })
-  if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事/i.test(text)) {
+  if (/快捷键|怎么用键盘|能直接修改 Giverny 数据库|Giverny\s*主题|吉维尼(?:主题|模式)|怎么设置大模型|如何设置大模型|配置大模型|模型设置|最近更新|更新了哪些|更新了什么|为什么叫.*(?:Giverny|吉维尼)|品牌故事|品牌理念|Slogan|口号/i.test(text)) {
     return toolCall('search_product_help', { query: text, limit: 5 })
   }
   if (/(?:记住|保存为).*(?:组织规则|合作伙伴|项目|偏好|约定)/.test(text)) return toolCall('manage_enterprise_memory_preview', { action: 'create', scopeType: 'partner', scopeKey: '昂楷', memoryType: 'preference', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceType: 'conversation', sourceLabel: '用户在当前对话中确认', confidence: 'confirmed' })
@@ -345,7 +345,7 @@ function chooseTool(messages) {
       isAcceptanceProgress: text.includes('验收进展'),
     })
   }
-  if (/做到哪|所有进展|哪些附件|谁提的需求|几段工时|验收情况|封套项目|封套任务的详情|最近一次反馈|卡在哪|为什么一直没有交付/.test(text)) {
+  if (/做到哪|任务详情|所有进展|哪些附件|谁提的需求|几段工时|验收情况|封套项目|封套任务的详情|最近一次反馈|卡在哪|为什么一直没有交付/.test(text)) {
     const title = text.includes('封套任务的详情') ? '封套' : ''
     return toolCall('get_task_detail', title ? { title } : { taskId: 1 })
   }

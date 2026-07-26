@@ -49,6 +49,78 @@
         { "prompt": "查看任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
         { "prompt": "它现在还有哪些未解决问题？", "expect": { "tools": ["get_task_memory"], "taskId": 1 } }
       ]
+    },
+    {
+      "id": "workflow-01",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-tool-task-detail"],
+      "turns": [
+        { "prompt": "任务#1做到哪了？", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "这个任务卡在哪，具体在等什么？", "expect": { "tools": ["get_task_detail"], "taskId": 1 } }
+      ]
+    },
+    {
+      "id": "workflow-02",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-workflow-write"],
+      "turns": [
+        { "prompt": "打开任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "给这个任务记录一条不计时进展：已核对第二版排版", "expect": { "tools": ["append_progress_preview"], "taskId": 1, "approval": "append_progress" } }
+      ]
+    },
+    {
+      "id": "workflow-03",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-stale-confirmation"],
+      "turns": [
+        { "prompt": "读取任务#1", "expect": { "tools": ["get_task_detail"], "taskId": 1 } },
+        { "prompt": "把它的预估工时改成 6 小时", "expect": { "tools": ["update_task_fields_preview"], "taskId": 1, "approval": "update_task_fields" } }
+      ]
+    },
+    {
+      "id": "workflow-04",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-attachment-evidence"],
+      "turns": [
+        { "prompt": "查找直播设计的验收附件", "expect": { "tools": ["search_attachments"] } },
+        { "prompt": "继续读取附件 101 的具体内容和 OCR 证据", "expect": { "tools": ["inspect_attachment_evidence"] } }
+      ]
+    },
+    {
+      "id": "workflow-05",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-finance-tool"],
+      "turns": [
+        { "prompt": "核对 6 月份的总工时和结算金额", "expect": { "tools": ["query_month_finance"] } },
+        { "prompt": "这个月份的计费工时再核对一遍", "expect": { "tools": ["query_month_finance"] } }
+      ]
+    },
+    {
+      "id": "workflow-06",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-formal-deliverable"],
+      "turns": [
+        { "prompt": "先做一次全站数据一致性审计", "expect": { "tools": ["audit_workspace_consistency"] } },
+        { "prompt": "把这次结果生成一份正式的一致性审计报告", "expect": { "tools": ["generate_formal_deliverable_preview"], "approval": "generate_formal_deliverable" } }
+      ]
+    },
+    {
+      "id": "workflow-07",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-runtime-general"],
+      "turns": [
+        { "prompt": "为什么网站叫吉维尼？", "expect": { "tools": ["search_product_help"] } },
+        { "prompt": "那这个品牌的 Slogan 是什么？", "expect": { "tools": ["search_product_help"] } }
+      ]
+    },
+    {
+      "id": "workflow-08",
+      "category": "multi_turn_workflow",
+      "regressionCaseIds": ["failure-authorization-task"],
+      "turns": [
+        { "prompt": "选择任务 #2：公司产品封套延展", "expect": {} },
+        { "prompt": "只读取刚才选中的任务详情", "expect": { "tools": ["get_task_detail"], "taskId": 2 } }
+      ]
     }
   ]
 }

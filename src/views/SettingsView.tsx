@@ -1245,12 +1245,16 @@ export default function SettingsView({
                           <div className="agent-failure-case-main">
                             <strong>{agentMetricIntentLabels[failure.intent] || failure.intent}</strong>
                             <span>{failure.category} · {failure.toolName || '无工具'} · HTTP {failure.httpStatus}</span>
-                            <small>{failure.occurrences} 次 · 最近 {failure.lastSeenAt.replace('T', ' ').slice(0, 16)}</small>
+                            <small>
+                              {failure.occurrences} 次 · 最近 {failure.lastSeenAt.replace('T', ' ').slice(0, 16)}
+                              {failure.regressionCaseId ? ` · 回归 ${failure.regressionCaseId}` : ' · 尚未绑定回归'}
+                              {failure.lastVerifiedVersion ? ` · v${failure.lastVerifiedVersion} 已验证` : ''}
+                            </small>
                           </div>
                           <div className="agent-failure-case-actions">
                             <span className={`status-${failure.regressionStatus}`}>{failure.regressionStatus === 'required' ? '待回归' : failure.regressionStatus === 'covered' ? '已覆盖' : failure.regressionStatus === 'ignored' ? '已忽略' : '候选'}</span>
                             <button type="button" className="ghost-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'required')}>加入回归</button>
-                            <button type="button" className="primary-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'covered')}>标记覆盖</button>
+                            <button type="button" className="primary-button compact-button" disabled={agentFailureBusy === failure.fingerprint || !failure.regressionCaseId} onClick={() => void updateAgentFailure(failure, 'covered')}>标记覆盖</button>
                             <button type="button" className="ghost-button compact-button" disabled={agentFailureBusy === failure.fingerprint} onClick={() => void updateAgentFailure(failure, 'ignored')}>忽略</button>
                           </div>
                         </article>

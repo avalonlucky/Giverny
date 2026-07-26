@@ -1,6 +1,6 @@
 # Giverny Agent Evals
 
-这组回归用例覆盖月份查询、收入工时、任务详情、附件搜索、创建与修改预览、六类后台分析、云端会话、任务通知、任务消歧和安全边界。
+这组回归用例覆盖月份查询、收入工时、任务详情、附件搜索、创建与修改预览、六类后台分析、云端会话、任务通知、任务消歧和安全边界。14 组、28 轮会话额外覆盖任务引用、等待原因、确认卡修改、附件证据、财务复核、正式报告、产品知识和权限边界。
 
 ```bash
 npm run agent:eval:check
@@ -24,7 +24,7 @@ npm run agent:eval
 npm run agent:eval:isolated
 ```
 
-隔离评测直接使用 Cloudflare Miniflare API 启动 workerd，每次创建独立的临时 D1、R2、SQLite Durable Object、Workflow 和静态资源绑定，不读取配置文件或调用外部 CLI。它导入 `fixture.sql` 的匿名任务和附件，执行 108 条单轮与 6 组多轮用例、MCP 鉴权/工具协议、确认写入 Workflow、operationId 幂等重放、云端会话、后台分析的取消与重试，并在真实写入任务和附件后重启 workerd，确认 D1、R2、会话和幂等状态均可恢复。正常、失败、中断和进程退出都会清理带 `.metadata_never_index` 的临时目录。它不会读取或修改正式 D1/R2，也不会调用外部模型。
+隔离评测直接使用 Cloudflare Miniflare API 启动 workerd，每次创建独立的临时 D1、R2、SQLite Durable Object、Workflow 和静态资源绑定，不读取配置文件或调用外部 CLI。它导入 `fixture.sql` 的匿名任务和附件，执行 126 条单轮与 14 组、28 轮多轮用例、MCP 鉴权/工具协议、确认写入 Workflow、失败指纹回归绑定、长期效果快照、operationId 幂等重放、云端会话、后台分析的取消与重试，并在真实写入任务和附件后重启 workerd，确认 D1、R2、会话和幂等状态均可恢复。正常、失败、中断和进程退出都会清理带 `.metadata_never_index` 的临时目录。它不会读取或修改正式 D1/R2，也不会调用外部模型。
 
 `quality-gates.json` 定义总体和分类通过率。创建、写入预览、后台分析、消歧与安全场景必须 100% 通过；任何非预期工具错误、应消歧却未返回候选，或评测流量进入正式指标统计，都会让门禁失败。
 

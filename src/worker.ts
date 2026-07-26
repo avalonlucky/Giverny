@@ -16,6 +16,7 @@ import { AgentWriteWorkflow } from './agentWriteWorkflow'
 import { AgentAnalysisWorkflow, type AgentAnalysisWorkflowParams } from './agentAnalysisWorkflow'
 import { buildAgentProactiveSignals, type AgentProactivePriority, type AgentProactiveSignalType } from './agentProactive'
 import { evaluateAgentSlo, evaluateEmergencyFallback } from './agentGovernance'
+import { regressionCaseForFailure } from './agentRegressionCatalog'
 import {
   approveExecutionBatch,
   beginExecutionCompensation,
@@ -3195,6 +3196,13 @@ async function reviseAgentApproval(env: Env, request: Request) {
     const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
     const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, conversationId)) as unknown as AliceAgent
     const result = await agent.reviseApproval({ approvalId, draft: body.draft })
+    await recordAgentEffectEvent(env, {
+      workspaceId: principal.workspaceId,
+      principalId: principal.principalId,
+      eventType: 'approval_revised',
+      entityId: approvalId,
+      metadata: { action: result.approval?.action || '' },
+    })
     return ok({
       content: result.answer,
       approval: result.approval,
@@ -19057,6 +19065,7 @@ type AgentRunMetricRow = {
   prompt_tokens: number
   completion_tokens: number
   estimated_cost_cny: number
+  app_version: string
   created_at: string
 }
 
@@ -19086,6 +19095,7 @@ async function ensureAgentRunMetricsTable(env: Env) {
   for (const statement of [
     "ALTER TABLE agent_run_metrics ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
     "ALTER TABLE agent_run_metrics ADD COLUMN principal_id TEXT NOT NULL DEFAULT 'system'",
+    "ALTER TABLE agent_run_metrics ADD COLUMN app_version TEXT NOT NULL DEFAULT ''",
   ]) {
     await env.DB.prepare(statement).run().catch(() => undefined)
   }
@@ -19111,8 +19121,77 @@ async function ensureAgentRunMetricsTable(env: Env) {
     )`,
   ).run()
   await env.DB.prepare('ALTER TABLE agent_turn_runs ADD COLUMN is_eval INTEGER NOT NULL DEFAULT 0').run().catch(() => undefined)
+  await env.DB.prepare("ALTER TABLE agent_turn_runs ADD COLUMN app_version TEXT NOT NULL DEFAULT ''").run().catch(() => undefined)
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_turn_runs_workspace ON agent_turn_runs(workspace_id, created_at DESC)').run()
   agentRunMetricsTableEnsured = true
+}
+
+let agentEffectTablesEnsured = false
+async function ensureAgentEffectTables(env: Env) {
+  if (agentEffectTablesEnsured) return
+  await ensureAgentRunMetricsTable(env)
+  for (const statement of [
+    "ALTER TABLE agent_failure_cases ADD COLUMN regression_case_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE agent_failure_cases ADD COLUMN last_verified_version TEXT NOT NULL DEFAULT ''",
+    'ALTER TABLE agent_failure_cases ADD COLUMN covered_at TEXT',
+  ]) await env.DB.prepare(statement).run().catch(() => undefined)
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_effect_events (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', principal_id TEXT NOT NULL DEFAULT 'system',
+      event_type TEXT NOT NULL, entity_id TEXT NOT NULL DEFAULT '', app_version TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}', estimated_minutes_saved REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS agent_effect_snapshots (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default', period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL, app_version TEXT NOT NULL DEFAULT '', total_turns INTEGER NOT NULL DEFAULT 0,
+      completed_turns INTEGER NOT NULL DEFAULT 0, approval_previews INTEGER NOT NULL DEFAULT 0,
+      approval_revisions INTEGER NOT NULL DEFAULT 0, verified_turns INTEGER NOT NULL DEFAULT 0,
+      executed_writes INTEGER NOT NULL DEFAULT 0, failed_writes INTEGER NOT NULL DEFAULT 0,
+      estimated_minutes_saved REAL NOT NULL DEFAULT 0, metrics_json TEXT NOT NULL DEFAULT '{}',
+      generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(workspace_id, period_start, period_end, app_version)
+    )`,
+  ).run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_effect_events_workspace_created ON agent_effect_events(workspace_id, created_at DESC)').run()
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_agent_effect_snapshots_workspace_period ON agent_effect_snapshots(workspace_id, period_end DESC, app_version)').run()
+  agentEffectTablesEnsured = true
+}
+
+async function recordAgentEffectEvent(env: Env, input: {
+  workspaceId: string
+  principalId: string
+  eventType: string
+  entityId?: string
+  metadata?: Record<string, unknown>
+  estimatedMinutesSaved?: number
+}) {
+  await ensureAgentEffectTables(env)
+  await env.DB.prepare(
+    `INSERT INTO agent_effect_events (
+      id, workspace_id, principal_id, event_type, entity_id, app_version, metadata_json, estimated_minutes_saved
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    crypto.randomUUID(), input.workspaceId, input.principalId, input.eventType,
+    agentString(input.entityId, 160), appVersion,
+    JSON.stringify(input.metadata || {}).slice(0, 3000), Math.max(0, Number(input.estimatedMinutesSaved) || 0),
+  ).run()
+}
+
+function estimatedAgentMinutesSaved(tools: string[], outcome: string) {
+  if (outcome === 'error' || outcome === 'approval_failed' || outcome === 'approval_cancelled') return 0
+  const uniqueTools = [...new Set(tools)]
+  let minutes = outcome === 'approval_executed' ? 8 : 0
+  for (const tool of uniqueTools) {
+    if (/formal_deliverable|settlement_receipt|monthly_review|deep_analysis/.test(tool)) minutes += 15
+    else if (/audit_workspace_consistency|requester_profile|workspace_search/.test(tool)) minutes += 6
+    else if (/attachment|agenda|project_execution|enterprise_memory/.test(tool)) minutes += 4
+    else if (/^(query|get|search|inspect)_/.test(tool)) minutes += 2
+    else minutes += 3
+  }
+  return Math.min(30, minutes)
 }
 
 function agentMetricIntent(tools: string[], approvalAction: string, hasSelection: boolean) {
@@ -19211,8 +19290,8 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       `INSERT INTO agent_run_metrics (
         id, intent, outcome, model, workspace_id, principal_id, tools_json, tool_count, duration_ms,
         approval_action, selection_count, fallback_used, http_status, is_eval,
-        prompt_tokens, completion_tokens, estimated_cost_cny
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        prompt_tokens, completion_tokens, estimated_cost_cny, app_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       intent,
@@ -19231,6 +19310,7 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       promptTokens,
       completionTokens,
       estimatedCostCny,
+      appVersion,
     ).run()
     const turnPlan = Array.isArray(rawTurn.plan) ? rawTurn.plan : tools.map((name) => ({ name, status: response.ok ? 'success' : 'failed', risk: 'read', attempt: 1 }))
     const turnEvidence = Array.isArray(rawTurn.evidence) ? rawTurn.evidence : []
@@ -19246,8 +19326,8 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       `INSERT OR REPLACE INTO agent_turn_runs (
         id, workspace_id, principal_id, runtime, model, intent, phase, outcome,
         planned_tools_json, evidence_summary_json, verification_json, attempts,
-        fallback_used, fallback_reason, duration_ms, is_eval
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        fallback_used, fallback_reason, duration_ms, is_eval, app_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       String(rawTurn.id || crypto.randomUUID()), workspaceId, principalId,
       payload.localCli ? 'local-cli' : String(payload.runtime || 'cloud'), model,
@@ -19256,9 +19336,25 @@ async function recordAgentRunMetric(env: Env, response: Response, durationMs: nu
       JSON.stringify(rawVerification).slice(0, 4_000), Math.max(1, Number(rawTurn.attempts) || 1),
       fallbackUsed ? 1 : 0, fallbackReason.slice(0, 500), Math.max(0, Math.round(durationMs)),
       isEval ? 1 : 0,
+      appVersion,
     ).run()
     if (!isEval && (outcome === 'error' || outcome === 'approval_failed')) {
       await learnAgentFailure(env, { intent, outcome, status: response.status, durationMs, tools, approvalAction })
+    }
+    if (!isEval) {
+      const effectType = outcome === 'approval_pending' ? 'approval_previewed'
+        : outcome === 'approval_executed' ? 'approval_executed'
+          : outcome === 'approval_failed' ? 'approval_failed'
+            : outcome === 'approval_cancelled' ? 'approval_cancelled'
+              : rawVerification.passed === true ? 'turn_verified' : 'turn_completed'
+      await recordAgentEffectEvent(env, {
+        workspaceId,
+        principalId,
+        eventType: effectType,
+        entityId: String(rawTurn.id || ''),
+        metadata: { intent, tools, approvalAction },
+        estimatedMinutesSaved: estimatedAgentMinutesSaved(tools, outcome),
+      })
     }
     if (Math.random() < 0.02) {
       await env.DB.prepare("DELETE FROM agent_run_metrics WHERE created_at < datetime('now', '-90 days')").run()
@@ -19867,6 +19963,198 @@ async function getAgentRunMetrics(env: Env, request: Request) {
   })
 }
 
+type AgentEffectiveness = {
+  periodDays: number
+  generatedAt: string
+  currentVersion: string
+  summary: {
+    taskCompletionRate: number
+    completedTasks: number
+    terminalTasks: number
+    humanCorrectionRate: number
+    approvalRevisions: number
+    approvalPreviews: number
+    executionQualityRate: number
+    verifiedTurns: number
+    totalTurns: number
+    estimatedMinutesSaved: number
+  }
+  observation: { sufficient: boolean; observationDays: number; minimumDays: number; minimumTurns: number; note: string }
+  versions: Array<{
+    appVersion: string
+    runs: number
+    taskCompletionRate: number
+    executionQualityRate: number
+    estimatedMinutesSaved: number
+  }>
+  trend: Array<{
+    periodStart: string
+    periodEnd: string
+    appVersion: string
+    taskCompletionRate: number
+    humanCorrectionRate: number
+    executionQualityRate: number
+    estimatedMinutesSaved: number
+  }>
+  policy: {
+    taskCompletion: string
+    humanCorrection: string
+    executionQuality: string
+    timeSaved: string
+  }
+}
+
+function percentage(numerator: number, denominator: number) {
+  return denominator > 0 ? Number((Math.min(1, Math.max(0, numerator / denominator)) * 100).toFixed(1)) : 0
+}
+
+async function calculateAgentEffectiveness(env: Env, workspaceId: string, periodDays: number, persistSnapshot = true): Promise<AgentEffectiveness> {
+  await ensureAgentEffectTables(env)
+  const range = `-${periodDays} days`
+  const [metricRows, turnRows, revisionRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT outcome, tools_json, app_version, created_at FROM agent_run_metrics
+       WHERE workspace_id = ? AND is_eval = 0 AND created_at >= datetime('now', ?)
+       ORDER BY created_at DESC LIMIT 10000`,
+    ).bind(workspaceId, range).all<{ outcome: string; tools_json: string; app_version: string; created_at: string }>(),
+    env.DB.prepare(
+      `SELECT outcome, verification_json, app_version, created_at FROM agent_turn_runs
+       WHERE workspace_id = ? AND is_eval = 0 AND created_at >= datetime('now', ?)
+       ORDER BY created_at DESC LIMIT 10000`,
+    ).bind(workspaceId, range).all<{ outcome: string; verification_json: string; app_version: string; created_at: string }>(),
+    env.DB.prepare(
+      `SELECT app_version, COUNT(*) AS count FROM agent_effect_events
+       WHERE workspace_id = ? AND event_type = 'approval_revised' AND created_at >= datetime('now', ?)
+       GROUP BY app_version`,
+    ).bind(workspaceId, range).all<{ app_version: string; count: number }>(),
+  ])
+  const metrics = metricRows.results ?? []
+  const turns = turnRows.results ?? []
+  const revisions = (revisionRows.results ?? []).reduce((sum, row) => sum + Number(row.count || 0), 0)
+  const approvalPreviews = metrics.filter((row) => row.outcome === 'approval_pending').length
+  const executedWrites = metrics.filter((row) => row.outcome === 'approval_executed').length
+  const failedWrites = metrics.filter((row) => row.outcome === 'approval_failed').length
+  const cancelledWrites = metrics.filter((row) => row.outcome === 'approval_cancelled').length
+  const terminalTasks = executedWrites + failedWrites + cancelledWrites
+  const verifiedTurns = turns.filter((row) => {
+    try { return JSON.parse(row.verification_json || '{}').passed === true } catch { return row.outcome === 'verified' }
+  }).length
+  const estimatedMinutesSaved = Number(metrics.reduce((sum, row) => (
+    sum + estimatedAgentMinutesSaved(parseAgentMetricTools(row.tools_json), row.outcome)
+  ), 0).toFixed(1))
+  const datedRows = [...metrics, ...turns]
+  const oldestAt = datedRows.map((row) => row.created_at).filter(Boolean).sort()[0] || ''
+  const observationDays = oldestAt
+    ? Math.min(periodDays, Math.max(1, Math.ceil((Date.now() - Date.parse(`${oldestAt.replace(' ', 'T')}Z`)) / 86_400_000)))
+    : 0
+  const summary = {
+    taskCompletionRate: percentage(executedWrites, terminalTasks),
+    completedTasks: executedWrites,
+    terminalTasks,
+    humanCorrectionRate: percentage(revisions, approvalPreviews),
+    approvalRevisions: revisions,
+    approvalPreviews,
+    executionQualityRate: percentage(verifiedTurns, turns.length),
+    verifiedTurns,
+    totalTurns: turns.length,
+    estimatedMinutesSaved,
+  }
+  const versionKeys = [...new Set(metrics.map((row) => row.app_version || '历史版本'))]
+  const versions = versionKeys.map((version) => {
+    const versionMetrics = metrics.filter((row) => (row.app_version || '历史版本') === version)
+    const versionTurns = turns.filter((row) => (row.app_version || '历史版本') === version)
+    const completed = versionMetrics.filter((row) => row.outcome === 'approval_executed').length
+    const terminal = versionMetrics.filter((row) => ['approval_executed', 'approval_failed', 'approval_cancelled'].includes(row.outcome)).length
+    const verified = versionTurns.filter((row) => {
+      try { return JSON.parse(row.verification_json || '{}').passed === true } catch { return row.outcome === 'verified' }
+    }).length
+    return {
+      appVersion: version,
+      runs: versionMetrics.length,
+      taskCompletionRate: percentage(completed, terminal),
+      executionQualityRate: percentage(verified, versionTurns.length),
+      estimatedMinutesSaved: Number(versionMetrics.reduce((sum, row) => sum + estimatedAgentMinutesSaved(parseAgentMetricTools(row.tools_json), row.outcome), 0).toFixed(1)),
+    }
+  }).sort((left, right) => right.runs - left.runs)
+  const periodEnd = nowIso().slice(0, 10)
+  const periodStart = new Date(Date.now() - (periodDays - 1) * 86_400_000).toISOString().slice(0, 10)
+  const metricsPayload = { ...summary, observationDays }
+  if (persistSnapshot) {
+    await env.DB.prepare(
+      `INSERT INTO agent_effect_snapshots (
+        id, workspace_id, period_start, period_end, app_version, total_turns, completed_turns,
+        approval_previews, approval_revisions, verified_turns, executed_writes, failed_writes,
+        estimated_minutes_saved, metrics_json, generated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(workspace_id, period_start, period_end, app_version) DO UPDATE SET
+        total_turns = excluded.total_turns, completed_turns = excluded.completed_turns,
+        approval_previews = excluded.approval_previews, approval_revisions = excluded.approval_revisions,
+        verified_turns = excluded.verified_turns, executed_writes = excluded.executed_writes,
+        failed_writes = excluded.failed_writes, estimated_minutes_saved = excluded.estimated_minutes_saved,
+        metrics_json = excluded.metrics_json, generated_at = CURRENT_TIMESTAMP`,
+    ).bind(
+      crypto.randomUUID(), workspaceId, periodStart, periodEnd, appVersion,
+      turns.length, verifiedTurns, approvalPreviews, revisions, verifiedTurns,
+      executedWrites, failedWrites, estimatedMinutesSaved, JSON.stringify(metricsPayload),
+    ).run()
+  }
+  const snapshots = await env.DB.prepare(
+    `SELECT period_start, period_end, app_version, metrics_json FROM agent_effect_snapshots
+     WHERE workspace_id = ? ORDER BY period_end DESC, generated_at DESC LIMIT 90`,
+  ).bind(workspaceId).all<{ period_start: string; period_end: string; app_version: string; metrics_json: string }>()
+  const trend = (snapshots.results ?? []).map((row) => {
+    const snapshot = parseJsonRecord(row.metrics_json)
+    return {
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      appVersion: row.app_version || '历史版本',
+      taskCompletionRate: Number(snapshot.taskCompletionRate || 0),
+      humanCorrectionRate: Number(snapshot.humanCorrectionRate || 0),
+      executionQualityRate: Number(snapshot.executionQualityRate || 0),
+      estimatedMinutesSaved: Number(snapshot.estimatedMinutesSaved || 0),
+    }
+  })
+  const sufficient = observationDays >= 30 && turns.length >= 100
+  return {
+    periodDays,
+    generatedAt: nowIso(),
+    currentVersion: appVersion,
+    summary,
+    observation: {
+      sufficient,
+      observationDays,
+      minimumDays: 30,
+      minimumTurns: 100,
+      note: sufficient ? '已达到长期评估门槛，可以比较版本趋势。' : `长期结论至少需要 30 天、100 次真实运行；当前 ${observationDays} 天、${turns.length} 次。`,
+    },
+    versions,
+    trend,
+    policy: {
+      taskCompletion: '确认式 Agent 操作以执行成功为完成；失败或取消计入已结束任务的分母。',
+      humanCorrection: '用户保存过确认卡修改即记一次人工修正；只统计匿名事件，不保存草稿内容。',
+      executionQuality: '仅当编排层写入后验真或读取事实校验明确通过，才计为高质量完成。',
+      timeSaved: '按成功工具类型采用保守固定分钟估算，单次最多 30 分钟，不读取金额或业务正文。',
+    },
+  }
+}
+
+async function getAgentEffectiveness(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录后再查看 Agent 长期效果', 401)
+  if (principal.role !== 'admin') return fail('仅管理员可以查看 Agent 长期效果', 403)
+  const requestedDays = Number(new URL(request.url).searchParams.get('days'))
+  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.round(requestedDays), 7), 90) : 30
+  return ok(await calculateAgentEffectiveness(env, principalWorkspaceId(principal), periodDays))
+}
+
+async function snapshotAgentEffectiveness(env: Env) {
+  await ensureAgentEffectTables(env)
+  const rows = await env.DB.prepare('SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1000').all<{ id: string }>()
+  for (const workspace of rows.results ?? []) {
+    await calculateAgentEffectiveness(env, workspace.id, 30, true)
+  }
+}
+
 type AiOperationsMetricRow = AgentRunMetricRow & { is_eval: number }
 
 function agentRouteFromMetric(item: Pick<AgentRunMetricRow, 'model' | 'fallback_used'>) {
@@ -20154,6 +20442,7 @@ async function getAiOperationsCenter(env: Env, request: Request) {
   if (!principal) return fail('请先登录后再查看 AI 运行中心', 401)
   if (principal.role !== 'admin') return fail('仅管理员可以查看 AI 运行中心', 403)
   const workspaceId = principalWorkspaceId(principal)
+  const effectivenessPromise = calculateAgentEffectiveness(env, workspaceId, Math.max(periodDays, 30))
   await recoverAgentAnalysisJobs(env, workspaceId)
   const [metricRows, turnRows, jobRows, learningRows, attachmentStatusRows, hourRows, clientErrorRows, clientPerformanceRows] = await Promise.all([
     env.DB.prepare(
@@ -20447,6 +20736,7 @@ async function getAiOperationsCenter(env: Env, request: Request) {
         topReasonCategory: item.top_reason_category,
       })),
     },
+    effectiveness: await effectivenessPromise,
     clientErrors: {
       totalOccurrences: clientErrorOccurrences,
       uniqueErrors: (clientErrorRows.results ?? []).length,
@@ -20498,13 +20788,16 @@ async function getAiOperationsCenter(env: Env, request: Request) {
 }
 
 async function getAgentFailureCases(env: Env) {
+  await ensureAgentEffectTables(env)
   const rows = await env.DB.prepare(
     `SELECT fingerprint, category, intent, tool_name, http_status, occurrences, regression_status,
-            resolution_note, first_seen_at, last_seen_at, updated_at
+            regression_case_id, last_verified_version, covered_at, resolution_note,
+            first_seen_at, last_seen_at, updated_at
      FROM agent_failure_cases ORDER BY CASE regression_status WHEN 'required' THEN 0 ELSE 1 END, occurrences DESC, last_seen_at DESC LIMIT 100`,
   ).all<{
     fingerprint: string; category: string; intent: string; tool_name: string | null; http_status: number
-    occurrences: number; regression_status: AgentFailureCase['regressionStatus']; resolution_note: string
+    occurrences: number; regression_status: AgentFailureCase['regressionStatus']; regression_case_id: string
+    last_verified_version: string; covered_at: string | null; resolution_note: string
     first_seen_at: string; last_seen_at: string; updated_at: string
   }>()
   return ok({
@@ -20516,6 +20809,14 @@ async function getAgentFailureCases(env: Env) {
       httpStatus: Number(row.http_status),
       occurrences: Number(row.occurrences),
       regressionStatus: row.regression_status,
+      regressionCaseId: row.regression_case_id || regressionCaseForFailure({
+        category: row.category,
+        intent: row.intent,
+        toolName: row.tool_name,
+        httpStatus: row.http_status,
+      })?.conversationCaseId || '',
+      lastVerifiedVersion: row.last_verified_version || '',
+      coveredAt: row.covered_at || undefined,
       resolutionNote: row.resolution_note,
       firstSeenAt: row.first_seen_at,
       lastSeenAt: row.last_seen_at,
@@ -20530,9 +20831,32 @@ async function updateAgentFailureCase(env: Env, fingerprint: string, request: Re
   const statuses: AgentFailureCase['regressionStatus'][] = ['candidate', 'required', 'covered', 'ignored']
   const status = body.status || 'candidate'
   if (!statuses.includes(status)) return fail('失败案例状态无效', 400)
+  await ensureAgentEffectTables(env)
+  const current = await env.DB.prepare(
+    'SELECT category, intent, tool_name, http_status FROM agent_failure_cases WHERE fingerprint = ?',
+  ).bind(fingerprint).first<{ category: string; intent: string; tool_name: string | null; http_status: number }>()
+  if (!current) return fail('失败案例不存在', 404)
+  const regression = regressionCaseForFailure({
+    category: current.category,
+    intent: current.intent,
+    toolName: current.tool_name,
+    httpStatus: current.http_status,
+  })
+  if (status === 'covered' && !regression) {
+    return fail('该失败指纹尚未绑定固定回归用例，不能标记为已覆盖', 409)
+  }
   await env.DB.prepare(
-    'UPDATE agent_failure_cases SET regression_status = ?, resolution_note = ?, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?',
-  ).bind(status, agentString(body.note, 500), fingerprint).run()
+    `UPDATE agent_failure_cases SET regression_status = ?, regression_case_id = ?,
+       last_verified_version = ?, covered_at = CASE WHEN ? = 'covered' THEN CURRENT_TIMESTAMP ELSE covered_at END,
+       resolution_note = ?, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?`,
+  ).bind(
+    status,
+    regression?.conversationCaseId || '',
+    status === 'covered' ? appVersion : '',
+    status,
+    agentString(body.note, 500),
+    fingerprint,
+  ).run()
   return getAgentFailureCases(env)
 }
 
@@ -21780,6 +22104,7 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path.startsWith('/api/ai/agent-failures') ||
       path.startsWith('/api/ai/task-memories') ||
       path === '/api/ai/agent-metrics' ||
+      path === '/api/ai/agent-effectiveness' ||
       path === '/api/ai/operations-center' ||
       path.startsWith('/api/ai/operation-alerts/') ||
       path.startsWith('/api/workspaces') ||
@@ -22073,6 +22398,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/ai/agent-metrics' && request.method === 'GET') {
     return getAgentRunMetrics(env, request)
   }
+  if (path === '/api/ai/agent-effectiveness' && request.method === 'GET') {
+    return getAgentEffectiveness(env, request)
+  }
   if (path === '/api/ai/operations-center' && request.method === 'GET') {
     return getAiOperationsCenter(env, request)
   }
@@ -22317,6 +22645,9 @@ export default {
     })
     await maybeRunScheduledConsistencyAudits(env).catch((error) => {
       console.error('workspace consistency audit failed', error)
+    })
+    await snapshotAgentEffectiveness(env).catch((error) => {
+      console.error('agent effectiveness snapshot failed', error)
     })
   },
   // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。

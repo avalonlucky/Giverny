@@ -26,13 +26,13 @@ if (!worker.includes("method: 'POST'") || !worker.includes('body: JSON.stringify
 if (!evaluator.includes('multiTurnCases') || !evaluator.includes('taskId=')) failures.push('Agent 评测器未执行多轮 taskId 继承校验')
 
 const cases = Array.isArray(suite.cases) ? suite.cases : []
-if (cases.length < 6) failures.push(`多轮引用用例仅 ${cases.length} 组，低于 6 组基线`)
+if (cases.length < 14) failures.push(`多轮对话用例仅 ${cases.length} 组，低于 14 组基线`)
 const turns = cases.reduce((sum, item) => sum + (Array.isArray(item.turns) ? item.turns.length : 0), 0)
-if (turns < 12) failures.push(`多轮引用仅 ${turns} 轮，低于 12 轮基线`)
+if (turns < 28) failures.push(`多轮对话仅 ${turns} 轮，低于 28 轮基线`)
 
 if (failures.length) {
   console.error(`Agent 会话引用架构守卫失败：\n- ${failures.join('\n- ')}`)
   process.exit(1)
 }
 
-console.log(`Agent 会话引用架构守卫通过：${cases.length} 组会话、${turns} 轮 taskId 继承与证据一致性覆盖。`)
+console.log(`Agent 会话引用架构守卫通过：${cases.length} 组会话、${turns} 轮引用、工作流与失败恢复覆盖。`)

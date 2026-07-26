@@ -2198,12 +2198,12 @@ async function runAgentOrchestrationCheck(cookie) {
   const failuresResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-failures', { headers: { cookie } })
   const failures = await failuresResponse.json().catch(() => ({}))
   const failure = failures.cases?.find((item) => item.regressionStatus === 'required')
-  if (!failuresResponse.ok || !failure) throw new Error('Failure learning dashboard did not expose required case')
+  if (!failuresResponse.ok || !failure || failure.regressionCaseId !== 'workflow-01') throw new Error('Failure learning dashboard did not bind the required case to a fixed conversation regression')
   const coveredResponse = await fetch(`http://127.0.0.1:8798/api/ai/agent-failures/${encodeURIComponent(failure.fingerprint)}`, {
     method: 'PATCH', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ status: 'covered', note: 'isolated regression' }),
   })
   const covered = await coveredResponse.json().catch(() => ({}))
-  if (!coveredResponse.ok || !covered.cases?.some((item) => item.fingerprint === failure.fingerprint && item.regressionStatus === 'covered')) {
+  if (!coveredResponse.ok || !covered.cases?.some((item) => item.fingerprint === failure.fingerprint && item.regressionStatus === 'covered' && item.lastVerifiedVersion)) {
     throw new Error('Failure regression status update failed')
   }
 
@@ -2212,7 +2212,18 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!metricsResponse.ok || typeof metrics.summary?.promptTokens !== 'number' || typeof metrics.summary?.completionTokens !== 'number' || !Array.isArray(metrics.models) || !metrics.tuning) {
     throw new Error(`Agent cost and tuning metrics are incomplete: ${JSON.stringify(metrics)}`)
   }
-  process.stdout.write('Persistent Agent plan, deterministic execution overview, signed pause/resume/retry/cancel management, task memory, and enterprise layered memory checks passed.\n')
+  const effectivenessResponse = await fetch('http://127.0.0.1:8798/api/ai/agent-effectiveness?days=30', { headers: { cookie } })
+  const effectiveness = await effectivenessResponse.json().catch(() => ({}))
+  if (!effectivenessResponse.ok
+    || typeof effectiveness.summary?.taskCompletionRate !== 'number'
+    || typeof effectiveness.summary?.humanCorrectionRate !== 'number'
+    || typeof effectiveness.summary?.executionQualityRate !== 'number'
+    || typeof effectiveness.summary?.estimatedMinutesSaved !== 'number'
+    || !Array.isArray(effectiveness.trend)
+    || !effectiveness.policy?.timeSaved) {
+    throw new Error(`Agent long-term effectiveness metrics are incomplete: ${JSON.stringify(effectiveness)}`)
+  }
+  process.stdout.write('Persistent Agent plans, fixed failure regressions, and versioned long-term effectiveness checks passed.\n')
 }
 
 async function runBackgroundAnalysisCheck(cookie) {

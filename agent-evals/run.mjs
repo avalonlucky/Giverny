@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import process from 'node:process'
+import { agentRegressionCatalog } from '../src/agentRegressionCatalog.ts'
 
 const suiteUrl = new URL('./cases.json', import.meta.url)
 const multiTurnSuiteUrl = new URL('./multiturn-cases.json', import.meta.url)
@@ -35,8 +36,18 @@ for (const testCase of multiTurnCases) {
   testCase.turns.forEach((turn, index) => {
     if (!turn.prompt || !turn.expect) errors.push(`${testCase.id}.turns[${index}] 缺少 prompt/expect`)
   })
+  if (testCase.regressionCaseIds && !Array.isArray(testCase.regressionCaseIds)) {
+    errors.push(`${testCase.id}.regressionCaseIds 必须是数组`)
+  }
 }
-if (multiTurnCases.length < 6) errors.push(`多轮引用评测至少需要 6 组，当前 ${multiTurnCases.length} 组`)
+if (multiTurnCases.length < 14) errors.push(`多轮对话评测至少需要 14 组，当前 ${multiTurnCases.length} 组`)
+const coveredRegressionIds = new Set(multiTurnCases.flatMap((item) => item.regressionCaseIds || []))
+for (const regression of agentRegressionCatalog) {
+  if (!multiTurnCases.some((item) => item.id === regression.conversationCaseId)) {
+    errors.push(`失败指纹 ${regression.id} 指向不存在的会话用例 ${regression.conversationCaseId}`)
+  }
+  if (!coveredRegressionIds.has(regression.id)) errors.push(`失败指纹 ${regression.id} 尚未绑定多轮回归用例`)
+}
 if (errors.length) {
   console.error(errors.join('\n'))
   process.exit(1)
