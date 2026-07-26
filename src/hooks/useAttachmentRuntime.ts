@@ -62,7 +62,7 @@ export function useAttachmentRuntime({
   }, [attachmentAnalyses, isLoaded, setAttachmentAnalyses])
 
   useEffect(() => {
-    if (role !== 'admin') return undefined
+    if (role !== 'admin' && role !== 'demo') return undefined
     const canBackfill = (file: FileAsset) => ['pdf', 'ai', 'psd', 'office', 'video'].includes(fileTypeForAsset(file).kind)
     const targets = files.filter(
       (file) =>

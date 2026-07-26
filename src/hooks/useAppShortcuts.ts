@@ -17,7 +17,7 @@ function shiftMonthValue(value: string, offset: number) {
 }
 
 export function useAppShortcuts({
-  navItems, activeView, canWrite, isAdmin, canToggleIncomeVisibility,
+  navItems, activeView, canWrite, isAdmin, canUseAgent, canToggleIncomeVisibility,
   selectedTask, taskItems, selectedTaskSource, navigateView, openCreateTask,
   handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleOpenTaskAcceptance,
   isModalOpen, detailTaskId, editTaskId, progressModalTarget, previewFile, confirmDialog,
@@ -29,6 +29,7 @@ export function useAppShortcuts({
   activeView: AppView
   canWrite: boolean
   isAdmin: boolean
+  canUseAgent: boolean
   canToggleIncomeVisibility: boolean
   selectedTask?: Task
   taskItems: Task[]
@@ -259,7 +260,7 @@ export function useAppShortcuts({
       }
       // ⌥A = 工作助手（Option 键，不与文字输入冲突）
       if (event.altKey && !event.metaKey && !event.shiftKey) {
-        if (event.code === 'KeyA' && isAdmin) {
+        if (event.code === 'KeyA' && canUseAgent) {
           event.preventDefault()
           toggleChat()
           return
@@ -347,4 +348,3 @@ export function useAppShortcuts({
     openCommandPalette, commandActions, shortcutHelpGroups,
   }
 }
-

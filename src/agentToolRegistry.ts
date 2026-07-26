@@ -30,10 +30,10 @@ export type AgentCapabilityDefinition = {
   executeWith?: string
 }
 
-const allRoles = ['admin', 'collaborator', 'viewer', 'client', 'guest', 'mcp-read', 'system'] as const
-const businessReadRoles = ['admin', 'collaborator', 'viewer', 'client', 'mcp-read', 'system'] as const
-const financeReadRoles = ['admin', 'collaborator', 'viewer', 'mcp-read', 'system'] as const
-const writeRoles = ['admin', 'collaborator', 'system'] as const
+const allRoles = ['admin', 'demo', 'collaborator', 'viewer', 'client', 'guest', 'mcp-read', 'system'] as const
+const businessReadRoles = ['admin', 'demo', 'collaborator', 'viewer', 'client', 'mcp-read', 'system'] as const
+const financeReadRoles = ['admin', 'demo', 'collaborator', 'viewer', 'mcp-read', 'system'] as const
+const writeRoles = ['admin', 'demo', 'collaborator', 'system'] as const
 const adminRoles = ['admin', 'system'] as const
 const systemRoles = ['system'] as const
 const confirmationInputSchema = z.object({ confirmationToken: z.string().min(1) })

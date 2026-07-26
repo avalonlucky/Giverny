@@ -70,24 +70,6 @@ export function useSettingsOperations({
       const result = await api.login(email, key, turnstileToken)
       const credentials = { email, role: result.role }
       setStoredAuth(credentials)
-      setAuthError('')
-      setBackendStatus('连接中')
-      setRole(result.role)
-      setAuth(credentials)
-      setIsLoginModalOpen(false)
-      notify(result.role === 'admin' ? '管理员已登录' : '访问口令已登录')
-    } catch (error) {
-      setAuthError(error instanceof ApiError && error.status === 401
-        ? '账号或密码不正确'
-        : error instanceof Error ? `登录失败：${error.message}` : '登录失败，请重试')
-    }
-  }
-
-  const handleDemoLogin = async () => {
-    try {
-      const result = await api.loginDemo()
-      const credentials = { email: 'Giverny 演示账号', role: result.role }
-      setStoredAuth(credentials)
       clearStateCache()
       setTaskItems([])
       setUpdateItems([])
@@ -98,10 +80,11 @@ export function useSettingsOperations({
       setRole(result.role)
       setAuth(credentials)
       setIsLoginModalOpen(false)
-      notify('已进入独立演示空间，当前数据均为虚构内容')
+      notify(result.role === 'admin' ? '管理员已登录' : result.role === 'demo' ? '演示账号已登录' : '访问口令已登录')
     } catch (error) {
-      setAuthError(error instanceof Error ? `演示空间进入失败：${error.message}` : '演示空间进入失败，请重试')
-      throw error
+      setAuthError(error instanceof ApiError && error.status === 401
+        ? '账号或密码不正确'
+        : error instanceof Error ? `登录失败：${error.message}` : '登录失败，请重试')
     }
   }
 
@@ -272,7 +255,7 @@ export function useSettingsOperations({
   }
 
   return {
-    handleExportBackup, handleUnlock, handleDemoLogin, handleSignOut, handleChangeAdminPassword,
+    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,

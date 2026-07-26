@@ -85,6 +85,7 @@ type ChatPanelProps = {
   onClose: () => void
   onOpenTask: (taskId: number) => void
   onNotify: (message: string, tone?: ToastTone) => void
+  canConfigureModel?: boolean
 }
 
 
@@ -96,6 +97,7 @@ export function ChatPanel({
   onClose,
   onOpenTask,
   onNotify,
+  canConfigureModel = true,
 }: ChatPanelProps) {
   const initialConversation = initialAnalysisJobId
     ? loadChatHistory().find((record) => record.messages.some((message) => message.backgroundTask?.id === initialAnalysisJobId))
@@ -558,6 +560,7 @@ export function ChatPanel({
   }
 
   const openModelPicker = () => {
+    if (!canConfigureModel) return
     setShowModelPopup((value) => !value)
     if (openRouterModels.length > 0 || isLoadingOpenRouterModels) return
     setIsLoadingOpenRouterModels(true)
@@ -1203,7 +1206,7 @@ export function ChatPanel({
             </label>
           </div>
         )}
-        {showModelPopup && (
+        {showModelPopup && canConfigureModel && (
           <div className="alice-model-popup">
             {usesLocalCli && activeLocalCliRoute && (
               <div className="alice-runtime-current">
@@ -1307,7 +1310,8 @@ export function ChatPanel({
               type="button"
               className={`alice-tool-btn alice-model-btn ${usesLocalCli || selectedModelChoice !== 'auto' ? 'active' : ''}`}
               onClick={openModelPicker}
-              title={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}；点击查看云端回退模型` : '选择模型'}
+              disabled={!canConfigureModel}
+              title={!canConfigureModel ? '演示账号沿用站点首选模型' : activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}；点击查看云端回退模型` : '选择模型'}
               aria-label={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}` : '选择模型'}
             >
               <AiBrandIcon brand={activeRuntimeBrand} size={17} />

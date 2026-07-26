@@ -1,4 +1,4 @@
-export type AgentPrincipalRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read' | 'system'
+export type AgentPrincipalRole = 'admin' | 'demo' | 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read' | 'system'
 
 export type AgentPrincipalContext = {
   workspaceId: string
@@ -48,7 +48,7 @@ export function normalizeAgentPrincipalContext(value: Partial<AgentPrincipalCont
   return {
     workspaceId: cleanScopePart(value?.workspaceId, 80) || 'default',
     principalId: cleanScopePart(value?.principalId, 160) || 'system',
-    role: ['admin', 'collaborator', 'viewer', 'client', 'guest', 'mcp-read', 'system'].includes(role) ? role : 'guest',
+    role: ['admin', 'demo', 'collaborator', 'viewer', 'client', 'guest', 'mcp-read', 'system'].includes(role) ? role : 'guest',
     runId: cleanScopePart(value?.runId, 160) || crypto.randomUUID(),
   }
 }

@@ -117,17 +117,19 @@ function App() {
     setIsAccountMenuOpen,
   })
   const {
-    handleExportBackup, handleUnlock, handleDemoLogin, handleSignOut, handleChangeAdminPassword,
+    handleExportBackup, handleUnlock, handleSignOut, handleChangeAdminPassword,
     handleCreateAccessToken, handleToggleAccessToken, handleDeleteAccessToken, handleCopyAccessToken,
     handleRateChange, handlePdfTitleChange, handleServiceCompanyNameChange, handleTaxModeChange,
     handleDesignTypeGroupsChange, handleAiModelConfigChange,
   } = settingsOperations
+  const isDemo = role === 'demo' && Boolean(auth)
+  const canUseAgent = isAdmin || isDemo
   useEffect(() => {
     if (isLoaded && !auth && role === 'guest') setIsLoginModalOpen(true)
   }, [auth, isLoaded, role, setIsLoginModalOpen])
   // 角色能力分级（前端展示用；后端是真正的安全边界）
-  const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
-  const canWrite = Boolean(auth) && (role === 'admin' || role === 'collaborator') // 可做非敏感写入
+  const canSeeFull = Boolean(auth) && (role === 'admin' || role === 'demo' || role === 'collaborator' || role === 'viewer') // 看管理员级全量视图
+  const canWrite = Boolean(auth) && (role === 'admin' || role === 'demo' || role === 'collaborator') // 可做非敏感写入
   const isClient = role === 'client' && Boolean(auth) // 甲方：当月结算/洞察可见
   const canToggleIncomeVisibility = canSeeFull || isClient
   const { taskActivity, loadTaskActivity } = useTaskActivity()
@@ -188,7 +190,7 @@ function App() {
     setChatAnalysisFocusId(jobId)
     setIsChatOpen(true)
   }, [setChatAnalysisFocusId, setIsChatOpen])
-  const { topAnalysisJobs, markAnalysisJobRead } = useAgentJobNotifications({ isAdmin, notify, onOpenJob: openAnalysisJob })
+  const { topAnalysisJobs, markAnalysisJobRead } = useAgentJobNotifications({ isAdmin: canUseAgent, notify, onOpenJob: openAnalysisJob })
 
   const handleConfirmDialogConfirm = async () => {
     if (!confirmDialog || isConfirmDialogBusy) {
@@ -408,7 +410,7 @@ function App() {
     visibleNavItems, navShortcutHints, navAriaShortcutHints,
     commandActions, shortcutHelpGroups,
   } = useAppShortcuts({
-    navItems, activeView, canWrite, isAdmin, canToggleIncomeVisibility,
+    navItems, activeView, canWrite, isAdmin, canUseAgent, canToggleIncomeVisibility,
     selectedTask, taskItems, selectedTaskSource, navigateView, openCreateTask,
     handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleOpenTaskAcceptance,
     isModalOpen, detailTaskId, editTaskId, progressModalTarget, previewFile, confirmDialog,
@@ -482,7 +484,7 @@ function App() {
           taskCount={activeMonthTasks.length}
           pendingCount={stats.pending}
           canSeeFull={canSeeFull}
-          isAdmin={isAdmin}
+          canUseAgent={canUseAgent}
           isChatOpen={isChatOpen}
           canWrite={canWrite}
           onMonthChange={isTaskCalendarView ? handleTaskCalendarMonthChange : setMonthValue}
@@ -813,6 +815,7 @@ function App() {
         dailyKnowledge={dailyKnowledge}
         dailyKnowledgeLoading={isDailyKnowledgeLoading}
         isAdmin={isAdmin}
+        canUseAgent={canUseAgent}
         onRefreshDailyKnowledge={() => void showNextDailyKnowledge()}
         onCloseDailyKnowledge={() => setIsDailyKnowledgeOpen(false)}
         onFavoriteDailyKnowledge={async (item) => {
@@ -890,7 +893,6 @@ function App() {
         onCloseLogin={() => { setIsLoginModalOpen(false); setAuthError('') }}
         onCloseAboutGiverny={() => setIsAboutGivernyOpen(false)}
         onUnlock={handleUnlock}
-        onDemoLogin={handleDemoLogin}
         showFireworks={showFireworks}
         toastQueue={toastQueue}
         onDismissToast={dismissToast}

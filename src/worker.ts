@@ -235,6 +235,7 @@ const getStorageUsage = async (env: Env) => {
 // 管理员账号：该邮箱 + 平台密码拥有最高权限（含口令管理）
 const ADMIN_EMAIL = 'bh141425@gmail.com'
 const ADMIN_PASSWORD_SETTING = 'adminPasswordHash'
+const DEMO_PASSWORD_SETTING = 'demoAccountPasswordHash'
 const ADMIN_RESET_SETTING = 'adminPasswordReset'
 const AUTH_SESSION_COOKIE = 'giverny_session'
 const AUTH_SESSION_TTL_SECONDS = 24 * 60 * 60
@@ -335,7 +336,7 @@ type AiRoutingHistoryEntry = {
 // viewer       只读全局（口令）——见管理员所见全量数据，只读
 // client       甲方（口令）——见当月任务/进展/交付件 + 当月结算，只读，看不到往月与全年财务、看不到后台配置
 // guest        对客访客（口令/匿名）——只看进展和对客可见交付件，只读
-type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
+type AuthRole = 'admin' | 'demo' | 'collaborator' | 'viewer' | 'client' | 'guest'
 type TokenScope = 'collaborator' | 'viewer' | 'client' | 'guest' | 'mcp-read'
 
 type AuthPrincipal = {
@@ -349,7 +350,7 @@ type AuthPrincipal = {
 const DEFAULT_WORKSPACE_ID = 'default'
 const DEMO_WORKSPACE_ID = 'demo'
 const DEMO_PRINCIPAL_ID = 'demo-viewer'
-const DEMO_PRINCIPAL_EMAIL = 'demo@giverny.local'
+const DEMO_PRINCIPAL_EMAIL = 'demo@mayeai.com'
 
 function principalWorkspaceId(principal: AuthPrincipal | null | undefined) {
   return String(principal?.workspaceId || DEFAULT_WORKSPACE_ID).slice(0, 80)
@@ -365,7 +366,7 @@ function normalizeTokenScope(scope: string | null | undefined): TokenScope {
 
 // 能看到管理员级全量数据（含作废任务、全部交付件与分析）
 function canSeeFullData(role: AuthRole): boolean {
-  return role === 'admin' || role === 'collaborator' || role === 'viewer'
+  return role === 'admin' || role === 'demo' || role === 'collaborator' || role === 'viewer'
 }
 
 // 协作者可写的非敏感接口（创建/编辑任务、记进展、传附件、AI 助手）；删除/作废/结算/配置/口令/密码一律排除
@@ -394,6 +395,25 @@ function isCollaboratorWritablePath(path: string, method: string): boolean {
     (path.startsWith('/api/updates/') && method === 'PATCH') ||
     path.startsWith('/api/files') ||
     path.startsWith('/api/ai/')
+  )
+}
+
+function isDemoAgentRuntimePath(path: string, method: string): boolean {
+  if (path === '/api/search' && method === 'GET') return true
+  if (path === '/api/insights/attachment-analyses/status' && method === 'GET') return true
+  if (path === '/api/ai/active-model' || path === '/api/ai/models' || path === '/api/ai/openrouter/free-models') {
+    return method === 'GET'
+  }
+  return (
+    path === '/api/ai/chat' ||
+    path === '/api/ai/approval' ||
+    path.startsWith('/api/ai/conversations') ||
+    path.startsWith('/api/ai/analysis-jobs') ||
+    path.startsWith('/api/ai/agent-plans') ||
+    path.startsWith('/api/ai/proactive-items') ||
+    path.startsWith('/api/ai/task-memories') ||
+    path.startsWith('/api/ai/enterprise-memories') ||
+    (path.startsWith('/api/files/') && path.endsWith('/analysis/retry'))
   )
 }
 
@@ -690,7 +710,7 @@ async function resolveSessionPrincipal(env: Env, request: Request): Promise<Auth
   const row = await env.DB.prepare('SELECT role, email, principal_id, workspace_id, expires_at FROM auth_sessions WHERE token_hash = ? AND expires_at > ?')
     .bind(tokenHash, nowIso())
     .first<{ role: string; email: string | null; principal_id: string; workspace_id: string | null; expires_at: string }>()
-  if (!row || !['admin', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role)) return null
+  if (!row || !['admin', 'demo', 'collaborator', 'viewer', 'client', 'guest'].includes(row.role)) return null
   return {
     role: row.role as AuthRole,
     email: row.email || '',
@@ -698,10 +718,6 @@ async function resolveSessionPrincipal(env: Env, request: Request): Promise<Auth
     workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
     expiresAt: row.expires_at,
   }
-}
-
-async function resolveSessionRole(env: Env, request: Request): Promise<AuthRole | null> {
-  return (await resolveSessionPrincipal(env, request))?.role ?? null
 }
 
 async function deleteRequestSession(env: Env, request: Request) {
@@ -14520,6 +14536,12 @@ async function resolvePrincipal(env: Env, key: string, email: string): Promise<A
       ? { role: 'admin', email: ADMIN_EMAIL, principalId: 'admin' }
       : null
   }
+  if (normalizedEmail === DEMO_PRINCIPAL_EMAIL) {
+    const valid = await verifySecret(trimmedKey, await getSettingValue(env, DEMO_PASSWORD_SETTING))
+    return valid
+      ? { role: 'demo', email: DEMO_PRINCIPAL_EMAIL, principalId: DEMO_PRINCIPAL_ID, workspaceId: DEMO_WORKSPACE_ID }
+      : null
+  }
 
   // Local D1 is isolated from production, so production access tokens are not present here.
   // Accept only the exact generated token shape for UI previews; production still validates D1 state and scope.
@@ -14546,20 +14568,6 @@ async function resolvePrincipal(env: Env, key: string, email: string): Promise<A
     workspaceId: row.workspace_id || DEFAULT_WORKSPACE_ID,
     expiresAt: row.expires_at ?? undefined,
   }
-}
-
-async function resolveRole(env: Env, key: string, email: string): Promise<AuthRole | null> {
-  return (await resolvePrincipal(env, key, email))?.role ?? null
-}
-
-async function resolveRequestRole(env: Env, request: Request): Promise<AuthRole | null> {
-  const sessionRole = await resolveSessionRole(env, request)
-  if (sessionRole) return sessionRole
-  return resolveRole(
-    env,
-    request.headers.get('x-auth-key') ?? '',
-    request.headers.get('x-auth-email') ?? '',
-  )
 }
 
 async function resolveRequestPrincipal(env: Env, request: Request): Promise<AuthPrincipal | null> {
@@ -14758,25 +14766,6 @@ async function login(env: Env, request: Request) {
   await audit(env, 'login', 'auth', principal.role, { email: body.email ?? '', session: true })
   return Response.json(
     { role: principal.role },
-    { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
-  )
-}
-
-async function loginDemo(env: Env) {
-  const workspace = await env.DB.prepare("SELECT id FROM workspaces WHERE id = ? AND status = 'active'")
-    .bind(DEMO_WORKSPACE_ID)
-    .first<{ id: string }>()
-  if (!workspace) return fail('演示空间正在准备中，请稍后再试', 503)
-  const principal: AuthPrincipal = {
-    role: 'viewer',
-    email: DEMO_PRINCIPAL_EMAIL,
-    principalId: DEMO_PRINCIPAL_ID,
-    workspaceId: DEMO_WORKSPACE_ID,
-  }
-  const session = await createAuthSession(env, principal)
-  await audit(env, 'login', 'auth', DEMO_PRINCIPAL_ID, { workspaceId: DEMO_WORKSPACE_ID, demo: true })
-  return Response.json(
-    { role: principal.role, workspaceId: DEMO_WORKSPACE_ID, demo: true },
     { status: 200, headers: { ...jsonHeaders, 'set-cookie': authSessionCookie(session.token, session.maxAge) } },
   )
 }
@@ -15119,7 +15108,7 @@ async function getState(env: Env, role: AuthRole, request: Request) {
       taxMode,
       designTypes: flattenDesignTypeGroups(designTypeGroups),
       designTypeGroups,
-      aiModel: role === 'admin' ? publicAiModelConfig(env, aiModelConfig) : undefined,
+      aiModel: role === 'admin' || role === 'demo' ? publicAiModelConfig(env, aiModelConfig) : undefined,
     },
     reports: (reportRows.results ?? []).map(toReport),
     accessTokens: role === 'admin' ? await listAccessTokens(env, workspaceId) : undefined,
@@ -22549,7 +22538,6 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
     path.startsWith('/api/agent/') ||
     path.startsWith('/api/local-cli/bridge/') ||
     path === '/api/auth/login' ||
-    path === '/api/auth/demo' ||
     path === '/api/auth/logout' ||
     path === '/api/auth/password-reset/request' ||
     path === '/api/auth/password-reset/confirm' ||
@@ -22561,9 +22549,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   let role: AuthRole = 'guest'
   const authEnabled = Boolean(env.ADMIN_TOKEN || (await getSettingValue(env, ADMIN_PASSWORD_SETTING)))
   if (authEnabled && !isPublic) {
-    const resolved = await resolveRequestRole(env, request)
-    if (resolved) {
-      role = resolved
+    const principal = await resolveRequestPrincipal(env, request)
+    if (principal) {
+      role = principal.role
     } else if (!isGet) {
       return fail('登录已失效，请重新登录', 401)
     }
@@ -22618,15 +22606,16 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/insights/history' ||
       path.endsWith('/analysis/retry')
     ) &&
-    role !== 'admin'
+    role !== 'admin' && !(role === 'demo' && isDemoAgentRuntimePath(path, request.method))
   ) {
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
     // 协作者可写非敏感接口（记进展/传附件/改任务/AI 助手）；其余角色一律只读。
     const collaboratorAllowed = role === 'collaborator' && isCollaboratorWritablePath(path, request.method)
+    const demoAllowed = role === 'demo' && (isCollaboratorWritablePath(path, request.method) || isDemoAgentRuntimePath(path, request.method))
     const localCliAllowed = path.startsWith('/api/local-cli/')
-    if (!collaboratorAllowed && !localCliAllowed) {
+    if (!collaboratorAllowed && !demoAllowed && !localCliAllowed) {
       return fail('当前口令没有该操作权限（敏感操作仅管理员可用）', 403)
     }
   }
@@ -22670,9 +22659,6 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
     return login(env, request)
-  }
-  if (path === '/api/auth/demo' && request.method === 'POST') {
-    return loginDemo(env)
   }
   if (path === '/api/auth/logout' && request.method === 'POST') {
     return logout(env, request)

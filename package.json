@@ -1,11 +1,12 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.36.0",
+  "version": "0.36.1",
   "type": "module",
   "scripts": {
     "demo:assets": "node scripts/generate-demo-assets.mjs",
     "demo:test": "node scripts/test-demo-workspace.mjs",
+    "demo:password": "node scripts/set-demo-account-password.mjs",
     "product-knowledge:generate": "node scripts/generate-product-knowledge.mjs",
     "agent-capabilities:generate": "node scripts/generate-agent-capability-docs.mjs",
     "baml:generate": "baml-cli generate",

@@ -1,14 +1,15 @@
 INSERT OR IGNORE INTO workspaces (id, name, status) VALUES ('demo', 'Giverny 多岗位演示空间', 'active');
 INSERT INTO workspace_memberships (workspace_id, principal_id, role)
-VALUES ('demo', 'demo-viewer', 'viewer')
-ON CONFLICT(workspace_id, principal_id) DO UPDATE SET role = 'viewer';
+VALUES ('demo', 'demo-viewer', 'demo')
+ON CONFLICT(workspace_id, principal_id) DO UPDATE SET role = 'demo';
 
-DELETE FROM attachment_analyses WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = 'demo');
-DELETE FROM attachments WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = 'demo');
-DELETE FROM task_updates WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = 'demo');
-DELETE FROM monthly_reports WHERE workspace_id = 'demo';
-DELETE FROM settlement_exports WHERE workspace_id = 'demo';
-DELETE FROM tasks WHERE workspace_id = 'demo';
+-- 注销上一版公开演示签发的只读会话，新版 demo 账号会话保留。
+DELETE FROM auth_sessions WHERE workspace_id = 'demo' AND role <> 'demo';
+
+DELETE FROM attachment_analyses WHERE CAST(attachment_id AS INTEGER) BETWEEN 862000001 AND 862000011;
+DELETE FROM attachments WHERE CAST(id AS INTEGER) BETWEEN 862000001 AND 862000011;
+DELETE FROM task_updates WHERE CAST(id AS INTEGER) BETWEEN 861000001 AND 861000016;
+DELETE FROM monthly_reports WHERE id IN ('demo-report-2026-06', 'demo-report-2026-07');
 
 INSERT INTO tasks (
   id, workspace_id, title, requirement, design_type, start_date, estimated_delivery_date, actual_delivery_date,
@@ -30,7 +31,32 @@ INSERT INTO tasks (
 ('860000013', 'demo', '团队协作数据看板 UI', '设计桌面端团队协作看板，覆盖总览、项目、报告与团队节奏，交付高保真界面和组件说明。', 'UI 设计', '2026-06-12 09:30', '2026-06-28 18:00', '2026-06-28 15:20', '2026-06', 24, 20, 260, '温岚', '云舒', '简宁', '设计交付', '已验收', 100, '视觉层级清晰，组件状态与响应式说明完整。', '[{"id":"demo-ui-1","date":"2026-06-13","start":"09:30","end":"18:30","note":"完成信息层级与两套视觉方向"},{"id":"demo-ui-2","date":"2026-06-26","start":"09:30","end":"20:30","note":"完成高保真界面与组件标注","isAcceptanceProgress":true}]', '[]', 1, '2026-06-12 09:10', '2026-06-28 15:20'),
 ('860000014', 'demo', '健康管理 App 核心界面', '设计步数、睡眠与温和提醒三个核心模块，强调低压力、可持续的健康反馈体验。', 'UI 设计', '2026-07-09 09:30', '2026-07-26 18:00', NULL, '2026-07', 18, 14, 260, '温岚', '楚禾', '简宁', '等待验收', '待验收', 90, '', '[{"id":"demo-ui-3","date":"2026-07-10","start":"09:30","end":"17:30","note":"完成用户路径和低保真原型"},{"id":"demo-ui-4","date":"2026-07-24","start":"09:30","end":"15:30","note":"提交高保真核心界面","isAcceptanceProgress":true}]', '[]', 1, '2026-07-09 09:15', '2026-07-24 15:30'),
 ('860000015', 'demo', '「看见日常」产品发布短片', '制作 25 秒产品发布短片，包含生活化开场、功能展示、品牌收束与多平台字幕版本。', '影视传媒 / 视频剪辑', '2026-06-18 10:00', '2026-07-02 18:00', '2026-07-02 17:40', '2026-07', 22, 18, 260, '傅声', '顾微', '裴川', '成片交付', '已验收', 100, '成片节奏和品牌表达通过，横竖版均已归档。', '[{"id":"demo-video-1","date":"2026-06-19","start":"10:00","end":"18:00","note":"完成脚本、分镜和素材清单"},{"id":"demo-video-2","date":"2026-07-01","start":"09:30","end":"19:30","note":"完成剪辑、调色和字幕版本","isAcceptanceProgress":true}]', '[]', 1, '2026-06-18 09:48', '2026-07-02 17:40'),
-('860000016', 'demo', '人物访谈节目精剪', '将 48 分钟访谈整理为 12 分钟正片和 3 条社交媒体切片，保留观点完整性与自然停顿。', '影视传媒 / 视频剪辑', '2026-07-20 10:00', '2026-08-01 18:00', NULL, '2026-07', 20, 7, 260, '傅声', '季棠', '裴川', '粗剪进行中', '进行中', 45, '', '[{"id":"demo-video-3","date":"2026-07-21","start":"10:00","end":"17:00","note":"完成素材整理、文字稿校对与粗剪结构"}]', '[]', 1, '2026-07-20 09:50', '2026-07-21 17:00');
+('860000016', 'demo', '人物访谈节目精剪', '将 48 分钟访谈整理为 12 分钟正片和 3 条社交媒体切片，保留观点完整性与自然停顿。', '影视传媒 / 视频剪辑', '2026-07-20 10:00', '2026-08-01 18:00', NULL, '2026-07', 20, 7, 260, '傅声', '季棠', '裴川', '粗剪进行中', '进行中', 45, '', '[{"id":"demo-video-3","date":"2026-07-21","start":"10:00","end":"17:00","note":"完成素材整理、文字稿校对与粗剪结构"}]', '[]', 1, '2026-07-20 09:50', '2026-07-21 17:00')
+ON CONFLICT(id) DO UPDATE SET
+  workspace_id = excluded.workspace_id,
+  title = excluded.title,
+  requirement = excluded.requirement,
+  design_type = excluded.design_type,
+  start_date = excluded.start_date,
+  estimated_delivery_date = excluded.estimated_delivery_date,
+  actual_delivery_date = excluded.actual_delivery_date,
+  settlement_month = excluded.settlement_month,
+  estimated_hours = excluded.estimated_hours,
+  actual_hours = excluded.actual_hours,
+  hourly_rate = excluded.hourly_rate,
+  requester = excluded.requester,
+  contact_person = excluded.contact_person,
+  reviewer = excluded.reviewer,
+  stage = excluded.stage,
+  status = excluded.status,
+  progress = excluded.progress,
+  acceptance_note = excluded.acceptance_note,
+  time_entries_json = excluded.time_entries_json,
+  waiting_entries_json = excluded.waiting_entries_json,
+  is_billable = excluded.is_billable,
+  deleted_at = NULL,
+  voided_at = NULL,
+  updated_at = excluded.updated_at;
 
 INSERT INTO task_updates (id, task_id, update_date, title, body, hours, visible_to_client) VALUES
 ('861000001', '860000001', '2026-06-12 16:40', '权益改版验收完成', 'PRD、流程图和埋点清单均已确认。', 0, 1),
@@ -65,6 +91,23 @@ INSERT INTO attachments (
 ('862000009', '860000014', 'acceptance', '健康管理App核心界面.png', 'PNG', 'image/png', 'demo-static/ui-wellbeing-app.png', 'demo-static/ui-wellbeing-app.png', NULL, '76 KB', 1, 1, '高保真界面', '2026-07-24 15:10'),
 ('862000010', '860000015', 'acceptance', '看见日常_短片分镜表.xlsx', 'XLSX', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'demo-static/video-storyboard.xlsx', NULL, NULL, '8 KB', 1, 1, '分镜表', '2026-07-02 17:20'),
 ('862000011', '860000015', 'acceptance', '看见日常_发布封面.png', 'PNG', 'image/png', 'demo-static/video-campaign-cover.png', 'demo-static/video-campaign-cover.png', NULL, '92 KB', 1, 1, '视频封面', '2026-07-02 17:25');
+
+INSERT INTO attachment_analyses (
+  attachment_id, task_id, status, attempt_count, parser_kind, provider, model, summary, content_type,
+  extracted_text, findings_json, quality_issues_json, requirement_matches_json, risks_json, suggestions_json,
+  confidence, requested_at, started_at, completed_at, updated_at
+) VALUES
+('862000001', '860000001', 'completed', 1, 'markdown', 'Giverny', 'demo-curated', '一份企业会员权益改版 PRD，完整说明改版目标、权益信息架构、套餐差异、用量提醒和验收指标。', '产品需求文档', '企业会员权益改版 PRD。目标是降低企业管理员理解权益的成本，提高试用期团队邀请完成率。核心范围包括权益信息架构、套餐差异、到期用量提醒和管理员邀请引导。', '["目标、范围与验收指标结构完整","明确提出团队邀请完成率提升 12%","包含套餐咨询工单下降 15% 的量化目标"]', '[]', '["与企业会员权益改版任务目标一致","覆盖任务要求的 PRD 和验收指标"]', '["正式上线前仍需补充埋点字段字典"]', '["后续可增加权限角色流程图"]', '高', '2026-06-12 16:31', '2026-06-12 16:31', '2026-06-12 16:32', '2026-06-12 16:32'),
+('862000002', '860000003', 'completed', 1, 'markdown', 'Giverny', 'demo-curated', '一份围绕首次创建、首次协作和首次回顾设计的新用户七日激活方案，包含分层触达与对照组思路。', '运营方案', '新用户七日激活计划。围绕首次创建、首次协作和首次回顾三个关键动作设计分层触达，并设置对照组验证增量。', '["激活动作定义清楚","包含对照组验证而非只看表面转化","适合转化为七日触达日历"]', '[]', '["覆盖任务要求的触达节奏与实验验证"]', '["需要在正式执行前确认消息频控"]', '["可补充分群人数和最小样本量"]', '高', '2026-06-25 17:11', '2026-06-25 17:11', '2026-06-25 17:12', '2026-06-25 17:12'),
+('862000003', '860000005', 'completed', 1, 'xlsx', 'Giverny', 'demo-curated', '季度留存分析表，按自然搜索、内容社区、品牌投放和好友邀请四个来源对比新增用户及次日、7 日、30 日留存。', '数据分析表格', '自然搜索新增 12840，次日留存 46.2%，7 日留存 29.1%，30 日留存 17.6%。好友邀请样本较小但 30 日留存最高，为 20.4%。品牌投放规模最大但长期留存最低。', '["好友邀请用户质量最高","自然搜索兼具规模和长期留存","品牌投放应优先优化首日激活","内容社区在第 3 日附近存在明显流失"]', '[]', '["覆盖不同渠道的次日、7 日和 30 日留存","给出了关键流失节点和实验方向"]', '["渠道样本量不同，横向比较需结合获客成本"]', '["下一版增加 CAC 与留存联合视图"]', '高', '2026-06-19 15:31', '2026-06-19 15:31', '2026-06-19 15:32', '2026-06-19 15:32'),
+('862000004', '860000006', 'completed', 1, 'xlsx', 'Giverny', 'demo-curated', '春季增长活动渠道漏斗表，统一展示曝光、点击、注册、激活和激活率，可直接用于渠道效率比较。', '数据分析表格', '公众号内容曝光 186000，激活 2710。短视频信息流曝光 524000，激活 3310。合作社群激活率 72.2%，为四个渠道最高。搜索广告激活率 52.0%。', '["合作社群激活率最高","短视频贡献最大激活量但转化效率偏低","公众号内容兼顾质量和规模"]', '[]', '["覆盖任务要求的四级漏斗和预算判断依据"]', '["当前未合并投放成本，不能直接判断最终 ROI"]', '["增加单激活成本后再调整预算"]', '高', '2026-07-24 16:01', '2026-07-24 16:01', '2026-07-24 16:02', '2026-07-24 16:02'),
+('862000005', '860000008', 'completed', 1, 'csv', 'Giverny', 'demo-curated', 'RAG 鲁棒性评测结果，覆盖制度查询、多跳问题、冲突来源和无答案边界四类场景。', '评测数据', 'policy lookup 回答得分 4.8，引用得分 1.0。multi-hop question 回答得分 4.2。conflicting sources 回答得分 3.7，引用得分 0.8。no-answer boundary 回答得分 4.6。', '["制度查询表现稳定","冲突来源处理是当前最弱项","无答案边界控制良好"]', '[]', '["覆盖检索、引用、拒答和冲突信息处理"]', '["样本数量较少，不宜直接作为上线结论"]', '["扩充冲突来源和跨文档多跳样本"]', '高', '2026-06-24 16:51', '2026-06-24 16:51', '2026-06-24 16:52', '2026-06-24 16:52'),
+('862000006', '860000009', 'completed', 1, 'xlsx', 'Giverny', 'demo-curated', '研发岗位招聘漏斗复盘表，覆盖前端、后端和数据工程师从简历到 Offer 的完整转化。', '人力资源分析表', '前端工程师 186 份简历，5 个 Offer。后端工程师 143 份简历，4 个 Offer。数据工程师 96 份简历，3 个 Offer。', '["前端岗位简历量最大但初筛损耗明显","三个岗位均给出具体流程改进动作","数据岗位样本较少但终面转化稳定"]', '[]', '["覆盖招聘漏斗与岗位差异分析"]', '["缺少候选人来源维度"]', '["下一轮增加渠道和到岗率字段"]', '高', '2026-06-30 16:11', '2026-06-30 16:11', '2026-06-30 16:12', '2026-06-30 16:12'),
+('862000007', '860000011', 'completed', 1, 'markdown', 'Giverny', 'demo-curated', '权限服务 API 技术说明，重点覆盖作用域角色、审计事件、幂等写入和工作区隔离测试。', '开发技术说明', 'Permission Service API Notes。包含 scoped roles、audit events、idempotent writes 和 workspace isolation tests。', '["权限边界聚焦清楚","明确要求幂等写入和审计事件","工作区隔离被列为核心测试项"]', '[]', '["符合多租户权限服务重构目标"]', '["仍需补充具体接口请求与响应示例"]', '["增加错误码和权限矩阵"]', '高', '2026-07-23 18:21', '2026-07-23 18:21', '2026-07-23 18:22', '2026-07-23 18:22'),
+('862000008', '860000013', 'completed', 1, 'vision', 'Giverny', 'demo-curated', '桌面端团队协作数据看板高保真界面，采用浅色低饱和视觉，包含侧边导航、三项核心指标、趋势图和今日事项。', 'UI 高保真界面', '界面标题为 Team workspace。左侧包含 Overview、Projects、Reports、Team。主区展示 Weekly focus 84%、Completed 26、Team pace +12%，并包含趋势曲线和 Today 事项。', '["主次层级清楚","三项指标易于快速扫读","侧边导航和内容区边界明确","低饱和色彩适合长时间工作场景"]', '[]', '["覆盖总览、项目、报告和团队节奏","具备高保真视觉和主要组件状态"]', '["部分浅灰文字在低亮度屏幕上需复核对比度"]', '["补充移动端折叠导航状态"]', '高', '2026-06-28 15:01', '2026-06-28 15:01', '2026-06-28 15:02', '2026-06-28 15:02'),
+('862000009', '860000014', 'completed', 1, 'vision', 'Giverny', 'demo-curated', '健康管理 App 核心界面高保真稿，重点展示今日步数、每周节奏和温和提醒，整体视觉低压力且易读。', 'UI 高保真界面', '界面标题为 Your wellbeing。核心数据为 7,420 steps，下方包含 Weekly rhythm 柱状图和 Gentle reminders 提醒列表。', '["健康数据表达克制而清晰","提醒语气温和","图表和行动建议处于同一视线层级"]', '[]', '["覆盖步数与温和提醒模块","符合低压力、可持续的体验目标"]', '["睡眠模块在当前画面中未独立展开"]', '["下一版增加睡眠详情和趋势说明"]', '高', '2026-07-24 15:11', '2026-07-24 15:11', '2026-07-24 15:12', '2026-07-24 15:12'),
+('862000010', '860000015', 'completed', 1, 'xlsx', 'Giverny', 'demo-curated', '25 秒产品短片分镜表，包含 4 个镜头的时长、画面、旁白字幕和声音设计。', '视频分镜表', '镜头 01 为晨光落在桌面，镜头 02 是通勤咖啡会议快速切镜，镜头 03 展示应用自动整理时间线，镜头 04 以周末回顾和水面倒影收束。', '["四镜头叙事完整","功能展示自然嵌入生活场景","结尾与品牌风景意象一致"]', '[]', '["覆盖生活化开场、功能展示和品牌收束"]', '["正式拍摄前需确认素材版权和字幕安全区"]', '["增加横版与竖版构图标注"]', '高', '2026-07-02 17:21', '2026-07-02 17:21', '2026-07-02 17:22', '2026-07-02 17:22'),
+('862000011', '860000015', 'completed', 1, 'vision', 'Giverny', 'demo-curated', '产品短片发布封面，以低饱和蓝绿和淡紫构成梦幻水面场景，标题“看见日常”清晰突出。', '视频封面', '封面主标题为“看见日常”，英文副标题为 Everyday moments, gently remembered。底部标注星澜产品短片。', '["标题识别度高","色彩与温和记忆主题一致","水面曲线形成自然视觉动线"]', '[]', '["符合产品发布短片的品牌收束方向"]', '["小尺寸社交媒体头像位可能裁切英文副标题"]', '["输出 1:1 与 9:16 安全裁切版本"]', '高', '2026-07-02 17:26', '2026-07-02 17:26', '2026-07-02 17:27', '2026-07-02 17:27');
 
 INSERT INTO monthly_reports (
   id, workspace_id, month, total_hours, billable_hours, total_amount, status, public_token, generated_at

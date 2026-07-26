@@ -47,6 +47,7 @@ export function AppOverlayLayer({
   dailyKnowledge,
   dailyKnowledgeLoading,
   isAdmin,
+  canUseAgent,
   onRefreshDailyKnowledge,
   onCloseDailyKnowledge,
   onFavoriteDailyKnowledge,
@@ -113,7 +114,6 @@ export function AppOverlayLayer({
   onCloseLogin,
   onCloseAboutGiverny,
   onUnlock,
-  onDemoLogin,
   showFireworks,
   toastQueue,
   onDismissToast,
@@ -122,6 +122,7 @@ export function AppOverlayLayer({
   dailyKnowledge: DailyKnowledgeItem
   dailyKnowledgeLoading: boolean
   isAdmin: boolean
+  canUseAgent: boolean
   onRefreshDailyKnowledge: () => void
   onCloseDailyKnowledge: () => void
   onFavoriteDailyKnowledge: (item: DailyKnowledgeItem) => Promise<boolean>
@@ -188,7 +189,6 @@ export function AppOverlayLayer({
   onCloseLogin: () => void
   onCloseAboutGiverny: () => void
   onUnlock: (email: string, key: string, turnstileToken?: string) => void | Promise<void>
-  onDemoLogin: () => Promise<void>
   showFireworks: boolean
   toastQueue: ToastState[]
   onDismissToast: (toastId: number) => void
@@ -211,7 +211,7 @@ export function AppOverlayLayer({
       )}
       {commandPaletteOpen && <CommandPalette key={commandPaletteInitialQuery} actions={commandActions} initialQuery={commandPaletteInitialQuery} onClose={onCloseCommandPalette} />}
       {shortcutHelpOpen && <ShortcutHelpModal groups={shortcutHelpGroups} onClose={onCloseShortcutHelp} />}
-      {chatOpen && isAdmin && (
+      {chatOpen && canUseAgent && (
         <>
           <div className="chat-backdrop" onDoubleClick={onCloseChat} />
           <Suspense fallback={<div className="chat-panel"><div className="office-preview-status">正在载入工作助手…</div></div>}>
@@ -220,6 +220,7 @@ export function AppOverlayLayer({
               aiModelConfig={aiModelConfig}
               aiProviderConfigs={aiProviderConfigs}
               initialAnalysisJobId={chatAnalysisFocusId || undefined}
+              canConfigureModel={isAdmin}
               onNotify={notify}
               onClose={onCloseChat}
               onOpenTask={onOpenChatTask}
@@ -311,7 +312,7 @@ export function AppOverlayLayer({
           <FilePreviewModal file={previewFile} onClose={onClosePreviewFile} />
         </Suspense>
       )}
-      {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} onDemoLogin={onDemoLogin} />}
+      {loginModalOpen && <AdminLoginModal error={authError} onClose={onCloseLogin} onSubmit={onUnlock} />}
       {aboutGivernyOpen && <AboutGivernyModal onClose={onCloseAboutGiverny} />}
       {showFireworks && <Fireworks />}
       {toastQueue.length > 0 && (

@@ -90,7 +90,7 @@ export type TaskProgressEstimatePayload = {
   files: Array<{ name: string; scope: 'progress' | 'acceptance'; final: boolean; tag: string }>
 }
 
-export type AuthRole = 'admin' | 'collaborator' | 'viewer' | 'client' | 'guest'
+export type AuthRole = 'admin' | 'demo' | 'collaborator' | 'viewer' | 'client' | 'guest'
 
 export type VoiceScheduleField = 'start' | 'hours' | 'end'
 
@@ -1007,11 +1007,6 @@ export const api = {
       },
       false,
     ),
-  loginDemo: () => requestJson<{ role: AuthRole; workspaceId: string; demo: true }>(
-    '/api/auth/demo',
-    { method: 'POST' },
-    false,
-  ),
   logout: () => requestJson<{ ok: true }>('/api/auth/logout', { method: 'POST' }, false),
   changeAdminPassword: (payload: { currentPassword: string; newPassword: string }) =>
     requestJson<{ ok: true }>('/api/auth/password', {

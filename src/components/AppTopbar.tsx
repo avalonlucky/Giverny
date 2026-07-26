@@ -13,7 +13,7 @@ export function AppTopbar({
   taskCount,
   pendingCount,
   canSeeFull,
-  isAdmin,
+  canUseAgent,
   isChatOpen,
   canWrite,
   onMonthChange,
@@ -33,7 +33,7 @@ export function AppTopbar({
   taskCount: number
   pendingCount: number
   canSeeFull: boolean
-  isAdmin: boolean
+  canUseAgent: boolean
   isChatOpen: boolean
   canWrite: boolean
   onMonthChange: (value: string) => void
@@ -66,7 +66,7 @@ export function AppTopbar({
       <div className="topbar-actions">
         {!isTaskCalendarView && <MonthPicker value={currentMonthValue} taskMonthValues={taskMonthValues} onChange={onMonthChange} iconOnly />}
         {canSeeFull && <button type="button" className="topbar-shortcut" title="语义搜索：按意思找回历史任务" aria-label="语义搜索" onClick={onOpenSemanticSearch}><Search size={16} /></button>}
-        {isAdmin && <button type="button" className={`topbar-shortcut topbar-assistant-button ${isChatOpen ? 'active' : ''}`} title="工作助手 AI 对话" aria-label="打开工作助手" onClick={onToggleChat}><Bot size={16} /><span>工作助手</span></button>}
+        {canUseAgent && <button type="button" className={`topbar-shortcut topbar-assistant-button ${isChatOpen ? 'active' : ''}`} title="工作助手 AI 对话" aria-label="打开工作助手" onClick={onToggleChat}><Bot size={16} /><span>工作助手</span></button>}
         <button type="button" className="topbar-shortcut" title="查看键盘快捷键（?）" aria-label="查看快捷键" aria-keyshortcuts="Shift+/" onClick={onOpenShortcutHelp}><HelpCircle size={16} /></button>
         {canWrite && <button className="primary-button topbar-create-button" title="新建任务（N）" aria-keyshortcuts="N" onClick={onCreateTask}><span>新建任务</span><kbd>N</kbd></button>}
       </div>

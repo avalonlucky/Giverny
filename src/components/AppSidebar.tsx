@@ -48,7 +48,7 @@ export function AppSidebar({
   onOpenAbout: () => void
   onSignOut: () => void
 }) {
-  const isDemo = auth?.email === 'Giverny 演示账号'
+  const isDemo = role === 'demo'
   return (
     <aside className="sidebar">
       <div className="brand">

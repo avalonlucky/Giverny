@@ -67,10 +67,10 @@ export function useWorkspaceData(notify: Notify) {
     hydrateFileState({ fileItems: state.files, attachmentAnalyses: state.attachmentAnalyses ?? [] })
     hydrateAuthState({ role: state.role, accessTokens: state.accessTokens ?? [] })
     const storedForCheck = getStoredAuth()
-    if (storedForCheck?.role === 'admin' && state.role !== 'admin') {
+    if (storedForCheck?.role && state.role !== storedForCheck.role) {
       clearStoredAuth()
       setAuth(null)
-      setAuthError('管理员登录已失效（密码可能已修改），请重新登录')
+      setAuthError('登录已失效，请重新登录')
     }
     hydrateSettingsState({
       hourlyRate: state.settings.hourlyRate,
