@@ -36,6 +36,7 @@
   isolation: isolate;
   overflow: hidden;
   background:
+    linear-gradient(color-mix(in srgb, var(--color-surface-strong) 50%, transparent), color-mix(in srgb, var(--color-surface-strong) 50%, transparent)),
     linear-gradient(180deg, color-mix(in srgb, var(--color-primary-strong) 14%, transparent), color-mix(in srgb, var(--color-menu) 30%, transparent)),
     url('/giverny-login-garden.webp') center / cover no-repeat;
 }
@@ -63,7 +64,7 @@
     radial-gradient(ellipse at 92% 17%, black 0 25%, transparent 45%),
     radial-gradient(ellipse at 10% 62%, black 0 12%, transparent 27%),
     radial-gradient(ellipse at 90% 60%, black 0 12%, transparent 27%);
-  opacity: 0.68;
+  opacity: 0.34;
   transform-origin: 50% 6%;
   animation: giverny-login-breeze 13s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
@@ -93,8 +94,8 @@
 
 @media (max-width: 700px) {
   .modal-backdrop:has(.admin-login-modal) {
-    background-position: center, center;
-    background-size: 100% 100%, cover;
+    background-position: center, center, center;
+    background-size: 100% 100%, 100% 100%, cover;
   }
 
   .modal-backdrop:has(.admin-login-modal)::before {
