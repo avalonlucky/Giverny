@@ -672,13 +672,8 @@
 .nav-item:hover,
 .nav-item.active {
   color: var(--color-primary-strong);
-  background: var(--color-supplement-bg);
+  background: var(--color-surface-alt);
   font-weight: 600;
-}
-
-.nav-item.active {
-  color: var(--color-surface-strong);
-  background: var(--color-primary);
 }
 
 .nav-item svg {
@@ -716,13 +711,8 @@ button.topbar-create-button kbd {
 .sidebar-account-trigger:hover,
 .sidebar-account-trigger.active {
   color: var(--color-primary-strong);
-  background: var(--color-supplement-bg);
+  background: var(--color-surface-alt);
   font-weight: 600;
-}
-
-.sidebar-account-trigger.active {
-  color: var(--color-surface-strong);
-  background: var(--color-primary);
 }
 
 .sidebar-account-trigger.active::before {
