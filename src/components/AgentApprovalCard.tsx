@@ -86,9 +86,14 @@ const AGENT_APPROVAL_FIELD_LABELS: Record<string, string> = {
   steps: '修订后的未来步骤',
   revisedStepCount: '修订后总步骤',
   protectedStepCount: '受保护步骤',
+  highRisk: '风险审批',
 }
 
 function formatAgentApprovalValue(key: string, value: unknown): string {
+  if (key === 'highRisk' && value && typeof value === 'object') {
+    const risk = value as Record<string, unknown>
+    return `${risk.level === 'critical' ? '关键风险' : '高风险'} · 需要两次明确确认 · 执行前可撤销 · 证据保留至 ${String(risk.retentionUntil || '').slice(0, 10)}`
+  }
   if (key === 'action') return ({ resolve: '标记已解决', dismiss: '标记无需处理', snooze: '稍后提醒', create: '新增记忆', correct: '纠正记忆', expire: '设为失效', delete: '删除记忆', pause: '暂停计划', resume: '恢复计划', retry_step: '重试失败步骤', revise_steps: '修订未执行步骤', cancel: '取消计划' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'scopeType') return ({ organization: '组织', partner: '合作伙伴', project: '项目' } as Record<string, string>)[String(value)] || String(value)
   if (key === 'memoryType') return ({ fact: '事实', preference: '偏好', rule: '规则', decision: '决策' } as Record<string, string>)[String(value)] || String(value)
@@ -146,7 +151,7 @@ function agentApprovalRows(approval: AgentApproval) {
     ? { taskTitle: draft.taskTitle, ...(draft.recordType ? { recordType: draft.recordType, action: draft.action, recordId: draft.recordId } : {}), ...changedFields }
     : draft
   return Object.entries(source)
-    .filter(([key, value]) => !['taskId', 'before', 'expectedUpdatedAt', 'batchId', 'preconditions'].includes(key) && value !== undefined && value !== '')
+    .filter(([key, value]) => !key.startsWith('__') && !['taskId', 'before', 'expectedUpdatedAt', 'batchId', 'preconditions'].includes(key) && value !== undefined && value !== '')
     .map(([key, value]) => ({
       key,
       label: approval.action === 'manage_enterprise_memory' && key === 'title' ? '记忆标题' : AGENT_APPROVAL_FIELD_LABELS[key] || key,

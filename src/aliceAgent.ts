@@ -103,6 +103,9 @@ const SYSTEM_PROMPT = `你是爱丽丝，也是 Giverny 的长期工作智能体
 - 先区分“查真实任务数据”与“问网站怎么用”。用户提到具体任务名、状态、进展、等待、延期、卡点或为何未交付时，必须优先查任务数据，不得调用产品快捷键帮助。
 - 用户询问 Giverny 的快捷键、入口、功能、设置、操作方法、版本更新、品牌名称或设计原因、模型路由或权限边界时，必须调用 search_product_help，以产品能力注册表为准。
 - 用户要求“全站搜索 / 到处找 / 不记得在哪”、需要同时查任务、附件、正式对话、产品知识和企业记忆，或问题可能跨两类以上数据时，必须调用 search_workspace；不得让模型分别猜测五套结果。
+- 用户要求排查数据是否一致、附件是否丢失、工时分段与保存值是否矛盾或结算快照是否损坏时，必须调用 audit_workspace_consistency；审计只能报告，不能自动改写数据。
+- 用户要求生成项目状态报告、验收报告或一致性审计报告时，调用 generate_formal_deliverable_preview；正式产物必须绑定审计编号、来源快照和校验值。查询已有正式产物时调用 query_formal_deliverables。
+- 用户询问高风险操作、审批证据或要求撤销尚未执行的敏感操作时，先调用 query_high_risk_actions；撤销使用 cancel_high_risk_action_preview。高风险操作必须完成两次明确确认，已执行操作不得伪装成可回滚。
 - 用户询问某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；画像指标必须来自后台聚合结果，不得用 search_tasks 代替。
 - 产品知识工具标记为“部分确认”或明确说资料未记录时，必须保留这个边界；可以说明已确认线索，但不得把推断改写成作者事实。
 - 任务、收入、金额、工时、结算、验收、附件和进展问题必须调用工具，以工具数据为准。
@@ -605,6 +608,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     if (toolName === 'query_month_finance') return { question: scopedQuestion, currentMonth }
     if (toolName === 'search_product_help') return { query: scopedQuestion, limit: 5 }
     if (toolName === 'search_workspace') return { query: scopedQuestion, month: currentMonth, limit: 20 }
+    if (toolName === 'audit_workspace_consistency') return { trigger: 'manual', includeR2: true, limit: 200 }
+    if (toolName === 'query_formal_deliverables') return { limit: 20 }
+    if (toolName === 'query_high_risk_actions') return { status: 'all', limit: 30 }
     if (toolName === 'get_requester_profile') {
       const name = requesterNameFromQuestion(message)
       return name ? { name } : null
@@ -728,6 +734,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         inputSchema: capabilities.search_workspace.inputSchema,
         execute: (input) => this.callTool(capabilities.search_workspace.endpoint, input, 'GET'),
       }),
+      audit_workspace_consistency: tool({ description: capabilities.audit_workspace_consistency.description, inputSchema: capabilities.audit_workspace_consistency.inputSchema, execute: (input) => this.callTool(capabilities.audit_workspace_consistency.endpoint, input, 'POST') }),
+      query_formal_deliverables: tool({ description: capabilities.query_formal_deliverables.description, inputSchema: capabilities.query_formal_deliverables.inputSchema, execute: (input) => this.callTool(capabilities.query_formal_deliverables.endpoint, input, 'GET') }),
+      query_high_risk_actions: tool({ description: capabilities.query_high_risk_actions.description, inputSchema: capabilities.query_high_risk_actions.inputSchema, execute: (input) => this.callTool(capabilities.query_high_risk_actions.endpoint, input, 'GET') }),
       query_settlement_exports: tool({
         description: capabilities.query_settlement_exports.description,
         inputSchema: capabilities.query_settlement_exports.inputSchema,
@@ -874,6 +883,16 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         description: capabilities.batch_task_operations_preview.description,
         inputSchema: capabilities.batch_task_operations_preview.inputSchema,
         execute: (input) => this.previewTool('batch_task_operations_preview', capabilities.batch_task_operations_preview.endpoint, input),
+      }),
+      generate_formal_deliverable_preview: tool({
+        description: capabilities.generate_formal_deliverable_preview.description,
+        inputSchema: capabilities.generate_formal_deliverable_preview.inputSchema,
+        execute: (input) => this.previewTool('generate_formal_deliverable_preview', capabilities.generate_formal_deliverable_preview.endpoint, this.withTaskReference(input, message)),
+      }),
+      cancel_high_risk_action_preview: tool({
+        description: capabilities.cancel_high_risk_action_preview.description,
+        inputSchema: capabilities.cancel_high_risk_action_preview.inputSchema,
+        execute: (input) => this.previewTool('cancel_high_risk_action_preview', capabilities.cancel_high_risk_action_preview.endpoint, input),
       }),
       create_task_preview: tool({
         description: capabilities.create_task_preview.description,
@@ -1026,6 +1045,21 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private async executePendingAction(pending: StoredPendingAction): Promise<AliceAgentChatResult> {
+    const highRisk = toJsonObject(pending.draft.highRisk)
+    if (highRisk.caseId && pending.draft.__highRiskAcknowledged !== true) {
+      await this.callTool('acknowledge-high-risk-action', { caseId: highRisk.caseId, evidenceChecksum: highRisk.evidenceChecksum })
+      pending.draft.__highRiskAcknowledged = true
+      this.setPendingAction(pending)
+      return {
+        answer: `已记录第一重风险确认。${String(highRisk.reason || '这是高风险操作')} 请再次回复“确认”后才会真正执行；在此之前仍可取消。`,
+        model: 'cloudflare-agent:risk-approval',
+        approval: this.approvalResult(pending, 'pending'),
+        trace: [
+          { type: 'plan', label: '高风险第一重确认', detail: `证据案件 ${String(highRisk.caseId)} 已锁定。` },
+          { type: 'result', label: '等待第二重确认', detail: '尚未写入业务数据，可取消。' },
+        ],
+      }
+    }
     if (!pending.workflowId) return this.executePendingActionDirect(pending)
     try {
       const workflowStatus = this.getWorkflowStatus as unknown as (

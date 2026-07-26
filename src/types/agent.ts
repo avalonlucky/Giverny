@@ -49,7 +49,7 @@ export type AgentResultAttachment = {
   sourceUrl: string
   downloadUrl?: string
   shareUrl?: string
-  kind?: 'task-file' | 'settlement-receipt'
+  kind?: 'task-file' | 'settlement-receipt' | 'formal-deliverable'
 }
 
 export type AgentUploadHandoff = {

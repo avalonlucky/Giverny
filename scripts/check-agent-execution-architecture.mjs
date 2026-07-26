@@ -50,7 +50,7 @@ const postconditionVerifier = files.worker.slice(
   files.worker.indexOf('const agentTaskPostconditionEndpoints'),
   files.worker.indexOf('async function agentWorkflowWriteTool'),
 )
-assert.equal(signedWriteEndpoints.length, 21, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
+assert.equal(signedWriteEndpoints.length, 23, 'signed write endpoint inventory changed; update the postcondition guard deliberately')
 for (const endpoint of signedWriteEndpoints) {
   assert.ok(postconditionVerifier.includes(`'${endpoint}'`), `signed write endpoint missing independent postcondition: ${endpoint}`)
 }

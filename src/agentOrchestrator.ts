@@ -162,6 +162,9 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
   const asksPlanContinuation = !/(?:做到哪一步|当前步骤|为什么.{0,8}(?:卡住|阻塞)|失败步骤|下一步是什么)/.test(turn.question)
     && /(?:继续|接着|续接|往下推进|执行下一步).*(?:计划|项目|任务|执行)|(?:计划|项目|任务|执行).*(?:继续|接着|续接|往下推进|执行下一步)/.test(turn.question)
   const asksWorkspaceSearch = /(?:全站|整个网站|所有地方|到处|跨(?:任务|附件|对话|知识)|不记得.*在哪).*(?:搜|查|找)|(?:统一搜索|全域搜索)/.test(turn.question)
+  const asksConsistencyAudit = /(?:全站|数据|任务|附件|工时|结算).*(?:一致性|数据审计|矛盾|对不上|丢失|快照损坏)|(?:一致性审计)/.test(turn.question)
+  const asksFormalDeliverables = /(?:查询|查看|找|已有).*(?:正式交付物|项目状态报告|验收报告|审计报告)/.test(turn.question)
+  const asksHighRiskActions = /(?:查询|查看|哪些|有没有).*(?:高风险操作|风险案件|审批证据)/.test(turn.question)
   const asksAgenda = /(?:日程|安排|空闲|空档|有空|时间槽|时间段|什么时候能安排|哪天能安排|本周计划|今天计划|明天计划)/.test(turn.question)
     && !/(?:安排|计划).*(?:做|制作|设计|新建|创建|新增)/.test(turn.question)
   const asksEnterpriseMemory = /(?:组织规则|公司规则|团队规则|合作伙伴.{0,12}(?:偏好|约定|记忆)|项目.{0,12}(?:约定|决策|记忆)|企业记忆|长期规则|之前记住|历史决策)/.test(turn.question)
@@ -200,6 +203,9 @@ export function verifyAgentAnswer(turn: AgentTurn): AgentVerification {
     requiredTools.push('search_workspace')
     issues.push('跨域查找没有经过全域统一搜索。')
   }
+  if (asksConsistencyAudit && !hasDeterministicTool('audit_workspace_consistency')) { requiredTools.push('audit_workspace_consistency'); issues.push('数据一致性结论没有经过全站确定性审计。') }
+  if (asksFormalDeliverables && !hasDeterministicTool('query_formal_deliverables')) { requiredTools.push('query_formal_deliverables'); issues.push('正式交付物查询没有读取持久化产物清单。') }
+  if (asksHighRiskActions && !hasDeterministicTool('query_high_risk_actions')) { requiredTools.push('query_high_risk_actions'); issues.push('高风险操作结论没有读取审批与证据案件。') }
   if (asksEnterpriseMemory && !hasDeterministicTool('query_enterprise_memory')) {
     requiredTools.push('query_enterprise_memory')
     issues.push('组织、合作伙伴或项目记忆结论没有读取企业分层记忆及来源。')

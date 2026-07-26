@@ -75,7 +75,7 @@ D1 / R2 / app data
 - AI 反馈学习：任务需求、名称、分类、进展、修改意见、验收备注和附件命名会记录“原始输入 → AI 建议 → 最终人工结果”及采用动作；工时继续以验收后的真实投入做偏差校准。详见 `docs/AI_LEARNING.md`。
 - 隔离评测：匿名夹具、临时 D1、模拟 OpenAI-compatible 模型和分类阈值组成发布门禁；评测流量带独立标记并从正式统计中排除。
 - 产品能力注册表：`src/productCapabilities.ts` 是快捷键、功能入口、流程、模型路由与权限说明的单一权威来源；页面快捷键面板、确定性快速路由、云端 Agent 和 MCP/CLI 共用 `search_product_help`，不再把产品知识散落在模型 Prompt 中。
-- Agent 工具能力注册表：`src/agentToolRegistry.ts` 统一登记 74 项读取、项目执行、批量事务、计划编辑与续接、全域搜索、安全诊断与恢复、任务记忆、企业分层记忆、结算、Agenda、排期、附件、多模态分析、主动事项、提醒、后台分析、写入预览、签名执行与内部 Workflow 能力。输入 schema、角色、scope、风险、确认关系、审计事件、任务作用域、执行轨迹、MCP 暴露面、Workflow 白名单和 OpenAPI 元数据均从这里派生；自动生成清单见 [`AGENT_CAPABILITY_REGISTRY.md`](./AGENT_CAPABILITY_REGISTRY.md)。
+- Agent 工具能力注册表：`src/agentToolRegistry.ts` 统一登记 82 项读取、项目执行、批量事务、计划编辑与续接、全域搜索、一致性审计、正式交付物、高风险治理、安全诊断与恢复、任务记忆、企业分层记忆、结算、Agenda、排期、附件、多模态分析、主动事项、提醒、后台分析、写入预览、签名执行与内部 Workflow 能力。输入 schema、角色、scope、风险、确认关系、审计事件、任务作用域、执行轨迹、MCP 暴露面、Workflow 白名单和 OpenAPI 元数据均从这里派生；自动生成清单见 [`AGENT_CAPABILITY_REGISTRY.md`](./AGENT_CAPABILITY_REGISTRY.md)。
 - 租户安全门禁：模型工具先按当前角色裁剪，Worker 再校验 HMAC scope、工作区 SQL 过滤和确认凭证；附件源/预览、月报分享与结算分享均校验工作区关联。跨租户 ID、模糊搜索、附件路径、提示注入和凭证攻击矩阵见 [`AGENT_TENANT_SECURITY.md`](./AGENT_TENANT_SECURITY.md)。
 - 远程 MCP：`/mcp` 使用 Streamable HTTP 暴露十七个只读工具，与爱丽丝共用 `src/agentToolRegistry.ts`；企业记忆、主动事项和项目执行计划均为内部信息，合作伙伴角色不可读取。MCP 仅接受独立的 `MCP 只读`口令，该口令不能登录网站或访问写入工具。
 - 持久写入：二十一类确认操作均由 `AgentWriteWorkflow` 等待人工批准后执行，覆盖任务生命周期、批量任务事务、项目计划管理、结算导出/分享管理/未锁定记录删除、排期调整、站内提醒、模型路由配置与恢复、附件分析恢复、附件元数据修改、主动事项处理和企业记忆维护；步骤支持重试，`agent_write_operations` 缓存完成结果和独立验收快照，重复恢复不会重复写入。

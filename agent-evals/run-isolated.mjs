@@ -158,7 +158,7 @@ async function runMcpChecks() {
   })
   const listed = await request(3, 'tools/list', {})
   const names = Array.isArray(listed.tools) ? listed.tools.map((item) => item.name).sort() : []
-  const expected = ['check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_month_finance', 'query_plan_continuation', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks', 'search_workspace']
+  const expected = ['audit_workspace_consistency', 'check_schedule_conflicts', 'get_giverny_context', 'get_requester_profile', 'get_task_detail', 'inspect_attachment_evidence', 'query_agenda', 'query_attachment_analysis', 'query_enterprise_memory', 'query_formal_deliverables', 'query_high_risk_actions', 'query_month_finance', 'query_plan_continuation', 'query_proactive_work', 'query_project_execution', 'query_settlement_exports', 'query_task_portfolio', 'reconcile_settlement_export', 'search_attachments', 'search_product_help', 'search_tasks', 'search_workspace']
   if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`Unexpected MCP tools: ${names.join(', ')}`)
   const called = await request(4, 'tools/call', { name: 'get_giverny_context', arguments: {} })
   if (called.isError || !Array.isArray(called.content) || !called.content.some((item) => item.type === 'text')) {
@@ -221,7 +221,7 @@ async function runCapabilityRegistryChecks() {
   const response = await fetch('http://127.0.0.1:8798/api/agent/openapi-full.json')
   const spec = await response.json().catch(() => ({}))
   const capabilities = Array.isArray(spec['x-giverny-capabilities']) ? spec['x-giverny-capabilities'] : []
-  if (!response.ok || capabilities.length !== 74) {
+  if (!response.ok || capabilities.length !== 82) {
     throw new Error(`Agent capability manifest is incomplete: ${capabilities.length}`)
   }
   for (const required of ['query_enterprise_memory', 'manage_enterprise_memory_preview', 'manage_enterprise_memory', 'reconcile_settlement_export', 'query_agenda', 'query_project_execution', 'manage_task_plan_preview', 'manage_task_plan', 'diagnose_ai_routing', 'restore_ai_routing_preview', 'restore_ai_routing']) {
@@ -2164,6 +2164,21 @@ async function runAgentOrchestrationCheck(cookie) {
   if (!workspaceTenant.response.ok || !workspaceTenant.data.results?.length || workspaceTenant.data.results.some((item) => Number(item.taskId) !== 9001)) throw new Error(`Workspace search leaked cross-tenant data or hid tenant-local matches: ${JSON.stringify(workspaceTenant.data)}`)
   const workspaceClient = await toolRequest('workspace-search', { query: '公司产品封套', limit: 10 }, { ...toolHeaders, ...agentScopeHeaders('default', 'workspace-search-client', 'client') })
   if (![401, 403].includes(workspaceClient.response.status)) throw new Error(`Client role accessed internal workspace search: ${JSON.stringify(workspaceClient.data)}`)
+  const consistency = await toolRequest('workspace-consistency-audit', { trigger: 'manual', includeR2: false, limit: 200 })
+  if (!consistency.response.ok || !consistency.data.id || !consistency.data.snapshotChecksum || !consistency.data.summary || !Array.isArray(consistency.data.findings)) throw new Error(`Workspace consistency audit was not persisted: ${JSON.stringify(consistency.data)}`)
+  const formalPreview = await toolRequest('generate-formal-deliverable-preview', { type: 'project_status', taskId: 1, title: '公司产品封套项目状态报告' })
+  if (!formalPreview.response.ok || !formalPreview.data.confirmationToken || !formalPreview.data.draft?.highRisk?.caseId || !formalPreview.data.draft?.auditRunId) throw new Error(`Formal deliverable preview missed audit or risk evidence: ${JSON.stringify(formalPreview.data)}`)
+  const formalResult = await workflowExecute('generate-formal-deliverable', formalPreview.data.confirmationToken)
+  if (!formalResult.deliverable?.id || !formalResult.deliverable?.pdfUrl || !formalResult.deliverable?.checksum || formalResult.postcondition?.passed !== true) throw new Error(`Formal deliverable was not generated and verified: ${JSON.stringify(formalResult)}`)
+  const formalQuery = await toolRequest('formal-deliverables', { taskId: 1, limit: 10 })
+  if (!formalQuery.response.ok || !formalQuery.data.deliverables?.some((item) => item.id === formalResult.deliverable.id)) throw new Error(`Formal deliverable query missed generated artifact: ${JSON.stringify(formalQuery.data)}`)
+  const riskQuery = await toolRequest('high-risk-actions', { status: 'executed', limit: 50 })
+  const formalRisk = riskQuery.data.cases?.find((item) => item.id === formalPreview.data.draft.highRisk.caseId)
+  if (!riskQuery.response.ok || !formalRisk || !formalRisk.evidenceChecksum || !String(formalRisk.retentionUntil).startsWith('2033')) throw new Error(`High-risk evidence retention or execution state failed: ${JSON.stringify(riskQuery.data)}`)
+  const cancellablePreview = await toolRequest('generate-formal-deliverable-preview', { type: 'consistency_audit', title: '待撤销审计报告' })
+  const riskCancelPreview = await toolRequest('cancel-high-risk-action-preview', { caseId: cancellablePreview.data.draft?.highRisk?.caseId, reason: '隔离评测验证执行前撤销' })
+  const cancelledRisk = await workflowExecute('cancel-high-risk-action', riskCancelPreview.data.confirmationToken)
+  if (cancelledRisk.case?.status !== 'cancelled' || cancelledRisk.postcondition?.passed !== true) throw new Error(`High-risk pre-execution cancellation failed: ${JSON.stringify(cancelledRisk)}`)
   const enterpriseHistoryResponse = await fetch('http://127.0.0.1:8798/api/ai/enterprise-memories?includeHistory=true', { headers: { cookie } })
   const enterpriseHistory = await enterpriseHistoryResponse.json().catch(() => ({}))
   if (!enterpriseHistoryResponse.ok || !enterpriseHistory.memories?.some((item) => item.id === createdEnterprise.memory.id && item.status === 'superseded')) throw new Error('Enterprise memory correction history was not retained')

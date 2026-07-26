@@ -5671,6 +5671,11 @@ async function verifyAgentConfirmationToken(env: Env, token: unknown, expectedAc
   if (!principal || payload.version !== 2 || payload.workspaceId !== principal.workspaceId || payload.principalId !== principal.principalId) {
     throw new Error('confirmationToken 与当前工作区或操作主体不匹配，请重新生成预览。')
   }
+  const highRisk = payload.draft?.highRisk && typeof payload.draft.highRisk === 'object' ? payload.draft.highRisk as Record<string, unknown> : null
+  if (highRisk?.caseId) {
+    const riskCase = await env.DB.prepare('SELECT status, evidence_checksum FROM agent_high_risk_cases WHERE id = ? AND workspace_id = ? AND principal_id = ?').bind(String(highRisk.caseId), principal.workspaceId, principal.principalId).first<{ status: string; evidence_checksum: string }>()
+    if (!riskCase || ['cancelled', 'failed'].includes(riskCase.status) || riskCase.evidence_checksum !== String(highRisk.evidenceChecksum || '')) throw new Error('高风险操作已经撤销、失败或证据已变化。')
+  }
   await consumeAgentConfirmationToken(env, payload.jti, expectedAction, payload.exp)
   return payload.draft ?? {}
 }
@@ -5743,14 +5748,20 @@ async function agentPreview(env: Env, request: Request, action: string, draft: R
   if (!confirmation) throw new Error(`未注册的 Agent 写入预览：${action}`)
   const principal = await resolveAgentToolPrincipal(env, request)
   if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const previewCapability = agentCapabilityRegistry[action as keyof typeof agentCapabilityRegistry]
+  const highRisk = missing.length === 0 && previewCapability?.policy.risk === 'sensitive' && action !== 'cancel_high_risk_action_preview'
+    ? await createHighRiskCase(env, principal, action, draft)
+    : null
+  const finalDraft = highRisk ? { ...draft, highRisk } : draft
+  const finalWarnings = highRisk ? [...warnings, `${highRisk.level === 'critical' ? '关键' : '高'}风险操作：需要两次明确确认，执行前可撤销，证据保留至 ${highRisk.retentionUntil.slice(0, 10)}。`] : warnings
   return agentOk({
     tool: action,
     mode: 'preview',
     ready: missing.length === 0,
-    draft,
+    draft: finalDraft,
     missing,
-    warnings,
-    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, confirmation.executeName, draft, principal) : '',
+    warnings: finalWarnings,
+    confirmationToken: missing.length === 0 ? await createAgentConfirmationToken(env, confirmation.executeName, finalDraft, principal) : '',
     instruction: missing.length === 0
       ? '请把预览内容展示给用户；只有用户明确确认后，才调用对应 execute 工具并传入 confirmationToken。'
       : '请向用户追问缺失字段，不要调用 execute 工具。',
@@ -8180,6 +8191,177 @@ async function agentWorkspaceSearchTool(env: Env, request: Request) {
   })
 }
 
+type AgentConsistencyFinding = { code: string; severity: 'warning' | 'error'; entityType: string; entityId: string; message: string; evidence: Record<string, unknown> }
+
+async function runWorkspaceConsistencyAudit(env: Env, workspaceId: string, principalId: string, trigger: string, includeR2: boolean, limit: number) {
+  const tasks = (await env.DB.prepare('SELECT * FROM tasks WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?').bind(workspaceId, limit).all<DbTask>()).results || []
+  const attachments = (await env.DB.prepare(`SELECT a.*, t.title AS task_title FROM attachments a JOIN tasks t ON t.id = a.task_id WHERE t.workspace_id = ? AND a.deleted_at IS NULL ORDER BY a.uploaded_at DESC LIMIT ?`).bind(workspaceId, limit).all<DbAttachment>()).results || []
+  const analyses = (await env.DB.prepare(`SELECT aa.*, a.file_name, a.file_type FROM attachment_analyses aa LEFT JOIN attachments a ON a.id = aa.attachment_id WHERE aa.task_id IN (SELECT id FROM tasks WHERE workspace_id = ?) LIMIT ?`).bind(workspaceId, limit).all<DbAttachmentAnalysis>()).results || []
+  const exports = (await env.DB.prepare('SELECT * FROM settlement_exports WHERE workspace_id = ? ORDER BY generated_at DESC LIMIT 50').bind(workspaceId).all<DbSettlementExport>()).results || []
+  const findings: AgentConsistencyFinding[] = []
+  const add = (finding: AgentConsistencyFinding) => findings.push(finding)
+  for (const task of tasks) {
+    const entries = parseTimeEntries(task.time_entries_json)
+    const waiting = parseWaitingEntries(task.waiting_entries_json).filter((entry) => !entry.end)
+    const entryHours = agentEntryHours(entries)
+    if (task.start_date && task.estimated_delivery_date && agendaTimeMs(task.start_date) > agendaTimeMs(task.estimated_delivery_date)) add({ code: 'task_date_order', severity: 'error', entityType: 'task', entityId: task.id, message: '预计开始时间晚于预计交付时间。', evidence: { startDate: task.start_date, endDate: task.estimated_delivery_date } })
+    if (task.status === '已验收' && Number(task.progress) < 100) add({ code: 'accepted_progress', severity: 'error', entityType: 'task', entityId: task.id, message: '已验收任务的进度低于 100%。', evidence: { status: task.status, progress: task.progress } })
+    if (['已验收', '终止', '不计费'].includes(task.status) && waiting.length) add({ code: 'closed_active_waiting', severity: 'error', entityType: 'task', entityId: task.id, message: '已闭环任务仍存在活动等待。', evidence: { status: task.status, waitingCount: waiting.length } })
+    if (Math.abs((Number(task.actual_hours) || 0) - entryHours) > 0.02) add({ code: 'hours_snapshot_difference', severity: 'warning', entityType: 'task', entityId: task.id, message: '保存的实际工时与可计时分段汇总存在差异；仅提示，不自动改写财务锚点。', evidence: { savedHours: Number(task.actual_hours) || 0, entryHours } })
+  }
+  for (const file of attachments) {
+    if (!file.task_title) add({ code: 'orphan_attachment', severity: 'error', entityType: 'attachment', entityId: file.id, message: '附件没有可用的当前工作区任务归属。', evidence: { taskId: file.task_id, r2Key: file.r2_key } })
+    if (includeR2 && file.task_title && !(await env.UPLOADS.get(file.r2_key, { range: { offset: 0, length: 1 } }).catch(() => null))) add({ code: 'missing_r2_object', severity: 'error', entityType: 'attachment', entityId: file.id, message: '附件数据库记录存在，但 R2 原文件缺失。', evidence: { taskId: file.task_id, r2Key: file.r2_key } })
+  }
+  const attachmentById = new Map(attachments.map((item) => [item.id, item]))
+  for (const analysis of analyses) {
+    const file = attachmentById.get(analysis.attachment_id)
+    if (!file || String(file.task_id) !== String(analysis.task_id)) add({ code: 'analysis_attachment_mismatch', severity: 'error', entityType: 'attachment_analysis', entityId: analysis.attachment_id, message: '附件分析与附件或任务归属不一致。', evidence: { analysisTaskId: analysis.task_id, attachmentTaskId: file?.task_id || '' } })
+  }
+  for (const row of exports) {
+    const snapshot = parseSettlementReceiptSnapshot(row.snapshot_json)
+    if (!snapshot) { add({ code: 'settlement_snapshot_invalid', severity: 'error', entityType: 'settlement_export', entityId: row.id, message: '结算快照无法解析。', evidence: {} }); continue }
+    const rowHours = roundCents(snapshot.rows.reduce((sum, item) => sum + (Number(item.actualHours) || 0), 0))
+    const rowAmount = roundCents(snapshot.rows.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))
+    if (rowHours !== roundCents(Number(row.billable_hours) || 0) || rowAmount !== roundCents(Number(row.total_amount) || 0) || snapshot.rows.length !== Number(row.task_count)) add({ code: 'settlement_snapshot_totals', severity: 'error', entityType: 'settlement_export', entityId: row.id, message: '结算快照逐行汇总与保存摘要不一致。', evidence: { rowHours, storedHours: row.billable_hours, rowAmount, storedAmount: row.total_amount, rowCount: snapshot.rows.length, storedCount: row.task_count } })
+  }
+  const summary = { taskCount: tasks.length, attachmentCount: attachments.length, analysisCount: analyses.length, settlementCount: exports.length, errorCount: findings.filter((item) => item.severity === 'error').length, warningCount: findings.filter((item) => item.severity === 'warning').length }
+  const snapshotChecksum = await scheduleSnapshotChecksum({ summary, findings })
+  const id = crypto.randomUUID()
+  await env.DB.prepare(`INSERT INTO agent_consistency_runs (id, workspace_id, trigger_type, status, scope_json, summary_json, findings_json, snapshot_checksum, created_by) VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?)`)
+    .bind(id, workspaceId, trigger, JSON.stringify({ includeR2, limit }), JSON.stringify(summary), JSON.stringify(findings), snapshotChecksum, principalId).run()
+  return { id, trigger, integrity: summary.errorCount ? 'fail' : summary.warningCount ? 'warning' : 'pass', summary, findings, snapshotChecksum, generatedAt: nowIso() }
+}
+
+async function agentWorkspaceConsistencyAuditTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const result = await runWorkspaceConsistencyAudit(env, principal.workspaceId, principal.principalId, agentString(body.trigger, 30) || 'manual', body.includeR2 !== false, Math.min(Math.max(Number(body.limit) || 200, 1), 500))
+  await audit(env, agentCapabilityRegistry.audit_workspace_consistency.policy.auditEvent, 'consistency_run', result.id, { integrity: result.integrity, ...result.summary })
+  return agentOk({ tool: 'audit_workspace_consistency', ...result, guardrail: '审计只记录差异，不会自动修改金额、工时、日期、附件或结算快照。' })
+}
+
+function formalDeliverableRecord(row: Record<string, unknown>) {
+  const id = String(row.id || '')
+  return { id, type: row.deliverable_type, title: row.title, taskId: Number(row.task_id) || undefined, auditRunId: row.audit_run_id || undefined, checksum: row.snapshot_checksum, createdAt: row.created_at, htmlUrl: `/api/agent/formal-deliverables/${id}/html`, pdfUrl: `/api/agent/formal-deliverables/${id}/pdf`, jsonUrl: `/api/agent/formal-deliverables/${id}/json` }
+}
+
+async function formalDeliverableSnapshot(env: Env, workspaceId: string, type: string, taskId: number) {
+  if (type === 'consistency_audit') {
+    const row = await env.DB.prepare('SELECT * FROM agent_consistency_runs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1').bind(workspaceId).first<Record<string, unknown>>()
+    if (!row) throw new Error('尚无一致性审计结果')
+    return { type, auditRunId: row.id, summary: JSON.parse(String(row.summary_json || '{}')), findings: JSON.parse(String(row.findings_json || '[]')), checksum: row.snapshot_checksum }
+  }
+  if (!taskId) throw new Error('项目报告必须提供 taskId')
+  const task = await env.DB.prepare('SELECT * FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL').bind(String(taskId), workspaceId).first<DbTask>()
+  if (!task) throw new Error('任务不存在或不属于当前工作区')
+  const files = (await env.DB.prepare(`SELECT id, file_name, attachment_scope, file_tag, uploaded_at FROM attachments WHERE task_id = ? AND deleted_at IS NULL ORDER BY uploaded_at ASC`).bind(String(taskId)).all<Record<string, unknown>>()).results || []
+  return { type, task: { id: Number(task.id), title: task.title, requirement: task.requirement || '', status: task.status, progress: Number(task.progress), startDate: task.start_date || '', estimatedDeliveryDate: task.estimated_delivery_date || '', actualDeliveryDate: task.actual_delivery_date || '', estimatedHours: Number(task.estimated_hours) || 0, actualHours: Number(task.actual_hours) || 0, requester: task.requester || '', contact: task.contact_person || '', reviewer: task.reviewer || '', acceptanceNote: task.acceptance_note || '', progressEntries: parseTimeEntries(task.time_entries_json) }, files }
+}
+
+function formalDeliverableContent(snapshot: Record<string, unknown>, title: string) {
+  const task = snapshot.task && typeof snapshot.task === 'object' ? snapshot.task as Record<string, unknown> : null
+  const findings = Array.isArray(snapshot.findings) ? snapshot.findings as Array<Record<string, unknown>> : []
+  const lines = task ? [`# ${title}`, `任务：${task.title}`, `状态：${task.status} · 进度 ${task.progress}%`, `需求：${task.requirement}`, `预计开始：${task.startDate || '未填写'}`, `预计交付：${task.estimatedDeliveryDate || '未填写'}`, `实际完成：${task.actualDeliveryDate || '未填写'}`, `预估工时：${task.estimatedHours} 小时`, `实际工时：${task.actualHours} 小时`, `验收备注：${task.acceptanceNote || '未填写'}`] : [`# ${title}`, `审计结论：${findings.length ? `发现 ${findings.length} 项差异` : '未发现差异'}`, ...findings.map((item, index) => `${index + 1}. [${item.severity}] ${item.message}`)]
+  const text = lines.join('\n\n')
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#23352f;max-width:900px;margin:48px auto;line-height:1.75}h1{font-size:28px;border-bottom:2px solid #507d68;padding-bottom:14px}p{white-space:pre-wrap}.meta{color:#64756e}</style></head><body><h1>${escapeHtml(title)}</h1>${lines.slice(1).map((line) => `<p>${escapeHtml(line)}</p>`).join('')}<p class="meta">由 Giverny 根据不可变来源快照生成</p></body></html>`
+  return { text, html }
+}
+
+async function agentGenerateFormalDeliverablePreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); const type = agentString(body.type, 40); const taskId = Number(body.taskId) || 0
+  const auditRun = await runWorkspaceConsistencyAudit(env, principal.workspaceId, principal.principalId, 'pre_deliverable', false, 300)
+  let snapshot: Record<string, unknown>; try { snapshot = await formalDeliverableSnapshot(env, principal.workspaceId, type, taskId) } catch (error) { return agentFail(error instanceof Error ? error.message : '无法构建交付物快照', 409) }
+  const title = agentString(body.title, 160) || (type === 'acceptance_report' ? `${(snapshot.task as Record<string, unknown>)?.title || ''}验收报告` : type === 'project_status' ? `${(snapshot.task as Record<string, unknown>)?.title || ''}项目状态报告` : 'Giverny 数据一致性审计报告')
+  const sourceChecksum = await scheduleSnapshotChecksum(snapshot)
+  return agentPreview(env, request, 'generate_formal_deliverable_preview', { type, taskId: taskId || undefined, title, auditRunId: auditRun.id, sourceChecksum }, [], auditRun.integrity === 'fail' ? ['来源审计存在错误项，报告会如实保留审计编号和差异，不会掩盖问题。'] : [])
+}
+
+async function agentGenerateFormalDeliverableTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'generate_formal_deliverable', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const snapshot = await formalDeliverableSnapshot(env, principal.workspaceId, String(draft.type), Number(draft.taskId) || 0)
+  if (await scheduleSnapshotChecksum(snapshot) !== draft.sourceChecksum) return agentFail('来源数据在确认期间发生变化，请重新预览', 409)
+  const id = crypto.randomUUID(); const content = formalDeliverableContent(snapshot, String(draft.title)); const checksum = await scheduleSnapshotChecksum({ snapshot, content: content.text })
+  await env.DB.prepare(`INSERT INTO agent_formal_deliverables (id, workspace_id, deliverable_type, title, task_id, audit_run_id, source_snapshot_json, content_html, content_text, snapshot_checksum, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, principal.workspaceId, draft.type, draft.title, draft.taskId ? String(draft.taskId) : null, draft.auditRunId || null, JSON.stringify(snapshot), content.html, content.text, checksum, principal.principalId).run()
+  const record = formalDeliverableRecord({ id, deliverable_type: draft.type, title: draft.title, task_id: draft.taskId, audit_run_id: draft.auditRunId, snapshot_checksum: checksum, created_at: nowIso() })
+  await audit(env, agentCapabilityRegistry.generate_formal_deliverable.policy.auditEvent, 'formal_deliverable', id, { type: draft.type, taskId: draft.taskId || null, checksum })
+  return agentOk({ tool: 'generate_formal_deliverable', mode: 'execute', deliverable: record, files: [{ id, taskId: Number(draft.taskId) || 0, taskTitle: String(draft.title), name: `${String(draft.title)}.pdf`, type: 'PDF', mimeType: 'application/pdf', size: '', scope: 'acceptance', tag: '正式交付物', uploadedAt: nowIso(), sourceUrl: record.htmlUrl, downloadUrl: record.pdfUrl, kind: 'formal-deliverable' }] })
+}
+
+async function agentQueryFormalDeliverablesTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); const filters = ['workspace_id = ?']; const values: unknown[] = [principal.workspaceId]
+  if (Number(body.taskId) > 0) { filters.push('task_id = ?'); values.push(String(Number(body.taskId))) }
+  if (body.type) { filters.push('deliverable_type = ?'); values.push(String(body.type)) }
+  values.push(Math.min(Math.max(Number(body.limit) || 20, 1), 50))
+  const rows = await env.DB.prepare(`SELECT * FROM agent_formal_deliverables WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT ?`).bind(...values).all<Record<string, unknown>>()
+  return agentOk({ tool: 'query_formal_deliverables', count: rows.results?.length || 0, deliverables: (rows.results || []).map(formalDeliverableRecord) })
+}
+
+async function downloadFormalDeliverable(env: Env, request: Request, id: string, format: string) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const row = await env.DB.prepare('SELECT * FROM agent_formal_deliverables WHERE id = ? AND workspace_id = ?').bind(id, principal.workspaceId).first<Record<string, unknown>>()
+  if (!row) return fail('正式交付物不存在', 404)
+  const filename = `${String(row.title || 'Giverny正式交付物').replace(/[\\/:*?"<>|]+/g, '-')}`
+  if (format === 'json') return new Response(String(row.source_snapshot_json || '{}'), { headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${filename}.json`)}`, 'cache-control': 'private, no-store' } })
+  if (format === 'html') return new Response(String(row.content_html || ''), { headers: { 'content-type': 'text/html; charset=utf-8', 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${filename}.html`)}`, 'cache-control': 'private, no-store' } })
+  if (format !== 'pdf') return fail('不支持的交付物格式', 400)
+  if (!env.BROWSER) return fail('PDF 服务暂不可用', 503)
+  const browser = await puppeteer.launch(env.BROWSER)
+  try {
+    const page = await browser.newPage(); await page.setContent(String(row.content_html || ''), { waitUntil: 'networkidle0' })
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '14mm', bottom: '14mm', left: '14mm', right: '14mm' } })
+    await audit(env, 'agent_download_formal_deliverable', 'formal_deliverable', id, { format: 'pdf' })
+    return new Response(new Uint8Array(pdf), { headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${filename}.pdf`)}`, 'cache-control': 'private, no-store' } })
+  } finally { await browser.close() }
+}
+
+async function createHighRiskCase(env: Env, principal: AgentPrincipalContext, action: string, draft: Record<string, unknown>) {
+  const id = crypto.randomUUID(); const evidence = { action, draft, createdAt: nowIso() }; const evidenceChecksum = await scheduleSnapshotChecksum(evidence)
+  const retentionUntil = new Date(Date.now() + 7 * 365 * 24 * 60 * 60 * 1000).toISOString()
+  await env.DB.prepare(`INSERT INTO agent_high_risk_cases (id, workspace_id, principal_id, action, entity_id, risk_level, reason, evidence_json, evidence_checksum, retention_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, principal.workspaceId, principal.principalId, action, String(draft.taskId || draft.exportId || draft.planId || ''), action.includes('delete') || action.includes('acceptance') ? 'critical' : 'high', '该操作会修改关键业务记录，需要两次明确确认。', JSON.stringify(evidence), evidenceChecksum, retentionUntil).run()
+  return { caseId: id, level: action.includes('delete') || action.includes('acceptance') ? 'critical' : 'high', reason: '该操作会修改关键业务记录，需要两次明确确认。', evidenceChecksum, retentionUntil, requiresSecondConfirmation: true, cancellableBeforeExecution: true }
+}
+
+async function agentAcknowledgeHighRiskActionTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); const id = agentString(body.caseId, 180); const checksum = agentString(body.evidenceChecksum, 100)
+  const result = await env.DB.prepare(`UPDATE agent_high_risk_cases SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ? AND principal_id = ? AND status = 'pending' AND evidence_checksum = ?`).bind(id, principal.workspaceId, principal.principalId, checksum).run()
+  if (Number(result.meta?.changes || 0) !== 1) return agentFail('高风险案件已变化、已撤销或证据不匹配', 409)
+  await audit(env, agentCapabilityRegistry.acknowledge_high_risk_action.policy.auditEvent, 'high_risk_case', id, { evidenceChecksum: checksum })
+  return agentOk({ tool: 'acknowledge_high_risk_action', caseId: id, status: 'acknowledged', instruction: '第一重确认已记录；必须再次明确确认原操作才可执行。' })
+}
+
+async function agentQueryHighRiskActionsTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); const status = agentString(body.status, 30) || 'all'; const limit = Math.min(Math.max(Number(body.limit) || 30, 1), 100)
+  const rows = status === 'all' ? await env.DB.prepare('SELECT * FROM agent_high_risk_cases WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?').bind(principal.workspaceId, limit).all<Record<string, unknown>>() : await env.DB.prepare('SELECT * FROM agent_high_risk_cases WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC LIMIT ?').bind(principal.workspaceId, status, limit).all<Record<string, unknown>>()
+  return agentOk({ tool: 'query_high_risk_actions', count: rows.results?.length || 0, cases: (rows.results || []).map((row) => ({ id: row.id, action: row.action, riskLevel: row.risk_level, status: row.status, reason: row.reason, evidenceChecksum: row.evidence_checksum, retentionUntil: row.retention_until, createdAt: row.created_at, acknowledgedAt: row.acknowledged_at, executedAt: row.executed_at, cancelledAt: row.cancelled_at })) })
+}
+
+async function agentCancelHighRiskPreviewTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); const row = await env.DB.prepare(`SELECT * FROM agent_high_risk_cases WHERE id = ? AND workspace_id = ? AND status IN ('pending', 'acknowledged')`).bind(String(body.caseId), principal.workspaceId).first<Record<string, unknown>>()
+  if (!row) return agentFail('高风险案件不存在、已经执行或不能撤销', 409)
+  return agentPreview(env, request, 'cancel_high_risk_action_preview', { caseId: row.id, reason: agentString(body.reason, 500), beforeStatus: row.status, evidenceChecksum: row.evidence_checksum })
+}
+
+async function agentCancelHighRiskTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request); if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request); let draft: Record<string, unknown>
+  try { draft = await verifyAgentConfirmationToken(env, body.confirmationToken, 'cancel_high_risk_action', request) } catch (error) { return agentFail(error instanceof Error ? error.message : 'confirmationToken 无效', 409) }
+  const result = await env.DB.prepare(`UPDATE agent_high_risk_cases SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ? AND status = ? AND evidence_checksum = ?`).bind(draft.caseId, principal.workspaceId, draft.beforeStatus, draft.evidenceChecksum).run()
+  if (Number(result.meta?.changes || 0) !== 1) return agentFail('高风险案件在确认期间发生变化', 409)
+  await audit(env, agentCapabilityRegistry.cancel_high_risk_action.policy.auditEvent, 'high_risk_case', String(draft.caseId), { reason: draft.reason })
+  return agentOk({ tool: 'cancel_high_risk_action', mode: 'execute', case: { id: draft.caseId, status: 'cancelled', reason: draft.reason } })
+}
+
 function toAgentBackgroundTask(row: DbAgentAnalysisJob): AgentBackgroundTask {
   return {
     id: row.id,
@@ -8916,6 +9098,16 @@ async function verifyAgentWritePostcondition(env: Env, principal: AgentPrincipal
     checks.push(postconditionCheck('模型路由历史已恢复', expectedRoutes, saved))
     checks.push(postconditionCheck('恢复后的当前模型已保存', result.activeChoice, await getActiveChatModelChoice(env)))
   }
+  if (endpoint === 'generate-formal-deliverable') {
+    const deliverable = result.deliverable && typeof result.deliverable === 'object' ? result.deliverable as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT snapshot_checksum FROM agent_formal_deliverables WHERE id = ? AND workspace_id = ?').bind(String(deliverable.id || ''), principal.workspaceId).first<{ snapshot_checksum: string }>()
+    checks.push(postconditionCheck('正式交付物与来源校验值已保存', String(deliverable.checksum || ''), row?.snapshot_checksum || 'missing'))
+  }
+  if (endpoint === 'cancel-high-risk-action') {
+    const riskCase = result.case && typeof result.case === 'object' ? result.case as Record<string, unknown> : {}
+    const row = await env.DB.prepare('SELECT status FROM agent_high_risk_cases WHERE id = ? AND workspace_id = ?').bind(String(riskCase.id || ''), principal.workspaceId).first<{ status: string }>()
+    checks.push(postconditionCheck('高风险案件已在执行前撤销', 'cancelled', row?.status || 'missing'))
+  }
 
   if (checks.length === 0) checks.push({ name: '写入类型已接入独立验收', passed: false, expected: endpoint, actual: 'missing-verifier' })
   const verification = { passed: checks.every((item) => item.passed), endpoint, source: 'd1-independent-read' as const, checks, verifiedAt: nowIso() }
@@ -8930,6 +9122,13 @@ async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerEx
   const operationId = agentString(body.operationId, 180)
   const endpoint = agentString(body.endpoint, 80)
   const confirmationToken = agentString(body.confirmationToken, 5000)
+  const highRiskCaseId = (() => {
+    try {
+      const payloadPart = confirmationToken.split('.')[0]
+      const payload = payloadPart ? JSON.parse(agentBase64UrlToString(payloadPart)) as { draft?: { highRisk?: { caseId?: string } } } : null
+      return String(payload?.draft?.highRisk?.caseId || '')
+    } catch { return '' }
+  })()
   if (!operationId || !agentWorkflowWriteEndpoints.has(endpoint) || !confirmationToken) {
     return agentFail('Workflow 写入参数不完整', 400)
   }
@@ -8970,6 +9169,7 @@ async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerEx
            WHERE operation_id = ?`,
         ).bind(message, operationId).run()
       }
+      if (highRiskCaseId) await env.DB.prepare("UPDATE agent_high_risk_cases SET status = 'failed', failure_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ? AND status IN ('pending', 'acknowledged')").bind(message, highRiskCaseId, principal.workspaceId).run()
       return agentFail(message, response.status || 500)
     }
     const postcondition = await verifyAgentWritePostcondition(env, principal, endpoint, result)
@@ -8979,6 +9179,7 @@ async function agentWorkflowWriteTool(env: Env, request: Request, ctx?: WorkerEx
        SET status = 'completed', result_json = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE operation_id = ?`,
     ).bind(JSON.stringify(verifiedResult), operationId).run()
+    if (highRiskCaseId) await env.DB.prepare("UPDATE agent_high_risk_cases SET status = 'executed', executed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ? AND status IN ('pending', 'acknowledged')").bind(highRiskCaseId, principal.workspaceId).run()
     return agentOk({ ...verifiedResult, workflowOperationId: operationId, replayed: false })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Workflow 写入异常'
@@ -9029,6 +9230,14 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
     return agentProductHelpTool(env, request)
   }
   if (url.pathname === '/api/agent/tools/workspace-search' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceSearchTool(env, request)
+  if (url.pathname === '/api/agent/tools/workspace-consistency-audit' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceConsistencyAuditTool(env, request)
+  if (url.pathname === '/api/agent/tools/formal-deliverables' && (request.method === 'POST' || request.method === 'GET')) return agentQueryFormalDeliverablesTool(env, request)
+  if (url.pathname === '/api/agent/tools/high-risk-actions' && (request.method === 'POST' || request.method === 'GET')) return agentQueryHighRiskActionsTool(env, request)
+  if (url.pathname === '/api/agent/tools/generate-formal-deliverable-preview' && request.method === 'POST') return agentGenerateFormalDeliverablePreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/generate-formal-deliverable' && request.method === 'POST') return agentGenerateFormalDeliverableTool(env, request)
+  if (url.pathname === '/api/agent/tools/acknowledge-high-risk-action' && request.method === 'POST') return agentAcknowledgeHighRiskActionTool(env, request)
+  if (url.pathname === '/api/agent/tools/cancel-high-risk-action-preview' && request.method === 'POST') return agentCancelHighRiskPreviewTool(env, request)
+  if (url.pathname === '/api/agent/tools/cancel-high-risk-action' && request.method === 'POST') return agentCancelHighRiskTool(env, request)
   if (url.pathname === '/api/agent/tools/settlement-exports' && (request.method === 'POST' || request.method === 'GET')) return agentQuerySettlementExportsTool(env, request)
   if (url.pathname === '/api/agent/tools/settlement-reconciliation' && (request.method === 'POST' || request.method === 'GET')) return agentReconcileSettlementTool(env, request)
   if (url.pathname === '/api/agent/tools/agenda' && (request.method === 'POST' || request.method === 'GET')) return agentAgendaTool(env, request)
@@ -14411,6 +14620,14 @@ async function audit(env: Env, action: string, entityType: string, entityId: str
   await env.DB.prepare('INSERT INTO audit_log (id, action, entity_type, entity_id, payload_json) VALUES (?, ?, ?, ?, ?)')
     .bind(crypto.randomUUID(), action, entityType, entityId, JSON.stringify(payload ?? null))
     .run()
+}
+
+async function maybeRunScheduledConsistencyAudits(env: Env) {
+  const workspaces = await env.DB.prepare("SELECT id FROM workspaces WHERE status = 'active'").all<{ id: string }>()
+  for (const workspace of workspaces.results || []) {
+    const recent = await env.DB.prepare("SELECT id FROM agent_consistency_runs WHERE workspace_id = ? AND trigger_type = 'scheduled' AND datetime(created_at) >= datetime('now', '-24 hours') LIMIT 1").bind(workspace.id).first<{ id: string }>()
+    if (!recent) await runWorkspaceConsistencyAudit(env, workspace.id, 'system', 'scheduled', false, 500)
+  }
 }
 
 async function ensureSeedData(env: Env) {
@@ -21614,6 +21831,8 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/storage/usage') {
     return getStorageUsage(env)
   }
+  const formalDownload = path.match(/^\/api\/agent\/formal-deliverables\/([^/]+)\/(html|pdf|json)$/)
+  if (formalDownload && isGet) return downloadFormalDeliverable(env, request, decodeURIComponent(formalDownload[1]), formalDownload[2])
   if (path.startsWith('/api/agent/')) {
     return handleAgentToolApi(request, env, ctx)
   }
@@ -22095,6 +22314,9 @@ export default {
     })
     await maybeScheduleAgentTaskReminders(env).catch((error) => {
       console.error('proactive agent task reminder scheduling failed', error)
+    })
+    await maybeRunScheduledConsistencyAudits(env).catch((error) => {
+      console.error('workspace consistency audit failed', error)
     })
   },
   // 交付件分析队列消费者：每条消息一个附件，用独立预算分析；抛错则交给队列自动重试（最多 3 次），cron 兜底剩余。

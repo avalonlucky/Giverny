@@ -361,6 +361,22 @@ function renderPlanContinuation(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderConsistencyAudit(payload: Record<string, unknown>) {
+  const summary = record(payload.summary)
+  const findings = list(payload.findings).map(record)
+  return ['**全站数据一致性审计**', `- 结论：${String(payload.integrity || '')}；错误 ${formatNumber(summary.errorCount)} 项，提醒 ${formatNumber(summary.warningCount)} 项；审计编号：${String(payload.id || '')}`, ...(findings.length ? findings.slice(0, 20).map((item) => `- [${String(item.severity || '')}] ${String(item.message || '')}（${String(item.entityType || '')} ${String(item.entityId || '')}）`) : ['- 未发现一致性差异。']), `- 安全边界：${String(payload.guardrail || '')}`].join('\n')
+}
+
+function renderFormalDeliverables(payload: Record<string, unknown>) {
+  const items = list(payload.deliverables).map(record)
+  return ['**正式交付物**', ...(items.length ? items.map((item) => `- ${String(item.title || '')}：HTML ${String(item.htmlUrl || '')}；PDF ${String(item.pdfUrl || '')}；校验值 ${String(item.checksum || '')}`) : ['- 当前没有符合条件的正式交付物。'])].join('\n')
+}
+
+function renderHighRiskActions(payload: Record<string, unknown>) {
+  const items = list(payload.cases).map(record)
+  return ['**高风险操作案件**', ...(items.length ? items.map((item) => `- ${String(item.action || '')}：${String(item.status || '')} · ${String(item.riskLevel || '')}；证据保留至 ${String(item.retentionUntil || '')}`) : ['- 当前没有高风险操作案件。'])].join('\n')
+}
+
 function renderEvidence(evidence: AgentEvidence) {
   const payload = record(evidence.payload)
   if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
@@ -371,6 +387,9 @@ function renderEvidence(evidence: AgentEvidence) {
   if (evidence.toolName === 'search_attachments') return renderAttachments(payload)
   if (evidence.toolName === 'search_product_help') return renderProductHelp(payload)
   if (evidence.toolName === 'search_workspace') return renderWorkspaceSearch(payload)
+  if (evidence.toolName === 'audit_workspace_consistency') return renderConsistencyAudit(payload)
+  if (evidence.toolName === 'query_formal_deliverables') return renderFormalDeliverables(payload)
+  if (evidence.toolName === 'query_high_risk_actions') return renderHighRiskActions(payload)
   if (evidence.toolName === 'get_giverny_context') return renderContext(payload)
   if (evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
   if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
