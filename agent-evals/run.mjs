@@ -27,6 +27,9 @@ for (const testCase of cases) {
   for (const key of ['tools', 'forbiddenTools', 'traceContains', 'forbiddenTrace']) {
     if (testCase.expect[key] && !Array.isArray(testCase.expect[key])) errors.push(`${testCase.id}.${key} 必须是数组`)
   }
+  if (testCase.expect.maxModelCalls != null && (!Number.isInteger(testCase.expect.maxModelCalls) || testCase.expect.maxModelCalls < 1)) {
+    errors.push(`${testCase.id}.maxModelCalls 必须是正整数`)
+  }
 }
 
 if (cases.length < 50) errors.push(`评测集至少需要 50 条用例，当前 ${cases.length} 条`)
@@ -113,6 +116,7 @@ function evaluateResponse(testCase, data) {
   const plan = Array.isArray(data.agentTurn?.plan) ? data.agentTurn.plan : []
   const plannedTools = new Set(plan.map((item) => String(item.name || '')))
   const failures = []
+  const irrelevantRetrieval = [...plannedTools].filter((tool) => ['search_product_help', 'get_giverny_context', 'search_workspace'].includes(tool) && !(testCase.expect.tools || []).includes(tool))
   for (const tool of testCase.expect.tools || []) {
     if (!plannedTools.has(tool) && !trace.includes(tool)) failures.push(`未调用 ${tool}`)
   }
@@ -142,6 +146,11 @@ function evaluateResponse(testCase, data) {
     failures.push('未返回结构化附件')
   }
   if (data.selection && !testCase.expect.selectionAllowed) failures.push('意外返回任务消歧')
+  if (testCase.expect.noIrrelevantRetrieval && irrelevantRetrieval.length > 0) failures.push(`发生无关检索：${irrelevantRetrieval.join('、')}`)
+  if (testCase.expect.maxModelCalls != null && Number(data.orchestration?.modelCalls || 0) > testCase.expect.maxModelCalls) {
+    failures.push(`主模型调用 ${data.orchestration?.modelCalls} 次，预算 ${testCase.expect.maxModelCalls} 次`)
+  }
+  if (testCase.expect.noApproval && data.approval) failures.push('信息不足时不应生成可确认写入卡')
   const candidateCount = Array.isArray(data.selection?.candidates) ? data.selection.candidates.length : 0
   if (testCase.expect.selectionRequired && candidateCount < 2) failures.push(`未返回有效消歧候选（${candidateCount} 个）`)
   return failures

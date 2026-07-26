@@ -1,5 +1,7 @@
 import { build } from 'esbuild'
+import { writeFile, unlink } from 'node:fs/promises'
 import process from 'node:process'
+import { pathToFileURL } from 'node:url'
 
 const entry = process.argv[2]
 if (!entry) throw new Error('缺少 TypeScript 测试入口')
@@ -15,4 +17,10 @@ const result = await build({
 })
 const source = result.outputFiles[0]?.text
 if (!source) throw new Error('测试打包未生成产物')
-await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+const outputPath = `/tmp/giverny-bundled-test-${process.pid}-${Date.now()}.mjs`
+try {
+  await writeFile(outputPath, source)
+  await import(pathToFileURL(outputPath).href)
+} finally {
+  await unlink(outputPath).catch(() => undefined)
+}

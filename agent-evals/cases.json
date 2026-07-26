@@ -13,7 +13,7 @@
     { "id": "month-09", "category": "month_tasks", "prompt": "黄娟负责的7月任务", "expect": { "tools": ["search_tasks"] } },
     { "id": "month-10", "category": "month_tasks", "prompt": "本月品牌类工作汇总", "expect": { "tools": ["search_tasks"] } },
 
-    { "id": "finance-01", "category": "finance", "prompt": "6月份预计收入是多少", "expect": { "tools": ["query_month_finance"] } },
+    { "id": "finance-01", "category": "finance", "prompt": "6月份预计收入是多少", "expect": { "tools": ["query_month_finance"], "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
     { "id": "finance-02", "category": "finance", "prompt": "7月总工时和计费工时分别多少", "expect": { "tools": ["query_month_finance"] } },
     { "id": "finance-03", "category": "finance", "prompt": "比较5月和6月收入", "expect": { "tools": ["query_month_finance"] } },
     { "id": "finance-04", "category": "finance", "prompt": "本月有多少不计费工时", "expect": { "tools": ["query_month_finance"] } },
@@ -24,7 +24,7 @@
     { "id": "finance-09", "category": "finance", "prompt": "哪些月份收入最高", "expect": { "tools": ["query_month_finance"] } },
     { "id": "finance-10", "category": "finance", "prompt": "本月待验收金额是多少", "expect": { "tools": ["query_month_finance"] } },
 
-    { "id": "portfolio-01", "category": "portfolio_query", "prompt": "把现在所有延期任务和具体原因列出来", "expect": { "tools": ["query_task_portfolio"] } },
+    { "id": "portfolio-01", "category": "portfolio_query", "prompt": "把现在所有延期任务和具体原因列出来", "expect": { "tools": ["query_task_portfolio"], "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
     { "id": "portfolio-02", "category": "portfolio_query", "prompt": "哪些项目正在等待，分别在等谁的什么东西？", "expect": { "tools": ["query_task_portfolio"] } },
     { "id": "portfolio-03", "category": "portfolio_query", "prompt": "汇总7月所有未完成工作的负责人和最近进展", "expect": { "tools": ["query_task_portfolio"] } },
     { "id": "portfolio-04", "category": "portfolio_query", "prompt": "从6月1日到7月24日，还有多少个项目没闭环？", "expect": { "tools": ["query_task_portfolio"] } },
@@ -61,7 +61,7 @@
     { "id": "attachment-07", "category": "write_preview", "prompt": "重新分析附件102", "expect": { "tools": ["manage_attachment_analysis_preview"], "approval": "manage_attachment_analysis" } },
     { "id": "attachment-08", "category": "write_preview", "prompt": "把附件105重命名为内部策略留档", "expect": { "tools": ["update_attachment_metadata_preview"], "approval": "update_attachment_metadata" } },
 
-    { "id": "create-01", "category": "create_preview", "prompt": "新建任务：官网首页改版，明天下午开始，预计8小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
+    { "id": "create-01", "category": "create_preview", "prompt": "新建任务：官网首页改版，明天下午开始，预计8小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task", "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
     { "id": "create-02", "category": "create_preview", "prompt": "帮我建一个Logo提案任务，需求人小陈，月底交付", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-03", "category": "create_preview", "prompt": "记录一个补录任务：昨天完成了宣传册封面，2小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-04", "category": "create_preview", "prompt": "新任务是展会主视觉，不计入结算", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
@@ -69,7 +69,7 @@
     { "id": "create-06", "category": "create_preview", "prompt": "我要加个任务，名字叫季度报告长图，验收人王老师", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-07", "category": "create_preview", "prompt": "安排下周一做三张社媒海报，预估4.5小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-08", "category": "create_preview", "prompt": "新建品牌规范更新，具体需求暂时还没定", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
-    { "id": "create-09", "category": "create_preview", "prompt": "你帮我新建一个任务", "expect": { "tools": ["create_task_preview"], "forbiddenTools": ["search_product_help", "search_workspace"], "traceContains": ["确认站内操作目标", "草稿信息不完整"], "forbiddenTrace": ["快捷键：", "产品手册", "更新日志"] } },
+    { "id": "create-09", "category": "create_preview", "prompt": "你帮我新建一个任务", "expect": { "tools": ["create_task_preview"], "forbiddenTools": ["search_product_help", "search_workspace"], "traceContains": ["确认站内操作目标", "草稿信息不完整"], "forbiddenTrace": ["快捷键：", "产品手册", "更新日志"], "maxModelCalls": 1, "noIrrelevantRetrieval": true, "noApproval": true } },
 
     { "id": "feedback-01", "category": "write_preview", "prompt": "给公司产品封套修改记录反馈：甲方要求封面颜色加深", "expect": { "tools": ["record_feedback_preview"], "approval": "record_feedback" } },
     { "id": "feedback-02", "category": "write_preview", "prompt": "记录任务#1的第二轮反馈：字号再放大一点", "expect": { "tools": ["record_feedback_preview"], "approval": "record_feedback" } },
@@ -78,13 +78,13 @@
     { "id": "fields-03", "category": "write_preview", "prompt": "把任务#1需求人改成李老师，对接人改成小周", "expect": { "tools": ["update_task_fields_preview"], "approval": "update_task_fields" } },
     { "id": "status-01", "category": "write_preview", "prompt": "把任务#1改成待验收，进度100%", "expect": { "tools": ["update_task_status_preview"], "approval": "update_task_status" } },
     { "id": "status-02", "category": "write_preview", "prompt": "暂停公司产品封套修改，原因是等待甲方材料", "expect": { "tools": ["update_task_status_preview"], "approval": "update_task_status" } },
-    { "id": "progress-01", "category": "write_preview", "prompt": "给任务#1记录进展：完成首版排版，今天14点到16点，计入工时", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
+    { "id": "progress-01", "category": "write_preview", "prompt": "给任务#1记录进展：完成首版排版，今天14点到16点，计入工时", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress", "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
     { "id": "progress-02", "category": "write_preview", "prompt": "公司产品封套修改记录一条不计时进展：完成产品矩阵图调整", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "progress-03", "category": "write_preview", "prompt": "给任务#1追加验收进展：全部文件已经交付", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "progress-04", "category": "write_preview", "prompt": "记录任务#1改稿一轮，从19:00做到20:30", "expect": { "tools": ["append_progress_preview"], "approval": "append_progress" } },
     { "id": "waiting-01", "category": "write_preview", "prompt": "给任务#1记录等待：10点到12点等待甲方补充资料", "expect": { "tools": ["append_waiting_preview"], "approval": "append_waiting" } },
     { "id": "acceptance-file-01", "category": "write_preview", "prompt": "把任务#1的附件104标记为验收文件", "expect": { "tools": ["mark_acceptance_files_preview"], "approval": "mark_acceptance_files" } },
-    { "id": "acceptance-01", "category": "write_preview", "prompt": "完整验收任务#1：已完成全部修改并交付最终文件", "expect": { "tools": ["complete_acceptance_preview"], "approval": "complete_acceptance" } },
+    { "id": "acceptance-01", "category": "write_preview", "prompt": "完整验收任务#1：已完成全部修改并交付最终文件", "expect": { "tools": ["complete_acceptance_preview"], "approval": "complete_acceptance", "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
     { "id": "batch-01", "category": "write_preview", "prompt": "用批量事务同时把任务#1的对接人改掉，并给任务#2记录等待资料", "expect": { "tools": ["batch_task_operations_preview"], "approval": "batch_task_operations" } },
 
     { "id": "orchestration-01", "category": "orchestration", "prompt": "为任务#1制定从当前进展到最终验收的持续推进计划", "expect": { "tools": ["create_task_plan"] } },
@@ -111,17 +111,17 @@
     { "id": "analysis-06", "category": "background_analysis", "prompt": "把本月批量附件分析结果汇总一下", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "batch_attachment_analysis" } },
     { "id": "analysis-07", "category": "background_analysis", "prompt": "分析最近几个月的工作趋势", "expect": { "tools": ["start_deep_analysis"], "backgroundTask": "trend_analysis" } },
 
-    { "id": "product-help-01", "category": "product_help", "prompt": "显示金额和隐藏金额的快捷键是什么？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-01", "category": "product_help", "prompt": "显示金额和隐藏金额的快捷键是什么？", "expect": { "tools": ["search_product_help"], "maxModelCalls": 1 } },
     { "id": "product-help-02", "category": "product_help", "prompt": "11 月和 12 月怎么用键盘直接跳转？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-03", "category": "product_help", "prompt": "本机 CLI 能直接修改 Giverny 数据库吗？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-04", "category": "product_help", "prompt": "目前我这个网站怎么开通 Giverny 主题？", "expect": { "tools": ["search_product_help"] } },
     { "id": "product-help-05", "category": "product_help", "prompt": "这个网站最近更新了哪些内容？", "expect": { "tools": ["search_product_help"] } },
-    { "id": "product-help-06", "category": "product_help", "prompt": "我应该怎么设置大模型？", "expect": { "tools": ["search_product_help"] } },
+    { "id": "product-help-06", "category": "product_help", "prompt": "我应该怎么设置大模型？", "expect": { "tools": ["search_product_help"], "maxModelCalls": 1 } },
     { "id": "product-help-07", "category": "product_help", "prompt": "这个网站为什么叫吉维尼？作者起这个名字有什么原因？", "expect": { "tools": ["search_product_help"] } },
 
-    { "id": "person-profile-01", "category": "person_profile", "prompt": "给我一下陈义君的用户画像", "expect": { "tools": ["get_requester_profile"] } },
+    { "id": "person-profile-01", "category": "person_profile", "prompt": "给我一下陈义君的用户画像", "expect": { "tools": ["get_requester_profile"], "maxModelCalls": 1, "noIrrelevantRetrieval": true } },
 
-    { "id": "compound-01", "category": "compound_goal", "prompt": "查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单", "expect": { "tools": ["query_month_finance", "query_task_portfolio", "search_product_help"] } },
+    { "id": "compound-01", "category": "compound_goal", "prompt": "查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单", "expect": { "tools": ["query_month_finance", "query_task_portfolio", "search_product_help"], "maxModelCalls": 2 } },
     { "id": "compound-02", "category": "compound_goal", "prompt": "告诉我6月计费工时，并打开直播设计的验收附件", "expect": { "tools": ["query_month_finance", "search_attachments"], "attachments": true } },
     { "id": "compound-03", "category": "compound_goal", "prompt": "分析陈义君的合作画像，再告诉我网站里在哪里设置大模型", "expect": { "tools": ["get_requester_profile", "search_product_help"] } },
     { "id": "compound-04", "category": "compound_goal", "prompt": "打开公司产品封套修改的验收附件，并告诉我这个任务现在的状态", "expect": { "tools": ["search_attachments", "get_task_detail"], "attachments": true } },

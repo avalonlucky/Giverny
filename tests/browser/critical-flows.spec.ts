@@ -90,6 +90,18 @@ test('工作台任务和工作助手可以正常打开', async ({ page }) => {
   await expect(page.getByText('今天完成了哪些工作？', { exact: true })).toBeVisible()
 })
 
+test('工作助手的明确创建指令直接进入业务流程且不虚构字段', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  const input = dialog.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('你帮我新建一个任务')
+  await input.press('Enter')
+  await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(dialog.getByText(/主模型调用 1 次/)).toBeAttached()
+  await expect(dialog.getByLabel('创建任务确认卡片')).toHaveCount(0)
+  await expect(dialog.getByText(/快捷键：|产品手册|更新日志/)).toHaveCount(0)
+})
+
 test('工作助手主动事项按优先级展示证据、建议和处理效果', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   await page.getByRole('button', { name: '记录与任务' }).click()

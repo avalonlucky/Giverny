@@ -123,12 +123,19 @@ function directorMetadata(toolName, question) {
               : /analysis|audit|deliverable|monthly_review/.test(toolName) ? 'analysis'
                 : /risk|security|diagnose_ai/.test(toolName) ? 'security'
                   : toolName ? 'tasks' : 'conversation'
+  const complex = /(?:再|同时|另外|然后|并且|以及)/.test(question) || /最近一次反馈/.test(question)
+  const planned = plannedCallFromCompletion(chooseTool([{ role: 'user', content: question }]))
+  if (planned?.name === 'create_task_preview' && !/^\s*你?帮我新建一个任务[\s。！!]*$/.test(question)) {
+    planned.grounding = Object.fromEntries(Object.keys(planned.args).map((field) => [field, question]))
+  }
   return {
     goal: question.slice(0, 120), domains: [domain], operation,
     requiresBusinessData: Boolean(toolName) && !product,
     requiresProductKnowledge: product, isWrite,
     missingInformation: [], confidence: 0.98,
     rationale: product ? '这是产品使用问题。' : isWrite ? '这是站内业务操作。' : toolName ? '需要核对真实业务数据。' : '可以直接回答。',
+    complexity: complex ? 'complex' : 'simple',
+    proposedCalls: !complex && planned ? [planned] : [],
   }
 }
 

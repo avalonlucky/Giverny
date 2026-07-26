@@ -5,6 +5,7 @@ const failures = []
 const runtime = readFileSync('src/aliceAgent.ts', 'utf8')
 const worker = readFileSync('src/worker.ts', 'utf8')
 const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
+const graph = readFileSync('src/agentRuntimeGraph.ts', 'utf8')
 const chat = readFileSync('src/components/ChatPanel.tsx', 'utf8')
 const suite = JSON.parse(readFileSync('agent-evals/cases.json', 'utf8'))
 
@@ -25,6 +26,12 @@ for (const marker of [
 
 for (const marker of ['directAgentRequest(', 'callSelectedModelJson<Record<string, unknown>>', 'modelChoice: args.modelChoice', 'needsPersonalKnowledge']) {
   if (!worker.includes(marker)) failures.push(`Worker 没有将用户主模型与意图导演接入主链：${marker}`)
+}
+for (const marker of ['StateGraph', "addNode('understand'", "addNode('direct_authorize'", "addNode('plan_node'", 'modelCalls']) {
+  if (!graph.includes(marker)) failures.push(`LangGraph 生产力主链缺少：${marker}`)
+}
+for (const marker of ['runAgentRuntimeGraph(', "engine: 'langgraph'", 'orchestration.modelCalls']) {
+  if (!worker.includes(marker)) failures.push(`Worker 未完整接入 LangGraph 主链：${marker}`)
 }
 if (!worker.includes('if (shouldUseDirectedRuntime)')) failures.push('纯文本请求仍可能按手选模型绕开统一编排层')
 if (!worker.includes("? [defaultHourlyRate, { results: [] as DbTask[] }")) failures.push('意图导演前仍会无条件预取任务、金额或知识数据')
@@ -50,4 +57,4 @@ if (failures.length) {
   process.exit(1)
 }
 
-console.log('Agent 意图编排守卫通过：主模型导演、小工具集、知识隔离与 Alice 执行边界已生效。')
+console.log('Agent 意图编排守卫通过：LangGraph 主链、主模型理解、小工具集、知识隔离与 Alice 执行边界已生效。')

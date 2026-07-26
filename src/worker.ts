@@ -9,11 +9,14 @@ import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry
 import {
   AGENT_DIRECTOR_SYSTEM_PROMPT,
   agentDirectorTrace,
+  directAgentOperationCatalog,
+  groundDirectAgentCalls,
   normalizeAgentDirectorDecision,
   shortlistAgentCapabilities,
   validateDirectedPlan,
   type AgentDirectorPlan,
 } from './agentIntentDirector'
+import { runAgentRuntimeGraph, type AgentRuntimeGraphPlan } from './agentRuntimeGraph'
 import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
 import { createAgentScopeHeaders, normalizeAgentPrincipalContext, verifyAgentScopeHeaders, type AgentPrincipalContext } from './agentScope'
@@ -3104,6 +3107,7 @@ type OpenAiAgentRuntimeResult = {
     sourceTools: string[]
     fallbackUsed: boolean
   }
+  orchestration?: { engine: 'langgraph'; path: string[]; modelCalls: number }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -3136,54 +3140,65 @@ async function directAgentRequest(
   args: { question: string; currentMonth?: string; modelChoice: ChatModelChoice; principal: AgentPrincipalContext; history?: Array<{ role: 'user' | 'assistant'; content: string }> },
 ) {
   const history = (args.history || []).slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) }))
-  const rawDecision = await callSelectedModelJson<Record<string, unknown>>(
-    env,
-    args.modelChoice,
-    AGENT_DIRECTOR_SYSTEM_PROMPT,
-    { question: args.question, currentMonth: args.currentMonth || '', role: args.principal.role, history },
-    'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|workspace_search|memory|analysis|security)[]; operation: string（优先使用 create_task/update_task/progress/waiting/feedback/acceptance/task_records/task_plan/attachment_upload/attachment_inspect/attachment_manage/settlement_export/schedule/model_config/enterprise_memory/proactive/formal_deliverable/high_risk/general）; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string',
-    1800,
-  )
-  const decision = normalizeAgentDirectorDecision(rawDecision)
-  const allowedCapabilities = shortlistAgentCapabilities(decision, args.principal.role)
   const target = await resolveChatModelTarget(env, args.modelChoice)
-  const modelLabel = target.label
-  if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite) {
-    const direct = await callTextWithSelectedModel(
-      env,
-      `你是 Giverny 工作助手。请直接回答用户，不要声称查询了网站数据或产品手册，不要展示隐藏思维链。\n\n用户：${args.question}`,
-      args.modelChoice,
-      1800,
-    )
-    return { decision, calls: [], allowedCapabilities, directAnswer: direct.text, modelLabel: direct.modelLabel, denied: [] as string[] }
-  }
-  const capabilities = allowedCapabilities.map((name) => {
-    const capability = agentCapabilityRegistry[name]
-    let inputSchema: unknown = {}
-    try { inputSchema = z.toJSONSchema(capability.inputSchema) } catch { /* Planner can still use title and description. */ }
-    return { name, title: capability.title, description: capability.description, risk: capability.policy.risk, confirmation: capability.policy.confirmation, inputSchema }
-  })
-  const rawPlan = await callSelectedModelJson<AgentDirectorPlan>(
-    env,
-    args.modelChoice,
-    `你是 Giverny Agent 的工具规划器。你只能从输入的候选能力中选择完成目标所必需的最小工具集。
+  let modelLabel = target.label
+  const request = { question: args.question, currentMonth: args.currentMonth, history, principal: args.principal }
+  const graphResult = await runAgentRuntimeGraph({
+    understand: async (graphRequest) => {
+      const rawDecision = await callSelectedModelJson<Record<string, unknown>>(
+        env,
+        args.modelChoice,
+        `${AGENT_DIRECTOR_SYSTEM_PROMPT}
+- complexity=simple 仅用于一个明确目标，且 proposedCalls 已能直接表达最小必要动作；复合目标、先查后做、对象不明确或需要比较时必须为 complex。
+- proposedCalls 只能从 directOperations 中选择；简单请求尽量一次给出。复杂请求保持空数组，交给后续规划节点。
+- create_task_preview 的每个参数必须在 grounding 中给出用户原话片段；用户没说的字段必须省略，不得用示例值补齐。`,
+        { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', role: graphRequest.principal.role, history: graphRequest.history, directOperations: directAgentOperationCatalog(graphRequest.principal.role) },
+        'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|workspace_search|memory|analysis|security)[]; operation: string; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string; complexity: simple|complex; proposedCalls: {name:string; args:object; reason:string; grounding?: Record<string,string>}[]',
+        2600,
+      )
+      return groundDirectAgentCalls(
+        normalizeAgentDirectorDecision(rawDecision),
+        [graphRequest.question, ...graphRequest.history.map((item) => item.content)].join('\n'),
+      )
+    },
+    shortlist: (decision, principal) => shortlistAgentCapabilities(decision, principal.role),
+    plan: async (graphRequest, decision, allowedCapabilities): Promise<AgentRuntimeGraphPlan> => {
+      if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite) {
+        const direct = await callTextWithSelectedModel(
+          env,
+          `你是 Giverny 工作助手。请直接回答用户，不要声称查询了网站数据或产品手册，不要展示隐藏思维链。\n\n用户：${graphRequest.question}`,
+          args.modelChoice,
+          1800,
+        )
+        modelLabel = direct.modelLabel
+        return { calls: [], needsInput: false, followUpQuestion: '', answerIfNoTools: direct.text }
+      }
+      const capabilities = allowedCapabilities.map((name) => {
+        const capability = agentCapabilityRegistry[name]
+        let inputSchema: unknown = {}
+        try { inputSchema = z.toJSONSchema(capability.inputSchema) } catch { /* Planner can still use title and description. */ }
+        return { name, title: capability.title, description: capability.description, risk: capability.policy.risk, confirmation: capability.policy.confirmation, inputSchema }
+      })
+      const rawPlan = await callSelectedModelJson<AgentDirectorPlan>(
+        env,
+        args.modelChoice,
+        `你是 Giverny Agent 的工具规划器。你只能从输入的候选能力中选择完成目标所必需的最小工具集。
 不得增加候选列表以外的工具；不得为了“多了解一点”而扩大检索；信息不足时允许调用 preview 让后端返回缺失字段。不得编造用户没有提供的任务名、需求、日期、工时、人员或附件 ID；未提供的字段必须省略。
 会修改业务实体的动作只能选 preview 能力，不得直接执行。候选能力中 confirmation=none 的确定性文件生成动作可以立即执行。answerIfNoTools 只用于不需要工具或需向用户追问时。`,
-    { question: args.question, currentMonth: args.currentMonth || '', history, decision, capabilities },
-    'calls: {name: string; args: object; reason: string}[]; needsInput: boolean; followUpQuestion: string; answerIfNoTools: string',
-    3000,
-  )
-  const plan: AgentDirectorPlan = {
-    calls: Array.isArray(rawPlan?.calls) ? rawPlan.calls : [],
-    needsInput: rawPlan?.needsInput === true,
-    followUpQuestion: String(rawPlan?.followUpQuestion || ''),
-    answerIfNoTools: String(rawPlan?.answerIfNoTools || ''),
-  }
-  const validated = validateDirectedPlan({ decision, plan, allowedCapabilities, role: args.principal.role })
-  const directAnswer = validated.calls.length === 0
-    ? plan.followUpQuestion || plan.answerIfNoTools || (decision.missingInformation.length ? `请补充：${decision.missingInformation.join('、')}。` : '')
-    : ''
-  return { decision, calls: validated.calls, allowedCapabilities, directAnswer, modelLabel, denied: validated.denied }
+        { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', history: graphRequest.history, decision, capabilities },
+        'calls: {name: string; args: object; reason: string}[]; needsInput: boolean; followUpQuestion: string; answerIfNoTools: string',
+        3000,
+      )
+      return {
+        calls: Array.isArray(rawPlan?.calls) ? rawPlan.calls : [],
+        needsInput: rawPlan?.needsInput === true,
+        followUpQuestion: String(rawPlan?.followUpQuestion || ''),
+        answerIfNoTools: String(rawPlan?.answerIfNoTools || ''),
+      }
+    },
+    authorize: (decision, plan, allowedCapabilities, principal) => validateDirectedPlan({ decision, plan, allowedCapabilities, role: principal.role }),
+  }, request)
+  return { ...graphResult, modelLabel }
 }
 
 let agentWorkspaceColumnsEnsured = false
@@ -3252,10 +3267,11 @@ async function callAgentRuntime(
       })
       const trace = [
         { type: 'plan', ...agentDirectorTrace(orchestration.decision) },
+        { type: 'plan', label: '执行编排路径', detail: `${orchestration.path.join(' → ')} · 主模型调用 ${orchestration.modelCalls} 次` },
         ...(orchestration.denied.length ? [{ type: 'error', label: '策略层拒绝了越界能力', detail: orchestration.denied.join('、') }] : []),
         ...result.trace.slice(1),
       ]
-      return { ...result, trace, conversationId }
+      return { ...result, trace, conversationId, orchestration: { engine: 'langgraph', path: orchestration.path, modelCalls: orchestration.modelCalls } }
     } catch (error) {
       console.warn(JSON.stringify({ event: 'cloudflare_alice_agent_failed', error: describeAiCallError(error) }))
       throw error
@@ -18660,6 +18676,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           agentTurn: runtimeResult.agentTurn,
           factVerification: runtimeResult.factVerification,
           model: runtimeResult.model,
+          orchestration: runtimeResult.orchestration,
         })
       }
       if (requiresRuntime) {

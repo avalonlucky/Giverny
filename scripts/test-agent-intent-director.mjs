@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  groundDirectAgentCalls,
   normalizeAgentDirectorDecision,
   shortlistAgentCapabilities,
   validateDirectedPlan,
@@ -51,4 +52,21 @@ assert.ok(injectedPlan.denied.includes('search_product_help'))
 
 assert.deepEqual(shortlistAgentCapabilities(createDecision, 'guest'), [])
 
-console.log('Agent 意图导演单测通过：普通问答、业务写入、产品帮助、全域搜索、越界拒绝和角色裁剪均已覆盖。')
+const fabricatedCreate = groundDirectAgentCalls(normalizeAgentDirectorDecision({
+  goal: '新建一个任务', domains: ['tasks'], operation: 'create_task', complexity: 'simple',
+  requiresBusinessData: true, requiresProductKnowledge: false, isWrite: true,
+  proposedCalls: [{ name: 'create_task_preview', args: { title: '模型虚构任务', estimatedHours: 4 }, reason: '创建' }],
+}), '你帮我新建一个任务')
+assert.deepEqual(fabricatedCreate.proposedCalls[0].args, {})
+
+const groundedCreate = groundDirectAgentCalls(normalizeAgentDirectorDecision({
+  goal: '新建 Logo 任务', domains: ['tasks'], operation: 'create_task', complexity: 'simple',
+  requiresBusinessData: true, requiresProductKnowledge: false, isWrite: true,
+  proposedCalls: [{
+    name: 'create_task_preview', args: { title: 'Logo 提案', estimatedHours: 4 }, reason: '创建',
+    grounding: { title: 'Logo 提案', estimatedHours: '预估 4 小时' },
+  }],
+}), '新建 Logo 提案，预估 4 小时')
+assert.deepEqual(groundedCreate.proposedCalls[0].args, { title: 'Logo 提案', estimatedHours: 4 })
+
+console.log('Agent 意图导演单测通过：普通问答、业务写入、参数原话依据、产品帮助、全域搜索、越界拒绝和角色裁剪均已覆盖。')

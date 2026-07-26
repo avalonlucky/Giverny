@@ -4,13 +4,15 @@
 
 Giverny Agent 不把大模型直接等同于产品。大模型负责理解、规划和语言组织；Agent 编排层负责权限、工具、业务规则、证据、确认、重试和结果验真。
 
-统一链路：
+统一链路由 LangGraph 回合状态机组织：
 
 ```text
 用户请求
   -> AgentTurn（租户、身份、会话、本轮目标）
-  -> 理解意图
-  -> 生成计划
+  -> understand（理解完整目标）
+  -> shortlist（缩选可用能力）
+  -> 明确单目标：direct_authorize
+  -> 复合目标或校验拒绝：plan_node
   -> 权限与风险授权
   -> 调用 D1 / R2 / 产品注册表 / 知识库工具
   -> 模型分析
@@ -21,7 +23,7 @@ Giverny Agent 不把大模型直接等同于产品。大模型负责理解、规
   -> 最终回答
 ```
 
-当前实现将“理解意图”与“选择工具”分成两个受控阶段。Intent Director 先在没有任何工具、产品知识或业务数据的条件下理解整句话；程序再按领域、操作、角色与风险缩小能力集，同一主模型只能在该小集合中制定计划。详见 [`ADR_AGENT_ORCHESTRATION_REPLACEMENT.md`](./ADR_AGENT_ORCHESTRATION_REPLACEMENT.md)。
+当前实现不再固定串行 Director 和 Planner。Intent Director 在没有任何工具、产品知识或业务数据的条件下理解整句话；对单一明确目标，同一次输出就提出最小动作并经策略授权。只有复合目标、对象不明确或直接动作未通过校验时，LangGraph 才进入 Planner 节点。详见 [`ADR_AGENT_ORCHESTRATION_REPLACEMENT.md`](./ADR_AGENT_ORCHESTRATION_REPLACEMENT.md)。
 
 ## 核心契约
 

@@ -17,14 +17,14 @@
 
 ## 正式方向
 
-正式主链路使用 Worker 意图编排与 Cloudflare Agents SDK 持久执行：
+正式主链路使用 LangGraph 回合编排与 Cloudflare Agents SDK 持久执行：
 
 ```text
 React UI -> Worker `/api/ai/chat`
-  -> 用户选择的主模型：Intent Director（无工具、无知识上下文）
-  -> 程序根据意图、角色和风险缩小到 0-16 项候选能力
-  -> 同一主模型：最小工具计划
-  -> Policy Validator（schema、角色、知识资格、写入预览）
+  -> LangGraph understand（用户主模型，无预取知识）
+  -> shortlist（角色、风险和能力缩选）
+  -> 明确单目标：direct_authorize（一次模型调用）
+  -> 复合/被拒绝：plan_node -> authorize（第二次规划）
   -> AliceAgent Durable Object
        ├── Agent SQLite 会话历史与任务引用
        ├── 执行已校验计划，不再自选模型或全量工具
@@ -46,6 +46,7 @@ React UI -> Worker `/api/ai/chat`
 ## 当前已落地
 
 - `src/agentIntentDirector.ts`：供应商中立的意图决策、能力缩选和计划校验；产品知识默认不可用。
+- `src/agentRuntimeGraph.ts`：LangGraph 回合级主链，负责单模型快速路径、复杂规划、策略拒绝后回规划和模型调用计数。
 - `src/aliceAgent.ts`：Cloudflare Agents SDK Runtime，负责持久会话、任务引用、确认状态和已校验计划执行；不再硬编码任何模型。
 - `src/worker.ts`：`/api/ai/chat` 按 `agentRuntimeConversationId` 路由到对应 `AliceAgent`，并返回稳定的旧接口响应。
 - `src/App.tsx`：历史对话以云端为主、本地缓存兜底；旧浏览器历史首次打开时自动迁移，任务中心统一展示后台分析与未读结果。
