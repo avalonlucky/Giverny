@@ -295,8 +295,9 @@ test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) =>
 test('结算预览与下载 Excel 使用同一份正式回单模板', async ({ page }) => {
   await page.getByRole('button', { name: '切换到结算', exact: true }).click()
   const receipt = page.getByRole('region', { name: '月度结算回单' })
-  await expect(receipt.getByText('Giverny', { exact: true })).toBeVisible()
-  await expect(receipt.getByText('让创作在自己的花园里生长', { exact: true })).toBeVisible()
+  const receiptBrand = receipt.locator('.settlement-receipt-brand')
+  await expect(receiptBrand.getByText('Giverny', { exact: true })).toBeVisible()
+  await expect(receiptBrand.getByText('让创作在自己的花园里生长', { exact: true })).toBeVisible()
   await expect(receipt.locator('thead th')).toHaveText([
     '序号', '设计类型', '任务', '任务需求', '预计开始日期', '实际完成日期',
     '需求人', '对接人', '状态', '预估工时', '实际工时', '单价', '小计', '验收备注',
