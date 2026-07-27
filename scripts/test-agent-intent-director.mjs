@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   applyAgentConversationFollowUpPolicy,
+  applyExplicitSettlementExportPolicy,
   groundDirectAgentCalls,
   normalizeAgentDirectorDecision,
   shortlistAgentCapabilities,
@@ -43,6 +44,35 @@ const financeFollowUp = applyAgentConversationFollowUpPolicy(
 assert.deepEqual(financeFollowUp.domains, ['finance'])
 assert.equal(financeFollowUp.requiresProductKnowledge, false)
 assert.deepEqual(financeFollowUp.proposedCalls.map((item) => item.name), ['query_settlement_exports', 'reconcile_settlement_export'])
+
+const mistakenSettlementQuery = normalizeAgentDirectorDecision({
+  goal: '查询七月导出记录', domains: ['finance'], operation: 'settlement_export',
+  requiresBusinessData: true, requiresProductKnowledge: false, isWrite: false, complexity: 'simple',
+  proposedCalls: [{ name: 'query_settlement_exports', args: {}, reason: '模型误选查询' }],
+})
+const explicitSettlementExport = applyExplicitSettlementExportPolicy(
+  mistakenSettlementQuery,
+  '请导出七月份的任务回单总结。',
+  '2026-07',
+)
+assert.deepEqual(explicitSettlementExport.proposedCalls.map((item) => item.name), ['generate_settlement_receipt'])
+assert.deepEqual(explicitSettlementExport.proposedCalls[0].args, { startDate: '2026-07-01', endDate: '2026-07-31' })
+assert.equal(explicitSettlementExport.isWrite, true)
+
+const currentMonthExport = applyExplicitSettlementExportPolicy(mistakenSettlementQuery, '导出本月回单', '2026-07')
+assert.deepEqual(currentMonthExport.proposedCalls[0].args, { startDate: '2026-07-01', endDate: '2026-07-31' })
+
+const februaryExport = applyExplicitSettlementExportPolicy(mistakenSettlementQuery, '生成2026年2月结算回单', '2026-07')
+assert.deepEqual(februaryExport.proposedCalls[0].args, { startDate: '2026-02-01', endDate: '2026-02-28' })
+
+const historyQuery = applyExplicitSettlementExportPolicy(mistakenSettlementQuery, '查询七月是否有导出记录', '2026-07')
+assert.deepEqual(historyQuery.proposedCalls.map((item) => item.name), ['query_settlement_exports'])
+
+const compoundHowTo = applyExplicitSettlementExportPolicy(mistakenSettlementQuery, '查一下本月结算金额，再列出所有延期任务，并告诉我网站里怎么下载回单', '2026-07')
+assert.deepEqual(compoundHowTo.proposedCalls.map((item) => item.name), ['query_settlement_exports'])
+
+const explicitDayRange = applyExplicitSettlementExportPolicy(mistakenSettlementQuery, '请帮我导出 6 月 1 号到 6 月 10 号的结算回单', '2026-07')
+assert.deepEqual(explicitDayRange.proposedCalls.map((item) => item.name), ['query_settlement_exports'])
 
 const searchDecision = normalizeAgentDirectorDecision({
   goal: '跨全站查找', domains: ['workspace_search'], operation: 'general',

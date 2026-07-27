@@ -267,7 +267,7 @@ export function AppOverlayLayer({
           task={detailTask}
           onClose={onCloseTaskDetail}
           onOpenAcceptance={onOpenTaskAcceptance}
-          canAccept={isAdmin}
+          canAccept={isAdmin || demoMode}
           onOpenEdit={onOpenTaskEditFromDetail}
           onOpenProgress={onOpenTaskProgressFromDetail}
         />

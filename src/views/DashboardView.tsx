@@ -31,7 +31,7 @@ export function DashboardView({
   donutData, dailyTrendData, annualData, currentMonthValue, selectedTask, taskContextInsights, onSelectTask, onOpenTaskContextMenu,
   dashboardContextMenu, onCloseTaskContextMenu, dashboardCreateMenu, onOpenTask, onOpenEditTask, onOpenAcceptance, onOpenProgress,
   onUpdateTask, onVoidTask, onRestoreTask, onDeleteTask, files, progressAssessments, onPreviewFile, onDeleteEntry,
-  onDeleteAcceptanceProgress, onAutoEstimateProgress, canWrite, canDelete,
+  onDeleteAcceptanceProgress, onAutoEstimateProgress, canWrite, canAccept, canDelete,
 }: {
   openDashboardCreateMenu: MouseEventHandler<HTMLDivElement>
   stats: DashboardStats
@@ -99,6 +99,7 @@ export function DashboardView({
   onDeleteAcceptanceProgress: (taskId: number, entryId?: string) => void
   onAutoEstimateProgress?: (task: Task) => void
   canWrite: boolean
+  canAccept: boolean
   canDelete: boolean
 }) {
   const DASHBOARD_PAGE_SIZE = dashboardPageSize
@@ -153,7 +154,7 @@ export function DashboardView({
           {canWrite && <div className="task-row-actions" aria-label="任务快捷操作">
             <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}><Pencil size={15} /></button>
             <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); onOpenProgress(task.id) }}><BarChart3 size={15} /></button>
-            {canDelete && <button type="button" className="icon-button" title={canAcceptTask ? '去验收' : '当前不是待验收'} aria-label={canAcceptTask ? '去验收' : '当前不是待验收'} disabled={!canAcceptTask} onClick={(event) => { event.stopPropagation(); onOpenAcceptance(task.id) }}><ClipboardCheck size={15} /></button>}
+            {canAccept && <button type="button" className="icon-button" title={canAcceptTask ? '去验收' : '当前不是待验收'} aria-label={canAcceptTask ? '去验收' : '当前不是待验收'} disabled={!canAcceptTask} onClick={(event) => { event.stopPropagation(); onOpenAcceptance(task.id) }}><ClipboardCheck size={15} /></button>}
           </div>}
         </div>
       </article>
@@ -357,6 +358,7 @@ export function DashboardView({
                     onRestoreTask={onRestoreTask}
                     onDeleteTask={onDeleteTask}
                     canWrite={canWrite}
+                    canAccept={canAccept}
                     canDelete={canDelete}
                   />
                 )}
@@ -454,6 +456,7 @@ export function DashboardView({
               onOpenAcceptance={onOpenAcceptance}
               onAutoEstimateProgress={onAutoEstimateProgress}
               canWrite={canWrite}
+              canAccept={canAccept}
               canDelete={canDelete}
             />
           )}

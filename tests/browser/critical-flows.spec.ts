@@ -36,13 +36,125 @@ async function login(page: Page) {
   })
 }
 
-test.beforeEach(async ({ page }) => {
+async function loginDemo(page: Page) {
+  const response = await page.request.post('/api/auth/login', {
+    data: { email: 'demo@mayeai.com', key: 'eval-admin-key' },
+  })
+  expect(response.ok()).toBeTruthy()
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'designer-worklog-auth',
+      JSON.stringify({ email: 'demo@mayeai.com', role: 'demo' }),
+    )
+  })
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: /2026 年 7 月工作台/ })).toBeVisible()
+}
+
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title.startsWith('demo ')) return
   await login(page)
   await page.goto('/dashboard')
   await expect(page.getByRole('heading', { name: /2026 年 7 月工作台/ })).toBeVisible()
 })
 
 test.describe('基础流程分片', () => {
+test('demo 账号可打开验收进展并完成 Excel 回单导出', async ({ page }) => {
+  await loginDemo(page)
+  const headers = { 'x-auth-email': 'demo@mayeai.com', 'x-auth-key': 'eval-admin-key' }
+  const createdResponse = await page.request.post('/api/tasks', {
+    headers,
+    data: {
+      id: 0, date: '2026-07-20 09:00', estimatedDate: '2026-07-27 18:00', settlementMonth: '2026-07',
+      type: '数据分析', title: '演示验收进展任务', requirement: '用于验证 demo 账号的验收与结算闭环。',
+      requester: '闻舟', contact: '陈望', reviewer: '江屿', stage: '计划中', estimatedHours: 8,
+      actualHours: 0, status: '计划中', progress: 0, billable: true, files: [],
+    },
+  })
+  expect(createdResponse.ok()).toBeTruthy()
+  const createdTask = await createdResponse.json() as { id: number }
+  const preparedResponse = await page.request.patch(`/api/tasks/${createdTask.id}`, {
+    headers,
+    data: {
+      status: '待验收', stage: '等待验收', progress: 92, actualHours: 2.25,
+      timeEntries: [{ id: 'demo-browser-acceptance', date: '2026-07-24', start: '14:00', end: '16:15', note: '已提交演示交付件', isAcceptanceProgress: true }],
+    },
+  })
+  expect(preparedResponse.ok()).toBeTruthy()
+  await page.reload()
+
+  await page.getByRole('button', { name: /已验收 1 个 展开/ }).click()
+  const taskRow = page.locator('.task-row', { hasText: '演示验收进展任务' })
+  await expect(taskRow).toBeVisible()
+  await taskRow.click()
+
+  const acceptanceEntry = page.locator('.dashboard-side-time-item', { hasText: '验收进展' }).first()
+  await expect(acceptanceEntry).toBeVisible()
+  await acceptanceEntry.getByRole('button', { name: '编辑' }).click()
+  const acceptanceDialog = page.getByRole('dialog').filter({ hasText: '编辑验收进展' })
+  await expect(acceptanceDialog.getByRole('heading', { name: '编辑验收进展' })).toBeVisible()
+  await acceptanceDialog.getByRole('button', { name: '关闭', exact: true }).click()
+
+  await page.getByRole('button', { name: '切换到结算', exact: true }).click()
+  await expect(page).toHaveURL(/\/reports$/)
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出范围 Excel' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('结算回单_20260701-20260727.xlsx')
+  await expect(page.getByText(/Excel 回单导出失败/)).toHaveCount(0)
+})
+
+test('demo Agent 会把整月导出请求转成可下载回单', async ({ page }) => {
+  await loginDemo(page)
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  const input = dialog.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('请导出七月份的任务回单总结。')
+  await input.press('Enter')
+  await expect(dialog.getByText('已核验结算回单').first()).toBeVisible({ timeout: 30_000 })
+  await expect(dialog.getByText(/日期范围：2026-07-01 至 2026-07-31/).first()).toBeVisible()
+  await expect(dialog.getByRole('link', { name: '下载' })).toBeVisible()
+  await expect(dialog.getByRole('link', { name: '在线预览' })).toBeVisible()
+})
+
+test('demo 只开放当前演示工作区的完整数据权限', async ({ page }) => {
+  await loginDemo(page)
+  const headers = { 'x-auth-email': 'demo@mayeai.com', 'x-auth-key': 'eval-admin-key' }
+  const createdTaskResponse = await page.request.post('/api/tasks', {
+    headers,
+    data: {
+      id: 0, date: '2026-07-21 09:00', estimatedDate: '2026-07-28 18:00', settlementMonth: '2026-07',
+      type: '产品经理', title: '演示权限边界任务', requirement: '验证 demo 工作区内的完整数据操作。',
+      requester: '林知夏', contact: '周序', reviewer: '顾言', stage: '计划中', estimatedHours: 4,
+      actualHours: 0, status: '计划中', progress: 0, billable: true, files: [],
+    },
+  })
+  expect(createdTaskResponse.status()).toBe(201)
+  const createdTask = await createdTaskResponse.json() as { id: number }
+  expect((await page.request.post(`/api/tasks/${createdTask.id}/void`, { headers, data: { reason: '演示权限回归' } })).ok()).toBeTruthy()
+  expect((await page.request.post(`/api/tasks/${createdTask.id}/restore`, { headers })).ok()).toBeTruthy()
+  await page.request.post(`/api/tasks/${createdTask.id}/void`, { headers, data: { reason: '演示清理' } })
+  expect((await page.request.delete(`/api/tasks/${createdTask.id}`, { headers })).ok()).toBeTruthy()
+
+  const exportResponse = await page.request.post('/api/settlement-exports', {
+    headers,
+    data: { startDate: '2026-07-01', endDate: '2026-07-31' },
+  })
+  expect(exportResponse.status()).toBe(201)
+  const createdExport = await exportResponse.json() as { record: { id: string } }
+  expect((await page.request.patch(`/api/settlement-exports/${createdExport.record.id}/access`, {
+    headers,
+    data: { expiresAt: '2099-07-31T23:59:59.000Z', disabled: false },
+  })).ok()).toBeTruthy()
+  expect((await page.request.patch(`/api/settlement-exports/${createdExport.record.id}/lock`, { headers, data: { locked: true } })).ok()).toBeTruthy()
+  expect((await page.request.delete(`/api/settlement-exports/${createdExport.record.id}`, { headers, data: { password: 'eval-admin-key' } })).ok()).toBeTruthy()
+
+  expect((await page.request.patch('/api/settings/hourly-rate', { headers, data: { hourlyRate: 1 } })).status()).toBe(403)
+  expect((await page.request.post('/api/tokens', { headers, data: { scope: 'admin' } })).status()).toBe(403)
+  expect((await page.request.put('/api/ai/active-model', { headers, data: { active: 'deepseek' } })).status()).toBe(403)
+  expect((await page.request.post('/api/workspaces', { headers, data: { name: '不应创建' } })).status()).toBe(403)
+})
+
 test('正式路由树处理重定向、未知地址与任务视图历史', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/dashboard$/)

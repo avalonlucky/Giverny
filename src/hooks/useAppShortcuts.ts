@@ -17,7 +17,7 @@ function shiftMonthValue(value: string, offset: number) {
 }
 
 export function useAppShortcuts({
-  navItems, activeView, canWrite, isAdmin, canUseAgent, canToggleIncomeVisibility,
+  navItems, activeView, canWrite, canAccept, isAdmin, canUseAgent, canToggleIncomeVisibility,
   selectedTask, taskItems, selectedTaskSource, navigateView, openCreateTask,
   handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleOpenTaskAcceptance,
   isModalOpen, detailTaskId, editTaskId, progressModalTarget, previewFile, confirmDialog,
@@ -28,6 +28,7 @@ export function useAppShortcuts({
   navItems: NavigationItem[]
   activeView: AppView
   canWrite: boolean
+  canAccept: boolean
   isAdmin: boolean
   canUseAgent: boolean
   canToggleIncomeVisibility: boolean
@@ -163,7 +164,7 @@ export function useAppShortcuts({
             detail: selectedTask.status === '待验收' ? selectedTask.title : `当前状态：${selectedTask.status}`,
             shortcut: 'A',
             keywords: '验收 交付',
-            disabled: !isAdmin || selectedTask.status !== '待验收',
+            disabled: !canAccept || selectedTask.status !== '待验收',
             run: () => handleOpenTaskAcceptance(selectedTask.id),
           },
         ]
@@ -287,7 +288,7 @@ export function useAppShortcuts({
         navigateView('设置')
         return
       }
-      if (key === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && selectedTask && isAdmin) {
+      if (key === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && selectedTask && canWrite) {
         event.preventDefault()
         handleOpenTaskProgress(selectedTask.id)
         return
@@ -323,16 +324,16 @@ export function useAppShortcuts({
       if (event.key === 'Enter') {
         event.preventDefault()
         handleOpenTaskDetail(selectedTask.id)
-      } else if (key === 'e' && isAdmin) {
+      } else if (key === 'e' && canWrite) {
         event.preventDefault()
         handleOpenTaskEdit(selectedTask.id)
-      } else if (key === 'p' && isAdmin) {
+      } else if (key === 'p' && canWrite) {
         event.preventDefault()
         handleOpenTaskProgress(selectedTask.id)
-      } else if (key === 'a' && isAdmin && selectedTask.status === '待验收') {
+      } else if (key === 'a' && canAccept && selectedTask.status === '待验收') {
         event.preventDefault()
         handleOpenTaskAcceptance(selectedTask.id)
-      } else if (key === 's' && isAdmin) {
+      } else if (key === 's' && canWrite) {
         event.preventDefault()
         openCommandPalette('状态')
       }

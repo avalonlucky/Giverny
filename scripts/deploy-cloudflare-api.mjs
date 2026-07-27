@@ -160,12 +160,16 @@ async function findCandidateAffinityKey(versionId, batches = 20, batchSize = 30)
   return ''
 }
 
-async function waitForCandidate(versionId, attempts = 7) {
+async function waitForCandidate(versionId, attempts = 25) {
   let latest
+  // Version uploads can take longer than the deployment record to become
+  // available at every edge. Keep the candidate at 0% and allow the version
+  // override enough time to observe the uploaded Worker and asset bundle.
+  await new Promise((resolve) => setTimeout(resolve, 5000))
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     latest = await probeCandidate(versionId)
     if (latest.decision.action === 'promote') return latest
-    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 3000))
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 5000))
   }
   const affinityKey = await findCandidateAffinityKey(versionId)
   if (affinityKey) latest = await probeCandidate(versionId, affinityKey)
@@ -215,8 +219,8 @@ async function deploy() {
   }
   process.stdout.write(`候选版本已上传：${candidateVersionId}；正在进行隔离冒烟验证…\n`)
   await createDeployment(token, [
-    { version_id: previousVersionId, percentage: 99 },
-    { version_id: candidateVersionId, percentage: 1 },
+    { version_id: previousVersionId, percentage: 100 },
+    { version_id: candidateVersionId, percentage: 0 },
   ], `v${releaseVersion} 候选验证`)
   try {
     const probe = await waitForCandidate(candidateVersionId)

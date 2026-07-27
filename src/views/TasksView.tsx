@@ -84,6 +84,7 @@ type TasksViewProps = {
   onCreateTask: () => void
   onAutoEstimateProgress?: (task: Task) => void
   canWrite: boolean
+  canAccept: boolean
   canDelete: boolean
   detailCollapsed: boolean
   onToggleDetail: () => void
@@ -128,6 +129,7 @@ export default function TasksView({
   rowThemeOn,
   onAutoEstimateProgress,
   canWrite,
+  canAccept,
   canDelete,
   detailCollapsed,
   onToggleDetail,
@@ -327,7 +329,7 @@ export default function TasksView({
                     <span className="task-row-due">{dueDateLabel}</span>
                     <button type="button" className="icon-button" title="编辑任务" aria-label="编辑任务" onClick={(event) => { event.stopPropagation(); onOpenEditTask(task.id) }}><Pencil size={15} /></button>
                     <button type="button" className="icon-button" title={canRecordProgress ? '记录进展' : task.status === '计划中' ? '改为进行中后可记录进展' : '已进入验收闭环，需先编辑或删除验收进展'} aria-label={canRecordProgress ? '记录进展' : '当前不可记录进展'} disabled={!canRecordProgress} onClick={(event) => { event.stopPropagation(); openProgress(task) }}><BarChart3 size={15} /></button>
-                    {canDelete && <button type="button" className="icon-button" title={canAcceptTask ? '去验收' : '当前不是待验收'} aria-label={canAcceptTask ? '去验收' : '当前不是待验收'} disabled={!canAcceptTask} onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}><ClipboardCheck size={15} /></button>}
+                    {canAccept && <button type="button" className="icon-button" title={canAcceptTask ? '去验收' : '当前不是待验收'} aria-label={canAcceptTask ? '去验收' : '当前不是待验收'} disabled={!canAcceptTask} onClick={(event) => { event.stopPropagation(); openAcceptance(task) }}><ClipboardCheck size={15} /></button>}
                   </div>}
                 </div>
               </article>
@@ -349,7 +351,7 @@ export default function TasksView({
           <div className="task-schedule-legend" aria-label="排期状态说明">
             <span><i className="imminent" />临期：今日 / 明日到期</span><span><i className="overdue" />逾期：超过交付日</span><span><i className="started" />进行中：距交付倒计时</span><span><i className="normal" />正常 / 已验收：灰显</span>
           </div>
-          {contextMenu && <TaskContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onOpenTask={onOpenTask} onOpenEditTask={onOpenEditTask} onOpenAcceptance={openAcceptance} onOpenProgress={openProgress} onUpdateTask={onUpdateTask} onVoidTask={onVoidTask} onRestoreTask={onRestoreTask} onDeleteTask={onDeleteTask} canWrite={canWrite} canDelete={canDelete} />}
+          {contextMenu && <TaskContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onOpenTask={onOpenTask} onOpenEditTask={onOpenEditTask} onOpenAcceptance={openAcceptance} onOpenProgress={openProgress} onUpdateTask={onUpdateTask} onVoidTask={onVoidTask} onRestoreTask={onRestoreTask} onDeleteTask={onDeleteTask} canWrite={canWrite} canAccept={canAccept} canDelete={canDelete} />}
           {canWrite && createMenu && <CreateTaskContextMenu menu={createMenu} onCreate={() => { setCreateMenu(null); onCreateTask() }} />}
         </div>
         {!detailCollapsed && <DashboardTaskSidebar
@@ -372,6 +374,7 @@ export default function TasksView({
           }}
           onAutoEstimateProgress={onAutoEstimateProgress}
           canWrite={canWrite}
+          canAccept={canAccept}
           canDelete={canDelete}
         />}
       </section>

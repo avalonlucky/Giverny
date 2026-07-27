@@ -11,6 +11,7 @@ import {
   AGENT_DIRECTOR_SYSTEM_PROMPT,
   agentDirectorTrace,
   applyAgentConversationFollowUpPolicy,
+  applyExplicitSettlementExportPolicy,
   directAgentOperationCatalog,
   groundDirectAgentCalls,
   normalizeAgentDirectorDecision,
@@ -418,6 +419,34 @@ function isDemoAgentRuntimePath(path: string, method: string): boolean {
     path.startsWith('/api/ai/enterprise-memories') ||
     (path.startsWith('/api/files/') && path.endsWith('/analysis/retry'))
   )
+}
+
+function isDemoWorkspaceWritablePath(path: string, method: string): boolean {
+  if (path.startsWith('/api/tasks/')) return ['PATCH', 'POST', 'DELETE'].includes(method)
+  if (path.startsWith('/api/updates/')) return ['PATCH', 'DELETE'].includes(method)
+  if (path.startsWith('/api/activity/')) return method === 'DELETE'
+  if (path.startsWith('/api/files')) return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+  if (path.startsWith('/api/settlement-exports')) return ['POST', 'PATCH', 'DELETE'].includes(method)
+  if (path === '/api/reports/monthly') return method === 'POST'
+  if (path.startsWith('/api/reports/') && (path.endsWith('/token') || method === 'DELETE')) return ['POST', 'DELETE'].includes(method)
+  return (path === '/api/tasks' || path === '/api/updates') && method === 'POST'
+}
+
+function isDemoWorkspaceAiPath(path: string, method: string): boolean {
+  if (isDemoAgentRuntimePath(path, method)) return true
+  if (method === 'GET') return path === '/api/ai/hour-estimate/metrics'
+  return method === 'POST' && [
+    '/api/ai/agent-plan',
+    '/api/ai/task-edits',
+    '/api/ai/task-title-edits',
+    '/api/ai/task-type-choices',
+    '/api/ai/text-edits',
+    '/api/ai/learning-events',
+    '/api/ai/hour-estimate/outcome-correction',
+    '/api/ai/hour-estimate/sample-feedback',
+    '/api/ai/hour-estimate/sample-quality',
+    '/api/ai/hour-estimate/quote-outcome',
+  ].includes(path)
 }
 
 type DbAccessToken = {
@@ -3297,7 +3326,11 @@ async function directAgentRequest(
         2600,
       )
       return groundDirectAgentCalls(
-        applyAgentConversationFollowUpPolicy(normalizeAgentDirectorDecision(rawDecision), graphRequest.question, graphRequest.history),
+        applyExplicitSettlementExportPolicy(
+          applyAgentConversationFollowUpPolicy(normalizeAgentDirectorDecision(rawDecision), graphRequest.question, graphRequest.history),
+          graphRequest.question,
+          graphRequest.currentMonth || '',
+        ),
         [graphRequest.question, ...graphRequest.history.map((item) => item.content)].join('\n'),
       )
     },
@@ -22699,14 +22732,14 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
       path === '/api/insights/history' ||
       path.endsWith('/analysis/retry')
     ) &&
-    role !== 'admin' && !(role === 'demo' && isDemoAgentRuntimePath(path, request.method))
+    role !== 'admin' && !(role === 'demo' && isDemoWorkspaceAiPath(path, request.method))
   ) {
     return fail('需要管理员权限', 403)
   }
   if (!isPublic && !isGet && role !== 'admin') {
     // 协作者可写非敏感接口（记进展/传附件/改任务/AI 助手）；其余角色一律只读。
     const collaboratorAllowed = role === 'collaborator' && isCollaboratorWritablePath(path, request.method)
-    const demoAllowed = role === 'demo' && (isCollaboratorWritablePath(path, request.method) || isDemoAgentRuntimePath(path, request.method))
+    const demoAllowed = role === 'demo' && (isCollaboratorWritablePath(path, request.method) || isDemoWorkspaceAiPath(path, request.method) || isDemoWorkspaceWritablePath(path, request.method))
     const localCliAllowed = path.startsWith('/api/local-cli/')
     if (!collaboratorAllowed && !demoAllowed && !localCliAllowed) {
       return fail('当前口令没有该操作权限（敏感操作仅管理员可用）', 403)

@@ -44,6 +44,7 @@ export function DashboardTaskSidebar({
   onOpenAcceptance,
   onAutoEstimateProgress,
   canWrite,
+  canAccept,
   canDelete,
 }: {
   task: Task | undefined
@@ -59,6 +60,7 @@ export function DashboardTaskSidebar({
   onOpenAcceptance: (taskId: number) => void
   onAutoEstimateProgress?: (task: Task) => void
   canWrite: boolean
+  canAccept: boolean
   canDelete: boolean
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'progress'>('progress')
@@ -232,7 +234,7 @@ export function DashboardTaskSidebar({
             </div>
           </dl>
           {canWrite && <div className="dashboard-side-info-actions">
-            {canDelete && canAcceptTask && (
+            {canAccept && canAcceptTask && (
               <button type="button" className="ghost-button compact-button" onClick={() => onOpenAcceptance(task.id)}>
                 去验收
               </button>

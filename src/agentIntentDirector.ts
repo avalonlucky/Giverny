@@ -254,3 +254,73 @@ export function applyAgentConversationFollowUpPolicy(
     ],
   }
 }
+
+function normalizeDirectedMonth(year: number, month: number) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return ''
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function directedMonthRange(month: string) {
+  const match = month.match(/^(\d{4})-(\d{2})$/)
+  if (!match) return null
+  const year = Number(match[1])
+  const monthNumber = Number(match[2])
+  const normalizedMonth = normalizeDirectedMonth(year, monthNumber)
+  if (!normalizedMonth) return null
+  const endDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
+  return { startDate: `${normalizedMonth}-01`, endDate: `${normalizedMonth}-${String(endDay).padStart(2, '0')}` }
+}
+
+function extractDirectedSettlementMonth(question: string, currentMonthValue: string) {
+  const currentMonth = /^\d{4}-\d{2}$/.test(currentMonthValue) ? currentMonthValue : ''
+  const currentYear = Number(currentMonth.slice(0, 4))
+  const chineseMonths: Record<string, number> = {
+    '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6,
+    '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12,
+  }
+  const explicit = question.match(/(\d{4})\s*年\s*(\d{1,2}|十[一二]?|[一二两三四五六七八九])\s*月(?:份)?/)
+  if (explicit) {
+    const monthNumber = Number(explicit[2]) || chineseMonths[explicit[2]] || 0
+    return normalizeDirectedMonth(Number(explicit[1]), monthNumber)
+  }
+  const short = question.match(/(?<!\d)(\d{1,2}|十[一二]?|[一二两三四五六七八九])\s*月(?:份)?/)
+  if (short && currentYear) {
+    const monthNumber = Number(short[1]) || chineseMonths[short[1]] || 0
+    return normalizeDirectedMonth(currentYear, monthNumber)
+  }
+  if (/\b(?:this month|current month)\b/i.test(question) || /本月|这个月|当前月/.test(question)) return currentMonth
+  return ''
+}
+
+export function applyExplicitSettlementExportPolicy(
+  decision: AgentDirectorDecision,
+  question: string,
+  currentMonth: string,
+): AgentDirectorDecision {
+  const compactQuestion = question.replace(/\s+/g, '')
+  const asksAboutHistory = /(?:查询|查看|有没有|是否|历史|记录|已导出|导出过)/.test(compactQuestion)
+  const asksHowToExport = /(?:怎么|如何|哪里|在哪|入口|howto)/i.test(compactQuestion)
+  const hasExplicitDayRange = /\d{1,2}月\d{1,2}(?:日|号).*(?:至|到|-|~).*(?:\d{1,2}月)?\d{1,2}(?:日|号)/.test(compactQuestion)
+  const requestsExport = /(?:导出|生成|下载|export|generate|download)/i.test(compactQuestion)
+  const targetsReceipt = /(?:结算|任务)?回单|(?:结算|任务)(?:总结|报表)|Excel/i.test(compactQuestion)
+  if (asksAboutHistory || asksHowToExport || hasExplicitDayRange || !requestsExport || !targetsReceipt) return decision
+  const month = extractDirectedSettlementMonth(question, currentMonth)
+  const range = directedMonthRange(month)
+  if (!range) return decision
+  return {
+    ...decision,
+    goal: `生成 ${month} 结算回单`,
+    domains: ['finance'],
+    operation: 'settlement_export',
+    requiresBusinessData: true,
+    requiresProductKnowledge: false,
+    isWrite: true,
+    missingInformation: [],
+    complexity: 'simple',
+    proposedCalls: [{
+      name: 'generate_settlement_receipt',
+      args: range,
+      reason: '用户明确要求导出整月回单，必须生成可下载、可预览的结算快照。',
+    }],
+  }
+}

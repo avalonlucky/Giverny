@@ -50,6 +50,7 @@ export function TaskContextMenu({
   onRestoreTask,
   onDeleteTask,
   canWrite,
+  canAccept,
   canDelete,
 }: {
   menu: { x: number; y: number; task: Task }
@@ -63,6 +64,7 @@ export function TaskContextMenu({
   onRestoreTask: (taskId: number) => void
   onDeleteTask: (taskId: number) => void
   canWrite: boolean
+  canAccept: boolean
   canDelete: boolean
 }) {
   const run = (action: () => void) => {
@@ -93,7 +95,7 @@ export function TaskContextMenu({
             <BarChart3 size={15} />
             记录进展
           </button>
-          {canDelete && <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
+          {canAccept && <button type="button" disabled={menu.task.status !== '待验收'} onClick={() => run(() => onOpenAcceptance(menu.task))}>
             <ClipboardCheck size={15} />
             {menu.task.status === '待验收' ? '去验收' : '去验收（非待验收）'}
           </button>}

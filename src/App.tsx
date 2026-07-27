@@ -123,6 +123,8 @@ function App() {
     handleDesignTypeGroupsChange, handleAiModelConfigChange,
   } = settingsOperations
   const isDemo = role === 'demo' && Boolean(auth)
+  const canAccept = isAdmin || isDemo
+  const canManageWorkspace = isAdmin || isDemo
   const canUseAgent = isAdmin || isDemo
   useEffect(() => {
     if (isLoaded && !auth && role === 'guest') setIsLoginModalOpen(true)
@@ -410,7 +412,7 @@ function App() {
     visibleNavItems, navShortcutHints, navAriaShortcutHints,
     commandActions, shortcutHelpGroups,
   } = useAppShortcuts({
-    navItems, activeView, canWrite, isAdmin, canUseAgent, canToggleIncomeVisibility,
+    navItems, activeView, canWrite, canAccept, isAdmin, canUseAgent, canToggleIncomeVisibility,
     selectedTask, taskItems, selectedTaskSource, navigateView, openCreateTask,
     handleOpenTaskDetail, handleOpenTaskEdit, handleOpenTaskProgress, handleOpenTaskAcceptance,
     isModalOpen, detailTaskId, editTaskId, progressModalTarget, previewFile, confirmDialog,
@@ -591,17 +593,18 @@ function App() {
             onOpenAcceptance={handleOpenTaskAcceptance}
             onOpenProgress={handleOpenTaskProgress}
             onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-            onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
-            onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
-            onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
+            onVoidTask={canManageWorkspace ? handleVoidTask : readOnlyUpdateTask}
+            onRestoreTask={canManageWorkspace ? handleRestoreTask : readOnlyUpdateTask}
+            onDeleteTask={canManageWorkspace ? handleDeleteTask : readOnlyUpdateTask}
             files={fileItems}
             progressAssessments={progressAssessments}
             onPreviewFile={setPreviewFile}
-            onDeleteEntry={isAdmin ? handleDeleteTaskTimeEntry : () => requireAdmin()}
-            onDeleteAcceptanceProgress={isAdmin ? handleDeleteAcceptanceProgress : () => requireAdmin()}
+            onDeleteEntry={canManageWorkspace ? handleDeleteTaskTimeEntry : () => requireAdmin()}
+            onDeleteAcceptanceProgress={canManageWorkspace ? handleDeleteAcceptanceProgress : () => requireAdmin()}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
             canWrite={canWrite}
-            canDelete={isAdmin}
+            canAccept={canAccept}
+            canDelete={canManageWorkspace}
           />
         )}
 
@@ -631,11 +634,11 @@ function App() {
             onShowVoidedChange={setShowVoidedTasks}
             onSelectTask={setSelectedTaskId}
             onUpdateTask={canWrite ? handleUpdateTask : readOnlyUpdateTask}
-            onVoidTask={isAdmin ? handleVoidTask : readOnlyUpdateTask}
-            onRestoreTask={isAdmin ? handleRestoreTask : readOnlyUpdateTask}
-            onDeleteTask={isAdmin ? handleDeleteTask : readOnlyUpdateTask}
-            onDeleteEntry={isAdmin ? handleDeleteTaskTimeEntry : () => requireAdmin()}
-            onDeleteAcceptanceProgress={isAdmin ? handleDeleteAcceptanceProgress : () => requireAdmin()}
+            onVoidTask={canManageWorkspace ? handleVoidTask : readOnlyUpdateTask}
+            onRestoreTask={canManageWorkspace ? handleRestoreTask : readOnlyUpdateTask}
+            onDeleteTask={canManageWorkspace ? handleDeleteTask : readOnlyUpdateTask}
+            onDeleteEntry={canManageWorkspace ? handleDeleteTaskTimeEntry : () => requireAdmin()}
+            onDeleteAcceptanceProgress={canManageWorkspace ? handleDeleteAcceptanceProgress : () => requireAdmin()}
             onOpenTask={handleOpenTaskDetail}
             onOpenEditTask={handleOpenTaskEdit}
             files={fileItems}
@@ -646,7 +649,8 @@ function App() {
             rowThemeOn={rowThemeOn}
             onAutoEstimateProgress={canWrite ? handleAutoEstimateProgress : undefined}
             canWrite={canWrite}
-            canDelete={isAdmin}
+            canAccept={canAccept}
+            canDelete={canManageWorkspace}
             detailCollapsed={isTaskDetailCollapsed}
             onToggleDetail={toggleTaskDetail}
             renderProgressModal={(target, onClose) => (
@@ -662,8 +666,8 @@ function App() {
                 onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
                 onPreviewFile={setPreviewFile}
                 onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
-                onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-                onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+                onDeleteFile={canManageWorkspace ? handleDeleteFile : () => requireAdmin()}
+                onConfirmAcceptance={canAccept ? handleConfirmTaskAcceptance : undefined}
                 onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : readOnlyUploadFile}
                 onNotify={notify}
                 initialAcceptanceMode={target.initialAcceptanceMode}
@@ -684,12 +688,12 @@ function App() {
               focusFileId={fileLibraryFocusId}
               onFocusHandled={() => setFileLibraryFocusId(0)}
               onPreviewFile={setPreviewFile}
-              onDeleteFile={isAdmin ? handleDeleteFile : readOnlyUpdateTask}
+              onDeleteFile={canManageWorkspace ? handleDeleteFile : readOnlyUpdateTask}
               onDownloadFile={handleDownloadFile}
               onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
               onRetryAnalysis={handleRetryAttachmentAnalysis}
               canWrite={canWrite}
-              canDelete={isAdmin}
+              canDelete={canManageWorkspace}
             />
           </Suspense>
         )}
@@ -875,8 +879,8 @@ function App() {
         onUploadImage={canWrite ? handleQuickUploadImage : readOnlyUploadImage}
         onPreviewFile={setPreviewFile}
         onUpdateFile={canWrite ? handleUpdateFile : async () => { requireAdmin(); throw new Error('需要管理员权限') }}
-        onDeleteFile={isAdmin ? handleDeleteFile : () => requireAdmin()}
-        onConfirmAcceptance={isAdmin ? handleConfirmTaskAcceptance : undefined}
+        onDeleteFile={canManageWorkspace ? handleDeleteFile : () => requireAdmin()}
+        onConfirmAcceptance={canAccept ? handleConfirmTaskAcceptance : undefined}
         onUploadAcceptanceFile={canWrite ? handleAcceptanceFileUpload : undefined}
         hourlyRate={hourlyRate}
         confirmDialog={confirmDialog}

@@ -62,6 +62,7 @@ export function useTaskOperations({
     role, taskItems, setTaskItems, taskItemsRef, setUpdateItems, fileItems, setFileItems,
     setBackendStatus, refreshState,
   } = workspace
+  const canAccept = isAdmin || role === 'demo'
   const {
     progressAssessments, setProgressAssessments, voidTaskTarget, setVoidTaskTarget,
     isVoidTaskBusy, setIsVoidTaskBusy, showFireworks, setShowFireworks,
@@ -370,7 +371,7 @@ export function useTaskOperations({
   }
 
   const handleOpenTaskAcceptance = (taskId: number) => {
-    if (!isAdmin) {
+    if (!canAccept) {
       requireAdmin()
       return
     }
@@ -392,7 +393,7 @@ export function useTaskOperations({
     task: Task,
     payload: AcceptancePayload,
   ) => {
-    if (isAdmin) {
+    if (canAccept) {
       const saved = await handleUpdateTask(task.id, {
         ...payload.taskChanges,
         status: '已验收',
@@ -508,7 +509,7 @@ export function useTaskOperations({
   const autoEstimateSigRef = useRef<Map<number, string>>(new Map())
   const aiProgressWriteRef = useRef<Set<number>>(new Set())
   const handleAutoEstimateProgress = async (task: Task) => {
-    if (!isAdmin) {
+    if (!isAdmin && role !== 'demo') {
       return
     }
     if (['已验收', '终止', '挂起', '不计费'].includes(task.status)) {
