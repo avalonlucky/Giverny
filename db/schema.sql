@@ -661,6 +661,7 @@ CREATE INDEX IF NOT EXISTS idx_insights_history_trigger ON insights_history(trig
 
 CREATE TABLE IF NOT EXISTS hour_estimate_suggestions (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
   input_fingerprint TEXT NOT NULL,
   task_id TEXT,
   title TEXT,
@@ -684,6 +685,7 @@ CREATE TABLE IF NOT EXISTS hour_estimate_suggestions (
 
 CREATE INDEX IF NOT EXISTS idx_hour_estimate_task ON hour_estimate_suggestions(task_id, requested_at);
 CREATE INDEX IF NOT EXISTS idx_hour_estimate_type ON hour_estimate_suggestions(design_type, requested_at);
+CREATE INDEX IF NOT EXISTS idx_hour_estimate_workspace_type ON hour_estimate_suggestions(workspace_id, design_type, requested_at);
 
 CREATE TABLE IF NOT EXISTS task_requirement_edits (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
