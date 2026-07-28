@@ -1,6 +1,6 @@
 import { Agent, type AgentContext } from 'agents'
 import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentReadToolRegistry, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName, type AgentReadToolName } from './agentToolRegistry'
-import { agentDirectorTrace, type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
+import { agentDirectorReasoningChain, type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
 import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
 import { runAgentProductivityGraph, type AgentProductivityCall } from './agentProductivityGraph'
 import { buildAgentFactSnapshot, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
@@ -1129,8 +1129,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       })),
     }
     let answer = cleanAnswer(request.orchestration.directAnswer || '') || (calls.length ? '已完成必要的业务处理。' : '请再具体说明你希望我处理的事情。')
-    const openingTrace = agentDirectorTrace(request.orchestration.decision)
-    const trace: AliceAgentTraceItem[] = [{ type: 'plan', ...openingTrace }]
+    const reasoningChain = agentDirectorReasoningChain(request.orchestration.decision)
+    const trace: AliceAgentTraceItem[] = reasoningChain.map((step) => ({ type: 'plan' as const, ...step }))
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
     let uploadHandoff: AgentUploadHandoff | undefined

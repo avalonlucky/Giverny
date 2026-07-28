@@ -1708,7 +1708,7 @@ async function runLocalCliBridgeCheck(cookie) {
     || !productHelpText.includes('Command + Shift + M')
     || !productHelpText.includes('search_product_help')
     || !productHelpText.includes('找到官方产品依据')
-    || !productHelpText.includes('思考')
+    || (!productHelpText.includes('思考') && !productHelpText.includes('理解'))
     || !productHelpText.includes('动作')
     || productHelpText.includes('不经过本机 CLI')
     || productHelpText.includes('执行编排路径')
@@ -1739,7 +1739,7 @@ async function runLocalCliBridgeCheck(cookie) {
     const responseText = await response.text()
     if (!response.ok
       || !responseText.includes('search_product_help')
-      || !responseText.includes('思考')
+      || (!responseText.includes('思考') && !responseText.includes('理解'))
       || !responseText.includes('动作')
       || !responseText.includes('找到官方产品依据')
       || item.expected.some((value) => !responseText.includes(value))
@@ -1800,7 +1800,7 @@ async function runLocalCliBridgeCheck(cookie) {
   if (!blockerResponse.ok
     || !/等待\s*\*{0,2}刘总的建议/.test(blockerText)
     || !blockerText.includes('get_task_detail')
-    || !blockerText.includes('思考')
+    || (!blockerText.includes('思考') && !blockerText.includes('理解'))
     || !blockerText.includes('动作')
     || blockerText.includes('快捷键')
     || blockerText.includes('⌘ ⌥ 2')) {

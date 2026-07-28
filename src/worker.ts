@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig, type AgentCapabilityName } from './agentToolRegistry'
 import {
   AGENT_DIRECTOR_SYSTEM_PROMPT,
-  agentDirectorTrace,
+  agentDirectorReasoningChain,
   applyAgentConversationFollowUpPolicy,
   applyExplicitSettlementExportPolicy,
   directAgentOperationCatalog,
@@ -3429,8 +3429,8 @@ async function callAgentRuntime(
         principal: args.principal,
         history: conversationHistory,
       })
-      const openingTrace = agentDirectorTrace(orchestration.decision)
-      await args.onTrace?.(openingTrace.detail ? [`${openingTrace.label}：${openingTrace.detail}`] : [openingTrace.label])
+      const reasoningChain = agentDirectorReasoningChain(orchestration.decision)
+      await args.onTrace?.(reasoningChain.map((step) => `${step.label}：${step.detail}`))
       const actionTrace = orchestration.calls.map((call) => ({
         type: 'tool',
         label: '动作',
@@ -3479,7 +3479,7 @@ async function callAgentRuntime(
         }
       }
       const trace = [
-        { type: 'plan', ...agentDirectorTrace(orchestration.decision) },
+        ...agentDirectorReasoningChain(orchestration.decision).map((step) => ({ type: 'plan' as const, ...step })),
         ...actionTrace,
         ...(orchestration.denied.length ? [{ type: 'error', label: '结果', detail: '有不符合权限或当前目标的操作已被拦截。' }] : []),
         ...agentVisibleResultTrace(result.trace.slice(1)),

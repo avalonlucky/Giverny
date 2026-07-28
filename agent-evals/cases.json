@@ -70,7 +70,7 @@
     { "id": "create-06", "category": "create_preview", "prompt": "我要加个任务，名字叫季度报告长图，验收人王老师", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-07", "category": "create_preview", "prompt": "安排下周一做三张社媒海报，预估4.5小时", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
     { "id": "create-08", "category": "create_preview", "prompt": "新建品牌规范更新，具体需求暂时还没定", "expect": { "tools": ["create_task_preview"], "approval": "create_task" } },
-    { "id": "create-09", "category": "create_preview", "prompt": "你帮我新建一个任务", "expect": { "tools": ["create_task_preview"], "forbiddenTools": ["search_product_help", "search_workspace"], "traceContains": ["思考", "草稿信息不完整"], "forbiddenTrace": ["快捷键：", "产品手册", "更新日志", "执行编排路径", "结构化事实协议"], "maxModelCalls": 1, "noIrrelevantRetrieval": true, "noApproval": true } },
+    { "id": "create-09", "category": "create_preview", "prompt": "你帮我新建一个任务", "expect": { "tools": ["create_task_preview"], "forbiddenTools": ["search_product_help", "search_workspace"], "traceContains": ["理解", "草稿信息不完整"], "forbiddenTrace": ["快捷键：", "产品手册", "更新日志", "执行编排路径", "结构化事实协议"], "maxModelCalls": 1, "noIrrelevantRetrieval": true, "noApproval": true } },
 
     { "id": "feedback-01", "category": "write_preview", "prompt": "给公司产品封套修改记录反馈：甲方要求封面颜色加深", "expect": { "tools": ["record_feedback_preview"], "approval": "record_feedback" } },
     { "id": "feedback-02", "category": "write_preview", "prompt": "记录任务#1的第二轮反馈：字号再放大一点", "expect": { "tools": ["record_feedback_preview"], "approval": "record_feedback" } },
