@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
 const failures = []
-const runtime = readFileSync('src/aliceAgent.ts', 'utf8')
+const runtime = readFileSync('src/aliceAgent.ts', 'utf8') + readFileSync('src/agentToolClient.ts', 'utf8')
 const orchestrator = readFileSync('src/agentOrchestrator.ts', 'utf8')
 const resolver = readFileSync('src/agentEntityResolver.ts', 'utf8')
 const tests = readFileSync('scripts/test-agent-orchestrator.mjs', 'utf8')
@@ -11,7 +11,7 @@ const suite = JSON.parse(readFileSync('agent-evals/cases.json', 'utf8'))
 for (const marker of ['decideAgentReplan', 'repairToolInput(', 'executeRepairTool(', 'scopedQuestionForAgentTool', '验真后动态补查', '结构化事实协议生成答案', '拆解 ${verifiedIntents.length} 个目标']) {
   if (!runtime.includes(marker)) failures.push(`AliceAgent 缺少动态重规划契约：${marker}`)
 }
-for (const marker of ['inferAgentIntent', 'inferAgentIntents', 'detectedIntents', 'hasDeterministicTool', "hasIntent('attachment')", "hasIntent('task_data')", 'confirmationRequiredPlan', 'hasUnpreviewedWrite', 'successfulTools']) {
+for (const marker of ['inferAgentIntents', 'detectedIntents', 'hasDeterministicTool', "includes('attachment')", "includes('task_data')", 'confirmationRequiredPlan', 'hasUnpreviewedWrite', 'successfulTools', 'verificationRules']) {
   if (!orchestrator.includes(marker)) failures.push(`Agent 验真器缺少契约：${marker}`)
 }
 for (const marker of ['missingFinance', 'missingProduct', 'missingPortfolio', 'missingAttachment', 'uncertainFinance', 'repairedTask', 'exhaustedTurn', 'compoundTurn', 'partiallyVerifiedCompound', 'verifiedWritePreview', 'requesterNameFromQuestion', 'taskTitleFromQuestion', 'splitAgentGoalClauses', 'scopedQuestionForAgentTool']) {

@@ -17,7 +17,7 @@ for (const symbol of ['queryEnterpriseMemories', 'mutateEnterpriseMemory', 'agen
 assert.match(registry, /query_enterprise_memory/)
 assert.match(registry, /manage_enterprise_memory_preview/)
 assert.match(director, /enterprise_memory: \['query_enterprise_memory', 'manage_enterprise_memory_preview'\]/)
-assert.match(orchestrator, /asksEnterpriseMemory/)
+assert.match(orchestrator, /query_enterprise_memory/)
 assert.match(component, /来源说明/)
 assert.match(component, /显示已纠正、失效和删除记录/)
 assert.match(component, /保存纠正/)

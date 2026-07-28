@@ -1,0 +1,16 @@
+{
+  "name": "giverny-product-promo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.7.76 preview",
+    "check": "npx --yes hyperframes@0.7.76 check",
+    "locale:en": "node scripts/set-locale.mjs en",
+    "locale:zh": "node scripts/set-locale.mjs zh-CN",
+    "locale:ja": "node scripts/set-locale.mjs ja",
+    "render": "npx --yes hyperframes@0.7.76 render --workers 1",
+    "render:draft": "npx --yes hyperframes@0.7.76 render --quality draft --workers 1 --output renders/giverny-promo-draft.mp4",
+    "render:final": "npx --yes hyperframes@0.7.76 render --quality high --fps 30 --workers 1 --output renders/giverny-product-promo.mp4",
+    "publish": "npx --yes hyperframes@0.7.76 publish"
+  }
+}

@@ -5807,7 +5807,7 @@ const agentToolCorsHeaders = {
   ...jsonHeaders,
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'authorization, content-type, x-agent-token, x-agent-workspace-id, x-agent-principal-id, x-agent-role, x-agent-run-id, x-agent-scope-signature',
+  'access-control-allow-headers': 'authorization, content-type, x-agent-token, x-agent-workspace-id, x-agent-principal-id, x-agent-role, x-agent-run-id, x-agent-scope-timestamp, x-agent-scope-signature',
 }
 
 const agentOk = (data: unknown, status = 200) => Response.json(data, { status, headers: agentToolCorsHeaders })

@@ -1,26 +1,26 @@
 import { Agent, type AgentContext } from 'agents'
-import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentReadToolRegistry, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName, type AgentReadToolName } from './agentToolRegistry'
+import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName } from './agentToolRegistry'
 import { agentDirectorReasoningChain, type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
-import { requesterNameFromQuestion, scopedQuestionForAgentTool, taskTitleFromQuestion } from './agentEntityResolver'
 import { runAgentProductivityGraph, type AgentProductivityCall } from './agentProductivityGraph'
 import { buildAgentFactSnapshot, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
-import { completeAgentTurn, createAgentTurn, decideAgentReplan, inferAgentIntent, inferAgentIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentIntent, type AgentPlannedToolCall } from './agentOrchestrator'
-import { createAgentScopeHeaders, normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
+import { completeAgentTurn, createAgentTurn, decideAgentReplan, directorDecisionToIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
+import { normalizeAgentPrincipalContext, type AgentPrincipalContext } from './agentScope'
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection, AgentUploadHandoff } from './types/agent'
+import { cleanAnswer, isAgentReadToolName, normalizedDecision, parseJsonObject, toJsonObject } from './agentUtils'
+import { callAgentTool, executeRepairTool, repairToolInput, type AgentToolClientConfig, type AgentToolResponse } from './agentToolClient'
+import { buildApprovalResult, buildExecutionSummary, CONFIRM_RE, REJECT_RE, isPendingActionExpired, pollWorkflowWithBackoff, type PendingActionSummary, type StoredPendingAction } from './agentApprovalFlow'
+import { detectTaskEvidenceMismatch, extractResultAttachments, extractTaskReference, extractTaskReferences, extractTaskSelection, isTaskScopedTool, referencesCurrentTask, resolveTaskInput, type TaskReference } from './agentTaskContext'
+
+/** 类型安全的能力注册表查找——消除重复的 as AgentCapabilityName 断言 */
+function lookupCapability(name: string): AgentCapabilityDefinition | undefined {
+  return agentCapabilityRegistry[name as AgentCapabilityName]
+}
 
 type AliceAgentEnv = Record<string, unknown> & {
   AGENT_TOOL_TOKEN?: string
   GIVERNY_API_BASE_URL?: string
   AGENT_WRITE_WORKFLOW?: unknown
-}
-
-type PendingActionSummary = {
-  action: string
-  label: string
-  draft: Record<string, unknown>
-  warnings: string[]
-  createdAt: number
 }
 
 type AliceAgentState = {
@@ -30,33 +30,12 @@ type AliceAgentState = {
   taskReference: TaskReference | null
 }
 
-type TaskReference = {
-  id: number
-  title: string
-  updatedAt: number
-}
-
 type StoredMessage = {
   id?: string
   role: 'user' | 'assistant'
   content: string
   metadata_json?: string
   created_at?: number
-}
-
-type StoredPendingAction = PendingActionSummary & {
-  endpoint: string
-  confirmationToken: string
-  workflowId: string
-  workflowApproved: boolean
-}
-
-type AgentToolResponse = Record<string, unknown> & {
-  mode?: string
-  ready?: boolean
-  draft?: Record<string, unknown>
-  confirmationToken?: string
-  error?: string
 }
 
 export type AliceAgentChatRequest = {
@@ -113,38 +92,16 @@ export type AliceAgentChatResult = {
   }
 }
 
+
+
+
+
+
+
+
+
 function agentToolTraceLabel(toolName: string, phase: 'running' | 'completed') {
   return `${agentCapabilityTraceLabel(toolName, phase)} [tool:${toolName}]`
-}
-
-const CONFIRM_RE = /^(?:好的?|没问题)?(?:确认(?:执行|创建|记录|修改)?|执行吧|可以(?:执行|创建|记录|修改)|同意(?:执行|创建|记录|修改)|就这样(?:执行|创建|记录)?)$/
-const REJECT_RE = /^(?:好的?)?(?:取消|不要(?:执行|创建|记录|修改)?|撤销|拒绝|先不(?:执行|创建|记录|修改)?)$/
-
-function cleanBaseUrl(value: string | undefined, fallback: string) {
-  return String(value || fallback).trim().replace(/\/+$/, '')
-}
-
-function cleanAnswer(value: string) {
-  return value
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<\/?think>/gi, '')
-    .trim()
-}
-
-function normalizedDecision(value: string) {
-  return value.replace(/[。！!，,、；;：:\s]/g, '').slice(0, 40)
-}
-
-function isAgentReadToolName(value: string): value is AgentReadToolName {
-  return Object.hasOwn(agentReadToolRegistry, value)
-}
-
-function toJsonObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-function parseJsonObject(value: string) {
-  try { return toJsonObject(JSON.parse(value || '{}')) } catch { return {} }
 }
 
 export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
@@ -386,31 +343,12 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     this.setState({ ...this.state, pendingAction: null })
   }
 
-  private async callTool(endpoint: string, input: Record<string, unknown>, method: 'GET' | 'POST' = 'POST') {
-    const baseUrl = cleanBaseUrl(this.aliceEnv.GIVERNY_API_BASE_URL, 'https://mayeai.com')
-    const headers: Record<string, string> = { 'content-type': 'application/json' }
-    const token = String(this.aliceEnv.AGENT_TOOL_TOKEN || '').trim()
-    if (!token) throw new Error('AGENT_TOOL_TOKEN 未配置，Agent 无法访问业务工具。')
-    headers.authorization = `Bearer ${token}`
-    Object.assign(headers, await createAgentScopeHeaders(token, this.activePrincipal))
+  private get toolClientConfig(): AgentToolClientConfig {
+    return { baseUrl: this.aliceEnv.GIVERNY_API_BASE_URL, token: this.aliceEnv.AGENT_TOOL_TOKEN, principal: this.activePrincipal }
+  }
 
-    const url = new URL(`${baseUrl}/api/agent/tools/${endpoint}`)
-    if (method === 'GET') {
-      Object.entries(input).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
-      })
-    }
-    const response = await fetch(url, {
-      method,
-      headers,
-      ...(method === 'POST' ? { body: JSON.stringify(input) } : {}),
-    })
-    const data = (await response.json().catch(() => null)) as AgentToolResponse | null
-    if (!response.ok || !data) {
-      throw new Error(data?.error || `工具 ${endpoint} 调用失败：HTTP ${response.status}`)
-    }
-    if (data.error) throw new Error(data.error)
-    return data
+  private async callTool(endpoint: string, input: Record<string, unknown>, method: 'GET' | 'POST' = 'POST') {
+    return callAgentTool(this.toolClientConfig, endpoint, input, method)
   }
 
   private async previewTool(action: string, endpoint: string, input: Record<string, unknown>) {
@@ -461,46 +399,15 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private approvalResult(pending: StoredPendingAction, status: AgentApprovalStatus, error?: string): AgentApproval {
-    return {
-      id: `${pending.action}:${pending.createdAt}`,
-      action: pending.action,
-      label: pending.label,
-      draft: pending.draft,
-      warnings: pending.warnings,
-      status,
-      createdAt: pending.createdAt,
-      expiresAt: pending.createdAt + 10 * 60 * 1000,
-      ...(error ? { error } : {}),
-    }
+    return buildApprovalResult(pending, status, error)
   }
 
   private taskSelection(value: unknown): AgentTaskSelection | undefined {
-    const record = toJsonObject(value)
-    const rawSelection = toJsonObject(record.selection)
-    const candidates = Array.isArray(rawSelection.candidates)
-      ? rawSelection.candidates.map((item) => toJsonObject(item)).map((item) => ({
-          id: Number(item.id) || 0,
-          title: String(item.title || ''),
-          type: String(item.type || ''),
-          status: String(item.status || ''),
-          startDate: String(item.startDate || ''),
-          settlementMonth: String(item.settlementMonth || ''),
-        })).filter((item) => item.id > 0 && item.title)
-      : []
-    if (record.needsDisambiguation !== true || candidates.length < 2) return undefined
-    return {
-      id: String(rawSelection.id || `task-selection:${Date.now()}`),
-      kind: 'task',
-      prompt: String(rawSelection.prompt || '请选择要操作的任务。'),
-      candidates,
-    }
+    return extractTaskSelection(value)
   }
 
   private selectedTaskReference(message: string): TaskReference | null {
-    const match = message.match(/(?:选择)?任务\s*#(\d+)(?:[：:]\s*(.+))?/)
-    const id = Number(match?.[1])
-    if (!Number.isInteger(id) || id <= 0) return null
-    return { id, title: String(match?.[2] || this.state.taskReference?.title || `任务 #${id}`).trim(), updatedAt: Date.now() }
+    return extractTaskReference(message)
   }
 
   private setTaskReference(reference: TaskReference | null) {
@@ -508,164 +415,32 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     this.setState({ ...this.state, taskReference: reference })
   }
 
-  private referencesCurrentTask(message: string) {
-    return /(?:这个|那个|刚才|上述|前面|当前|该|它|继续|这项|那项)(?:任务|项目|工作|进展|反馈|等待|验收)?/.test(message)
-  }
-
   private withTaskReference(input: Record<string, unknown>, message: string) {
-    const taskId = Number(input.taskId)
-    const reference = this.activeTaskReference || this.state.taskReference
-    const hasExplicitReference = /(?:选择)?任务\s*#\d+/.test(message)
-    if (reference && (hasExplicitReference || this.referencesCurrentTask(message))) {
-      return { ...input, taskId: reference.id, taskTitle: reference.title }
-    }
-    if (Number.isInteger(taskId) && taskId > 0) return input
-    return reference ? { ...input, taskId: reference.id, taskTitle: reference.title } : input
+    return resolveTaskInput(input, message, this.activeTaskReference || this.state.taskReference)
   }
 
   private taskReferencesFromResult(value: unknown) {
-    const record = toJsonObject(value)
-    const candidates: TaskReference[] = []
-    const append = (item: unknown) => {
-      const candidate = toJsonObject(item)
-      const id = Number(candidate.taskId ?? candidate.id)
-      const title = String(candidate.title ?? candidate.taskTitle ?? candidate.task ?? '').trim()
-      if (Number.isInteger(id) && id > 0 && title) candidates.push({ id, title, updatedAt: Date.now() })
-    }
-    append(record.task)
-    append(record.draft)
-    append(record.memory)
-    append(record.plan)
-    for (const key of ['results', 'tasks', 'files']) {
-      const items = Array.isArray(record[key]) ? record[key] as unknown[] : []
-      items.forEach((item) => {
-        const nested = toJsonObject(item)
-        append(nested.task && typeof nested.task === 'object' ? nested.task : nested)
-      })
-    }
-    const unique = [...new Map(candidates.map((item) => [item.id, item])).values()]
-    return unique
-  }
-
-  private taskIdsFromResult(value: unknown) {
-    const record = toJsonObject(value)
-    const ids: number[] = []
-    const append = (item: unknown) => {
-      const candidate = toJsonObject(item)
-      const id = Number(candidate.taskId ?? candidate.id)
-      if (Number.isInteger(id) && id > 0) ids.push(id)
-    }
-    append(record.task)
-    append(record.draft)
-    append(record.memory)
-    append(record.plan)
-    for (const key of ['results', 'tasks', 'files']) {
-      const items = Array.isArray(record[key]) ? record[key] as unknown[] : []
-      items.forEach((item) => {
-        const nested = toJsonObject(item)
-        append(nested.task && typeof nested.task === 'object' ? nested.task : nested)
-      })
-    }
-    return [...new Set(ids)]
+    return extractTaskReferences(value)
   }
 
   private taskEvidenceMismatch(toolName: string, input: Record<string, unknown>, output: unknown) {
-    const expectedTaskId = Number(input.taskId)
-    const returnedIds = this.taskIdsFromResult(output)
-    if (Number.isInteger(expectedTaskId) && expectedTaskId > 0) {
-      if (this.isTaskScopedTool(toolName) && returnedIds.length === 0) return `工具 ${toolName} 未返回可核对的 taskId`
-      if (returnedIds.length > 0 && !returnedIds.includes(expectedTaskId)) {
-        return `工具请求任务 #${expectedTaskId}，但返回了 ${returnedIds.map((id) => `#${id}`).join('、')}`
-      }
-    }
-    const record = toJsonObject(output)
-    const task = toJsonObject(record.task)
-    const waitingRecords = Array.isArray(record.waitingRecords) ? record.waitingRecords.map(toJsonObject) : []
-    const activeWaiting = waitingRecords.filter((item) => item.active === true)
-    if (['已验收', '终止', '不计费'].includes(String(task.status || '')) && activeWaiting.length > 0) {
-      return `任务 #${Number(task.id) || expectedTaskId} 已关闭，但工具仍返回活动等待记录`
-    }
-    if (activeWaiting.some((item) => !String(item.note || item.reason || '').trim() || !String(item.startAt || '').trim())) {
-      return `任务 #${Number(task.id) || expectedTaskId} 的活动等待记录缺少原因或开始时间`
-    }
-    return ''
+    return detectTaskEvidenceMismatch(toolName, input, output)
   }
 
   private isTaskScopedTool(toolName: string) {
-    return Boolean((agentCapabilityRegistry[toolName as AgentCapabilityName] as AgentCapabilityDefinition | undefined)?.taskScoped)
+    return isTaskScopedTool(toolName)
   }
 
-  private repairToolInput(toolName: AgentReadToolName, message: string, currentMonth?: string): Record<string, unknown> | null {
-    const scopedQuestion = scopedQuestionForAgentTool(message, toolName)
-    if (toolName === 'query_month_finance') return { question: scopedQuestion, currentMonth }
-    if (toolName === 'search_product_help') return { query: scopedQuestion, limit: 5 }
-    if (toolName === 'search_workspace') return { query: scopedQuestion, month: currentMonth, limit: 20 }
-    if (toolName === 'audit_workspace_consistency') return { trigger: 'manual', includeR2: true, limit: 200 }
-    if (toolName === 'query_formal_deliverables') return { limit: 20 }
-    if (toolName === 'query_high_risk_actions') return { status: 'all', limit: 30 }
-    if (toolName === 'get_requester_profile') {
-      const name = requesterNameFromQuestion(message)
-      return name ? { name } : null
-    }
-    if (toolName === 'query_task_portfolio') {
-      const scope = /(?:逾期|延期|过期)/.test(scopedQuestion)
-        ? 'overdue'
-        : /等待/.test(scopedQuestion)
-          ? 'waiting'
-          : /(?:未完成|没完成|没闭环)/.test(scopedQuestion)
-            ? 'unfinished'
-            : /(?:已验收|验收了)/.test(scopedQuestion)
-              ? 'accepted'
-              : 'all'
-      return { scope, month: currentMonth, limit: 100 }
-    }
-    if (toolName === 'get_task_detail') {
-      const reference = this.activeTaskReference || this.state.taskReference
-      const explicitId = Number(message.match(/任务\s*#(\d+)/)?.[1])
-      if (Number.isInteger(explicitId) && explicitId > 0) return { taskId: explicitId }
-      if (reference && this.referencesCurrentTask(message)) return { taskId: reference.id, title: reference.title }
-      return { title: taskTitleFromQuestion(message) || scopedQuestion }
-    }
-    if (toolName === 'search_tasks') return { query: scopedQuestion, month: currentMonth, limit: 30 }
-    if (toolName === 'search_attachments') return { query: scopedQuestion, month: currentMonth, limit: 30 }
-    if (toolName === 'query_plan_continuation') {
-      const reference = this.activeTaskReference || this.state.taskReference
-      return reference && this.referencesCurrentTask(message) ? { taskId: reference.id, limit: 10 } : { limit: 10 }
-    }
-    if (toolName === 'get_giverny_context') return {}
-    return null
+  private repairToolInput(toolName: Parameters<typeof repairToolInput>[0], message: string, currentMonth?: string): Record<string, unknown> | null {
+    return repairToolInput(toolName, message, currentMonth, this.activeTaskReference || this.state.taskReference, (msg) => referencesCurrentTask(msg))
   }
 
-  private async executeRepairTool(toolName: AgentReadToolName, input: Record<string, unknown>) {
-    const config = agentReadToolRegistry[toolName]
-    return this.callTool(config.endpoint, input)
+  private async executeRepairTool(toolName: Parameters<typeof executeRepairTool>[1], input: Record<string, unknown>) {
+    return executeRepairTool(this.toolClientConfig, toolName, input)
   }
 
   private resultAttachments(value: unknown): AgentResultAttachment[] {
-    const record = toJsonObject(value)
-    const evidenceFiles = Array.isArray(record.evidence) ? record.evidence.map((item) => toJsonObject(toJsonObject(item).file)) : []
-    const files = Array.isArray(record.files) ? record.files : evidenceFiles
-    return files.map((item) => toJsonObject(item)).map((file) => {
-      const numericId = Number(file.id)
-      const id = Number.isInteger(numericId) && numericId > 0 ? numericId : String(file.id || '').trim()
-      const kind: AgentResultAttachment['kind'] = file.kind === 'settlement-receipt' || file.kind === 'formal-deliverable' ? file.kind : 'task-file'
-      return {
-      id,
-      taskId: Number(file.taskId) || 0,
-      taskTitle: String(file.taskTitle || file.task || ''),
-      name: String(file.name || ''),
-      type: String(file.type || 'FILE'),
-      mimeType: String(file.mimeType || ''),
-      size: String(file.size || ''),
-      scope: file.scope === 'acceptance' ? 'acceptance' as const : 'progress' as const,
-      tag: String(file.tag || ''),
-      uploadedAt: String(file.uploadedAt || ''),
-      previewUrl: file.previewUrl ? String(file.previewUrl) : undefined,
-      sourceUrl: String(file.sourceUrl || ''),
-      downloadUrl: file.downloadUrl ? String(file.downloadUrl) : undefined,
-      shareUrl: file.shareUrl ? String(file.shareUrl) : undefined,
-      kind,
-    }}).filter((file) => Boolean(file.id) && file.name && file.sourceUrl)
+    return extractResultAttachments(value)
   }
 
   private async completedActionResult(pending: StoredPendingAction, result: AgentToolResponse): Promise<AliceAgentChatResult> {
@@ -792,7 +567,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         name: string,
         workflowId: string,
       ) => Promise<{ status: string; output?: unknown; error?: { message?: string } }>
-      let status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
+      const status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
       if (status.status === 'complete') {
         this.clearPendingAction()
         return await this.completedActionResult(pending, toJsonObject(status.output))
@@ -814,16 +589,18 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         pending.workflowApproved = true
         this.setPendingAction(pending)
       }
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 200))
-        status = await workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', pending.workflowId)
-        if (status.status === 'complete') {
-          this.clearPendingAction()
-          return await this.completedActionResult(pending, toJsonObject(status.output))
-        }
-        if (status.status === 'errored' || status.status === 'terminated') {
-          throw new Error(status.error?.message || '持久化写入流程未能完成')
-        }
+      const pollResult = await pollWorkflowWithBackoff(pending.workflowId, {
+        getStatus: (id) => workflowStatus.call(this, 'AGENT_WRITE_WORKFLOW', id),
+        maxAttempts: 30,
+        initialDelayMs: 200,
+        maxDelayMs: 2000,
+      })
+      if (pollResult.status === 'complete') {
+        this.clearPendingAction()
+        return await this.completedActionResult(pending, toJsonObject(pollResult.output))
+      }
+      if (pollResult.status === 'errored' || pollResult.status === 'terminated') {
+        throw new Error(pollResult.error?.message || '持久化写入流程未能完成')
       }
       return {
         answer: `${pending.label}已经进入后台执行。Workflow 会继续完成这次操作，你可以稍后回复“确认”查看最终结果。`,
@@ -855,18 +632,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
   }
 
   private executionSummary(result: AgentToolResponse) {
-    const batch = toJsonObject(result.batch)
-    if (batch.id && batch.status === 'completed') return `批量事务已原子提交：${Number(batch.operationCount) || 0} 个操作，涉及 ${Number(batch.taskCount) || 0} 个任务。`
-    const record = toJsonObject(result.record)
-    if (record.startDate && record.endDate) return `结算日期：${String(record.startDate)} 至 ${String(record.endDate)}。回单已生成，可直接预览、分享或下载。`
-    const plan = toJsonObject(result.plan)
-    if (plan.goal) return `提醒：${String(plan.goal)}`
-    const config = toJsonObject(result.config)
-    if (config.provider && config.model) return `模型路由：${String(config.provider)} / ${String(config.model)}`
-    const task = toJsonObject(result.task)
-    const title = String(task.title || '')
-    if (title) return `任务：${title}`
-    return '系统已保存本次操作，并返回成功状态。'
+    return buildExecutionSummary(result)
   }
 
   async reviseApproval(request: { approvalId: string; draft: Record<string, unknown> }): Promise<AliceAgentChatResult> {
@@ -905,7 +671,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
     request: AliceAgentChatRequest,
     message: string,
   ) {
-    const capability = agentCapabilityRegistry[name] as AgentCapabilityDefinition
+    const capability = lookupCapability(name)
+    if (!capability) throw new Error(`未注册的能力：${name}`)
     const parsed = capability.inputSchema.safeParse(args)
     if (!parsed.success) throw new Error(`${capability.title}的参数未通过校验`)
     let input = toJsonObject(parsed.data)
@@ -937,7 +704,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       })
     }
 
-    const pending = this.getPendingAction()
+    let pending = this.getPendingAction()
+    if (pending && isPendingActionExpired(pending)) {
+      this.clearPendingAction()
+      pending = null
+    }
     this.saveMessage('user', message)
     this.saveGraphCheckpoint(agentTurn.id, 'planned', {
       path: request.orchestration.graph.path,
@@ -1043,26 +814,20 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         if (latest?.halt === 'selection') return { status: 'needs_input', requiredTools: [], reason: '需要用户选择明确任务。' }
         if (latest?.halt === 'needs_input') return { status: 'needs_input', requiredTools: [], reason: '写入草稿需要用户补充必填字段。' }
         const observedTools = new Set(observations.map((item) => item.call.name))
-        const inferredIntent: AgentIntent = observedTools.has('query_month_finance') || observedTools.has('generate_settlement_receipt')
-          ? 'finance'
-          : observedTools.has('get_requester_profile')
-            ? 'person_profile'
-            : observedTools.has('search_attachments')
-              ? 'attachment'
-              : [...observedTools].some((name) => name.endsWith('_preview'))
-                ? 'write'
-                : observedTools.has('get_task_detail') || observedTools.has('search_tasks') || observedTools.has('search_workspace') || observedTools.has('query_task_portfolio') || observedTools.has('query_plan_continuation')
-                  ? 'task_data'
-                  : observedTools.has('search_product_help')
-                    ? 'product_help'
-                    : 'general'
+        const toolIntent = observedTools.has('query_month_finance') || observedTools.has('generate_settlement_receipt')
+          ? 'finance' : observedTools.has('get_requester_profile') ? 'person_profile'
+          : observedTools.has('search_attachments') ? 'attachment'
+          : [...observedTools].some((n) => n.endsWith('_preview')) ? 'write'
+          : observedTools.has('get_task_detail') || observedTools.has('search_tasks') || observedTools.has('query_task_portfolio') || observedTools.has('query_plan_continuation') ? 'task_data'
+          : observedTools.has('search_product_help') ? 'product_help' : 'general'
+        const directorIntents = [...new Set([...directorDecisionToIntents(request.orchestration.decision), toolIntent as import('./agentOrchestrator').AgentIntent])]
         const observedPlan: AgentPlannedToolCall[] = observations.map((item, index) => ({
           id: `${agentTurn.id}:graph:${index + 1}`,
           name: item.call.name,
           args: item.call.args,
           reason: item.call.reason,
-          risk: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.risk || 'read',
-          confirmation: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.confirmation || 'none',
+          risk: lookupCapability(item.call.name)?.policy.risk || 'read',
+          confirmation: lookupCapability(item.call.name)?.policy.confirmation || 'none',
           status: item.error ? 'failed' : 'success',
           attempt: item.call.attempt || cycle,
           error: item.error,
@@ -1072,22 +837,22 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           id: `${agentTurn.id}:graph-evidence:${index + 1}`,
           toolCallId: observedPlan[index].id,
           toolName: item.call.name,
-          source: agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'product_registry'
+          source: lookupCapability(item.call.name)?.policy.source === 'product_registry'
             ? 'product_registry'
-            : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'web'
+            : lookupCapability(item.call.name)?.policy.source === 'web'
               ? 'web'
-              : agentCapabilityRegistry[item.call.name as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
+              : lookupCapability(item.call.name)?.policy.source === 'r2' ? 'r2' : 'd1',
           deterministic: item.deterministic,
           payload: item.output,
         }))
         const checked = completeAgentTurn({
           ...agentTurn,
-          intent: inferAgentIntent(message, inferredIntent),
+          intent: directorIntents[0],
           phase: 'analyze',
           plan: observedPlan,
           evidence: observedEvidence,
           attempts: cycle,
-        }, '')
+        }, '', directorIntents)
         const replan = decideAgentReplan(checked)
         if (checked.verification.passed) return { status: 'complete', requiredTools: [], reason: '目标所需的确定性证据已齐全。' }
         if (replan.shouldReplan) return { status: 'replan', requiredTools: replan.requiredTools, reason: replan.reason }
@@ -1148,8 +913,8 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           name: call.toolName,
           args: effectiveInput,
           reason: '由主模型结合完整语义规划。',
-          risk: agentCapabilityRegistry[call.toolName as AgentCapabilityName]?.policy.risk || 'read',
-          confirmation: agentCapabilityRegistry[call.toolName as AgentCapabilityName]?.policy.confirmation || 'none',
+          risk: lookupCapability(call.toolName)?.policy.risk || 'read',
+          confirmation: lookupCapability(call.toolName)?.policy.confirmation || 'none',
           status: 'pending',
           attempt: call.attempt,
           durationMs: call.durationMs,
@@ -1177,7 +942,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           trace.push({ type: 'result', label: '草稿信息不完整', detail: missing.length ? `还缺少 ${missing.join('、')}，暂不生成确认操作。` : '需要补充必要信息。' })
           const labels: Record<string, string> = { title: '任务名称', requirement: '具体需求', startDate: '预计开始时间', estimatedDate: '预计交付时间', estimatedHours: '预估工时' }
           const fields = missing.map((field) => labels[field] || field)
-          answer = `可以，我已经进入${String(agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.title || '操作')}流程。请补充${fields.length ? fields.join('、') : '必要信息'}，我会继续生成可确认的草稿。`
+          answer = `可以，我已经进入${String(lookupCapability(toolResult.toolName)?.title || '操作')}流程。请补充${fields.length ? fields.join('、') : '必要信息'}，我会继续生成可确认的草稿。`
         } else {
           trace.push({ type: 'result', label: agentToolTraceLabel(toolResult.toolName, 'completed') })
         }
@@ -1188,11 +953,11 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           id: `${agentTurn.id}:evidence:${evidence.length + 1}`,
           toolCallId: planned?.id || `${agentTurn.id}:tool:unknown`,
           toolName: toolResult.toolName,
-          source: agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'product_registry'
+          source: lookupCapability(toolResult.toolName)?.policy.source === 'product_registry'
             ? 'product_registry'
-            : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'web'
+            : lookupCapability(toolResult.toolName)?.policy.source === 'web'
               ? 'web'
-              : agentCapabilityRegistry[toolResult.toolName as AgentCapabilityName]?.policy.source === 'r2' ? 'r2' : 'd1',
+              : lookupCapability(toolResult.toolName)?.policy.source === 'r2' ? 'r2' : 'd1',
           deterministic: !mismatch,
           payload: output,
         })
@@ -1214,21 +979,14 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         }
       }
     }
-    const inferredIntent: AgentIntent = usedTools.has('query_month_finance') || usedTools.has('generate_settlement_receipt')
-      ? 'finance'
-      : usedTools.has('get_requester_profile')
-        ? 'person_profile'
-      : usedTools.has('search_attachments')
-        ? 'attachment'
-        : [...usedTools].some((name) => name.endsWith('_preview'))
-          ? 'write'
-      : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('search_workspace') || usedTools.has('query_task_portfolio') || usedTools.has('query_plan_continuation')
-            ? 'task_data'
-            : usedTools.has('search_product_help')
-              ? 'product_help'
-              : 'general'
-    const verifiedIntent = inferAgentIntent(message, inferredIntent)
-    const verifiedIntents = inferAgentIntents(message, inferredIntent)
+    const finalToolIntent = usedTools.has('query_month_finance') || usedTools.has('generate_settlement_receipt')
+      ? 'finance' : usedTools.has('get_requester_profile') ? 'person_profile'
+      : usedTools.has('search_attachments') ? 'attachment'
+      : [...usedTools].some((n) => n.endsWith('_preview')) ? 'write'
+      : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('query_task_portfolio') || usedTools.has('query_plan_continuation') ? 'task_data'
+      : usedTools.has('search_product_help') ? 'product_help' : 'general'
+    const verifiedIntents = [...new Set([...directorDecisionToIntents(request.orchestration.decision), finalToolIntent as import('./agentOrchestrator').AgentIntent])]
+    const verifiedIntent = verifiedIntents[0]
     if (verifiedIntents.length > 1) {
       trace.push({ type: 'plan', label: `拆解 ${verifiedIntents.length} 个目标`, detail: verifiedIntents.join('、') })
     }
@@ -1279,7 +1037,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
         trace.push({ type: 'result', label: '已用等待记录校正最终结论' })
       }
     }
-    agentTurn = completeAgentTurn({ ...workingTurn, plan: plannedCalls, evidence, answer }, answer)
+    agentTurn = completeAgentTurn({ ...workingTurn, plan: plannedCalls, evidence, answer }, answer, verifiedIntents)
     const nextPending = this.getPendingAction()
     const approval = nextPending && (!pending || nextPending.createdAt !== pending.createdAt)
       ? this.approvalResult(nextPending, 'pending')

@@ -1,0 +1,313 @@
+{
+  "summary": {
+    "webAnimations": 6,
+    "cssDeclarations": 43,
+    "scrollTargets": 0,
+    "cdpAnimations": 11,
+    "canvases": 0
+  },
+  "namedAnimations": [
+    "empty-state-lily-breathe",
+    "detail-pane-enter",
+    "backdrop-in",
+    "modal-in",
+    "pond-drift"
+  ],
+  "scrollTriggeredElements": 0,
+  "representativeAnimations": [
+    {
+      "type": "CSSAnimation",
+      "playState": "running",
+      "animationName": "empty-state-lily-breathe",
+      "targetSelector": "svg",
+      "targetRect": {
+        "x": 861.5430297851562,
+        "y": 579.2351684570312,
+        "width": 28.9139404296875,
+        "height": 28.91387939453125,
+        "top": 579.2351684570312,
+        "right": 890.4569702148438,
+        "bottom": 608.1490478515625,
+        "left": 861.5430297851562
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "ease-in-out",
+          "composite": "auto",
+          "transform": "translateY(0px) rotate(-2deg)",
+          "computedOffset": 0
+        },
+        {
+          "offset": 0.5,
+          "easing": "ease-in-out",
+          "composite": "auto",
+          "transform": "translateY(-3px) rotate(2deg)",
+          "computedOffset": 0.5
+        },
+        {
+          "offset": 1,
+          "easing": "ease-in-out",
+          "composite": "auto",
+          "transform": "translateY(0px) rotate(-2deg)",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 3600,
+        "delay": 0,
+        "iterations": null,
+        "easing": "linear",
+        "direction": "normal"
+      }
+    },
+    {
+      "type": "CSSAnimation",
+      "playState": "finished",
+      "animationName": "backdrop-in",
+      "targetSelector": "div.modal-backdrop",
+      "targetRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "ease",
+          "composite": "auto",
+          "opacity": "0",
+          "computedOffset": 0
+        },
+        {
+          "offset": 1,
+          "easing": "ease",
+          "composite": "auto",
+          "opacity": "1",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 180,
+        "delay": 0,
+        "iterations": 1,
+        "easing": "linear",
+        "direction": "normal"
+      }
+    },
+    {
+      "type": "CSSAnimation",
+      "playState": "running",
+      "animationName": "giverny-login-breeze",
+      "targetSelector": "div.modal-backdrop",
+      "targetRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "cubic-bezier(0.45, 0.05, 0.55, 0.95)",
+          "composite": "auto",
+          "transform": "translate(-2px, 1px) rotate(-0.08deg) scale(1.002)",
+          "filter": "brightness(1)",
+          "computedOffset": 0
+        },
+        {
+          "offset": 0.31,
+          "easing": "cubic-bezier(0.45, 0.05, 0.55, 0.95)",
+          "composite": "auto",
+          "transform": "translate(3px, -1px) rotate(0.13deg) scale(1.004)",
+          "filter": "brightness(1.025)",
+          "computedOffset": 0.31
+        },
+        {
+          "offset": 0.67,
+          "easing": "cubic-bezier(0.45, 0.05, 0.55, 0.95)",
+          "composite": "auto",
+          "transform": "translate(-1px, 2px) rotate(-0.04deg) scale(1.001)",
+          "filter": "brightness(0.995)",
+          "computedOffset": 0.67
+        },
+        {
+          "offset": 1,
+          "easing": "cubic-bezier(0.45, 0.05, 0.55, 0.95)",
+          "composite": "auto",
+          "transform": "translate(2px) rotate(0.09deg) scale(1.003)",
+          "filter": "brightness(1.015)",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 13000,
+        "delay": 0,
+        "iterations": null,
+        "easing": "linear",
+        "direction": "normal"
+      }
+    },
+    {
+      "type": "CSSAnimation",
+      "playState": "running",
+      "animationName": "giverny-login-ripple",
+      "targetSelector": "div.modal-backdrop",
+      "targetRect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "transform": "scale(0.88)",
+          "opacity": "0",
+          "computedOffset": 0
+        },
+        {
+          "offset": 0.24,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "transform": "scale(0.88)",
+          "opacity": "0",
+          "computedOffset": 0.24
+        },
+        {
+          "offset": 0.34,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "opacity": "0.12",
+          "computedOffset": 0.34
+        },
+        {
+          "offset": 0.5,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "transform": "scale(1)",
+          "opacity": "0.48",
+          "computedOffset": 0.5
+        },
+        {
+          "offset": 0.82,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "transform": "scale(1.14)",
+          "opacity": "0",
+          "computedOffset": 0.82
+        },
+        {
+          "offset": 1,
+          "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+          "composite": "auto",
+          "transform": "scale(1.14)",
+          "opacity": "0",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 9500,
+        "delay": 0,
+        "iterations": null,
+        "easing": "linear",
+        "direction": "normal"
+      }
+    },
+    {
+      "type": "CSSAnimation",
+      "playState": "finished",
+      "animationName": "modal-in",
+      "targetSelector": "section.task-modal.admin-login-modal",
+      "targetRect": {
+        "x": 740,
+        "y": 261.203125,
+        "width": 440,
+        "height": 557.59375,
+        "top": 261.203125,
+        "right": 1180,
+        "bottom": 818.796875,
+        "left": 740
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "cubic-bezier(0.2, 0.9, 0.3, 1.2)",
+          "composite": "auto",
+          "transform": "translate(0px, 14px) scale(0.985)",
+          "opacity": "0",
+          "computedOffset": 0
+        },
+        {
+          "offset": 1,
+          "easing": "cubic-bezier(0.2, 0.9, 0.3, 1.2)",
+          "composite": "auto",
+          "transform": "translate(0px) scale(1)",
+          "opacity": "1",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 220,
+        "delay": 0,
+        "iterations": 1,
+        "easing": "linear",
+        "direction": "normal"
+      }
+    },
+    {
+      "type": "CSSAnimation",
+      "playState": "running",
+      "animationName": "pond-drift",
+      "targetSelector": "div.login-pond",
+      "targetRect": {
+        "x": 712.6207275390625,
+        "y": 242.75909423828125,
+        "width": 498.4205322265625,
+        "height": 196.599365234375,
+        "top": 242.75909423828125,
+        "right": 1211.041259765625,
+        "bottom": 439.35845947265625,
+        "left": 712.6207275390625
+      },
+      "keyframes": [
+        {
+          "offset": 0,
+          "easing": "ease-in-out",
+          "composite": "auto",
+          "transform": "translate(0px) scale(1)",
+          "computedOffset": 0
+        },
+        {
+          "offset": 1,
+          "easing": "ease-in-out",
+          "composite": "auto",
+          "transform": "translate(8px, -5px) scale(1.05)",
+          "computedOffset": 1
+        }
+      ],
+      "timing": {
+        "duration": 32000,
+        "delay": 0,
+        "iterations": null,
+        "easing": "linear",
+        "direction": "alternate"
+      }
+    }
+  ]
+}

@@ -1,0 +1,298 @@
+{
+  "typography": [
+    {
+      "role": "display",
+      "fontFamily": "Inter",
+      "fontSize": "32px",
+      "fontWeight": "600",
+      "lineHeight": "36.8px",
+      "letterSpacing": "normal",
+      "color": "#1F2A27",
+      "sampleText": "2026 年 7 月工作台"
+    },
+    {
+      "role": "body-small",
+      "fontFamily": "Iowan Old Style",
+      "fontSize": "18.48px",
+      "fontWeight": "500",
+      "lineHeight": "18.48px",
+      "letterSpacing": "normal",
+      "color": "#586460",
+      "sampleText": "h"
+    },
+    {
+      "role": "heading",
+      "fontFamily": "Inter",
+      "fontSize": "18px",
+      "fontWeight": "600",
+      "lineHeight": "21.6px",
+      "letterSpacing": "normal",
+      "color": "#1F2A27",
+      "sampleText": "任务明细"
+    },
+    {
+      "role": "body",
+      "fontFamily": "Inter",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "lineHeight": "22.4px",
+      "letterSpacing": "normal",
+      "color": "#66716D",
+      "sampleText": "按月份汇总工作内容、工时与验收"
+    },
+    {
+      "role": "label",
+      "fontFamily": "Inter",
+      "fontSize": "13px",
+      "fontWeight": "700",
+      "lineHeight": "normal",
+      "letterSpacing": "normal",
+      "color": "#17282F",
+      "sampleText": "0"
+    }
+  ],
+  "spacing": {
+    "observed": [
+      2,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20,
+      22,
+      24
+    ],
+    "baseUnit": 4
+  },
+  "radius": [
+    "4px"
+  ],
+  "shadows": [],
+  "buttons": [
+    {
+      "label": "工作台",
+      "background": "#F4F4EE",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#2F564E",
+      "padding": "0px 12px",
+      "borderRadius": "4px",
+      "border": "0px none rgb(47, 86, 78)",
+      "boxShadow": "none",
+      "fontSize": "14px",
+      "fontWeight": "600",
+      "height": "36px"
+    },
+    {
+      "label": "设置",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#586460",
+      "padding": "0px 12px",
+      "borderRadius": "4px",
+      "border": "0px none rgb(88, 100, 96)",
+      "boxShadow": "none",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "height": "38px"
+    },
+    {
+      "label": "button",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#586460",
+      "padding": "0px 4px",
+      "borderRadius": "0px",
+      "border": "0px none rgb(88, 100, 96)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "42px"
+    },
+    {
+      "label": "✦ 考古发现庞贝人留下的最后一顿饭 · 火山灰封存了一座城市，也封存了一个普通早",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#1F2A27",
+      "padding": "0px",
+      "borderRadius": "0px",
+      "border": "0px none rgb(31, 42, 39)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "22px"
+    },
+    {
+      "label": "收起详情",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#66716D",
+      "padding": "0px",
+      "borderRadius": "0px",
+      "border": "0px none rgb(102, 113, 109)",
+      "boxShadow": "none",
+      "fontSize": "12px",
+      "fontWeight": "500",
+      "height": "30px"
+    },
+    {
+      "label": "全部",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#1F2A27",
+      "padding": "0px",
+      "borderRadius": "4px",
+      "border": "0px none rgb(31, 42, 39)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "800",
+      "height": "36px"
+    }
+  ],
+  "cards": [
+    {
+      "label": "card",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17282F",
+      "padding": "2px 32px 4px 0px",
+      "borderRadius": "0px",
+      "border": "",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "117.328px"
+    },
+    {
+      "label": "card",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17282F",
+      "padding": "2px 0px 4px 32px",
+      "borderRadius": "0px",
+      "border": "0px none rgb(23, 40, 47)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "117.328px"
+    },
+    {
+      "label": "card",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17282F",
+      "padding": "20px 0px 0px",
+      "borderRadius": "4px",
+      "border": "0px none rgb(23, 40, 47)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "423px"
+    },
+    {
+      "label": "card",
+      "background": "#F4F4EE",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#586460",
+      "padding": "36px 28px",
+      "borderRadius": "4px",
+      "border": "0px none rgb(88, 100, 96)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "240px"
+    }
+  ],
+  "nav": {
+    "label": "navigation",
+    "background": "transparent",
+    "backgroundImage": "",
+    "backdropFilter": "",
+    "color": "#1F2A27",
+    "padding": "0px",
+    "borderRadius": "0px",
+    "border": "0px none rgb(31, 42, 39)",
+    "boxShadow": "none",
+    "fontSize": "16px",
+    "fontWeight": "400",
+    "height": "226px"
+  },
+  "chips": [
+    {
+      "label": "✦ 考古发现",
+      "background": "#3C6B61",
+      "color": "#FBFBF8",
+      "padding": "3px 11px",
+      "borderRadius": "999px",
+      "border": "0px none rgb(251, 251, 248)",
+      "boxShadow": "none",
+      "fontSize": "11px",
+      "fontWeight": "700",
+      "height": "22px"
+    }
+  ],
+  "statCells": [
+    {
+      "background": "transparent",
+      "borderRadius": "0px",
+      "border": "",
+      "boxShadow": "none",
+      "numberFontSize": "44px",
+      "numberFontWeight": "600",
+      "numberColor": "#1F2A27"
+    }
+  ],
+  "tabs": [
+    {
+      "label": "全部计划中进行中待验收已验收",
+      "background": "transparent",
+      "color": "#17282F",
+      "padding": "0px",
+      "borderRadius": "4px",
+      "border": "",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "37px"
+    }
+  ],
+  "backgrounds": [
+    {
+      "value": "linear-gradient(color(srgb 0.984314 0.984314 0.972549 / 0.5), color(srgb 0.984314 0.984314 0.972549 / 0.5)), linear-gradient(color(srgb 0.184314 0.337255 0.305882 / 0.14), color(srgb 0.12549 0.188235 0.172549 / 0.3)), url(\"https://mayeai.com/giverny-login-garden.webp\")",
+      "area": 2073600
+    },
+    {
+      "value": "linear-gradient(112deg, rgba(0, 0, 0, 0) 34%, color(srgb 0.984314 0.984314 0.972549 / 0.08) 49%, rgba(0, 0, 0, 0) 64%), url(\"https://mayeai.com/giverny-login-garden.webp\")",
+      "area": 2073600
+    },
+    {
+      "value": "radial-gradient(at 50% 73%, rgba(0, 0, 0, 0) 0px, rgba(0, 0, 0, 0) 16%, color(srgb 0.984314 0.984314 0.972549 / 0.22) 16.25%, color(srgb 0.984314 0.984314 0.972549 / 0.22) 16.55%, rgba(0, 0, 0, 0) 16.9%, rgba(0, 0, 0, 0) 22%, color(srgb 0.984314 0.984314 0.972549 / 0.11) 22.2%, color(srgb 0.984314 0.984314 0.972549 / 0.11) 22.45%, rgba(0, 0, 0, 0) 22.8%), linear-gradient(108deg, rgba(0, 0, 0, 0) 34%, color(srgb 0.984314 0.984314 0.972549 / 0.12) 49%, rgba(0, 0, 0, 0) 64%)",
+      "area": 2073600
+    },
+    {
+      "value": "radial-gradient(42px 24px at 20% 32%, rgba(90, 122, 94, 0.6), rgba(0, 0, 0, 0) 70%), radial-gradient(34px 20px at 72% 22%, rgba(107, 142, 160, 0.5), rgba(0, 0, 0, 0) 70%), radial-gradient(30px 18px at 86% 60%, rgba(90, 122, 94, 0.52), rgba(0, 0, 0, 0) 70%), radial-gradient(24px 15px at 44% 70%, rgba(107, 142, 160, 0.42), rgba(0, 0, 0, 0) 72%), radial-gradient(13px 10px at 26% 30%, rgba(196, 160, 176, 0.62), rgba(0, 0, 0, 0) 72%), radial-gradient(11px 9px at 78% 58%, rgba(138, 122, 158, 0.55), rgba(0, 0, 0, 0) 72%)",
+      "area": 97151
+    },
+    {
+      "value": "linear-gradient(color(srgb 0.909412 0.927843 0.913333), color(srgb 0.954353 0.961725 0.948863))",
+      "area": 71280
+    }
+  ],
+  "glass": []
+}

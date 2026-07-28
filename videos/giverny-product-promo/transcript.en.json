@@ -1,0 +1,13 @@
+{
+  "source": "script-derived sentence timing from final TTS duration",
+  "language": "en",
+  "duration": 31.552,
+  "segments": [
+    { "text": "Creative work shouldn't be scattered across chats, spreadsheets, and drives.", "start": 0.00, "end": 4.18 },
+    { "text": "Giverny is more than task management. It connects briefs, schedules, progress, time, files, and approval into one traceable workflow.", "start": 4.28, "end": 10.22 },
+    { "text": "Your team sees the whole month at a glance. Every hour keeps its evidence, and every delivery stays with its project.", "start": 10.32, "end": 16.25 },
+    { "text": "Alice reads real business context, analyzes first, verifies the facts, and asks before anything is written.", "start": 16.35, "end": 22.05 },
+    { "text": "At month end, generate a settlement receipt in one click, ready to review and share.", "start": 22.15, "end": 27.05 },
+    { "text": "Giverny makes reliable work traceable—and lets creation grow in its own garden.", "start": 27.15, "end": 31.55 }
+  ]
+}

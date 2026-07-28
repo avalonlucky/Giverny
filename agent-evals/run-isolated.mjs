@@ -249,8 +249,9 @@ async function runCapabilityRegistryChecks() {
 
 function agentScopeHeaders(workspaceId, principalId = 'scope-eval', role = 'admin') {
   const runId = `scope-${crypto.randomUUID()}`
+  const timestamp = Date.now()
   const signature = createHmac('sha256', 'eval-agent-tool-token')
-    .update([workspaceId, principalId, role, runId].join('\n'))
+    .update([workspaceId, principalId, role, runId, String(timestamp)].join('\n'))
     .digest('base64url')
   return {
     authorization: 'Bearer eval-agent-tool-token',
@@ -258,6 +259,7 @@ function agentScopeHeaders(workspaceId, principalId = 'scope-eval', role = 'admi
     'x-agent-principal-id': principalId,
     'x-agent-role': role,
     'x-agent-run-id': runId,
+    'x-agent-scope-timestamp': String(timestamp),
     'x-agent-scope-signature': signature,
   }
 }

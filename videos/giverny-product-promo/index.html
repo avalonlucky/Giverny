@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-locale="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="locales.js"></script>
+    <style>
+      @font-face { font-family: "Iowan Old Style"; src: url("assets/fonts/IowanOldStyle.ttc") format("truetype"); font-weight: 600; font-display: block; }
+      @font-face { font-family:"PingFang SC"; src:local("PingFang SC"); font-display:block; }
+      @font-face { font-family:"Songti SC"; src:local("Songti SC"); font-display:block; }
+      :root { --ink:#1f2a27; --muted:#586460; --paper:#fbfbf8; --paper2:#f4f4ee; --sage:#3c6b61; --deep:#20302c; --mist:#e9f5ea; --warm:#94652f; --line:rgba(31,42,39,.16); }
+      * { box-sizing:border-box; }
+      html, body { margin:0; width:1920px; height:1080px; overflow:hidden; background:var(--paper); color:var(--ink); }
+      body { font-family:Inter,"PingFang SC",Arial,sans-serif; text-rendering:geometricPrecision; }
+      .serif { font-family:"Iowan Old Style","Songti SC",Georgia,serif; }
+      #promo-v2 { position:relative; width:1920px; height:1080px; overflow:hidden; }
+      .scene, .product-bed { position:absolute; inset:0; width:1920px; height:1080px; overflow:hidden; }
+      .paper { position:absolute; inset:0; background:var(--paper); }
+      .grain { position:absolute; inset:-40%; width:180%; height:180%; opacity:.045; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E"); }
+      .meta { position:absolute; left:84px; top:62px; display:flex; align-items:center; gap:16px; font-size:18px; font-weight:700; letter-spacing:.16em; color:var(--sage); text-transform:uppercase; }
+      .meta::before { content:""; width:42px; height:2px; background:currentColor; }
+      .language { position:absolute; right:84px; top:62px; font-size:16px; letter-spacing:.1em; color:var(--muted); }
+      .demo-note { position:absolute; right:76px; bottom:40px; z-index:12; padding:11px 16px; border:1px solid rgba(251,251,248,.38); background:rgba(31,42,39,.78); color:var(--paper); font-size:15px; letter-spacing:.05em; }
+
+      /* 00:00–00:08 */
+      #pain { background:var(--paper2); }
+      .pain-title { position:absolute; left:84px; top:160px; width:1040px; margin:0; font-size:100px; line-height:.98; letter-spacing:-.045em; font-weight:600; }
+      .pain-sub { position:absolute; left:90px; top:390px; color:var(--muted); font-size:25px; }
+      .fragments { position:absolute; left:84px; right:84px; bottom:112px; height:360px; display:grid; grid-template-columns:1.1fr .74fr 1.28fr; gap:30px; }
+      .fragment { position:relative; overflow:hidden; padding:34px; border:1px solid var(--line); background:var(--paper); box-shadow:0 18px 42px rgba(31,42,39,.08); }
+      .fragment::after { content:""; position:absolute; left:34px; right:34px; bottom:36px; height:2px; background:var(--sage); transform-origin:left; }
+      .fragment-label { color:var(--muted); font-size:17px; letter-spacing:.12em; text-transform:uppercase; }
+      .fragment-value { position:absolute; left:34px; right:34px; top:105px; font-size:46px; line-height:1.12; font-weight:650; }
+      .fragment-lines { position:absolute; left:34px; right:34px; top:190px; display:grid; gap:15px; }
+      .fragment-lines span { height:12px; background:rgba(60,107,97,.11); }
+      .fragment-lines span:nth-child(2) { width:76%; }
+      .fragment-lines span:nth-child(3) { width:52%; }
+
+      /* 00:08–00:15 */
+      #brand { background:var(--deep); color:var(--paper); }
+      #brand .meta { color:rgba(251,251,248,.82); }
+      .garden { position:absolute; inset:-24px; background-image:url("assets/giverny-login-garden.webp"); background-size:cover; background-position:center; filter:saturate(.78) brightness(.68); }
+      .garden-shade { position:absolute; inset:0; background:linear-gradient(90deg,rgba(32,48,44,.82) 0%,rgba(32,48,44,.46) 48%,rgba(32,48,44,.14) 100%); }
+      .brand-copy { position:absolute; left:220px; top:200px; width:1120px; }
+      .brand-copy h2 { width:1080px; margin:24px 0 28px; font-size:78px; line-height:1.04; letter-spacing:-.035em; font-weight:600; }
+      .brand-copy p { width:900px; margin:0; font-size:28px; line-height:1.5; color:rgba(251,251,248,.86); }
+      .brand-line { position:absolute; left:92px; bottom:88px; width:560px; height:2px; background:rgba(251,251,248,.65); transform-origin:left; }
+      .ripple { position:absolute; right:140px; bottom:116px; width:430px; height:128px; border:2px solid rgba(251,251,248,.48); border-radius:50%; }
+      .ripple.r2 { right:190px; bottom:138px; width:330px; height:90px; opacity:.65; }
+
+      /* Product beats */
+      .product-bed { background:var(--paper2); }
+      .product-bed::after { content:""; position:absolute; left:42px; right:42px; top:30px; bottom:30px; border:1px solid var(--line); }
+      .product-video { position:absolute; left:66px; top:46px; width:1788px; height:1006px; object-fit:cover; border:1px solid rgba(31,42,39,.2); box-shadow:0 24px 64px rgba(31,42,39,.14); }
+      .claim { position:absolute; left:110px; bottom:68px; z-index:9; width:auto; max-width:1320px; padding:23px 30px 25px 34px; border-left:6px solid var(--sage); background:rgba(251,251,248,.95); box-shadow:0 14px 46px rgba(31,42,39,.12); }
+      .claim strong { display:block; font-size:39px; line-height:1.08; letter-spacing:-.025em; }
+      .claim span { display:block; margin-top:9px; color:var(--muted); font-size:21px; }
+      .chapter { position:absolute; right:94px; top:58px; z-index:9; padding:11px 15px; background:rgba(32,48,44,.88); color:var(--paper); font-size:15px; letter-spacing:.12em; text-transform:uppercase; }
+      .scan { position:absolute; z-index:8; border:3px solid rgba(60,107,97,.86); box-shadow:0 0 0 9999px rgba(31,42,39,.04); }
+      #workflow-scan { left:328px; top:235px; width:1215px; height:690px; }
+      #accept-scan { right:90px; top:245px; width:520px; height:650px; }
+      #settle-scan { left:340px; top:125px; width:1450px; height:790px; }
+      #agent-scan { right:70px; top:84px; width:710px; height:920px; }
+
+      /* 00:55–01:05 */
+      #outro { background:var(--deep); color:var(--paper); }
+      .outro-garden { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; filter:saturate(.74) brightness(.42); transform:scale(1.08); }
+      .outro-wash { position:absolute; inset:0; background:linear-gradient(90deg,rgba(32,48,44,.94),rgba(32,48,44,.58) 62%,rgba(32,48,44,.28)); }
+      .life-strip { position:absolute; right:76px; top:82px; width:690px; height:820px; display:grid; grid-template-columns:1fr 1fr; gap:18px; transform:rotate(1.2deg); }
+      .life-strip img { width:100%; height:100%; object-fit:cover; border:1px solid rgba(251,251,248,.25); box-shadow:0 14px 34px rgba(0,0,0,.24); }
+      .outro-copy { position:absolute; left:88px; top:220px; width:920px; }
+      .outro-copy h2 { margin:24px 0 30px; font-size:92px; line-height:.98; letter-spacing:-.045em; font-weight:600; }
+      .outro-copy p { width:780px; margin:0; font-size:27px; line-height:1.5; color:rgba(251,251,248,.82); }
+      .logo-lock { position:absolute; left:88px; bottom:72px; display:flex; align-items:center; gap:18px; font-size:31px; font-weight:600; }
+      .logo-lock img { width:46px; height:46px; object-fit:contain; }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-vozd" id="promo-v2" data-composition-id="giverny-product-promo-v2" data-start="0" data-duration="65" data-width="1920" data-height="1080" data-fps="30">
+      <section data-hf-id="hf-wpkw" id="pain" class="clip scene" data-start="0" data-duration="8" data-track-index="0">
+        <div data-hf-id="hf-2ava" class="paper"></div><div data-hf-id="hf-h60x" class="grain"></div>
+        <div data-hf-id="hf-utbk" class="meta" data-i18n="painKicker"></div><div data-hf-id="hf-yqco" class="language" data-i18n="localeLabel"></div>
+        <h1 data-hf-id="hf-usqk" class="pain-title serif" data-i18n="painTitle"></h1><p data-hf-id="hf-y0nq" class="pain-sub" data-i18n="painSub"></p>
+        <div data-hf-id="hf-v1ul" class="fragments" data-i18n-list="fragments">
+          <article data-hf-id="hf-pa2l" class="fragment"><div data-hf-id="hf-3uij" class="fragment-label">01 / brief</div><div data-hf-id="hf-ju9x" class="fragment-value" data-item=""></div><div data-hf-id="hf-fphy" class="fragment-lines"><span data-hf-id="hf-uckh"></span><span data-hf-id="hf-l73p"></span><span data-hf-id="hf-me0s"></span></div></article>
+          <article data-hf-id="hf-8hn5" class="fragment"><div data-hf-id="hf-xxij" class="fragment-label">02 / time</div><div data-hf-id="hf-rvq1" class="fragment-value" data-item=""></div><div data-hf-id="hf-u1fe" class="fragment-lines"><span data-hf-id="hf-lzpr"></span><span data-hf-id="hf-n6mu"></span><span data-hf-id="hf-msbt"></span></div></article>
+          <article data-hf-id="hf-9ok8" class="fragment"><div data-hf-id="hf-af6d" class="fragment-label">03 / file</div><div data-hf-id="hf-t2n4" class="fragment-value" data-item=""></div><div data-hf-id="hf-ufqf" class="fragment-lines"><span data-hf-id="hf-nz8w"></span><span data-hf-id="hf-nkxv"></span><span data-hf-id="hf-ieyi"></span></div></article>
+        </div>
+      </section>
+
+      <section data-hf-id="hf-sk56" id="brand" class="clip scene" data-start="8" data-duration="7" data-track-index="0">
+        <div data-hf-id="hf-c6jd" id="brand-garden" class="garden" role="img" aria-label="Giverny garden"></div><div data-hf-id="hf-unmf" class="garden-shade"></div><div data-hf-id="hf-3l5h" class="grain"></div>
+        <div data-hf-id="hf-susv" id="brand-copy" class="brand-copy"><div data-hf-id="hf-96dc" class="meta" style="position:relative;left:0;top:0" data-i18n="brandKicker"></div><h2 data-hf-id="hf-9mfj" class="serif" data-i18n="brandTitle"></h2><p data-hf-id="hf-pv0r" data-i18n="brandBody"></p></div>
+        <div data-hf-id="hf-229q" id="brand-line" class="brand-line"></div><div data-hf-id="hf-2qfi" id="brand-ripple" class="ripple"></div><div data-hf-id="hf-3use" id="brand-ripple-2" class="ripple r2"></div>
+      </section>
+
+      <div data-hf-id="hf-0e7h" id="workflow-bed" class="clip product-bed" data-start="15" data-duration="11" data-track-index="0"><div data-hf-id="hf-4s2k" class="grain"></div></div>
+      <video data-hf-id="hf-afq5" id="workflow-brief" class="clip product-video" src="assets/footage-v2/c02-task-brief.mp4" data-start="15" data-duration="5.2" data-track-index="1" muted playsinline></video>
+      <video data-hf-id="hf-9mvk" id="workflow-progress" class="clip product-video" src="assets/footage-v2/c03-progress-evidence.mp4" data-start="20.2" data-duration="5.8" data-track-index="1" muted playsinline></video>
+      <div data-hf-id="hf-mu8e" id="workflow-scan" class="clip scan" data-start="16.2" data-duration="9.2" data-track-index="2" data-layout-allow-occlusion=""></div>
+      <div data-hf-id="hf-xh4l" id="workflow-claim" class="clip claim" data-start="15" data-duration="11" data-track-index="3"><strong data-hf-id="hf-9fvu" data-i18n="workflow"></strong><span data-hf-id="hf-cur9" data-i18n="workflowNote"></span></div>
+      <div data-hf-id="hf-11wc" id="workflow-chapter" class="clip chapter" data-start="15" data-duration="11" data-track-index="4">01 / evidence</div>
+
+      <div data-hf-id="hf-0yn0" id="acceptance-bed" class="clip product-bed" data-start="26" data-duration="9" data-track-index="0"><div data-hf-id="hf-4drj" class="grain"></div></div>
+      <video data-hf-id="hf-urv6" id="acceptance-video" class="clip product-video" src="assets/footage-v2/c04-accepted-boundary.mp4" data-start="26" data-duration="8.5" data-track-index="1" muted playsinline></video>
+      <div data-hf-id="hf-1m2o" id="accept-scan" class="clip scan" data-start="27" data-duration="7.5" data-track-index="2" data-layout-allow-occlusion=""></div>
+      <div data-hf-id="hf-z0he" id="acceptance-claim" class="clip claim" data-start="26" data-duration="9" data-track-index="3"><strong data-hf-id="hf-4mpo" data-i18n="acceptance"></strong><span data-hf-id="hf-28cb" data-i18n="acceptanceNote"></span></div>
+      <div data-hf-id="hf-22fe" id="acceptance-chapter" class="clip chapter" data-start="26" data-duration="9" data-track-index="4">02 / acceptance</div>
+
+      <div data-hf-id="hf-b6vg" id="settlement-bed" class="clip product-bed" data-start="35" data-duration="10" data-track-index="0"><div data-hf-id="hf-5kom" class="grain"></div></div>
+      <video data-hf-id="hf-jaxe" id="settlement-video" class="clip product-video" src="assets/footage-v2/c05-settlement-receipt.mp4" data-start="35" data-duration="9.5" data-track-index="1" muted playsinline></video>
+      <div data-hf-id="hf-y4jc" id="settle-scan" class="clip scan" data-start="36" data-duration="8.5" data-track-index="2" data-layout-allow-occlusion=""></div>
+      <div data-hf-id="hf-todg" id="settlement-claim" class="clip claim" data-start="35" data-duration="10" data-track-index="3"><strong data-hf-id="hf-r83o" data-i18n="settlement"></strong><span data-hf-id="hf-bh2z" data-i18n="settlementNote"></span></div>
+      <div data-hf-id="hf-r3x3" id="settlement-chapter" class="clip chapter" data-start="35" data-duration="10" data-track-index="4">03 / settlement</div>
+
+      <div data-hf-id="hf-6alr" id="agent-bed" class="clip product-bed" data-start="45" data-duration="10" data-track-index="0"><div data-hf-id="hf-56dl" class="grain"></div></div>
+      <video data-hf-id="hf-9pbb" id="agent-query" class="clip product-video" src="assets/footage-v2/c06-alice-query.mp4" data-start="45" data-duration="5.2" data-track-index="1" muted playsinline></video>
+      <video data-hf-id="hf-ix28" id="agent-result" class="clip product-video" src="assets/footage-v2/c06-alice-result.mp4" data-start="50.2" data-duration="4.8" data-track-index="1" muted playsinline></video>
+      <div data-hf-id="hf-4hhd" id="agent-scan" class="clip scan" data-start="46" data-duration="9" data-track-index="2" data-layout-allow-occlusion=""></div>
+      <div data-hf-id="hf-wcev" id="agent-claim" class="clip claim" data-start="45" data-duration="10" data-track-index="3"><strong data-hf-id="hf-0qjw" data-i18n="agent"></strong><span data-hf-id="hf-moi1" data-i18n="agentNote"></span></div>
+      <div data-hf-id="hf-naon" id="agent-chapter" class="clip chapter" data-start="45" data-duration="10" data-track-index="4">04 / agent</div>
+
+      <section data-hf-id="hf-nks0" id="outro" class="clip scene" data-start="55" data-duration="10" data-track-index="0">
+        <img data-hf-id="hf-k90j" class="outro-garden" src="assets/giverny-login-garden-outro.webp" alt="Giverny garden"><div data-hf-id="hf-q467" class="outro-wash"></div><div data-hf-id="hf-6dao" class="grain"></div>
+        <div data-hf-id="hf-0gt5" class="outro-copy"><div data-hf-id="hf-17m8" class="meta" style="position:relative;left:0;top:0;color:rgba(251,251,248,.78)" data-i18n="outroKicker"></div><h2 data-hf-id="hf-v0v5" class="serif" data-i18n="outroTitle"></h2><p data-hf-id="hf-0u1t" data-i18n="outroBody"></p></div>
+        <div data-hf-id="hf-e92b" class="life-strip"><img data-hf-id="hf-ogcv" src="capture/product-ui/dashboard.png" alt="Dashboard"><img data-hf-id="hf-8fqf" src="capture/product-ui/tasks.png" alt="Tasks"><img data-hf-id="hf-lk09" src="capture/product-ui/files.png" alt="Files"><img data-hf-id="hf-ep29" src="capture/product-ui/settlement.png" alt="Settlement"></div>
+        <div data-hf-id="hf-bdkb" class="logo-lock"><img data-hf-id="hf-tug9" src="assets/giverny-mark-outro.png" alt="Giverny"><span data-hf-id="hf-nskc" class="serif">Giverny</span></div>
+      </section>
+
+      <div data-hf-id="hf-pgk9" id="demo-note" class="clip demo-note" data-start="0" data-duration="65" data-track-index="10" data-i18n="demo"></div>
+    </div>
+
+    <script>
+      window.GivernyPromoLocale.apply()
+      window.__timelines = window.__timelines || {}
+      var tl = gsap.timeline({ paused:true })
+      window.__timelines['giverny-product-promo-v2'] = tl
+
+      tl.fromTo('.pain-title',{opacity:0,y:42},{opacity:1,y:0,duration:.72,ease:'power3.out'},.2)
+        .fromTo('.pain-sub',{opacity:0,x:-32},{opacity:1,x:0,duration:.55,ease:'power2.out'},.7)
+        .fromTo('.fragment',{opacity:0,y:90,rotation:.6},{opacity:1,y:0,rotation:0,duration:.7,stagger:.18,ease:'power3.out'},1.1)
+        .to('.fragment:nth-child(1)',{x:-48,y:18,duration:2.3,ease:'power1.inOut'},4.2)
+        .to('.fragment:nth-child(2)',{y:-28,duration:2.1,ease:'power1.inOut'},4.35)
+        .to('.fragment:nth-child(3)',{x:74,y:34,opacity:.38,duration:2.2,ease:'power1.inOut'},4.25)
+
+      tl
+        .fromTo('#brand-copy',{opacity:0},{opacity:1,duration:.85,ease:'power3.out'},8.35)
+        .fromTo('#brand-line',{scaleX:0},{scaleX:1,duration:1.1,ease:'power2.out'},9.4)
+        .fromTo('#brand-ripple',{opacity:0,scale:.45},{opacity:.75,scale:1.18,duration:2.8,ease:'power1.out'},10.2)
+        .fromTo('#brand-ripple-2',{opacity:0,scale:.65},{opacity:.55,scale:1.35,duration:2.4,ease:'power1.out'},10.6)
+
+      tl.fromTo('#workflow-brief',{opacity:0,x:170,scale:.965},{opacity:1,x:0,scale:1,duration:.62,ease:'power3.out'},15)
+        .fromTo('#workflow-scan',{opacity:0,scale:.94},{opacity:1,scale:1,duration:.42,ease:'power2.out'},16.2)
+        .to('#workflow-scan',{x:160,y:110,scaleX:.62,scaleY:.88,duration:3.6,ease:'power1.inOut'},17.1)
+        .fromTo('#workflow-progress',{opacity:0,x:150},{opacity:1,x:0,duration:.55,ease:'power3.out'},20.2)
+        .to('#workflow-scan',{x:30,y:20,scaleX:1.08,scaleY:1.08,duration:3.2,ease:'power1.inOut'},20.8)
+
+      tl.fromTo('#acceptance-video',{opacity:0,x:160},{opacity:1,x:0,duration:.62,ease:'power3.out'},26)
+        .fromTo('#accept-scan',{opacity:0,scale:.9},{opacity:1,scale:1,duration:.45,ease:'power2.out'},27)
+        .to('#accept-scan',{y:-95,scaleY:.84,duration:4.8,ease:'power1.inOut'},28.1)
+
+      tl.fromTo('#settlement-video',{opacity:0,x:160},{opacity:1,x:0,duration:.62,ease:'power3.out'},35)
+        .fromTo('#settle-scan',{opacity:0,scale:.95},{opacity:1,scale:1,duration:.45,ease:'power2.out'},36)
+        .to('#settle-scan',{x:160,y:190,scaleX:.66,scaleY:.56,duration:5.5,ease:'power1.inOut'},37.2)
+
+      tl.fromTo('#agent-query',{opacity:0,x:160},{opacity:1,x:0,duration:.62,ease:'power3.out'},45)
+        .fromTo('#agent-scan',{opacity:0,scale:.94},{opacity:1,scale:1,duration:.45,ease:'power2.out'},46)
+        .to('#agent-scan',{x:-120,y:120,scaleY:.74,duration:3.2,ease:'power1.inOut'},47)
+        .fromTo('#agent-result',{opacity:0,x:150},{opacity:1,x:0,duration:.55,ease:'power3.out'},50.2)
+        .to('#agent-scan',{x:-80,y:215,scaleX:.95,scaleY:.6,duration:3.8,ease:'power1.inOut'},50.6)
+
+      tl.fromTo('#outro .outro-garden',{scale:1.12,x:-36},{scale:1.06,x:0,duration:10,ease:'none'},55)
+        .fromTo('#outro .outro-copy',{opacity:0,x:-70},{opacity:1,x:0,duration:.85,ease:'power3.out'},55.4)
+        .fromTo('#outro .life-strip img',{opacity:0,y:80,rotation:1.4},{opacity:1,y:0,rotation:0,duration:.7,stagger:.18,ease:'power3.out'},56)
+        .to('#outro .life-strip',{x:-42,y:18,rotation:-.7,duration:7.2,ease:'none'},57)
+        .fromTo('#outro .logo-lock',{opacity:0,x:-30},{opacity:1,x:0,duration:.6,ease:'power2.out'},60.8)
+    </script>
+  </body>
+</html>

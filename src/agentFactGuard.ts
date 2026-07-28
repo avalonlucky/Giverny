@@ -401,37 +401,51 @@ function renderHighRiskActions(payload: Record<string, unknown>) {
   return ['**高风险操作案件**', ...(items.length ? items.map((item) => `- ${String(item.action || '')}：${String(item.status || '')} · ${String(item.riskLevel || '')}；证据保留至 ${String(item.retentionUntil || '')}`) : ['- 当前没有高风险操作案件。'])].join('\n')
 }
 
+/**
+ * 证据渲染器注册表——新增工具只需在此处注册一个渲染函数即可。
+ * 替代了旧版 28 分支 if-else 链，支持 O(1) 查找和动态扩展。
+ */
+const evidenceRendererRegistry: Record<string, (payload: Record<string, unknown>) => string> = {
+  query_month_finance: renderFinance,
+  query_task_portfolio: (payload) => renderTaskRows('已核验任务概况', normalizedTaskRows(payload.tasks), record(payload.summary)),
+  search_tasks: (payload) => renderTaskRows('已核验任务结果', normalizedTaskRows(payload.results)),
+  get_task_detail: renderTaskDetail,
+  get_requester_profile: renderProfile,
+  search_attachments: renderAttachments,
+  search_product_help: renderProductHelp,
+  search_web: renderWebSearch,
+  search_workspace: renderWorkspaceSearch,
+  audit_workspace_consistency: renderConsistencyAudit,
+  query_formal_deliverables: renderFormalDeliverables,
+  query_high_risk_actions: renderHighRiskActions,
+  get_giverny_context: renderContext,
+  generate_settlement_receipt: renderSettlement,
+  export_settlement_receipt: renderSettlement,
+  get_task_memory: renderTaskMemory,
+  create_task_plan: renderTaskPlan,
+  query_settlement_exports: renderSettlementExports,
+  reconcile_settlement_export: renderSettlementReconciliation,
+  check_schedule_conflicts: renderScheduleConflicts,
+  prepare_attachment_upload: renderUploadHandoff,
+  inspect_attachment_evidence: renderAttachmentEvidence,
+  query_attachment_analysis: renderAttachmentAnalysisQueue,
+  inspect_ai_settings: renderAiSettings,
+  test_ai_route: renderAiRouteTest,
+  diagnose_ai_routing: renderAiRoutingDiagnosis,
+  query_proactive_work: renderProactiveWork,
+  query_plan_continuation: renderPlanContinuation,
+  query_enterprise_memory: renderEnterpriseMemory,
+}
+
+/** 注册自定义证据渲染器（供未来插件扩展使用） */
+export function registerEvidenceRenderer(toolName: string, renderer: (payload: Record<string, unknown>) => string) {
+  evidenceRendererRegistry[toolName] = renderer
+}
+
 function renderEvidence(evidence: AgentEvidence) {
-  const payload = record(evidence.payload)
-  if (evidence.toolName === 'query_month_finance') return renderFinance(payload)
-  if (evidence.toolName === 'query_task_portfolio') return renderTaskRows('已核验任务概况', normalizedTaskRows(payload.tasks), record(payload.summary))
-  if (evidence.toolName === 'search_tasks') return renderTaskRows('已核验任务结果', normalizedTaskRows(payload.results))
-  if (evidence.toolName === 'get_task_detail') return renderTaskDetail(payload)
-  if (evidence.toolName === 'get_requester_profile') return renderProfile(payload)
-  if (evidence.toolName === 'search_attachments') return renderAttachments(payload)
-  if (evidence.toolName === 'search_product_help') return renderProductHelp(payload)
-  if (evidence.toolName === 'search_web') return renderWebSearch(payload)
-  if (evidence.toolName === 'search_workspace') return renderWorkspaceSearch(payload)
-  if (evidence.toolName === 'audit_workspace_consistency') return renderConsistencyAudit(payload)
-  if (evidence.toolName === 'query_formal_deliverables') return renderFormalDeliverables(payload)
-  if (evidence.toolName === 'query_high_risk_actions') return renderHighRiskActions(payload)
-  if (evidence.toolName === 'get_giverny_context') return renderContext(payload)
-  if (evidence.toolName === 'generate_settlement_receipt' || evidence.toolName === 'export_settlement_receipt') return renderSettlement(payload)
-  if (evidence.toolName === 'get_task_memory') return renderTaskMemory(payload)
-  if (evidence.toolName === 'create_task_plan') return renderTaskPlan(payload)
-  if (evidence.toolName === 'query_settlement_exports') return renderSettlementExports(payload)
-  if (evidence.toolName === 'reconcile_settlement_export') return renderSettlementReconciliation(payload)
-  if (evidence.toolName === 'check_schedule_conflicts') return renderScheduleConflicts(payload)
-  if (evidence.toolName === 'prepare_attachment_upload') return renderUploadHandoff(payload)
-  if (evidence.toolName === 'inspect_attachment_evidence') return renderAttachmentEvidence(payload)
-  if (evidence.toolName === 'query_attachment_analysis') return renderAttachmentAnalysisQueue(payload)
-  if (evidence.toolName === 'inspect_ai_settings') return renderAiSettings(payload)
-  if (evidence.toolName === 'test_ai_route') return renderAiRouteTest(payload)
-  if (evidence.toolName === 'diagnose_ai_routing') return renderAiRoutingDiagnosis(payload)
-  if (evidence.toolName === 'query_proactive_work') return renderProactiveWork(payload)
-  if (evidence.toolName === 'query_plan_continuation') return renderPlanContinuation(payload)
-  if (evidence.toolName === 'query_enterprise_memory') return renderEnterpriseMemory(payload)
-  return ''
+  const renderer = evidenceRendererRegistry[evidence.toolName]
+  if (!renderer) return ''
+  return renderer(record(evidence.payload))
 }
 
 export function buildAgentFactSnapshot(evidence: AgentEvidence[]): AgentFactSnapshot {

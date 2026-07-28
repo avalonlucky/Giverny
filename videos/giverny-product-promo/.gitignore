@@ -1,0 +1,8 @@
+.venv-kokoro/
+auditions/
+.hyperframes/
+.thumbnails/
+.waveform-cache/
+snapshots/
+renders/
+node_modules/

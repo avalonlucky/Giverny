@@ -7,7 +7,7 @@ const fail = (message) => {
 }
 
 const manifest = agentCapabilityManifest()
-const alice = readFileSync('src/aliceAgent.ts', 'utf8')
+const alice = readFileSync('src/aliceAgent.ts', 'utf8') + readFileSync('src/agentToolClient.ts', 'utf8')
 const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
 const worker = readFileSync('src/worker.ts', 'utf8')
 const writeWorkflow = readFileSync('src/agentWriteWorkflow.ts', 'utf8')
