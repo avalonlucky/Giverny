@@ -36,6 +36,7 @@ const financeReadRoles = ['admin', 'demo', 'collaborator', 'viewer', 'mcp-read',
 const writeRoles = ['admin', 'demo', 'collaborator', 'system'] as const
 const adminRoles = ['admin', 'system'] as const
 const settlementReceiptRoles = ['admin', 'demo', 'system'] as const
+const workspaceSubjectRoles = ['admin', 'demo', 'collaborator', 'viewer', 'system'] as const
 const systemRoles = ['system'] as const
 const confirmationInputSchema = z.object({ confirmationToken: z.string().min(1) })
 const taskReferenceSchema = {
@@ -152,6 +153,14 @@ export const agentCapabilityRegistry = {
     policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read', 'attachments:read', 'product:read', 'memory:read'], roles: financeReadRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_search_workspace' },
     inputSchema: z.object({ query: z.string().min(1).max(500), month: z.string().regex(/^\d{4}-\d{2}$/).optional(), sources: z.array(z.enum(['task', 'attachment', 'conversation', 'product', 'memory'])).min(1).max(5).optional(), limit: z.number().int().min(1).max(50).default(20) }),
     trace: { running: '跨任务、附件、对话与知识统一检索', completed: '全域搜索结果已整理' },
+  }),
+  resolve_workspace_subject: defineCapability({
+    title: '解析工作区对象',
+    description: '先锁定用户提到的具名项目或任务，再聚合任务进展、附件和对话中的版本证据。多个候选时必须让用户选择，不得猜测。',
+    category: 'tasks', endpoint: 'resolve-workspace-subject', methods: ['POST'], exposure: ['model', 'api'] as readonly AgentCapabilityExposure[],
+    policy: { risk: 'read', deterministic: true, source: 'd1', scopes: ['tasks:read', 'attachments:read'], roles: workspaceSubjectRoles, confirmation: 'none', audit: 'turn', auditEvent: 'agent_resolve_workspace_subject' },
+    inputSchema: z.object({ subject: z.string().min(1).max(80), factKind: z.enum(['version']).default('version'), limit: z.number().int().min(1).max(50).default(20) }),
+    trace: { running: '锁定对象并核对版本证据', completed: '对象与版本证据已返回' },
   }),
   audit_workspace_consistency: readCapability({
     title: '执行全站数据一致性审计', description: '只读核查任务、进展工时、等待、附件、附件分析和结算快照之间的一致性，保存可追溯审计运行但绝不自动修改业务数据。', category: 'analysis', endpoint: 'workspace-consistency-audit',

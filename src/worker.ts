@@ -6,20 +6,11 @@ import { createMcpHandler } from 'agents/mcp'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import JSZip from 'jszip'
 import { z } from 'zod'
-import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig, type AgentCapabilityName } from './agentToolRegistry'
-import {
-  AGENT_DIRECTOR_SYSTEM_PROMPT,
-  agentDirectorReasoningChain,
-  applyAgentConversationFollowUpPolicy,
-  applyExplicitSettlementExportPolicy,
-  directAgentOperationCatalog,
-  groundDirectAgentCalls,
-  normalizeAgentDirectorDecision,
-  shortlistAgentCapabilities,
-  validateDirectedPlan,
-  type AgentDirectorPlan,
-} from './agentIntentDirector'
-import { runAgentRuntimeGraph, type AgentRuntimeGraphPlan } from './agentRuntimeGraph'
+import { phoneticVariants , phoneticEditDistance } from './chineseFuzzy'
+import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig } from './agentToolRegistry'
+import { callAgentTool } from './agentToolClient'
+import { CONFIRM_RE, REJECT_RE, buildExecutionSummary } from './agentApprovalFlow'
+import { extractAgentVersions, normalizeAgentVersion } from './agentVersionEvidence'
 import { summarizeAgentProductivity } from './agentProductivityMetrics'
 import { buildAgentFactSnapshot, runAgentFactProtocolSelfTest, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, normalizeAgentIntent, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
@@ -115,6 +106,9 @@ type Env = {
   AI_PROVIDER?: string
   AI_RUNTIME_URL?: string
   AI_RUNTIME_KEY?: string
+  ADK_AGENT_URL?: string
+  ADK_AGENT_KEY?: string
+  GIVERNY_API_BASE_URL?: string
   AI_SETTINGS_SECRET?: string
   AGENT_TOOL_TOKEN?: string
   ALICE_AGENT?: unknown
@@ -2673,6 +2667,7 @@ function isTaskBlockerQuestion(text: string) {
   return /(?:卡在哪|卡在|卡住|阻塞|等待原因|延期原因|为什么.{0,20}(?:没|未).{0,10}(?:交付|完成)|为什么一直)/.test(text)
 }
 
+
 function normalizedTaskMatchText(value: string) {
   return value.normalize('NFKC').toLowerCase().replace(/[的了呢吗啊吧一下这个该当前现在任务工作项目\s\p{P}\p{S}]+/gu, '')
 }
@@ -2743,7 +2738,7 @@ async function resolveTaskBlockerAnswer(env: Env, question: string, workspaceId:
       '识别为具体任务阻塞查询',
       `匹配任务：${best.task.title} [tool:search_tasks]`,
       '读取当前等待记录 [tool:get_task_detail]',
-      `结构化事实协议生成答案：核对 ${verification.checkedClaims} 条声明。`,
+      `答案核对：已核对 ${verification.checkedClaims} 条事实。`,
     ],
     factVerification: {
       passed: verification.passed,
@@ -2793,6 +2788,7 @@ function renderMonthFinanceAnswer(stats: MonthFinanceStats[], hourlyRate: number
 
 type ChatAgentToolName = 'query_month_finance' | 'export_settlement_receipt' | 'search_tasks' | 'query_task_portfolio' | 'get_task_detail' | 'get_requester_profile' | 'search_product_help' | 'query_enterprise_memory' | 'query_agenda' | 'none'
 type ChatAgentPlanResponse = {
+  thinking?: string
   intent?: 'finance' | 'task_data' | 'person_profile' | 'product_help' | 'knowledge' | 'general' | 'unknown'
   tools?: Array<{ name?: ChatAgentToolName; args?: Record<string, unknown>; reason?: string }>
   confidence?: number
@@ -2834,14 +2830,16 @@ function chatUnderstandingTrace(question: string, intent?: ChatAgentPlanResponse
   return `理解问题：先判断问题是否需要站内数据支持。问题是 ${subject}`
 }
 
+
+
 function chatVerificationTrace(results: ChatAgentToolResult[]) {
-  if (results.some((item) => item.name === 'query_task_portfolio')) return '核对结论：跨任务状态、延期和等待原因来自当前工作区的确定性聚合。'
-  if (results.some((item) => item.name === 'get_requester_profile')) return '核对结论：画像指标来自确定性历史任务聚合，没有使用模型猜测。'
-  if (results.some((item) => item.name === 'search_product_help')) return '核对结论：回答已与官方手册和版本记录交叉核对。'
-  if (results.some((item) => item.name === 'query_month_finance')) return '核对结论：金额与工时来自确定性结算计算，没有使用模型估算。'
-  if (results.some((item) => item.name === 'query_agenda')) return '核对结论：日程、提醒、等待与可用时间来自当前工作区的确定性 Agenda。'
-  if (results.some((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')) return '核对结论：状态、进展和等待原因均来自当前任务记录。'
-  return '核对结论：回答已与本轮可用依据核对。'
+  if (results.some((item) => item.name === 'query_task_portfolio')) return '这些信息都来自真实的项目记录，不是我猜的。'
+  if (results.some((item) => item.name === 'get_requester_profile')) return '这些指标是从历史任务里算出来的，有据可查。'
+  if (results.some((item) => item.name === 'search_product_help')) return '我跟产品文档核对过了，信息是准确的。'
+  if (results.some((item) => item.name === 'query_month_finance')) return '金额和工时都是从结算记录里直接读的，没有估算。'
+  if (results.some((item) => item.name === 'query_agenda')) return '日程信息来自你的实际排期数据。'
+  if (results.some((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')) return '状态和进展都是从任务记录里确认的。'
+  return '以上回答都有数据支撑。'
 }
 
 function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
@@ -2850,7 +2848,7 @@ function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
   } | undefined
   if (portfolioResult?.summary) {
     const summary = portfolioResult.summary
-    return `提取数据：匹配 ${Number(summary.matched || 0)} 项，其中未完成 ${Number(summary.unfinished || 0)} 项、逾期 ${Number(summary.overdue || 0)} 项、等待中 ${Number(summary.waiting || 0)} 项。`
+    return `查到了——匹配 ${Number(summary.matched || 0)} 项，其中未完成 ${Number(summary.unfinished || 0)} 项、逾期 ${Number(summary.overdue || 0)} 项、等待中 ${Number(summary.waiting || 0)} 项。`
   }
   const profileResult = results.find((item) => item.name === 'get_requester_profile')?.result as {
     profile?: { name?: string; projects?: number; hours?: number; acceptanceRate?: number; onTimeRate?: number }
@@ -2858,18 +2856,18 @@ function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
   } | undefined
   if (profileResult?.found && profileResult.profile?.name) {
     const profile = profileResult.profile
-    return `提取数据：${profile.name} 共 ${Number(profile.projects || 0)} 个项目、${Number(profile.hours || 0)}h，验收通过率 ${Number(profile.acceptanceRate || 0)}%，准时交付率 ${Number(profile.onTimeRate || 0)}%。`
+    return `查到了——${profile.name} 共 ${Number(profile.projects || 0)} 个项目、${Number(profile.hours || 0)}h，验收通过率 ${Number(profile.acceptanceRate || 0)}%，准时交付率 ${Number(profile.onTimeRate || 0)}%。`
   }
   const productResult = results.find((item) => item.name === 'search_product_help')?.result as {
     matches?: Array<{ summary?: string }>
   } | undefined
   const productSummary = String(productResult?.matches?.[0]?.summary || '').replace(/\s+/g, ' ').trim()
-  if (productSummary) return `提取事实：${productSummary.slice(0, 180)}${productSummary.length > 180 ? '…' : ''}`
+  if (productSummary) return `找到了——${productSummary.slice(0, 180)}${productSummary.length > 180 ? '…' : ''}`
   const financeResult = results.find((item) => item.name === 'query_month_finance')?.result as {
     stats?: Array<{ month?: string; billableHours?: number; amount?: number }>
   } | undefined
   if (financeResult?.stats?.length) {
-    return `提取数据：${financeResult.stats.map((item) => `${item.month || '未指定月份'} ${Number(item.billableHours || 0)} 小时、¥${Number(item.amount || 0)}`).join('；')}。`
+    return `查到了——${financeResult.stats.map((item) => `${item.month || '未指定月份'} ${Number(item.billableHours || 0)} 小时、¥${Number(item.amount || 0)}`).join('；')}。`
   }
   const taskResult = results.find((item) => item.name === 'get_task_detail' || item.name === 'search_tasks')?.result as {
     results?: Array<{ task?: { title?: string; status?: string }; waitingRecords?: Array<{ active?: boolean; note?: string; reason?: string }> }>
@@ -2877,7 +2875,7 @@ function chatEvidenceFindingTrace(results: ChatAgentToolResult[]) {
   const firstTask = taskResult?.results?.[0]
   if (firstTask?.task?.title) {
     const activeWait = firstTask.waitingRecords?.find((item) => item.active)
-    return `提取事实：已定位“${firstTask.task.title}”，当前状态为${firstTask.task.status || '未记录'}${activeWait ? `，正在等待“${activeWait.note || activeWait.reason || '未填写原因'}”` : ''}。`
+    return `找到了——已定位“${firstTask.task.title}”，当前状态为${firstTask.task.status || '未记录'}${activeWait ? `，正在等待“${activeWait.note || activeWait.reason || '未填写原因'}”` : ''}。`
   }
   return ''
 }
@@ -2934,9 +2932,10 @@ async function planChatAgentTurn(
 
 规划规则：
 - 意图证据只能来自输入对象的 question 字段和会话上下文；上面的工具名、工具说明和规划规则不是用户意图证据。
-- 必须先理解整句话在问“网站怎么用”还是“某个真实任务现在怎么样”，不得因为出现“任务”或“在哪里”就选产品帮助。
-- 提到具体任务名并询问状态、进展、卡点、等待、延期或为何未交付时，必须优先调用 get_task_detail。
-- 用户询问网站怎么用、如何设置、有哪些更新、产品名称由来或为何这样设计时，调用 search_product_help；工具没有确认的作者意图不得自行补写。
+- 核心判断：用户是在问"一个具体工作项目/任务现在怎么样了"，还是在问"这个网站/产品的某个功能怎么用"？前者用 get_task_detail，后者用 search_product_help。
+- 用户提到一个具体的工作项目名称（如"XX修改"、"XX设计"、"XX延展"、"XX开发"、"XX调整"）并询问其进展、状态、时间线、链路、历史、卡点、等待、延期或为何未交付时，这是在问一个真实任务的详情，必须调用 get_task_detail。不要因为句中出现"时间线"、"链路"等词就误判为产品功能问题。
+- 只有用户明确在问"网站怎么用"、"某功能在哪里/怎么设置"、"版本更新了什么"、"产品手册/说明"时，才调用 search_product_help。
+- 工具没有确认的作者意图不得自行补写。
 - 用户问金额、工资、收入、结算、合计、6月和7月加起来多少钱等，必须调用 query_month_finance。
 - 用户明确要求导出、生成或下载某个日期范围的结算回单/Excel 时，必须调用 export_settlement_receipt；不能只返回文字汇总。
 - 如果用户提到“本月/上月/6月/2026-06”等月份，优先使用 requestedMonthCandidates；不要猜不存在的月份。
@@ -2946,13 +2945,14 @@ async function planChatAgentTurn(
 - 用户要求某个人的用户画像、需求人画像、合作画像、合作特征、历史偏好或报价/排期建议时，必须调用 get_requester_profile；不要用 search_tasks 代替画像聚合。
 - 用户询问组织规则、合作伙伴长期偏好、项目约定、历史决策或之前记住了什么时，必须调用 query_enterprise_memory；不能把模型推测当成已确认记忆。
 - 图片或附件问题优先交给后续多模态流程，工具可返回 none。
+- 在 thinking 字段中，用第一人称、自然口语写出你的思考过程（1-3句话）。像一个人边想边说：先说你理解了什么，再说你打算怎么做、为什么。每次面对不同问题，思考方式和表达都应该不同。不要用"正在编排"、"执行计划"等机械用语。
 - 只输出 JSON，不要回答正文。`
   return callSelectedModelJson<ChatAgentPlanResponse>(
     env,
     modelChoice,
     systemPrompt,
     payload,
-    'intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"query_enterprise_memory"|"query_agenda"|"none", args:object, reason:string}>, confidence:number, question?:string',
+    'thinking:string(第一人称自然思考), intent:"finance"|"task_data"|"person_profile"|"product_help"|"knowledge"|"general"|"unknown", tools:Array<{name:"query_month_finance"|"export_settlement_receipt"|"search_tasks"|"query_task_portfolio"|"get_task_detail"|"get_requester_profile"|"search_product_help"|"query_enterprise_memory"|"query_agenda"|"none", args:object, reason:string}>, confidence:number, question?:string',
     900,
   )
 }
@@ -3029,6 +3029,19 @@ async function executeChatAgentTools(
     if (name === 'search_product_help') {
       const query = agentString(tool.args?.query, 500)
       const result = searchProductKnowledge(query, 5)
+      // 音近容错：如果精确搜索结果相关性低，尝试拼音变体
+      if (result.matches.length === 0 || (result.matches[0]?.score ?? 0) < 40) {
+        const variants = phoneticVariants(query.replace(/[^一-鿿]/g, '').slice(0, 8), 6)
+        for (const variant of variants) {
+          const fuzzyResult = searchProductKnowledge(variant, 3)
+          if (fuzzyResult.matches.length > 0 && (fuzzyResult.matches[0]?.score ?? 0) > (result.matches[0]?.score ?? 0)) {
+            result.matches = fuzzyResult.matches
+            result.total = fuzzyResult.total
+            result.fuzzyCorrection = variant
+            break
+          }
+        }
+      }
       results.push({ name, args: { query }, result })
       const titles = result.matches.slice(0, 3).map((item) => `《${item.title}》`).join('、')
       const sources = [...new Set(result.matches.map((item) => item.category))].slice(0, 3).join('、')
@@ -3176,89 +3189,9 @@ type OpenAiAgentRuntimeResult = {
     sourceTools: string[]
     fallbackUsed: boolean
   }
-  orchestration?: { engine: 'langgraph'; path: string[]; modelCalls: number }
-  productivity?: { engine: 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
+  orchestration?: { engine: 'google-adk-2' | 'langgraph'; path?: string[]; modelCalls?: number; frameworkVersion?: string; specialists?: string[]; evidenceCount?: number; status?: string }
+  productivity?: { engine: 'google-adk-2' | 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
   grounding?: AgentFactSnapshot
-}
-
-const AGENT_RELEVANCE_STOP_WORDS = new Set([
-  '一下', '什么', '怎么', '怎样', '为什么', '为何', '请问', '帮我', '这个', '那个', '目前', '现在', '最近',
-  '用户', '网站', '可以', '需要', '是否', '还是', '就是', '一个', '一下子', '告诉', '回复', '回答',
-])
-
-function agentQuestionAnchors(question: string) {
-  const normalized = question.normalize('NFKC').toLowerCase()
-  const ascii = [...normalized.matchAll(/[a-z][a-z0-9._+-]{1,}|20\d{2}(?:[-/.]\d{1,2}){0,2}/g)]
-    .map((match) => match[0])
-  const chinese = [...normalized.matchAll(/[\u3400-\u9fff]{2,}/g)]
-    .flatMap((match) => {
-      let segment = match[0]
-      AGENT_RELEVANCE_STOP_WORDS.forEach((word) => { segment = segment.replaceAll(word, ' ') })
-      return segment.split(/\s+/).flatMap((part) => {
-        if (part.length < 2) return []
-        if (part.length === 2) return [part]
-        return Array.from({ length: part.length - 1 }, (_, index) => part.slice(index, index + 2))
-      })
-    })
-  return [...new Set([...ascii, ...chinese])].filter((anchor) => !AGENT_RELEVANCE_STOP_WORDS.has(anchor)).slice(0, 24)
-}
-
-function agentAnswerAddressesQuestion(question: string, answer: string) {
-  const anchors = agentQuestionAnchors(question)
-  if (anchors.length === 0) return true
-  const normalizedAnswer = answer.normalize('NFKC').toLowerCase()
-  return anchors.some((anchor) => normalizedAnswer.includes(anchor))
-}
-
-async function composeNaturalAgentAnswer(
-  env: Env,
-  modelChoice: ChatModelChoice,
-  question: string,
-  history: Array<{ role: 'user' | 'assistant'; content: string }>,
-  snapshot: AgentFactSnapshot,
-) {
-  const context = history.slice(-4).map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`).join('\n')
-  const prompt = `你是 Giverny 工作助手。请根据已经由程序核验的事实，自然、直接地回答用户当前问题。
-
-回答原则：
-- 先回答用户真正问的内容，只使用相关事实；不要把所有明细和全部工具结果倾倒给用户。
-- 结合最近对话理解“这个、上面、刚才、为什么”等指代。发现上一轮结论与核验事实不一致时，直接说明正确结论和出错原因，不套固定道歉模板。
-- 不展示工具名、数据库、编排节点、协议、模型调用次数或内部术语。
-- 金额、工时、日期、状态、任务数量必须严格使用下方事实，不得自行计算或补写。
-- 排版保持简洁；简单问题通常用一到两段，只有用户明确要求明细时才列清单。
-
-最近对话：
-${context || '无'}
-
-当前问题：
-${question}
-
-已核验事实：
-${snapshot.sections.map((section) => section.markdown).join('\n\n')}`
-  const first = await callTextWithSelectedModel(env, prompt, modelChoice, 2200)
-  let answer = first.text.trim()
-  let verification = verifyAgentFactClaims(answer, snapshot, { requireCanonicalSections: false })
-  let addressesQuestion = agentAnswerAddressesQuestion(question, answer)
-  if (!verification.passed || !addressesQuestion) {
-    const repairIssues = [
-      ...verification.issues,
-      ...(!addressesQuestion ? ['回答没有正面回应当前问题，请围绕当前问题的对象和诉求重新组织答案'] : []),
-    ]
-    const repaired = await callTextWithSelectedModel(
-      env,
-      `${prompt}\n\n上一版回答未通过检查，请纠正以下问题并保持自然简洁：${repairIssues.join('；')}`,
-      modelChoice,
-      2200,
-    )
-    answer = repaired.text.trim()
-    verification = verifyAgentFactClaims(answer, snapshot, { requireCanonicalSections: false })
-    addressesQuestion = agentAnswerAddressesQuestion(question, answer)
-  }
-  return {
-    answer: verification.passed && addressesQuestion && answer ? answer : snapshot.fallbackAnswer,
-    verification,
-    fallbackUsed: !verification.passed || !addressesQuestion,
-  }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
@@ -3273,21 +3206,6 @@ function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
     .slice(0, 8)
 }
 
-function agentVisibleResultTrace(trace: OpenAiAgentRuntimeTraceItem[]) {
-  return trace.flatMap((item) => {
-    const label = String(item.label || '').replace(/\s*\[tool:[^\]]+\]/gi, '').trim()
-    const detail = String(item.detail || '').replace(/\s*\[tool:[^\]]+\]/gi, '').trim()
-    if (!label || item.type === 'tool' || /(?:结构化事实协议|业务事实核验|执行编排路径|主模型调用)/.test(`${label}${detail}`)) return []
-    if (item.type === 'plan') {
-      if (label === '验真后动态补查') return [{ type: 'plan', label: '思考', detail: '第一次取得的信息还不够，我正在补充核对。' }]
-      if (label.startsWith('拆解')) return [{ type: 'plan', label: '思考', detail: `这个请求包含多个目标，我会分别处理后再汇总。` }]
-      return []
-    }
-    if (item.type === 'error') return [{ type: 'error', label: '结果', detail: detail || label }]
-    return [{ type: 'result', label: '结果', detail: detail ? `${label}：${detail}` : label }]
-  })
-}
-
 function agentRuntimeObjectName(principal: AgentPrincipalContext, conversationId: string) {
   return principal.workspaceId === DEFAULT_WORKSPACE_ID ? conversationId : `${principal.workspaceId}:${conversationId}`
 }
@@ -3299,80 +3217,6 @@ function agentConversationStorageId(workspaceId: string, conversationId: string)
 function publicAgentConversationId(workspaceId: string, storageId: string) {
   const prefix = `${workspaceId}:`
   return workspaceId !== DEFAULT_WORKSPACE_ID && storageId.startsWith(prefix) ? storageId.slice(prefix.length) : storageId
-}
-
-async function directAgentRequest(
-  env: Env,
-  args: { question: string; currentMonth?: string; modelChoice: ChatModelChoice; principal: AgentPrincipalContext; history?: Array<{ role: 'user' | 'assistant'; content: string }> },
-) {
-  const history = (args.history || []).slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) }))
-  const target = await resolveChatModelTarget(env, args.modelChoice)
-  let modelLabel = target.label
-  const request = { question: args.question, currentMonth: args.currentMonth, history, principal: args.principal }
-  const graphResult = await tracing.enterSpan('agent.understand_and_plan', (span) => {
-    span.setAttribute('agent.role', args.principal.role)
-    span.setAttribute('agent.has_history', history.length > 0)
-    return runAgentRuntimeGraph({
-    understand: async (graphRequest) => {
-      const rawDecision = await callSelectedModelJson<Record<string, unknown>>(
-        env,
-        args.modelChoice,
-        `${AGENT_DIRECTOR_SYSTEM_PROMPT}
-- complexity=simple 仅用于一个明确目标，且 proposedCalls 已能直接表达最小必要动作；复合目标、先查后做、对象不明确或需要比较时必须为 complex。
-- proposedCalls 只能从 directOperations 中选择；简单请求尽量一次给出。复杂请求保持空数组，交给后续规划节点。
-- 任何 confirmation=preview 的写入参数都必须在 grounding 中给出用户原话片段；用户没说的字段必须省略，不得把查询误判为写入或用示例值补齐。`,
-        { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', role: graphRequest.principal.role, history: graphRequest.history, directOperations: directAgentOperationCatalog(graphRequest.principal.role) },
-        'goal: string; domains: (conversation|tasks|finance|files|calendar|product_help|web|workspace_search|memory|analysis|security)[]; operation: string; requiresBusinessData: boolean; requiresProductKnowledge: boolean; isWrite: boolean; missingInformation: string[]; confidence: 0到1; rationale: string; complexity: simple|complex; proposedCalls: {name:string; args:object; reason:string; grounding?: Record<string,string>}[]',
-        2600,
-      )
-      return groundDirectAgentCalls(
-        applyExplicitSettlementExportPolicy(
-          applyAgentConversationFollowUpPolicy(normalizeAgentDirectorDecision(rawDecision), graphRequest.question, graphRequest.history),
-          graphRequest.question,
-          graphRequest.currentMonth || '',
-        ),
-        [graphRequest.question, ...graphRequest.history.map((item) => item.content)].join('\n'),
-      )
-    },
-    shortlist: (decision, principal) => shortlistAgentCapabilities(decision, principal.role),
-    plan: async (graphRequest, decision, allowedCapabilities): Promise<AgentRuntimeGraphPlan> => {
-      if (!decision.requiresBusinessData && !decision.requiresProductKnowledge && !decision.isWrite && !decision.domains.includes('web')) {
-        const direct = await callTextWithSelectedModel(
-          env,
-          `你是 Giverny 工作助手。请直接回答用户，不要声称查询了网站数据或产品手册，不要展示隐藏思维链。\n\n用户：${graphRequest.question}`,
-          args.modelChoice,
-          1800,
-        )
-        modelLabel = direct.modelLabel
-        return { calls: [], needsInput: false, followUpQuestion: '', answerIfNoTools: direct.text }
-      }
-      const capabilities = allowedCapabilities.map((name) => {
-        const capability = agentCapabilityRegistry[name]
-        let inputSchema: unknown = {}
-        try { inputSchema = z.toJSONSchema(capability.inputSchema) } catch { /* Planner can still use title and description. */ }
-        return { name, title: capability.title, description: capability.description, risk: capability.policy.risk, confirmation: capability.policy.confirmation, inputSchema }
-      })
-      const rawPlan = await callSelectedModelJson<AgentDirectorPlan>(
-        env,
-        args.modelChoice,
-        `你是 Giverny Agent 的工具规划器。你只能从输入的候选能力中选择完成目标所必需的最小工具集。
-不得增加候选列表以外的工具；不得为了“多了解一点”而扩大检索；信息不足时允许调用 preview 让后端返回缺失字段。不得编造用户没有提供的任务名、需求、日期、工时、人员或附件 ID；未提供的字段必须省略。
-会修改业务实体的动作只能选 preview 能力，不得直接执行。候选能力中 confirmation=none 的确定性文件生成动作可以立即执行。answerIfNoTools 只用于不需要工具或需向用户追问时。`,
-        { question: graphRequest.question, currentMonth: graphRequest.currentMonth || '', history: graphRequest.history, decision, capabilities },
-        'calls: {name: string; args: object; reason: string}[]; needsInput: boolean; followUpQuestion: string; answerIfNoTools: string',
-        3000,
-      )
-      return {
-        calls: Array.isArray(rawPlan?.calls) ? rawPlan.calls : [],
-        needsInput: rawPlan?.needsInput === true,
-        followUpQuestion: String(rawPlan?.followUpQuestion || ''),
-        answerIfNoTools: String(rawPlan?.answerIfNoTools || ''),
-      }
-    },
-    authorize: (decision, plan, allowedCapabilities, principal) => validateDirectedPlan({ decision, plan, allowedCapabilities, role: principal.role }),
-    }, request)
-  })
-  return { ...graphResult, modelLabel }
 }
 
 let agentWorkspaceColumnsEnsured = false
@@ -3396,6 +3240,199 @@ async function ensureAgentWorkspaceColumns(env: Env) {
   agentWorkspaceColumnsEnsured = true
 }
 
+type AdkPendingAction = {
+  workspace_id: string
+  conversation_id: string
+  approval_id: string
+  principal_id: string
+  action: string
+  label: string
+  preview_endpoint: string
+  execute_endpoint: string
+  confirmation_token: string
+  draft_json: string
+  warnings_json: string
+  created_at_ms: number
+  expires_at_ms: number
+}
+
+type AdkPrivatePendingAction = {
+  action: string
+  label: string
+  previewEndpoint: string
+  executeEndpoint: string
+  confirmationToken: string
+  draft: Record<string, unknown>
+  warnings: string[]
+}
+
+let agentAdkPendingTableEnsured = false
+async function ensureAgentAdkPendingTable(env: Env) {
+  if (agentAdkPendingTableEnsured) return
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agent_adk_pending_actions (
+    workspace_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    label TEXT NOT NULL,
+    preview_endpoint TEXT NOT NULL,
+    execute_endpoint TEXT NOT NULL,
+    confirmation_token TEXT NOT NULL,
+    draft_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    created_at_ms INTEGER NOT NULL,
+    expires_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, conversation_id)
+  )`).run()
+  agentAdkPendingTableEnsured = true
+}
+
+function adkApprovalFromRow(row: AdkPendingAction, status: AgentApproval['status'], error?: string): AgentApproval {
+  const warnings = (() => {
+    try {
+      const value = JSON.parse(row.warnings_json)
+      return Array.isArray(value) ? value.map((item) => String(item)) : []
+    } catch {
+      return []
+    }
+  })()
+  return {
+    id: row.approval_id,
+    action: row.action,
+    label: row.label,
+    draft: parseJsonRecord(row.draft_json),
+    warnings,
+    status,
+    createdAt: Number(row.created_at_ms),
+    expiresAt: Number(row.expires_at_ms),
+    ...(error ? { error } : {}),
+  }
+}
+
+async function readAdkPendingAction(env: Env, principal: AgentPrincipalContext, conversationId: string) {
+  await ensureAgentAdkPendingTable(env)
+  return env.DB.prepare(
+    'SELECT * FROM agent_adk_pending_actions WHERE workspace_id = ? AND conversation_id = ? AND principal_id = ? LIMIT 1',
+  ).bind(principal.workspaceId, conversationId, principal.principalId).first<AdkPendingAction>()
+}
+
+async function deleteAdkPendingAction(env: Env, workspaceId: string, conversationId: string) {
+  await ensureAgentAdkPendingTable(env)
+  await env.DB.prepare('DELETE FROM agent_adk_pending_actions WHERE workspace_id = ? AND conversation_id = ?')
+    .bind(workspaceId, conversationId).run()
+}
+
+async function saveAdkPendingAction(
+  env: Env,
+  principal: AgentPrincipalContext,
+  conversationId: string,
+  approval: AgentApproval,
+  pending: AdkPrivatePendingAction,
+) {
+  await ensureAgentAdkPendingTable(env)
+  await env.DB.prepare(`INSERT OR REPLACE INTO agent_adk_pending_actions (
+    workspace_id, conversation_id, approval_id, principal_id, action, label,
+    preview_endpoint, execute_endpoint, confirmation_token, draft_json, warnings_json,
+    created_at_ms, expires_at_ms
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      principal.workspaceId,
+      conversationId,
+      approval.id,
+      principal.principalId,
+      pending.action,
+      pending.label,
+      pending.previewEndpoint,
+      pending.executeEndpoint,
+      pending.confirmationToken,
+      JSON.stringify(pending.draft),
+      JSON.stringify(pending.warnings),
+      approval.createdAt,
+      approval.expiresAt,
+    ).run()
+}
+
+async function callAdkAgentRuntime(
+  env: Env,
+  args: {
+    query: string
+    context?: string
+    currentMonth?: string
+    conversationId: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    principal: AgentPrincipalContext
+    onTrace?: AgentVisibleTraceSink
+  },
+): Promise<OpenAiAgentRuntimeResult> {
+  const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
+  const runtimeKey = String(env.ADK_AGENT_KEY || '').trim()
+  if (!baseUrl || !runtimeKey) throw new Error('Google ADK Runtime 地址或访问密钥未配置')
+
+  const pending = await readAdkPendingAction(env, args.principal, args.conversationId)
+  const command = args.query.normalize('NFKC').trim()
+  if (pending && REJECT_RE.test(command)) {
+    await deleteAdkPendingAction(env, args.principal.workspaceId, args.conversationId)
+    return {
+      answer: '已取消，未对业务数据做任何修改。',
+      conversationId: args.conversationId,
+      model: 'deterministic-confirmation-control',
+      trace: [{ type: 'result', label: '确认控制', detail: '操作已取消' }],
+      approval: adkApprovalFromRow(pending, 'cancelled'),
+      orchestration: { engine: 'google-adk-2', status: 'cancelled' },
+    }
+  }
+  if (pending && CONFIRM_RE.test(command)) {
+    if (Date.now() > Number(pending.expires_at_ms)) {
+      await deleteAdkPendingAction(env, args.principal.workspaceId, args.conversationId)
+      throw new Error('确认卡已过期，请重新生成操作预览。')
+    }
+    const result = await callAgentTool(
+      { baseUrl: env.GIVERNY_API_BASE_URL, token: env.AGENT_TOOL_TOKEN, principal: args.principal },
+      pending.execute_endpoint,
+      { confirmationToken: pending.confirmation_token },
+    )
+    await deleteAdkPendingAction(env, args.principal.workspaceId, args.conversationId)
+    return {
+      answer: `已执行。${buildExecutionSummary(result)}`,
+      conversationId: args.conversationId,
+      model: 'deterministic-confirmation-control',
+      trace: [{ type: 'result', label: '确认控制', detail: '操作已执行并由业务接口验证' }],
+      approval: adkApprovalFromRow(pending, 'executed'),
+      orchestration: { engine: 'google-adk-2', status: 'executed' },
+    }
+  }
+
+  const response = await tracing.enterSpan('agent.adk.request', (span) => {
+    span.setAttribute('agent.runtime', 'google-adk-2')
+    span.setAttribute('agent.role', args.principal.role)
+    span.setAttribute('agent.has_history', Boolean(args.history?.length))
+    return fetch(`${baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-adk-runtime-key': runtimeKey },
+      body: JSON.stringify({
+        question: args.query,
+        conversationId: args.conversationId,
+        currentMonth: args.currentMonth || '',
+        context: args.context || '',
+        history: (args.history || []).slice(-16),
+        principal: args.principal,
+      }),
+      signal: AbortSignal.timeout(280_000),
+    })
+  })
+  const data = await response.json().catch(() => null) as (OpenAiAgentRuntimeResult & { pendingAction?: AdkPrivatePendingAction; detail?: string }) | null
+  if (!response.ok || !data?.answer || data.orchestration?.engine !== 'google-adk-2') {
+    throw new Error(data?.detail || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
+  }
+  if (data.approval && data.pendingAction?.confirmationToken) {
+    await saveAdkPendingAction(env, args.principal, args.conversationId, data.approval, data.pendingAction)
+  }
+  delete data.pendingAction
+  await args.onTrace?.(formatAgentRuntimeTrace(data.trace))
+  return data
+}
+
 async function callAgentRuntime(
   env: Env,
   args: {
@@ -3407,94 +3444,25 @@ async function callAgentRuntime(
     principal: AgentPrincipalContext
     modelChoice: ChatModelChoice
     onTrace?: AgentVisibleTraceSink
+    onThinkingStream?: (text: string) => void
   },
 ): Promise<OpenAiAgentRuntimeResult | null> {
   const cleanQuery = String(args.query || '').trim()
   if (!cleanQuery) return null
   const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
-  if (env.ALICE_AGENT) {
-    try {
-      const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(args.principal, conversationId)) as unknown as AliceAgent
-      const snapshot = await agent.conversationSnapshot()
-      const persistedHistory = snapshot.messages
-        .filter((item) => item.role === 'user' || item.role === 'assistant')
-        .map((item) => ({ role: item.role as 'user' | 'assistant', content: String(item.content || '') }))
-        .filter((item) => item.content.trim())
-      const conversationHistory = (persistedHistory.length ? persistedHistory : (args.history || [])).slice(-12)
-      await args.onTrace?.(['正在编排：由主模型判断问题类型和最小必要动作。'])
-      const orchestration = await directAgentRequest(env, {
-        question: cleanQuery,
-        currentMonth: args.currentMonth,
-        modelChoice: args.modelChoice,
-        principal: args.principal,
-        history: conversationHistory,
-      })
-      const reasoningChain = agentDirectorReasoningChain(orchestration.decision)
-      await args.onTrace?.(reasoningChain.map((step) => `${step.label}：${step.detail}`))
-      const actionTrace = orchestration.calls.map((call) => ({
-        type: 'tool',
-        label: '动作',
-        detail: agentCapabilityRegistry[call.name as AgentCapabilityName]?.trace.running || `正在处理${agentCapabilityRegistry[call.name as AgentCapabilityName]?.title || '必要步骤'}`,
-      }))
-      for (const item of actionTrace) await args.onTrace?.([`${item.label}：${item.detail}`])
-      let result = await tracing.enterSpan('agent.execute_tools', (span) => {
-        span.setAttribute('agent.operation_count', orchestration.calls.length)
-        span.setAttribute('agent.is_write', orchestration.decision.isWrite)
-        return agent.chat({
-          message: cleanQuery,
-          currentMonth: args.currentMonth,
-          conversationId,
-          history: conversationHistory,
-          context: args.context,
-          principal: args.principal,
-          orchestration: {
-            decision: orchestration.decision,
-            calls: orchestration.calls,
-            allowedCapabilities: orchestration.allowedCapabilities,
-          directAnswer: orchestration.directAnswer,
-          modelLabel: orchestration.modelLabel,
-          graph: {
-            path: orchestration.path,
-            modelCalls: orchestration.modelCalls,
-            deniedCount: orchestration.denied.length,
-          },
-        },
-        })
-      })
-      if (result.grounding && !result.approval && !result.selection && !result.backgroundTask) {
-        await args.onTrace?.(['动作：正在结合查到的信息组织回答。'])
-        const composed = await tracing.enterSpan('agent.compose_and_verify', (span) => {
-          span.setAttribute('agent.grounding_source_count', result.grounding?.sources.length || 0)
-          return composeNaturalAgentAnswer(env, args.modelChoice, cleanQuery, conversationHistory, result.grounding!)
-        })
-        result = {
-          ...result,
-          answer: composed.answer,
-          factVerification: {
-            passed: composed.verification.passed,
-            checkedClaims: composed.verification.checkedClaims,
-            sourceTools: composed.verification.coveredSources,
-            fallbackUsed: composed.fallbackUsed,
-          },
-        }
-      }
-      const trace = [
-        ...agentDirectorReasoningChain(orchestration.decision).map((step) => ({ type: 'plan' as const, ...step })),
-        ...actionTrace,
-        ...(orchestration.denied.length ? [{ type: 'error', label: '结果', detail: '有不符合权限或当前目标的操作已被拦截。' }] : []),
-        ...agentVisibleResultTrace(result.trace.slice(1)),
-      ]
-      return { ...result, trace, conversationId, orchestration: { engine: 'langgraph', path: orchestration.path, modelCalls: orchestration.modelCalls } }
-    } catch (error) {
-      console.warn(JSON.stringify({ event: 'cloudflare_alice_agent_failed', error: describeAiCallError(error) }))
-      throw error
-    }
-  }
-  throw new Error('Cloudflare Agent Runtime 未启用')
+  if (!env.ADK_AGENT_URL) throw new Error('Google ADK Runtime 未启用')
+  return callAdkAgentRuntime(env, {
+    query: cleanQuery,
+    context: args.context,
+    currentMonth: args.currentMonth,
+    conversationId,
+    history: args.history,
+    principal: args.principal,
+    onTrace: args.onTrace,
+  })
 }
 
 async function reviseAgentApproval(env: Env, request: Request) {
-  if (!env.ALICE_AGENT) return fail('Cloudflare Agent Runtime 未启用', 503)
   const body = (await request.json().catch(() => ({}))) as {
     agentRuntimeConversationId?: string
     conversationId?: string
@@ -3506,27 +3474,47 @@ async function reviseAgentApproval(env: Env, request: Request) {
   if (!conversationId || !approvalId || !body.draft || typeof body.draft !== 'object') {
     return fail('缺少会话、确认卡或草稿数据', 400)
   }
-  try {
-    const requestPrincipal = await resolveRequestPrincipal(env, request)
-    const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
-    const agent = await getAgentByName(env.ALICE_AGENT as never, agentRuntimeObjectName(principal, conversationId)) as unknown as AliceAgent
-    const result = await agent.reviseApproval({ approvalId, draft: body.draft })
-    await recordAgentEffectEvent(env, {
-      workspaceId: principal.workspaceId,
-      principalId: principal.principalId,
-      eventType: 'approval_revised',
-      entityId: approvalId,
-      metadata: { action: result.approval?.action || '' },
-    })
-    return ok({
-      content: result.answer,
-      approval: result.approval,
-      agentRuntimeConversationId: conversationId,
-      trace: formatAgentRuntimeTrace(result.trace),
-    })
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : '任务草稿更新失败', 409)
+  if (env.ADK_AGENT_URL) {
+    try {
+      const requestPrincipal = await resolveRequestPrincipal(env, request)
+      const principal = normalizeAgentPrincipalContext({ workspaceId: principalWorkspaceId(requestPrincipal), principalId: requestPrincipal?.principalId || 'anonymous', role: requestPrincipal?.role || 'guest' })
+      const pending = await readAdkPendingAction(env, principal, conversationId)
+      if (!pending || pending.approval_id !== approvalId) return fail('确认卡已失效，请重新生成操作预览。', 409)
+      const preview = await callAgentTool(
+        { baseUrl: env.GIVERNY_API_BASE_URL, token: env.AGENT_TOOL_TOKEN, principal },
+        pending.preview_endpoint,
+        body.draft,
+      )
+      const confirmationToken = String(preview.confirmationToken || '')
+      if (preview.ready !== true || !confirmationToken || !preview.draft || typeof preview.draft !== 'object') {
+        return fail(Array.isArray(preview.missing) ? `草稿仍缺少：${preview.missing.map(String).join('、')}` : '草稿未通过预览校验', 409)
+      }
+      const createdAt = Date.now()
+      const approval: AgentApproval = {
+        id: pending.approval_id,
+        action: pending.action,
+        label: pending.label,
+        draft: preview.draft as Record<string, unknown>,
+        warnings: Array.isArray(preview.warnings) ? preview.warnings.map(String) : [],
+        status: 'pending',
+        createdAt,
+        expiresAt: createdAt + 10 * 60 * 1000,
+      }
+      await saveAdkPendingAction(env, principal, conversationId, approval, {
+        action: pending.action,
+        label: pending.label,
+        previewEndpoint: pending.preview_endpoint,
+        executeEndpoint: pending.execute_endpoint,
+        confirmationToken,
+        draft: approval.draft,
+        warnings: approval.warnings,
+      })
+      return ok({ content: '已更新草稿并重新完成预览校验。', approval, agentRuntimeConversationId: conversationId })
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : '任务草稿更新失败', 409)
+    }
   }
+  return fail('Google ADK Runtime 未启用', 503)
 }
 
 function toAgentConversationSummary(row: {
@@ -6048,6 +6036,20 @@ async function agentTaskByRef(env: Env, body: Record<string, unknown>) {
     if (exactMatches.length === 1) return exactMatches[0]
     if (matches.length === 1) return matches[0]
     if (matches.length > 1) throw new AgentTaskSelectionRequired(matches.map(toAgentTaskCandidate))
+    // 音近容错：精确 LIKE 无结果时，尝试拼音变体
+    if (matches.length === 0) {
+      const variants = phoneticVariants(title, 8)
+      for (const variant of variants) {
+        const fuzzyRows = await env.DB.prepare(
+          `SELECT * FROM tasks
+           WHERE workspace_id = ? AND deleted_at IS NULL AND voided_at IS NULL AND title LIKE ?
+           ORDER BY start_date DESC, created_at DESC LIMIT 3`,
+        ).bind(workspaceId, `%${variant}%`).all<DbTask>()
+        const fuzzyMatches = fuzzyRows.results ?? []
+        if (fuzzyMatches.length === 1) return fuzzyMatches[0]
+        if (fuzzyMatches.length > 1) throw new AgentTaskSelectionRequired(fuzzyMatches.map(toAgentTaskCandidate))
+      }
+    }
   }
   if (!task) throw new Error('没有匹配到明确任务，请提供 taskId 或更完整的任务标题。')
   return task
@@ -7788,6 +7790,7 @@ type RequesterProfileResult = {
   found: boolean
   name: string
   searchedName: string
+  fuzzyCorrection?: string
   closeCandidates: string[]
   profile?: {
     name: string
@@ -7900,7 +7903,28 @@ async function computeRequesterProfile(env: Env, workspaceId: string, requestedN
       return normalizedTarget && (normalized.includes(normalizedTarget) || normalizedTarget.includes(normalized))
     })
     .slice(0, 8)
-  const matched = tasks.filter((task) => normalizeRequesterName(task.requester) === normalizedTarget)
+  let matched = tasks.filter((task) => normalizeRequesterName(task.requester) === normalizedTarget)
+  let fuzzyCorrection: string | undefined
+  // 精确匹配失败时，用音近容错找最接近的人名
+  if (matched.length === 0 && normalizedTarget) {
+    let bestName = ''
+    let bestDistance = Infinity
+    for (const candidate of requesterNames) {
+      const normalized = normalizeRequesterName(candidate)
+      if (!normalized) continue
+      const distance = phoneticEditDistance(normalizedTarget, normalized)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestName = candidate
+      }
+    }
+    // 距离阈值：名字长度的 40% 以内视为同音错字
+    const threshold = Math.max(1, normalizedTarget.length * 0.4)
+    if (bestName && bestDistance <= threshold && bestDistance > 0) {
+      fuzzyCorrection = bestName
+      matched = tasks.filter((task) => normalizeRequesterName(task.requester) === normalizeRequesterName(bestName))
+    }
+  }
   if (!normalizedTarget || matched.length === 0) {
     return {
       found: false,
@@ -8016,6 +8040,7 @@ async function computeRequesterProfile(env: Env, workspaceId: string, requestedN
     found: true,
     name: displayName,
     searchedName,
+    fuzzyCorrection,
     closeCandidates: [],
     profile: {
       name: displayName,
@@ -8546,6 +8571,131 @@ async function agentWorkspaceSearchTool(env: Env, request: Request) {
   return agentOk({
     tool: 'search_workspace', query, month: month || undefined, searchMode: env.VECTORIZE && env.AI ? 'semantic-vector+keyword+structured' : 'keyword+structured',
     semanticEnabled: Boolean(env.VECTORIZE && env.AI), requestedSources: [...requested], count: ranked.length, counts, results: ranked, generatedAt: nowIso(),
+  })
+}
+
+type AgentVersionEvidenceItem = {
+  source: 'progress' | 'update' | 'attachment' | 'conversation'
+  sourceLabel: string
+  text: string
+  at: string
+  versions: string[]
+  taskId?: number
+  attachmentId?: number
+  conversationId?: string
+}
+
+function workspaceSubjectKey(value: string) {
+  return value.normalize('NFKC').toLowerCase().replace(/[\s··《》“”"'()（）[\]【】_-]+/g, '')
+}
+
+function appendVersionEvidence(
+  target: AgentVersionEvidenceItem[],
+  input: Omit<AgentVersionEvidenceItem, 'versions'> & { explicitVersion?: string },
+) {
+  const text = [input.explicitVersion, input.text].filter(Boolean).join(' ')
+  const versions = extractAgentVersions(text).map((item) => item.value)
+  if (!versions.length) return
+  target.push({ ...input, text: input.text.slice(0, 800), versions })
+}
+
+async function agentResolveWorkspaceSubjectTool(env: Env, request: Request) {
+  const principal = await resolveAgentToolPrincipal(env, request)
+  if (!principal) return agentFail('Agent tool token missing or invalid', 401)
+  const body = await parseAgentToolBody(request)
+  const subject = agentString(body.subject, 80)
+  if (!subject) return agentFail('subject 不能为空', 400)
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 50)
+
+  const searchRequest = agentSubtoolRequest(request, {
+    query: subject,
+    sources: ['task', 'attachment', 'conversation'],
+    limit,
+  })
+  const search = await agentWorkspaceSearchTool(env, searchRequest).then(agentSubtoolData)
+  const results = Array.isArray(search?.results) ? search.results as AgentWorkspaceSearchResult[] : []
+  const taskResults = results.filter((item) => item.source === 'task' && Number(item.taskId) > 0)
+  const subjectKey = workspaceSubjectKey(subject)
+  const exactTasks = taskResults.filter((item) => workspaceSubjectKey(item.title) === subjectKey)
+  const containingTasks = taskResults.filter((item) => {
+    const title = workspaceSubjectKey(item.title)
+    return title.includes(subjectKey) || subjectKey.includes(title)
+  })
+  const candidates = (exactTasks.length ? exactTasks : containingTasks.length ? containingTasks : taskResults).slice(0, 8)
+  const resolvedTask = exactTasks.length === 1
+    ? exactTasks[0]
+    : exactTasks.length === 0 && containingTasks.length === 1
+      ? containingTasks[0]
+      : exactTasks.length === 0 && containingTasks.length === 0 && taskResults.length === 1
+        ? taskResults[0]
+        : null
+
+  if (!resolvedTask && candidates.length > 1) {
+    return agentOk({
+      tool: 'resolve_workspace_subject', subject, factKind: 'version', resolutionStatus: 'ambiguous',
+      needsDisambiguation: true,
+      selection: {
+        id: `subject:${crypto.randomUUID()}`,
+        prompt: `找到多个与「${subject}」相关的任务，请选择要查看的对象。`,
+        candidates: candidates.map((item) => ({ id: item.taskId, title: item.title, status: '', type: '', startDate: item.updatedAt || '', settlementMonth: '' })),
+      },
+      candidates,
+      evidence: [],
+      generatedAt: nowIso(),
+    })
+  }
+
+  const evidence: AgentVersionEvidenceItem[] = []
+  let task: Record<string, unknown> | null = null
+  if (resolvedTask?.taskId) {
+    const detailRequest = agentSubtoolRequest(request, { taskId: resolvedTask.taskId })
+    const detail = await agentTaskDetailTool(env, detailRequest).then(agentSubtoolData)
+    task = detail?.task && typeof detail.task === 'object' ? detail.task as Record<string, unknown> : null
+    const entries = Array.isArray(task?.timeEntries) ? task.timeEntries as Array<Record<string, unknown>> : []
+    entries.forEach((entry) => appendVersionEvidence(evidence, {
+      source: 'progress', sourceLabel: '任务进展', taskId: Number(resolvedTask.taskId),
+      text: String(entry.note || ''), explicitVersion: String(entry.feedbackVersion || ''),
+      at: String(entry.endDate || entry.date || task?.date || ''),
+    }))
+    const updates = Array.isArray(detail?.updates) ? detail.updates as Array<Record<string, unknown>> : []
+    updates.forEach((update) => appendVersionEvidence(evidence, {
+      source: 'update', sourceLabel: '项目更新', taskId: Number(resolvedTask.taskId),
+      text: `${String(update.title || '')} ${String(update.body || '')}`.trim(),
+      at: String(update.date || update.updateDate || update.createdAt || ''),
+    }))
+    const files = Array.isArray(detail?.files) ? detail.files as Array<Record<string, unknown>> : []
+    files.forEach((file) => appendVersionEvidence(evidence, {
+      source: 'attachment', sourceLabel: '任务附件', taskId: Number(resolvedTask.taskId), attachmentId: Number(file.id) || undefined,
+      text: String(file.name || ''), at: String(file.uploadedAt || ''),
+    }))
+  }
+
+  results.filter((item) => item.source === 'attachment').forEach((item) => appendVersionEvidence(evidence, {
+    source: 'attachment', sourceLabel: item.sourceLabel || '附件', taskId: item.taskId, attachmentId: item.attachmentId,
+    text: `${item.title} ${item.snippet}`.trim(), at: item.updatedAt || '',
+  }))
+  results.filter((item) => item.source === 'conversation').forEach((item) => appendVersionEvidence(evidence, {
+    source: 'conversation', sourceLabel: item.sourceLabel || '对话', conversationId: item.conversationId,
+    text: `${item.title} ${item.snippet}`.trim(), at: item.updatedAt || '',
+  }))
+
+  const dedupedEvidence = [...new Map(evidence.map((item) => [
+    `${item.source}:${item.taskId || ''}:${item.attachmentId || ''}:${item.at}:${item.versions.map(normalizeAgentVersion).join(',')}:${item.text}`,
+    item,
+  ])).values()].sort((left, right) => String(right.at || '').localeCompare(String(left.at || '')))
+  const latestEvidence = dedupedEvidence[0]
+  const latestVersion = latestEvidence?.versions[0] || ''
+  const resolutionStatus = resolvedTask || results.length ? 'resolved' : 'not_found'
+
+  return agentOk({
+    tool: 'resolve_workspace_subject', subject, factKind: 'version', resolutionStatus,
+    task: task ? { id: Number(task.id), title: String(task.title || ''), status: String(task.status || '') } : undefined,
+    latestVersion,
+    latestEvidence: latestEvidence || null,
+    evidence: dedupedEvidence.slice(0, 30),
+    candidates,
+    searchedSources: ['task', 'attachment', 'conversation'],
+    generatedAt: nowIso(),
   })
 }
 
@@ -9589,6 +9739,7 @@ async function handleAgentToolApi(request: Request, env: Env, ctx?: WorkerExecut
   }
   if (url.pathname === '/api/agent/tools/web-search' && (request.method === 'POST' || request.method === 'GET')) return agentSearchWebTool(env, request)
   if (url.pathname === '/api/agent/tools/workspace-search' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceSearchTool(env, request)
+  if (url.pathname === '/api/agent/tools/resolve-workspace-subject' && request.method === 'POST') return agentResolveWorkspaceSubjectTool(env, request)
   if (url.pathname === '/api/agent/tools/workspace-consistency-audit' && (request.method === 'POST' || request.method === 'GET')) return agentWorkspaceConsistencyAuditTool(env, request)
   if (url.pathname === '/api/agent/tools/formal-deliverables' && (request.method === 'POST' || request.method === 'GET')) return agentQueryFormalDeliverablesTool(env, request)
   if (url.pathname === '/api/agent/tools/high-risk-actions' && (request.method === 'POST' || request.method === 'GET')) return agentQueryHighRiskActionsTool(env, request)
@@ -18966,7 +19117,8 @@ async function searchTavily(apiKey: string, query: string): Promise<string> {
 
 type AgentVisibleTraceSink = (trace: string[]) => void | Promise<void>
 
-async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisibleTraceSink) {
+
+async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisibleTraceSink, onThinkingStream?: (text: string) => void) {
   const body = (await request.json().catch(() => ({}))) as {
     messages?: Array<{ role: string; content: string }>
     month?: string
@@ -19050,9 +19202,10 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     const agentContext = `${textAttachmentQuerySection}${knowledgeSection}`.trim()
     const agentQuery = lastMsg
     const requiresRuntime = isWorkDataQuestion(lastMsg)
+    const runtimeFailureMustStop = Boolean(env.ADK_AGENT_URL) || (requiresRuntime && env.LOCAL_DEV !== '1')
 
     try {
-      await emitVisibleTrace('正在编排：判断这句话是否需要读取网站数据或调用业务工具。')
+      // 初始阶段不发 trace，前端自动显示呼吸动画
       const runtimeResult = await callAgentRuntime(env, {
         query: agentQuery,
         context: agentContext,
@@ -19065,6 +19218,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
         principal: agentPrincipal,
         modelChoice,
         onTrace: emitVisibleTrace,
+        onThinkingStream,
       })
       if (runtimeResult?.answer) {
         const conversationId = String(runtimeResult.conversationId || '').trim()
@@ -19097,12 +19251,12 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           productivity: runtimeResult.productivity,
         })
       }
-      if (requiresRuntime) {
+      if (runtimeFailureMustStop) {
         return fail('Agent Runtime 没有返回有效答案；已停止旧本地兜底，避免用模板冒充智能体。', 503)
       }
     } catch (error) {
       console.warn(JSON.stringify({ event: 'agent_runtime_failed', error: describeAiCallError(error) }))
-      if (requiresRuntime) {
+      if (runtimeFailureMustStop) {
         return fail(`Agent Runtime 暂时不可用：${describeAiCallError(error)}`, 503)
       }
     }
@@ -19196,10 +19350,14 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     const topProductMatch = productHelpProbe.matches[0]
     const hasHighConfidenceProductFact = Boolean(topProductMatch) && (
       topProductMatch.id.startsWith('document.')
-        ? topProductMatch.score >= 70
-        : topProductMatch.score >= 24
+        ? topProductMatch.score >= 90
+        : topProductMatch.score >= 40
     )
+    // 产品知识仅作为补充：只有当 LLM 自己判断为 product_help 或完全不确定时才追加
+    const llmIntent = rawPlan?.intent
+    const shouldSupplementProduct = llmIntent === 'product_help' || (!llmIntent || llmIntent === 'general' || llmIntent === 'unknown')
     if (hasHighConfidenceProductFact
+      && shouldSupplementProduct
       && !isTaskBlockerQuestion(lastMsg)
       && !isFinanceQuestion(lastMsg)
       && !isRequesterProfileQuestion(lastMsg)
@@ -19207,7 +19365,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       plannedTools.push({
         name: 'search_product_help',
         args: { query: lastMsg },
-        reason: '编排层验真要求：问题命中官方产品知识，必须读取产品事实后再回答。',
+        reason: '编排层补充：产品知识库有高置信匹配，追加产品事实作为参考。',
       })
     }
     if (isTaskBlockerQuestion(lastMsg) && !plannedTools.some((item) => item.name === 'get_task_detail')) {
@@ -19231,14 +19389,12 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       ...rawPlan,
       intent: isRequesterProfileQuestion(lastMsg) && profileName
           ? 'person_profile'
-        : hasHighConfidenceProductFact && !isTaskBlockerQuestion(lastMsg) && !isFinanceQuestion(lastMsg)
-          ? 'product_help'
         : rawPlan?.intent,
       question: rawPlan?.question || lastMsg,
       tools: plannedTools,
     }
-    await emitVisibleTrace(chatUnderstandingTrace(lastMsg, plan.intent))
-    await emitVisibleTrace(chatPlanTrace(plan, plannedTools.map((tool) => normalizeChatToolName(tool.name)).filter((name): name is ChatAgentToolName => name !== 'none')))
+    // 展示 LLM 的真实思考（每次不同，因为是模型实际推理的输出）
+    if (rawPlan?.thinking) await emitVisibleTrace(rawPlan.thinking)
     orchestratedTurn = {
       ...orchestratedTurn,
       intent: normalizeAgentIntent(plan?.intent),
@@ -19260,10 +19416,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const startedAt = performance.now()
       try {
-        const toolLabels = plannedTools.map((tool) => normalizeChatToolName(tool.name)).filter((name) => name !== 'none')
-        if (toolLabels.length > 0) {
-          await emitVisibleTrace(`执行计划：调用 ${toolLabels.join('、')} 读取真实数据。`)
-        }
+        // 工具执行不再发模板 trace——LLM 的 thinking 已经说明了要做什么
         const execution = await executeChatAgentTools(
           env,
           plan,
@@ -19289,7 +19442,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
         break
       } catch (error) {
         toolExecutionError = describeAiCallError(error) || '工具执行失败'
-        await emitVisibleTrace(`工具执行第 ${attempt} 次未完成：${toolExecutionError}`)
+        await emitVisibleTrace(`嗯，这步没成功（${toolExecutionError}），我再试一次。`)
         orchestratedTurn = {
           ...orchestratedTurn,
           attempts: attempt,
@@ -19325,7 +19478,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
       }))
       orchestratedTurn = { ...orchestratedTurn, phase: 'analyze', evidence }
       const answer = await composeChatAgentAnswer(env, { question: lastMsg, toolResults, modelChoice })
-      await emitVisibleTrace('整理回答：根据工具结果组织最终答案。')
+      // 整理阶段不再发模板 trace
       const statsResult = toolResults.find((item) => item.name === 'query_month_finance')?.result as { stats?: MonthFinanceStats[] } | undefined
       const financeStats = statsResult?.stats ?? []
       const settlementExportResult = toolResults.find((item) => item.name === 'export_settlement_receipt')?.result as {
@@ -19444,15 +19597,15 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           fallbackUsed: !verified.passed,
         }
         trace.push(verified.passed
-          ? `结构化事实协议生成答案：核对 ${verified.checkedClaims} 条声明，覆盖 ${verified.coveredSources.join('、')}。`
-          : `结构化事实协议校验失败：${verified.issues.slice(0, 3).join('；')}。`)
+          ? `答案核对：已核对 ${verified.checkedClaims} 条事实，覆盖 ${verified.coveredSources.join('、')}。`
+          : `答案核对未通过：${verified.issues.slice(0, 3).join('；')}。`)
         orchestratedTurn = completeAgentTurn(orchestratedTurn, finalContent)
         if (!verified.passed) {
           finalContent = '工具数据已返回，但最终答案未通过结构化事实校验。系统已停止输出未验证内容，请重试。'
           orchestratedTurn = { ...orchestratedTurn, phase: 'failed', answer: finalContent }
         }
       } else {
-        finalContent = '工具返回的数据尚未接入结构化事实协议，我已停止采用模型初稿。'
+        finalContent = '工具返回的数据还不能支持可靠结论，我已停止采用未验证的初稿。'
         legacyFactVerification = { passed: false, checkedClaims: 0, sourceTools: [], fallbackUsed: true }
       }
       return ok({
@@ -19463,7 +19616,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           chatUnderstandingTrace(lastMsg, plan.intent),
           ...trace,
           chatEvidenceFindingTrace(toolResults),
-          '整理回答：只保留与问题直接相关、且有依据支持的结论。',
+          '好，让我把关键信息整理清楚。',
           ...(evidenceCorrection ? [evidenceCorrection] : []),
           chatVerificationTrace(toolResults),
         ].filter(Boolean),
@@ -19520,14 +19673,11 @@ ${textAttachmentSection}
     const assets: MultimodalAsset[] = imageAttachments.map((a) => ({ base64: a.data, mimeType: a.mimeType }))
     try {
       await emitVisibleTrace([
-        '理解问题：用户提供了图片附件，需要进入识图模型。',
-        '执行计划：读取图片内容并结合任务上下文生成回答。',
+        '让我看看这张图。',
       ])
       const answer = await callMultimodalWithSelectedModel(env, modelChoice, visionPrompt, assets)
       await emitVisibleTrace([
-        `识图答复：使用 ${answer.modelLabel}${answer.fallbackUsed ? '（已回落）' : ''}。`,
-        ...answer.notes,
-        '整理回答：识图结果已返回，准备展示最终答案。',
+        '看完了，让我整理一下。',
       ])
       return ok({
         content: answer.text,
@@ -19556,8 +19706,7 @@ ${textAttachmentSection}
 
   try {
     await emitVisibleTrace([
-      '理解问题：这是普通问答，本轮不需要读取站内业务数据。',
-      '组织答案：结合当前问题与对话上下文形成直接回答。',
+      '这个我直接回答。',
     ])
     const answer = await callTextWithSelectedModel(env, fallbackChatPrompt, modelChoice, 1500)
     await emitVisibleTrace('核对结论：没有引用未经查询的任务、金额或产品事实。')
@@ -20250,10 +20399,10 @@ async function waitForLocalCliChat(
     if (!command) return { status: 'failed' as const, error: '本机命令记录不存在' }
     const result = normalizeLocalCliCommandResult(command.result_json ? JSON.parse(command.result_json) : null)
     const routeTrace = uniqueAgentTrace([
-      '理解问题：这项任务需要当前电脑的本机环境。',
+      '这个需要在你电脑上操作。',
       `制定计划：由 ${route.cliName} 处理本机步骤，网站继续负责权限和结果校验。`,
-      command.claimed_at ? '执行计划：本机环境已接收任务。' : '执行计划：正在将任务交给当前电脑。',
-      command.claimed_at ? '正在连接 Giverny MCP，读取允许的工作区工具。' : '',
+      command.claimed_at ? '好，你的电脑已经接收了。' : '正在把任务交给你的电脑…',
+      command.claimed_at ? '连接中，读取可用的工具。' : '',
       ...result.trace,
     ])
     const signature = JSON.stringify(routeTrace)
@@ -20298,11 +20447,13 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     async start(controller) {
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
-        send({ type: 'trace', status: 'running', trace: ['已收到问题，正在判断需要哪些信息。'] })
+        send({ type: 'trace', status: 'running', trace: ['正在理解问题并确认需要的证据'] })
         const promptTokensPromise = estimateAgentRequestTokens(metricsRequest)
         const routingTrace: string[] = []
 
-        const localDecision = await queueLocalCliChat(env, localRouteRequest)
+        const localDecision: LocalCliChatDecision = env.ADK_AGENT_URL
+          ? { route: null, cloudReason: '已交由 Google ADK 语义编排与证据审核主链' }
+          : await queueLocalCliChat(env, localRouteRequest)
         if (localDecision.immediate) {
           const payload = {
             content: localDecision.immediate.content,
@@ -20384,12 +20535,18 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
         }
 
         let cloudTrace: string[] = []
+        let streamingRationale = ''
         const emitCloudTrace: AgentVisibleTraceSink = async (items) => {
-          cloudTrace = uniqueAgentTrace([...cloudTrace, ...items])
+          cloudTrace = uniqueAgentTrace([...(streamingRationale ? [streamingRationale] : []), ...cloudTrace, ...items])
           send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]) })
-          await waitForAgentTimeline(120)
+          await waitForAgentTimeline(30)
         }
-        const response = await chatWithAi(env, cloudRequest, emitCloudTrace)
+        // 流式思考：直接替换 trace 内容（不累积），实现逐字显示
+        const emitThinkingStream = (text: string) => {
+          streamingRationale = text
+          send({ type: 'trace', status: 'running', trace: [...routingTrace, text] })
+        }
+        const response = await chatWithAi(env, cloudRequest, emitCloudTrace, emitThinkingStream)
         const metricResponse = response.clone()
         const metricWrite = recordAgentRunMetric(
           env,

@@ -52,6 +52,9 @@ async function loginDemo(page: Page) {
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
+  // The browser fixtures intentionally model the July 2026 workspace. Keep the
+  // app clock aligned with those fixtures so the suite does not drift each month.
+  await page.clock.setFixedTime(new Date('2026-07-27T12:00:00+08:00'))
   if (testInfo.title.startsWith('demo ')) return
   await login(page)
   await page.goto('/dashboard')
@@ -209,46 +212,47 @@ test('工作助手的明确创建指令直接进入业务流程且不虚构字�
   await input.fill('你帮我新建一个任务')
   await input.press('Enter')
   await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
-  await expect(dialog.getByText('思考过程', { exact: true })).toBeVisible()
-  await expect(dialog.getByText(/思考：|理解：|规划：/).first()).toBeVisible()
-  await expect(dialog.getByText(/动作：/).first()).toBeVisible()
+  const reasoning = dialog.getByText(/已思考 \d+ 步/)
+  await expect(reasoning).toBeVisible()
+  await reasoning.click()
+  await expect(dialog.getByText('已识别用户目标与对象', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('只使用当前请求需要的专家与工具', { exact: true })).toBeVisible()
   await expect(dialog.getByLabel('创建任务确认卡片')).toHaveCount(0)
   await expect(dialog.getByText(/快捷键：|产品手册|更新日志|执行编排路径|结构化事实协议|主模型调用/)).toHaveCount(0)
 })
 
-test('工作助手主动事项按优先级展示证据、建议和处理效果', async ({ page }) => {
+test('工作助手展开后提供独立会话侧栏', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
-  await page.getByRole('button', { name: '记录与任务' }).click()
-  await page.getByRole('tab', { name: '后台任务' }).click()
-  await expect(page.getByRole('tab', { name: '主动事项' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByLabel('主动事项处理效果')).toBeVisible()
-  const item = page.locator('.chat-proactive-item').first()
-  await expect(item).toBeVisible()
-  await item.locator('.chat-task-item').click()
-  await expect(item.getByText('事实依据', { exact: true })).toBeVisible()
-  await expect(item.getByText('建议处理', { exact: true })).toBeVisible()
-  await expect(item.getByRole('button', { name: '执行建议' })).toBeVisible()
-  await expect(item.getByRole('button', { name: '已解决' })).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  await dialog.getByRole('button', { name: '展开' }).click()
+  await dialog.getByRole('button', { name: '显示侧栏' }).click()
+  const sidebar = page.locator('aside.chat-sidebar')
+  await expect(sidebar.getByRole('button', { name: '新对话' })).toBeVisible()
+  await expect(sidebar.getByRole('textbox', { name: '搜索对话' })).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: '设置' })).toBeVisible()
+  await sidebar.getByTitle('收起侧栏').click()
+  await expect(sidebar).toBeHidden()
 })
 
-test('工作助手企业记忆展示范围、来源、有效期和纠正入口', async ({ page }) => {
+test('企业记忆 API 保留范围、来源、有效期和纠正能力', async ({ page }) => {
   const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
   const createdResponse = await page.request.post('/api/ai/enterprise-memories', { headers: authHeaders, data: { scopeType: 'partner', scopeKey: '浏览器评测合作伙伴', memoryType: 'preference', title: '验收文件偏好', content: '验收时优先提供 PDF。', sourceType: 'manual', sourceLabel: '浏览器评测人工确认', confidence: 'confirmed' } })
   const created = await createdResponse.json() as { memory: { id: string }; error?: string }
   expect(createdResponse.ok(), created.error || '企业记忆创建失败').toBeTruthy()
 
-  await page.getByRole('button', { name: '打开工作助手' }).click()
-  await page.getByRole('button', { name: '记录与任务' }).click()
-  await page.getByRole('tab', { name: '后台任务' }).click()
-  await page.getByRole('tab', { name: '企业记忆' }).click()
-  await expect(page.getByLabel('企业记忆概况')).toBeVisible()
-  const item = page.locator('.enterprise-memory-item', { hasText: '浏览器评测合作伙伴' })
-  await expect(item.getByText('验收文件偏好', { exact: true })).toBeVisible()
-  await expect(item.getByText('来源：浏览器评测人工确认', { exact: true })).toBeVisible()
-  await expect(item.getByText('长期有效', { exact: true })).toBeVisible()
-  await item.getByRole('button', { name: '纠正' }).click()
-  await expect(page.getByText('纠正记忆', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '保存纠正' })).toBeVisible()
+  const listedResponse = await page.request.get('/api/ai/enterprise-memories?query=' + encodeURIComponent('浏览器评测合作伙伴'), { headers: authHeaders })
+  expect(listedResponse.ok()).toBeTruthy()
+  const listed = JSON.stringify(await listedResponse.json())
+  expect(listed).toContain('浏览器评测合作伙伴')
+  expect(listed).toContain('验收文件偏好')
+  expect(listed).toContain('浏览器评测人工确认')
+
+  const correctedResponse = await page.request.patch(`/api/ai/enterprise-memories/${created.memory.id}`, {
+    headers: authHeaders,
+    data: { action: 'correct', content: '验收时优先提供 PDF 和可编辑源文件。', reason: '浏览器评测纠正' },
+  })
+  expect(correctedResponse.ok()).toBeTruthy()
+  expect(JSON.stringify(await correctedResponse.json())).toContain('验收时优先提供 PDF 和可编辑源文件。')
 
   await page.request.patch(`/api/ai/enterprise-memories/${created.memory.id}`, { headers: authHeaders, data: { action: 'delete', reason: '浏览器评测清理' } })
 })
@@ -290,13 +294,11 @@ test('设置页仅在进入时加载独立分包', async ({ page }) => {
   ))
   expect(settingsLoadedOnDashboard).toBe(false)
 
+  const settingsChunk = page.waitForRequest((request) => request.url().includes('SettingsView-'))
   await page.goto('/settings')
+  await settingsChunk
   await expect(page).toHaveURL(/\/settings$/)
   await expect(page.getByRole('heading', { name: '默认模型' })).toBeVisible()
-  const settingsLoadedAfterNavigation = await page.evaluate(() => (
-    performance.getEntriesByType('resource').some((entry) => entry.name.includes('SettingsView-'))
-  ))
-  expect(settingsLoadedAfterNavigation).toBe(true)
 })
 
 test('任务日历仅在切换到日历视图时加载', async ({ page }) => {
@@ -305,15 +307,13 @@ test('任务日历仅在切换到日历视图时加载', async ({ page }) => {
   ))
   expect(calendarLoadedOnDashboard).toBe(false)
 
+  const calendarChunk = page.waitForRequest((request) => request.url().includes('CalendarView-'))
   await page.goto('/tasks?taskView=calendar')
+  await calendarChunk
   await expect(page.getByRole('heading', { name: '任务日历' })).toBeVisible()
   await expect(page.locator('.google-calendar-panel')).toBeVisible()
   const calendarTaskSegments = page.getByRole('button', { name: '公司产品封套修改', exact: true })
   await expect(calendarTaskSegments.first()).toBeVisible()
-  const calendarLoadedAfterNavigation = await page.evaluate(() => (
-    performance.getEntriesByType('resource').some((entry) => entry.name.includes('CalendarView-'))
-  ))
-  expect(calendarLoadedAfterNavigation).toBe(true)
 })
 
 test('结算页仅在进入时加载独立分包', async ({ page }) => {
@@ -322,13 +322,11 @@ test('结算页仅在进入时加载独立分包', async ({ page }) => {
   ))
   expect(reportsLoadedOnDashboard).toBe(false)
 
+  const reportsChunk = page.waitForRequest((request) => request.url().includes('ReportsView-'))
   await page.getByRole('button', { name: '切换到结算', exact: true }).click()
+  await reportsChunk
   await expect(page).toHaveURL(/\/reports$/)
   await expect(page.getByRole('region', { name: '月度结算回单' })).toBeVisible()
-  const reportsLoadedAfterNavigation = await page.evaluate(() => (
-    performance.getEntriesByType('resource').some((entry) => entry.name.includes('ReportsView-'))
-  ))
-  expect(reportsLoadedAfterNavigation).toBe(true)
 })
 
 test('洞察页仅在进入时加载独立分包', async ({ page }) => {
@@ -337,13 +335,11 @@ test('洞察页仅在进入时加载独立分包', async ({ page }) => {
   ))
   expect(insightsLoadedOnDashboard).toBe(false)
 
+  const insightsChunk = page.waitForRequest((request) => request.url().includes('InsightsView-'))
   await page.getByRole('button', { name: '洞察' }).click()
+  await insightsChunk
   await expect(page).toHaveURL(/\/insights$/)
   await expect(page.locator('.insights-view')).toBeVisible()
-  const insightsLoadedAfterNavigation = await page.evaluate(() => (
-    performance.getEntriesByType('resource').some((entry) => entry.name.includes('InsightsView-'))
-  ))
-  expect(insightsLoadedAfterNavigation).toBe(true)
 })
 
 test('爱丽丝可以生成日期范围 Excel 结算回单', async ({ page }) => {
@@ -597,7 +593,7 @@ test('自定义范围分享链接保持未锁定', async ({ page }) => {
   await page.request.delete(`/api/settlement-exports/${rangeRecord!.id}`, { headers: authHeaders })
 })
 
-test('工作助手历史记录合并本地与云端时保留原始时间和消息', async ({ page }) => {
+test('工作助手历史记录合并本地与云端时保留原始消息', async ({ page }) => {
   await page.route('**/api/ai/conversations', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({
@@ -641,49 +637,53 @@ test('工作助手历史记录合并本地与云端时保留原始时间和消�
   })
   await page.reload()
   await page.getByRole('button', { name: '打开工作助手' }).click()
-  await page.getByRole('button', { name: '记录与任务' }).click()
-  await expect(page.getByText('给我一下陈义君的用户画像', { exact: true })).toBeVisible()
-  await expect(page.locator('.chat-history-item', { hasText: '给我一下陈义君的用户画像' }).locator('.chat-history-item-meta em')).toHaveText('用户画像')
-  await expect(page.getByText(/7\/18 14:57/)).toBeVisible()
-  await page.getByText('给我一下陈义君的用户画像', { exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  await dialog.getByRole('button', { name: '展开' }).click()
+  await dialog.getByRole('button', { name: '显示侧栏' }).click()
+  const historyItem = page.locator('.chat-sidebar-item', { hasText: '给我一下陈义君的用户画像' })
+  await expect(historyItem).toBeVisible()
+  expect(await page.evaluate(() => JSON.parse(window.localStorage.getItem('alice_chat_history') || '[]')[0]?.savedAt)).toBe(new Date(2026, 6, 18, 14, 57).getTime())
+  await historyItem.click()
   await expect(page.getByText('陈义君画像：历史任务 7 个。', { exact: true })).toBeVisible()
 })
 
-test('工作助手临时对话不会写入历史记录', async ({ page }) => {
-  await page.route('**/api/ai/chat', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ content: '临时回答', trace: ['临时分析完成'] }),
-    })
+test('工作助手临时请求不会写入云端会话索引', async ({ page }) => {
+  const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  const beforeResponse = await page.request.get('/api/ai/conversations', { headers: authHeaders })
+  expect(beforeResponse.ok()).toBeTruthy()
+  const before = await beforeResponse.json() as { conversations: Array<{ id: string }> }
+  const temporaryId = `browser-temporary-${Date.now()}`
+  const chatResponse = await page.request.post('/api/ai/chat', {
+    headers: authHeaders,
+    data: {
+      modelChoice: 'deepseek-v4-flash',
+      month: '2026-07',
+      temporary: true,
+      agentRuntimeConversationId: temporaryId,
+      messages: [{ role: 'user', content: '这只是临时问题' }],
+    },
   })
-  await page.route('**/api/ai/conversations', async (route) => {
-    if (route.request().method() === 'GET') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
-      return
-    }
-    await route.continue()
-  })
-  await page.getByRole('button', { name: '打开工作助手' }).click()
-  await page.getByRole('button', { name: '临时', exact: true }).click()
-  await page.getByPlaceholder('向爱丽丝提问…').fill('这只是临时问题')
-  await page.getByRole('button', { name: '发送' }).click()
-  await expect(page.getByText('临时回答', { exact: true })).toBeVisible()
-  const saved = await page.evaluate(() => window.localStorage.getItem('alice_chat_history') || '[]')
-  expect(saved).not.toContain('这只是临时问题')
+  expect(chatResponse.ok(), JSON.stringify(await chatResponse.json())).toBeTruthy()
+  const after = await (await page.request.get('/api/ai/conversations', { headers: authHeaders })).json() as { conversations: Array<{ id: string }> }
+  expect(after.conversations.some((item) => item.id === temporaryId)).toBe(false)
+  expect(after.conversations.length).toBe(before.conversations.length)
 })
 
-test('工作助手主面板可以直接新建对话项目', async ({ page }) => {
+test('工作助手主面板可以直接新建对话', async ({ page }) => {
+  await page.route('**/api/ai/chat', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: '第一个对话的回答', trace: ['回答已核对'] }) })
+  })
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const dialog = page.getByRole('dialog', { name: '爱丽丝' })
-  await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: '新建或切换对话项目' }).click()
-  await expect(dialog.getByText('对话项目', { exact: true })).toBeVisible()
-  await dialog.getByLabel('新建对话项目名称').fill('金额核对')
-  await dialog.getByRole('button', { name: '新建项目' }).click()
-  await expect(dialog.getByText('金额核对').first()).toBeVisible()
-  const projects = await page.evaluate(() => window.localStorage.getItem('alice_chat_projects') || '[]')
-  expect(projects).toContain('金额核对')
+  await dialog.getByPlaceholder('向爱丽丝提问…').fill('第一个对话问题')
+  await dialog.getByRole('button', { name: '发送' }).click()
+  await expect(dialog.getByText('第一个对话的回答', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '展开' }).click()
+  await dialog.getByRole('button', { name: '显示侧栏' }).click()
+  const sidebar = page.locator('aside.chat-sidebar')
+  await sidebar.getByRole('button', { name: '新对话' }).click()
+  await expect(dialog.getByRole('heading', { name: '嗨，来和爱丽丝聊一聊' })).toBeVisible()
+  await expect(sidebar.getByText('第一个对话问题', { exact: true })).toBeVisible()
 })
 
 test('工作助手批量事务使用单张原子确认卡', async ({ page }) => {

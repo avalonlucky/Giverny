@@ -1,22 +1,19 @@
 import { type ClipboardEvent as ReactClipboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Eye, FileText as FileTextIcon, Flower2, Folder, Globe, History, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Trash2, Waves, X } from 'lucide-react'
+import { ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronRight, FileText as FileTextIcon, Flower2, Globe, Maximize2, Minimize2, Plus, Search, Settings, Sparkles, Trash2, Waves, X } from 'lucide-react'
 import { api, type AiModelConfig, type AiProviderConfig, type OpenRouterFreeModel } from '../lib/api'
 import { aiBrandForValue, type AiBrandKey } from '../lib/aiBrands'
 import { aiProviderDisplayLabel, chatModelChoiceLabel } from '../lib/chatModelPresentation'
 import { createOptionalPreviewFile } from '../lib/attachmentPreview'
 import {
   loadChatHistory,
-  loadChatProjects,
   mergeConversationHistory,
   normalizeChatModelChoice,
   readChatModelChoice,
   saveChatHistory,
-  saveChatProjects,
   upsertChatHistory,
   writeChatModelChoice,
   type ChatMessage,
   type ChatModelChoice,
-  type ConversationProject,
   type ConversationRecord,
 } from '../lib/conversationCache'
 import { fileTypeForFile } from '../lib/fileTypes'
@@ -24,10 +21,9 @@ import { validateUploadFile } from '../lib/fileUpload'
 import { formatFileSize } from '../lib/format'
 import { localCliBrowserDeviceKey, localCliRuntimeReady } from '../lib/localCli'
 import { providerSupportsVision } from '../lib/aiProviders'
-import { agentAnalysisStatusLabel } from '../lib/agentAnalysisPresentation'
 import { givernyCopy } from '../lib/brandCopy'
 import type { FileAsset } from '../types/domain'
-import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentEnterpriseMemory, AgentEnterpriseMemorySummary, AgentProactiveItem, AgentProactiveSummary, AgentResultAttachment, AgentTaskMemory, AgentTaskPlan, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
+import type { AgentApproval, AgentBackgroundTask, AgentConversationMessage, AgentConversationSummary, AgentResultAttachment, AgentTaskSelection, AgentUploadHandoff } from '../types/agent'
 import type { ToastTone } from '../lib/toastQueue'
 import { AgentAnalysisTaskCard } from './AgentAnalysisTaskCard'
 import { AgentApprovalCard } from './AgentApprovalCard'
@@ -36,46 +32,15 @@ import { AgentExecutionTimeline } from './AgentExecutionTimeline'
 import { AgentTaskSelectionCard } from './AgentTaskSelectionCard'
 import { AiBrandIcon } from './AiBrandIcon'
 import { ChatContent } from './ChatContent'
+import { ChatSidebar } from './ChatSidebar'
 import { EmptyState } from './EmptyState'
 import { ImageLightbox } from './CommandPalette'
-import { EnterpriseMemoryPanel, type EnterpriseMemoryDraft } from './EnterpriseMemoryPanel'
 
 type ChatAttachment = { id: string; type: 'image' | 'text' | 'file'; name: string; data: string; mimeType: string; preview?: string; file: File }
 type ActiveLocalCliRoute = { adapterId: string; name: string; version: string; deviceName: string }
 
 const ALICE_WELCOME_ID = 'alice-welcome'
 const ALICE_SUGGESTED = ['今天完成了哪些工作？', '生成本周工作摘要', '分析最近几个月的工作趋势']
-
-const planStatusLabels: Record<AgentTaskPlan['status'], string> = {
-  awaiting_confirmation: '待批次确认',
-  active: '执行中',
-  paused: '已暂停',
-  completed: '已完成',
-  failed: '已停止',
-  compensating: '补偿中',
-  compensated: '已补偿',
-  cancelled: '已取消',
-}
-
-const planStepStatusLabels: Record<AgentTaskPlan['steps'][number]['status'], string> = {
-  pending: '待确认',
-  blocked: '等待依赖',
-  ready: '可执行',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
-  skipped: '已跳过',
-  compensation_pending: '待补偿',
-  compensating: '补偿中',
-  compensated: '已补偿',
-}
-
-const proactivePriorityLabels: Record<AgentProactiveItem['priority'], string> = {
-  critical: '紧急',
-  high: '高',
-  medium: '中',
-  low: '低',
-}
 
 type ChatPanelProps = {
   currentMonthValue: string
@@ -87,7 +52,6 @@ type ChatPanelProps = {
   onNotify: (message: string, tone?: ToastTone) => void
   canConfigureModel?: boolean
 }
-
 
 export function ChatPanel({
   currentMonthValue,
@@ -107,41 +71,21 @@ export function ChatPanel({
   const [agentConversationId, setAgentConversationId] = useState<string | undefined>(initialConversation?.agentConversationId)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [temporaryChat, setTemporaryChat] = useState(false)
-  const [projects, setProjects] = useState<ConversationProject[]>(() => loadChatProjects())
-  const [activeProjectId, setActiveProjectId] = useState<string>(initialConversation?.projectId ?? '')
-  const [projectDraft, setProjectDraft] = useState('')
-  const [historySearch, setHistorySearch] = useState('')
   const [useKnowledge, setUseKnowledge] = useState(true)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
-  const [showHistory, setShowHistory] = useState(false)
-  const [showTaskCenter, setShowTaskCenter] = useState(false)
-  const [showProjectPopup, setShowProjectPopup] = useState(false)
-  const [showScopePopup, setShowScopePopup] = useState(false)
-  const [showModelPopup, setShowModelPopup] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [showSidebar, setShowSidebar] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const [selectedModelChoice, setSelectedModelChoice] = useState<ChatModelChoice>(() => readChatModelChoice())
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterFreeModel[]>([])
   const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false)
   const [historyList, setHistoryList] = useState<ConversationRecord[]>(() => loadChatHistory())
-  const [analysisJobs, setAnalysisJobs] = useState<AgentBackgroundTask[]>([])
-  const [agentPlans, setAgentPlans] = useState<AgentTaskPlan[]>([])
-  const [taskMemories, setTaskMemories] = useState<AgentTaskMemory[]>([])
-  const [enterpriseMemories, setEnterpriseMemories] = useState<AgentEnterpriseMemory[]>([])
-  const [enterpriseMemorySummary, setEnterpriseMemorySummary] = useState<AgentEnterpriseMemorySummary | null>(null)
-  const [proactiveItems, setProactiveItems] = useState<AgentProactiveItem[]>([])
-  const [proactiveSummary, setProactiveSummary] = useState<AgentProactiveSummary | null>(null)
-  const [taskCenterTab, setTaskCenterTab] = useState<'proactive' | 'plans' | 'memories' | 'enterprise-memory'>('proactive')
-  const [expandedPlanId, setExpandedPlanId] = useState('')
-  const [expandedProactiveId, setExpandedProactiveId] = useState('')
-  const [expandedMemoryId, setExpandedMemoryId] = useState(0)
-  const [memoryNoteDrafts, setMemoryNoteDrafts] = useState<Record<number, string>>({})
-  const [memoryForgetConfirmId, setMemoryForgetConfirmId] = useState(0)
-  const [taskCenterBusy, setTaskCenterBusy] = useState('')
+  const [historySearch, setHistorySearch] = useState('')
   const [activeLocalCommandId, setActiveLocalCommandId] = useState('')
   const [isCancellingLocalCommand, setIsCancellingLocalCommand] = useState(false)
   const [activeLocalCliRoute, setActiveLocalCliRoute] = useState<ActiveLocalCliRoute | null>(null)
-
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [agentPreviewAttachment, setAgentPreviewAttachment] = useState<AgentResultAttachment | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -149,10 +93,11 @@ export function ChatPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isWelcome = messages.length === 1 && messages[0].id === ALICE_WELCOME_ID
-  const activeProject = activeProjectId ? projects.find((project) => project.id === activeProjectId) ?? null : null
 
+  // --- Effects ---
   useEffect(() => { if (!isWelcome) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isWelcome])
   useEffect(() => { inputRef.current?.focus() }, [])
+
   useEffect(() => {
     let cancelled = false
     const refreshLocalRoute = async () => {
@@ -161,24 +106,19 @@ export function ChatPanel({
         const device = result.devices.find((item) => item.online && item.selectedCliId && localCliRuntimeReady(item.bridgeVersion))
         const cli = device?.clis.find((item) => item.id === device.selectedCliId && item.status === 'available')
         if (!cancelled) {
-          setActiveLocalCliRoute(device && cli
-            ? { adapterId: cli.id, name: cli.name, version: cli.version, deviceName: device.name }
-            : null)
+          setActiveLocalCliRoute(device && cli ? { adapterId: cli.id, name: cli.name, version: cli.version, deviceName: device.name } : null)
         }
-      } catch {
-        if (!cancelled) setActiveLocalCliRoute(null)
-      }
+      } catch { if (!cancelled) setActiveLocalCliRoute(null) }
     }
     void refreshLocalRoute()
     const timer = window.setInterval(() => void refreshLocalRoute(), 8_000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
+    return () => { cancelled = true; window.clearInterval(timer) }
   }, [])
+
+  // Auto-save conversation
   useEffect(() => {
-    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
-  }, [activeProject, agentConversationId, conversationRecordId, isWelcome, messages, temporaryChat])
+    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, null)
+  }, [agentConversationId, conversationRecordId, isWelcome, messages])
 
   const refreshCloudHistory = useCallback(async () => {
     const response = await fetch('/api/ai/conversations')
@@ -187,52 +127,12 @@ export function ChatPanel({
     const cloudRecords = data.conversations.map((item) => ({
       id: item.id,
       title: item.title,
-      messages: [],
+      messages: [] as ChatMessage[],
       savedAt: new Date(item.updatedAt).getTime(),
       agentConversationId: item.id,
-      projectId: item.projectId,
-      projectName: item.projectName,
       cloud: true,
     }))
-    const localProjects = loadChatProjects()
-    const cloudProjects = cloudRecords
-      .filter((record) => record.projectId && record.projectName)
-      .map((record) => ({ id: record.projectId!, name: record.projectName!, savedAt: record.savedAt }))
-    const projectMap = new Map<string, ConversationProject>()
-    ;[...localProjects, ...cloudProjects].forEach((project) => {
-      const current = projectMap.get(project.id)
-      if (!current || project.savedAt > current.savedAt) projectMap.set(project.id, project)
-    })
-    const nextProjects = Array.from(projectMap.values()).sort((a, b) => b.savedAt - a.savedAt).slice(0, 50)
-    saveChatProjects(nextProjects)
-    setProjects(nextProjects)
     setHistoryList(mergeConversationHistory(loadChatHistory(), cloudRecords))
-  }, [])
-
-  const refreshAnalysisJobs = useCallback(async () => {
-    const [jobsResponse, plansResponse, memoriesResponse, proactiveResponse, enterpriseMemoryResponse] = await Promise.all([
-      fetch('/api/ai/analysis-jobs?limit=50'),
-      fetch('/api/ai/agent-plans?limit=50'),
-      fetch('/api/ai/task-memories?limit=50'),
-      fetch('/api/ai/proactive-items?status=active&limit=50'),
-      fetch('/api/ai/enterprise-memories?includeHistory=true&limit=100'),
-    ])
-    const data = await jobsResponse.json().catch(() => null) as { jobs?: AgentBackgroundTask[] } | null
-    const planData = await plansResponse.json().catch(() => null) as { plans?: AgentTaskPlan[] } | null
-    const memoryData = await memoriesResponse.json().catch(() => null) as { memories?: AgentTaskMemory[] } | null
-    const proactiveData = await proactiveResponse.json().catch(() => null) as { items?: AgentProactiveItem[]; summary?: AgentProactiveSummary } | null
-    const enterpriseMemoryData = await enterpriseMemoryResponse.json().catch(() => null) as { memories?: AgentEnterpriseMemory[]; summary?: AgentEnterpriseMemorySummary } | null
-    if (jobsResponse.ok && Array.isArray(data?.jobs)) setAnalysisJobs(data.jobs)
-    if (plansResponse.ok && Array.isArray(planData?.plans)) setAgentPlans(planData.plans)
-    if (memoriesResponse.ok && Array.isArray(memoryData?.memories)) setTaskMemories(memoryData.memories)
-    if (proactiveResponse.ok && Array.isArray(proactiveData?.items)) {
-      setProactiveItems(proactiveData.items)
-      setProactiveSummary(proactiveData.summary || null)
-    }
-    if (enterpriseMemoryResponse.ok && Array.isArray(enterpriseMemoryData?.memories)) {
-      setEnterpriseMemories(enterpriseMemoryData.memories)
-      setEnterpriseMemorySummary(enterpriseMemoryData.summary || null)
-    }
   }, [])
 
   useEffect(() => {
@@ -244,43 +144,22 @@ export function ChatPanel({
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ conversations: local.map((record) => ({
-            id: record.id,
-            agentConversationId: record.agentConversationId,
-            title: record.title,
-            savedAt: record.savedAt,
-            projectId: record.projectId,
-            projectName: record.projectName,
+            id: record.id, agentConversationId: record.agentConversationId, title: record.title, savedAt: record.savedAt,
             messages: record.messages.map((message, index) => ({ ...message, createdAt: record.savedAt + index })),
           })) }),
         }).catch(() => undefined)
       }
-      if (!cancelled) await Promise.all([refreshCloudHistory(), refreshAnalysisJobs()])
+      if (!cancelled) await refreshCloudHistory()
     }
     void migrateAndLoad()
     return () => { cancelled = true }
-  }, [refreshAnalysisJobs, refreshCloudHistory])
+  }, [refreshCloudHistory])
 
-  useEffect(() => {
-    if (!initialAnalysisJobId) return
-    const local = loadChatHistory().find((record) => record.messages.some((message) => message.backgroundTask?.id === initialAnalysisJobId))
-    if (local) return
-    void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(initialAnalysisJobId)}`)
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
-      .then(({ ok, data }: { ok: boolean; data: { job?: AgentBackgroundTask } }) => {
-        if (!ok || !data.job) return
-        setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: '', backgroundTask: data.job }])
-        void fetch(`/api/ai/analysis-jobs/${encodeURIComponent(data.job.id)}/read`, { method: 'POST' })
-        setAnalysisJobs((current) => current.map((job) => job.id === data.job!.id ? { ...job, unread: false } : job))
-      })
-      .catch(() => undefined)
-  }, [initialAnalysisJobId])
-
+  // Poll active analysis jobs
   const activeAnalysisKey = messages
-    .map((message) => message.backgroundTask)
-    .filter((task): task is AgentBackgroundTask => Boolean(task && (task.status === 'queued' || task.status === 'running')))
-    .map((task) => task.id)
-    .sort()
-    .join(',')
+    .map((m) => m.backgroundTask)
+    .filter((t): t is AgentBackgroundTask => Boolean(t && (t.status === 'queued' || t.status === 'running')))
+    .map((t) => t.id).sort().join(',')
 
   useEffect(() => {
     const ids = activeAnalysisKey ? activeAnalysisKey.split(',').filter(Boolean) : []
@@ -288,121 +167,74 @@ export function ChatPanel({
     let cancelled = false
     const refresh = async () => {
       const tasks = await Promise.all(ids.map(async (id) => {
-        const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(id)}`)
-        const data = await response.json().catch(() => null) as { job?: AgentBackgroundTask } | null
-        return response.ok ? data?.job : undefined
+        const r = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(id)}`)
+        const d = await r.json().catch(() => null) as { job?: AgentBackgroundTask } | null
+        return r.ok ? d?.job : undefined
       }))
       if (cancelled) return
-      const byId = new Map(tasks.filter((task): task is AgentBackgroundTask => Boolean(task)).map((task) => [task.id, task]))
+      const byId = new Map(tasks.filter((t): t is AgentBackgroundTask => Boolean(t)).map((t) => [t.id, t]))
       if (byId.size > 0) {
-        setMessages((current) => current.map((message) => (
-          message.backgroundTask && byId.has(message.backgroundTask.id)
-            ? { ...message, backgroundTask: byId.get(message.backgroundTask.id) }
-            : message
+        setMessages((current) => current.map((m) => (
+          m.backgroundTask && byId.has(m.backgroundTask.id) ? { ...m, backgroundTask: byId.get(m.backgroundTask.id) } : m
         )))
       }
     }
     void refresh()
     const timer = window.setInterval(() => void refresh(), 2500)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
+    return () => { cancelled = true; window.clearInterval(timer) }
   }, [activeAnalysisKey])
 
-  useEffect(() => {
-    if (!showScopePopup) return
-    const handler = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('.alice-scope-popup') && !(e.target as HTMLElement).closest('.alice-scope-btn')) {
-        setShowScopePopup(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showScopePopup])
-
-  useEffect(() => {
-    if (!showModelPopup) return
-    const handler = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('.alice-model-popup') && !(e.target as HTMLElement).closest('.alice-model-btn')) {
-        setShowModelPopup(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showModelPopup])
-
-  useEffect(() => {
-    writeChatModelChoice(selectedModelChoice)
-  }, [selectedModelChoice])
-
+  useEffect(() => { writeChatModelChoice(selectedModelChoice) }, [selectedModelChoice])
   useEffect(() => {
     let cancelled = false
-    void api.getActiveAiModelChoice()
-      .then(({ choice }) => {
-        if (!cancelled) setSelectedModelChoice(normalizeChatModelChoice(choice))
-      })
-      .catch(() => {
-        // 离线时保留当前浏览器上一次选择，发送请求仍由服务端安全回退。
-      })
-    return () => {
-      cancelled = true
-    }
+    void api.getActiveAiModelChoice().then(({ choice }) => { if (!cancelled) setSelectedModelChoice(normalizeChatModelChoice(choice)) }).catch(() => {})
+    return () => { cancelled = true }
   }, [])
 
+  // Close settings/dropdown on outside click
   useEffect(() => {
-    if (!showHistory) return
+    if (!showSettings && !showHistoryDropdown) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (showSettings && !target.closest('.alice-settings-popup') && !target.closest('.alice-settings-btn')) setShowSettings(false)
+      if (showHistoryDropdown && !target.closest('.chat-history-dropdown') && !target.closest('.chat-panel-title')) setShowHistoryDropdown(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showSettings, showHistoryDropdown])
+
+  // History search (cloud)
+  useEffect(() => {
     const q = historySearch.trim()
     if (!q) return
     let cancelled = false
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ q })
-      if (activeProjectId) params.set('projectId', activeProjectId)
-      void fetch(`/api/ai/conversations/search?${params.toString()}`)
-        .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
-        .then(({ ok, data }: { ok: boolean; data: { conversations?: AgentConversationSummary[] } }) => {
-          if (!ok || cancelled || !Array.isArray(data.conversations)) return
-          const cloudRecords = data.conversations.map((item) => ({
-            id: item.id,
-            title: item.title,
-            messages: [] as ChatMessage[],
-            savedAt: new Date(item.updatedAt).getTime(),
-            agentConversationId: item.id,
-            projectId: item.projectId,
-            projectName: item.projectName,
-            cloud: true,
+      void fetch(`/api/ai/conversations/search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }: { ok: boolean; d: { conversations?: AgentConversationSummary[] } }) => {
+          if (!ok || cancelled || !Array.isArray(d.conversations)) return
+          const cloudRecords = d.conversations.map((item) => ({
+            id: item.id, title: item.title, messages: [] as ChatMessage[],
+            savedAt: new Date(item.updatedAt).getTime(), agentConversationId: item.id, cloud: true,
           }))
-          setHistoryList((current) => mergeConversationHistory(loadChatHistory(), [...current.filter((record) => record.cloud), ...cloudRecords]))
-        })
-        .catch(() => undefined)
+          setHistoryList((current) => mergeConversationHistory(loadChatHistory(), [...current.filter((r) => r.cloud), ...cloudRecords]))
+        }).catch(() => undefined)
     }, 220)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [activeProjectId, historySearch, showHistory])
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [historySearch])
 
+  // --- Core functions ---
   const newConversation = () => {
-    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
-    setHistoryList(mergeConversationHistory(loadChatHistory(), historyList.filter((record) => record.cloud)))
+    if (!isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, null)
+    setHistoryList(mergeConversationHistory(loadChatHistory(), historyList.filter((r) => r.cloud)))
     setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
     setConversationRecordId(crypto.randomUUID())
     setAgentConversationId(undefined)
-    setTemporaryChat(false)
     setInput('')
     setAttachments([])
-    setShowModelPopup(false)
-    setShowHistory(false)
-    setShowTaskCenter(false)
+    setShowSettings(false)
+    setShowHistoryDropdown(false)
     setTimeout(() => inputRef.current?.focus(), 50)
-  }
-
-  const openHistory = () => {
-    void refreshCloudHistory()
-    setHistoryList((current) => mergeConversationHistory(loadChatHistory(), current.filter((record) => record.cloud)))
-    setShowTaskCenter(false)
-    setShowProjectPopup(false)
-    setShowHistory(true)
   }
 
   const loadConversation = async (record: ConversationRecord) => {
@@ -411,22 +243,13 @@ export function ChatPanel({
       const response = await fetch(`/api/ai/conversations/${encodeURIComponent(record.agentConversationId || record.id)}`)
       const data = await response.json().catch(() => null) as { messages?: AgentConversationMessage[] } | null
       if (!response.ok || !Array.isArray(data?.messages)) {
-        if (record.messages.length === 0) {
-          onNotify('云端会话读取失败，请稍后重试', 'error')
-          return
-        }
+        if (record.messages.length === 0) { onNotify('云端会话读取失败，请稍后重试', 'error'); return }
         nextMessages = record.messages
       } else {
         const cloudMessages = data.messages.map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          trace: message.trace,
+          id: message.id, role: message.role, content: message.content, trace: message.trace,
           traceStatus: message.trace?.length ? 'completed' as const : undefined,
-          approval: message.approval,
-          selection: message.selection,
-          backgroundTask: message.backgroundTask,
-          attachments: message.attachments,
+          approval: message.approval, selection: message.selection, backgroundTask: message.backgroundTask, attachments: message.attachments,
         }))
         nextMessages = cloudMessages.length > 0 ? cloudMessages : record.messages
       }
@@ -434,9 +257,7 @@ export function ChatPanel({
     setMessages(nextMessages)
     setConversationRecordId(record.id)
     setAgentConversationId(record.agentConversationId || record.id)
-    setActiveProjectId(record.projectId ?? '')
-    setTemporaryChat(false)
-    setShowHistory(false)
+    setShowHistoryDropdown(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
@@ -449,77 +270,6 @@ export function ChatPanel({
     await fetch(`/api/ai/conversations/${encodeURIComponent(cloudId)}`, { method: 'DELETE' }).catch(() => undefined)
   }
 
-  const createConversationProject = () => {
-    const name = projectDraft.trim()
-    if (!name) return
-    const project = { id: crypto.randomUUID(), name: name.slice(0, 24), savedAt: Date.now() }
-    const nextProjects = [project, ...projects.filter((item) => item.name !== project.name)].slice(0, 50)
-    saveChatProjects(nextProjects)
-    setProjects(nextProjects)
-    setActiveProjectId(project.id)
-    setProjectDraft('')
-    if (temporaryChat) setTemporaryChat(false)
-    setShowProjectPopup(false)
-    onNotify(`已新建对话项目：${project.name}`, 'success')
-  }
-
-  const selectConversationProject = (projectId: string) => {
-    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
-    setActiveProjectId(projectId)
-    setTemporaryChat(false)
-    setShowProjectPopup(false)
-    setShowHistory(false)
-    setTimeout(() => inputRef.current?.focus(), 50)
-  }
-
-  const clearConversationProject = () => {
-    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
-    setActiveProjectId('')
-    setTemporaryChat(false)
-    setShowProjectPopup(false)
-    setTimeout(() => inputRef.current?.focus(), 50)
-  }
-
-  const startTemporaryChat = () => {
-    if (!temporaryChat && !isWelcome) upsertChatHistory(conversationRecordId, messages, agentConversationId, activeProject)
-    setTemporaryChat(true)
-    setActiveProjectId('')
-    setMessages([{ id: ALICE_WELCOME_ID, role: 'assistant', content: '' }])
-    setConversationRecordId(crypto.randomUUID())
-    setAgentConversationId(undefined)
-    setInput('')
-    setAttachments([])
-    setShowProjectPopup(false)
-    setShowHistory(false)
-    setShowTaskCenter(false)
-    setTimeout(() => inputRef.current?.focus(), 50)
-  }
-
-  const openTaskCenter = () => {
-    void refreshAnalysisJobs()
-    setShowHistory(false)
-    setShowTaskCenter(true)
-  }
-
-  const openAnalysisJob = async (job: AgentBackgroundTask) => {
-    setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: '', backgroundTask: { ...job, unread: false } }])
-    setConversationRecordId(crypto.randomUUID())
-    setAgentConversationId(undefined)
-    setShowTaskCenter(false)
-    setAnalysisJobs((current) => current.map((item) => item.id === job.id ? { ...item, unread: false } : item))
-    await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(job.id)}/read`, { method: 'POST' }).catch(() => undefined)
-  }
-
-  const openAgentPlan = async (plan: AgentTaskPlan) => {
-    setAgentPlans((current) => current.map((item) => item.id === plan.id ? { ...item, unread: false } : item))
-    await fetch(`/api/ai/agent-plans/${encodeURIComponent(plan.id)}/read`, { method: 'POST' }).catch(() => undefined)
-    setExpandedPlanId((current) => current === plan.id ? '' : plan.id)
-  }
-
-  const authHeaders = (): Record<string, string> => {
-    return { 'content-type': 'application/json' }
-  }
-
   const handleFiles = async (files: FileList | File[] | null) => {
     if (!files) return
     const added: ChatAttachment[] = []
@@ -528,82 +278,64 @@ export function ChatPanel({
       const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name)
       const data = await new Promise<string>((resolve) => {
         const reader = new FileReader()
-        if (isImage) {
-          reader.onload = () => { resolve((reader.result as string).split(',')[1] ?? '') }
-          reader.readAsDataURL(file)
-        } else if (isText) {
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsText(file)
-        } else resolve('')
+        if (isImage) { reader.onload = () => { resolve((reader.result as string).split(',')[1] ?? '') }; reader.readAsDataURL(file) }
+        else if (isText) { reader.onload = () => resolve(reader.result as string); reader.readAsText(file) }
+        else resolve('')
       })
-      added.push({
-        id: crypto.randomUUID(),
-        type: isImage ? 'image' : isText ? 'text' : 'file',
-        name: file.name,
-        data,
-        mimeType: file.type || 'text/plain',
-        preview: isImage ? `data:${file.type || 'image/jpeg'};base64,${data}` : undefined,
-        file,
-      })
+      added.push({ id: crypto.randomUUID(), type: isImage ? 'image' : isText ? 'text' : 'file', name: file.name, data, mimeType: file.type || 'text/plain', preview: isImage ? `data:${file.type || 'image/jpeg'};base64,${data}` : undefined, file })
     }
     setAttachments((prev) => [...prev, ...added].slice(0, 4))
   }
 
   const handleInputPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
-    const pastedImages = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => Boolean(file))
+    const pastedImages = Array.from(event.clipboardData.items).filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter((file): file is File => Boolean(file))
     if (pastedImages.length === 0) return
     event.preventDefault()
     void handleFiles(pastedImages)
   }
 
-  const openModelPicker = () => {
-    if (!canConfigureModel) return
-    setShowModelPopup((value) => !value)
+  const openSettings = () => {
+    setShowSettings((v) => !v)
     if (openRouterModels.length > 0 || isLoadingOpenRouterModels) return
     setIsLoadingOpenRouterModels(true)
-    api.getOpenRouterFreeModels()
-      .then((result) => {
-        setOpenRouterModels((result.models ?? []).filter((model) => model.status === 'ok').slice(0, 12))
-      })
-      .catch(() => setOpenRouterModels([]))
-      .finally(() => setIsLoadingOpenRouterModels(false))
+    api.getOpenRouterFreeModels().then((result) => { setOpenRouterModels((result.models ?? []).filter((m) => m.status === 'ok').slice(0, 12)) }).catch(() => setOpenRouterModels([])).finally(() => setIsLoadingOpenRouterModels(false))
+  }
+
+  const chooseModel = async (choice: ChatModelChoice) => {
+    const previous = selectedModelChoice
+    setSelectedModelChoice(choice)
+    setShowSettings(false)
+    try {
+      const saved = await api.setActiveAiModelChoice(choice)
+      setSelectedModelChoice(normalizeChatModelChoice(saved.choice))
+      onNotify(choice === 'auto' ? '已恢复自动模型路由' : `已将 ${chatModelChoiceLabel(choice, aiModelConfig, aiProviderConfigs)} 设为全站 AI 首选`, 'success')
+    } catch (error) {
+      setSelectedModelChoice(previous)
+      onNotify(error instanceof Error ? error.message : '模型优先级保存失败', 'error')
+    }
   }
 
   const reviseApproval = async (messageId: string, approvalId: string, draft: Record<string, unknown>) => {
     if (!agentConversationId) throw new Error('当前会话已失效，请重新生成任务草稿。')
-    const res = await fetch('/api/ai/approval', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        agentRuntimeConversationId: agentConversationId,
-        approvalId,
-        draft,
-      }),
-    })
+    const res = await fetch('/api/ai/approval', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentRuntimeConversationId: agentConversationId, approvalId, draft }) })
     const data = (await res.json().catch(() => null)) as { approval?: AgentApproval; error?: string } | null
     if (!res.ok || !data?.approval) throw new Error(data?.error ?? '草稿更新失败')
-    setMessages((current) => current.map((message) => (
-      message.id === messageId ? { ...message, approval: data.approval } : message
-    )))
+    setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, approval: data.approval } : m)))
   }
 
   const updateAnalysisTask = async (messageId: string, taskId: string, action: 'cancel' | 'retry') => {
-    const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(taskId)}/${action}`, {
-      method: 'POST',
-      headers: authHeaders(),
-    })
+    const response = await fetch(`/api/ai/analysis-jobs/${encodeURIComponent(taskId)}/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' } })
     const data = await response.json().catch(() => null) as { job?: AgentBackgroundTask; error?: string } | null
-    if (!response.ok || !data?.job) {
-      onNotify(data?.error || (action === 'cancel' ? '取消分析失败' : '重新分析失败'), 'error')
-      return
-    }
-    setMessages((current) => current.map((message) => (
-      message.id === messageId ? { ...message, backgroundTask: data.job } : message
-    )))
+    if (!response.ok || !data?.job) { onNotify(data?.error || (action === 'cancel' ? '取消分析失败' : '重新分析失败'), 'error'); return }
+    setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, backgroundTask: data.job } : m)))
     onNotify(action === 'cancel' ? '后台分析已取消' : '已重新启动后台分析', action === 'cancel' ? 'info' : 'success')
+  }
+
+  const stopLocalCliExecution = async () => {
+    if (!activeLocalCommandId || isCancellingLocalCommand) return
+    setIsCancellingLocalCommand(true)
+    try { await api.cancelLocalCliCommand(activeLocalCommandId); onNotify('正在停止本机 CLI…', 'info') }
+    catch (error) { setIsCancellingLocalCommand(false); onNotify(error instanceof Error ? error.message : '停止本机 CLI 失败', 'error') }
   }
 
   const send = async (overrideText?: string, approvalDecision?: { messageId: string; approvalId: string }) => {
@@ -619,26 +351,11 @@ export function ChatPanel({
         for (const item of sentAttachments) {
           validateUploadFile(item.file)
           const preview = await createOptionalPreviewFile(item.file)
-          uploaded.push(await api.uploadFile({
-            taskId: targetTaskId,
-            scope: 'progress',
-            file: item.file,
-            preview,
-            type: fileTypeForFile(item.file).type,
-            size: formatFileSize(item.file.size),
-            final: false,
-            visible: true,
-            tag: 'Agent 对话附件',
-            analyze: true,
-          }))
+          uploaded.push(await api.uploadFile({ taskId: targetTaskId, scope: 'progress', file: item.file, preview, type: fileTypeForFile(item.file).type, size: formatFileSize(item.file.size), final: false, visible: true, tag: 'Agent 对话附件', analyze: true }))
         }
         filesUploadedBeforeAgent = true
-        text = `${text}\n\n[已上传到任务 #${targetTaskId} 的真实附件：${uploaded.map((file) => `${file.name}（attachmentId=${file.id}）`).join('、')}]`
-      } catch (error) {
-        onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error')
-        setLoading(false)
-        return
-      }
+        text = `${text}\n\n[已上传到任务 #${targetTaskId} 的真实附件：${uploaded.map((f) => `${f.name}（attachmentId=${f.id}）`).join('、')}]`
+      } catch (error) { onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error'); setLoading(false); return }
     }
     if (!targetTaskId && sentAttachments.length > 0) {
       text = `${text}${text ? '\n\n' : ''}[待上传附件：${sentAttachments.map((item) => `${item.name}（${item.file.size} 字节，${item.mimeType}）`).join('、')}；请先定位所属任务并调用上传接力工具]`
@@ -646,94 +363,51 @@ export function ChatPanel({
     const displayText = text || `[附件：${attachments.map((a) => a.name).join('、')}]`
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: displayText }
     const assistantId = crypto.randomUUID()
-    const baseMessages = (isWelcome ? [] : messages).map((message) => (
-      approvalDecision && message.id === approvalDecision.messageId && message.approval?.id === approvalDecision.approvalId
-        ? { ...message, approval: { ...message.approval, status: 'processing' as const } }
-        : message
+    const baseMessages = (isWelcome ? [] : messages).map((m) => (
+      approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId
+        ? { ...m, approval: { ...m.approval, status: 'processing' as const } } : m
     ))
     if (overrideText === undefined) setInput('')
     setAttachments([])
-
-    setMessages([...baseMessages, userMsg, {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      trace: [],
-      traceStatus: 'running',
-    }])
+    setMessages([...baseMessages, userMsg, { id: assistantId, role: 'assistant', content: '', trace: [], traceStatus: 'running' }])
     setLoading(true)
     try {
       const allMessages = [...baseMessages, userMsg].map((m) => ({ role: m.role, content: m.content }))
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: {
-          ...authHeaders(),
-          Accept: 'text/event-stream',
-        },
+        headers: { 'content-type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
-          messages: allMessages,
-          month: currentMonthValue,
-          useKnowledge,
-          useWebSearch,
+          messages: allMessages, month: currentMonthValue, useKnowledge, useWebSearch,
           modelChoice: selectedModelChoice,
           attachments: sentAttachments.filter((item) => item.type !== 'file').map(({ type, name, data, mimeType }) => ({ type, name, data, mimeType })),
           agentRuntimeConversationId: agentConversationId,
           localCliConversationId: conversationRecordId,
-          temporary: temporaryChat,
-          projectId: activeProject?.id,
-          projectName: activeProject?.name,
           browserDeviceKey: localCliBrowserDeviceKey(),
         }),
       })
-      if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(err?.error ?? `请求失败：${res.status}`)
-      }
-      type AgentChatResult = {
-        content?: string
-        trace?: string[]
-        agentRuntimeConversationId?: string
-        approval?: AgentApproval
-        selection?: AgentTaskSelection
-        backgroundTask?: AgentBackgroundTask
-        attachments?: AgentResultAttachment[]
-        uploadHandoff?: AgentUploadHandoff
-      }
+      if (!res.ok) { const err = (await res.json().catch(() => null)) as { error?: string } | null; throw new Error(err?.error ?? `请求失败：${res.status}`) }
+      type AgentChatResult = { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval; selection?: AgentTaskSelection; backgroundTask?: AgentBackgroundTask; attachments?: AgentResultAttachment[]; uploadHandoff?: AgentUploadHandoff }
       let uploadHandoffStarted = false
       const applyAgentResult = (data: AgentChatResult) => {
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         setMessages((prev) => prev.map((m) => {
           if (m.id === assistantId) {
-            return {
-              ...m,
-              content: data.content ?? '（无回复）',
-              trace: data.trace?.length ? data.trace : m.trace,
-              traceStatus: 'completed',
+            return { ...m, content: data.content ?? '（无回复）', trace: data.trace?.length ? data.trace : m.trace, traceStatus: 'completed',
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
               ...(data.selection ? { selection: data.selection } : {}),
               ...(data.backgroundTask ? { backgroundTask: data.backgroundTask } : {}),
-              ...(data.attachments?.length ? { attachments: data.attachments } : {}),
-            }
+              ...(data.attachments?.length ? { attachments: data.attachments } : {}) }
           }
-          if (data.approval && m.approval?.id === data.approval.id) {
-            return { ...m, approval: data.approval }
-          }
+          if (data.approval && m.approval?.id === data.approval.id) return { ...m, approval: data.approval }
           if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
-            return {
-              ...m,
-              approval: data.approval ?? {
-                ...m.approval,
-                status: 'failed',
-                error: 'Agent 没有返回操作结果，请重新生成预览。',
-              },
-            }
+            return { ...m, approval: data.approval ?? { ...m.approval, status: 'failed', error: 'Agent 没有返回操作结果，请重新生成预览。' } }
           }
           return m
         }))
         if (data.uploadHandoff && !filesUploadedBeforeAgent && !uploadHandoffStarted && sentAttachments.length > 0) {
           uploadHandoffStarted = true
           const handoff = data.uploadHandoff
-          const allowedNames = new Set(handoff.files.map((file) => file.name))
+          const allowedNames = new Set(handoff.files.map((f) => f.name))
           void (async () => {
             if (!sentAttachments.every((item) => allowedNames.has(item.name))) throw new Error('上传接力返回的文件清单与当前附件不一致')
             const uploaded: FileAsset[] = []
@@ -742,834 +416,269 @@ export function ChatPanel({
               const preview = await createOptionalPreviewFile(item.file)
               uploaded.push(await api.uploadFile({ taskId: handoff.taskId, scope: handoff.scope, file: item.file, preview, type: fileTypeForFile(item.file).type, size: formatFileSize(item.file.size), final: handoff.scope === 'acceptance', visible: true, tag: 'Agent 对话附件', analyze: true }))
             }
-            setMessages((current) => current.map((message) => message.id === assistantId
-              ? { ...message, content: `${message.content}\n\n已将 ${uploaded.length} 个附件上传到“${handoff.taskTitle}”。` }
-              : message))
-            onNotify(`已上传到“${handoff.taskTitle}”`, 'success')
+            setMessages((current) => current.map((msg) => msg.id === assistantId ? { ...msg, content: `${msg.content}\n\n已将 ${uploaded.length} 个附件上传到"${handoff.taskTitle}"。` } : msg))
+            onNotify(`已上传到"${handoff.taskTitle}"`, 'success')
           })().catch((error) => onNotify(error instanceof Error ? `附件上传失败：${error.message}` : '附件上传失败', 'error'))
         }
       }
       const ct = res.headers.get('content-type') ?? ''
-      if (!ct.includes('text/event-stream')) {
-        applyAgentResult((await res.json()) as AgentChatResult)
-        return
-      }
+      if (!ct.includes('text/event-stream')) { applyAgentResult((await res.json()) as AgentChatResult); return }
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
-      let buf = ''
-      let streamError = ''
-      let receivedResult = false
+      let buf = ''; let streamError = ''; let receivedResult = false
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
+        const lines = buf.split('\n'); buf = lines.pop() ?? ''
         for (const line of lines) {
           const trimmed = line.trim()
           if (!trimmed.startsWith('data:')) continue
           const payload = trimmed.slice(5).trim()
           if (payload === '[DONE]') break
           try {
-            const event = JSON.parse(payload) as AgentChatResult & {
-              type?: 'trace' | 'route' | 'result' | 'error' | 'done'
-              status?: 'running' | 'completed'
-              error?: string
-              t?: string
-              commandId?: string
-              runtime?: string
-              runtimeLabel?: string
-            }
+            const event = JSON.parse(payload) as AgentChatResult & { type?: string; status?: string; error?: string; t?: string; commandId?: string; runtime?: string }
             if (event.type === 'trace' && event.trace?.length) {
-              setMessages((prev) => prev.map((m) => (
-                m.id === assistantId
-                  ? { ...m, trace: event.trace, traceStatus: 'running' }
-                  : m
-              )))
+              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, trace: event.trace, traceStatus: 'running' } : m)))
             } else if (event.type === 'route' && event.runtime === 'local-cli' && event.commandId) {
               setActiveLocalCommandId(event.commandId)
-            } else if (event.type === 'result') {
-              receivedResult = true
-              applyAgentResult(event)
-            } else if (event.type === 'error') {
-              streamError = event.error || 'Agent 请求失败'
-            } else if (event.t) {
-              setMessages((prev) => prev.map((m) => (
-                m.id === assistantId ? { ...m, content: m.content + event.t } : m
-              )))
-            }
+            } else if (event.type === 'result') { receivedResult = true; applyAgentResult(event) }
+            else if (event.type === 'error') { streamError = event.error || 'Agent 请求失败' }
+            else if (event.t) { setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + event.t } : m))) }
           } catch { /* skip */ }
         }
       }
       if (streamError) throw new Error(streamError)
-      if (!receivedResult) {
-        setMessages((prev) => prev.map((m) => (
-          m.id === assistantId ? { ...m, traceStatus: 'completed' } : m
-        )))
-      }
+      if (!receivedResult) setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, traceStatus: 'completed' } : m)))
     } catch (e) {
       const msg = e instanceof Error ? e.message : '请求失败，请重试'
       setMessages((prev) => prev.map((m) => {
-        if (m.id === assistantId) {
-          return {
-            ...m,
-            content: `⚠️ ${msg}`,
-            trace: [...(m.trace ?? []), '执行失败：请检查服务状态后重试'],
-            traceStatus: 'failed',
-          }
-        }
-        if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) {
-          return { ...m, approval: { ...m.approval, status: 'failed', error: msg } }
-        }
+        if (m.id === assistantId) return { ...m, content: `⚠️ ${msg}`, trace: [...(m.trace ?? []), '执行失败：请检查服务状态后重试'], traceStatus: 'failed' }
+        if (approvalDecision && m.id === approvalDecision.messageId && m.approval?.id === approvalDecision.approvalId) return { ...m, approval: { ...m.approval, status: 'failed', error: msg } }
         return m
       }))
-    } finally {
-      setLoading(false)
-      setActiveLocalCommandId('')
-      setIsCancellingLocalCommand(false)
-      void refreshAnalysisJobs()
-    }
+    } finally { setLoading(false); setActiveLocalCommandId(''); setIsCancellingLocalCommand(false) }
   }
 
-  const stopLocalCliExecution = async () => {
-    if (!activeLocalCommandId || isCancellingLocalCommand) return
-    setIsCancellingLocalCommand(true)
-    try {
-      await api.cancelLocalCliCommand(activeLocalCommandId)
-      onNotify('正在停止本机 CLI…', 'info')
-    } catch (error) {
-      setIsCancellingLocalCommand(false)
-      onNotify(error instanceof Error ? error.message : '停止本机 CLI 失败', 'error')
-    }
-  }
-
-  const updatePlan = async (
-    plan: AgentTaskPlan,
-    action: 'approve_batch' | 'pause' | 'resume' | 'cancel' | 'start_step' | 'complete_step' | 'reopen_step' | 'fail_step' | 'retry_step' | 'begin_compensation' | 'start_compensation' | 'complete_compensation',
-    stepId?: string,
-  ) => {
-    const busyKey = `${plan.id}:${action}:${stepId || ''}`
-    setTaskCenterBusy(busyKey)
-    try {
-      const result = await api.updateAgentPlan(plan.id, action, stepId, { revision: plan.revision })
-      setAgentPlans((current) => action === 'cancel'
-        ? current.filter((item) => item.id !== plan.id)
-        : current.map((item) => item.id === plan.id ? result.plan : item))
-      onNotify(
-        action === 'approve_batch' ? '执行批次已确认'
-          : action === 'pause' ? '计划已暂停'
-            : action === 'resume' ? '计划已继续'
-              : action === 'cancel' ? '计划已取消'
-                : action === 'begin_compensation' ? '已进入补偿流程'
-                  : '计划步骤已更新',
-        'success',
-      )
-    } catch (error) {
-      onNotify(error instanceof Error ? error.message : '计划更新失败', 'error')
-    } finally {
-      setTaskCenterBusy('')
-    }
-  }
-
-  const executePlanCompensation = (plan: AgentTaskPlan, step: AgentTaskPlan['steps'][number]) => {
-    if (!step.compensation) return
-    setShowTaskCenter(false)
-    void send(`请为持续计划“${plan.goal}”执行补偿步骤“${step.compensation.label}”。先核对当前任务数据，生成对应操作草稿，执行前让我确认。`)
-  }
-
-  const updateMemory = async (memory: AgentTaskMemory, payload: Parameters<typeof api.updateTaskMemory>[1]) => {
-    setTaskCenterBusy(`memory:${memory.taskId}:${payload.action}`)
-    try {
-      const result = await api.updateTaskMemory(memory.taskId, payload)
-      setTaskMemories((current) => current.map((item) => item.taskId === memory.taskId ? result.memory : item))
-      if (payload.action === 'add_note') setMemoryNoteDrafts((current) => ({ ...current, [memory.taskId]: '' }))
-      onNotify(payload.action === 'set_enabled' && payload.enabled === false ? '已清除并停止该任务记忆' : '任务记忆已更新', 'success')
-    } catch (error) {
-      onNotify(error instanceof Error ? error.message : '任务记忆更新失败', 'error')
-    } finally {
-      setTaskCenterBusy('')
-    }
-  }
-
-  const createEnterpriseMemory = async (draft: EnterpriseMemoryDraft) => {
-    setTaskCenterBusy('enterprise-memory:create')
-    try {
-      const result = await api.createEnterpriseMemory(draft)
-      setEnterpriseMemories((current) => [result.memory, ...current])
-      setEnterpriseMemorySummary(result.summary)
-      onNotify('企业记忆已保存', 'success')
-    } catch (error) {
-      onNotify(error instanceof Error ? error.message : '企业记忆保存失败', 'error')
-    } finally { setTaskCenterBusy('') }
-  }
-
-  const updateEnterpriseMemory = async (memory: AgentEnterpriseMemory, payload: Record<string, unknown>) => {
-    setTaskCenterBusy(`enterprise-memory:${memory.id}`)
-    try {
-      const result = await api.updateEnterpriseMemory(memory.id, payload)
-      if (payload.action === 'correct') {
-        setEnterpriseMemories((current) => [result.memory, ...current.map((item) => item.id === memory.id ? { ...item, status: 'superseded' as const } : item)])
-      } else {
-        setEnterpriseMemories((current) => current.map((item) => item.id === memory.id ? result.memory : item))
-      }
-      setEnterpriseMemorySummary(result.summary)
-      onNotify(payload.action === 'correct' ? '企业记忆已纠正并保留旧版本' : payload.action === 'expire' ? '企业记忆已失效' : '企业记忆已删除', 'success')
-    } catch (error) {
-      onNotify(error instanceof Error ? error.message : '企业记忆更新失败', 'error')
-    } finally { setTaskCenterBusy('') }
-  }
-
-  const reminderPrompt = (plan: AgentTaskPlan) => {
-    const prefix = plan.taskId ? `任务 #${plan.taskId}` : '这个任务'
-    if (plan.goal.includes('验收') || plan.goal.includes('100%')) return `请检查${prefix}当前资料，并生成完整验收草稿；执行前让我确认。`
-    if (plan.goal.includes('等待')) return `请检查${prefix}的等待记录和后续进展，判断阻塞是否解除，并给出下一步可确认操作。`
-    if (plan.goal.includes('工时')) return `请分析${prefix}实际工时超出预估的原因，并给出可执行的范围调整建议。`
-    if (plan.goal.includes('逾期')) return `请检查${prefix}的逾期原因和最新进展，并生成更新进展或调整交付日期的确认草稿。`
-    return `请继续处理${prefix}的提醒：${plan.goal}。先核对数据，再生成需要我确认的下一步。`
-  }
-
-  const executeReminder = (plan: AgentTaskPlan) => {
-    setShowTaskCenter(false)
-    void send(reminderPrompt(plan))
-  }
-
-  const openProactiveItem = async (item: AgentProactiveItem) => {
-    setExpandedProactiveId((current) => current === item.id ? '' : item.id)
-    if (!item.unread) return
-    setProactiveItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, unread: false } : entry))
-    await api.updateProactiveItem(item.id, { action: 'read' }).catch(() => undefined)
-  }
-
-  const updateProactiveItem = async (item: AgentProactiveItem, action: 'resolve' | 'dismiss' | 'snooze') => {
-    setTaskCenterBusy(`proactive:${item.id}:${action}`)
-    try {
-      const snoozedUntil = action === 'snooze' ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined
-      const result = await api.updateProactiveItem(item.id, { action, snoozedUntil })
-      setProactiveItems((current) => current.filter((entry) => entry.id !== item.id))
-      setProactiveSummary(result.summary)
-      onNotify(action === 'resolve' ? '已记录为已解决' : action === 'dismiss' ? '已记录为无需处理' : '将在 24 小时后再次提醒', 'success')
-    } catch (error) {
-      onNotify(error instanceof Error ? error.message : '主动事项更新失败', 'error')
-    } finally {
-      setTaskCenterBusy('')
-    }
-  }
-
-  const executeProactiveSuggestion = (item: AgentProactiveItem) => {
-    setShowTaskCenter(false)
-    void send(item.suggestedPrompt)
-  }
-
-  const scopeActive = useKnowledge || useWebSearch
-  const activeProviderConfigs = useMemo(
-    () => aiProviderConfigs.filter((config) => config.enabled && config.hasApiKey && config.models.includes(config.defaultModel)),
-    [aiProviderConfigs],
-  )
-  const providerModelOptions = activeProviderConfigs.map((config) => {
-    const providerLabel = aiProviderDisplayLabel(config.provider)
-    return {
+  // --- Model options ---
+  const activeProviderConfigs = useMemo(() => aiProviderConfigs.filter((c) => c.enabled && c.hasApiKey && c.models.includes(c.defaultModel)), [aiProviderConfigs])
+  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey }> = [
+    { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析自动使用站内 Agent' : '由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
+    ...activeProviderConfigs.map((config) => ({
       value: `provider:${config.provider}` as ChatModelChoice,
       label: config.defaultModel,
-      meta: `${providerLabel} · 手动最高优先级${providerSupportsVision(config.provider) ? ' · 支持识图时图片也优先使用' : ''}`,
+      meta: `${aiProviderDisplayLabel(config.provider)} · 手动最高优先级${providerSupportsVision(config.provider) ? ' · 支持识图' : ''}`,
       brand: aiBrandForValue(`${config.provider} ${config.defaultModel}`),
-    }
-  })
-  const modelOptions: Array<{ value: ChatModelChoice; label: string; meta: string; brand: AiBrandKey }> = [
-    { value: 'auto', label: activeLocalCliRoute ? `自动 · ${activeLocalCliRoute.name}` : '自动路由', meta: activeLocalCliRoute ? '普通问答优先本机 CLI；深度分析、写入和识图自动使用站内 Agent' : '本机 CLI 不可用时由站内 Agent 自动选择模型', brand: activeLocalCliRoute ? aiBrandForValue(activeLocalCliRoute.adapterId) : 'auto' },
-    ...providerModelOptions,
+    })),
   ]
   const usesLocalCli = selectedModelChoice === 'auto' && Boolean(activeLocalCliRoute)
   const activeRuntimeLabel = usesLocalCli ? activeLocalCliRoute!.name : chatModelChoiceLabel(selectedModelChoice, aiModelConfig, aiProviderConfigs)
   const activeRuntimeBrand = usesLocalCli ? aiBrandForValue(activeLocalCliRoute!.adapterId) : aiBrandForValue(`${selectedModelChoice} ${activeRuntimeLabel}`)
-  const isModelOptionSelected = (option: (typeof modelOptions)[number]) => {
-    if (selectedModelChoice === option.value) return true
-    return false
-  }
-  const taskCenterUnreadCount = analysisJobs.filter((job) => job.unread).length + agentPlans.filter((plan) => plan.unread).length + proactiveItems.filter((item) => item.unread).length
-  const filteredHistoryList = useMemo(() => {
-    const keyword = historySearch.trim().toLowerCase()
-    return historyList.filter((record) => {
-      if (activeProjectId && record.projectId !== activeProjectId) return false
-      if (!keyword) return true
-      const haystack = [
-        record.title,
-        record.projectName,
-        ...record.messages.map((message) => message.content),
-      ].filter(Boolean).join('\n').toLowerCase()
-      return haystack.includes(keyword)
-    })
-  }, [activeProjectId, historyList, historySearch])
-  const chooseModel = async (choice: ChatModelChoice) => {
-    const previous = selectedModelChoice
-    setSelectedModelChoice(choice)
-    setShowModelPopup(false)
-    try {
-      const saved = await api.setActiveAiModelChoice(choice)
-      setSelectedModelChoice(normalizeChatModelChoice(saved.choice))
-      onNotify(choice === 'auto' ? '已恢复自动模型路由' : `已将 ${chatModelChoiceLabel(choice, aiModelConfig, aiProviderConfigs)} 设为全站 AI 首选`, 'success')
-    } catch (error) {
-      setSelectedModelChoice(previous)
-      onNotify(error instanceof Error ? error.message : '模型优先级保存失败', 'error')
-    }
-  }
 
+  const recentHistory = useMemo(() => [...historyList].sort((a, b) => b.savedAt - a.savedAt).slice(0, 10), [historyList])
+
+  // --- Render ---
   return (
-    <div className="chat-panel" role="dialog" aria-label="爱丽丝">
-      {/* header */}
-      <div className="chat-panel-header">
-        <div className="chat-panel-identity">
-          <span className="chat-panel-brand-mark" aria-hidden="true">
-            <Sparkles size={16} />
-          </span>
-          <div className="chat-panel-title">
-            <div>
-              <span>爱丽丝</span>
-              <small>Giverny Agent</small>
-            </div>
-            <p className="chat-panel-runtime">
-              <span aria-hidden="true" />
-              {temporaryChat ? '临时对话' : activeProject?.name || activeRuntimeLabel}
-              <em>{temporaryChat ? '不保存' : activeProject ? '项目' : usesLocalCli ? '本机' : selectedModelChoice === 'auto' ? '自动路由' : '全站首选'}</em>
-            </p>
-          </div>
-        </div>
-        <div className="chat-panel-header-actions">
-          <button
-            type="button"
-            className={`chat-panel-project-btn ${activeProject || showProjectPopup ? 'active' : ''}`}
-            onClick={() => {
-              setShowProjectPopup((value) => !value)
-              setShowHistory(false)
-              setShowTaskCenter(false)
-              setShowScopePopup(false)
-              setShowModelPopup(false)
-            }}
-            title="新建或切换对话项目"
-            aria-label="新建或切换对话项目"
-          >
-            <Folder size={14} />
-            <span>{activeProject?.name || '项目'}</span>
-          </button>
-          <button type="button" className={`chat-panel-text-btn ${temporaryChat ? 'active' : ''}`} onClick={startTemporaryChat} title="临时对话不进入历史记录">
-            临时
-          </button>
-          <button type="button" className="chat-panel-icon-btn" onClick={newConversation} title="新建对话" aria-label="新建对话">
-            <Plus size={15} />
-          </button>
-          <button
-            type="button"
-            className={`chat-panel-icon-btn ${taskCenterUnreadCount > 0 ? 'has-unread' : ''}`}
-            onClick={openHistory}
-            title="对话记录与后台任务"
-            aria-label="记录与任务"
-          >
-            <History size={15} />
-            {taskCenterUnreadCount > 0 && <span className="chat-task-unread">{Math.min(9, taskCenterUnreadCount)}</span>}
-          </button>
-          <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭">
-            <X size={15} />
-          </button>
-        </div>
-      </div>
-
-      {showProjectPopup && (
-        <div className="chat-project-popup">
-          <div className="chat-project-popup-header">
-            <strong>对话项目</strong>
-            <span>像文件夹一样收纳同一主题的问题</span>
-          </div>
-          <div className="chat-project-quick-actions">
-            <button type="button" className={!activeProjectId && !temporaryChat ? 'active' : ''} onClick={clearConversationProject}>
-              全部对话
-            </button>
-            <button type="button" className={temporaryChat ? 'active' : ''} onClick={startTemporaryChat}>
-              临时对话
-            </button>
-          </div>
-          <div className="chat-project-list">
-            {projects.length === 0 ? (
-              <EmptyState variant="inline" title="还没有项目" description="可以先建一个「金额核对」。" />
-            ) : projects.map((project) => (
-              <button key={project.id} type="button" className={activeProjectId === project.id ? 'active' : ''} onClick={() => selectConversationProject(project.id)}>
-                <Folder size={13} aria-hidden="true" />
-                <span>{project.name}</span>
-              </button>
-            ))}
-          </div>
-          <div className="chat-project-create">
-            <input
-              value={projectDraft}
-              onChange={(event) => setProjectDraft(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && createConversationProject()}
-              placeholder="新建项目，例如：金额核对"
-              aria-label="新建对话项目名称"
-            />
-            <button type="button" onClick={createConversationProject}>新建项目</button>
-          </div>
-        </div>
-      )}
-
-      {/* messages / welcome screen */}
-      <div className="chat-panel-messages">
-        {isWelcome ? (
-          <div className="alice-welcome">
-            <span className="alice-welcome-lily" aria-hidden="true"><Waves /><Flower2 /></span>
-            <div className="alice-welcome-kicker">Giverny Agent</div>
-            <h2 className="alice-welcome-title">{givernyCopy.assistantWelcomeTitle}</h2>
-            <p className="alice-welcome-sub">{givernyCopy.assistantWelcomeDescription}</p>
-            <div className="alice-suggested">
-              {ALICE_SUGGESTED.map((s, index) => (
-                <button key={s} type="button" className="alice-suggested-btn" onClick={() => void send(s)}>
-                  <span>{String(index + 1).padStart(2, '0')}</span>
-                  <strong>{s}</strong>
-                  <ChevronRight size={15} aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <>
-            {messages.map((msg) => (
-              <div key={msg.id} className={`chat-bubble ${msg.role}`}>
-                {msg.role === 'assistant' && msg.trace?.length ? (
-                  <AgentExecutionTimeline trace={msg.trace} status={msg.traceStatus ?? 'completed'} />
-                ) : null}
-                {msg.content ? <ChatContent content={msg.content} /> : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
-                {msg.role === 'assistant' && msg.approval && (
-                  <AgentApprovalCard
-                    approval={msg.approval}
-                    busy={loading}
-                    onRevise={(draft) => reviseApproval(msg.id, msg.approval!.id, draft)}
-                    onOpenTask={onOpenTask}
-                    onDecision={(decision) => void send(decision === 'confirm' ? '确认执行' : '取消', {
-                      messageId: msg.id,
-                      approvalId: msg.approval!.id,
-                    })}
-                  />
-                )}
-                {msg.role === 'assistant' && msg.selection && (
-                  <AgentTaskSelectionCard
-                    selection={msg.selection}
-                    busy={loading}
-                    onSelect={(candidate) => void send(`选择任务 #${candidate.id}：${candidate.title}`)}
-                  />
-                )}
-                {msg.role === 'assistant' && msg.backgroundTask && (
-                  <AgentAnalysisTaskCard
-                    task={msg.backgroundTask}
-                    busy={loading}
-                    onCancel={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'cancel')}
-                    onRetry={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'retry')}
-                  />
-                )}
-                {msg.role === 'assistant' && msg.attachments && msg.attachments.length > 0 && (
-                  <AgentAttachmentResults attachments={msg.attachments} onPreview={setAgentPreviewAttachment} />
-                )}
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </>
-        )}
-      </div>
-
-      {/* attachment preview chips */}
-      {attachments.length > 0 && (
-        <div className="chat-attachments">
-          {attachments.map((a) => (
-            <div key={a.id} className="chat-attachment-chip">
-              {a.type === 'image' && a.preview
-                ? <img src={a.preview} className="chat-attachment-thumb" alt={a.name} onClick={() => setLightboxSrc(a.preview ?? null)} style={{ cursor: 'zoom-in' }} />
-                : <FileTextIcon size={13} />}
-              <span>{a.name}</span>
-              <button type="button" className="chat-attachment-remove" onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}>
-                <X size={11} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* input card */}
-      <div className="alice-input-wrap">
-        {showScopePopup && (
-          <div className="alice-scope-popup">
-            <div className="alice-scope-popup-title">内容范围</div>
-            <label className="alice-scope-row">
-              <BookOpen size={14} />
-              <span>个人知识库</span>
-              <div className={`alice-toggle ${useKnowledge ? 'on' : ''}`} onClick={() => setUseKnowledge((v) => !v)} role="switch" aria-checked={useKnowledge} />
-            </label>
-            <label className="alice-scope-row">
-              <Globe size={14} />
-              <span>全网搜索</span>
-              <div className={`alice-toggle ${useWebSearch ? 'on' : ''}`} onClick={() => setUseWebSearch((v) => !v)} role="switch" aria-checked={useWebSearch} />
-            </label>
-          </div>
-        )}
-        {showModelPopup && canConfigureModel && (
-          <div className="alice-model-popup">
-            {usesLocalCli && activeLocalCliRoute && (
-              <div className="alice-runtime-current">
-                <AiBrandIcon brand={aiBrandForValue(activeLocalCliRoute.adapterId)} size={22} />
-                <span>
-                  <strong>{activeLocalCliRoute.name}</strong>
-                  <small>当前回答路线 · {activeLocalCliRoute.deviceName}</small>
-                </span>
-                <em>本机</em>
-              </div>
-            )}
-            <div className="alice-model-popup-section">
-              <div className="alice-model-popup-title">回答路线</div>
-              {modelOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`alice-model-row ${isModelOptionSelected(option) ? 'active' : ''}`}
-                  onClick={() => {
-                    void chooseModel(option.value)
-                  }}
-                >
-                  <AiBrandIcon brand={option.brand} size={18} />
-                  <span>
-                    <strong>{option.label}</strong>
-                    <small>{option.meta}</small>
-                  </span>
-                  {isModelOptionSelected(option) && <CheckCircle2 className="alice-model-selected" size={16} aria-hidden="true" />}
-                </button>
-              ))}
-            </div>
-            <div className="alice-model-popup-section">
-              <div className="alice-model-popup-title">更多免费模型</div>
-              {isLoadingOpenRouterModels && <p className="loading-state">正在读取 OpenRouter 免费模型…</p>}
-              {!isLoadingOpenRouterModels && openRouterModels.length === 0 && (
-                <EmptyState variant="inline" title="暂无可用缓存" description="可以先在设置里扫描 OpenRouter 免费模型。" />
-              )}
-              {openRouterModels.map((model) => (
-                <button
-                  key={model.id}
-                  type="button"
-                  className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`}
-                  onClick={() => {
-                    void chooseModel(`openrouter:${model.id}` as ChatModelChoice)
-                  }}
-                >
-                  <AiBrandIcon brand="openrouter" size={18} />
-                  <span>
-                    <strong>{model.id}</strong>
-                    <small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K 上下文`].filter(Boolean).join(' · ') || 'OpenRouter free'}</small>
-                  </span>
-                  {selectedModelChoice === `openrouter:${model.id}` && <CheckCircle2 className="alice-model-selected" size={16} aria-hidden="true" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/*,.txt,.md,.json,.csv,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov"
-          style={{ display: 'none' }}
-          onChange={(e) => void handleFiles(e.target.files)}
+    <div className={`chat-panel ${expanded ? 'is-expanded' : ''}`} role="dialog" aria-label="爱丽丝">
+      {/* Sidebar (fullscreen mode) */}
+      {expanded && showSidebar && (
+        <ChatSidebar
+          history={historyList}
+          activeConversationId={conversationRecordId}
+          onSelect={(record) => void loadConversation(record)}
+          onNew={newConversation}
+          onDelete={(id) => void deleteHistoryItem(id)}
+          onOpenSettings={openSettings}
+          onClose={() => setShowSidebar(false)}
         />
-        <div className="alice-input-card">
-          <textarea
-            ref={inputRef}
-            className="alice-textarea"
-            value={input}
-            rows={1}
-            placeholder="向爱丽丝提问…"
-            onChange={(e) => {
-              setInput(e.target.value)
-              e.target.style.height = 'auto'
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
-            }}
-            onPaste={handleInputPaste}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
-          />
-          <div className="alice-input-toolbar">
-            <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件（图片、txt、md…）" aria-label="添加附件">
-              <Plus size={17} />
-            </button>
-            <button
-              type="button"
-              className={`alice-tool-btn alice-scope-btn ${scopeActive ? 'active' : ''}`}
-              onClick={() => setShowScopePopup((v) => !v)}
-              title="选择内容范围"
-              aria-label="内容范围"
+      )}
+
+      <div className="chat-panel-main">
+        {/* Header */}
+        <div className="chat-panel-header">
+          <div className="chat-panel-identity">
+            <span className="chat-panel-brand-mark" aria-hidden="true"><Sparkles size={16} /></span>
+            <div
+              className="chat-panel-title"
+              onClick={() => { setShowHistoryDropdown((v) => !v); void refreshCloudHistory() }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && setShowHistoryDropdown((v) => !v)}
             >
-              <SlidersHorizontal size={15} />
-              {scopeActive && (
-                <span className="alice-scope-badge">
-                  {[useKnowledge && '知识库', useWebSearch && '全网'].filter(Boolean).join('+')}
-                </span>
+              <div>
+                <span>爱丽丝</span>
+                <ChevronDown size={12} className="chat-panel-title-chevron" />
+              </div>
+              <p className="chat-panel-runtime">
+                <span aria-hidden="true" />
+                {activeRuntimeLabel}
+                {usesLocalCli && <em>本机</em>}
+              </p>
+            </div>
+          </div>
+          <div className="chat-panel-header-actions">
+            {expanded && !showSidebar && (
+              <button type="button" className="chat-panel-icon-btn" onClick={() => setShowSidebar(true)} title="显示侧栏" aria-label="显示侧栏">
+                <Search size={15} />
+              </button>
+            )}
+            <button type="button" className="chat-panel-icon-btn" onClick={() => setExpanded((v) => !v)} title={expanded ? '收起为侧栏' : '展开全屏'} aria-label={expanded ? '收起' : '展开'}>
+              {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+            <button type="button" className="chat-panel-icon-btn" onClick={onClose} aria-label="关闭"><X size={15} /></button>
+          </div>
+        </div>
+
+        {/* History dropdown (drawer mode) */}
+        {showHistoryDropdown && (
+          <div className="chat-history-dropdown">
+            <div className="chat-history-dropdown-search">
+              <Search size={13} />
+              <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="搜索对话…" aria-label="搜索对话" />
+            </div>
+            <div className="chat-history-dropdown-list">
+              {recentHistory.length === 0 && <EmptyState variant="inline" title="暂无历史记录" />}
+              {recentHistory.map((r) => (
+                <div key={r.id} className={`chat-history-dropdown-item ${r.id === conversationRecordId ? 'active' : ''}`} onClick={() => void loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void loadConversation(r)}>
+                  <span>{r.title}</span>
+                  <small>{new Date(r.savedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                  <button type="button" className="chat-history-dropdown-del" onClick={(e) => { e.stopPropagation(); void deleteHistoryItem(r.id) }} title="删除" aria-label={`删除：${r.title}`}><Trash2 size={12} /></button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="chat-history-dropdown-new" onClick={newConversation}>
+              <Plus size={14} /> 新对话
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div className="chat-panel-messages">
+          {isWelcome ? (
+            <div className="alice-welcome">
+              <span className="alice-welcome-lily" aria-hidden="true"><Waves /><Flower2 /></span>
+              <div className="alice-welcome-kicker">Giverny Agent</div>
+              <h2 className="alice-welcome-title">{givernyCopy.assistantWelcomeTitle}</h2>
+              <p className="alice-welcome-sub">{givernyCopy.assistantWelcomeDescription}</p>
+              <div className="alice-suggested">
+                {ALICE_SUGGESTED.map((s, index) => (
+                  <button key={s} type="button" className="alice-suggested-btn" onClick={() => void send(s)}>
+                    <span>{String(index + 1).padStart(2, '0')}</span>
+                    <strong>{s}</strong>
+                    <ChevronRight size={15} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg) => (
+                <div key={msg.id} className={`chat-bubble ${msg.role}`}>
+                  {msg.role === 'assistant' && (msg.trace?.length || msg.traceStatus === 'running') ? (
+                    <AgentExecutionTimeline trace={msg.trace ?? []} status={msg.traceStatus ?? 'completed'} />
+                  ) : null}
+                  {msg.content ? <ChatContent content={msg.content} /> : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
+                  {msg.role === 'assistant' && msg.approval && (
+                    <AgentApprovalCard approval={msg.approval} busy={loading} onRevise={(draft) => reviseApproval(msg.id, msg.approval!.id, draft)} onOpenTask={onOpenTask} onDecision={(decision) => void send(decision === 'confirm' ? '确认执行' : '取消', { messageId: msg.id, approvalId: msg.approval!.id })} />
+                  )}
+                  {msg.role === 'assistant' && msg.selection && (
+                    <AgentTaskSelectionCard selection={msg.selection} busy={loading} onSelect={(candidate) => void send(`选择任务 #${candidate.id}：${candidate.title}`)} />
+                  )}
+                  {msg.role === 'assistant' && msg.backgroundTask && (
+                    <AgentAnalysisTaskCard task={msg.backgroundTask} busy={loading} onCancel={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'cancel')} onRetry={() => void updateAnalysisTask(msg.id, msg.backgroundTask!.id, 'retry')} />
+                  )}
+                  {msg.role === 'assistant' && msg.attachments && msg.attachments.length > 0 && (
+                    <AgentAttachmentResults attachments={msg.attachments} onPreview={setAgentPreviewAttachment} />
+                  )}
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </>
+          )}
+        </div>
+
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="chat-attachments">
+            {attachments.map((a) => (
+              <div key={a.id} className="chat-attachment-chip">
+                {a.type === 'image' && a.preview
+                  ? <img src={a.preview} className="chat-attachment-thumb" alt={a.name} onClick={() => setLightboxSrc(a.preview ?? null)} style={{ cursor: 'zoom-in' }} />
+                  : <FileTextIcon size={13} />}
+                <span>{a.name}</span>
+                <button type="button" className="chat-attachment-remove" onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}><X size={11} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="alice-input-wrap">
+          {/* Settings popup */}
+          {showSettings && (
+            <div className="alice-settings-popup">
+              <div className="alice-settings-section">
+                <div className="alice-settings-title">内容范围</div>
+                <label className="alice-scope-row"><BookOpen size={14} /><span>个人知识库</span><div className={`alice-toggle ${useKnowledge ? 'on' : ''}`} onClick={() => setUseKnowledge((v) => !v)} role="switch" aria-checked={useKnowledge} /></label>
+                <label className="alice-scope-row"><Globe size={14} /><span>全网搜索</span><div className={`alice-toggle ${useWebSearch ? 'on' : ''}`} onClick={() => setUseWebSearch((v) => !v)} role="switch" aria-checked={useWebSearch} /></label>
+              </div>
+              {canConfigureModel && (
+                <div className="alice-settings-section">
+                  <div className="alice-settings-title">回答路线</div>
+                  {modelOptions.map((option) => (
+                    <button key={option.value} type="button" className={`alice-model-row ${selectedModelChoice === option.value ? 'active' : ''}`} onClick={() => void chooseModel(option.value)}>
+                      <AiBrandIcon brand={option.brand} size={18} />
+                      <span><strong>{option.label}</strong><small>{option.meta}</small></span>
+                      {selectedModelChoice === option.value && <CheckCircle2 size={16} aria-hidden="true" />}
+                    </button>
+                  ))}
+                  {isLoadingOpenRouterModels && <p className="loading-state">正在读取 OpenRouter 免费模型…</p>}
+                  {openRouterModels.map((model) => (
+                    <button key={model.id} type="button" className={`alice-model-row ${selectedModelChoice === `openrouter:${model.id}` ? 'active' : ''}`} onClick={() => void chooseModel(`openrouter:${model.id}` as ChatModelChoice)}>
+                      <AiBrandIcon brand="openrouter" size={18} />
+                      <span><strong>{model.id}</strong><small>{[model.vision && '可识图', model.context > 0 && `${Math.round(model.context / 1000)}K`].filter(Boolean).join(' · ') || 'free'}</small></span>
+                      {selectedModelChoice === `openrouter:${model.id}` && <CheckCircle2 size={16} aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
               )}
-            </button>
-            <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              className={`alice-tool-btn alice-model-btn ${usesLocalCli || selectedModelChoice !== 'auto' ? 'active' : ''}`}
-              onClick={openModelPicker}
-              disabled={!canConfigureModel}
-              title={!canConfigureModel ? '演示账号沿用站点首选模型' : activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}；点击查看云端回退模型` : '选择模型'}
-              aria-label={activeLocalCliRoute ? `当前使用 ${activeLocalCliRoute.name}` : '选择模型'}
-            >
-              <AiBrandIcon brand={activeRuntimeBrand} size={17} />
-              <span className="alice-model-label">{activeRuntimeLabel}</span>
-              {activeLocalCliRoute && <span className="alice-runtime-local-tag">本机</span>}
-            </button>
-            <button
-              type="button"
-              className="alice-send-btn"
-              onClick={() => loading ? void stopLocalCliExecution() : void send()}
-              disabled={loading ? !activeLocalCommandId || isCancellingLocalCommand : (!input.trim() && attachments.length === 0)}
-              aria-label={loading ? '停止本机 CLI' : '发送'}
-              title={loading ? (activeLocalCommandId ? '停止本机 CLI' : 'Agent 正在运行') : '发送'}
-            >
-              {loading ? <X size={17} /> : <ArrowUp size={17} />}
-            </button>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" multiple accept="image/*,.txt,.md,.json,.csv,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.mp4,.mov" style={{ display: 'none' }} onChange={(e) => void handleFiles(e.target.files)} />
+          <div className="alice-input-card">
+            <textarea
+              ref={inputRef}
+              className="alice-textarea"
+              value={input}
+              rows={1}
+              placeholder="向爱丽丝提问…"
+              onChange={(e) => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px` }}
+              onPaste={handleInputPaste}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+            />
+            <div className="alice-input-toolbar">
+              <button type="button" className="alice-tool-btn" onClick={() => fileInputRef.current?.click()} title="添加附件" aria-label="添加附件"><Plus size={17} /></button>
+              <button type="button" className={`alice-tool-btn alice-settings-btn ${showSettings ? 'active' : ''}`} onClick={openSettings} title="设置（模型、范围）" aria-label="设置"><Settings size={15} /></button>
+              <div style={{ flex: 1 }} />
+              <button type="button" className={`alice-tool-btn alice-model-label-btn ${usesLocalCli ? 'active' : ''}`} title={activeRuntimeLabel} aria-label={activeRuntimeLabel}>
+                <AiBrandIcon brand={activeRuntimeBrand} size={16} />
+              </button>
+              <button
+                type="button"
+                className="alice-send-btn"
+                onClick={() => loading ? void stopLocalCliExecution() : void send()}
+                disabled={loading ? !activeLocalCommandId || isCancellingLocalCommand : (!input.trim() && attachments.length === 0)}
+                aria-label={loading ? '停止' : '发送'}
+              >
+                {loading ? <X size={17} /> : <ArrowUp size={17} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {lightboxSrc && <ImageLightbox src={lightboxSrc} alt="附件预览" onClose={() => setLightboxSrc(null)} />}
       {agentPreviewAttachment && <AgentResultPreviewModal attachment={agentPreviewAttachment} onClose={() => setAgentPreviewAttachment(null)} />}
-
-      {/* history panel (absolute overlay within chat-panel) */}
-      {showHistory && (
-        <div className="chat-history-panel">
-          <div className="chat-history-header">
-            <div className="chat-record-tabs" role="tablist" aria-label="记录与任务">
-              <button type="button" role="tab" aria-selected="true" className="active">对话记录</button>
-              <button type="button" role="tab" aria-selected="false" onClick={openTaskCenter}>
-                后台任务
-                {taskCenterUnreadCount > 0 && <span>{Math.min(9, taskCenterUnreadCount)}</span>}
-              </button>
-            </div>
-            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowHistory(false)} aria-label="关闭记录">
-              <X size={15} />
-            </button>
-          </div>
-          <div className="chat-history-tools">
-            <div className="chat-history-projects" aria-label="对话项目">
-              <button type="button" className={!activeProjectId ? 'active' : ''} onClick={() => setActiveProjectId('')}>全部</button>
-              {projects.map((project) => (
-                <button key={project.id} type="button" className={activeProjectId === project.id ? 'active' : ''} onClick={() => { setActiveProjectId(project.id); setTemporaryChat(false) }}>
-                  <Folder size={13} aria-hidden="true" />{project.name}
-                </button>
-              ))}
-            </div>
-            <div className="chat-history-create-project">
-              <input
-                value={projectDraft}
-                onChange={(event) => setProjectDraft(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && createConversationProject()}
-                placeholder="新建项目，例如：金额核对"
-                aria-label="新建对话项目名称"
-              />
-              <button type="button" onClick={createConversationProject}>新建项目</button>
-            </div>
-            <label className="chat-history-search">
-              <Search size={14} aria-hidden="true" />
-              <input
-                value={historySearch}
-                onChange={(event) => setHistorySearch(event.target.value)}
-                placeholder={activeProject ? `搜索「${activeProject.name}」里的对话` : '搜索对话标题和内容'}
-                aria-label="搜索对话记录"
-              />
-            </label>
-            <button type="button" className="chat-history-temp-btn" onClick={startTemporaryChat}>开始临时对话</button>
-          </div>
-          <div className="chat-history-list">
-            {filteredHistoryList.length === 0 ? (
-              <EmptyState variant="compact" title="暂无历史记录" description="新的正式对话会保存在这里，临时对话不会留存。" />
-            ) : filteredHistoryList.map((r) => (
-              <div key={r.id} className="chat-history-item" onClick={() => void loadConversation(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void loadConversation(r)}>
-                <span className="chat-history-item-title">{r.title}</span>
-                <div className="chat-history-item-meta">
-                  {r.projectName && <em>{r.projectName}</em>}
-                  <span>{new Date(r.savedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                  <button
-                    type="button"
-                    className="chat-history-del"
-                    onClick={(e) => { e.stopPropagation(); void deleteHistoryItem(r.id) }}
-                    title="删除"
-                    aria-label="删除"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {showTaskCenter && (
-        <div className="chat-history-panel chat-task-center">
-          <div className="chat-history-header">
-            <div className="chat-record-tabs" role="tablist" aria-label="记录与任务">
-              <button type="button" role="tab" aria-selected="false" onClick={openHistory}>对话记录</button>
-              <button type="button" role="tab" aria-selected="true" className="active">后台任务</button>
-            </div>
-            <button type="button" className="chat-panel-icon-btn" onClick={() => setShowTaskCenter(false)} aria-label="关闭记录"><X size={15} /></button>
-          </div>
-          <div className="chat-task-center-tabs" role="tablist" aria-label="任务中心内容">
-            <button type="button" role="tab" aria-selected={taskCenterTab === 'proactive'} className={taskCenterTab === 'proactive' ? 'active' : ''} onClick={() => setTaskCenterTab('proactive')}>主动事项</button>
-            <button type="button" role="tab" aria-selected={taskCenterTab === 'plans'} className={taskCenterTab === 'plans' ? 'active' : ''} onClick={() => setTaskCenterTab('plans')}>计划与提醒</button>
-            <button type="button" role="tab" aria-selected={taskCenterTab === 'memories'} className={taskCenterTab === 'memories' ? 'active' : ''} onClick={() => setTaskCenterTab('memories')}>任务记忆</button>
-            <button type="button" role="tab" aria-selected={taskCenterTab === 'enterprise-memory'} className={taskCenterTab === 'enterprise-memory' ? 'active' : ''} onClick={() => setTaskCenterTab('enterprise-memory')}>企业记忆</button>
-          </div>
-          <div className="chat-history-list">
-            {taskCenterTab === 'proactive' && proactiveSummary && (
-              <div className="chat-proactive-summary" aria-label="主动事项处理效果">
-                <span><strong>{proactiveSummary.open}</strong> 待处理</span>
-                <span><strong>{proactiveSummary.critical + proactiveSummary.high}</strong> 高风险</span>
-                <span><strong>{proactiveSummary.resolutionRate}%</strong> 解决率</span>
-                <span><strong>{proactiveSummary.averageResponseMinutes}</strong> 分钟响应</span>
-              </div>
-            )}
-            {taskCenterTab === 'proactive' && proactiveItems.map((item) => {
-              const expanded = expandedProactiveId === item.id
-              return (
-                <article key={item.id} className={`chat-task-plan chat-proactive-item ${item.unread ? 'unread' : ''}`}>
-                  <button type="button" className="chat-task-item" onClick={() => void openProactiveItem(item)} aria-expanded={expanded}>
-                    <span className="chat-task-item-main">
-                      <strong>{item.title}</strong>
-                      <small><span className={`proactive-priority ${item.priority}`}>{proactivePriorityLabels[item.priority]}优先级</span> · {item.status === 'snoozed' ? '稍后提醒' : '待处理'} · {new Date(item.detectedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</small>
-                    </span>
-                    <ChevronDown size={14} aria-hidden="true" />
-                  </button>
-                  {expanded && (
-                    <div className="chat-task-plan-detail chat-proactive-detail">
-                      <strong>事实依据</strong>
-                      <ul>{item.evidence.map((line) => <li key={line}>{line}</li>)}</ul>
-                      <strong>建议处理</strong>
-                      <p>{item.recommendation}</p>
-                      <div className="chat-task-plan-actions">
-                        <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== '' || loading} onClick={() => executeProactiveSuggestion(item)}>执行建议</button>
-                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => onOpenTask(item.taskId)}><Eye size={13} />查看任务</button>
-                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'snooze')}>24 小时后提醒</button>
-                        <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'resolve')}>已解决</button>
-                        <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateProactiveItem(item, 'dismiss')}>无需处理</button>
-                      </div>
-                    </div>
-                  )}
-                </article>
-              )
-            })}
-            {taskCenterTab === 'proactive' && proactiveItems.length === 0 && <EmptyState variant="compact" title="当前没有主动事项" description="任务变化产生风险时会自动按优先级进入这里。" />}
-            {taskCenterTab === 'plans' && agentPlans.map((plan) => {
-              const expanded = expandedPlanId === plan.id
-              const completedSteps = plan.steps.filter((step) => ['completed', 'skipped', 'compensated'].includes(step.status)).length
-              const canCompensate = plan.steps.some((step) => step.status === 'completed' && step.compensation)
-              return (
-                <article key={plan.id} className={`chat-task-plan ${plan.unread ? 'unread' : ''}`}>
-                  <button type="button" className="chat-task-item" onClick={() => void openAgentPlan(plan)} aria-expanded={expanded}>
-                    <span className="chat-task-item-main">
-                      <strong>{plan.goal}</strong>
-                      <small>{plan.kind === 'reminder' ? '主动提醒' : plan.executionMode === 'batch' ? '执行批次' : '持续计划'} · {planStatusLabels[plan.status]} · {completedSteps}/{plan.steps.length} 步</small>
-                    </span>
-                    <span className="chat-task-item-meta">{new Date(plan.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
-                    <ChevronDown size={14} aria-hidden="true" />
-                  </button>
-                  {expanded && (
-                    <div className="chat-task-plan-detail">
-                      <ol className="chat-task-plan-steps">
-                        {plan.steps.map((step) => (
-                          <li key={step.id} className={step.status}>
-                            <button
-                              type="button"
-                              className="chat-plan-step-toggle"
-                              disabled={taskCenterBusy !== '' || ['cancelled', 'paused', 'awaiting_confirmation'].includes(plan.status) || ['pending', 'blocked', 'compensation_pending', 'compensating'].includes(step.status)}
-                              onClick={() => void updatePlan(plan, step.status === 'completed' ? 'reopen_step' : step.status === 'failed' ? 'retry_step' : 'complete_step', step.id)}
-                              aria-label={step.status === 'completed' ? `重新打开：${step.label}` : step.status === 'failed' ? `重试：${step.label}` : `标记完成：${step.label}`}
-                            >
-                              <CheckCircle2 size={14} />
-                            </button>
-                            <span className="chat-plan-step-content">
-                              <span>{step.label}</span>
-                              <small>{planStepStatusLabels[step.status]}{step.dependsOn.length > 0 && ['pending', 'blocked'].includes(step.status) ? ` · 等待 ${step.dependsOn.length} 项` : ''}</small>
-                              {step.error && <small className="status-error">{step.error}</small>}
-                              {step.status === 'compensation_pending' && step.compensation && (
-                                <button type="button" className="ghost-button compact-button" onClick={() => executePlanCompensation(plan, step)}>生成补偿草稿</button>
-                              )}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                      <div className="chat-task-plan-actions">
-                        {plan.taskId && <button type="button" className="ghost-button compact-button" onClick={() => onOpenTask(plan.taskId!)}><Eye size={13} />查看任务</button>}
-                        {plan.kind === 'reminder' && plan.status === 'active' && <button type="button" className="primary-button compact-button" disabled={loading} onClick={() => executeReminder(plan)}>执行建议</button>}
-                        {plan.status === 'awaiting_confirmation' && <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'approve_batch')}>确认整个批次</button>}
-                        {plan.kind === 'goal' && plan.status === 'active' && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'pause')}>暂停</button>}
-                        {plan.kind === 'goal' && plan.status === 'paused' && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'resume')}><RotateCcw size={13} />继续</button>}
-                        {plan.kind === 'goal' && ['failed', 'completed'].includes(plan.status) && canCompensate && <button type="button" className="ghost-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'begin_compensation')}>补偿 / 回滚</button>}
-                        {!['completed', 'compensated', 'cancelled'].includes(plan.status) && <button type="button" className="danger-text-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updatePlan(plan, 'cancel')}>取消计划</button>}
-                      </div>
-                    </div>
-                  )}
-                </article>
-              )
-            })}
-            {taskCenterTab === 'plans' && analysisJobs.map((job) => (
-              <button key={job.id} type="button" className={`chat-task-item ${job.unread ? 'unread' : ''}`} onClick={() => void openAnalysisJob(job)}>
-                <span className="chat-task-item-main">
-                  <strong>{job.title}</strong>
-                  <small>{job.source === 'scheduled' ? '爱丽丝主动生成' : '对话中发起'} · {agentAnalysisStatusLabel(job.status)}</small>
-                </span>
-                <span className="chat-task-item-meta">{new Date(job.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</span>
-              </button>
-            ))}
-            {taskCenterTab === 'plans' && analysisJobs.length === 0 && agentPlans.length === 0 && <EmptyState variant="compact" title="暂无持续计划、提醒或后台分析" />}
-            {taskCenterTab === 'memories' && taskMemories.map((memory) => {
-              const expanded = expandedMemoryId === memory.taskId
-              return (
-                <article key={memory.taskId} className={`chat-task-memory ${memory.disabled ? 'disabled' : ''}`}>
-                  <button type="button" className="chat-task-item" onClick={() => setExpandedMemoryId((current) => current === memory.taskId ? 0 : memory.taskId)} aria-expanded={expanded}>
-                    <span className="chat-task-item-main">
-                      <strong>{memory.taskTitle || `任务 #${memory.taskId}`}</strong>
-                      <small>{memory.disabled ? '已停止记忆' : `${memory.openItems.length} 项待办 · ${memory.userNotes.length} 条人工纠正`}</small>
-                    </span>
-                    <ChevronDown size={14} aria-hidden="true" />
-                  </button>
-                  {expanded && (
-                    <div className="chat-task-memory-detail">
-                      {memory.disabled ? (
-                        <button type="button" className="primary-button compact-button" disabled={taskCenterBusy !== ''} onClick={() => void updateMemory(memory, { action: 'set_enabled', enabled: true })}>重新启用记忆</button>
-                      ) : (
-                        <>
-                          <p className="chat-memory-summary">{memory.summary || '等待下一次任务活动后生成摘要。'}</p>
-                          {memory.openItems.length > 0 && <div className="chat-memory-section"><strong>待处理</strong>{memory.openItems.map((item) => <div key={item}><span>{item}</span><button type="button" className="ghost-button compact-button" onClick={() => void updateMemory(memory, { action: 'ignore_item', item })}>忽略</button></div>)}</div>}
-                          {memory.userNotes.length > 0 && <div className="chat-memory-section"><strong>人工纠正</strong>{memory.userNotes.map((note) => <div key={note}><span>{note}</span><button type="button" className="chat-history-del" title="删除纠正" aria-label={`删除纠正：${note}`} onClick={() => void updateMemory(memory, { action: 'delete_note', note })}><Trash2 size={12} /></button></div>)}</div>}
-                          <div className="chat-memory-note-form">
-                            <textarea rows={2} value={memoryNoteDrafts[memory.taskId] || ''} placeholder="补充偏好或纠正 Agent 的理解" onChange={(event) => setMemoryNoteDrafts((current) => ({ ...current, [memory.taskId]: event.target.value }))} />
-                            <button type="button" className="primary-button compact-button" disabled={!memoryNoteDrafts[memory.taskId]?.trim() || taskCenterBusy !== ''} onClick={() => void updateMemory(memory, { action: 'add_note', note: memoryNoteDrafts[memory.taskId] })}>保存纠正</button>
-                          </div>
-                          <div className="chat-task-plan-actions">
-                            <button type="button" className="ghost-button compact-button" onClick={() => onOpenTask(memory.taskId)}><Eye size={13} />查看任务</button>
-                            {memory.ignoredItems.length > 0 && <button type="button" className="ghost-button compact-button" onClick={() => void updateMemory(memory, { action: 'restore_items' })}>恢复已忽略待办</button>}
-                            {memoryForgetConfirmId === memory.taskId ? <><button type="button" className="ghost-button compact-button" onClick={() => setMemoryForgetConfirmId(0)}>保留</button><button type="button" className="danger-button compact-button" onClick={() => { setMemoryForgetConfirmId(0); void updateMemory(memory, { action: 'set_enabled', enabled: false }) }}>确认清空</button></> : <button type="button" className="danger-text-button compact-button" onClick={() => setMemoryForgetConfirmId(memory.taskId)}>停止并清空记忆</button>}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </article>
-              )
-            })}
-            {taskCenterTab === 'memories' && taskMemories.length === 0 && <EmptyState variant="compact" title="暂无任务记忆" description="Agent 在读取或更新任务后会自动建立。" />}
-            {taskCenterTab === 'enterprise-memory' && <EnterpriseMemoryPanel
-              memories={enterpriseMemories}
-              summary={enterpriseMemorySummary}
-              busy={taskCenterBusy !== ''}
-              onCreate={createEnterpriseMemory}
-              onCorrect={(memory, draft) => updateEnterpriseMemory(memory, { ...draft, action: 'correct', expectedUpdatedAt: memory.updatedAt })}
-              onExpire={(memory) => updateEnterpriseMemory(memory, { action: 'expire', reason: '任务中心人工设为失效', expectedUpdatedAt: memory.updatedAt })}
-              onDelete={(memory) => updateEnterpriseMemory(memory, { action: 'delete', reason: '任务中心人工删除', expectedUpdatedAt: memory.updatedAt })}
-            />}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

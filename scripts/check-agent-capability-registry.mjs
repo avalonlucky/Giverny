@@ -12,6 +12,7 @@ const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
 const worker = readFileSync('src/worker.ts', 'utf8')
 const writeWorkflow = readFileSync('src/agentWriteWorkflow.ts', 'utf8')
 const analysisWorkflow = readFileSync('src/agentAnalysisWorkflow.ts', 'utf8')
+const adkTooling = readFileSync('agent-runtime/app/tooling.py', 'utf8')
 const docs = readFileSync('docs/AGENT_CAPABILITY_REGISTRY.md', 'utf8')
 
 if (manifest.length < 62) fail(`只登记了 ${manifest.length} 项能力，读取、计划、分层记忆、主动工作、后台、预览、执行或内部能力存在缺失`)
@@ -23,7 +24,8 @@ for (const capability of manifest) {
 }
 
 if (!alice.includes('capability.inputSchema.safeParse(args)')) fail('AliceAgent 执行已规划能力前未使用注册表 schema 校验')
-if (!worker.includes('z.toJSONSchema(capability.inputSchema)')) fail('工具规划器未从注册表生成候选能力 schema')
+if (!/z\.toJSONSchema\(capability\.inputSchema,/.test(worker)) fail('OpenAPI 未从注册表生成能力 schema')
+if (!adkTooling.includes('OpenAPIToolset') || !adkTooling.includes('select_operation_ids')) fail('ADK 未从 OpenAPI 注册表生成按角色过滤的工具集')
 if (!director.includes('agentCapabilityRegistry[name]')) fail('意图导演未使用统一能力注册表完成授权')
 
 for (const [name, capability] of Object.entries(agentCapabilityRegistry)) {

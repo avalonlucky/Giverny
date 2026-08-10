@@ -308,14 +308,14 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  width: min(470px, 100%);
+  width: min(440px, 100%);
   box-sizing: border-box;
   margin: 0 auto;
-  padding: 48px 10px;
-  text-align: left;
-  gap: 10px;
+  padding: 56px 16px;
+  text-align: center;
+  gap: 12px;
 }
 
 .alice-welcome-lily {
@@ -371,24 +371,26 @@
 
 .alice-welcome-title {
   font-family: var(--font-serif);
-  font-size: 25px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .alice-welcome-sub {
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.65;
+  max-width: 340px;
 }
 
 .alice-suggested {
   width: 100%;
   display: grid;
-  gap: 0;
-  margin-top: 20px;
+  gap: 8px;
+  margin-top: 28px;
 }
 
 .alice-suggested-btn {
@@ -397,15 +399,15 @@
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-strong);
   color: var(--color-text);
-  border-radius: var(--radius-panel);
-  padding: 13px 4px;
-  font-size: 13px;
+  border-radius: 12px;
+  padding: 13px 14px;
+  font-size: 13.5px;
   text-align: left;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.18s ease;
 }
 
 .alice-suggested-btn span {
@@ -420,18 +422,26 @@
 
 .alice-suggested-btn svg {
   color: var(--color-text-muted);
+  transition: transform 0.18s ease;
 }
 
 .alice-suggested-btn:hover {
   color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface-strong));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.alice-suggested-btn:hover svg {
+  transform: translateX(2px);
+  color: var(--color-primary);
 }
 
 /* ─── Alice input card ───────────────────────────────────────────────────── */
 
 .alice-input-wrap {
   flex: 0 0 auto;
-  padding: 12px 18px 18px;
+  padding: 14px 20px 20px;
   border-top: 0;
   background: var(--color-surface-strong);
   position: relative;
@@ -440,17 +450,17 @@
 .alice-input-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 20px;
   background: var(--color-surface-strong);
-  box-shadow: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .alice-input-card:focus-within {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--color-primary) 50%, var(--color-border));
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 3px color-mix(in srgb, var(--color-primary) 8%, transparent);
 }
 
 .alice-textarea {
@@ -463,15 +473,15 @@
   -webkit-appearance: none;
   background: transparent;
   font: inherit;
-  font-size: 16px;
+  font-size: 15px;
   color: var(--color-text);
   resize: none;
-  line-height: 1.55;
-  min-height: 58px;
+  line-height: 1.6;
+  min-height: 52px;
   max-height: 160px;
   overflow-y: auto;
   outline: none;
-  padding: 14px 15px 10px;
+  padding: 16px 18px 8px;
 }
 
 .alice-textarea::placeholder {
@@ -489,8 +499,8 @@
 .alice-input-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 9px;
+  gap: 4px;
+  padding: 8px 12px 10px;
   border: none;
   border-top: 0 !important;
   background: transparent;
@@ -533,22 +543,22 @@
 }
 
 .alice-send-btn {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border: 0;
-  border-radius: 50%;
-  background: var(--color-primary);
+  border-radius: 10px;
+  background: var(--color-text);
   color: var(--color-surface-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
   flex: 0 0 auto;
 }
 
-.alice-send-btn:disabled { opacity: 0.32; cursor: not-allowed; }
-.alice-send-btn:not(:disabled):hover { opacity: 0.86; transform: translateY(-1px); }
+.alice-send-btn:disabled { opacity: 0.25; cursor: not-allowed; background: var(--color-text-muted); }
+.alice-send-btn:not(:disabled):hover { opacity: 0.85; transform: scale(1.05); }
 
 /* ─── Alice scope popup ──────────────────────────────────────────────────── */
 
@@ -1509,23 +1519,12 @@
 }
 
 .chat-knowledge-toggle.on,
-.knowledge-save-btn,
-.alice-send-btn {
+.knowledge-save-btn {
   color: var(--color-surface-strong);
 }
 
-.alice-suggested-btn:hover,
 .alice-tool-btn:hover {
   background: color-mix(in srgb, var(--color-primary) 5%, transparent);
-}
-
-.alice-input-card {
-  background: var(--color-surface-strong);
-}
-
-.alice-input-card:focus-within {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-  box-shadow: none;
 }
 
 .alice-scope-badge {

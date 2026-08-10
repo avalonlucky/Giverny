@@ -1,8 +1,91 @@
 import http from 'node:http'
+import { createHmac } from 'node:crypto'
 
 const port = Number(process.env.MOCK_MODEL_PORT || 8898)
+const appPort = Number(process.env.MOCK_APP_PORT || 0)
 const requestLog = []
 let strictJsonRepairAttempts = 0
+
+function signedAgentHeaders(principal) {
+  const timestamp = String(Date.now())
+  const canonical = [
+    principal.workspaceId,
+    principal.principalId,
+    principal.role,
+    principal.runId,
+    timestamp,
+  ].join('\n')
+  const signature = createHmac('sha256', 'eval-agent-tool-token')
+    .update(canonical)
+    .digest('base64url')
+  return {
+    authorization: 'Bearer eval-agent-tool-token',
+    'content-type': 'application/json',
+    'x-agent-workspace-id': principal.workspaceId,
+    'x-agent-principal-id': principal.principalId,
+    'x-agent-role': principal.role,
+    'x-agent-run-id': principal.runId,
+    'x-agent-scope-timestamp': timestamp,
+    'x-agent-scope-signature': signature,
+  }
+}
+
+async function adkResponse(payload) {
+  const question = String(payload.question || '')
+  const conversationId = String(payload.conversationId || crypto.randomUUID())
+  const base = {
+    conversationId,
+    model: 'google-adk-eval',
+    trace: [
+      { type: 'thought', label: '理解', detail: '已识别用户目标与对象' },
+      { type: 'plan', label: '规划', detail: '只使用当前请求需要的专家与工具' },
+      { type: 'result', label: '动作', detail: '已核对证据并生成结果' },
+      { type: 'result', label: '答案核对', detail: '评测运行时已通过契约校验' },
+    ],
+    agentTurn: { verification: { passed: true }, evidenceCount: 1 },
+    factVerification: { passed: true, checkedClaims: 1, sourceTools: [], fallbackUsed: false },
+    orchestration: { engine: 'google-adk-2', status: 'answered', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], specialists: [], evidenceCount: 1 },
+    productivity: { engine: 'google-adk-2', status: 'complete', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], cycles: 1, toolCalls: 0, reason: '评测契约已完成' },
+  }
+
+  if (/(?:导出|生成|下载).*(?:结算回单|任务回单|回单|Excel|excel)/.test(question)) {
+    const june = /6\s*月|六月/.test(question)
+    const startDate = june ? '2026-06-01' : '2026-07-01'
+    const endDate = june ? '2026-06-10' : '2026-07-31'
+    if (!appPort) throw new Error('MOCK_APP_PORT is required for ADK tool evaluation')
+    const toolResponse = await fetch(`http://127.0.0.1:${appPort}/api/agent/tools/generate-settlement-receipt`, {
+      method: 'POST',
+      headers: signedAgentHeaders(payload.principal),
+      body: JSON.stringify({ startDate, endDate }),
+    })
+    const toolResult = await toolResponse.json()
+    if (!toolResponse.ok) throw new Error(toolResult?.error || `settlement tool returned ${toolResponse.status}`)
+    return {
+      ...base,
+      answer: `**已核验结算回单**\n\n日期范围：${startDate} 至 ${endDate}\n\nExcel 已生成，可在下方下载或打开在线预览。`,
+      attachments: toolResult.files || [],
+      factVerification: { passed: true, checkedClaims: 1, sourceTools: ['generate_settlement_receipt'], fallbackUsed: false },
+      orchestration: { ...base.orchestration, specialists: ['transaction_specialist'], evidenceCount: 1 },
+      productivity: { ...base.productivity, toolCalls: 1 },
+    }
+  }
+  if (/^你?帮我新建一个任务[\s。！!]*$/.test(question)) {
+    return {
+      ...base,
+      answer: '请补充任务名称、具体需求、需求人和预计交付时间，我再为你生成可确认的创建草稿。',
+      orchestration: { ...base.orchestration, status: 'needs_clarification', specialists: ['transaction_specialist'], evidenceCount: 0 },
+      productivity: { ...base.productivity, status: 'needs_input', toolCalls: 0, reason: '缺少创建任务的必要字段' },
+    }
+  }
+  if (/显示金额|隐藏金额|快捷键/.test(question)) {
+    return {
+      ...base,
+      answer: '显示或隐藏金额的快捷键是 **Command + Shift + M**；Windows 是 **Ctrl + Shift + M**。',
+      orchestration: { ...base.orchestration, specialists: ['product_support'] },
+    }
+  }
+  return { ...base, answer: '评测运行时已按当前问题完成语义理解与答案校验。' }
+}
 
 function completion(message, finishReason = 'stop') {
   return {
@@ -506,9 +589,19 @@ const server = http.createServer((request, response) => {
   }
   let body = ''
   request.on('data', (chunk) => { body += chunk })
-  request.on('end', () => {
+  request.on('end', async () => {
     try {
       const payload = JSON.parse(body || '{}')
+      if (request.method === 'POST' && request.url === '/v1/chat') {
+        if (request.headers['x-adk-runtime-key'] !== 'eval-adk-runtime-key') {
+          response.writeHead(401, { 'content-type': 'application/json' })
+          response.end(JSON.stringify({ detail: '未授权的评测 Runtime 请求' }))
+          return
+        }
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(await adkResponse(payload)))
+        return
+      }
       requestLog.push({
         model: String(payload.model || ''),
         text: userText(Array.isArray(payload.messages) ? payload.messages : []).slice(0, 500),

@@ -1,7 +1,7 @@
 {
   "name": "designer-worklog",
   "private": true,
-  "version": "0.37.0",
+  "version": "0.37.1",
   "type": "module",
   "scripts": {
     "demo:assets": "node scripts/generate-demo-assets.mjs",
@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "npm run agent-capabilities:generate && npm run product-knowledge:generate && npm run baml:generate && tsc -b && vite build && npm run architecture:dist:guard",
     "ui:guard": "node scripts/check-ui-reuse.mjs",
-    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs && node scripts/check-routing-architecture.mjs && node scripts/check-heavy-dependency-architecture.mjs && node scripts/check-observability-architecture.mjs && node scripts/check-empty-state-architecture.mjs && node scripts/check-agent-portfolio-architecture.mjs && node scripts/check-agent-reference-architecture.mjs && node scripts/check-agent-replan-architecture.mjs && node scripts/check-agent-checkpoint-architecture.mjs && node scripts/check-agent-streaming-architecture.mjs && node scripts/check-agent-fact-architecture.mjs && node scripts/check-agent-capability-registry.mjs && node scripts/check-agent-business-tools-architecture.mjs && node scripts/check-agent-multimodal-architecture.mjs && node scripts/check-agent-proactive-architecture.mjs && node scripts/check-agent-enterprise-memory-architecture.mjs && node scripts/check-agent-governance-architecture.mjs && node scripts/check-agent-security-architecture.mjs && node scripts/check-agent-execution-architecture.mjs && node scripts/check-agent-assurance-architecture.mjs && node scripts/check-agent-effectiveness-architecture.mjs && node scripts/check-agent-command-routing-architecture.mjs && node scripts/check-agent-productivity-architecture.mjs && node scripts/check-isolated-eval-architecture.mjs && node scripts/check-deployment-architecture.mjs",
+    "architecture:guard": "node scripts/check-app-entry-size.mjs && node scripts/check-state-architecture.mjs && node scripts/check-css-architecture.mjs && node scripts/check-routing-architecture.mjs && node scripts/check-heavy-dependency-architecture.mjs && node scripts/check-observability-architecture.mjs && node scripts/check-empty-state-architecture.mjs && node scripts/check-agent-portfolio-architecture.mjs && node scripts/check-agent-reference-architecture.mjs && node scripts/check-agent-replan-architecture.mjs && node scripts/check-agent-checkpoint-architecture.mjs && node scripts/check-agent-streaming-architecture.mjs && node scripts/check-agent-fact-architecture.mjs && node scripts/check-agent-capability-registry.mjs && node scripts/check-agent-business-tools-architecture.mjs && node scripts/check-agent-multimodal-architecture.mjs && node scripts/check-agent-proactive-architecture.mjs && node scripts/check-agent-enterprise-memory-architecture.mjs && node scripts/check-agent-governance-architecture.mjs && node scripts/check-agent-security-architecture.mjs && node scripts/check-agent-execution-architecture.mjs && node scripts/check-agent-assurance-architecture.mjs && node scripts/check-agent-effectiveness-architecture.mjs && node scripts/check-agent-command-routing-architecture.mjs && node scripts/check-agent-productivity-architecture.mjs && node scripts/check-google-adk-architecture.mjs && node scripts/check-isolated-eval-architecture.mjs && node scripts/check-deployment-architecture.mjs",
     "architecture:dist:guard": "node scripts/check-heavy-dependency-build.mjs",
     "db:apply:production": "node scripts/apply-cloudflare-d1-sql.mjs",
     "infra:sync": "node scripts/sync-cloudflare-infrastructure.mjs",
@@ -32,8 +32,9 @@
     "agent:security:test": "node scripts/test-agent-security.mjs",
     "agent:execution:test": "node scripts/test-agent-execution-engine.mjs",
     "agent:property:test": "node scripts/test-agent-properties.mjs",
-    "agent:fact:test": "node scripts/test-agent-fact-guard.mjs",
+    "agent:fact:test": "node scripts/run-bundled-test.mjs scripts/test-agent-fact-guard.mjs",
     "agent:fact:production": "node scripts/check-production-agent-facts.mjs",
+    "agent:adk:test": "PYTHONPATH=agent-runtime sh -c 'if [ -x agent-runtime/.venv/bin/python ]; then exec agent-runtime/.venv/bin/python -m unittest discover -s agent-runtime/tests -v; else exec python3 -m unittest discover -s agent-runtime/tests -v; fi'",
     "lint": "eslint .",
     "agent:eval:check": "node agent-evals/run.mjs --validate-only",
     "agent:eval": "node agent-evals/run.mjs",

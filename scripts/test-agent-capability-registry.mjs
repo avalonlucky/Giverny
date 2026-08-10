@@ -17,9 +17,9 @@ const check = (condition, message) => {
 }
 
 const manifest = agentCapabilityManifest()
-check(manifest.length === 82, '能力总数必须固定为 82')
+check(manifest.length === 83, '能力总数必须固定为 83')
 check(Object.keys(agentReadToolRegistry).length === 23, 'MCP 读取工具应为 23 项')
-check(manifest.filter((item) => item.exposure.includes('model')).length === 54, '模型能力应为 54 项')
+check(manifest.filter((item) => item.exposure.includes('model')).length === 55, '模型能力应为 55 项')
 check(manifest.filter((item) => item.exposure.includes('mcp')).length === 23, 'MCP 能力应为 23 项')
 check(manifest.filter((item) => item.confirmation === 'preview').length === 22, '写入预览应为 22 项')
 check(manifest.filter((item) => item.confirmation === 'signed-execute').length === 22, '签名执行应为 22 项')
@@ -64,6 +64,9 @@ check(agentCapabilityAllows('project-execution', 'viewer', 'GET'), '只读成员
 check(agentCapabilityAllows('plan-continuation', 'viewer', 'GET'), '只读成员应能读取计划续接建议')
 check(agentCapabilityAllows('workspace-search', 'viewer', 'GET'), '只读成员应能使用全域搜索')
 check(!agentCapabilityAllows('workspace-search', 'client', 'GET'), '合作伙伴不能搜索内部对话与企业记忆')
+check(agentCapabilityAllows('resolve-workspace-subject', 'viewer', 'POST'), '只读成员应能解析工作区对象')
+check(!agentCapabilityAllows('resolve-workspace-subject', 'client', 'POST'), '合作伙伴不能跨任务与内部对话解析对象')
+check(!manifest.find((item) => item.name === 'resolve_workspace_subject')?.exposure.includes('mcp'), '主体解析不得扩大 MCP 暴露面')
 check(agentCapabilityAllows('month-finance', 'viewer', 'GET'), '只读成员应能读取财务')
 check(!agentCapabilityAllows('create-task-preview', 'viewer', 'POST'), '只读成员不能生成写入草稿')
 check(agentCapabilityAllows('create-task-preview', 'collaborator', 'POST'), '协作者应能生成写入草稿')

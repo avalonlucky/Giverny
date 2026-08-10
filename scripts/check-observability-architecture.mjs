@@ -38,7 +38,7 @@ if (!/\[observability\][\s\S]*enabled\s*=\s*true[\s\S]*head_sampling_rate\s*=\s*
 if (!/\[observability\.traces\][\s\S]*enabled\s*=\s*true[\s\S]*head_sampling_rate\s*=\s*0\.05/.test(files.cloudflare)) {
   failures.push('Cloudflare Workers 原生 Tracing 与独立采样未启用')
 }
-for (const span of ['agent.understand_and_plan', 'agent.execute_tools', 'agent.compose_and_verify', 'attachment.analysis']) {
+for (const span of ['agent.adk.request', 'attachment.analysis']) {
   if (!files.worker.includes(`'${span}'`)) failures.push(`Worker 缺少隐私安全业务 span：${span}`)
 }
 for (const forbidden of ['cleanQuery)', 'args.question)', 'row.file_name)', 'payload.answer)']) {

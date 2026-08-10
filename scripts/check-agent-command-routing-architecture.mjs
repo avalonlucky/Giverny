@@ -2,62 +2,52 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
 const failures = []
-const runtime = readFileSync('src/aliceAgent.ts', 'utf8')
+const agents = readFileSync('agent-runtime/app/agents.py', 'utf8')
+const runtime = readFileSync('agent-runtime/app/runtime.py', 'utf8')
+const tooling = readFileSync('agent-runtime/app/tooling.py', 'utf8')
 const worker = readFileSync('src/worker.ts', 'utf8')
-const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
-const graph = readFileSync('src/agentRuntimeGraph.ts', 'utf8')
-const chat = readFileSync('src/components/ChatPanel.tsx', 'utf8')
-const suite = JSON.parse(readFileSync('agent-evals/cases.json', 'utf8'))
-
-for (const forbidden of ['DEEPSEEK_API_KEY', 'createOpenAICompatible', 'generateText({', 'toolChoice:']) {
-  if (runtime.includes(forbidden)) failures.push(`Alice 仍自带模型或自由工具规划：${forbidden}`)
-}
-for (const marker of ['orchestration:', 'executeDirectedCapability(', 'allowedCapabilities', 'requiresProductKnowledge']) {
-  if (!runtime.includes(marker)) failures.push(`Alice 缺少已校验计划执行边界：${marker}`)
-}
+const suite = JSON.parse(readFileSync('agent-runtime/evals/semantic-cases.json', 'utf8'))
+const chatEntry = worker.slice(worker.indexOf('async function callAgentRuntime('), worker.indexOf('async function reviseAgentApproval('))
+const streamEntry = worker.slice(worker.indexOf('function streamChatWithAiInstrumented'), worker.indexOf('function parseAgentMetricTools'))
 
 for (const marker of [
-  'AGENT_DIRECTOR_SYSTEM_PROMPT',
-  'shortlistAgentCapabilities',
-  'validateDirectedPlan',
-  "names.delete('search_product_help')",
-  "names.delete('search_workspace')",
-  "web: ['search_web']",
-]) if (!director.includes(marker)) failures.push(`意图导演缺少能力隔离：${marker}`)
+  'Root Coordinator',
+  '不得根据单个关键词判断意图',
+  '不得将“版本”默认理解为 Giverny 产品版本',
+  'workspace_analyst',
+  'product_support',
+  'web_researcher',
+  'transaction_specialist',
+]) if (!agents.includes(marker)) failures.push(`ADK 语义编排缺少：${marker}`)
 
-for (const marker of ['directAgentRequest(', 'callSelectedModelJson<Record<string, unknown>>', 'modelChoice: args.modelChoice', 'needsPersonalKnowledge']) {
-  if (!worker.includes(marker)) failures.push(`Worker 没有将用户主模型与意图导演接入主链：${marker}`)
+for (const marker of ['response_synthesizer', 'evidence_auditor', 'Evidence Auditor', 'deterministic_verify', 'semantic_audit']) {
+  if (!`${agents}\n${runtime}`.includes(marker)) failures.push(`回答合成或独立校验缺少：${marker}`)
 }
-for (const marker of ['StateGraph', "addNode('understand'", "addNode('direct_authorize'", "addNode('plan_node'", 'modelCalls']) {
-  if (!graph.includes(marker)) failures.push(`LangGraph 生产力主链缺少：${marker}`)
+
+for (const marker of ['OpenAPIToolset', 'select_operation_ids', 'confirmation in {"signed-execute", "system-only"}', 'include_preview']) {
+  if (!tooling.includes(marker)) failures.push(`ADK 工具权限边界缺少：${marker}`)
 }
-for (const marker of ['runAgentRuntimeGraph(', "engine: 'langgraph'", 'orchestration.modelCalls']) {
-  if (!worker.includes(marker)) failures.push(`Worker 未完整接入 LangGraph 主链：${marker}`)
+
+if (!chatEntry.includes('callAdkAgentRuntime')) failures.push('Worker 主聊天未调用 ADK Runtime')
+for (const forbidden of ['ALICE_AGENT', 'runAgentRuntimeGraph(', 'applyAgentGroundingPolicy', 'directAgentRequest(']) {
+  if (chatEntry.includes(forbidden)) failures.push(`ADK 主链仍受旧框架干扰：${forbidden}`)
 }
-if (!worker.includes('if (shouldUseDirectedRuntime)')) failures.push('纯文本请求仍可能按手选模型绕开统一编排层')
-if (!worker.includes("? [defaultHourlyRate, { results: [] as DbTask[] }")) failures.push('意图导演前仍会无条件预取任务、金额或知识数据')
-if (worker.includes("trace: ['开始分析：识别问题目标与需要核对的依据。']")) failures.push('Worker 仍在发送固定处理模板')
-if (chat.includes("trace: ['开始分析：识别问题目标与需要核对的依据。']")) failures.push('聊天界面仍预填固定处理模板')
-if (chat.includes("trace: ['正在识别这次请求…']")) failures.push('聊天界面仍预填无意义的固定识别提示')
-if (!worker.includes('composeNaturalAgentAnswer(')) failures.push('核验事实仍未交回用户主模型自然组织回答')
+if (!streamEntry.includes('env.ADK_AGENT_URL') || !streamEntry.includes("{ route: null, cloudReason: '已交由 Google ADK")) {
+  failures.push('已配置 ADK 时流式入口仍可能被本机 CLI 抢占')
+}
 
 const cases = suite.cases || []
-const requireCase = (id, tool, forbiddenTool) => {
-  const item = cases.find((entry) => entry.id === id)
-  if (!item) return failures.push(`缺少跨域回归：${id}`)
-  if (tool && !item.expect?.tools?.includes(tool)) failures.push(`${id} 未要求 ${tool}`)
-  if (forbiddenTool && !item.expect?.forbiddenTools?.includes(forbiddenTool)) failures.push(`${id} 未禁止 ${forbiddenTool}`)
+for (const id of ['publication-version-direct', 'publication-version-paraphrase', 'version-dimension-conflict', 'product-release-real', 'multiturn-reference', 'ambiguous-entity']) {
+  if (!cases.some((item) => item.id === id)) failures.push(`缺少语义回归用例：${id}`)
 }
-requireCase('create-09', 'create_task_preview', 'search_product_help')
-requireCase('product-help-01', 'search_product_help')
-requireCase('person-profile-01', 'get_requester_profile')
-requireCase('agenda-01', 'query_agenda')
-requireCase('workspace-search-01', 'search_workspace')
-requireCase('safety-08', null, 'search_tasks')
+const publication = cases.find((item) => item.id === 'publication-version-direct')
+if (publication?.expected?.specialist !== 'workspace_analyst' || publication?.expected?.forbiddenSpecialist !== 'product_support') {
+  failures.push('《昂楷之道》回归未显式隔离工作区与产品版本')
+}
 
 if (failures.length) {
-  console.error(`Agent 意图编排守卫失败：\n- ${failures.join('\n- ')}`)
+  console.error(`Agent 语义编排守卫失败：\n- ${failures.join('\n- ')}`)
   process.exit(1)
 }
 
-console.log('Agent 意图编排守卫通过：LangGraph 主链、主模型理解、小工具集、知识隔离与 Alice 执行边界已生效。')
+console.log('Agent 语义编排守卫通过：Google ADK 总管、专家委派、证据双校验与旧链路隔离均已锁定。')

@@ -105,6 +105,13 @@ const missingWorkspaceSearch = completeAgentTurn(createAgentTurn({ principal, qu
 assert.ok(missingWorkspaceSearch.verification.requiredTools.includes('search_workspace'))
 const verifiedWorkspaceSearch = { ...missingWorkspaceSearch, plan: [call('search_workspace')], evidence: [evidence('search_workspace')] }
 assert.equal(verifyAgentAnswer(verifiedWorkspaceSearch).passed, true)
+const verifiedNamedSubject = {
+  ...createAgentTurn({ principal, question: '你看看昂楷之道现在最新的是哪个版本', intent: 'task_data' }),
+  plan: [call('resolve_workspace_subject')],
+  evidence: [evidence('resolve_workspace_subject')],
+  answer: '已核对',
+}
+assert.equal(verifyAgentAnswer(verifiedNamedSubject).passed, true)
 const missingAiDiagnosis = completeAgentTurn(createAgentTurn({ principal, question: '为什么我的主模型不可用，总是切换备用模型？', intent: 'general' }), '可能额度不足')
 assert.ok(missingAiDiagnosis.verification.requiredTools.includes('diagnose_ai_routing'))
 const verifiedAiDiagnosis = { ...missingAiDiagnosis, plan: [call('diagnose_ai_routing')], evidence: [evidence('diagnose_ai_routing')] }

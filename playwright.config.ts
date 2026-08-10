@@ -25,5 +25,8 @@ export default defineConfig({
     url: `http://127.0.0.1:${appPort}/api/health`,
     reuseExistingServer: false,
     timeout: 180_000,
+    // 没有这一段时 Playwright 会直接 SIGKILL 整个 webServer 进程组，
+    // start-browser-eval 的清理逻辑根本跑不到，workerd 的临时 D1/R2 目录会一直堆积。
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
   },
 })

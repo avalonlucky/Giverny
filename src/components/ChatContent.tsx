@@ -86,18 +86,16 @@ export function ChatContent({ content }: { content: string }) {
       .map((line) => line.replace(/^- /, '').trim())
       .filter(Boolean)
     const answerLines = answerLinesWithoutThinkingBlocks(dividerIndex > 0 ? lines.slice(dividerIndex + 1) : [])
-    const totalSteps = liveTraceMatch ? Number(liveTraceMatch[1]) : traceLines.length
     return (
       <>
-        <details className="chat-agent-timeline" open={isLiveAgentTrace}>
+        <details className="chat-agent-thinking" open={isLiveAgentTrace}>
           <summary>
-            <span>{isLiveAgentTrace ? '正在运行' : '运行完成'}</span>
-            <small>{isLiveAgentTrace ? `${traceLines.length} / ${totalSteps} 步` : `${traceLines.length} 步`}</small>
+            <span className="thinking-indicator">{isLiveAgentTrace ? '思考中' : '思考过程'}</span>
             <ChevronDown size={13} />
           </summary>
-          <ol>
-            {traceLines.map((line, index) => <li key={`${index}-${line}`}><RichChatLine line={line} /></li>)}
-          </ol>
+          <div className="thinking-stream">
+            {traceLines.map((line, index) => <p key={`${index}-${line}`} className="thinking-line"><RichChatLine line={line} /></p>)}
+          </div>
         </details>
         {answerLines.length > 0 && <div className="chat-final-answer"><ChatMarkdown content={answerLines.join('\n')} /></div>}
       </>

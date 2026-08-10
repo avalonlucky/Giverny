@@ -1,4 +1,5 @@
 import { productKnowledgeDocuments } from './generated/productKnowledge.generated'
+import { phoneticVariants } from './chineseFuzzy'
 import { searchProductHelp, type ProductHelpMatch } from './productCapabilities'
 
 const STOP_WORDS = ['这个网站', '网站', '现在', '目前', '请问', '帮我', '一下', '怎么', '如何', '为什么', '哪些', '什么', '可以', '是否', '有没有', '的', '了', '吗']
@@ -56,29 +57,51 @@ function excerpt(content: string, query: string, maxLength = 900) {
   return `${start > 0 ? '…' : ''}${content.slice(start, start + maxLength)}${start + maxLength < content.length ? '…' : ''}`
 }
 
-export function searchProductKnowledge(query: string, limit = 5) {
+export function searchProductKnowledge(query: string, limit = 5): { query: string; total: number; matches: ProductHelpMatch[]; indexedDocuments: number; fuzzyCorrection?: string } {
   const curated = searchProductHelp(query, Math.min(limit, 10)).matches
-  const documents = productKnowledgeDocuments
+  let documents = productKnowledgeDocuments
     .map((document) => ({ document, score: documentScore(query, document.heading, document.content) }))
     .filter((item) => item.score >= 24)
     .sort((left, right) => right.score - left.score)
     .slice(0, Math.max(3, limit * 2))
-    .map(({ document, score }): ProductHelpMatch => ({
-      id: `document.${document.id}`,
-      category: document.category,
-      title: document.heading,
-      summary: excerpt(document.content, query, 260),
-      details: [excerpt(document.content, query)],
-      route: document.sourcePath,
-      sourceLabel: `${document.sourceLabel} · ${document.heading}`,
-      evidenceStatus: 'confirmed',
-      answer: `**${document.heading}**\n\n${excerpt(document.content, query)}\n\n依据：${document.sourceLabel}（${document.sourcePath}）。`,
-      score,
-    }))
+
+  // 音近容错：如果精确搜索结果弱，尝试拼音变体
+  let fuzzyCorrection: string | undefined
+  const bestScore = documents[0]?.score ?? 0
+  if (bestScore < 50) {
+    const chineseCore = query.replace(/[^一-鿿]/g, '').slice(0, 8)
+    if (chineseCore.length >= 2) {
+      const variants = phoneticVariants(chineseCore, 8)
+      for (const variant of variants) {
+        const variantDocs = productKnowledgeDocuments
+          .map((document) => ({ document, score: documentScore(variant, document.heading, document.content) }))
+          .filter((item) => item.score >= 24)
+          .sort((left, right) => right.score - left.score)
+          .slice(0, Math.max(3, limit * 2))
+        if ((variantDocs[0]?.score ?? 0) > bestScore + 10) {
+          documents = variantDocs
+          fuzzyCorrection = variant
+          break
+        }
+      }
+    }
+  }
+  const mappedDocuments: ProductHelpMatch[] = documents.map(({ document, score }) => ({
+    id: `document.${document.id}`,
+    category: document.category,
+    title: document.heading,
+    summary: excerpt(document.content, query, 260),
+    details: [excerpt(document.content, query)],
+    route: document.sourcePath,
+    sourceLabel: `${document.sourceLabel} · ${document.heading}`,
+    evidenceStatus: 'confirmed' as const,
+    answer: `**${document.heading}**\n\n${excerpt(document.content, query)}\n\n依据：${document.sourceLabel}（${document.sourcePath}）。`,
+    score,
+  }))
   const unique = new Map<string, ProductHelpMatch>()
-  for (const match of [...curated, ...documents]) {
+  for (const match of [...curated, ...mappedDocuments]) {
     if (!unique.has(match.id)) unique.set(match.id, match)
   }
   const matches = [...unique.values()].slice(0, Math.max(1, Math.min(10, limit)))
-  return { query, total: matches.length, matches, indexedDocuments: productKnowledgeDocuments.length }
+  return { query, total: matches.length, matches, indexedDocuments: productKnowledgeDocuments.length, fuzzyCorrection }
 }

@@ -14,13 +14,20 @@
 用户已明确要求：以后涉及代码或前端体验的改动，不要只停留在本地，也不再额外等待人工验收确认。完成本地验证、正式站部署和线上关键路径回归后，默认直接同步 GitHub、tag 和 Release。
 
 1. 本地修改。
-2. 跑 `npm run agent:quality:gate`（包含 build、lint 和隔离 Agent 全链路评测）。
+2. 如修改 `agent-runtime/`，先运行 Python 单元测试、ADK 语义评测和容器健康检查；再跑 `npm run agent:quality:gate`。
 3. 涉及新增 D1 migration 时，先用本地 SQLite 验证，再通过 `npm run db:apply:production -- db/migrations/<file>.sql` 调用 Cloudflare D1 HTTP API 应用正式迁移。
 4. 运行 `npm run infra:check` 核对主队列、DLQ、消费者和 Workers Tracing；发布命令会在构建后自动运行 `npm run infra:sync`，发现漂移时通过 Cloudflare HTTP API 幂等修复。
 5. 部署正式站。HTTP API 发布器先上传候选版本，定向核对健康、事实协议、版本和资源，通过后才推广；失败自动回滚上一版本。
 6. 验证 `https://mayeai.com/` 资源版本和关键变更是否生效。
 7. 线上关键路径回归；如发现问题，继续本地修改、验证并重新部署正式站。
 8. 回归通过后，直接执行 GitHub commit / push / tag / Release 发布闭环。
+
+## Google ADK Runtime
+
+- ADK 作为独立 Python 容器发布到 Google Cloud Run，不使用 Cloudflare Containers，因此不需要 Wrangler。
+- Cloud Run 通过 Vertex AI Application Default Credentials 调用 Gemini；`GIVERNY_TOOL_TOKEN` 只作为服务端密钥注入。
+- Worker 只保存 `ADK_AGENT_URL` 和 `ADK_AGENT_KEY`。两者未就绪时 `/api/ai/chat` 必须失败关闭，禁止回退 LangGraph/Alice 或本地模板回答。
+- 发布顺序：Cloud Run 候选服务健康检查 -> D1 `0042_google_adk_runtime.sql` -> Worker 变量/密钥 -> `npm run deploy:production` -> 真实语义回归。
 
 ### 双域名静态资源核对
 

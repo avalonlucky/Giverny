@@ -112,6 +112,7 @@ async function seedDatabase(miniflare) {
 export async function createIsolatedRuntime({
   appPort,
   modelPort,
+  adkRuntimeUrl,
   prefix = 'giverny-eval-',
   persistPath,
   seed = true,
@@ -141,6 +142,10 @@ export async function createIsolatedRuntime({
         DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`,
         DOUBAO_BASE_URL: `http://127.0.0.1:${modelPort}`,
         GIVERNY_API_BASE_URL: `http://127.0.0.1:${appPort}`,
+        ...(adkRuntimeUrl ? {
+          ADK_AGENT_URL: adkRuntimeUrl,
+          ADK_AGENT_KEY: 'eval-adk-runtime-key',
+        } : {}),
       },
       d1Databases: { DB: '00000000-0000-0000-0000-000000000015' },
       d1Persist: join(storageRoot, 'd1'),

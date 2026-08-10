@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "publication-version-direct",
+      "messages": ["查一下期刊《昂楷之道》的最新进展，现在是 B09 还是 B10？"],
+      "expected": {"subject": "昂楷之道", "specialist": "workspace_analyst", "forbiddenSpecialist": "product_support", "mustUseEvidence": true}
+    },
+    {
+      "id": "publication-version-paraphrase",
+      "messages": ["《昂楷之道》现在走到哪一稿了？"],
+      "expected": {"subject": "昂楷之道", "specialist": "workspace_analyst", "forbiddenSpecialist": "product_support", "mustUseEvidence": true}
+    },
+    {
+      "id": "version-dimension-conflict",
+      "messages": ["对话里说已经做到 B10，但最近发给甲方的到底是 B09 还是 B10？"],
+      "expected": {"mustSeparateDimensions": ["produced", "submitted"], "mustUseEvidence": true}
+    },
+    {
+      "id": "product-release-real",
+      "messages": ["Giverny 自身最近一次发布更新了什么？"],
+      "expected": {"specialist": "product_support", "mustUseEvidence": true}
+    },
+    {
+      "id": "multiturn-reference",
+      "messages": ["帮我看看《昂楷之道》。", "它最近正式上传的是哪一稿？"],
+      "expected": {"subject": "昂楷之道", "specialist": "workspace_analyst", "mustResolveReference": true}
+    },
+    {
+      "id": "ambiguous-entity",
+      "messages": ["帮我看看那个期刊现在到哪版了。"],
+      "expected": {"status": "needs_clarification", "mustNotGuess": true}
+    }
+  ]
+}

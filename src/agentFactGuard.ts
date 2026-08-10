@@ -1,11 +1,12 @@
 import type { AgentEvidence } from './agentOrchestrator'
+import { extractAgentVersions, normalizeAgentVersion } from './agentVersionEvidence'
 
 const taskStatuses = ['计划中', '进行中', '挂起', '待验收', '已验收', '终止', '不计费'] as const
 
 type NumericFactKind = 'hours' | 'money' | 'percent' | 'taskId' | 'count'
 
 export type AgentFactClaim = {
-  kind: NumericFactKind | 'date' | 'status'
+  kind: NumericFactKind | 'date' | 'status' | 'version'
   value: number | string
   sourceTool: string
   path: string
@@ -21,6 +22,7 @@ export type AgentFactSnapshot = {
   numbers: Record<NumericFactKind, number[]>
   dates: string[]
   statuses: string[]
+  versions: string[]
   sources: string[]
   claims: AgentFactClaim[]
   sections: AgentFactSection[]
@@ -87,6 +89,13 @@ function collectFacts(value: unknown, key: string, facts: AgentFactSnapshot, sou
     return
   }
   if (typeof value !== 'string') return
+  if (sourceTool === 'resolve_workspace_subject' || sourceTool === 'search_product_help' || /version|版本/i.test(key)) {
+    extractAgentVersions(value).forEach((version) => {
+      const normalized = normalizeAgentVersion(version.value)
+      facts.versions.push(normalized)
+      facts.claims.push({ kind: 'version', value: normalized, sourceTool, path })
+    })
+  }
   if (sourceTool === 'get_requester_profile' && /^profile\.(?:traits|advice)\[\d+\]$/.test(path)) {
     const embeddedHours = [...value.matchAll(/(-?\d+(?:\.\d+)?)\s*(?:小时|h\b)/gi)].map((match) => number(match[1]))
     embeddedHours.forEach((embedded) => {
@@ -372,6 +381,23 @@ function renderWorkspaceSearch(payload: Record<string, unknown>) {
   ].join('\n')
 }
 
+function renderWorkspaceSubject(payload: Record<string, unknown>) {
+  const subject = String(payload.subject || '')
+  const status = String(payload.resolutionStatus || '')
+  const task = record(payload.task)
+  const latest = record(payload.latestEvidence)
+  const version = String(payload.latestVersion || '')
+  if (status === 'not_found') {
+    return `**已核对对象：${subject}**\n- 当前工作区的任务、附件和对话中都没有找到这个对象。\n- 没有可用的版本证据，不能确定最新版本。`
+  }
+  return [
+    `**已核对对象：${subject}**`,
+    task.title ? `- 匹配任务：#${formatNumber(task.id)} ${String(task.title)}` : '- 已从附件或对话中找到相关对象。',
+    version ? `- 最新版本：${version}` : '- 相关记录中没有可确认的版本号。',
+    version ? `- 版本依据：${String(latest.sourceLabel || latest.source || '')}，${String(latest.at || '未记录时间')}，${String(latest.text || '').slice(0, 500)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
 function renderPlanContinuation(payload: Record<string, unknown>) {
   const items = list(payload.continuations).map(record)
   return [
@@ -415,6 +441,7 @@ const evidenceRendererRegistry: Record<string, (payload: Record<string, unknown>
   search_product_help: renderProductHelp,
   search_web: renderWebSearch,
   search_workspace: renderWorkspaceSearch,
+  resolve_workspace_subject: renderWorkspaceSubject,
   audit_workspace_consistency: renderConsistencyAudit,
   query_formal_deliverables: renderFormalDeliverables,
   query_high_risk_actions: renderHighRiskActions,
@@ -458,6 +485,7 @@ export function buildAgentFactSnapshot(evidence: AgentEvidence[]): AgentFactSnap
     numbers: { hours: [], money: [], percent: [], taskId: [], count: [] },
     dates: [],
     statuses: [],
+    versions: [],
     sources: deterministic.map((item) => item.toolName),
     claims: [],
     sections,
@@ -470,6 +498,7 @@ export function buildAgentFactSnapshot(evidence: AgentEvidence[]): AgentFactSnap
   snapshot.numbers.count = uniqueNumbers(snapshot.numbers.count)
   snapshot.dates = [...new Set(snapshot.dates)]
   snapshot.statuses = [...new Set(snapshot.statuses)]
+  snapshot.versions = [...new Set(snapshot.versions)]
   snapshot.claims = [...new Map(snapshot.claims.map((claim) => [`${claim.kind}:${claim.value}:${claim.sourceTool}:${claim.path}`, claim])).values()]
   return snapshot
 }
@@ -541,6 +570,10 @@ export function verifyAgentFactClaims(answer: string, snapshot: AgentFactSnapsho
   })
   taskStatuses.forEach((status) => {
     if (answerOutsideCanonicalSections.includes(status) && !snapshot.statuses.includes(status)) issues.push(`status=${status} 缺少工具证据`)
+  })
+  extractAgentVersions(answerOutsideCanonicalSections).forEach((version) => {
+    const normalized = normalizeAgentVersion(version.value)
+    if (!snapshot.versions.includes(normalized)) issues.push(`version=${version.value} 缺少工具证据`)
   })
   const coveredSources = options.requireCanonicalSections === false
     ? [...new Set(snapshot.sources)]

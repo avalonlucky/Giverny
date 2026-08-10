@@ -15,10 +15,15 @@
 │   ├── README.md
 │   ├── package.json
 │   └── package-lock.json
+├── agent-runtime/
 │   ├── app/
-│   │   ├── giverny_tools.py
+│   │   ├── agents.py
+│   │   ├── evidence.py
 │   │   ├── main.py
-│   │   └── schemas.py
+│   │   ├── runtime.py
+│   │   └── tooling.py
+│   ├── evals/
+│   ├── tests/
 │   ├── Dockerfile
 │   ├── README.md
 │   └── requirements.txt
@@ -241,6 +246,8 @@
 - Shared pending progress attachment thumbnail and full preview: `src/components/PendingAttachmentPreview.tsx`
 - Shared Agent background-analysis progress card: `src/components/AgentAnalysisTaskCard.tsx`
 - Agent capability source of truth and generated catalog: `src/agentToolRegistry.ts`, `docs/AGENT_CAPABILITY_REGISTRY.md`
+- Google ADK 2.x semantic coordinator, specialists, evidence protocol and auditor: `agent-runtime/app/`, `agent-runtime/evals/semantic-cases.json`
+- ADK ingress, private confirmation storage and deterministic execute control: `src/worker.ts`, `db/migrations/0042_google_adk_runtime.sql`
 - Agent settlement, scheduling, upload handoff, reminder and secure model-setting regression: `scripts/test-agent-business-tools.mjs`, `scripts/check-agent-business-tools-architecture.mjs`, `agent-evals/run-isolated.mjs`
 - Agent attachment evidence, analysis recovery, metadata integrity and multimodal regression: `scripts/test-agent-multimodal-tools.mjs`, `scripts/check-agent-multimodal-architecture.mjs`, `agent-evals/run-isolated.mjs`
 - Agent proactive event rules, priority queue, deduplication and outcome regression: `src/agentProactive.ts`, `db/migrations/0031_agent_proactive_work.sql`, `scripts/test-agent-proactive-work.mjs`, `scripts/check-agent-proactive-architecture.mjs`

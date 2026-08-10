@@ -97,6 +97,22 @@ const product = buildAgentFactSnapshot([evidence('search_product_help', {
 assert.ok(product.fallbackAnswer.includes('模型设置'))
 assert.equal(verifyAgentFactClaims(product.fallbackAnswer, product).passed, true)
 
+const subjectVersion = buildAgentFactSnapshot([evidence('resolve_workspace_subject', {
+  tool: 'resolve_workspace_subject', subject: '昂楷之道', resolutionStatus: 'resolved',
+  task: { id: 86, title: '昂楷之道', status: '进行中' },
+  latestVersion: 'B03',
+  latestEvidence: { source: 'attachment', sourceLabel: '任务附件', text: '昂楷之道_B03.pdf', at: '2026-08-10', versions: ['B03'], taskId: 86 },
+  evidence: [
+    { source: 'attachment', sourceLabel: '任务附件', text: '昂楷之道_B03.pdf', at: '2026-08-10', versions: ['B03'], taskId: 86 },
+    { source: 'progress', sourceLabel: '任务进展', text: '已提交 B02', at: '2026-08-08', versions: ['B02'], taskId: 86 },
+  ],
+})])
+assert.ok(subjectVersion.fallbackAnswer.includes('已核对对象：昂楷之道'))
+assert.ok(subjectVersion.fallbackAnswer.includes('最新版本：B03'))
+assert.ok(subjectVersion.versions.includes('B03'))
+assert.equal(verifyAgentFactClaims('昂楷之道最新版本是 B03。', subjectVersion, { requireCanonicalSections: false }).passed, true)
+assert.equal(verifyAgentFactClaims('昂楷之道最新版本是 B04。', subjectVersion, { requireCanonicalSections: false }).passed, false)
+
 const legacyFinance = buildAgentFactSnapshot([evidence('query_month_finance', {
   hourlyRate: 300,
   stats: [{ month: '2026-06', billableHours: 5, totalHours: 5, amount: 1500, taskCount: 2 }],

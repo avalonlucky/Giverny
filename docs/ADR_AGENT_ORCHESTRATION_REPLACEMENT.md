@@ -1,6 +1,24 @@
 # Agent 编排主链替换决策
 
-> 状态：已采用（LangGraph 混合架构）
+> 状态：已被 Google ADK 2.x 独立主链取代（以下 LangGraph 内容仅保留为历史决策记录）
+
+## 2026-08-10 最终替换决策
+
+站内工作助手的语义主链改为独立 `agent-runtime/` Google ADK 2.x Python 服务。`/api/ai/chat` 必须进入 ADK Root Coordinator；未配置 ADK 时显式失败，不回退 Alice/LangGraph，不再用关键词修补语义路由。
+
+```text
+React -> Cloudflare Worker 鉴权入口
+  -> Google ADK Root Coordinator
+     -> workspace / product / web / transaction specialists
+  -> OpenAPI 工具（Worker 仍是 D1/R2 与权限的唯一权威边界）
+  -> claim-evidence 确定性验证
+  -> 独立 Evidence Auditor
+  -> 通过才发布回答
+```
+
+写入工具只向模型暴露 preview。`signed-execute` 与 `system-only` 从 ADK 工具集物理排除；确认 token 不进入模型或浏览器，由 Worker D1 保管并在用户明确确认后确定性执行。
+
+## 历史方案（不再参与对话主链）
 
 ## 决策
 
@@ -23,12 +41,13 @@
 ## 新主链
 
 1. `understand`：用户选择的主模型理解完整目标，不预取任务、金额或产品知识。
-2. `shortlist`：程序根据语义决策、角色和风险从注册表缩选能力。
-3. `direct_authorize`：单一、明确的指令由主模型在首次理解时同时给出最小动作，通过 Policy Validator 后直接执行，全回合只需一次规划模型调用。
-4. `plan_node`：只有复合目标、对象不明确、先查后做或直接方案被策略拒绝时，才进入第二次计划。
-5. `authorize`：独立校验能力名、Zod schema、角色、知识检索资格与 preview/execute 边界。
-6. `finish`：将通过授权的计划交给 Alice 执行，或返回明确的缺失信息。
-7. D1/R2 工具结果继续经过结构化事实验真；写入继续执行 preview -> 人工确认 -> Workflow -> 独立后置验收。
+2. `subject_grounding`：程序对“具名对象的版本 / 稿次”等硬事实建立主体契约。未明确指向 Giverny 时，先聚合工作区任务、进展、附件和对话证据；不允许模型因为“版本”一词就假定用户在问产品版本。
+3. `shortlist`：程序根据语义决策、主体契约、角色和风险从注册表缩选能力。
+4. `direct_authorize`：单一、明确的指令由主模型在首次理解时同时给出最小动作，通过 Policy Validator 后直接执行，全回合只需一次规划模型调用。
+5. `plan_node`：只有复合目标、对象不明确、先查后做或直接方案被策略拒绝时，才进入第二次计划。
+6. `authorize`：独立校验能力名、Zod schema、角色、知识检索资格与 preview/execute 边界。
+7. `finish`：将通过授权的计划交给 Alice 执行，或返回明确的缺失信息。
+8. D1/R2 工具结果继续经过结构化事实验真；版本声明与金额、工时、日期和状态一样必须出现在工具证据中。写入继续执行 preview -> 人工确认 -> Workflow -> 独立后置验收。
 
 ## 双图生产力闭环
 

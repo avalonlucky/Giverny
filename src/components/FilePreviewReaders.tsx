@@ -1,5 +1,5 @@
 import { type WheelEvent as ReactWheelEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { ExternalLink, FileImage, FileText, Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
+import { ExternalLink, FileImage, FileText, Maximize2, RefreshCw, ZoomIn, ZoomOut } from 'lucide-react'
 import { loadPdfRuntime } from '../lib/pdfRuntime'
 
 type PdfPreviewDocument = {
@@ -321,6 +321,7 @@ export function OfficePreview({
   const [status, setStatus] = useState('正在加载预览…')
   const [error, setError] = useState('')
   const [workbookPreview, setWorkbookPreview] = useState<SpreadsheetPreview>([])
+  const [retryTick, setRetryTick] = useState(0)
   const isLegacyOffice = ['DOC', 'XLS', 'PPT'].includes(fileType)
 
   useEffect(() => {
@@ -342,7 +343,7 @@ export function OfficePreview({
       }
 
       try {
-        const response = await fetch(sourceUrl)
+        const response = await fetch(sourceUrl, { credentials: 'same-origin' })
         if (!response.ok) {
           throw new Error('文件读取失败')
         }
@@ -414,7 +415,7 @@ export function OfficePreview({
     return () => {
       cancelled = true
     }
-  }, [compact, fileType, isLegacyOffice, sourceUrl])
+  }, [compact, fileType, isLegacyOffice, retryTick, sourceUrl])
 
   return (
     <div className={`office-preview office-preview-${fileType.toLowerCase()} ${compact ? 'compact' : ''}`}>
@@ -423,7 +424,12 @@ export function OfficePreview({
         <div className="file-preview-placeholder">
           <FileText size={compact ? 28 : 42} />
           <strong>{fileType}</strong>
-          <span>{compact ? '旧版格式无法生成浏览器缩略图' : error}</span>
+          <span>{compact ? (isLegacyOffice ? '旧版格式无法生成浏览器缩略图' : '缩略图加载失败') : error}</span>
+          {compact && !isLegacyOffice && (
+            <button type="button" className="office-preview-retry" onClick={() => setRetryTick((v) => v + 1)} title="重试">
+              <RefreshCw size={13} />
+            </button>
+          )}
           {!compact && (
             <a className="primary-button compact-button" href={sourceUrl} target="_blank" rel="noreferrer">
               <ExternalLink size={15} />

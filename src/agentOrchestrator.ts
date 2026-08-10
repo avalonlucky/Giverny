@@ -106,6 +106,7 @@ export function directorDecisionToIntents(decision: AgentDirectorDecision): Agen
       case 'product_help': add('product_help'); break
       case 'memory': add('person_profile'); break
       case 'analysis': add('task_data'); break
+      case 'workspace_search': add('task_data'); break
       default: break
     }
   }
@@ -221,7 +222,7 @@ export function verifyAgentAnswer(turn: AgentTurn, precomputedIntents?: AgentInt
     requiredTools.push('get_task_detail')
     issues.push('任务阻塞问题没有读取任务详情或跨任务等待记录。')
   }
-  if (detectedIntents.includes('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'search_workspace', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation')) {
+  if (detectedIntents.includes('task_data') && !asksPortfolio && !hasDeterministicTool('search_tasks', 'search_workspace', 'resolve_workspace_subject', 'get_task_detail', 'query_task_portfolio', 'query_agenda', 'check_schedule_conflicts', 'reschedule_task_preview', 'query_proactive_work', 'query_project_execution', 'query_plan_continuation')) {
     const singular = /(?:任务\s*#\d+|这个|那个|刚才|详情|进展|卡在|为什么)/.test(turn.question)
     requiredTools.push(singular ? 'get_task_detail' : 'search_tasks')
     issues.push('任务事实回答没有读取当前工作区任务。')

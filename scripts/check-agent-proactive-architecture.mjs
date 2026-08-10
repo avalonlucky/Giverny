@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 const worker = readFileSync('src/worker.ts', 'utf8')
 const registry = readFileSync('src/agentToolRegistry.ts', 'utf8')
 const director = readFileSync('src/agentIntentDirector.ts', 'utf8')
-const chat = readFileSync('src/components/ChatPanel.tsx', 'utf8')
 const schema = readFileSync('db/schema.sql', 'utf8')
 const migration = readFileSync('db/migrations/0031_agent_proactive_work.sql', 'utf8')
 
@@ -19,8 +18,7 @@ assert.match(worker, /CASE priority WHEN 'critical' THEN 4/)
 assert.match(registry, /query_proactive_work/)
 assert.match(registry, /manage_proactive_item_preview/)
 assert.match(director, /proactive: \['query_proactive_work', 'manage_proactive_item_preview'\]/)
-assert.match(chat, /主动事项处理效果/)
-assert.match(chat, /24 小时后再次提醒/)
-assert.match(chat, /proactiveSummary\.resolutionRate/)
+assert.match(worker, /resolutionRate: handledTotal/)
+assert.match(registry, /manage_proactive_item_preview/)
 
 console.log('Agent proactive work architecture guard passed.')

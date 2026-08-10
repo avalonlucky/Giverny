@@ -27,6 +27,11 @@ export type AgentDirectorDecision = {
   rationale: string
   complexity: 'simple' | 'complex'
   proposedCalls: AgentDirectorPlanCall[]
+  /** Director 直接输出的最终工具调用（合并架构） */
+  calls?: AgentDirectorPlanCall[]
+  needsInput?: boolean
+  followUpQuestion?: string
+  answerIfNoTools?: string
 }
 
 export type AgentDirectorPlanCall = {
@@ -68,6 +73,7 @@ export function directAgentOperationCatalog(role: AgentPrincipalRole) {
 }
 
 const capabilityGroups: Record<string, readonly AgentCapabilityName[]> = {
+  resolve_workspace_subject: ['resolve_workspace_subject'],
   create_task: ['create_task_preview'],
   update_task: ['search_tasks', 'get_task_detail', 'update_task_fields_preview', 'update_task_status_preview'],
   progress: ['search_tasks', 'get_task_detail', 'append_progress_preview'],
@@ -114,8 +120,9 @@ export function normalizeAgentDirectorDecision(value: unknown): AgentDirectorDec
     ? record.domains.map(normalizeDomain).filter((item): item is AgentDirectorDomain => Boolean(item))
     : []
   const requiresProductKnowledge = record.requiresProductKnowledge === true
-  const proposedCalls = Array.isArray(record.proposedCalls)
-    ? record.proposedCalls.map((item) => {
+  const rawCalls = Array.isArray(record.proposedCalls) ? record.proposedCalls : Array.isArray(record.calls) ? record.calls : []
+  const proposedCalls = Array.isArray(rawCalls)
+    ? rawCalls.map((item) => {
         const call = item && typeof item === 'object' ? item as Record<string, unknown> : {}
         return {
           name: String(call.name || ''),
@@ -143,6 +150,10 @@ export function normalizeAgentDirectorDecision(value: unknown): AgentDirectorDec
     rationale: String(record.rationale || '').trim().slice(0, 300),
     complexity: record.complexity === 'simple' ? 'simple' : 'complex',
     proposedCalls,
+    calls: proposedCalls,
+    needsInput: record.needsInput === true,
+    followUpQuestion: String(record.followUpQuestion || '').trim().slice(0, 300),
+    answerIfNoTools: String(record.answerIfNoTools || '').trim().slice(0, 4000),
   }
 }
 
@@ -251,36 +262,60 @@ export function agentDirectorTrace(decision: AgentDirectorDecision) {
   return { label: '思考', detail: `我理解你的问题是关于"${goal}"，这个可以直接回答。` }
 }
 
-export function agentDirectorReasoningChain(decision: AgentDirectorDecision): Array<{ label: string; detail: string }> {
-  const chain: Array<{ label: string; detail: string }> = []
-  const goal = decision.goal || '理解本次请求'
+export function agentDirectorReasoningChain(decision: AgentDirectorDecision): string[] {
+  const thoughts: string[] = []
+  const goal = decision.goal || '你的问题'
   const rationale = decision.rationale.trim()
+
+  // 第一句：表达"我在想什么"
   if (rationale && rationale.length > 4) {
-    chain.push({ label: '理解', detail: rationale })
+    thoughts.push(rationale)
   } else {
     const domains = decision.domains.filter((d) => d !== 'conversation')
-    const domainDesc = domains.length ? domains.map((d) => domainTraceLabels[d] || d).join('、') : '通用知识'
-    chain.push({ label: '理解', detail: `你的目标是"${goal}"，涉及${domainDesc}。` })
+    if (domains.includes('tasks') || domains.includes('calendar')) {
+      thoughts.push(`「${goal}」——让我去翻一下实际的项目记录，看看进展到哪一步了。`)
+    } else if (domains.includes('finance')) {
+      thoughts.push(`「${goal}」——这个得看真实的账目数据，我来核对一下。`)
+    } else if (domains.includes('files')) {
+      thoughts.push(`「${goal}」——我去找找相关的文件。`)
+    } else if (domains.includes('product_help')) {
+      thoughts.push(`「${goal}」——让我查一下产品文档，确保给你准确的信息。`)
+    } else if (domains.includes('web')) {
+      thoughts.push(`「${goal}」——这需要最新的外部信息，我去搜一下。`)
+    } else if (domains.includes('memory')) {
+      thoughts.push(`「${goal}」——让我回忆一下之前的上下文。`)
+    } else if (domains.includes('analysis')) {
+      thoughts.push(`「${goal}」——我来梳理一下数据，理清楚再回答你。`)
+    } else {
+      thoughts.push(`「${goal}」——这个我可以直接回答。`)
+    }
   }
+
+  // 第二句：表达"我打算怎么做"
   const actions = describePlannedActions(decision)
   if (actions) {
     if (decision.isWrite) {
-      chain.push({ label: '规划', detail: `我会执行${actions}，生成草稿后等你确认再写入。` })
+      thoughts.push(`这涉及修改操作，我会先整理好草稿给你过目，确认了再动。`)
     } else {
-      chain.push({ label: '规划', detail: `我需要调用${actions}来获取准确数据。` })
+      thoughts.push(`我去把${actions}的原始数据调出来，用事实说话。`)
     }
   } else if (decision.isWrite) {
-    chain.push({ label: '规划', detail: '这是一个写入操作，我会先预览再确认。' })
+    thoughts.push('这是写入操作，我先拟好内容让你确认。')
   } else if (decision.requiresBusinessData) {
-    chain.push({ label: '规划', detail: '需要从业务数据库中读取真实记录。' })
+    thoughts.push('我去系统里把真实记录调出来看看。')
   }
+
+  // 补充信息
   if (decision.missingInformation.length > 0) {
-    chain.push({ label: '补充', detail: `还需要你提供：${decision.missingInformation.slice(0, 3).join('、')}。` })
+    thoughts.push(`不过我还需要知道：${decision.missingInformation.slice(0, 3).join('、')}。你可以补充一下。`)
   }
-  if (decision.complexity === 'complex' && chain.length < 3) {
-    chain.push({ label: '评估', detail: '这个请求比较复杂，我会分步处理并逐一核对。' })
+
+  // 复杂任务
+  if (decision.complexity === 'complex' && thoughts.length < 3) {
+    thoughts.push('这个有点复杂，我分几步来处理，每步都核实。')
   }
-  return chain.length > 0 ? chain : [{ label: '思考', detail: `我理解你的问题是关于"${goal}"。` }]
+
+  return thoughts.length > 0 ? thoughts : [`让我想想「${goal}」这个问题。`]
 }
 
 export function applyAgentConversationFollowUpPolicy(

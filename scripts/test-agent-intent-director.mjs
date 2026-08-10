@@ -7,6 +7,9 @@ import {
   shortlistAgentCapabilities,
   validateDirectedPlan,
 } from '../src/agentIntentDirector.ts'
+import { applyAgentGroundingPolicy, resolveAgentGroundingSubject } from '../src/agentGroundingPolicy.ts'
+import { searchProductKnowledge } from '../src/productKnowledgeSearch.ts'
+import { appVersion } from '../src/config/appConfig.ts'
 
 const createDecision = normalizeAgentDirectorDecision({
   goal: '新建一个任务', domains: ['tasks'], operation: 'create_task',
@@ -28,6 +31,24 @@ const conversationDecision = normalizeAgentDirectorDecision({
   requiresBusinessData: false, requiresProductKnowledge: false, isWrite: false, confidence: 0.95,
 })
 assert.deepEqual(shortlistAgentCapabilities(conversationDecision, 'admin'), [])
+
+const namedVersionSubject = resolveAgentGroundingSubject('你看看昂楷之道现在最新的是哪个版本')
+assert.deepEqual(namedVersionSubject, { label: '昂楷之道', namespace: 'workspace', factKind: 'version' })
+const misroutedNamedVersion = applyAgentGroundingPolicy(productDecision, '你看看昂楷之道现在最新的是哪个版本')
+assert.deepEqual(misroutedNamedVersion.domains, ['workspace_search'])
+assert.equal(misroutedNamedVersion.requiresProductKnowledge, false)
+assert.deepEqual(misroutedNamedVersion.proposedCalls, [{
+  name: 'resolve_workspace_subject',
+  args: { subject: '昂楷之道', factKind: 'version', limit: 20 },
+  reason: '先锁定具名对象，再聚合任务、进展、附件与对话证据。',
+}])
+assert.deepEqual(shortlistAgentCapabilities(misroutedNamedVersion, 'admin'), ['resolve_workspace_subject'])
+
+const explicitProductVersion = applyAgentGroundingPolicy(conversationDecision, 'Giverny 当前最新版本是什么？')
+assert.deepEqual(explicitProductVersion.domains, ['product_help'])
+assert.equal(explicitProductVersion.requiresProductKnowledge, true)
+assert.equal(explicitProductVersion.proposedCalls[0].name, 'search_product_help')
+assert.match(searchProductKnowledge('Giverny 当前最新版本', 5).matches[0].summary, new RegExp(`v${appVersion.replaceAll('.', '\\.')}`))
 
 const webDecision = normalizeAgentDirectorDecision({
   goal: '查询上海明天天气', domains: ['web'], operation: 'general',

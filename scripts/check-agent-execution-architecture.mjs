@@ -7,7 +7,6 @@ const files = {
   registry: readFileSync('src/agentToolRegistry.ts', 'utf8'),
   schema: readFileSync('db/schema.sql', 'utf8'),
   migration: readFileSync('db/migrations/0030_agent_execution_engine.sql', 'utf8'),
-  ui: readFileSync('src/components/ChatPanel.tsx', 'utf8'),
   workflow: readFileSync('src/agentWriteWorkflow.ts', 'utf8'),
   alice: readFileSync('src/aliceAgent.ts', 'utf8'),
   director: readFileSync('src/agentIntentDirector.ts', 'utf8'),
@@ -48,8 +47,8 @@ assert.match(files.registry, /search_workspace/)
 assert.match(files.worker, /outcome === 'failed'/)
 assert.match(files.worker, /revision = revision \+ 1/)
 assert.match(files.worker, /计划已在其他会话更新/)
-assert.match(files.ui, /确认整个批次/)
-assert.match(files.ui, /补偿 \/ 回滚/)
+assert.match(files.worker, /label: '确认整个批次'/)
+assert.match(files.engine, /beginExecutionCompensation/)
 assert.match(files.workflow, /waitForApproval/)
 const signedWriteEndpoints = files.registry
   .split('\n')

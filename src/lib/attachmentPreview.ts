@@ -97,20 +97,23 @@ async function createVideoPreviewFile(file: File) {
 // 把离屏渲染好的 DOM 栅格化成 PNG 预览；空白/过小则放弃（回退到类型角标）
 async function rasterizeElementToPreviewFile(target: HTMLElement, baseName: string, options?: { width?: number; height?: number }) {
   const html2canvas = (await import('html2canvas')).default
-  const canvas = await html2canvas(target, {
-    backgroundColor: '#ffffff',
-    scale: 1,
-    logging: false,
-    useCORS: true,
-    width: options?.width,
-    height: options?.height,
-    windowWidth: options?.width ?? target.scrollWidth ?? 960,
-  })
+  const canvas = await Promise.race([
+    html2canvas(target, {
+      backgroundColor: '#ffffff',
+      scale: 1,
+      logging: false,
+      useCORS: true,
+      width: options?.width,
+      height: options?.height,
+      windowWidth: options?.width ?? target.scrollWidth ?? 960,
+    }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('html2canvas 栅格化超时')), 12_000)),
+  ])
   if (canvas.width < 8 || canvas.height < 8) {
     return undefined
   }
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), 'image/png'))
-  if (!blob || blob.size < 300) {
+  if (!blob || blob.size < 120) {
     return undefined
   }
   return new File([blob], `${baseName}-preview.png`, { type: 'image/png' })
@@ -128,10 +131,16 @@ async function createOfficePreviewFile(file: File, fileType: 'DOCX' | 'PPTX' | '
       host.style.width = '794px'
       const { renderAsync } = await import('docx-preview')
       await renderAsync(buffer, host, undefined, { className: 'docx-preview-document', inWrapper: true, breakPages: true, useBase64URL: true })
-      await new Promise((resolve) => setTimeout(resolve, 400))
+      await new Promise((resolve) => setTimeout(resolve, 700))
       const page = (host.querySelector('section') as HTMLElement | null) ?? host
       const fullHeight = page.offsetHeight || 1123
-      return await rasterizeElementToPreviewFile(page, base, { width: 794, height: Math.min(fullHeight, 1123) })
+      const firstAttempt = await rasterizeElementToPreviewFile(page, base, { width: 794, height: Math.min(fullHeight, 1123) })
+      if (firstAttempt) {
+        return firstAttempt
+      }
+      // 二次尝试：等待更久让字体和图片加载完成
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      return await rasterizeElementToPreviewFile(page, base, { width: 794, height: Math.min(page.offsetHeight || fullHeight, 1123) })
     }
     if (fileType === 'PPTX') {
       host.style.width = '960px'
@@ -139,7 +148,12 @@ async function createOfficePreviewFile(file: File, fileType: 'DOCX' | 'PPTX' | '
       const { init } = await import('pptx-preview')
       const previewer = init(host, { width: 960, height: 540 })
       await previewer.preview(buffer)
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      const firstAttempt = await rasterizeElementToPreviewFile(host, base, { width: 960, height: 540 })
+      if (firstAttempt) {
+        return firstAttempt
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200))
       return await rasterizeElementToPreviewFile(host, base, { width: 960, height: 540 })
     }
     // XLSX：自建首个工作表的表格再栅格化，稳定可控

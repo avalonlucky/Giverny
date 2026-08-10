@@ -1,6 +1,6 @@
 import { Agent, type AgentContext } from 'agents'
 import { agentCapabilityRegistry, agentCapabilityTraceLabel, agentModelCapabilityAllows, agentWritePreviewConfig, type AgentCapabilityDefinition, type AgentCapabilityName } from './agentToolRegistry'
-import { agentDirectorReasoningChain, type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
+import { type AgentDirectorDecision, type AgentDirectorPlanCall } from './agentIntentDirector'
 import { runAgentProductivityGraph, type AgentProductivityCall } from './agentProductivityGraph'
 import { buildAgentFactSnapshot, verifyAgentFactClaims, type AgentFactSnapshot } from './agentFactGuard'
 import { completeAgentTurn, createAgentTurn, decideAgentReplan, directorDecisionToIntents, sanitizeAgentTurnAudit, type AgentEvidence, type AgentPlannedToolCall } from './agentOrchestrator'
@@ -8,6 +8,7 @@ import { normalizeAgentPrincipalContext, type AgentPrincipalContext } from './ag
 import type { AgentWriteWorkflowParams } from './agentWriteWorkflow'
 import type { AgentApproval, AgentApprovalStatus, AgentBackgroundTask, AgentConversationMessage, AgentResultAttachment, AgentTaskSelection, AgentUploadHandoff } from './types/agent'
 import { cleanAnswer, isAgentReadToolName, normalizedDecision, parseJsonObject, toJsonObject } from './agentUtils'
+import { phoneticEditDistance } from './chineseFuzzy'
 import { callAgentTool, executeRepairTool, repairToolInput, type AgentToolClientConfig, type AgentToolResponse } from './agentToolClient'
 import { buildApprovalResult, buildExecutionSummary, CONFIRM_RE, REJECT_RE, isPendingActionExpired, pollWorkflowWithBackoff, type PendingActionSummary, type StoredPendingAction } from './agentApprovalFlow'
 import { detectTaskEvidenceMismatch, extractResultAttachments, extractTaskReference, extractTaskReferences, extractTaskSelection, isTaskScopedTool, referencesCurrentTask, resolveTaskInput, type TaskReference } from './agentTaskContext'
@@ -818,7 +819,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           ? 'finance' : observedTools.has('get_requester_profile') ? 'person_profile'
           : observedTools.has('search_attachments') ? 'attachment'
           : [...observedTools].some((n) => n.endsWith('_preview')) ? 'write'
-          : observedTools.has('get_task_detail') || observedTools.has('search_tasks') || observedTools.has('query_task_portfolio') || observedTools.has('query_plan_continuation') ? 'task_data'
+          : observedTools.has('get_task_detail') || observedTools.has('search_tasks') || observedTools.has('resolve_workspace_subject') || observedTools.has('query_task_portfolio') || observedTools.has('query_plan_continuation') ? 'task_data'
           : observedTools.has('search_product_help') ? 'product_help' : 'general'
         const directorIntents = [...new Set([...directorDecisionToIntents(request.orchestration.decision), toolIntent as import('./agentOrchestrator').AgentIntent])]
         const observedPlan: AgentPlannedToolCall[] = observations.map((item, index) => ({
@@ -854,6 +855,20 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
           attempts: cycle,
         }, '', directorIntents)
         const replan = decideAgentReplan(checked)
+        // Reflexion 触发：工具返回找不到但有候选项时，触发 replan 自动纠错
+        const hasNotFoundWithCandidates = observations.some((obs) => {
+          if (obs.error) return false
+          const out = obs.output && typeof obs.output === 'object' ? obs.output as Record<string, unknown> : {}
+          const candidates = Array.isArray(out.closeCandidates) ? out.closeCandidates : []
+          return out.found === false && candidates.length > 0
+        })
+        if (hasNotFoundWithCandidates) {
+          const failedTools = observations.filter((obs) => {
+            const out = obs.output && typeof obs.output === 'object' ? obs.output as Record<string, unknown> : {}
+            return out.found === false && Array.isArray(out.closeCandidates) && (out.closeCandidates as unknown[]).length > 0
+          }).map((obs) => obs.call.name)
+          return { status: 'replan', requiredTools: [...new Set(failedTools)], reason: '工具未找到匹配结果，但有音近候选项，尝试自动纠错。' }
+        }
         if (checked.verification.passed) return { status: 'complete', requiredTools: [], reason: '目标所需的确定性证据已齐全。' }
         if (replan.shouldReplan) return { status: 'replan', requiredTools: replan.requiredTools, reason: replan.reason }
         const failed = observations.some((item) => item.error)
@@ -861,6 +876,57 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       },
       replan: async (decision, observations, cycle) => {
         const replanned: AgentProductivityCall[] = []
+        // === Reflexion：工具返回"找不到"但有候选项时，自动用音近匹配修正 ===
+        for (const obs of observations) {
+          if (obs.error) continue
+          const output = obs.output && typeof obs.output === 'object' ? obs.output as Record<string, unknown> : {}
+          const candidates = Array.isArray(output.closeCandidates) ? output.closeCandidates as string[] : []
+          if (output.found === false && candidates.length > 0 && obs.call.args && typeof obs.call.args === 'object') {
+            const args = obs.call.args as Record<string, unknown>
+            const originalName = String(args.name || args.query || args.title || '').trim()
+            if (originalName) {
+              let bestCandidate = ''
+              let bestDistance = Infinity
+              for (const candidate of candidates) {
+                const distance = phoneticEditDistance(originalName, String(candidate))
+                if (distance < bestDistance) { bestDistance = distance; bestCandidate = String(candidate) }
+              }
+              const threshold = Math.max(1.5, originalName.length * 0.5)
+              if (bestCandidate && bestDistance <= threshold && bestDistance > 0) {
+                const correctedArgs = { ...args }
+                if (args.name !== undefined) correctedArgs.name = bestCandidate
+                if (args.query !== undefined) correctedArgs.query = bestCandidate
+                if (args.title !== undefined) correctedArgs.title = bestCandidate
+                replanned.push({ name: obs.call.name, args: correctedArgs, reason: `Reflexion 纠错："${originalName}"→"${bestCandidate}"（音近距离 ${bestDistance.toFixed(1)}）`, attempt: cycle + 1 })
+                continue
+              }
+            }
+          }
+          // 搜索结果为空但有 closeCandidates 时也尝试修正
+          const results = Array.isArray(output.results) ? output.results : []
+          if (results.length === 0 && candidates.length > 0 && obs.call.args && typeof obs.call.args === 'object') {
+            const args = obs.call.args as Record<string, unknown>
+            const originalQuery = String(args.query || args.name || args.title || '').trim()
+            if (originalQuery) {
+              let bestCandidate = ''
+              let bestDistance = Infinity
+              for (const candidate of candidates) {
+                const distance = phoneticEditDistance(originalQuery, String(candidate))
+                if (distance < bestDistance) { bestDistance = distance; bestCandidate = String(candidate) }
+              }
+              const threshold = Math.max(1.5, originalQuery.length * 0.5)
+              if (bestCandidate && bestDistance <= threshold && bestDistance > 0) {
+                const correctedArgs = { ...args }
+                if (args.query !== undefined) correctedArgs.query = bestCandidate
+                if (args.name !== undefined) correctedArgs.name = bestCandidate
+                if (args.title !== undefined) correctedArgs.title = bestCandidate
+                replanned.push({ name: obs.call.name, args: correctedArgs, reason: `Reflexion 纠错："${originalQuery}"→"${bestCandidate}"`, attempt: cycle + 1 })
+              }
+            }
+          }
+        }
+        if (replanned.length > 0) return replanned
+        // === 原有 replan 逻辑 ===
         for (const toolName of decision.requiredTools.filter(isAgentReadToolName)) {
           if (!agentModelCapabilityAllows(toolName, this.activePrincipal.role)) continue
           let input = this.repairToolInput(toolName, message, request.currentMonth)
@@ -894,8 +960,9 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       })),
     }
     let answer = cleanAnswer(request.orchestration.directAnswer || '') || (calls.length ? '已完成必要的业务处理。' : '请再具体说明你希望我处理的事情。')
-    const reasoningChain = agentDirectorReasoningChain(request.orchestration.decision)
-    const trace: AliceAgentTraceItem[] = reasoningChain.map((step) => ({ type: 'plan' as const, ...step }))
+    const trace: AliceAgentTraceItem[] = request.orchestration.decision.rationale
+      ? [{ type: 'plan' as const, label: '思考', detail: request.orchestration.decision.rationale }]
+      : []
     let selection: AgentTaskSelection | undefined
     let backgroundTask: AgentBackgroundTask | undefined
     let uploadHandoff: AgentUploadHandoff | undefined
@@ -983,7 +1050,7 @@ export class AliceAgent extends Agent<AliceAgentEnv, AliceAgentState> {
       ? 'finance' : usedTools.has('get_requester_profile') ? 'person_profile'
       : usedTools.has('search_attachments') ? 'attachment'
       : [...usedTools].some((n) => n.endsWith('_preview')) ? 'write'
-      : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('query_task_portfolio') || usedTools.has('query_plan_continuation') ? 'task_data'
+      : usedTools.has('get_task_detail') || usedTools.has('search_tasks') || usedTools.has('resolve_workspace_subject') || usedTools.has('query_task_portfolio') || usedTools.has('query_plan_continuation') ? 'task_data'
       : usedTools.has('search_product_help') ? 'product_help' : 'general'
     const verifiedIntents = [...new Set([...directorDecisionToIntents(request.orchestration.decision), finalToolIntent as import('./agentOrchestrator').AgentIntent])]
     const verifiedIntent = verifiedIntents[0]

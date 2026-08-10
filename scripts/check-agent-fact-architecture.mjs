@@ -14,7 +14,9 @@ for (const marker of ['buildAgentFactSnapshot', 'verifyAgentFactClaims', 'should
 for (const marker of ['renderFinance', 'renderTaskDetail', 'renderProfile', 'renderAttachments', 'renderProductHelp', 'renderSettlement', 'renderTaskMemory', 'renderTaskPlan', 'AgentFactClaim', 'AgentFactSection', 'runAgentFactProtocolSelfTest', 'numericClaims', 'chineseNumber', 'chineseClaims', 'taskStatuses']) {
   if (!guard.includes(marker)) failures.push(`Agent 事实保护层缺少契约：${marker}`)
 }
-for (const marker of ['buildAgentFactSnapshot(finalEvidence)', 'verifyAgentFactClaims(finalContent, factSnapshot)', 'legacyFactVerification', 'factVerification: runtimeResult.factVerification', 'runAgentFactProtocolSelfTest()', '结构化事实协议生成答案']) {
+// 核对结论仍必须写进 trace，但对用户展示的是「答案核对」这类自然措辞，
+// 不再暴露「结构化事实协议」等内部术语（见 tests/browser/critical-flows.spec.ts 的反术语断言）。
+for (const marker of ['buildAgentFactSnapshot(finalEvidence)', 'verifyAgentFactClaims(finalContent, factSnapshot)', 'legacyFactVerification', 'factVerification: runtimeResult.factVerification', 'runAgentFactProtocolSelfTest()', '答案核对：已核对']) {
   if (!worker.includes(marker)) failures.push(`Worker 兼容 Agent 链路缺少统一事实协议：${marker}`)
 }
 for (const marker of ['实际投入3小时', '实际投入三小时', '结算金额1200元', '结算金额一千二百元', '任务#99', '目前进行中', '2026年6月23日', '有4个附件', '有四个附件', '验收通过率80%']) {
