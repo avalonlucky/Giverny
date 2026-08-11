@@ -41,6 +41,13 @@ Giverny —— 设计兼职任务管理与结算工具。
 
 ## 发布纪律
 
+### 费用与模型红线
+
+- **任何可能新增、扩大或重复产生费用的操作，必须在执行前取得项目所有者的明确同意。** 包括但不限于 Cloud Run 部署/扩容、真实模型 API 回归、批量或循环调用、付费资源创建、账单/预算/配额调整。仅有“继续开发”“修复问题”不构成费用授权；未获得本轮明确批准时只能做本地、隔离、Mock 或静态验证。
+- 执行前必须说明供应商、操作内容、预计调用次数/资源范围和可能费用；不得以测试、排障、回归或发布收尾为由先执行后告知。
+- Google ADK 的实际 provider/model 必须与设置中当前选择完全一致。Worker 必须把精确选择传给 ADK，Coordinator、专家、Formatter、Auditor 全部使用同一模型；不允许隐藏的固定 Gemini、便宜审核模型或静默 fallback。配置缺失、不支持或回包不一致时直接失败关闭。
+- 以上红线必须由代码/架构测试锁定，并同步维护 `docs/AI_COST_AND_MODEL_GOVERNANCE.md`、`docs/AI_MODEL_ROUTING.md` 与 `docs/DEPLOYMENT.md`；不得只留在聊天记录。
+
 - **永久禁止使用 Wrangler CLI**：本项目的本地检修和正式部署都不要再执行 `wrangler` / `npx wrangler`。正式发布只允许使用 `npm run deploy:production`（Cloudflare 官方 HTTP API Direct Upload）；如该链路失败，应修复 API 发布器，禁止回退 Wrangler 重试。
 - **8GB Mac 资源纪律**：迭代阶段优先运行 `npm run quality:fast` 和定向浏览器用例；`agent:eval:isolated` 与 `browser:eval` 只在发布前各完整运行一次，必须严格串行，禁止并发或重复全量回归。
 - **低负载常态**：本机命令默认单进程、低调度优先级运行；Node 检查优先使用 `NODE_OPTIONS=--max-old-space-size=1536 nice -n 19`。开发中只跑 TypeScript 与当前业务域的定向测试，不启动常驻 dev server，不并发构建、隔离评测或浏览器。每轮重任务结束后确认没有遗留 Node、Chromium、workerd、Miniflare 或 Playwright 进程。

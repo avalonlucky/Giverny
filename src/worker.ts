@@ -3188,15 +3188,84 @@ type OpenAiAgentRuntimeResult = {
     checkedClaims: number
     sourceTools: string[]
     fallbackUsed: boolean
+    auditorModel?: string
   }
-  orchestration?: { engine: 'google-adk-2' | 'langgraph'; path?: string[]; modelCalls?: number; frameworkVersion?: string; specialists?: string[]; evidenceCount?: number; status?: string }
+  orchestration?: { engine: 'google-adk-2' | 'langgraph'; path?: string[]; modelCalls?: number; modelCallLimit?: number; frameworkVersion?: string; specialists?: string[]; evidenceCount?: number; status?: string; provider?: string; model?: string; modelPolicy?: string }
   productivity?: { engine: 'google-adk-2' | 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
   grounding?: AgentFactSnapshot
+}
+
+type AdkChatPayload = OpenAiAgentRuntimeResult & {
+  pendingAction?: AdkPrivatePendingAction
+  detail?: string
+  // 标记本轮的可见步骤已经在流式过程中发过，末尾不要再补一份原始 trace。
+  streamedSteps?: boolean
+}
+
+// ADK 的 /v1/chat/stream 逐帧下发自然语言步骤，空闲时下发 `: keep-alive` 注释帧。
+// 这里边收边把步骤交给 trace sink，用户因此能看到真实推理过程而不是静止占位符。
+async function readAdkChatStream(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  onTrace: AgentVisibleTraceSink,
+  onThinking?: (text: string) => void,
+): Promise<AdkChatPayload> {
+  const response = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(280_000) })
+  if (!response.ok || !response.body) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(detail.slice(0, 300) || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: AdkChatPayload | null = null
+  let streamError = ''
+  let streamedSteps = false
+  const consumeFrame = async (frame: string) => {
+    for (const line of frame.split('\n')) {
+      if (!line.startsWith('data:')) continue
+      let parsed: { type?: string; detail?: string; response?: AdkChatPayload } | null
+      try {
+        parsed = JSON.parse(line.slice(5).trim())
+      } catch {
+        continue
+      }
+      if (parsed?.type === 'step' && parsed.detail) {
+        streamedSteps = true
+        await onTrace([String(parsed.detail)])
+      }
+      // thinking 是模型正在生成的推理内容（thought part），逐块替换实现打字机效果。
+      // 它不是结论，因此展示它不会绕过 claim/evidence 校验与 Evidence Auditor。
+      else if (parsed?.type === 'thinking' && parsed.detail) onThinking?.(String(parsed.detail))
+      else if (parsed?.type === 'result' && parsed.response) result = parsed.response
+      else if (parsed?.type === 'error') streamError = String(parsed.detail || 'ADK Agent 执行失败')
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    for (;;) {
+      const boundary = buffer.indexOf('\n\n')
+      if (boundary === -1) break
+      const frame = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      await consumeFrame(frame)
+    }
+  }
+  if (buffer.trim()) await consumeFrame(buffer)
+  if (streamError) throw new Error(streamError)
+  if (!result) throw new Error('Google ADK Runtime 未返回可用结果')
+  return { ...(result as AdkChatPayload), streamedSteps }
 }
 
 function formatAgentRuntimeTrace(trace?: OpenAiAgentRuntimeTraceItem[]) {
   if (!Array.isArray(trace) || trace.length === 0) return []
   return trace
+    // tool 条目的 detail 是原始 operationId（search_attachments），只适合审计；
+    // 用户可见的等价信息已经由流式步骤用自然语言给过了。
+    .filter((item) => item.type !== 'tool')
     .map((item) => {
       const label = String(item.label || item.type || 'Agent 步骤').trim()
       const detail = String(item.detail || '').trim()
@@ -3362,7 +3431,9 @@ async function callAdkAgentRuntime(
     conversationId: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
     principal: AgentPrincipalContext
+    modelChoice: ChatModelChoice
     onTrace?: AgentVisibleTraceSink
+    onThinkingStream?: (text: string) => void
   },
 ): Promise<OpenAiAgentRuntimeResult> {
   const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
@@ -3403,33 +3474,74 @@ async function callAdkAgentRuntime(
     }
   }
 
-  const response = await tracing.enterSpan('agent.adk.request', (span) => {
+  const effectiveChoice = args.modelChoice === 'auto' ? await getActiveChatModelChoice(env) : args.modelChoice
+  const selectedTarget = await resolveChatModelTarget(env, effectiveChoice)
+  if (selectedTarget.kind !== 'endpoint') {
+    throw new Error('Google ADK 不支持当前所选运行时；系统不会擅自更换模型。请在设置中选择已配置的云端模型。')
+  }
+  const selectedModel = selectedTarget.endpoint
+  if (!selectedModel.model || !selectedModel.baseUrl) {
+    throw new Error('当前所选模型配置不完整；已阻止 ADK 调用。')
+  }
+  if (!selectedModel.apiKey && selectedModel.provider !== 'gemini') {
+    throw new Error(`${selectedTarget.label} API Key 未配置；系统不会回退到其他模型。`)
+  }
+
+  const requestBody = JSON.stringify({
+    question: args.query,
+    conversationId: args.conversationId,
+    currentMonth: args.currentMonth || '',
+    context: args.context || '',
+    history: (args.history || []).slice(-16),
+    principal: args.principal,
+    selectedModel: {
+      provider: selectedModel.provider,
+      model: selectedModel.model,
+      baseUrl: selectedModel.baseUrl,
+      apiKey: selectedModel.apiKey || '',
+    },
+  })
+  // 编排要跑 60–150 秒。走非流式的 /v1/chat 时这段时间一个字节都不产生，
+  // Cloudflare 会掐断子请求并合成 520，源站算出的 200 直接作废；
+  // 而且用户全程只能看着一句静止的话。所以有 trace sink 时一律走流式端点。
+  const data = await tracing.enterSpan('agent.adk.request', async (span) => {
     span.setAttribute('agent.runtime', 'google-adk-2')
     span.setAttribute('agent.role', args.principal.role)
     span.setAttribute('agent.has_history', Boolean(args.history?.length))
-    return fetch(`${baseUrl}/v1/chat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-adk-runtime-key': runtimeKey },
-      body: JSON.stringify({
-        question: args.query,
-        conversationId: args.conversationId,
-        currentMonth: args.currentMonth || '',
-        context: args.context || '',
-        history: (args.history || []).slice(-16),
-        principal: args.principal,
-      }),
-      signal: AbortSignal.timeout(280_000),
-    })
+    span.setAttribute('agent.streaming', Boolean(args.onTrace))
+    span.setAttribute('agent.selected_provider', selectedModel.provider)
+    span.setAttribute('agent.selected_model', selectedModel.model)
+    const headers = { 'content-type': 'application/json', 'x-adk-runtime-key': runtimeKey }
+    if (!args.onTrace) {
+      const response = await fetch(`${baseUrl}/v1/chat`, {
+        method: 'POST', headers, body: requestBody, signal: AbortSignal.timeout(280_000),
+      })
+      const payload = await response.json().catch(() => null) as AdkChatPayload | null
+      if (!response.ok || !payload?.answer) throw new Error(payload?.detail || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
+      return payload
+    }
+    return readAdkChatStream(`${baseUrl}/v1/chat/stream`, headers, requestBody, args.onTrace, args.onThinkingStream)
   })
-  const data = await response.json().catch(() => null) as (OpenAiAgentRuntimeResult & { pendingAction?: AdkPrivatePendingAction; detail?: string }) | null
-  if (!response.ok || !data?.answer || data.orchestration?.engine !== 'google-adk-2') {
-    throw new Error(data?.detail || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
+  if (!data?.answer || data.orchestration?.engine !== 'google-adk-2') {
+    throw new Error(data?.detail || 'Google ADK Runtime 未返回可验证的编排结果')
+  }
+  if (
+    data.model !== selectedModel.model ||
+    data.orchestration?.provider !== selectedModel.provider ||
+    data.orchestration?.model !== selectedModel.model ||
+    data.orchestration?.modelCallLimit !== 7 ||
+    data.factVerification?.auditorModel !== selectedModel.model
+  ) {
+    throw new Error(`模型一致性校验失败：设置选择 ${selectedModel.provider}/${selectedModel.model}，ADK 回报 ${data.orchestration?.provider || 'unknown'}/${data.model || 'unknown'}。已阻止返回结果。`)
   }
   if (data.approval && data.pendingAction?.confirmationToken) {
     await saveAdkPendingAction(env, args.principal, args.conversationId, data.approval, data.pendingAction)
   }
   delete data.pendingAction
-  await args.onTrace?.(formatAgentRuntimeTrace(data.trace))
+  // 流式路径已经把自然语言步骤逐条推给用户了；这里再补一次会把
+  // `giverny_coordinator：search_attachments` 这类原始 operationId 灌进界面。
+  if (!args.onTrace) return data
+  if (!data.streamedSteps) await args.onTrace(formatAgentRuntimeTrace(data.trace))
   return data
 }
 
@@ -3458,8 +3570,37 @@ async function callAgentRuntime(
     conversationId,
     history: args.history,
     principal: args.principal,
+    modelChoice: args.modelChoice,
     onTrace: args.onTrace,
+    onThinkingStream: args.onThinkingStream,
   })
+}
+
+async function probeAdkRuntimeHealth(env: Env): Promise<{
+  ok: boolean
+  runtime?: string
+  framework?: string
+  modelPolicy?: string
+  error?: string
+}> {
+  const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
+  if (!baseUrl) return { ok: false, error: 'ADK_AGENT_URL 未配置' }
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(8_000),
+    })
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+    if (!response.ok || payload.ok !== true) return { ok: false, error: `HTTP ${response.status}` }
+    return {
+      ok: true,
+      runtime: String(payload.runtime || ''),
+      framework: String(payload.framework || ''),
+      modelPolicy: String(payload.modelPolicy || ''),
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 async function reviseAgentApproval(env: Env, request: Request) {
@@ -20142,6 +20283,9 @@ type LocalCliChatRoute = {
 type LocalCliChatDecision = {
   route: LocalCliChatRoute | null
   cloudReason: string
+  // 命中内部编排细节（框架名、主链名称）的路由原因只用于审计与指标，
+  // 绝不能进入用户可见的思考链；用户只需要看到自然语言的推理过程。
+  internalOnly?: boolean
   immediate?: {
     content: string
     trace: string[]
@@ -20447,12 +20591,13 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
     async start(controller) {
       const send = (payload: Record<string, unknown>) => controller.enqueue(encoder.encode(agentSseEvent(payload)))
       try {
-        send({ type: 'trace', status: 'running', trace: ['正在理解问题并确认需要的证据'] })
-        const promptTokensPromise = estimateAgentRequestTokens(metricsRequest)
+        // 不发任何预设开场句：思考链只显示 ADK 流式返回的真实步骤。
+        // 首屏反馈由界面的「思考中」动效承担，不用静止占位文案冒充推理过程。
         const routingTrace: string[] = []
+        const promptTokensPromise = estimateAgentRequestTokens(metricsRequest)
 
         const localDecision: LocalCliChatDecision = env.ADK_AGENT_URL
-          ? { route: null, cloudReason: '已交由 Google ADK 语义编排与证据审核主链' }
+          ? { route: null, cloudReason: '已交由 Google ADK 语义编排与证据审核主链', internalOnly: true }
           : await queueLocalCliChat(env, localRouteRequest)
         if (localDecision.immediate) {
           const payload = {
@@ -20529,22 +20674,25 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           routingTrace.push(`本机 CLI 未完成：${String(localOutcome.error || '未知原因').slice(0, 160)}`)
           routingTrace.push('已自动回退云端 Agent')
           send({ type: 'trace', status: 'running', trace: uniqueAgentTrace(routingTrace) })
-        } else if (localDecision.cloudReason) {
+        } else if (localDecision.cloudReason && !localDecision.internalOnly) {
           routingTrace.push(localDecision.cloudReason)
           send({ type: 'trace', status: 'running', trace: uniqueAgentTrace(routingTrace) })
         }
 
         let cloudTrace: string[] = []
         let streamingRationale = ''
+        // 推理文本是"当前这一句"的持续重写，只能瞬时显示，不能沉淀进 cloudTrace：
+        // 否则每来一个步骤就固化一版，思考链里会出现一串互为前缀的重复句子。
         const emitCloudTrace: AgentVisibleTraceSink = async (items) => {
-          cloudTrace = uniqueAgentTrace([...(streamingRationale ? [streamingRationale] : []), ...cloudTrace, ...items])
+          streamingRationale = ''
+          cloudTrace = uniqueAgentTrace([...cloudTrace, ...items])
           send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]) })
           await waitForAgentTimeline(30)
         }
-        // 流式思考：直接替换 trace 内容（不累积），实现逐字显示
+        // 流式思考：正在生成的推理内容逐块替换末行，实现逐字显示
         const emitThinkingStream = (text: string) => {
           streamingRationale = text
-          send({ type: 'trace', status: 'running', trace: [...routingTrace, text] })
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace, streamingRationale]) })
         }
         const response = await chatWithAi(env, cloudRequest, emitCloudTrace, emitThinkingStream)
         const metricResponse = response.clone()
@@ -20566,6 +20714,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           return
         }
 
+        // payload.trace 已在 formatAgentRuntimeTrace 里滤掉原始工具名，
+        // 因此可以安全地接在流式步骤后面，作为这一轮的收尾小结。
         const trace = uniqueAgentTrace(payload.trace)
         const visibleTrace = uniqueAgentTrace([
           ...routingTrace,
@@ -22906,7 +23056,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   if (path === '/api/health') {
     const agentFactProtocol = runAgentFactProtocolSelfTest()
     if (!agentFactProtocol.ok) return fail('Agent 结构化事实协议自检失败', 503)
-    return ok({ ok: true, version: appVersion, storage: 'D1/R2', agentFactProtocol, checkedAt: nowIso() })
+    const includeAgentRuntime = new URL(request.url).searchParams.get('runtime') === '1'
+    const agentRuntime = includeAgentRuntime ? await probeAdkRuntimeHealth(env) : undefined
+    return ok({ ok: true, version: appVersion, storage: 'D1/R2', agentFactProtocol, agentRuntime, checkedAt: nowIso() })
   }
   if (path === '/api/client-errors' && request.method === 'POST') {
     return recordClientError(env, request)

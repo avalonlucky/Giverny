@@ -221,6 +221,38 @@ test('工作助手的明确创建指令直接进入业务流程且不虚构字�
   await expect(dialog.getByText(/快捷键：|产品手册|更新日志|执行编排路径|结构化事实协议|主模型调用/)).toHaveCount(0)
 })
 
+test('工作助手思考链展示真实步骤且不暴露框架与工具名', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  const input = dialog.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('你帮我新建一个任务')
+  await input.press('Enter')
+  await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
+
+  // 流式步骤要真的落进思考链，而不是只有一句静止的占位符。
+  const reasoning = dialog.getByText(/已思考 \d+ 步/)
+  await expect(reasoning).toBeVisible()
+  await reasoning.click()
+  await expect(dialog.getByText('正在判断这个问题问的是哪个对象、哪个维度', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('正在读取任务详情', { exact: true })).toBeVisible()
+
+  // 底层框架名、主链名称与原始 operationId 一律不得出现在界面上。
+  await expect(dialog.getByText(/Google ADK|语义编排|证据审核主链/)).toHaveCount(0)
+  await expect(dialog.getByText(/search_attachments|get_task_detail|query_month_finance|transfer_to_agent/)).toHaveCount(0)
+})
+
+test('思考链摘要不会把同一句话重复显示两遍', async ({ page }) => {
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  const input = dialog.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('你帮我新建一个任务')
+  await input.press('Enter')
+  await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
+  await dialog.getByText(/已思考 \d+ 步/).click()
+  // 展开后同一条步骤只能出现一次：摘要预览只在收起状态下补位。
+  await expect(dialog.getByText('正在读取任务详情', { exact: true })).toHaveCount(1)
+})
+
 test('工作助手展开后提供独立会话侧栏', async ({ page }) => {
   await page.getByRole('button', { name: '打开工作助手' }).click()
   const dialog = page.getByRole('dialog', { name: '爱丽丝' })

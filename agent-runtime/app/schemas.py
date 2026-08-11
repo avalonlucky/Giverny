@@ -6,6 +6,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 
 
 AgentRole = Literal["admin", "demo", "collaborator", "viewer", "client", "guest", "mcp-read", "system"]
+ModelProvider = Literal["deepseek", "gemini", "kimi", "doubao", "qwen", "openai", "openrouter", "anthropic", "custom-openai"]
 
 
 class Principal(BaseModel):
@@ -22,6 +23,21 @@ class HistoryMessage(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
 
 
+class SelectedModelConfig(BaseModel):
+    """The exact model selected in Giverny settings for this turn.
+
+    The API key is deliberately excluded from repr/serialization. It exists only
+    in memory long enough to construct the ADK model adapter.
+    """
+
+    provider: ModelProvider
+    model: str = Field(min_length=1, max_length=240)
+    base_url: str = Field(alias="baseUrl", min_length=1, max_length=1000)
+    api_key: str = Field(default="", alias="apiKey", max_length=1200, repr=False, exclude=True)
+
+    model_config = {"populate_by_name": True}
+
+
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=12000)
     conversation_id: str = Field(alias="conversationId", min_length=1, max_length=160)
@@ -29,6 +45,7 @@ class ChatRequest(BaseModel):
     context: str = Field(default="", max_length=24000)
     history: list[HistoryMessage] = Field(default_factory=list, max_length=30)
     principal: Principal
+    selected_model: SelectedModelConfig = Field(alias="selectedModel")
 
     model_config = {"populate_by_name": True}
 

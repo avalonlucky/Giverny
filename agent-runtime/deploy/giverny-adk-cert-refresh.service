@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh Giverny ADK TLS certificate copy
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl try-restart giverny-adk.service

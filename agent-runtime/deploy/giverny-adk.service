@@ -1,0 +1,45 @@
+[Unit]
+Description=Giverny Google ADK Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=giverny-adk
+Group=giverny-adk
+WorkingDirectory=/opt/giverny-adk/current
+EnvironmentFile=/etc/giverny-adk/runtime.env
+ExecStartPre=+/usr/bin/install -m 0640 -o root -g giverny-adk /root/cert/adk-runtime/fullchain.pem /etc/giverny-adk/tls/fullchain.pem
+ExecStartPre=+/usr/bin/install -m 0640 -o root -g giverny-adk /root/cert/adk-runtime/privkey.pem /etc/giverny-adk/tls/privkey.pem
+ExecStart=/opt/giverny-adk/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --workers 1 --timeout-keep-alive 75 --ssl-certfile /etc/giverny-adk/tls/fullchain.pem --ssl-keyfile /etc/giverny-adk/tls/privkey.pem
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+Nice=10
+IOSchedulingClass=idle
+MemoryHigh=900M
+MemoryMax=1200M
+TasksMax=256
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/giverny-adk
+ReadOnlyPaths=/etc/giverny-adk/tls
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

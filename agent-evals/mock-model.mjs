@@ -33,9 +33,13 @@ function signedAgentHeaders(principal) {
 async function adkResponse(payload) {
   const question = String(payload.question || '')
   const conversationId = String(payload.conversationId || crypto.randomUUID())
+  const selectedModel = payload.selectedModel && typeof payload.selectedModel === 'object' ? payload.selectedModel : null
+  if (!selectedModel?.provider || !selectedModel?.model || !selectedModel?.baseUrl) {
+    throw new Error('评测请求缺少 selectedModel 精确模型契约')
+  }
   const base = {
     conversationId,
-    model: 'google-adk-eval',
+    model: String(selectedModel.model),
     trace: [
       { type: 'thought', label: '理解', detail: '已识别用户目标与对象' },
       { type: 'plan', label: '规划', detail: '只使用当前请求需要的专家与工具' },
@@ -43,8 +47,8 @@ async function adkResponse(payload) {
       { type: 'result', label: '答案核对', detail: '评测运行时已通过契约校验' },
     ],
     agentTurn: { verification: { passed: true }, evidenceCount: 1 },
-    factVerification: { passed: true, checkedClaims: 1, sourceTools: [], fallbackUsed: false },
-    orchestration: { engine: 'google-adk-2', status: 'answered', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], specialists: [], evidenceCount: 1 },
+    factVerification: { passed: true, checkedClaims: 1, sourceTools: [], fallbackUsed: false, auditorModel: String(selectedModel.model) },
+    orchestration: { engine: 'google-adk-2', status: 'answered', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], specialists: [], evidenceCount: 1, provider: String(selectedModel.provider), model: String(selectedModel.model), modelPolicy: 'exact-selected-model-no-fallback', modelCallLimit: 7 },
     productivity: { engine: 'google-adk-2', status: 'complete', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], cycles: 1, toolCalls: 0, reason: '评测契约已完成' },
   }
 
@@ -64,7 +68,7 @@ async function adkResponse(payload) {
       ...base,
       answer: `**已核验结算回单**\n\n日期范围：${startDate} 至 ${endDate}\n\nExcel 已生成，可在下方下载或打开在线预览。`,
       attachments: toolResult.files || [],
-      factVerification: { passed: true, checkedClaims: 1, sourceTools: ['generate_settlement_receipt'], fallbackUsed: false },
+      factVerification: { ...base.factVerification, sourceTools: ['generate_settlement_receipt'] },
       orchestration: { ...base.orchestration, specialists: ['transaction_specialist'], evidenceCount: 1 },
       productivity: { ...base.productivity, toolCalls: 1 },
     }
@@ -592,14 +596,38 @@ const server = http.createServer((request, response) => {
   request.on('end', async () => {
     try {
       const payload = JSON.parse(body || '{}')
-      if (request.method === 'POST' && request.url === '/v1/chat') {
+      if (request.method === 'POST' && (request.url === '/v1/chat' || request.url === '/v1/chat/stream')) {
         if (request.headers['x-adk-runtime-key'] !== 'eval-adk-runtime-key') {
           response.writeHead(401, { 'content-type': 'application/json' })
           response.end(JSON.stringify({ detail: '未授权的评测 Runtime 请求' }))
           return
         }
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end(JSON.stringify(await adkResponse(payload)))
+        if (request.url === '/v1/chat') {
+          response.writeHead(200, { 'content-type': 'application/json' })
+          response.end(JSON.stringify(await adkResponse(payload)))
+          return
+        }
+        // 生产主链走的是流式端点，评测必须覆盖同一条路径：
+        // 之前只有秒回的 /v1/chat 桩，真实的 80 秒延迟与 520 在评测里完全不可见。
+        response.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+        })
+        const frame = (value) => response.write(`data: ${JSON.stringify(value)}\n\n`)
+        frame({ type: 'accepted', conversationId: String(payload.conversationId || '') })
+        frame({ type: 'step', detail: '正在判断这个问题问的是哪个对象、哪个维度' })
+        // 心跳注释帧：验证 Worker 的 SSE 解析会跳过非 data 帧而不是报错。
+        response.write(': keep-alive\n\n')
+        // 模型推理内容逐块下发（thought part），验证打字机通道打通。
+        frame({ type: 'thinking', detail: '用户问的是这个项目最新那一版' })
+        frame({ type: 'thinking', detail: '用户问的是这个项目最新那一版，我先看附件里的版本号' })
+        frame({ type: 'step', detail: '正在读取任务详情' })
+        try {
+          frame({ type: 'result', response: await adkResponse(payload) })
+        } catch (error) {
+          frame({ type: 'error', status: 502, detail: `ADK Agent 执行失败：${error.message}` })
+        }
+        response.end()
         return
       }
       requestLog.push({

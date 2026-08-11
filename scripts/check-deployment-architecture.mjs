@@ -2,11 +2,18 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
+const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+const appConfig = readFileSync('src/config/appConfig.ts', 'utf8')
 const deploySource = readFileSync('scripts/deploy-cloudflare-api.mjs', 'utf8')
 const apiSource = readFileSync('scripts/lib/cloudflare-api.mjs', 'utf8')
 const infraSource = readFileSync('scripts/sync-cloudflare-infrastructure.mjs', 'utf8')
 const deployScripts = Object.entries(packageJson.scripts || {}).filter(([name]) => name.startsWith('deploy:'))
 const failures = []
+
+const appVersion = appConfig.match(/export const appVersion = '([^']+)'/)?.[1]
+if (appVersion !== packageJson.version || packageLock.version !== packageJson.version || packageLock.packages?.['']?.version !== packageJson.version) {
+  failures.push(`发布版本必须一致：appConfig=${appVersion || '缺失'} package=${packageJson.version} lock=${packageLock.version}`)
+}
 
 if (packageJson.scripts?.['deploy:production'] !== 'npm run build && npm run infra:sync && node scripts/deploy-cloudflare-api.mjs && npm run agent:fact:production') {
   failures.push('deploy:production 必须先同步 Cloudflare 基础设施，再使用 HTTP API 发布器并执行生产 Agent 事实协议验收')

@@ -35,6 +35,10 @@ for (const forbidden of ['ALICE_AGENT', 'runAgentRuntimeGraph(', 'applyAgentGrou
 if (!streamEntry.includes('env.ADK_AGENT_URL') || !streamEntry.includes("{ route: null, cloudReason: '已交由 Google ADK")) {
   failures.push('已配置 ADK 时流式入口仍可能被本机 CLI 抢占')
 }
+// 路由原因可以写进审计，但不能出现在用户看到的思考链里。
+if (!streamEntry.includes('internalOnly: true') || !streamEntry.includes('!localDecision.internalOnly')) {
+  failures.push('内部编排原因（框架名、主链名称）可能泄漏进用户可见思考链')
+}
 
 const cases = suite.cases || []
 for (const id of ['publication-version-direct', 'publication-version-paraphrase', 'version-dimension-conflict', 'product-release-real', 'multiturn-reference', 'ambiguous-entity']) {

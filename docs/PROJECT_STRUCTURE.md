@@ -50,6 +50,7 @@
 │   ├── AGENT_ENTERPRISE_ROADMAP.md
 │   ├── AGENT_WORKFLOWS.md
 │   ├── AI_MODEL_ROUTING.md
+│   ├── AI_COST_AND_MODEL_GOVERNANCE.md
 │   ├── AI_LEARNING.md
 │   ├── AI_HOUR_ESTIMATE.md
 │   ├── AI_PROGRESS_ASSESSMENT.md
@@ -330,6 +331,7 @@
 - Local computer pairing, CLI discovery and tenant isolation: `docs/LOCAL_CLI_BRIDGE.md`
 - Local CLI outbound connector: `public/giverny-bridge.mjs`
 - AI model routing notes: `docs/AI_MODEL_ROUTING.md`
+- AI paid-operation approval and exact ADK model contract: `docs/AI_COST_AND_MODEL_GOVERNANCE.md`
 - AI feedback learning, style distillation and hour calibration: `docs/AI_LEARNING.md`
 - AI hour-estimate complexity profile, retrieval, breakdown and calibration: `docs/AI_HOUR_ESTIMATE.md`
 - AI milestone progress evidence, guardrails and correction calibration: `docs/AI_PROGRESS_ASSESSMENT.md`

@@ -6,7 +6,7 @@ from typing import Any
 from google.adk.agents import LlmAgent
 from google.adk.models.base_llm import BaseLlm
 
-from .config import Settings
+from .schemas import SelectedModelConfig
 from .tooling import READ_GROUPS, ToolFactory, capture_tool_evidence
 
 
@@ -82,37 +82,45 @@ intent_summary, subject, allowed_specialists, requires_evidence, rationale。
 """.strip()
 
 
-def _model(model_name: str, api_base: str = "") -> str | BaseLlm:
-    # Native Gemini model identifiers use ADK's first-party model adapter and
-    # Cloud Run Application Default Credentials. Other providers go through
-    # LiteLLM without changing the orchestration contract.
-    if "/" not in model_name:
-        return model_name
+def _model(config: SelectedModelConfig) -> str | BaseLlm:
+    # Gemini without an API key uses ADK's native Vertex adapter. Every other
+    # route uses the exact provider/model/base URL selected in Giverny settings.
+    # There is intentionally no fallback model here.
+    if config.provider == "gemini" and not config.api_key:
+        return config.model
     if importlib.util.find_spec("litellm") is None:
-        raise RuntimeError("Multi-provider model requires google-adk[extensions]")
+        raise RuntimeError("Selected multi-provider model requires the litellm adapter")
     import litellm  # noqa: F401 - ADK 2.6 lazy loader requires the module to be initialized.
     from google.adk.models import LiteLlm
 
-    kwargs: dict[str, Any] = {}
-    if api_base:
-        kwargs["api_base"] = api_base
+    provider_prefix = {
+        "gemini": "gemini",
+        "openrouter": "openrouter",
+        "anthropic": "anthropic",
+    }.get(config.provider, "openai")
+    model_name = config.model if config.model.startswith(f"{provider_prefix}/") else f"{provider_prefix}/{config.model}"
+    kwargs: dict[str, Any] = {"api_base": config.base_url}
+    if config.api_key:
+        kwargs["api_key"] = config.api_key
     return LiteLlm(model=model_name, **kwargs)
 
 
-def build_scope_supervisor(settings: Settings) -> LlmAgent:
+def build_scope_supervisor(selected_model: SelectedModelConfig) -> LlmAgent:
     return LlmAgent(
         name="scope_supervisor",
         description="理解用户真实主体与意图，在编排前限定专家可见性。",
-        model=_model(settings.coordinator_model, settings.model_api_base),
+        model=_model(selected_model),
         instruction=SUPERVISOR_INSTRUCTION,
         mode="chat",
         include_contents="none",
     )
 
 
-def build_agent_bundle(settings: Settings, tool_factory: ToolFactory, role: str, allowed_specialists: set[str]) -> tuple[LlmAgent, LlmAgent, LlmAgent]:
-    coordinator_model = _model(settings.coordinator_model, settings.model_api_base)
-    auditor_model = _model(settings.auditor_model, settings.model_api_base)
+def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str, allowed_specialists: set[str]) -> tuple[LlmAgent, LlmAgent, LlmAgent]:
+    # Coordinator, specialists, formatter and auditor must all use the exact
+    # selected model. A cheaper or different auditor would violate the UI/model contract.
+    coordinator_model = _model(selected_model)
+    auditor_model = _model(selected_model)
 
     workspace_analyst = LlmAgent(
         name="workspace_analyst",

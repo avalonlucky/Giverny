@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from google.genai import types
@@ -15,14 +18,30 @@ from google.genai import types
 from .agents import build_agent_bundle, build_scope_supervisor
 from .config import Settings
 from .evidence import EvidenceStore, deterministic_verify
-from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, RoutingDecision
+from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, RoutingDecision, SelectedModelConfig
 from .tooling import RequestScope, ToolFactory, request_scope
 
 
 def _content_text(event: Any) -> str:
+    """答案正文：必须排除 thought part。
+
+    思考内容与答案是两类 part（`types.Part.thought`）。把它们混在一起，
+    推理过程会被当成草稿送进 formatter，也会污染最终答案。
+    """
     content = getattr(event, "content", None)
     parts = getattr(content, "parts", None) or []
-    return "".join(str(getattr(part, "text", "") or "") for part in parts).strip()
+    return "".join(
+        str(getattr(part, "text", "") or "") for part in parts if not getattr(part, "thought", False)
+    ).strip()
+
+
+def _thought_text(event: Any) -> str:
+    """模型的推理内容。可以实时展示给用户——它不是结论，因此不绕过证据审核。"""
+    content = getattr(event, "content", None)
+    parts = getattr(content, "parts", None) or []
+    return "".join(
+        str(getattr(part, "text", "") or "") for part in parts if getattr(part, "thought", False)
+    ).strip()
 
 
 def _structured_event(event: Any, schema: type[Any]) -> Any | None:
@@ -54,6 +73,30 @@ def _parse_structured_text(value: str, schema: type[Any]) -> Any | None:
     return None
 
 
+# 思考步骤沉降到用户界面，因此只允许自然语言：不得出现框架名、主链名称、
+# 专家代号或原始工具 operationId。上限与 Claim 文案一致，避免界面被单步刷爆。
+StepSink = Callable[[str], Awaitable[None]] | None
+
+# 推理内容是逐块下发的连续文本（打字机效果），和离散的步骤分开走。
+ThoughtSink = Callable[[str], Awaitable[None]] | None
+
+_STEP_TEXT_LIMIT = 120
+
+# 每个外层聊天请求的模型调用硬预算：1（范围主管）+ 4（协调器及专家）
+# + 1（结构化整理）+ 1（证据审核）= 最多 7 次。Google ADK 默认是 500，
+# 绝不能直接用于生产，否则一次超时/循环就可能产生大量费用。
+SUPERVISOR_LLM_CALL_LIMIT = 1
+COORDINATOR_LLM_CALL_LIMIT = 4
+FORMATTER_LLM_CALL_LIMIT = 1
+AUDITOR_LLM_CALL_LIMIT = 1
+TOTAL_LLM_CALL_LIMIT = 7
+
+
+def _sanitize_step(text: str) -> str:
+    cleaned = " ".join(str(text or "").split())
+    return cleaned[:_STEP_TEXT_LIMIT]
+
+
 def _conversation_prompt(request: ChatRequest, history_limit: int) -> str:
     history = request.history[-history_limit:]
     history_text = "\n".join(
@@ -83,21 +126,66 @@ class AgentRuntime:
             token=self.settings.tool_token,
             timeout_seconds=min(30.0, self.settings.request_timeout_seconds),
         )
-        self.supervisor_runner = Runner(
-            agent=build_scope_supervisor(self.settings),
+        self._supervisors: dict[tuple[str, str, str, str], Runner] = {}
+        self._bundles: dict[tuple[str, str, str, str, str, tuple[str, ...]], tuple[Runner, Runner, Runner]] = {}
+        self._conversation_locks: dict[str, asyncio.Lock] = {}
+
+    @staticmethod
+    def _model_key(selected_model: SelectedModelConfig) -> tuple[str, str, str, str]:
+        # The digest prevents stale cached adapters after a key rotation without
+        # putting the secret itself into cache keys, traces or error messages.
+        key_digest = hashlib.sha256(selected_model.api_key.encode()).hexdigest()[:16] if selected_model.api_key else "vertex-adc"
+        return selected_model.provider, selected_model.model, selected_model.base_url, key_digest
+
+    def _supervisor(self, selected_model: SelectedModelConfig) -> Runner:
+        key = self._model_key(selected_model)
+        cached = self._supervisors.get(key)
+        if cached:
+            return cached
+        runner = Runner(
+            agent=build_scope_supervisor(selected_model),
             app_name="giverny-adk-supervisor",
             session_service=self.session_service,
             auto_create_session=True,
         )
-        self._bundles: dict[tuple[str, tuple[str, ...]], tuple[Runner, Runner, Runner]] = {}
-        self._conversation_locks: dict[str, asyncio.Lock] = {}
+        self._supervisors[key] = runner
+        return runner
 
-    def _runners(self, role: str, allowed_specialists: set[str]) -> tuple[Runner, Runner, Runner]:
-        key = (role, tuple(sorted(allowed_specialists)))
+    def _tool_summaries(self) -> dict[str, str]:
+        # OpenAPI 里每个业务工具都自带中文 summary（search_attachments → 搜索任务附件），
+        # 直接复用它派生用户可见文案，避免再维护一份会和接口漂移的映射表。
+        cached = getattr(self, "_tool_summary_cache", None)
+        if cached is not None:
+            return cached
+        summaries: dict[str, str] = {}
+        for path_item in self.spec.get("paths", {}).values():
+            if not isinstance(path_item, dict):
+                continue
+            for operation in path_item.values():
+                if not isinstance(operation, dict):
+                    continue
+                operation_id = str(operation.get("operationId") or "").strip()
+                summary = str(operation.get("summary") or "").strip()
+                if operation_id and summary:
+                    summaries.setdefault(operation_id, summary)
+        self._tool_summary_cache = summaries
+        return summaries
+
+    def _tool_phrase(self, tool_name: str) -> str:
+        name = str(tool_name or "").strip()
+        if not name:
+            return "正在查阅业务数据"
+        summaries = self._tool_summaries()
+        summary = summaries.get(name) or summaries.get(name.removesuffix("_post"))
+        # 查不到 summary 时绝不回落成原始 operationId，宁可说得笼统一点。
+        return f"正在{summary}" if summary else "正在查阅业务数据"
+
+    def _runners(self, selected_model: SelectedModelConfig, role: str, allowed_specialists: set[str]) -> tuple[Runner, Runner, Runner]:
+        key = (*self._model_key(selected_model), role, tuple(sorted(allowed_specialists)))
         cached = self._bundles.get(key)
         if cached:
             return cached
-        coordinator, formatter, auditor = build_agent_bundle(self.settings, self.tool_factory, role, allowed_specialists)
+        coordinator, formatter, auditor = build_agent_bundle(selected_model, self.tool_factory, role, allowed_specialists)
         coordinator_runner = Runner(
             agent=coordinator,
             app_name="giverny-adk",
@@ -126,15 +214,25 @@ class AgentRuntime:
         user_id: str,
         session_id: str,
         prompt: str,
+        on_step: StepSink = None,
+        on_thought: ThoughtSink = None,
+        max_llm_calls: int,
     ) -> tuple[str, list[dict[str, str]]]:
         final_text = ""
         trace: list[dict[str, str]] = []
         event_shapes: list[dict[str, Any]] = []
+        # SSE 模式下 runner 会边生成边吐 partial 事件；没有它的话，模型思考
+        # 几十秒期间一个事件都没有，界面上最后一行就会定住不动。
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
+            run_config=RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls),
         ):
+            if on_thought:
+                thought = _thought_text(event)
+                if thought:
+                    await on_thought(thought)
             author = str(getattr(event, "author", "") or "agent")
             calls = list(event.get_function_calls() or []) if getattr(event, "get_function_calls", None) else []
             responses = list(event.get_function_responses() or []) if getattr(event, "get_function_responses", None) else []
@@ -148,7 +246,11 @@ class AgentRuntime:
             })
             if getattr(event, "get_function_calls", None):
                 for call in calls:
-                    trace.append({"type": "tool", "label": author, "detail": str(getattr(call, "name", "tool"))})
+                    tool_name = str(getattr(call, "name", "tool"))
+                    trace.append({"type": "tool", "label": author, "detail": tool_name})
+                    # 委派专家（transfer_to_agent）属于内部编排，不进用户可见步骤。
+                    if on_step and tool_name != "transfer_to_agent":
+                        await on_step(self._tool_phrase(tool_name))
             if getattr(event, "get_function_responses", None):
                 for response in responses:
                     response_value = getattr(response, "response", None)
@@ -178,57 +280,65 @@ class AgentRuntime:
         session_id: str,
         prompt: str,
         schema: type[Any],
+        on_step: StepSink = None,
+        max_llm_calls: int,
     ) -> tuple[Any, list[dict[str, str]]]:
         trace: list[dict[str, str]] = []
-        current_prompt = prompt
         last_text = ""
-        for attempt in range(2):
-            parsed = None
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=types.Content(role="user", parts=[types.Part(text=current_prompt)]),
-            ):
-                author = str(getattr(event, "author", "") or "agent")
-                if getattr(event, "get_function_calls", None):
-                    for call in event.get_function_calls() or []:
-                        trace.append({"type": "tool", "label": author, "detail": str(getattr(call, "name", "tool"))})
-                text = _content_text(event)
-                if text:
-                    last_text = text
-                candidate = _structured_event(event, schema)
-                if candidate is not None:
-                    parsed = candidate
-            if parsed is not None:
-                return parsed, trace
-            if attempt == 0 and last_text:
-                current_prompt = json.dumps(
-                    {
-                        "task": "上一版输出未通过结构校验。不引入新事实，只按 schema 重写 JSON。",
-                        "jsonSchema": schema.model_json_schema(),
-                        "previousOutput": last_text,
-                    },
-                    ensure_ascii=False,
-                )
-        raise RuntimeError(f"{schema.__name__} structured output missing after validation retry")
+        parsed = None
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
+            run_config=RunConfig(max_llm_calls=max_llm_calls),
+        ):
+            author = str(getattr(event, "author", "") or "agent")
+            if getattr(event, "get_function_calls", None):
+                for call in event.get_function_calls() or []:
+                    tool_name = str(getattr(call, "name", "tool"))
+                    trace.append({"type": "tool", "label": author, "detail": tool_name})
+                    if on_step and tool_name != "transfer_to_agent":
+                        await on_step(self._tool_phrase(tool_name))
+            text = _content_text(event)
+            if text:
+                last_text = text
+            candidate = _structured_event(event, schema)
+            if candidate is not None:
+                parsed = candidate
+        if parsed is not None:
+            return parsed, trace
+        raise RuntimeError(f"{schema.__name__} structured output missing within the one-call safety budget")
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(self, request: ChatRequest, on_step: StepSink = None, on_thought: ThoughtSink = None) -> ChatResponse:
+        async def step(text: str) -> None:
+            if not on_step:
+                return
+            cleaned = _sanitize_step(text)
+            if cleaned:
+                await on_step(cleaned)
+
         lock_key = f"{request.principal.workspace_id}:{request.conversation_id}"
         lock = self._conversation_locks.setdefault(lock_key, asyncio.Lock())
         async with lock:
+            selected_model = request.selected_model
             conversation_prompt = _conversation_prompt(request, self.settings.max_history_messages)
+            await step("正在判断这个问题问的是哪个对象、哪个维度")
             routing, routing_trace = await asyncio.wait_for(
                 self._run_structured(
-                    self.supervisor_runner,
+                    self._supervisor(selected_model),
                     user_id=request.principal.principal_id,
                     session_id=f"scope-{uuid.uuid4()}",
                     prompt=conversation_prompt,
                     schema=RoutingDecision,
+                    on_step=on_step,
+                    max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
                 ),
                 timeout=self.settings.request_timeout_seconds,
             )
+            # 这是模型对问题的真实理解，不是占位符文案，直接给用户看。
+            await step(routing.intent_summary)
             allowed_specialists = set(routing.allowed_specialists)
-            coordinator_runner, formatter_runner, auditor_runner = self._runners(request.principal.role, allowed_specialists)
+            coordinator_runner, formatter_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
             evidence = EvidenceStore()
             token = request_scope.set(RequestScope(principal=request.principal, evidence=evidence))
             try:
@@ -242,6 +352,11 @@ class AgentRuntime:
                             "只能委派 allowed_specialists 中列出的专家，不得请求其他领域。\n"
                             f"{conversation_prompt}"
                         ),
+                        on_step=on_step,
+                        # 只有 coordinator 这一段值得实时展示推理：它耗时最长，
+                        # 而且它的 thought part 是过程而非结论，不绕过证据审核。
+                        on_thought=on_thought,
+                        max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
@@ -254,6 +369,7 @@ class AgentRuntime:
                     ensure_ascii=False,
                     default=str,
                 )
+                await step("正在把证据逐条对齐，整理结论")
                 output, formatter_trace = await asyncio.wait_for(
                     self._run_structured(
                         formatter_runner,
@@ -261,6 +377,8 @@ class AgentRuntime:
                         session_id=f"format-{uuid.uuid4()}",
                         prompt=formatter_prompt,
                         schema=AgentTurnOutput,
+                        on_step=on_step,
+                        max_llm_calls=FORMATTER_LLM_CALL_LIMIT,
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
@@ -280,6 +398,7 @@ class AgentRuntime:
                     ensure_ascii=False,
                     default=str,
                 )
+                await step("正在复核结论与证据是否一致")
                 semantic_audit, audit_trace = await asyncio.wait_for(
                     self._run_structured(
                         auditor_runner,
@@ -287,6 +406,8 @@ class AgentRuntime:
                         session_id=f"audit-{uuid.uuid4()}",
                         prompt=audit_prompt,
                         schema=AuditOutput,
+                        on_step=on_step,
+                        max_llm_calls=AUDITOR_LLM_CALL_LIMIT,
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
@@ -319,7 +440,7 @@ class AgentRuntime:
                 return ChatResponse(
                     answer=answer,
                     conversationId=request.conversation_id,
-                    model=self.settings.coordinator_model,
+                    model=selected_model.model,
                     trace=[
                         {"type": "plan", "label": "语义理解", "detail": output.intent_summary},
                         {"type": "plan", "label": "范围总管", "detail": routing.intent_summary},
@@ -339,11 +460,15 @@ class AgentRuntime:
                         "sourceTools": sorted({record.tool_name for record in evidence.records.values()}),
                         "fallbackUsed": not passed,
                         "issues": issues,
-                        "auditorModel": self.settings.auditor_model,
+                        "auditorModel": selected_model.model,
                     },
                     orchestration={
                         "engine": "google-adk-2",
                         "frameworkVersion": "2.x",
+                        "provider": selected_model.provider,
+                        "model": selected_model.model,
+                        "modelPolicy": "exact-selected-model-no-fallback",
+                        "modelCallLimit": TOTAL_LLM_CALL_LIMIT,
                         "specialists": output.used_specialists,
                         "evidenceCount": len(evidence.records),
                         "status": output.status,

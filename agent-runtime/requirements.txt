@@ -2,5 +2,6 @@ google-adk[db]>=2.6.3,<3
 aiosqlite>=0.21,<1
 fastapi>=0.116,<1
 httpx>=0.28,<1
+litellm>=1.80,<2
 pydantic>=2.12,<3
 uvicorn[standard]>=0.35,<1
