@@ -3215,7 +3215,7 @@ async function readAdkChatStream(
   const response = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(280_000) })
   if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => '')
-    throw new Error(detail.slice(0, 300) || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
+    throw new Error(detail.slice(0, 300) || `工作助手服务返回异常（HTTP ${response.status}），请稍后再试一次。`)
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -3265,7 +3265,7 @@ async function readAdkChatStream(
   }
   if (buffer.trim()) await consumeFrame(buffer)
   if (streamError) throw new Error(streamError)
-  if (!result) throw new Error('Google ADK Runtime 未返回可用结果')
+  if (!result) throw new Error('工作助手这一轮没有返回结果，请再试一次。')
   return { ...(result as AdkChatPayload), streamedSteps }
 }
 
@@ -3447,7 +3447,7 @@ async function callAdkAgentRuntime(
 ): Promise<OpenAiAgentRuntimeResult> {
   const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
   const runtimeKey = String(env.ADK_AGENT_KEY || '').trim()
-  if (!baseUrl || !runtimeKey) throw new Error('Google ADK Runtime 地址或访问密钥未配置')
+  if (!baseUrl || !runtimeKey) throw new Error('工作助手服务尚未配置完成，请联系管理员。')
 
   const pending = await readAdkPendingAction(env, args.principal, args.conversationId)
   const command = args.query.normalize('NFKC').trim()
@@ -3537,7 +3537,7 @@ async function callAdkAgentRuntime(
     )
   })
   if (!data?.answer || data.orchestration?.engine !== 'google-adk-2') {
-    throw new Error(data?.detail || 'Google ADK Runtime 未返回可验证的编排结果')
+    throw new Error(data?.detail || '工作助手这一轮的结果没能通过校验，请再试一次。')
   }
   // 校验的意义是"确实存在有限边界、而且收在 Worker 自己的上限之内"，不是某个具体数字。
   // 钉死数字会让每次编排调优都变成一次契约不兼容；而真正约束一轮规模的是时间预算，
@@ -3548,7 +3548,13 @@ async function callAdkAgentRuntime(
     Number.isInteger(declaredCallLimit) && declaredCallLimit > 0 && declaredCallLimit <= 60 &&
     Number.isFinite(declaredTurnBudget) && declaredTurnBudget > 0 && declaredTurnBudget < 280
   if (!boundedOrchestration) {
-    throw new Error(`Google ADK Runtime 未声明有效的执行边界：调用上限 ${data.orchestration?.modelCallLimit ?? '缺失'}、单轮预算 ${data.orchestration?.turnBudgetSeconds ?? '缺失'} 秒。已阻止返回结果。`)
+    // 边界声明缺失是部署不一致（Runtime 比 Worker 旧），用户无法处理也不需要知道细节。
+    console.log(JSON.stringify({
+      event: 'adk_runtime_bounds_missing',
+      modelCallLimit: data.orchestration?.modelCallLimit ?? null,
+      turnBudgetSeconds: data.orchestration?.turnBudgetSeconds ?? null,
+    }))
+    throw new Error('工作助手服务版本不一致，已阻止返回未经校验的结果，请稍后再试。')
   }
   if (
     data.model !== selectedModel.model ||
@@ -3586,7 +3592,7 @@ async function callAgentRuntime(
   const cleanQuery = String(args.query || '').trim()
   if (!cleanQuery) return null
   const conversationId = String(args.conversationId || '').trim() || crypto.randomUUID()
-  if (!env.ADK_AGENT_URL) throw new Error('Google ADK Runtime 未启用')
+  if (!env.ADK_AGENT_URL) throw new Error('工作助手服务未启用。')
   return callAdkAgentRuntime(env, {
     query: cleanQuery,
     context: args.context,
@@ -3682,7 +3688,7 @@ async function reviseAgentApproval(env: Env, request: Request) {
       return fail(error instanceof Error ? error.message : '任务草稿更新失败', 409)
     }
   }
-  return fail('Google ADK Runtime 未启用', 503)
+  return fail('工作助手服务未启用。', 503)
 }
 
 function toAgentConversationSummary(row: {
@@ -19425,7 +19431,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
     } catch (error) {
       console.warn(JSON.stringify({ event: 'agent_runtime_failed', error: describeAiCallError(error) }))
       if (runtimeFailureMustStop) {
-        return fail(`Agent Runtime 暂时不可用：${describeAiCallError(error)}`, 503)
+        return fail(`工作助手暂时不可用：${describeAiCallError(error)}`, 503)
       }
     }
   }

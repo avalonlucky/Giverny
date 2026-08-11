@@ -843,6 +843,7 @@ class AgentRuntime:
                     "model": selected_model.model,
                     "modelPolicy": "exact-selected-model-no-fallback",
                     "modelCallLimit": TOTAL_LLM_CALL_LIMIT,
+                    "turnBudgetSeconds": self.settings.turn_budget_seconds,
                     "reasoningStream": reasoning_is_requested(selected_model),
                     "specialists": output.used_specialists,
                     "evidenceCount": len(evidence.records),

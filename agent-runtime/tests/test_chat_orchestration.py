@@ -121,6 +121,69 @@ def build_runtime(supervisor, coordinator, auditor, *, turn_budget=240.0, reques
     return runtime
 
 
+def assert_worker_contract(case, response, *, expected_model="deepseek-v4-pro", expected_provider="deepseek"):
+    """把 Worker 的校验逐条搬过来，对着真实回包跑。
+
+    turnBudgetSeconds 曾经只加到"预算耗尽"这条降级路径上，主成功路径漏了，
+    于是正常答完的回答被 Worker 自己的边界校验拦死并报「未声明有效的执行边界」。
+    三道防线全都放过了：守卫只检查字符串在源码里存在（降级路径上有），
+    测试只覆盖降级路径，评测桩自己声明了这个字段。
+    所以这份契约必须集中在一处，并对每条真实路径都跑一遍。
+    """
+    orchestration = response.orchestration
+    case.assertTrue(response.answer.strip(), "Worker 会拒绝没有正文的回包")
+    case.assertEqual(orchestration["engine"], "google-adk-2")
+    case.assertEqual(orchestration["provider"], expected_provider)
+    case.assertEqual(orchestration["model"], expected_model)
+    case.assertEqual(response.model, expected_model)
+    case.assertEqual(response.fact_verification["auditorModel"], expected_model)
+    case.assertEqual(orchestration["modelPolicy"], "exact-selected-model-no-fallback")
+    limit = orchestration.get("modelCallLimit")
+    case.assertIsInstance(limit, int)
+    case.assertGreater(limit, 0)
+    case.assertLessEqual(limit, 60, "Worker 只接受 60 以内的有限上限")
+    budget = orchestration.get("turnBudgetSeconds")
+    case.assertIsInstance(budget, (int, float))
+    case.assertGreater(budget, 0)
+    case.assertLess(budget, 280, "单轮预算必须收在 Worker 的子请求上限之内")
+
+
+class WorkerContractTest(unittest.IsolatedAsyncioTestCase):
+    """每条会返回给 Worker 的路径都必须满足同一份边界契约。"""
+
+    async def test_answered_response_satisfies_the_worker_contract(self):
+        runtime = build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            _Runner([event("giverny_coordinator", text=json.dumps(ANSWERED, ensure_ascii=False))]),
+            _Runner([event("evidence_auditor", text=json.dumps(AUDIT_PUBLISH, ensure_ascii=False))]),
+        )
+        assert_worker_contract(self, await runtime.chat(build_request()))
+
+    async def test_clarification_response_satisfies_the_worker_contract(self):
+        runtime = build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            _Runner([event("giverny_coordinator", text=json.dumps(CLARIFY, ensure_ascii=False))]),
+            _Runner([]),
+        )
+        assert_worker_contract(self, await runtime.chat(build_request()))
+
+    async def test_blocked_response_satisfies_the_worker_contract(self):
+        runtime = build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            coordinator_rounds(ANSWERED, REPAIRED),
+            auditor_rounds(AUDIT_REFUSE, AUDIT_REFUSE),
+        )
+        assert_worker_contract(self, await runtime.chat(build_request()))
+
+    async def test_budget_exhausted_response_satisfies_the_worker_contract(self):
+        runtime = build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            CallBudgetLandingTest._ExhaustedRunner(),
+            _Runner([]),
+        )
+        assert_worker_contract(self, await runtime.chat(build_request()))
+
+
 class DelegationAttributionTest(unittest.IsolatedAsyncioTestCase):
     """ADK 的委派工具就叫 transfer_to_agent，专家名只在 args 里。"""
 

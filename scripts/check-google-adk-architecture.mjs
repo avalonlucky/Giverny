@@ -31,7 +31,10 @@ assert.ok(!/^\s*(?:from|import)\s+.*langgraph/im.test(runtimeSource), 'independe
 assert.ok(requirements.includes('google-adk[db]'), 'ADK database session dependency must be explicit')
 assert.ok(!requirements.includes('google-adk[extensions]'), 'broad ADK extensions must not pull LangGraph into the runtime image')
 assert.ok(requirements.includes('litellm'), 'ADK must include the narrow multi-provider adapter without pulling the broad extensions bundle')
-assert.ok(chatEntry.includes("if (!env.ADK_AGENT_URL) throw new Error('Google ADK Runtime 未启用')"), 'chat entry must fail closed without ADK')
+assert.ok(chatEntry.includes("if (!env.ADK_AGENT_URL) throw new Error('工作助手服务未启用。')"), 'chat entry must fail closed without ADK')
+// 用户可见的报错里不得出现框架名：用户已经两次因此抱怨"暴露自己用什么框架"。
+assert.ok(!/new Error\(`?'?Google ADK Runtime/.test(worker), 'user-facing errors must not name the orchestration framework')
+assert.ok(worker.includes("event: 'adk_runtime_bounds_missing'"), 'a bounds mismatch must be logged instead of shown as internal numbers')
 assert.equal(
   (mainChat.match(/if \(runtimeFailureMustStop\)/g) || []).length,
   2,
@@ -61,7 +64,7 @@ assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, ma
 // 校验"边界存在且收在 Worker 之内"，而不是某个具体数字——钉死数字会让每次编排调优都变成契约不兼容。
 assert.ok(worker.includes('const boundedOrchestration ='), 'Worker must verify that the runtime declares finite execution bounds')
 assert.ok(worker.includes('declaredTurnBudget < 280'), 'the declared turn budget must nest inside the Worker subrequest limit')
-assert.ok(worker.includes('未声明有效的执行边界'), 'a runtime without declared bounds must be rejected explicitly')
+assert.ok(worker.includes('工作助手服务版本不一致，已阻止返回未经校验的结果'), 'a runtime without declared bounds must be rejected explicitly')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
