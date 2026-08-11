@@ -195,6 +195,8 @@ _INTERNAL_ROLE_PHRASES = {
 }
 
 # 提示词里出现过的协议字段名，模型复述它们的概率很高。
+# 这里必须逐个给出可读的中文，不能都塞进同一个占位词：两个不同字段替换成同一个词
+# 会让句子读不通（`{"内部流程": "unknown", "内部流程": null}`），而用户要看的正是这段推理。
 _INTERNAL_FIELD_PHRASES = {
     "intent_summary": "意图判断",
     "allowed_specialists": "可用范围",
@@ -209,6 +211,19 @@ _INTERNAL_FIELD_PHRASES = {
     "subject_aligned": "主体是否一致",
     "evidence_sufficient": "证据是否充分",
     "needs_clarification": "需要澄清",
+    "entity_type": "对象类型",
+    "entity_id": "对象编号",
+    "grounded_evidence": "已取得的证据",
+    "conversation_history": "对话历史",
+    "current_user_question": "当前问题",
+    "attached_context": "附带上下文",
+    "current_month": "当前月份",
+    "AgentTurnOutput": "结构化结论",
+    "RoutingDecision": "范围判断结论",
+    "AuditOutput": "复核结论",
+    "max_llm_calls": "调用上限",
+    "streaming_mode": "流式模式",
+    "result_author": "结论归属",
     "sub_agent": "内部环节",
     "sub_agents": "内部环节",
 }
