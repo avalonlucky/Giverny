@@ -11,6 +11,8 @@ const operationsGuide = readFileSync('docs/AGENT_PRODUCTION_OPERATIONS.md', 'utf
 const costGovernance = readFileSync('docs/AI_COST_AND_MODEL_GOVERNANCE.md', 'utf8')
 const agentInstructions = readFileSync('AGENTS.md', 'utf8')
 const evalMock = readFileSync('agent-evals/mock-model.mjs', 'utf8')
+const timeline = readFileSync('src/components/AgentExecutionTimeline.tsx', 'utf8')
+const evidenceSource = readFileSync('agent-runtime/app/evidence.py', 'utf8')
 const currentManual = manual.slice(0, manual.indexOf('## 更新记录'))
 const runtimeDir = 'agent-runtime/app'
 const runtimeSource = readdirSync(runtimeDir)
@@ -51,6 +53,9 @@ assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, ma
 assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 7'), 'Worker must reject a runtime that does not attest the seven-call limit')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
+// 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "reasoning-stream-1"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')
 assert.ok(!runtimeSource.includes('GIVERNY_AUDITOR_MODEL'), 'ADK must not retain a hidden fixed auditor model')
@@ -104,6 +109,76 @@ assert.ok(runtimeSource.includes('def _thought_text'), 'reasoning parts must be 
 assert.ok(worker.includes("parsed?.type === 'thinking'"), 'Worker must relay reasoning chunks to the typewriter channel')
 assert.ok(worker.includes('trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale'), 'reasoning and execution progress must use separate transport fields')
 assert.ok(runtimeSource.includes('resolve_workspace_subject'), 'scope supervisor must ground ambiguous workspace objects before routing')
+
+// 混合推理模型不显式打开开关就不返回 reasoning_content，思考链只能是空的。
+// deepseek 走 litellm 的 openai 兼容路由，该路由的 thinking 参数会直接抛
+// UnsupportedParamsError，所以开关只能经 extra_body 透传。
+assert.ok(runtimeSource.includes('def reasoning_extra_body'), 'the runtime must ask the provider for reasoning output')
+assert.ok(
+  runtimeSource.includes('return {"thinking": {"type": "enabled"}}'),
+  'DeepSeek V4 must receive the same thinking switch the direct model path already sends',
+)
+assert.ok(runtimeSource.includes('kwargs["extra_body"] = extra_body'), 'the reasoning switch must travel as extra_body, never as a litellm top-level param')
+assert.ok(!/kwargs\["thinking"\]/.test(runtimeSource), 'a top-level thinking param would make every openai-route request fail')
+assert.ok(runtimeSource.includes('_model(selected_model, reasoning=True)'), 'the long orchestration stages must request reasoning output')
+assert.ok(runtimeSource.includes('auditor_model = _model(selected_model, reasoning=False)'), 'the auditor gate needs no visible reasoning and must not pay for it')
+assert.ok(runtimeSource.includes('BuiltInPlanner(thinking_config=types.ThinkingConfig(include_thoughts=True))'), 'the native Gemini route needs a thinking planner to emit thought parts')
+assert.ok(runtimeSource.includes('def reasoning_stream_expected'), 'the runtime must tell the client whether reasoning was requested at all')
+assert.ok(worker.includes("if (parsed?.type === 'accepted') onReasoningExpected?.(parsed.reasoning === true)"), 'Worker must relay the reasoning declaration from the handshake frame')
+
+// 推理内容与 intent_summary 都是模型自由文本，会照着提示词念出内部名词。
+// 这两条通道直接渲染给用户，所以出口必须消毒——trace 有过滤器，thinking 也必须有。
+assert.ok(runtimeSource.includes('def _scrub_internal'), 'model-authored text must be scrubbed before it reaches the user')
+assert.ok(runtimeSource.includes('await on_thought(self._scrub_internal(thoughts.text()))'), 'the reasoning channel must be scrubbed, not only the trace channel')
+assert.ok(runtimeSource.includes('cleaned = _sanitize_step(self._scrub_internal(text))'), 'model-authored step text must be scrubbed too')
+assert.ok(timeline.includes('function scrubInternalNames'), 'the UI must keep a second scrubbing layer for reasoning text')
+assert.ok(timeline.includes('scrubInternalNames(thinking?.trim() ?? \'\')'), 'reasoning text must never be rendered unscrubbed')
+assert.ok(evalMock.includes('由 Google ADK 编排'), 'the eval stub must emit dirty reasoning so the scrubbing assertions are not vacuous')
+
+// ADK 的 SSE 分片是增量，段末再补一帧聚合全文。靠 endswith 猜就会吞掉重复分片
+// （JSON 里的 "" 和 }}），丢一次末尾聚合帧就会被追加成垃圾 JSON，整轮 502。
+assert.ok(runtimeSource.includes('class _StreamText'), 'stream text must be assembled from ADK partial semantics')
+assert.ok(runtimeSource.includes('partial = bool(getattr(event, "partial", False))'), 'delta and aggregated frames must be distinguished by event.partial, never guessed')
+assert.ok(!runtimeSource.includes('def _merge_stream_text'), 'the lossy endswith-based merge must not come back')
+assert.ok(runtimeSource.includes('if accepts_result and not partial:'), 'structured parsing must only run on aggregated frames')
+
+// ADK 的委派工具名固定是 transfer_to_agent，真正的专家名只在 args 里，
+// 只看 detail 的话 used_specialists 与 productivity.path 永远是空数组。
+assert.ok(runtimeSource.includes('.get("agent_name")'), 'delegation attribution must read the transfer target from the call arguments')
+assert.ok(runtimeSource.includes('item.get("agent") in allowed_specialists'), 'used specialists must be derived from the transfer target, not the tool name')
+assert.ok(!/"detail": tool_name\}\)/.test(runtimeSource), 'the delegation entry must carry the resolved target alongside the tool name')
+
+// 审核员的推理里带着还没过闸的答案草稿，展示它等于绕过这道闸门自己。
+assert.ok(!runtimeSource.includes('thought("证据复核"'), 'the auditor stage must never feed the user-visible reasoning channel')
+// 结论不是 answered 时 passed 恒为 False、答案已被固定文案取代，那次调用改变不了任何输出。
+assert.ok(runtimeSource.includes('audited = output.status == "answered"'), 'the auditor must be skipped when its verdict cannot change the output')
+assert.ok(runtimeSource.includes('passed = audited and deterministic.passed'), 'skipping the auditor must never turn into publishing an unaudited answer')
+
+// 每阶段各拿一份单阶段超时，最坏能跑到 450 秒，而 Worker 280 秒就掐断。
+assert.ok(runtimeSource.includes('turn_deadline = time.monotonic() + self.settings.turn_budget_seconds'), 'one turn must carry a single total budget')
+assert.ok(runtimeSource.includes('return min(self.settings.request_timeout_seconds, remaining)'), 'per-stage timeouts must nest inside the turn budget')
+assert.ok(!/timeout=self\.settings\.request_timeout_seconds/.test(runtimeSource), 'no stage may claim the full timeout independently of the turn budget')
+assert.ok(runtimeSource.includes('turn_budget_seconds: float'), 'the turn budget must be an explicit setting')
+
+// 非流式子请求同样会被 Cloudflare 掐断合成 520，所以传输层只能保留流式这一条。
+assert.ok(!/\$\{baseUrl\}\/v1\/chat`/.test(worker), 'the Worker must not fall back to the non-streaming endpoint that Cloudflare turns into a 520')
+assert.ok(worker.includes("args.onTrace ?? (async () => {})"), 'callers without a trace sink must still use the streaming transport')
+
+// 确定性证据门只能拦真正在陈述业务事实的回答。既没工具证据也没事实声明的请求
+// （写文案、闲聊）被拦下来时，用户会收到一句系统根本没做过的"我已查到相关资料"。
+assert.ok(evidenceSource.includes('asserts_workspace_facts = bool(evidence.records) or bool(output.claims)'), 'the subject binding gate must only apply to turns that assert workspace facts')
+assert.ok(evidenceSource.includes('if output.status == "answered" and output.claims and not evidence.records'), 'claims without any tool evidence must still be blocked')
+assert.ok(runtimeSource.includes('if evidence.records\n'), 'the blocked-answer copy must not claim a lookup that never happened')
+assert.ok(
+  /VERSION_PATTERN = re\.compile\(r"\(\?<!\[A-Za-z0-9\]\)\(v\|ver\|rev\|rc\|b\)/.test(evidenceSource),
+  'version detection must be limited to real version prefixes so "Logo 3" cannot block a correct answer',
+)
+assert.ok(runtimeSource.includes('if grounded.get("resolutionStatus") == "resolved":'), 'an ambiguous resolution must not destroy the product-support route')
+
+// Runtime 的 systemd 单元设了 MemoryMax=1200M，只增不减的字典就是慢性 OOM。
+assert.ok(runtimeSource.includes('_ADAPTER_CACHE_LIMIT'), 'model adapter caches must be bounded')
+assert.ok(runtimeSource.includes('class _ConversationGate'), 'conversation locks must be reference counted rather than accumulated forever')
+assert.ok(runtimeSource.includes('self._conversation_locks.pop(lock_key, None)'), 'a finished turn must release its conversation gate')
 // 答案草稿必须先过证据审核才能露面，所以 thought part 不能混进正文。
 assert.ok(
   runtimeSource.includes('if not getattr(part, "thought", False)'),

@@ -19,6 +19,10 @@ from .security import runtime_key_matches
 # 因此空闲时必须持续吐心跳注释帧，让字节不断流动。
 _HEARTBEAT_SECONDS = 10.0
 
+# 每次改动 Worker 与 Runtime 之间的流式契约都要往上推一版，
+# 发布前用 /health 核对，避免 Worker 先上而 Runtime 还是旧代码。
+RUNTIME_CONTRACT = "reasoning-stream-1"
+
 
 settings = Settings.from_env()
 
@@ -45,6 +49,10 @@ async def health(request: Request):
         "runtime": "google-adk-2",
         "framework": "google-adk",
         "modelPolicy": "exact-selected-model-no-fallback",
+        # 契约标记让"Runtime 是否已经先于 Worker 发布"变成可核对的事实。
+        # Worker 依赖 accepted 帧的 reasoning 字段与推理消毒，旧代码不具备。
+        "contract": RUNTIME_CONTRACT,
+        "turnBudgetSeconds": settings.turn_budget_seconds,
         "missing": settings.missing(),
     }
 
@@ -96,7 +104,13 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
         task = asyncio.create_task(run())
         try:
             # 先发一帧，握手立即完成，Worker 不必等第一个编排事件。
-            yield _sse({"type": "accepted", "conversationId": payload.conversation_id})
+            # reasoning 说明本轮有没有向供应商申请推理输出：混合推理模型没打开开关
+            # 就永远不会有 thought part，前端不能一直挂着"等待模型返回推理内容"。
+            yield _sse({
+                "type": "accepted",
+                "conversationId": payload.conversation_id,
+                "reasoning": runtime.reasoning_stream_expected(payload),
+            })
             while True:
                 try:
                     item = await asyncio.wait_for(queue.get(), timeout=_HEARTBEAT_SECONDS)

@@ -3210,6 +3210,7 @@ async function readAdkChatStream(
   body: string,
   onTrace: AgentVisibleTraceSink,
   onThinking?: (text: string) => void,
+  onReasoningExpected?: (expected: boolean) => void,
 ): Promise<AdkChatPayload> {
   const response = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(280_000) })
   if (!response.ok || !response.body) {
@@ -3225,13 +3226,16 @@ async function readAdkChatStream(
   const consumeFrame = async (frame: string) => {
     for (const line of frame.split('\n')) {
       if (!line.startsWith('data:')) continue
-      let parsed: { type?: string; detail?: string; response?: AdkChatPayload } | null
+      let parsed: { type?: string; detail?: string; reasoning?: boolean; response?: AdkChatPayload } | null
       try {
         parsed = JSON.parse(line.slice(5).trim())
       } catch {
         continue
       }
-      if (parsed?.type === 'step' && parsed.detail) {
+      // 握手帧说明本轮有没有向供应商申请推理输出。混合推理模型没打开开关时
+      // 永远不会有 thought part，界面就不该一直挂着"等待模型返回推理内容"。
+      if (parsed?.type === 'accepted') onReasoningExpected?.(parsed.reasoning === true)
+      else if (parsed?.type === 'step' && parsed.detail) {
         streamedSteps = true
         await onTrace([String(parsed.detail)])
       }
@@ -3434,6 +3438,7 @@ async function callAdkAgentRuntime(
     principal: AgentPrincipalContext
     onTrace?: AgentVisibleTraceSink
     onThinkingStream?: (text: string) => void
+    onReasoningExpected?: (expected: boolean) => void
   },
 ): Promise<OpenAiAgentRuntimeResult> {
   const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
@@ -3504,9 +3509,9 @@ async function callAdkAgentRuntime(
       apiKey: selectedModel.apiKey || '',
     },
   })
-  // 编排要跑 60–150 秒。走非流式的 /v1/chat 时这段时间一个字节都不产生，
-  // Cloudflare 会掐断子请求并合成 520，源站算出的 200 直接作废；
-  // 而且用户全程只能看着一句静止的话。所以有 trace sink 时一律走流式端点。
+  // 编排要跑 60–150 秒。非流式请求这段时间一个字节都不产生，Cloudflare 会掐断
+  // 子请求并合成 520，源站算出的 200 直接作废；而且用户全程只能看着一句静止的话。
+  // 因此所有调用方一律走流式端点，Runtime 侧空闲时持续发心跳。
   const data = await tracing.enterSpan('agent.adk.request', async (span) => {
     span.setAttribute('agent.runtime', 'google-adk-2')
     span.setAttribute('agent.role', args.principal.role)
@@ -3515,15 +3520,17 @@ async function callAdkAgentRuntime(
     span.setAttribute('agent.selected_provider', selectedModel.provider)
     span.setAttribute('agent.selected_model', selectedModel.model)
     const headers = { 'content-type': 'application/json', 'x-adk-runtime-key': runtimeKey }
-    if (!args.onTrace) {
-      const response = await fetch(`${baseUrl}/v1/chat`, {
-        method: 'POST', headers, body: requestBody, signal: AbortSignal.timeout(280_000),
-      })
-      const payload = await response.json().catch(() => null) as AdkChatPayload | null
-      if (!response.ok || !payload?.answer) throw new Error(payload?.detail || `Google ADK Runtime 返回异常：HTTP ${response.status}`)
-      return payload
-    }
-    return readAdkChatStream(`${baseUrl}/v1/chat/stream`, headers, requestBody, args.onTrace, args.onThinkingStream)
+    // 没有 trace sink 的调用方（非 SSE 的 /api/ai/chat、MCP、脚本）此前走非流式
+    // /v1/chat，同样会被 Cloudflare 掐断合成 520。所以传输层只保留流式这一条：
+    // 没有接收端时就在内部收干净再整体返回，520 对所有调用方一起消失。
+    return readAdkChatStream(
+      `${baseUrl}/v1/chat/stream`,
+      headers,
+      requestBody,
+      args.onTrace ?? (async () => {}),
+      args.onThinkingStream,
+      args.onReasoningExpected,
+    )
   })
   if (!data?.answer || data.orchestration?.engine !== 'google-adk-2') {
     throw new Error(data?.detail || 'Google ADK Runtime 未返回可验证的编排结果')
@@ -3559,6 +3566,7 @@ async function callAgentRuntime(
     principal: AgentPrincipalContext
     onTrace?: AgentVisibleTraceSink
     onThinkingStream?: (text: string) => void
+    onReasoningExpected?: (expected: boolean) => void
   },
 ): Promise<OpenAiAgentRuntimeResult | null> {
   const cleanQuery = String(args.query || '').trim()
@@ -3574,6 +3582,7 @@ async function callAgentRuntime(
     principal: args.principal,
     onTrace: args.onTrace,
     onThinkingStream: args.onThinkingStream,
+    onReasoningExpected: args.onReasoningExpected,
   })
 }
 
@@ -3582,6 +3591,8 @@ async function probeAdkRuntimeHealth(env: Env): Promise<{
   runtime?: string
   framework?: string
   modelPolicy?: string
+  // Runtime 的流式契约版本。Worker 发布前用它核对 Runtime 是否已经先更新。
+  contract?: string
   error?: string
 }> {
   const baseUrl = String(env.ADK_AGENT_URL || '').trim().replace(/\/+$/, '')
@@ -3598,6 +3609,7 @@ async function probeAdkRuntimeHealth(env: Env): Promise<{
       runtime: String(payload.runtime || ''),
       framework: String(payload.framework || ''),
       modelPolicy: String(payload.modelPolicy || ''),
+      contract: String(payload.contract || ''),
     }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -19260,7 +19272,7 @@ async function searchTavily(apiKey: string, query: string): Promise<string> {
 type AgentVisibleTraceSink = (trace: string[]) => void | Promise<void>
 
 
-async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisibleTraceSink, onThinkingStream?: (text: string) => void) {
+async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisibleTraceSink, onThinkingStream?: (text: string) => void, onReasoningExpected?: (expected: boolean) => void) {
   const body = (await request.json().catch(() => ({}))) as {
     messages?: Array<{ role: string; content: string }>
     month?: string
@@ -19360,6 +19372,7 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
         principal: agentPrincipal,
         onTrace: emitVisibleTrace,
         onThinkingStream,
+        onReasoningExpected,
       })
       if (runtimeResult?.answer) {
         const conversationId = String(runtimeResult.conversationId || '').trim()
@@ -20681,20 +20694,26 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
 
         let cloudTrace: string[] = []
         let streamingRationale = ''
+        // 供应商没被要求返回推理时，界面不能挂着"等待模型返回推理内容"充当进度。
+        let reasoningExpected: boolean | undefined
+        const emitReasoningExpected = (expected: boolean) => {
+          reasoningExpected = expected
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale, reasoningExpected })
+        }
         // 推理文本是"当前这一句"的持续重写，只能瞬时显示，不能沉淀进 cloudTrace：
         // 否则每来一个步骤就固化一版，思考链里会出现一串互为前缀的重复句子。
         const emitCloudTrace: AgentVisibleTraceSink = async (items) => {
           cloudTrace = uniqueAgentTrace([...cloudTrace, ...items])
-          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale })
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale, reasoningExpected })
           await waitForAgentTimeline(30)
         }
         // Runtime 只在供应商确实返回 thought part 时调用这里；执行阶段文案
         // 始终留在 trace，不能再混进 thinking 冒充模型推理。
         const emitThinkingStream = (text: string) => {
           streamingRationale = text
-          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale })
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale, reasoningExpected })
         }
-        const response = await chatWithAi(env, cloudRequest, emitCloudTrace, emitThinkingStream)
+        const response = await chatWithAi(env, cloudRequest, emitCloudTrace, emitThinkingStream, emitReasoningExpected)
         const metricResponse = response.clone()
         const metricWrite = recordAgentRunMetric(
           env,
@@ -20722,8 +20741,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           ...cloudTrace,
           ...(trace.length > 0 ? trace : ['整理回答']),
         ])
-        send({ type: 'trace', status: 'running', trace: visibleTrace, thinking: streamingRationale })
-        send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace, thinking: streamingRationale })
+        send({ type: 'trace', status: 'running', trace: visibleTrace, thinking: streamingRationale, reasoningExpected })
+        send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace, thinking: streamingRationale, reasoningExpected })
         send({ type: 'done' })
       } catch (error) {
         send({ type: 'error', error: error instanceof Error ? error.message : 'Agent 请求失败' })

@@ -264,8 +264,31 @@ test('工作助手分开展示真实模型推理与执行过程且不暴露框�
   await expect(timeline.locator('.execution-progress')).toContainText('正在读取任务详情')
 
   // 底层框架名、主链名称与原始 operationId 一律不得出现在界面上。
+  // 桩下发的推理里故意带了这些名词（真实模型也会这么念），所以这两条断言检查的是
+  // 界面层真的消毒了，而不是桩恰好给了干净文案。
   await expect(dialog.getByText(/Google ADK|语义编排|证据审核主链/)).toHaveCount(0)
   await expect(dialog.getByText(/search_attachments|get_task_detail|query_month_finance|transfer_to_agent/)).toHaveCount(0)
+  await expect(timeline.locator('.thinking-reasoning')).not.toContainText('workspace_analyst')
+  await expect(timeline.locator('.thinking-reasoning')).toContainText('内部流程')
+})
+
+test('模型没被要求返回推理时不摆等待推理的空占位符', async ({ page }) => {
+  // 混合推理模型没打开开关就永远不会有 thought part。界面挂着"等待模型返回推理内容"
+  // 会被当成进度，等于又骗用户一次：这时应该只展示真实的执行过程。
+  await page.getByRole('button', { name: '打开工作助手' }).click()
+  const dialog = page.getByRole('dialog', { name: '爱丽丝' })
+  const input = dialog.getByPlaceholder('向爱丽丝提问…')
+  await input.fill('你帮我新建一个任务 NO_REASONING_EVAL')
+  await input.press('Enter')
+  await expect(dialog.getByText(/请补充任务名称、具体需求/).first()).toBeVisible({ timeout: 30_000 })
+
+  const timeline = dialog.locator('details.chat-agent-thinking')
+  await expect(timeline.locator('summary')).toContainText('执行过程')
+  await timeline.locator('summary').click()
+  await expect(timeline.locator('.thinking-placeholder')).toHaveCount(0)
+  await expect(timeline.locator('.thinking-section', { hasText: '模型推理' })).toHaveCount(0)
+  // 推理拿不到，执行过程仍然必须是真实步骤。
+  await expect(timeline.locator('.execution-progress')).toContainText('正在确认问题所指对象')
 })
 
 test('模型推理与执行步骤不会互相混入或重复显示', async ({ page }) => {

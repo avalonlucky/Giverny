@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from typing import Any
 
 from google.adk.agents import LlmAgent
 from google.adk.models.base_llm import BaseLlm
+from google.adk.planners import BuiltInPlanner
+from google.genai import types
 
 from .schemas import SelectedModelConfig
 from .tooling import READ_GROUPS, ToolFactory, capture_tool_evidence
@@ -72,7 +75,40 @@ intent_summary, subject, allowed_specialists, requires_evidence, rationale。
 """.strip()
 
 
-def _model(config: SelectedModelConfig) -> str | BaseLlm:
+DEEPSEEK_HYBRID_REASONING = re.compile(r"^deepseek-v4(?:-|$)", re.IGNORECASE)
+GEMINI_THINKING_MODEL = re.compile(r"gemini-(?:2\.5|[3-9])", re.IGNORECASE)
+
+
+def reasoning_extra_body(config: SelectedModelConfig) -> dict[str, Any]:
+    """供应商原生的"打开推理输出"开关，原样透传给 provider。
+
+    混合推理模型不显式打开就不返回 reasoning_content，于是 ADK 收不到
+    thought part，思考链只能是空的。这里必须走 litellm 的 ``extra_body``：
+    deepseek 被映射成 openai 兼容路由，而 litellm 对该路由的 ``thinking``
+    参数会直接抛 UnsupportedParamsError，把整条主链打死。
+
+    未列出的供应商一律返回空：把没验证过的字段塞进请求体，可能让供应商
+    对每个请求都返回 400，代价远大于少一段推理文本。
+    """
+    if config.provider == "deepseek" and DEEPSEEK_HYBRID_REASONING.match(config.model.strip()):
+        # 与 src/worker.ts 直连路径同一份契约（thinking: { type: 'enabled' }）。
+        return {"thinking": {"type": "enabled"}}
+    return {}
+
+
+def _thinking_planner(config: SelectedModelConfig) -> BuiltInPlanner | None:
+    """ADK 原生 Gemini 路由要靠 planner 才会回传 thought part。"""
+    if config.provider == "gemini" and not config.api_key and GEMINI_THINKING_MODEL.search(config.model):
+        return BuiltInPlanner(thinking_config=types.ThinkingConfig(include_thoughts=True))
+    return None
+
+
+def reasoning_is_requested(config: SelectedModelConfig) -> bool:
+    """本轮是否真的向供应商申请了推理输出。前端据此决定要不要摆"等待推理"占位符。"""
+    return bool(reasoning_extra_body(config)) or _thinking_planner(config) is not None
+
+
+def _model(config: SelectedModelConfig, *, reasoning: bool = False) -> str | BaseLlm:
     # Gemini without an API key uses ADK's native Vertex adapter. Every other
     # route uses the exact provider/model/base URL selected in Giverny settings.
     # There is intentionally no fallback model here.
@@ -92,27 +128,42 @@ def _model(config: SelectedModelConfig) -> str | BaseLlm:
     kwargs: dict[str, Any] = {"api_base": config.base_url}
     if config.api_key:
         kwargs["api_key"] = config.api_key
+    if reasoning:
+        extra_body = reasoning_extra_body(config)
+        if extra_body:
+            kwargs["extra_body"] = extra_body
     return LiteLlm(model=model_name, **kwargs)
 
 
+def _reasoning_kwargs(config: SelectedModelConfig) -> dict[str, Any]:
+    planner = _thinking_planner(config)
+    return {"planner": planner} if planner else {}
+
+
 def build_scope_supervisor(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str) -> LlmAgent:
+    # 对象判断是本轮最先执行的阶段，用户等待的头几十秒全在这里。它必须开推理，
+    # 否则思考链在开场阶段一定是空的。
     return LlmAgent(
         name="scope_supervisor",
         description="理解用户真实主体与意图，在编排前限定专家可见性。",
-        model=_model(selected_model),
+        model=_model(selected_model, reasoning=True),
         instruction=SUPERVISOR_INSTRUCTION,
         tools=tool_factory.toolsets_for_operations(role=role, operation_ids={"resolve_workspace_subject"}),
         mode="chat",
         include_contents="none",
         after_tool_callback=capture_tool_evidence,
+        **_reasoning_kwargs(selected_model),
     )
 
 
 def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str, allowed_specialists: set[str]) -> tuple[LlmAgent, LlmAgent]:
     # Coordinator, specialists and auditor must all use the exact
     # selected model. A cheaper or different auditor would violate the UI/model contract.
-    coordinator_model = _model(selected_model)
-    auditor_model = _model(selected_model)
+    # 推理输出只向协调器与专家申请：审核员是布尔闸门，它的推理既不该展示给用户
+    # （里面带着还没过闸的答案草稿），也没必要为此多付推理 token。
+    coordinator_model = _model(selected_model, reasoning=True)
+    auditor_model = _model(selected_model, reasoning=False)
+    reasoning_kwargs = _reasoning_kwargs(selected_model)
 
     workspace_analyst = LlmAgent(
         name="workspace_analyst",
@@ -122,6 +173,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         tools=[tool_factory.toolset(role=role, groups=READ_GROUPS["workspace"])],
         mode="single_turn",
         after_tool_callback=capture_tool_evidence,
+        **reasoning_kwargs,
     )
     product_support = LlmAgent(
         name="product_support",
@@ -136,6 +188,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         tools=[tool_factory.toolset(role=role, groups=READ_GROUPS["product"])],
         mode="single_turn",
         after_tool_callback=capture_tool_evidence,
+        **reasoning_kwargs,
     )
     web_researcher = LlmAgent(
         name="web_researcher",
@@ -145,6 +198,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         tools=[tool_factory.toolset(role=role, groups=READ_GROUPS["web"])],
         mode="single_turn",
         after_tool_callback=capture_tool_evidence,
+        **reasoning_kwargs,
     )
     transaction_specialist = LlmAgent(
         name="transaction_specialist",
@@ -160,6 +214,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         ],
         mode="single_turn",
         after_tool_callback=capture_tool_evidence,
+        **reasoning_kwargs,
     )
 
     available_specialists = [
@@ -173,6 +228,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         instruction=COORDINATOR_INSTRUCTION,
         sub_agents=available_specialists,
         mode="chat",
+        **reasoning_kwargs,
     )
     auditor = LlmAgent(
         name="evidence_auditor",

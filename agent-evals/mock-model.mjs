@@ -79,7 +79,7 @@ async function adkResponse(payload) {
       productivity: { ...base.productivity, toolCalls: 1 },
     }
   }
-  if (/^你?帮我新建一个任务[\s。！!]*$/.test(question)) {
+  if (/^你?帮我新建一个任务(?:\s+NO_REASONING_EVAL)?[\s。！!]*$/.test(question)) {
     return {
       ...base,
       answer: '请补充任务名称、具体需求、需求人和预计交付时间，我再为你生成可确认的创建草稿。',
@@ -625,13 +625,23 @@ const server = http.createServer((request, response) => {
           'cache-control': 'no-cache, no-transform',
         })
         const frame = (value) => response.write(`data: ${JSON.stringify(value)}\n\n`)
-        frame({ type: 'accepted', conversationId: String(payload.conversationId || '') })
+        // 混合推理模型没打开开关时供应商不返回 thought part，握手帧要如实声明，
+        // 界面才不会一直挂着"等待模型返回推理内容"。
+        const reasoningOff = /NO_REASONING_EVAL/.test(String(payload.question || ''))
+        frame({ type: 'accepted', conversationId: String(payload.conversationId || ''), reasoning: !reasoningOff })
         frame({ type: 'step', detail: '正在确认问题所指对象' })
         // 心跳注释帧：验证 Worker 的 SSE 解析会跳过非 data 帧而不是报错。
         response.write(': keep-alive\n\n')
         // 模型推理内容逐块下发（thought part），验证打字机通道打通。
-        frame({ type: 'thinking', detail: '用户问的是这个项目最新那一版' })
-        frame({ type: 'thinking', detail: '用户问的是这个项目最新那一版，我先看附件里的版本号' })
+        if (!reasoningOff) {
+          frame({ type: 'thinking', detail: '用户问的是这个项目最新那一版' })
+          // 第二块故意带上内部名词：真实模型会照着提示词把工具名、专家名和框架名念出来，
+          // 桩要是只发干净文案，界面层的消毒就等于没被测过。
+          frame({
+            type: 'thinking',
+            detail: '用户问的是这个项目最新那一版，我先看附件里的版本号（准备 transfer_to_agent 给 workspace_analyst 调用 search_attachments，由 Google ADK 编排）',
+          })
+        }
         frame({ type: 'step', detail: '正在读取任务详情' })
         try {
           frame({ type: 'result', response: await adkResponse(payload) })

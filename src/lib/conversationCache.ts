@@ -16,6 +16,8 @@ export type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
+  // 本轮有没有向供应商申请推理输出；false 时界面不摆"等待推理"占位符。
+  reasoningExpected?: boolean
   trace?: string[]
   traceStatus?: 'running' | 'completed' | 'failed'
   approval?: AgentApproval

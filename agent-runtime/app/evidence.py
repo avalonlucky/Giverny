@@ -10,7 +10,10 @@ from typing import Any
 from .schemas import AgentTurnOutput, AuditOutput, EvidenceRecord
 
 
-VERSION_PATTERN = re.compile(r"(?<![A-Z0-9])([A-Z]{1,4})[\s._-]?(\d{1,4})(?!\d)", re.IGNORECASE)
+# 只认真正的版本前缀。此前是任意 1–4 个字母加数字，于是 "Logo 3"、"AS 2"、"KV 1"
+# 都会被当成版本号：回答里出现、证据里没有原样字符串，就会误判成"版本结论缺少证据"
+# 并把一个正确答案拦下来。
+VERSION_PATTERN = re.compile(r"(?<![A-Za-z0-9])(v|ver|rev|rc|b)[\s._-]?(\d{1,4})(?!\d)", re.IGNORECASE)
 
 
 def normalize_text(value: str) -> str:
@@ -99,9 +102,14 @@ def deterministic_verify(question: str, output: AgentTurnOutput, evidence: Evide
     if unsupported_versions:
         issues.append(f"版本结论缺少证据：{', '.join(unsupported_versions)}")
 
-    if output.status == "answered" and output.subject and output.subject.name:
-        subject_key = normalize_text(output.subject.name)
-        if subject_key and subject_key not in normalize_text(evidence_text):
+    subject_key = normalize_text(output.subject.name) if output.subject and output.subject.name else ""
+
+    # 主体绑定只在这一轮确实在陈述业务事实时才检查。既没有工具证据也没有事实声明的
+    # 请求（闲聊、写文案、纯语言任务）本来就不该被当成"证据没绑上主体"拦下来，
+    # 否则用户会收到一句"我已查到相关资料，但未通过校验"——而系统根本没查过任何资料。
+    asserts_workspace_facts = bool(evidence.records) or bool(output.claims)
+    if output.status == "answered" and asserts_workspace_facts and subject_key:
+        if subject_key not in normalize_text(evidence_text):
             issues.append(f"证据未能绑定主体“{output.subject.name}”")
 
     if output.status == "answered" and output.claims and not evidence.records:
@@ -109,14 +117,12 @@ def deterministic_verify(question: str, output: AgentTurnOutput, evidence: Evide
 
     question_key = normalize_text(question)
     answer_key = normalize_text(output.answer)
-    question_addressed = bool(answer_key) and (
-        not output.subject
-        or not output.subject.name
-        or normalize_text(output.subject.name) in answer_key
-        or normalize_text(output.subject.name) in question_key
-    )
-    if output.status == "answered" and not question_addressed:
-        issues.append("回答没有明确回应当前问题的主体")
+    # 这条不负责判断"回答得好不好"——语义是否真正回应问题由独立的证据审核员判定。
+    # 它只拦一种确定性错误：模型报了一个问题和回答里都不存在的主体，即主体是凭空造的。
+    subject_exists_in_dialogue = not subject_key or subject_key in answer_key or subject_key in question_key
+    question_addressed = bool(answer_key) and subject_exists_in_dialogue
+    if output.status == "answered" and not subject_exists_in_dialogue:
+        issues.append(f"回答主体“{output.subject.name}”在问题和回答里都不存在")
 
     passed = not issues
     return AuditOutput(
