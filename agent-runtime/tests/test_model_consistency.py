@@ -4,7 +4,14 @@ from types import SimpleNamespace
 from pydantic import ValidationError
 
 from app.agents import _model
-from app.runtime import AgentRuntime, COORDINATOR_LLM_CALL_LIMIT, SUPERVISOR_LLM_CALL_LIMIT, TOTAL_LLM_CALL_LIMIT
+from app.runtime import (
+    AUDITOR_LLM_CALL_LIMIT,
+    COORDINATOR_LLM_CALL_LIMIT,
+    REPAIR_LLM_CALL_LIMIT,
+    SUPERVISOR_LLM_CALL_LIMIT,
+    TOTAL_LLM_CALL_LIMIT,
+    AgentRuntime,
+)
 from app.schemas import AgentTurnOutput, ChatRequest, RoutingDecision, SelectedModelConfig
 
 
@@ -102,7 +109,10 @@ class _FakeRunner:
 
 
 class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
-    async def test_coordinator_receives_hard_four_call_limit(self):
+    """次数是防打转开关，不是费用预算：真正约束一轮的是 240 秒时间墙。
+    但绝不能不设——ADK 默认 500 次，来回转交会一直转到超时。"""
+
+    async def test_every_stage_runs_under_a_finite_loop_guard(self):
         runner = _FakeRunner('{"status":"needs_clarification","intent_summary":"确认对象","subject":null,"answer":"请确认对象。","claims":[],"used_specialists":[]}')
         runtime = object.__new__(AgentRuntime)
         await runtime._run_structured(
@@ -113,10 +123,11 @@ class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
             schema=AgentTurnOutput,
             max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
         )
-        self.assertEqual(runner.run_config.max_llm_calls, 6)
-        self.assertEqual(TOTAL_LLM_CALL_LIMIT, 11)
+        self.assertEqual(runner.run_config.max_llm_calls, COORDINATOR_LLM_CALL_LIMIT)
+        self.assertGreater(COORDINATOR_LLM_CALL_LIMIT, 4, "协调阶段留够第二轮检索的余量")
+        self.assertLessEqual(TOTAL_LLM_CALL_LIMIT, 60, "上限仍必须有限，且收在 Worker 校验范围内")
 
-    async def test_scope_stage_receives_two_call_limit_without_expanding_total_budget(self):
+    async def test_scope_stage_runs_under_its_own_guard(self):
         runner = _FakeRunner('{"intent_summary":"查项目版本","subject":null,"allowed_specialists":["workspace_analyst"],"requires_evidence":true,"rationale":"需要工作区证据"}')
         runtime = object.__new__(AgentRuntime)
         parsed, _ = await runtime._run_structured(
@@ -128,8 +139,11 @@ class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
             max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
         )
         self.assertEqual(parsed.allowed_specialists, ["workspace_analyst"])
-        self.assertEqual(runner.run_config.max_llm_calls, 2)
-        self.assertEqual(TOTAL_LLM_CALL_LIMIT, 11)
+        self.assertEqual(runner.run_config.max_llm_calls, SUPERVISOR_LLM_CALL_LIMIT)
+        self.assertEqual(
+            TOTAL_LLM_CALL_LIMIT,
+            SUPERVISOR_LLM_CALL_LIMIT + COORDINATOR_LLM_CALL_LIMIT + AUDITOR_LLM_CALL_LIMIT + REPAIR_LLM_CALL_LIMIT,
+        )
 
 
 if __name__ == "__main__":

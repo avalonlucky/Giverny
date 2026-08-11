@@ -249,22 +249,20 @@ _INTERNAL_ROLE_WORDS = (
 # 证据哈希对用户没有任何意义，只会让回答看起来像内部管道。
 _EVIDENCE_ID_PATTERN = re.compile(r"\bev-[0-9a-f]{8,}\b", re.IGNORECASE)
 
-# 每个外层聊天请求的模型调用硬预算：2（范围主管，含一次对象取证）
-# + 6（协调器及专家）+ 1（证据审核）+ 1（按审核意见修正）+ 1（修正稿复核）= 最多 11 次。
-# 修正与复核只在审核不通过时才发生，且只有一轮。
+# 这些数字是**防打转开关，不是费用预算**。
 #
-# 协调阶段之所以是 6：一次合法的检索问答就要用掉 协调决策 1 + 专家检索 1 +
-# 专家综合 1 + 协调成文 1 = 4，等于没有第二轮检索的余量。线上一个"工作区里
-# 没有精确匹配"的问题正好卡在这里——结论已经查清，却因为没预算写最终 JSON
-# 而整轮报错。结构整理改为本地
-# 强类型解析，不再为修 JSON 额外调用一次模型。Google ADK 默认是 500，
-# 绝不能直接用于生产，否则一次超时/循环就可能产生大量费用。
-SUPERVISOR_LLM_CALL_LIMIT = 2
-COORDINATOR_LLM_CALL_LIMIT = 6
-AUDITOR_LLM_CALL_LIMIT = 1
-# 审核不通过时按意见重写一次，重写稿再过一次审核：+1 +1。只有一轮，绝不循环。
-REPAIR_LLM_CALL_LIMIT = 1
-TOTAL_LLM_CALL_LIMIT = 11
+# 真正限制一轮问答规模的是时间：单轮总预算 240 秒，而所选模型开推理后单次调用
+# 约 15–25 秒，所以一轮实际最多也就跑十几次。把次数卡到刚好够用（协调阶段曾是 4）
+# 只会让正常的第二轮检索直接撞墙，结论已经查清却写不出来。
+#
+# 但也不能完全不设：ADK 默认 500 次，真出现专家之间来回转交时会一直转到超时，
+# 用户白等四分钟才拿到失败。所以留一个正常用不到的高位天花板。
+SUPERVISOR_LLM_CALL_LIMIT = 6
+COORDINATOR_LLM_CALL_LIMIT = 24
+AUDITOR_LLM_CALL_LIMIT = 3
+# 审核不通过时按意见重写一次，重写稿再过一次审核。只有一轮，绝不循环。
+REPAIR_LLM_CALL_LIMIT = 6
+TOTAL_LLM_CALL_LIMIT = SUPERVISOR_LLM_CALL_LIMIT + COORDINATOR_LLM_CALL_LIMIT + AUDITOR_LLM_CALL_LIMIT + REPAIR_LLM_CALL_LIMIT
 
 
 def _sanitize_step(text: str) -> str:
@@ -517,6 +515,7 @@ class AgentRuntime:
                 "model": selected_model.model,
                 "modelPolicy": "exact-selected-model-no-fallback",
                 "modelCallLimit": TOTAL_LLM_CALL_LIMIT,
+                "turnBudgetSeconds": self.settings.turn_budget_seconds,
                 "reasoningStream": reasoning_is_requested(selected_model),
                 "specialists": [],
                 "evidenceCount": len(evidence.records),

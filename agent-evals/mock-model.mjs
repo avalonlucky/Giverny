@@ -54,7 +54,7 @@ async function adkResponse(payload) {
     ],
     agentTurn: { verification: { passed: true }, evidenceCount: 1 },
     factVerification: { passed: true, checkedClaims: 1, sourceTools: [], fallbackUsed: false, auditorModel: String(selectedModel.model) },
-    orchestration: { engine: 'google-adk-2', status: 'answered', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], specialists: [], evidenceCount: 1, provider: String(selectedModel.provider), model: String(selectedModel.model), modelPolicy: 'exact-selected-model-no-fallback', modelCallLimit: 11 },
+    orchestration: { engine: 'google-adk-2', status: 'answered', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], specialists: [], evidenceCount: 1, provider: String(selectedModel.provider), model: String(selectedModel.model), modelPolicy: 'exact-selected-model-no-fallback', modelCallLimit: 39, turnBudgetSeconds: 240 },
     productivity: { engine: 'google-adk-2', status: 'complete', path: ['scope_supervisor', 'response_synthesizer', 'evidence_auditor'], cycles: 1, toolCalls: 0, reason: '评测契约已完成' },
   }
 

@@ -343,7 +343,8 @@ class CallBudgetLandingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.productivity["reason"], "analysis_call_budget_exhausted")
         # Worker 会校验这几个字段，缺一个就整轮拒绝。
         self.assertEqual(response.orchestration["engine"], "google-adk-2")
-        self.assertEqual(response.orchestration["modelCallLimit"], 11)
+        self.assertLessEqual(response.orchestration["modelCallLimit"], 60)
+        self.assertLess(response.orchestration["turnBudgetSeconds"], 280)
         self.assertEqual(response.fact_verification["auditorModel"], response.model)
 
     async def test_scope_budget_exhaustion_asks_for_a_more_specific_object(self):

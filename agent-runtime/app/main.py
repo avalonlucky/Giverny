@@ -21,7 +21,7 @@ _HEARTBEAT_SECONDS = 10.0
 
 # 每次改动 Worker 与 Runtime 之间的流式契约都要往上推一版，
 # 发布前用 /health 核对，避免 Worker 先上而 Runtime 还是旧代码。
-RUNTIME_CONTRACT = "repair-round-2"
+RUNTIME_CONTRACT = "bounded-by-time-1"
 
 
 settings = Settings.from_env()

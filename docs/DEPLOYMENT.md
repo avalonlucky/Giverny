@@ -29,7 +29,7 @@
 - ADK 作为独立 Python systemd 服务发布到现有 DMIT VPS，不使用 Google Cloud Run、Cloudflare Containers 或 Docker，也不需要 Wrangler。
 - Google ADK 不固定调用 Gemini。Worker 必须把设置中本轮选择的精确 `provider/model/baseUrl` 传给 DMIT Runtime；DeepSeek 等 OpenAI 兼容服务商通过受控 LiteLLM 适配器调用。
 - Scope Supervisor、Coordinator、专家与 Evidence Auditor 必须全部使用同一个所选模型；回答 JSON 由本地强类型协议解析，不调用隐藏格式化模型。ADK 回包声明实际 provider/model，Worker 做一致性校验；配置缺失或不一致时失败关闭，禁止静默回退。
-- 单个外层聊天请求的 ADK 模型调用硬上限为 11：主管最多 2 次（含一次只读对象取证）、协调与专家合计 6 次、审核 1 次、按审核意见修正 1 次、修正稿复核 1 次（后两次只在审核不通过时发生，且只有一轮）。用光预算时必须软着陆成一句可操作的回答，不得把框架异常抛给用户。DMIT Runtime 固定单进程、`MemoryHigh=900M`、`MemoryMax=1200M`；禁止沿用 ADK 默认的 500 次调用上限或无审批扩大资源。
+- **约束一轮规模的是时间，不是次数。** 单轮总预算 `ADK_TURN_BUDGET_SECONDS`（默认 240 秒）是真正的边界：所选模型开推理后单次调用约 15–25 秒，一轮实际最多十几次。模型调用次数上限（当前 39，按阶段拆分）只是防止专家之间来回转交转到超时的开关，不是费用预算，正常问答用不到。Worker 校验「边界确实存在且收在 280 秒之内」，不钉死具体数字。用光任一边界时必须软着陆成一句可操作的回答，不得把框架异常抛给用户。DMIT Runtime 固定单进程、`MemoryHigh=900M`、`MemoryMax=1200M`；禁止沿用 ADK 默认的 500 次调用上限或无审批扩大资源。
 - Worker 只保存 `ADK_AGENT_URL` 和 `ADK_AGENT_KEY`。两者未就绪时 `/api/ai/chat` 必须失败关闭，禁止回退 LangGraph/Alice 或本地模板回答。
 - 发布顺序：DMIT Runtime 的本机与公网 `/health` -> VPN PID/端口核对 -> Worker 变量/密钥 -> `npm run deploy:production` -> `/api/health?runtime=1` 无模型探针。真实语义回归只有取得费用批准后才执行。
 - **对话必须走流式端点 `POST /v1/chat/stream`。** 编排耗时 60–150 秒，非流式的 `/v1/chat` 在这段时间不产生任何字节，Cloudflare 会掐断 Worker 的子请求并合成 **HTTP 520**，Runtime 已经返回的 200 会被丢弃。流式端点在空闲时下发 `: keep-alive` 注释帧维持字节流动；供应商真实 thought 与工具/阶段执行进度使用两个独立字段下发。**Worker 的所有调用方一律走流式端点**：没有 trace sink 时在 Worker 内部收完再整体返回，非流式路径不再存在，520 对 MCP、脚本和非 SSE 的 `/api/ai/chat` 一并消失。`/v1/chat` 只保留给隔离评测与外部诊断。
@@ -37,7 +37,7 @@
 - **握手帧 `accepted` 携带 `reasoning`**，声明本轮是否向供应商申请了推理输出。混合推理模型（DeepSeek V4）必须显式打开开关才会返回推理内容，开关经 LiteLLM 的 `extra_body` 透传——顶层 `thinking` 参数在 openai 兼容路由上会直接抛 `UnsupportedParamsError`，导致每个请求失败。推理输出会产生推理 token，费用高于关闭推理。
 - **DMIT Runtime 必须先于 Worker 发布。** Worker 一旦上线就会请求 `/v1/chat/stream`；若 Runtime 仍是旧代码或未启动，对话会整体失败关闭，因此顺序不可颠倒。
 - Runtime 使用 `179.253.249.92.sslip.io:8443` 的独立 Let’s Encrypt TLS。防火墙只新增 IPv4 TCP 8443；不得重载 Xray/x-ui、占用 443/2096/24443/42989，证书续期只允许 `try-restart giverny-adk.service`。
-- **`/health` 的 `contract` 字段是发布顺序的判据。** 当前契约为 `repair-round-2`。Worker 发布前必须先看到 Runtime 报出这个值，不能只凭"我已经更新了"这句话。`/api/health?runtime=1` 会把它透出来。
+- **`/health` 的 `contract` 字段是发布顺序的判据。** 当前契约为 `bounded-by-time-1`。Worker 发布前必须先看到 Runtime 报出这个值，不能只凭"我已经更新了"这句话。`/api/health?runtime=1` 会把它透出来。
 
 ### Runtime 发布步骤（DMIT VPS）
 
@@ -62,7 +62,7 @@ grep -q ADK_TURN_BUDGET_SECONDS /etc/giverny-adk/runtime.env \
 systemctl restart giverny-adk.service
 systemctl is-active giverny-adk.service
 curl -s https://179.253.249.92.sslip.io:8443/health | python3 -m json.tool
-#    期望：ok=true、contract="repair-round-2"、turnBudgetSeconds=240
+#    期望：ok=true、contract="bounded-by-time-1"、turnBudgetSeconds=240
 
 # 5) 核对 VPN 端口未被影响
 ss -lntp | grep -E ':(443|2096|8443|24443|42989)'

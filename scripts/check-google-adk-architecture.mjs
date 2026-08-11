@@ -47,14 +47,25 @@ assert.ok(worker.includes('模型一致性校验失败'), 'Worker must reject an
 assert.ok(runtimeSource.includes('selected_model: SelectedModelConfig'), 'ADK request schema must require the exact selected model')
 assert.ok(runtimeSource.includes('"modelPolicy": "exact-selected-model-no-fallback"'), 'ADK response must attest the no-fallback exact-model policy')
 assert.ok(runtimeSource.includes('model=selected_model.model'), 'ADK response must report the exact requested model')
-assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 11'), 'ADK must cap one outer request at eleven model calls')
+// 调用次数是防打转开关，不是费用预算：真正约束一轮规模的是 240 秒时间墙
+// （单次调用 15–25 秒，一轮实际最多十几次）。把次数卡到刚好够用只会让正常的
+// 第二轮检索撞墙，结论查清了却写不出来。但也不能不设，否则 ADK 默认 500 次会一直转到超时。
+assert.ok(
+  runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = SUPERVISOR_LLM_CALL_LIMIT + COORDINATOR_LLM_CALL_LIMIT + AUDITOR_LLM_CALL_LIMIT + REPAIR_LLM_CALL_LIMIT'),
+  'the call ceiling must be derived from the per-stage loop guards rather than hand-tuned',
+)
+assert.ok(runtimeSource.includes('这些数字是**防打转开关，不是费用预算**'), 'the call ceiling must be documented as a loop guard, not a cost budget')
+assert.ok(runtimeSource.includes('"turnBudgetSeconds": self.settings.turn_budget_seconds'), 'the runtime must attest its wall-clock bound, which is the real limit on one turn')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'coordinator and specialists must receive a hard ADK model-call limit')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'all model stages must stream under a hard ADK model-call limit')
-assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 11'), 'Worker must reject a runtime that does not attest the eleven-call limit')
+// 校验"边界存在且收在 Worker 之内"，而不是某个具体数字——钉死数字会让每次编排调优都变成契约不兼容。
+assert.ok(worker.includes('const boundedOrchestration ='), 'Worker must verify that the runtime declares finite execution bounds')
+assert.ok(worker.includes('declaredTurnBudget < 280'), 'the declared turn budget must nest inside the Worker subrequest limit')
+assert.ok(worker.includes('未声明有效的执行边界'), 'a runtime without declared bounds must be rejected explicitly')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
-assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "repair-round-2"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "bounded-by-time-1"'), 'the runtime must publish a verifiable streaming contract version')
 assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')
@@ -144,7 +155,8 @@ assert.ok(runtimeSource.includes('kwargs["temperature"] = 0'), 'the auditor must
 assert.ok(runtimeSource.includes('advisory: list[str]'), 'the audit contract must separate blocking defects from wording advice')
 assert.ok(runtimeSource.includes('只能写进 advisory，不得因此拒绝'), 'the auditor must be told which findings may never block')
 // 一轮修复：审核不通过时按意见重写，重写稿必须重新过审。只有一轮，绝不循环。
-assert.ok(runtimeSource.includes('REPAIR_LLM_CALL_LIMIT = 1'), 'the repair round must be bounded to a single model call')
+// 修复"只有一轮"由结构保证（没有循环），不靠次数上限——次数只是防打转开关。
+assert.ok(runtimeSource.includes('REPAIR_LLM_CALL_LIMIT = 6'), 'the repair round needs its own loop guard')
 // 爆预算不是服务故障：线上用户看到过「Agent Runtime 暂时不可用：Max number of llm calls limit of 4 exceeded」。
 assert.ok(runtimeSource.includes('except LlmCallsLimitExceededError:'), 'exhausting the call budget must land as an answer, not as a framework error')
 assert.ok(runtimeSource.includes('def _incomplete_response'), 'an unfinished turn still needs a complete, verifiable response payload')
@@ -171,6 +183,10 @@ assert.ok(runtimeSource.includes('def _scrub_internal'), 'model-authored text mu
 assert.ok(runtimeSource.includes('await on_thought(self._scrub_internal(thoughts.text()))'), 'the reasoning channel must be scrubbed, not only the trace channel')
 assert.ok(runtimeSource.includes('cleaned = _sanitize_step(self._scrub_internal(text))'), 'model-authored step text must be scrubbed too')
 assert.ok(timeline.includes('function scrubInternalNames'), 'the UI must keep a second scrubbing layer for reasoning text')
+// 推理此前整段塞进单个 <p>，换行被 HTML 折叠成一堵墙；跑完还一直展开着，把执行过程挤走。
+assert.ok(timeline.includes('function splitReasoning'), 'reasoning must render as paragraphs instead of one collapsed block')
+assert.ok(timeline.includes('thinking-reasoning-fold'), 'a finished turn must fold the long reasoning behind one click')
+assert.ok(timeline.includes('running ? ('), 'a running turn must keep the live reasoning visible — that is the whole point of streaming it')
 assert.ok(timeline.includes('scrubInternalNames(thinking?.trim() ?? \'\')'), 'reasoning text must never be rendered unscrubbed')
 assert.ok(evalMock.includes('由 Google ADK 编排'), 'the eval stub must emit dirty reasoning so the scrubbing assertions are not vacuous')
 

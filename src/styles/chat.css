@@ -494,6 +494,60 @@
   overflow-wrap: anywhere;
 }
 
+/* 推理按段渲染：此前整段塞在一个 <p> 里，换行被 HTML 折叠成一堵墙。 */
+.chat-agent-thinking .thinking-reasoning-block + .thinking-reasoning-block {
+  margin-top: 12px;
+}
+
+.chat-agent-thinking .thinking-reasoning-block p {
+  margin: 0 0 6px;
+}
+
+.chat-agent-thinking .thinking-reasoning-block p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-agent-thinking .thinking-reasoning-stage {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 跑完就折叠：推理全文动辄上千字，展开着会把执行过程挤走。 */
+.chat-agent-thinking .thinking-reasoning-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-agent-thinking .thinking-reasoning-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-agent-thinking .thinking-reasoning-fold > summary small {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.chat-agent-thinking .thinking-reasoning-fold > summary svg {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.chat-agent-thinking .thinking-reasoning-fold[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.chat-agent-thinking .thinking-reasoning-fold[open] > .thinking-reasoning {
+  margin-top: 10px;
+}
+
 .chat-agent-thinking .thinking-reasoning.active::after {
   content: '';
   display: inline-block;

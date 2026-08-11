@@ -3190,7 +3190,7 @@ type OpenAiAgentRuntimeResult = {
     fallbackUsed: boolean
     auditorModel?: string
   }
-  orchestration?: { engine: 'google-adk-2' | 'langgraph'; path?: string[]; modelCalls?: number; modelCallLimit?: number; frameworkVersion?: string; specialists?: string[]; evidenceCount?: number; status?: string; provider?: string; model?: string; modelPolicy?: string }
+  orchestration?: { engine: 'google-adk-2' | 'langgraph'; path?: string[]; modelCalls?: number; modelCallLimit?: number; turnBudgetSeconds?: number; frameworkVersion?: string; specialists?: string[]; evidenceCount?: number; status?: string; provider?: string; model?: string; modelPolicy?: string }
   productivity?: { engine: 'google-adk-2' | 'langgraph'; status: 'complete' | 'needs_input' | 'failed'; path: string[]; cycles: number; toolCalls: number; reason: string }
   grounding?: AgentFactSnapshot
 }
@@ -3539,11 +3539,21 @@ async function callAdkAgentRuntime(
   if (!data?.answer || data.orchestration?.engine !== 'google-adk-2') {
     throw new Error(data?.detail || 'Google ADK Runtime 未返回可验证的编排结果')
   }
+  // 校验的意义是"确实存在有限边界、而且收在 Worker 自己的上限之内"，不是某个具体数字。
+  // 钉死数字会让每次编排调优都变成一次契约不兼容；而真正约束一轮规模的是时间预算，
+  // 调用次数上限只是防止专家之间来回转交转到超时的开关。
+  const declaredCallLimit = Number(data.orchestration?.modelCallLimit)
+  const declaredTurnBudget = Number(data.orchestration?.turnBudgetSeconds)
+  const boundedOrchestration =
+    Number.isInteger(declaredCallLimit) && declaredCallLimit > 0 && declaredCallLimit <= 60 &&
+    Number.isFinite(declaredTurnBudget) && declaredTurnBudget > 0 && declaredTurnBudget < 280
+  if (!boundedOrchestration) {
+    throw new Error(`Google ADK Runtime 未声明有效的执行边界：调用上限 ${data.orchestration?.modelCallLimit ?? '缺失'}、单轮预算 ${data.orchestration?.turnBudgetSeconds ?? '缺失'} 秒。已阻止返回结果。`)
+  }
   if (
     data.model !== selectedModel.model ||
     data.orchestration?.provider !== selectedModel.provider ||
     data.orchestration?.model !== selectedModel.model ||
-    data.orchestration?.modelCallLimit !== 11 ||
     data.factVerification?.auditorModel !== selectedModel.model
   ) {
     throw new Error(`模型一致性校验失败：设置选择 ${selectedModel.provider}/${selectedModel.model}，ADK 回报 ${data.orchestration?.provider || 'unknown'}/${data.model || 'unknown'}。已阻止返回结果。`)

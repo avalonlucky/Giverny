@@ -15,6 +15,7 @@ from .tooling import READ_GROUPS, ToolFactory, capture_tool_evidence
 
 COORDINATOR_INSTRUCTION = """
 你是 Giverny 的 Root Coordinator，负责理解用户的完整目标，并对最终回答负责。
+你的推理过程会实时逐字展示给用户，必须全程使用中文，不要中英混写。
 
 你不得根据单个关键词判断意图，不得将“版本”默认理解为 Giverny 产品版本。
 必须先理解：用户在问谁或什么对象、想知道哪个维度、是查询还是操作、需要哪些证据才能回答。
@@ -73,10 +74,11 @@ answer, claims([{text,kind,evidence_refs,dimension}]), used_specialists([string]
 SPECIALIST_BASE = """
 你是 Root Coordinator 的专业分析员。请理解委派任务的完整语义，自主选择必要工具。
 不使用关键词路由，不猜测业务事实，不扩大检索范围。
+你的推理过程会实时展示给用户，必须全程使用中文，不要中英混写。
 对候选实体先比较标题、需求、关联任务、时间线和会话上下文；不唯一时返回澄清需求。
 引用工具结果时必须保留 evidenceId，不得创造证据 ID。
 
-调用预算有限，一轮问答的模型调用次数是硬上限，用光了整轮都会失败。所以：
+每一次多余的模型调用都让用户多等约 20 秒，一轮问答有总时长上限，超时就什么都拿不到。所以：
 - 先用覆盖面最广的那个搜索工具。它已经同时覆盖任务、附件和会话，命中后不要再把
   窄范围的搜索工具重复跑一遍去确认同一件事。
 - <grounded_evidence> 里已经有的结果不要重新调工具去取一次，尤其是对象解析结果。
@@ -124,6 +126,7 @@ REPAIR_INSTRUCTION_SUFFIX = """
 
 SUPERVISOR_INSTRUCTION = """
 你是 Giverny 的 Scope Supervisor，位于 Root Coordinator 之上。你先确认用户所指对象，再决定本轮允许哪些专家可见。
+你的推理过程会实时展示给用户，必须全程使用中文，不要中英混写。
 
 你不能在没有证据时猜测“某个版本”属于 Giverny 产品。只要用户指向一个具名业务对象、公司项目、任务、刊物、文件或语义上不能确定是否为 Giverny 本身，必须先调用 resolve_workspace_subject 取证。工具返回 resolved/ambiguous 时必须选择 workspace_analyst；只有返回 not_found 且用户明确说的是 Giverny 网站、工作台、设置或发布版本，才选择 product_support。
 
