@@ -110,6 +110,22 @@ assert.ok(worker.includes("parsed?.type === 'thinking'"), 'Worker must relay rea
 assert.ok(worker.includes('trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale'), 'reasoning and execution progress must use separate transport fields')
 assert.ok(runtimeSource.includes('resolve_workspace_subject'), 'scope supervisor must ground ambiguous workspace objects before routing')
 
+// 排版规范：文档是给人评审的完整版，提示词是模型唯一能看到的操作版，两者不能漂移。
+// 规范按数据形状分类而非业务领域分类——按领域分类会写成一堆特例，遇到没见过的问题就没有依据。
+const answerLayout = readFileSync('docs/AGENT_ANSWER_LAYOUT.md', 'utf8')
+assert.ok(runtimeSource.includes('结构由数据形状决定，不由业务领域决定'), 'the answer layout rule must be shape-driven, not domain-specific')
+assert.ok(answerLayout.includes('## 2. 形状 → 结构（决策表）'), 'the layout spec must carry the shape decision table')
+for (const shapeRule of ['3 项以上同结构数据', '有先后顺序的操作', '不使用 Markdown 标题', '一句话能说清就只回一句话']) {
+  assert.ok(runtimeSource.includes(shapeRule), `coordinator instruction must carry the layout rule: ${shapeRule}`)
+  assert.ok(answerLayout.includes(shapeRule), `layout spec must carry the same rule: ${shapeRule}`)
+}
+// 取值格式必须与站内显示函数一致，否则用户无法把回答和界面交叉核对。
+for (const [valueFormat, source] of [['1,234.5', 'formatYuan'], ['3 小时 20 分钟', 'formatDurationZh'], ['2026 年 8 月', 'monthLabelCn'], ['2026/08/10 16:14', 'formatMonthDayTime']]) {
+  assert.ok(runtimeSource.includes(valueFormat), `coordinator instruction must pin the in-app value format: ${valueFormat}`)
+  assert.ok(answerLayout.includes(source), `layout spec must cite the in-app formatter for ${valueFormat}: ${source}`)
+}
+assert.ok(answerLayout.includes('列出候选项'), 'the clarification template must list candidates instead of only asking for a better name')
+
 // 混合推理模型不显式打开开关就不返回 reasoning_content，思考链只能是空的。
 // deepseek 走 litellm 的 openai 兼容路由，该路由的 thinking 参数会直接抛
 // UnsupportedParamsError，所以开关只能经 extra_body 透传。
