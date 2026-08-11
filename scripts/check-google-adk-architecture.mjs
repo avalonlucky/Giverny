@@ -47,14 +47,14 @@ assert.ok(worker.includes('模型一致性校验失败'), 'Worker must reject an
 assert.ok(runtimeSource.includes('selected_model: SelectedModelConfig'), 'ADK request schema must require the exact selected model')
 assert.ok(runtimeSource.includes('"modelPolicy": "exact-selected-model-no-fallback"'), 'ADK response must attest the no-fallback exact-model policy')
 assert.ok(runtimeSource.includes('model=selected_model.model'), 'ADK response must report the exact requested model')
-assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 9'), 'ADK must cap one outer request at nine model calls')
+assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 11'), 'ADK must cap one outer request at eleven model calls')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'coordinator and specialists must receive a hard ADK model-call limit')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'all model stages must stream under a hard ADK model-call limit')
-assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 9'), 'Worker must reject a runtime that does not attest the nine-call limit')
+assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 11'), 'Worker must reject a runtime that does not attest the eleven-call limit')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
-assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "repair-round-1"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "repair-round-2"'), 'the runtime must publish a verifiable streaming contract version')
 assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')
@@ -145,6 +145,13 @@ assert.ok(runtimeSource.includes('advisory: list[str]'), 'the audit contract mus
 assert.ok(runtimeSource.includes('只能写进 advisory，不得因此拒绝'), 'the auditor must be told which findings may never block')
 // 一轮修复：审核不通过时按意见重写，重写稿必须重新过审。只有一轮，绝不循环。
 assert.ok(runtimeSource.includes('REPAIR_LLM_CALL_LIMIT = 1'), 'the repair round must be bounded to a single model call')
+// 爆预算不是服务故障：线上用户看到过「Agent Runtime 暂时不可用：Max number of llm calls limit of 4 exceeded」。
+assert.ok(runtimeSource.includes('except LlmCallsLimitExceededError:'), 'exhausting the call budget must land as an answer, not as a framework error')
+assert.ok(runtimeSource.includes('def _incomplete_response'), 'an unfinished turn still needs a complete, verifiable response payload')
+assert.ok(runtimeSource.includes('"detail": "这一轮没能完成，请稍后再试一次。"'), 'the user-facing error text must never carry the raw exception')
+assert.ok(runtimeSource.includes('"technical": f"{type(error).__name__}: {error}"'), 'the technical cause must still be reported for audit')
+assert.ok(worker.includes("event: 'adk_runtime_error'"), 'the Worker must log the technical cause instead of rendering it')
+assert.ok(runtimeSource.includes('先用覆盖面最广的那个搜索工具'), 'specialists must not burn the budget re-confirming the same fact with narrower tools')
 assert.ok(runtimeSource.includes('and deterministic.passed'), 'a deterministic failure is a hard defect and must never be papered over by a rewrite')
 assert.ok(
   runtimeSource.includes('if reaudit is not None and reaudit.passed and reaudit.recommendation == "publish":'),

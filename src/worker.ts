@@ -3226,7 +3226,7 @@ async function readAdkChatStream(
   const consumeFrame = async (frame: string) => {
     for (const line of frame.split('\n')) {
       if (!line.startsWith('data:')) continue
-      let parsed: { type?: string; detail?: string; reasoning?: boolean; response?: AdkChatPayload } | null
+      let parsed: { type?: string; detail?: string; technical?: string; reasoning?: boolean; response?: AdkChatPayload } | null
       try {
         parsed = JSON.parse(line.slice(5).trim())
       } catch {
@@ -3244,7 +3244,11 @@ async function readAdkChatStream(
       // 它不是结论，因此展示它不会绕过 claim/evidence 校验与 Evidence Auditor。
       else if (parsed?.type === 'thinking' && parsed.detail) onThinking?.(String(parsed.detail))
       else if (parsed?.type === 'result' && parsed.response) result = parsed.response
-      else if (parsed?.type === 'error') streamError = String(parsed.detail || 'ADK Agent 执行失败')
+      else if (parsed?.type === 'error') {
+        // detail 是给用户看的人话；technical 只进日志，绝不进聊天气泡。
+        streamError = String(parsed.detail || '这一轮没能完成，请稍后再试一次。')
+        if (parsed.technical) console.log(JSON.stringify({ event: 'adk_runtime_error', technical: String(parsed.technical).slice(0, 300) }))
+      }
     }
   }
   for (;;) {
@@ -3539,7 +3543,7 @@ async function callAdkAgentRuntime(
     data.model !== selectedModel.model ||
     data.orchestration?.provider !== selectedModel.provider ||
     data.orchestration?.model !== selectedModel.model ||
-    data.orchestration?.modelCallLimit !== 9 ||
+    data.orchestration?.modelCallLimit !== 11 ||
     data.factVerification?.auditorModel !== selectedModel.model
   ) {
     throw new Error(`模型一致性校验失败：设置选择 ${selectedModel.provider}/${selectedModel.model}，ADK 回报 ${data.orchestration?.provider || 'unknown'}/${data.model || 'unknown'}。已阻止返回结果。`)

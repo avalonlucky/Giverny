@@ -8,6 +8,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from google.adk.agents.invocation_context import LlmCallsLimitExceededError
+
 from app.config import Settings
 from app.runtime import AgentRuntime
 from app.schemas import ChatRequest
@@ -311,6 +313,44 @@ class RepairRoundTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.answer, ANSWERED["answer"])
         self.assertEqual(coordinator.calls, 1)
         self.assertEqual(auditor.calls, 1)
+
+
+class CallBudgetLandingTest(unittest.IsolatedAsyncioTestCase):
+    """爆预算不是服务故障。线上用户看到的是「Agent Runtime 暂时不可用：
+    Max number of llm calls limit of 4 exceeded」——框架报错端到了脸上，
+    而结论其实已经查清，只是没预算写最后那份 JSON。"""
+
+    class _ExhaustedRunner:
+        def __init__(self):
+            self.calls = 0
+
+        async def run_async(self, **_kwargs):
+            self.calls += 1
+            raise LlmCallsLimitExceededError("Max number of llm calls limit of `6` exceeded")
+            yield  # pragma: no cover - 让它成为异步生成器
+
+    async def test_analysis_budget_exhaustion_lands_as_an_actionable_answer(self):
+        runtime = build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            self._ExhaustedRunner(),
+            _Runner([]),
+        )
+        response = await runtime.chat(build_request())
+        self.assertIn("范围缩小", response.answer)
+        self.assertNotIn("llm calls", response.answer)
+        self.assertNotIn("exceeded", response.answer)
+        self.assertEqual(response.orchestration["status"], "incomplete")
+        self.assertEqual(response.productivity["reason"], "analysis_call_budget_exhausted")
+        # Worker 会校验这几个字段，缺一个就整轮拒绝。
+        self.assertEqual(response.orchestration["engine"], "google-adk-2")
+        self.assertEqual(response.orchestration["modelCallLimit"], 11)
+        self.assertEqual(response.fact_verification["auditorModel"], response.model)
+
+    async def test_scope_budget_exhaustion_asks_for_a_more_specific_object(self):
+        runtime = build_runtime(self._ExhaustedRunner(), _Runner([]), _Runner([]))
+        response = await runtime.chat(build_request())
+        self.assertIn("更具体", response.answer)
+        self.assertEqual(response.productivity["reason"], "scope_call_budget_exhausted")
 
 
 class CacheBoundTest(unittest.IsolatedAsyncioTestCase):

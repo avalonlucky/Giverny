@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
@@ -249,16 +250,21 @@ _INTERNAL_ROLE_WORDS = (
 _EVIDENCE_ID_PATTERN = re.compile(r"\bev-[0-9a-f]{8,}\b", re.IGNORECASE)
 
 # 每个外层聊天请求的模型调用硬预算：2（范围主管，含一次对象取证）
-# + 4（协调器及专家）+ 1（证据审核）+ 1（按审核意见修正）+ 1（修正稿复核）= 最多 9 次。
-# 后两次只在审核不通过时才发生，且只有一轮。结构整理改为本地
+# + 6（协调器及专家）+ 1（证据审核）+ 1（按审核意见修正）+ 1（修正稿复核）= 最多 11 次。
+# 修正与复核只在审核不通过时才发生，且只有一轮。
+#
+# 协调阶段之所以是 6：一次合法的检索问答就要用掉 协调决策 1 + 专家检索 1 +
+# 专家综合 1 + 协调成文 1 = 4，等于没有第二轮检索的余量。线上一个"工作区里
+# 没有精确匹配"的问题正好卡在这里——结论已经查清，却因为没预算写最终 JSON
+# 而整轮报错。结构整理改为本地
 # 强类型解析，不再为修 JSON 额外调用一次模型。Google ADK 默认是 500，
 # 绝不能直接用于生产，否则一次超时/循环就可能产生大量费用。
 SUPERVISOR_LLM_CALL_LIMIT = 2
-COORDINATOR_LLM_CALL_LIMIT = 4
+COORDINATOR_LLM_CALL_LIMIT = 6
 AUDITOR_LLM_CALL_LIMIT = 1
 # 审核不通过时按意见重写一次，重写稿再过一次审核：+1 +1。只有一轮，绝不循环。
 REPAIR_LLM_CALL_LIMIT = 1
-TOTAL_LLM_CALL_LIMIT = 9
+TOTAL_LLM_CALL_LIMIT = 11
 
 
 def _sanitize_step(text: str) -> str:
@@ -471,6 +477,61 @@ class AgentRuntime:
             return parsed, trace
         raise RuntimeError(f"{schema.__name__} structured output missing within its bounded call budget")
 
+    def _incomplete_response(
+        self,
+        request: ChatRequest,
+        *,
+        answer: str,
+        reason: str,
+        evidence: EvidenceStore,
+        routing_trace: list[dict[str, str]],
+    ) -> ChatResponse:
+        """本轮没能收敛出可发布结论时的完整回包。
+
+        这里必须返回正常的 ChatResponse 而不是抛异常：抛出去会变成
+        「Agent Runtime 暂时不可用：Max number of llm calls limit of 4 exceeded」——
+        把框架报错原样端给用户，而且服务其实完好无损。
+        """
+        selected_model = request.selected_model
+        searched = sorted({self._tool_phrase(record.tool_name) for record in evidence.records.values()})
+        return ChatResponse(
+            answer=answer + (f"\n\n本轮已经{('、'.join(phrase.removeprefix('正在') for phrase in searched))}。" if searched else ""),
+            conversationId=request.conversation_id,
+            model=selected_model.model,
+            trace=[
+                *routing_trace,
+                {"type": "error", "label": "本轮结果", "detail": "未能在本轮预算内收敛出结论"},
+            ],
+            factVerification={
+                "passed": False,
+                "checkedClaims": 0,
+                "sourceTools": sorted({record.tool_name for record in evidence.records.values()}),
+                "fallbackUsed": True,
+                "issues": [reason],
+                "auditorModel": selected_model.model,
+            },
+            orchestration={
+                "engine": "google-adk-2",
+                "frameworkVersion": "2.x",
+                "provider": selected_model.provider,
+                "model": selected_model.model,
+                "modelPolicy": "exact-selected-model-no-fallback",
+                "modelCallLimit": TOTAL_LLM_CALL_LIMIT,
+                "reasoningStream": reasoning_is_requested(selected_model),
+                "specialists": [],
+                "evidenceCount": len(evidence.records),
+                "status": "incomplete",
+            },
+            productivity={
+                "engine": "google-adk-2",
+                "status": "failed",
+                "path": [],
+                "cycles": 1,
+                "toolCalls": len(evidence.records),
+                "reason": reason,
+            },
+        )
+
     @staticmethod
     def reasoning_stream_expected(request: ChatRequest) -> bool:
         """本轮是否会向供应商申请推理输出。前端据此决定要不要摆"等待推理"占位符。"""
@@ -533,7 +594,9 @@ class AgentRuntime:
         try:
             await step("正在确认问题所指对象")
             supervisor_timeout = stage_timeout()
-            routing, routing_trace = await asyncio.wait_for(
+            # 爆预算不是服务故障：软着陆成一句能指导下一步的话，别把框架报错抛给用户。
+            try:
+                routing, routing_trace = await asyncio.wait_for(
                 self._run_structured(
                     self._supervisor(selected_model, request.principal.role),
                     user_id=request.principal.principal_id,
@@ -545,8 +608,16 @@ class AgentRuntime:
                     max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
                     result_author="scope_supervisor",
                 ),
-                timeout=supervisor_timeout,
-            )
+                    timeout=supervisor_timeout,
+                )
+            except LlmCallsLimitExceededError:
+                return self._incomplete_response(
+                    request,
+                    answer="这个问题指向的对象我没能在本轮预算内确认下来。请把对象说得更具体一些——带上任务名称、编号或所属项目，我再查一次。",
+                    reason="scope_call_budget_exhausted",
+                    evidence=evidence,
+                    routing_trace=[],
+                )
             routing = _apply_grounded_scope(routing, evidence)
             await step(routing.intent_summary)
             allowed_specialists = set(routing.allowed_specialists)
@@ -558,7 +629,8 @@ class AgentRuntime:
                 f"{conversation_prompt}"
             )
             coordinator_timeout = stage_timeout()
-            output, trace = await asyncio.wait_for(
+            try:
+                output, trace = await asyncio.wait_for(
                 self._run_structured(
                     coordinator_runner,
                     user_id=request.principal.principal_id,
@@ -570,8 +642,18 @@ class AgentRuntime:
                     schema=AgentTurnOutput,
                     result_author="giverny_coordinator",
                 ),
-                timeout=coordinator_timeout,
-            )
+                    timeout=coordinator_timeout,
+                )
+            except LlmCallsLimitExceededError:
+                # 这类失败往往是检索范围太大：证据其实已经查到，只是没预算写最终结论。
+                return self._incomplete_response(
+                    request,
+                    answer="这次检索的范围太大，我在本轮的调用预算内没能收敛出结论。把范围缩小一些会更快——指定具体任务、时间范围，或确认一下对象的准确名称。",
+                    reason="analysis_call_budget_exhausted",
+                    evidence=evidence,
+                    routing_trace=routing_trace,
+                )
+
             def attribute_specialists(target: AgentTurnOutput, items: list[dict[str, str]]) -> None:
                 target.used_specialists = sorted({
                     str(item["agent"]) for item in items

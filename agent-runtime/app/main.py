@@ -21,7 +21,7 @@ _HEARTBEAT_SECONDS = 10.0
 
 # 每次改动 Worker 与 Runtime 之间的流式契约都要往上推一版，
 # 发布前用 /health 核对，避免 Worker 先上而 Runtime 还是旧代码。
-RUNTIME_CONTRACT = "repair-round-1"
+RUNTIME_CONTRACT = "repair-round-2"
 
 
 settings = Settings.from_env()
@@ -67,7 +67,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     except TimeoutError as error:
         raise HTTPException(status_code=504, detail="ADK Agent 执行超时") from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"ADK Agent 执行失败：{error}") from error
+        raise HTTPException(status_code=502, detail="这一轮没能完成，请稍后再试一次。") from error
 
 
 def _sse(payload: dict) -> bytes:
@@ -95,8 +95,15 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
             await queue.put({"type": "result", "response": response.model_dump(by_alias=True)})
         except TimeoutError:
             await queue.put({"type": "error", "status": 504, "detail": "ADK Agent 执行超时"})
-        except Exception as error:  # noqa: BLE001 - 失败原因要原样回传给 Worker 审计
-            await queue.put({"type": "error", "status": 502, "detail": f"ADK Agent 执行失败：{error}"})
+        except Exception as error:  # noqa: BLE001 - 技术细节进审计字段，不进用户界面
+            # detail 会一路显示到聊天气泡里。把框架异常原样放进去，用户就会看到
+            # 「Max number of llm calls limit of 4 exceeded」这种东西。
+            await queue.put({
+                "type": "error",
+                "status": 502,
+                "detail": "这一轮没能完成，请稍后再试一次。",
+                "technical": f"{type(error).__name__}: {error}",
+            })
         finally:
             await queue.put(None)
 

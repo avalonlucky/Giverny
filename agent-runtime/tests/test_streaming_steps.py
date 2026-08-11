@@ -169,7 +169,13 @@ class ChatStreamEndpointTest(unittest.TestCase):
         ]
         error = next(item for item in payloads if item.get("type") == "error")
         self.assertEqual(error["status"], 502)
-        self.assertIn("证据链断了", error["detail"])
+        # detail 会一路渲染到聊天气泡里，不能放框架异常原文
+        # （用户曾因此看到「Max number of llm calls limit of 4 exceeded」）。
+        self.assertNotIn("证据链断了", error["detail"])
+        self.assertIn("没能完成", error["detail"])
+        # 技术细节单独字段留给审计与日志。
+        self.assertIn("证据链断了", error["technical"])
+        self.assertIn("RuntimeError", error["technical"])
 
     def test_accepted_frame_declares_whether_reasoning_was_requested(self):
         class QuietRuntime(_StreamRuntimeStub):
