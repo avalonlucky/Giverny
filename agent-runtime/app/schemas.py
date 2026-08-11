@@ -67,14 +67,25 @@ class Claim(BaseModel):
     @classmethod
     def normalize_kind(cls, value: Any) -> str:
         normalized = str(value or "fact").strip().lower()
-        aliases = {"factual": "fact", "missing_info": "fact", "numeric": "count", "analysis": "interpretation"}
+        aliases = {
+            "factual": "fact",
+            "missing_info": "fact",
+            "disambiguation": "fact",
+            "numeric": "count",
+            "analysis": "interpretation",
+        }
         return aliases.get(normalized, normalized if normalized in {"fact", "version", "status", "date", "money", "hours", "count", "interpretation"} else "fact")
 
     @field_validator("dimension", mode="before")
     @classmethod
     def normalize_dimension(cls, value: Any) -> str:
         normalized = str(value or "not_applicable").strip().lower()
-        aliases = {"progress": "overall", "existence": "not_applicable", "related_entity": "not_applicable"}
+        aliases = {
+            "progress": "overall",
+            "existence": "not_applicable",
+            "related_entity": "not_applicable",
+            "subject_identity": "not_applicable",
+        }
         allowed = {"discussed", "produced", "uploaded", "submitted", "feedback", "approved", "overall", "not_applicable"}
         return aliases.get(normalized, normalized if normalized in allowed else "not_applicable")
 

@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto'
 const port = Number(process.env.MOCK_MODEL_PORT || 8898)
 const appPort = Number(process.env.MOCK_APP_PORT || 0)
 const requestLog = []
+const adkRequestLog = []
 let strictJsonRepairAttempts = 0
 
 function signedAgentHeaders(principal) {
@@ -37,6 +38,11 @@ async function adkResponse(payload) {
   if (!selectedModel?.provider || !selectedModel?.model || !selectedModel?.baseUrl) {
     throw new Error('评测请求缺少 selectedModel 精确模型契约')
   }
+  adkRequestLog.push({
+    provider: String(selectedModel.provider),
+    model: String(selectedModel.model),
+    baseUrl: String(selectedModel.baseUrl),
+  })
   const base = {
     conversationId,
     model: String(selectedModel.model),
@@ -563,6 +569,11 @@ const server = http.createServer((request, response) => {
   if (request.method === 'GET' && request.url === '/test/requests') {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({ requests: requestLog }))
+    return
+  }
+  if (request.method === 'GET' && request.url === '/test/adk-requests') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ requests: adkRequestLog }))
     return
   }
   if (request.method === 'GET' && request.url === '/legacy-qwen/models') {

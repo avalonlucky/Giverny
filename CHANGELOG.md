@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-11 · v0.37.5（结构化结果采集器修复）
+
+- **修复“模型答对却被误报失败”**：Root Coordinator 已正确生成澄清答案时，ADK 事件中的临时 `output` 不再覆盖最终正文并触发 `invalid AgentTurnOutput contract`。
+- **统一按强类型结果收口**：Scope Supervisor、Root Coordinator 与 Evidence Auditor 都只接受所属 Agent 最后一个通过 Pydantic 校验的结果；专家草稿、转交载荷和临时事件不能冒充最终答案。
+- **兼容澄清语义标签**：DeepSeek 返回的 `disambiguation` 与 `subject_identity` 会归一到现有事实协议，不再因等价枚举名称中断整轮对话。
+- **后台设置成为唯一模型来源**：每轮 ADK 请求重新读取服务端持久化选择，浏览器缓存或请求体中的旧 DeepSeek 选择不能覆盖后台新设置；设置 A 则全链路使用 A，设置 B 则全链路使用 B。
+- **真实问题进入回归**：新增线上原始失败形态测试，覆盖“有效正文 + 无效临时 output”以及“专家草稿不能替代 Coordinator 结果”两类事件序列。
+- **费用与模型边界不变**：单轮最多 7 次模型调用，仍严格使用设置中选择的同一模型；不启用 Gemini、Google Cloud Run 或隐藏回退。
+
 ## 2026-08-11 · v0.37.4（真实模型推理 · 先取证再路由）
 
 - **思考面板只展示真实推理**：DeepSeek/所选模型实际返回的 thought/reasoning 单独进入“模型推理”；对象解析、工具查询和审核状态改列“执行过程”，删除前端定时器伪造的逐步思考。

@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from app.agents import _model
 from app.runtime import AgentRuntime, COORDINATOR_LLM_CALL_LIMIT, SUPERVISOR_LLM_CALL_LIMIT, TOTAL_LLM_CALL_LIMIT
-from app.schemas import ChatRequest, RoutingDecision, SelectedModelConfig
+from app.schemas import AgentTurnOutput, ChatRequest, RoutingDecision, SelectedModelConfig
 
 
 REQUEST = {
@@ -60,6 +60,24 @@ class SelectedModelContractTest(unittest.TestCase):
         self.assertEqual(getattr(adapter, "model", ""), "openai/deepseek-v4-pro")
         self.assertNotIn("gemini", getattr(adapter, "model", "").lower())
 
+    def test_openai_compatible_a_b_selection_never_defaults_to_deepseek(self):
+        for provider, model, base_url in [
+            ("qwen", "qwen3-max", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            ("kimi", "kimi-k2.6", "https://api.moonshot.cn/v1"),
+            ("openai", "gpt-5.2", "https://api.openai.com/v1"),
+            ("custom-openai", "company-model-b", "https://models.example.com/v1"),
+        ]:
+            with self.subTest(provider=provider, model=model):
+                selected = SelectedModelConfig(
+                    provider=provider,
+                    model=model,
+                    baseUrl=base_url,
+                    apiKey="test-only-key",
+                )
+                adapter = _model(selected)
+                self.assertEqual(getattr(adapter, "model", ""), f"openai/{model}")
+                self.assertNotIn("deepseek", getattr(adapter, "model", "").lower())
+
     def test_vertex_gemini_uses_exact_selected_identifier(self):
         selected = SelectedModelConfig(
             provider="gemini",
@@ -85,13 +103,14 @@ class _FakeRunner:
 
 class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
     async def test_coordinator_receives_hard_four_call_limit(self):
-        runner = _FakeRunner("done")
+        runner = _FakeRunner('{"status":"needs_clarification","intent_summary":"确认对象","subject":null,"answer":"请确认对象。","claims":[],"used_specialists":[]}')
         runtime = object.__new__(AgentRuntime)
-        await runtime._run_text(
+        await runtime._run_structured(
             runner,
             user_id="user",
             session_id="session",
             prompt="question",
+            schema=AgentTurnOutput,
             max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
         )
         self.assertEqual(runner.run_config.max_llm_calls, 4)

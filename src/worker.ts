@@ -3432,7 +3432,6 @@ async function callAdkAgentRuntime(
     conversationId: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
     principal: AgentPrincipalContext
-    modelChoice: ChatModelChoice
     onTrace?: AgentVisibleTraceSink
     onThinkingStream?: (text: string) => void
   },
@@ -3475,7 +3474,10 @@ async function callAdkAgentRuntime(
     }
   }
 
-  const effectiveChoice = args.modelChoice === 'auto' ? await getActiveChatModelChoice(env) : args.modelChoice
+  // The persisted admin setting is the sole authority for ADK model routing.
+  // A browser can hold a stale local preference, so accepting modelChoice from
+  // the request would let an old DeepSeek selection override a newer A/B choice.
+  const effectiveChoice = await getActiveChatModelChoice(env)
   const selectedTarget = await resolveChatModelTarget(env, effectiveChoice)
   if (selectedTarget.kind !== 'endpoint') {
     throw new Error('Google ADK 不支持当前所选运行时；系统不会擅自更换模型。请在设置中选择已配置的云端模型。')
@@ -3555,7 +3557,6 @@ async function callAgentRuntime(
     conversationId?: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
     principal: AgentPrincipalContext
-    modelChoice: ChatModelChoice
     onTrace?: AgentVisibleTraceSink
     onThinkingStream?: (text: string) => void
   },
@@ -3571,7 +3572,6 @@ async function callAgentRuntime(
     conversationId,
     history: args.history,
     principal: args.principal,
-    modelChoice: args.modelChoice,
     onTrace: args.onTrace,
     onThinkingStream: args.onThinkingStream,
   })
@@ -19358,7 +19358,6 @@ async function chatWithAi(env: Env, request: Request, onVisibleTrace?: AgentVisi
           content: message.content,
         })),
         principal: agentPrincipal,
-        modelChoice,
         onTrace: emitVisibleTrace,
         onThinkingStream,
       })

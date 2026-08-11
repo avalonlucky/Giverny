@@ -61,6 +61,34 @@ test.beforeEach(async ({ page }, testInfo) => {
   await expect(page.getByRole('heading', { name: /2026 年 7 月工作台/ })).toBeVisible()
 })
 
+test('ADK 严格使用后台模型选择并忽略浏览器旧 DeepSeek 值', async ({ page }) => {
+  const modelPort = Number(process.env.BROWSER_EVAL_MODEL_PORT || 8899)
+  const authHeaders = { 'x-auth-email': 'bh141425@gmail.com', 'x-auth-key': 'eval-admin-key' }
+  const setChoice = (choice: string) => page.request.put('/api/ai/active-model', { headers: authHeaders, data: { choice } })
+  expect((await setChoice('doubao-seed-2-1-pro')).ok()).toBeTruthy()
+  try {
+    const before = await fetch(`http://127.0.0.1:${modelPort}/test/adk-requests`).then((response) => response.json()) as { requests?: Array<{ provider?: string; model?: string; baseUrl?: string }> }
+    const response = await page.request.post('/api/ai/chat', {
+      headers: { ...authHeaders, Accept: 'text/event-stream', 'x-giverny-agent-eval': '1' },
+      data: {
+        modelChoice: 'deepseek-v4-pro',
+        month: '2026-07',
+        messages: [{ role: 'user', content: '请介绍一下你能做什么' }],
+      },
+    })
+    const responseText = await response.text()
+    const after = await fetch(`http://127.0.0.1:${modelPort}/test/adk-requests`).then((modelResponse) => modelResponse.json()) as { requests?: Array<{ provider?: string; model?: string; baseUrl?: string }> }
+    const requests = (after.requests || []).slice((before.requests || []).length)
+    expect(response.ok()).toBeTruthy()
+    expect(requests).toEqual([{ provider: 'doubao', model: 'doubao-seed-eval', baseUrl: `http://127.0.0.1:${modelPort}` }])
+    expect(JSON.stringify(requests)).not.toMatch(/deepseek/i)
+    expect(responseText).toContain('"provider":"doubao"')
+    expect(responseText).toContain('"model":"doubao-seed-eval"')
+  } finally {
+    expect((await setChoice('auto')).ok()).toBeTruthy()
+  }
+})
+
 test.describe('基础流程分片', () => {
 test('demo 账号可打开验收进展并完成 Excel 回单导出', async ({ page }) => {
   await loginDemo(page)

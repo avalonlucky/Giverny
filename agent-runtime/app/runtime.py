@@ -244,73 +244,6 @@ class AgentRuntime:
         self._bundles[key] = (coordinator_runner, auditor_runner)
         return coordinator_runner, auditor_runner
 
-    async def _run_text(
-        self,
-        runner: Runner,
-        *,
-        user_id: str,
-        session_id: str,
-        prompt: str,
-        on_step: StepSink = None,
-        on_thought: ThoughtSink = None,
-        max_llm_calls: int,
-    ) -> tuple[str, list[dict[str, str]]]:
-        final_text = ""
-        thought_text = ""
-        trace: list[dict[str, str]] = []
-        event_shapes: list[dict[str, Any]] = []
-        # SSE 模式下 runner 会边生成边吐 partial 事件；没有它的话，模型思考
-        # 几十秒期间一个事件都没有，界面上最后一行就会定住不动。
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
-            run_config=RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls),
-        ):
-            if on_thought:
-                thought = _thought_text(event)
-                if thought:
-                    thought_text = _merge_stream_text(thought_text, thought)
-                    await on_thought(thought_text)
-            author = str(getattr(event, "author", "") or "agent")
-            calls = list(event.get_function_calls() or []) if getattr(event, "get_function_calls", None) else []
-            responses = list(event.get_function_responses() or []) if getattr(event, "get_function_responses", None) else []
-            event_shapes.append({
-                "author": author,
-                "calls": [str(getattr(value, "name", "")) for value in calls],
-                "responses": [str(getattr(value, "name", "")) for value in responses],
-                "hasContent": getattr(event, "content", None) is not None,
-                "outputType": type(getattr(event, "output", None)).__name__,
-                "transfer": str(getattr(getattr(event, "actions", None), "transfer_to_agent", "") or ""),
-            })
-            if getattr(event, "get_function_calls", None):
-                for call in calls:
-                    tool_name = str(getattr(call, "name", "tool"))
-                    trace.append({"type": "tool", "label": author, "detail": tool_name})
-                    # 委派专家（transfer_to_agent）属于内部编排，不进用户可见步骤。
-                    if on_step and tool_name != "transfer_to_agent":
-                        await on_step(self._tool_phrase(tool_name))
-            if getattr(event, "get_function_responses", None):
-                for response in responses:
-                    response_value = getattr(response, "response", None)
-                    response_name = str(getattr(response, "name", "") or "")
-                    if response_name in {"finish_task", "transfer_to_agent"} and response_value is not None:
-                        final_text = response_value if isinstance(response_value, str) else json.dumps(response_value, ensure_ascii=False, default=str)
-            text = _content_text(event)
-            if text:
-                final_text = _merge_stream_text(final_text, text)
-            output = getattr(event, "output", None)
-            if output is not None:
-                if isinstance(output, str):
-                    final_text = output.strip() or final_text
-                elif hasattr(output, "model_dump"):
-                    final_text = json.dumps(output.model_dump(), ensure_ascii=False, default=str)
-                elif isinstance(output, (dict, list)):
-                    final_text = json.dumps(output, ensure_ascii=False, default=str)
-        if not final_text:
-            raise RuntimeError(f"Root Coordinator did not return a draft; eventShapes={json.dumps(event_shapes[-12:])}")
-        return final_text, trace
-
     async def _run_structured(
         self,
         runner: Runner,
@@ -322,6 +255,7 @@ class AgentRuntime:
         on_step: StepSink = None,
         on_thought: ThoughtSink = None,
         max_llm_calls: int,
+        result_author: str | None = None,
     ) -> tuple[Any, list[dict[str, str]]]:
         trace: list[dict[str, str]] = []
         last_text = ""
@@ -346,13 +280,20 @@ class AgentRuntime:
                     if on_step and tool_name != "transfer_to_agent":
                         await on_step(self._tool_phrase(tool_name))
             text = _content_text(event)
-            if text:
+            accepts_result = result_author is None or author == result_author
+            if text and accepts_result:
                 last_text = _merge_stream_text(last_text, text)
-            candidate = _structured_event(event, schema)
-            if candidate is not None:
-                parsed = candidate
-            elif last_text:
-                parsed = _parse_structured_text(last_text, schema) or parsed
+            if accepts_result:
+                # ADK events can expose a transient ``output`` alongside the
+                # provider's final content.  Never let that transient value
+                # overwrite a body that already satisfies the public schema.
+                # Only the named owning agent may publish the structured result;
+                # specialist prose and transfer payloads remain trace-only.
+                candidate = _structured_event(event, schema)
+                if candidate is not None:
+                    parsed = candidate
+                elif last_text:
+                    parsed = _parse_structured_text(last_text, schema) or parsed
         if parsed is not None:
             return parsed, trace
         raise RuntimeError(f"{schema.__name__} structured output missing within its bounded call budget")
@@ -392,6 +333,7 @@ class AgentRuntime:
                         on_step=on_step,
                         on_thought=lambda text: thought("对象判断", text),
                         max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
+                        result_author="scope_supervisor",
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
@@ -399,8 +341,8 @@ class AgentRuntime:
                 await step(routing.intent_summary)
                 allowed_specialists = set(routing.allowed_specialists)
                 coordinator_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
-                draft, trace = await asyncio.wait_for(
-                    self._run_text(
+                output, trace = await asyncio.wait_for(
+                    self._run_structured(
                         coordinator_runner,
                         user_id=request.principal.principal_id,
                         session_id=request.conversation_id,
@@ -413,12 +355,11 @@ class AgentRuntime:
                         on_step=on_step,
                         on_thought=lambda text: thought("分析与取证", text),
                         max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
+                        schema=AgentTurnOutput,
+                        result_author="giverny_coordinator",
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
-                output = _parse_structured_text(draft, AgentTurnOutput)
-                if output is None:
-                    raise RuntimeError("Root Coordinator returned an invalid AgentTurnOutput contract")
                 actual_specialists = sorted({
                     item["detail"] for item in trace
                     if item.get("label") == "giverny_coordinator" and item.get("detail") in allowed_specialists
@@ -446,6 +387,7 @@ class AgentRuntime:
                         on_step=on_step,
                         on_thought=lambda text: thought("证据复核", text),
                         max_llm_calls=AUDITOR_LLM_CALL_LIMIT,
+                        result_author="evidence_auditor",
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )

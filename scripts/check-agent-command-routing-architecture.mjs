@@ -20,9 +20,10 @@ for (const marker of [
   'transaction_specialist',
 ]) if (!agents.includes(marker)) failures.push(`ADK 语义编排缺少：${marker}`)
 
-for (const marker of ['_parse_structured_text(draft, AgentTurnOutput)', 'evidence_auditor', 'Evidence Auditor', 'deterministic_verify', 'semantic_audit']) {
+for (const marker of ['schema=AgentTurnOutput', 'result_author="giverny_coordinator"', 'evidence_auditor', 'Evidence Auditor', 'deterministic_verify', 'semantic_audit']) {
   if (!`${agents}\n${runtime}`.includes(marker)) failures.push(`回答合成或独立校验缺少：${marker}`)
 }
+if (runtime.includes('async def _run_text(')) failures.push('Coordinator 仍保留会被临时事件覆盖的非结构化采集器')
 
 for (const marker of ['OpenAPIToolset', 'select_operation_ids', 'confirmation in {"signed-execute", "system-only"}', 'include_preview']) {
   if (!tooling.includes(marker)) failures.push(`ADK 工具权限边界缺少：${marker}`)
