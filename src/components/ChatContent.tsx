@@ -90,7 +90,7 @@ export function ChatContent({ content }: { content: string }) {
       <>
         <details className="chat-agent-thinking" open={isLiveAgentTrace}>
           <summary>
-            <span className="thinking-indicator">{isLiveAgentTrace ? '思考中' : '思考过程'}</span>
+            <span className="thinking-indicator">{isLiveAgentTrace ? '执行中' : '执行过程'}</span>
             <ChevronDown size={13} />
           </summary>
           <div className="thinking-stream">

@@ -20,7 +20,7 @@ for (const marker of [
   'transaction_specialist',
 ]) if (!agents.includes(marker)) failures.push(`ADK 语义编排缺少：${marker}`)
 
-for (const marker of ['response_synthesizer', 'evidence_auditor', 'Evidence Auditor', 'deterministic_verify', 'semantic_audit']) {
+for (const marker of ['_parse_structured_text(draft, AgentTurnOutput)', 'evidence_auditor', 'Evidence Auditor', 'deterministic_verify', 'semantic_audit']) {
   if (!`${agents}\n${runtime}`.includes(marker)) failures.push(`回答合成或独立校验缺少：${marker}`)
 }
 

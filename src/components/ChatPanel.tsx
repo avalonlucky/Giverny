@@ -386,13 +386,13 @@ export function ChatPanel({
         }),
       })
       if (!res.ok) { const err = (await res.json().catch(() => null)) as { error?: string } | null; throw new Error(err?.error ?? `请求失败：${res.status}`) }
-      type AgentChatResult = { content?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval; selection?: AgentTaskSelection; backgroundTask?: AgentBackgroundTask; attachments?: AgentResultAttachment[]; uploadHandoff?: AgentUploadHandoff }
+      type AgentChatResult = { content?: string; thinking?: string; trace?: string[]; agentRuntimeConversationId?: string; approval?: AgentApproval; selection?: AgentTaskSelection; backgroundTask?: AgentBackgroundTask; attachments?: AgentResultAttachment[]; uploadHandoff?: AgentUploadHandoff }
       let uploadHandoffStarted = false
       const applyAgentResult = (data: AgentChatResult) => {
         if (data.agentRuntimeConversationId) setAgentConversationId(data.agentRuntimeConversationId)
         setMessages((prev) => prev.map((m) => {
           if (m.id === assistantId) {
-            return { ...m, content: data.content ?? '（无回复）', trace: data.trace?.length ? data.trace : m.trace, traceStatus: 'completed',
+            return { ...m, content: data.content ?? '（无回复）', thinking: data.thinking ?? m.thinking, trace: data.trace?.length ? data.trace : m.trace, traceStatus: 'completed',
               ...(data.approval?.status === 'pending' ? { approval: data.approval } : {}),
               ...(data.selection ? { selection: data.selection } : {}),
               ...(data.backgroundTask ? { backgroundTask: data.backgroundTask } : {}),
@@ -438,8 +438,8 @@ export function ChatPanel({
           if (payload === '[DONE]') break
           try {
             const event = JSON.parse(payload) as AgentChatResult & { type?: string; status?: string; error?: string; t?: string; commandId?: string; runtime?: string }
-            if (event.type === 'trace' && event.trace?.length) {
-              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, trace: event.trace, traceStatus: 'running' } : m)))
+            if (event.type === 'trace' && (event.trace?.length || event.thinking !== undefined)) {
+              setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, thinking: event.thinking ?? m.thinking, trace: event.trace?.length ? event.trace : m.trace, traceStatus: 'running' } : m)))
             } else if (event.type === 'route' && event.runtime === 'local-cli' && event.commandId) {
               setActiveLocalCommandId(event.commandId)
             } else if (event.type === 'result') { receivedResult = true; applyAgentResult(event) }
@@ -574,8 +574,8 @@ export function ChatPanel({
             <>
               {messages.map((msg) => (
                 <div key={msg.id} className={`chat-bubble ${msg.role}`}>
-                  {msg.role === 'assistant' && (msg.trace?.length || msg.traceStatus === 'running') ? (
-                    <AgentExecutionTimeline trace={msg.trace ?? []} status={msg.traceStatus ?? 'completed'} />
+                  {msg.role === 'assistant' && (msg.thinking || msg.trace?.length || msg.traceStatus === 'running') ? (
+                    <AgentExecutionTimeline thinking={msg.thinking} trace={msg.trace ?? []} status={msg.traceStatus ?? 'completed'} />
                   ) : null}
                   {msg.content ? <ChatContent content={msg.content} /> : (msg.role === 'assistant' && loading ? <span className="chat-cursor" /> : '…')}
                   {msg.role === 'assistant' && msg.approval && (

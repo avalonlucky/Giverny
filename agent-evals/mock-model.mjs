@@ -615,7 +615,7 @@ const server = http.createServer((request, response) => {
         })
         const frame = (value) => response.write(`data: ${JSON.stringify(value)}\n\n`)
         frame({ type: 'accepted', conversationId: String(payload.conversationId || '') })
-        frame({ type: 'step', detail: '正在判断这个问题问的是哪个对象、哪个维度' })
+        frame({ type: 'step', detail: '正在确认问题所指对象' })
         // 心跳注释帧：验证 Worker 的 SSE 解析会跳过非 data 帧而不是报错。
         response.write(': keep-alive\n\n')
         // 模型推理内容逐块下发（thought part），验证打字机通道打通。

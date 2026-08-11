@@ -15,6 +15,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  thinking?: string
   trace?: string[]
   traceStatus?: 'running' | 'completed' | 'failed'
   approval?: AgentApproval

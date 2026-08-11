@@ -28,11 +28,11 @@
 
 - ADK 作为独立 Python systemd 服务发布到现有 DMIT VPS，不使用 Google Cloud Run、Cloudflare Containers 或 Docker，也不需要 Wrangler。
 - Google ADK 不固定调用 Gemini。Worker 必须把设置中本轮选择的精确 `provider/model/baseUrl` 传给 DMIT Runtime；DeepSeek 等 OpenAI 兼容服务商通过受控 LiteLLM 适配器调用。
-- Scope Supervisor、Coordinator、专家、Formatter 与 Evidence Auditor 必须全部使用同一个所选模型。ADK 回包声明实际 provider/model，Worker 做四重一致性校验；配置缺失或不一致时失败关闭，禁止静默回退。
-- 单个外层聊天请求的 ADK 模型调用硬上限为 7：主管 1、协调与专家合计 4、整理 1、审核 1。DMIT Runtime 固定单进程、`MemoryHigh=900M`、`MemoryMax=1200M`；禁止沿用 ADK 默认的 500 次调用上限或无审批扩大资源。
+- Scope Supervisor、Coordinator、专家与 Evidence Auditor 必须全部使用同一个所选模型；回答 JSON 由本地强类型协议解析，不调用隐藏格式化模型。ADK 回包声明实际 provider/model，Worker 做一致性校验；配置缺失或不一致时失败关闭，禁止静默回退。
+- 单个外层聊天请求的 ADK 模型调用硬上限为 7：主管最多 2 次（含一次只读对象取证）、协调与专家合计 4 次、审核 1 次。DMIT Runtime 固定单进程、`MemoryHigh=900M`、`MemoryMax=1200M`；禁止沿用 ADK 默认的 500 次调用上限或无审批扩大资源。
 - Worker 只保存 `ADK_AGENT_URL` 和 `ADK_AGENT_KEY`。两者未就绪时 `/api/ai/chat` 必须失败关闭，禁止回退 LangGraph/Alice 或本地模板回答。
 - 发布顺序：DMIT Runtime 的本机与公网 `/health` -> VPN PID/端口核对 -> Worker 变量/密钥 -> `npm run deploy:production` -> `/api/health?runtime=1` 无模型探针。真实语义回归只有取得费用批准后才执行。
-- **对话必须走流式端点 `POST /v1/chat/stream`。** 编排耗时 60–150 秒，非流式的 `/v1/chat` 在这段时间不产生任何字节，Cloudflare 会掐断 Worker 的子请求并合成 **HTTP 520**，Runtime 已经返回的 200 会被丢弃。流式端点在空闲时下发 `: keep-alive` 注释帧维持字节流动，同时把自然语言思考步骤实时推给用户。`/v1/chat` 仅保留给无 trace sink 的调用方与隔离评测。
+- **对话必须走流式端点 `POST /v1/chat/stream`。** 编排耗时 60–150 秒，非流式的 `/v1/chat` 在这段时间不产生任何字节，Cloudflare 会掐断 Worker 的子请求并合成 **HTTP 520**，Runtime 已经返回的 200 会被丢弃。流式端点在空闲时下发 `: keep-alive` 注释帧维持字节流动；供应商真实 thought 与工具/阶段执行进度使用两个独立字段下发。`/v1/chat` 仅保留给无 trace sink 的调用方与隔离评测。
 - **DMIT Runtime 必须先于 Worker 发布。** Worker 一旦上线就会请求 `/v1/chat/stream`；若 Runtime 仍是旧代码或未启动，对话会整体失败关闭，因此顺序不可颠倒。
 - Runtime 使用 `179.253.249.92.sslip.io:8443` 的独立 Let’s Encrypt TLS。防火墙只新增 IPv4 TCP 8443；不得重载 Xray/x-ui、占用 443/2096/24443/42989，证书续期只允许 `try-restart giverny-adk.service`。
 

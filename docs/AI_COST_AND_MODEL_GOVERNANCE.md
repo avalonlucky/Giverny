@@ -19,11 +19,12 @@
 设置页/工作助手选择是本轮唯一模型来源：
 
 1. Worker 把精确 `provider + model + baseUrl` 传给 ADK；API Key 只在 Worker 与受鉴权的 ADK 请求内短暂存在，不写日志、不进回包。
-2. Scope Supervisor、Root Coordinator、所有专家、Response Synthesizer 与 Evidence Auditor 必须使用同一个所选模型。
+2. Scope Supervisor、Root Coordinator、所有专家与 Evidence Auditor 必须使用同一个所选模型；JSON 协议整理使用本地强类型解析，不得暗中调用另一模型修复。
 3. ADK 回包必须声明实际 `provider/model`；Worker 同时核对最终模型、编排模型和 Auditor 模型。
 4. 任一字段缺失或不一致，立即失败关闭；不得使用固定 Gemini、备用模型、低价模型或其他供应商代答。
 5. 所选模型不支持 ADK 工具/结构化输出，或 API Key/Base URL 不可用时，向用户说明配置问题并停止，不允许静默切换。
-6. 每个外层聊天请求最多执行 7 次模型调用：Scope Supervisor 1 次、Coordinator 与专家合计 4 次、Response Synthesizer 1 次、Evidence Auditor 1 次。Runtime 必须在回包中声明 `modelCallLimit: 7`，Worker 缺少该声明时阻止答案。禁止使用 Google ADK 默认的 500 次上限。
+6. 每个外层聊天请求最多执行 7 次模型调用：Scope Supervisor 最多 2 次（仅允许一次只读对象取证）、Coordinator 与专家合计 4 次、Evidence Auditor 1 次。Runtime 必须在回包中声明 `modelCallLimit: 7`，Worker 缺少该声明时阻止答案。禁止使用 Google ADK 默认的 500 次上限。
+7. 用户界面的“模型推理”只能来自所选模型实际返回的 thought/reasoning 字段；工具调用、对象解析和审核状态必须单列为“执行过程”，禁止用定时器、模板文案或阶段提示伪造思考链。
 
 ## 3. 回归与发布
 

@@ -97,7 +97,7 @@ class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.run_config.max_llm_calls, 4)
         self.assertEqual(TOTAL_LLM_CALL_LIMIT, 7)
 
-    async def test_structured_stage_receives_one_call_limit(self):
+    async def test_scope_stage_receives_two_call_limit_without_expanding_total_budget(self):
         runner = _FakeRunner('{"intent_summary":"查项目版本","subject":null,"allowed_specialists":["workspace_analyst"],"requires_evidence":true,"rationale":"需要工作区证据"}')
         runtime = object.__new__(AgentRuntime)
         parsed, _ = await runtime._run_structured(
@@ -109,7 +109,8 @@ class ModelCallBudgetTest(unittest.IsolatedAsyncioTestCase):
             max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
         )
         self.assertEqual(parsed.allowed_specialists, ["workspace_analyst"])
-        self.assertEqual(runner.run_config.max_llm_calls, 1)
+        self.assertEqual(runner.run_config.max_llm_calls, 2)
+        self.assertEqual(TOTAL_LLM_CALL_LIMIT, 7)
 
 
 if __name__ == "__main__":

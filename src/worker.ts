@@ -3235,7 +3235,8 @@ async function readAdkChatStream(
         streamedSteps = true
         await onTrace([String(parsed.detail)])
       }
-      // thinking 是模型正在生成的推理内容（thought part），逐块替换实现打字机效果。
+      // thinking 是模型实际返回的推理内容（thought part）；Runtime 已将
+      // delta/cumulative 两类供应商流合并为当前完整文本。
       // 它不是结论，因此展示它不会绕过 claim/evidence 校验与 Evidence Auditor。
       else if (parsed?.type === 'thinking' && parsed.detail) onThinking?.(String(parsed.detail))
       else if (parsed?.type === 'result' && parsed.response) result = parsed.response
@@ -20684,15 +20685,15 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
         // 推理文本是"当前这一句"的持续重写，只能瞬时显示，不能沉淀进 cloudTrace：
         // 否则每来一个步骤就固化一版，思考链里会出现一串互为前缀的重复句子。
         const emitCloudTrace: AgentVisibleTraceSink = async (items) => {
-          streamingRationale = ''
           cloudTrace = uniqueAgentTrace([...cloudTrace, ...items])
-          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]) })
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale })
           await waitForAgentTimeline(30)
         }
-        // 流式思考：正在生成的推理内容逐块替换末行，实现逐字显示
+        // Runtime 只在供应商确实返回 thought part 时调用这里；执行阶段文案
+        // 始终留在 trace，不能再混进 thinking 冒充模型推理。
         const emitThinkingStream = (text: string) => {
           streamingRationale = text
-          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace, streamingRationale]) })
+          send({ type: 'trace', status: 'running', trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale })
         }
         const response = await chatWithAi(env, cloudRequest, emitCloudTrace, emitThinkingStream)
         const metricResponse = response.clone()
@@ -20722,8 +20723,8 @@ function streamChatWithAiInstrumented(env: Env, request: Request, ctx?: WorkerEx
           ...cloudTrace,
           ...(trace.length > 0 ? trace : ['整理回答']),
         ])
-        send({ type: 'trace', status: 'running', trace: visibleTrace })
-        send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace })
+        send({ type: 'trace', status: 'running', trace: visibleTrace, thinking: streamingRationale })
+        send({ type: 'result', status: 'completed', ...payload, trace: visibleTrace, thinking: streamingRationale })
         send({ type: 'done' })
       } catch (error) {
         send({ type: 'error', error: error instanceof Error ? error.message : 'Agent 请求失败' })

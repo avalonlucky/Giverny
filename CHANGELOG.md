@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-11 · v0.37.4（真实模型推理 · 先取证再路由）
+
+- **思考面板只展示真实推理**：DeepSeek/所选模型实际返回的 thought/reasoning 单独进入“模型推理”；对象解析、工具查询和审核状态改列“执行过程”，删除前端定时器伪造的逐步思考。
+- **不再无证据猜对象**：Scope Supervisor 获得唯一的最小权限对象解析工具；具名业务对象或归属不明的对象必须先查询任务、附件与对话证据，再决定工作区专家或产品专家。
+- **证据可以纠正错误路由**：解析到真实工作区任务或多个工作区候选时，确定性约束会阻止未经取证的产品版本猜测；多候选要求用户选择，不用相似项目代答。
+- **修复 DeepSeek 有结果却返回 502**：兼容 OpenAI 兼容模型把 `subject` 返回为字符串的等价 JSON 形态，并正确合并 delta/cumulative 两类流式文本，不再丢弃完整结果。
+- **单轮费用上限不变**：对象取证使用原格式化调用的预算；移除额外 Response Synthesizer，改由本地 Pydantic 强类型解析，总上限仍为每个外层请求 7 次模型调用。
+- **模型一致性不变**：主管、协调器、专家和 Evidence Auditor 全部使用设置中选定的同一模型；无 Gemini、Google Cloud Run 或隐藏模型回退。
+
 ## 2026-08-11 · v0.37.3（ADK Runtime 迁移 DMIT · Google 费用归零）
 
 - **Google Cloud 不再承载对话 Runtime**：Google ADK 框架迁移到现有 DMIT VPS，以独立 systemd 用户运行；Google Cloud Run 与 Gemini 均不再是生产对话依赖。

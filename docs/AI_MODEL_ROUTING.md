@@ -84,7 +84,9 @@ Cloudflare Worker 仍不直接 import `@boundaryml/baml` runtime。原因是 BAM
 
 ## 当前 AI 功能映射
 
-工作助手中的手动模型选择是当前站点的运行时最高优先级。Google ADK 只是语义编排框架，不是独立模型供应商：每轮请求会把设置中选定的服务商、模型 ID、Base URL 和凭证作为不可改写的执行契约传入 ADK；Scope Supervisor、Root Coordinator、各专家、回答格式化器和 Evidence Auditor 必须全部使用这一个模型。Runtime 必须回报实际服务商和模型，Worker 在返回答案前逐项核对；缺少配置、调用失败或回报不一致时直接停止，禁止暗中改用 Gemini、备用模型或其他服务商。
+工作助手中的手动模型选择是当前站点的运行时最高优先级。Google ADK 只是语义编排框架，不是独立模型供应商：每轮请求会把设置中选定的服务商、模型 ID、Base URL 和凭证作为不可改写的执行契约传入 ADK；Scope Supervisor、Root Coordinator、各专家和 Evidence Auditor 必须全部使用这一个模型。Runtime 必须回报实际服务商和模型，Worker 在返回答案前逐项核对；缺少配置、调用失败或回报不一致时直接停止，禁止暗中改用 Gemini、备用模型或其他服务商。回答 JSON 由本地 Pydantic 强类型解析，不再额外调用“格式化模型”。
+
+Scope Supervisor 不得在无证据时把“版本”猜成 Giverny 产品版本。具名业务对象或归属不明确的对象必须先通过最小权限的 `resolve_workspace_subject` 工具取证，再依据解析结果开放工作区专家；取证结果为多候选时要求用户选择，不得用相似项目代答。前端将供应商真实 thought 与工具/阶段进度分开传输和展示，阶段进度不得标记为模型思考。
 
 选择「自动」时，Worker 只把设置中的文字主模型解析一次，随后仍按同一份精确模型契约完成本轮 ADK 调用；「自动」不代表允许 ADK 自选模型或回落到本机 CLI。工作助手以外的新建任务需求优化、附件命名、洞察和识图等独立 AI 功能仍按各自表格中的主备策略运行，不能把它们的回退规则套用到 ADK 对话主链。
 

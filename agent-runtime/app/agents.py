@@ -55,20 +55,10 @@ evidence_sufficient(boolean), recommendation(publish|clarify|refuse)。
 """.strip()
 
 
-FORMATTER_INSTRUCTION = """
-你是 Giverny Response Synthesizer。你不调用工具，不重做意图路由，不引入新事实。
-你只把 Root Coordinator 的草稿和工具证据整理为 AgentTurnOutput。
-每条事实 claim 必须引用输入中真实存在的 evidenceId；不能支持的事实必须删除。
-如果主体不唯一、证据不足或草稿没有回应用户问题，必须输出 needs_clarification 或 refused，不得补猜。
-保留“讨论/制作/上传/提交/反馈/审批”维度差异。answer 必须直接回应当前问题。
-subject.name 只填主体的稳定名称，不得把版本号、日期、状态或结论拼进主体名；这些应进入 claims。
-最终只返回 JSON 对象，不要 Markdown 代码块，字段为：
-status, intent_summary, subject, answer, claims, used_specialists。
-""".strip()
-
-
 SUPERVISOR_INSTRUCTION = """
-你是 Giverny 的 Scope Supervisor，位于 Root Coordinator 之上。你不调用工具，只理解完整语义并决定本轮允许哪些专家可见。
+你是 Giverny 的 Scope Supervisor，位于 Root Coordinator 之上。你先确认用户所指对象，再决定本轮允许哪些专家可见。
+
+你不能在没有证据时猜测“某个版本”属于 Giverny 产品。只要用户指向一个具名业务对象、公司项目、任务、刊物、文件或语义上不能确定是否为 Giverny 本身，必须先调用 resolve_workspace_subject 取证。工具返回 resolved/ambiguous 时必须选择 workspace_analyst；只有返回 not_found 且用户明确说的是 Giverny 网站、工作台、设置或发布版本，才选择 product_support。
 
 不得根据“版本”、“最新”等单个词决定领域，必须先识别用户问的具体主体：
 - workspace_analyst：用户工作区中的客户、人物、任务、项目、刊物、文件、进度、工时、财务、日程或记忆。
@@ -77,7 +67,7 @@ SUPERVISOR_INSTRUCTION = """
 - transaction_specialist：只有用户明确要求新增、修改、删除、执行或发送操作时才允许。
 
 不要“以防万一”开放无关专家。一般问答可以不开放任何专家。
-最终只返回 JSON 对象，不要 Markdown 代码块：
+工具取证最多一次。最终只返回 JSON 对象，不要 Markdown 代码块：
 intent_summary, subject, allowed_specialists, requires_evidence, rationale。
 """.strip()
 
@@ -105,19 +95,21 @@ def _model(config: SelectedModelConfig) -> str | BaseLlm:
     return LiteLlm(model=model_name, **kwargs)
 
 
-def build_scope_supervisor(selected_model: SelectedModelConfig) -> LlmAgent:
+def build_scope_supervisor(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str) -> LlmAgent:
     return LlmAgent(
         name="scope_supervisor",
         description="理解用户真实主体与意图，在编排前限定专家可见性。",
         model=_model(selected_model),
         instruction=SUPERVISOR_INSTRUCTION,
+        tools=tool_factory.toolsets_for_operations(role=role, operation_ids={"resolve_workspace_subject"}),
         mode="chat",
         include_contents="none",
+        after_tool_callback=capture_tool_evidence,
     )
 
 
-def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str, allowed_specialists: set[str]) -> tuple[LlmAgent, LlmAgent, LlmAgent]:
-    # Coordinator, specialists, formatter and auditor must all use the exact
+def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str, allowed_specialists: set[str]) -> tuple[LlmAgent, LlmAgent]:
+    # Coordinator, specialists and auditor must all use the exact
     # selected model. A cheaper or different auditor would violate the UI/model contract.
     coordinator_model = _model(selected_model)
     auditor_model = _model(selected_model)
@@ -182,14 +174,6 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         sub_agents=available_specialists,
         mode="chat",
     )
-    formatter = LlmAgent(
-        name="response_synthesizer",
-        description="将编排草稿与证据收敛为强类型最终回答。",
-        model=auditor_model,
-        instruction=FORMATTER_INSTRUCTION,
-        mode="chat",
-        include_contents="none",
-    )
     auditor = LlmAgent(
         name="evidence_auditor",
         description="独立检查问题覆盖、主体一致性和 claim-evidence 支持关系。",
@@ -198,4 +182,4 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
         mode="chat",
         include_contents="none",
     )
-    return coordinator, formatter, auditor
+    return coordinator, auditor

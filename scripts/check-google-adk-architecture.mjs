@@ -45,7 +45,7 @@ assert.ok(runtimeSource.includes('"modelPolicy": "exact-selected-model-no-fallba
 assert.ok(runtimeSource.includes('model=selected_model.model'), 'ADK response must report the exact requested model')
 assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 7'), 'ADK must cap one outer request at seven model calls')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'coordinator and specialists must receive a hard ADK model-call limit')
-assert.ok(runtimeSource.includes('run_config=RunConfig(max_llm_calls=max_llm_calls)'), 'structured stages must receive a hard ADK model-call limit')
+assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'all model stages must stream under a hard ADK model-call limit')
 assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 7'), 'Worker must reject a runtime that does not attest the seven-call limit')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
@@ -56,7 +56,7 @@ assert.ok(costGovernance.includes('不得把“继续”“修复”“发布收
 assert.ok(costGovernance.includes('外层请求数量不能替代内部模型调用上限'), 'cost governance must budget internal model fan-out')
 assert.ok(agentInstructions.includes('任何可能新增、扩大或重复产生费用的操作'), 'project instructions must enforce the cost approval red line')
 assert.ok(operationsGuide.includes('未获当前轮明确批准时，只能进行本地静态检查、Mock 测试、文档修改和不调用模型的健康检查'), 'operations guide must fail closed without cost approval')
-assert.ok(routingGuide.includes('Scope Supervisor、Root Coordinator、各专家、回答格式化器和 Evidence Auditor 必须全部使用这一个模型'), 'routing guide must require one exact model for every ADK role')
+assert.ok(routingGuide.includes('Scope Supervisor、Root Coordinator、各专家和 Evidence Auditor 必须全部使用这一个模型'), 'routing guide must require one exact model for every ADK role')
 assert.ok(currentManual.includes('Google ADK 是编排框架，不是另一个模型'), 'manual must explain that ADK cannot override the selected model')
 assert.ok(currentManual.includes('前台不得显示 DeepSeek、后台却运行 Gemini'), 'manual must explicitly prohibit UI/runtime model mismatch')
 assert.ok(evalMock.includes("throw new Error('评测请求缺少 selectedModel 精确模型契约')"), 'isolated ADK eval must reject requests without the selected model contract')
@@ -100,6 +100,8 @@ assert.ok(runtimeSource.includes('tool_name != "transfer_to_agent"'), 'specialis
 assert.ok(runtimeSource.includes('streaming_mode=StreamingMode.SSE'), 'the long coordinator stage must stream partial events')
 assert.ok(runtimeSource.includes('def _thought_text'), 'reasoning parts must be extracted separately from the answer')
 assert.ok(worker.includes("parsed?.type === 'thinking'"), 'Worker must relay reasoning chunks to the typewriter channel')
+assert.ok(worker.includes('trace: uniqueAgentTrace([...routingTrace, ...cloudTrace]), thinking: streamingRationale'), 'reasoning and execution progress must use separate transport fields')
+assert.ok(runtimeSource.includes('resolve_workspace_subject'), 'scope supervisor must ground ambiguous workspace objects before routing')
 // 答案草稿必须先过证据审核才能露面，所以 thought part 不能混进正文。
 assert.ok(
   runtimeSource.includes('if not getattr(part, "thought", False)'),

@@ -119,6 +119,20 @@ class RoutingDecision(BaseModel):
     requires_evidence: bool = True
     rationale: str = Field(min_length=1, max_length=800)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_subject_shape(cls, value: Any) -> Any:
+        # OpenAI-compatible providers commonly emit a concise subject string
+        # even when the prompt describes the expanded object. Preserve the
+        # semantic result instead of discarding an otherwise valid turn.
+        if isinstance(value, dict) and isinstance(value.get("subject"), str):
+            subject = value["subject"].strip()
+            return {
+                **value,
+                "subject": {"entity_type": "unknown", "name": subject, "confidence": 0.5} if subject else None,
+            }
+        return value
+
 
 class EvidenceRecord(BaseModel):
     evidence_id: str = Field(alias="evidenceId")

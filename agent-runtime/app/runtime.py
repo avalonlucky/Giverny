@@ -18,7 +18,7 @@ from google.genai import types
 from .agents import build_agent_bundle, build_scope_supervisor
 from .config import Settings
 from .evidence import EvidenceStore, deterministic_verify
-from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, RoutingDecision, SelectedModelConfig
+from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, EntityReference, RoutingDecision, SelectedModelConfig
 from .tooling import RequestScope, ToolFactory, request_scope
 
 
@@ -73,21 +73,64 @@ def _parse_structured_text(value: str, schema: type[Any]) -> Any | None:
     return None
 
 
-# 思考步骤沉降到用户界面，因此只允许自然语言：不得出现框架名、主链名称、
-# 专家代号或原始工具 operationId。上限与 Claim 文案一致，避免界面被单步刷爆。
+def _merge_stream_text(current: str, incoming: str) -> str:
+    """Merge either cumulative or delta-style provider stream chunks."""
+    chunk = str(incoming or "")
+    if not chunk:
+        return current
+    if chunk == current or current.endswith(chunk):
+        return current
+    if chunk.startswith(current):
+        return chunk
+    for overlap in range(min(len(current), len(chunk)), 0, -1):
+        if current.endswith(chunk[:overlap]):
+            return current + chunk[overlap:]
+    return current + chunk
+
+
+def _apply_grounded_scope(routing: RoutingDecision, evidence: EvidenceStore) -> RoutingDecision:
+    """Let retrieved entity evidence override an ungrounded product guess."""
+    resolutions = [
+        record.result for record in evidence.records.values()
+        if record.tool_name == "resolve_workspace_subject"
+    ]
+    grounded = next(
+        (item for item in reversed(resolutions) if item.get("resolutionStatus") in {"resolved", "ambiguous"}),
+        None,
+    )
+    if not grounded:
+        return routing
+    routing.allowed_specialists = [
+        value for value in routing.allowed_specialists if value != "product_support"
+    ]
+    if "workspace_analyst" not in routing.allowed_specialists:
+        routing.allowed_specialists.append("workspace_analyst")
+    task = grounded.get("task") if isinstance(grounded.get("task"), dict) else None
+    if task and str(task.get("title") or "").strip():
+        routing.subject = EntityReference(
+            entity_type="task",
+            name=str(task["title"]).strip(),
+            entity_id=str(task.get("id") or "") or None,
+            confidence=1.0,
+        )
+    return routing
+
+
+# 执行步骤沉降到用户界面，因此只允许自然语言：不得出现框架名、主链名称、
+# 专家代号或原始工具 operationId。它与模型 thought 是两条独立通道。
 StepSink = Callable[[str], Awaitable[None]] | None
 
-# 推理内容是逐块下发的连续文本（打字机效果），和离散的步骤分开走。
+# 推理内容来自供应商 thought part，逐块下发并与离散执行步骤分开走。
 ThoughtSink = Callable[[str], Awaitable[None]] | None
 
 _STEP_TEXT_LIMIT = 120
 
-# 每个外层聊天请求的模型调用硬预算：1（范围主管）+ 4（协调器及专家）
-# + 1（结构化整理）+ 1（证据审核）= 最多 7 次。Google ADK 默认是 500，
+# 每个外层聊天请求的模型调用硬预算：2（范围主管，含一次对象取证）
+# + 4（协调器及专家）+ 1（证据审核）= 最多 7 次。结构整理改为本地
+# 强类型解析，不再为修 JSON 额外调用一次模型。Google ADK 默认是 500，
 # 绝不能直接用于生产，否则一次超时/循环就可能产生大量费用。
-SUPERVISOR_LLM_CALL_LIMIT = 1
+SUPERVISOR_LLM_CALL_LIMIT = 2
 COORDINATOR_LLM_CALL_LIMIT = 4
-FORMATTER_LLM_CALL_LIMIT = 1
 AUDITOR_LLM_CALL_LIMIT = 1
 TOTAL_LLM_CALL_LIMIT = 7
 
@@ -126,8 +169,8 @@ class AgentRuntime:
             token=self.settings.tool_token,
             timeout_seconds=min(30.0, self.settings.request_timeout_seconds),
         )
-        self._supervisors: dict[tuple[str, str, str, str], Runner] = {}
-        self._bundles: dict[tuple[str, str, str, str, str, tuple[str, ...]], tuple[Runner, Runner, Runner]] = {}
+        self._supervisors: dict[tuple[str, str, str, str, str], Runner] = {}
+        self._bundles: dict[tuple[str, str, str, str, str, tuple[str, ...]], tuple[Runner, Runner]] = {}
         self._conversation_locks: dict[str, asyncio.Lock] = {}
 
     @staticmethod
@@ -137,13 +180,13 @@ class AgentRuntime:
         key_digest = hashlib.sha256(selected_model.api_key.encode()).hexdigest()[:16] if selected_model.api_key else "vertex-adc"
         return selected_model.provider, selected_model.model, selected_model.base_url, key_digest
 
-    def _supervisor(self, selected_model: SelectedModelConfig) -> Runner:
-        key = self._model_key(selected_model)
+    def _supervisor(self, selected_model: SelectedModelConfig, role: str) -> Runner:
+        key = (*self._model_key(selected_model), role)
         cached = self._supervisors.get(key)
         if cached:
             return cached
         runner = Runner(
-            agent=build_scope_supervisor(selected_model),
+            agent=build_scope_supervisor(selected_model, self.tool_factory, role),
             app_name="giverny-adk-supervisor",
             session_service=self.session_service,
             auto_create_session=True,
@@ -180,21 +223,15 @@ class AgentRuntime:
         # 查不到 summary 时绝不回落成原始 operationId，宁可说得笼统一点。
         return f"正在{summary}" if summary else "正在查阅业务数据"
 
-    def _runners(self, selected_model: SelectedModelConfig, role: str, allowed_specialists: set[str]) -> tuple[Runner, Runner, Runner]:
+    def _runners(self, selected_model: SelectedModelConfig, role: str, allowed_specialists: set[str]) -> tuple[Runner, Runner]:
         key = (*self._model_key(selected_model), role, tuple(sorted(allowed_specialists)))
         cached = self._bundles.get(key)
         if cached:
             return cached
-        coordinator, formatter, auditor = build_agent_bundle(selected_model, self.tool_factory, role, allowed_specialists)
+        coordinator, auditor = build_agent_bundle(selected_model, self.tool_factory, role, allowed_specialists)
         coordinator_runner = Runner(
             agent=coordinator,
             app_name="giverny-adk",
-            session_service=self.session_service,
-            auto_create_session=True,
-        )
-        formatter_runner = Runner(
-            agent=formatter,
-            app_name="giverny-adk-formatter",
             session_service=self.session_service,
             auto_create_session=True,
         )
@@ -204,8 +241,8 @@ class AgentRuntime:
             session_service=self.session_service,
             auto_create_session=True,
         )
-        self._bundles[key] = (coordinator_runner, formatter_runner, auditor_runner)
-        return coordinator_runner, formatter_runner, auditor_runner
+        self._bundles[key] = (coordinator_runner, auditor_runner)
+        return coordinator_runner, auditor_runner
 
     async def _run_text(
         self,
@@ -219,6 +256,7 @@ class AgentRuntime:
         max_llm_calls: int,
     ) -> tuple[str, list[dict[str, str]]]:
         final_text = ""
+        thought_text = ""
         trace: list[dict[str, str]] = []
         event_shapes: list[dict[str, Any]] = []
         # SSE 模式下 runner 会边生成边吐 partial 事件；没有它的话，模型思考
@@ -232,7 +270,8 @@ class AgentRuntime:
             if on_thought:
                 thought = _thought_text(event)
                 if thought:
-                    await on_thought(thought)
+                    thought_text = _merge_stream_text(thought_text, thought)
+                    await on_thought(thought_text)
             author = str(getattr(event, "author", "") or "agent")
             calls = list(event.get_function_calls() or []) if getattr(event, "get_function_calls", None) else []
             responses = list(event.get_function_responses() or []) if getattr(event, "get_function_responses", None) else []
@@ -259,7 +298,7 @@ class AgentRuntime:
                         final_text = response_value if isinstance(response_value, str) else json.dumps(response_value, ensure_ascii=False, default=str)
             text = _content_text(event)
             if text:
-                final_text = text
+                final_text = _merge_stream_text(final_text, text)
             output = getattr(event, "output", None)
             if output is not None:
                 if isinstance(output, str):
@@ -281,17 +320,24 @@ class AgentRuntime:
         prompt: str,
         schema: type[Any],
         on_step: StepSink = None,
+        on_thought: ThoughtSink = None,
         max_llm_calls: int,
     ) -> tuple[Any, list[dict[str, str]]]:
         trace: list[dict[str, str]] = []
         last_text = ""
+        thought_text = ""
         parsed = None
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
-            run_config=RunConfig(max_llm_calls=max_llm_calls),
+            run_config=RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls),
         ):
+            if on_thought:
+                thought = _thought_text(event)
+                if thought:
+                    thought_text = _merge_stream_text(thought_text, thought)
+                    await on_thought(thought_text)
             author = str(getattr(event, "author", "") or "agent")
             if getattr(event, "get_function_calls", None):
                 for call in event.get_function_calls() or []:
@@ -301,13 +347,15 @@ class AgentRuntime:
                         await on_step(self._tool_phrase(tool_name))
             text = _content_text(event)
             if text:
-                last_text = text
+                last_text = _merge_stream_text(last_text, text)
             candidate = _structured_event(event, schema)
             if candidate is not None:
                 parsed = candidate
+            elif last_text:
+                parsed = _parse_structured_text(last_text, schema) or parsed
         if parsed is not None:
             return parsed, trace
-        raise RuntimeError(f"{schema.__name__} structured output missing within the one-call safety budget")
+        raise RuntimeError(f"{schema.__name__} structured output missing within its bounded call budget")
 
     async def chat(self, request: ChatRequest, on_step: StepSink = None, on_thought: ThoughtSink = None) -> ChatResponse:
         async def step(text: str) -> None:
@@ -317,31 +365,40 @@ class AgentRuntime:
             if cleaned:
                 await on_step(cleaned)
 
+        reasoning_sections: dict[str, str] = {}
+
+        async def thought(stage: str, text: str) -> None:
+            if not on_thought or not text:
+                return
+            reasoning_sections[stage] = text
+            await on_thought("\n\n".join(f"【{label}】\n{value}" for label, value in reasoning_sections.items()))
+
         lock_key = f"{request.principal.workspace_id}:{request.conversation_id}"
         lock = self._conversation_locks.setdefault(lock_key, asyncio.Lock())
         async with lock:
             selected_model = request.selected_model
             conversation_prompt = _conversation_prompt(request, self.settings.max_history_messages)
-            await step("正在判断这个问题问的是哪个对象、哪个维度")
-            routing, routing_trace = await asyncio.wait_for(
-                self._run_structured(
-                    self._supervisor(selected_model),
-                    user_id=request.principal.principal_id,
-                    session_id=f"scope-{uuid.uuid4()}",
-                    prompt=conversation_prompt,
-                    schema=RoutingDecision,
-                    on_step=on_step,
-                    max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
-                ),
-                timeout=self.settings.request_timeout_seconds,
-            )
-            # 这是模型对问题的真实理解，不是占位符文案，直接给用户看。
-            await step(routing.intent_summary)
-            allowed_specialists = set(routing.allowed_specialists)
-            coordinator_runner, formatter_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
             evidence = EvidenceStore()
             token = request_scope.set(RequestScope(principal=request.principal, evidence=evidence))
             try:
+                await step("正在确认问题所指对象")
+                routing, routing_trace = await asyncio.wait_for(
+                    self._run_structured(
+                        self._supervisor(selected_model, request.principal.role),
+                        user_id=request.principal.principal_id,
+                        session_id=f"scope-{uuid.uuid4()}",
+                        prompt=conversation_prompt,
+                        schema=RoutingDecision,
+                        on_step=on_step,
+                        on_thought=lambda text: thought("对象判断", text),
+                        max_llm_calls=SUPERVISOR_LLM_CALL_LIMIT,
+                    ),
+                    timeout=self.settings.request_timeout_seconds,
+                )
+                routing = _apply_grounded_scope(routing, evidence)
+                await step(routing.intent_summary)
+                allowed_specialists = set(routing.allowed_specialists)
+                coordinator_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
                 draft, trace = await asyncio.wait_for(
                     self._run_text(
                         coordinator_runner,
@@ -349,39 +406,19 @@ class AgentRuntime:
                         session_id=request.conversation_id,
                         prompt=(
                             f"<scope_supervisor>{json.dumps(routing.model_dump(), ensure_ascii=False)}</scope_supervisor>\n"
+                            f"<grounded_evidence>{json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)}</grounded_evidence>\n"
                             "只能委派 allowed_specialists 中列出的专家，不得请求其他领域。\n"
                             f"{conversation_prompt}"
                         ),
                         on_step=on_step,
-                        # 只有 coordinator 这一段值得实时展示推理：它耗时最长，
-                        # 而且它的 thought part 是过程而非结论，不绕过证据审核。
-                        on_thought=on_thought,
+                        on_thought=lambda text: thought("分析与取证", text),
                         max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
                     ),
                     timeout=self.settings.request_timeout_seconds,
                 )
-                formatter_prompt = json.dumps(
-                    {
-                        "question": request.question,
-                        "coordinatorDraft": draft,
-                        "evidence": evidence.as_prompt_data(),
-                    },
-                    ensure_ascii=False,
-                    default=str,
-                )
-                await step("正在把证据逐条对齐，整理结论")
-                output, formatter_trace = await asyncio.wait_for(
-                    self._run_structured(
-                        formatter_runner,
-                        user_id=request.principal.principal_id,
-                        session_id=f"format-{uuid.uuid4()}",
-                        prompt=formatter_prompt,
-                        schema=AgentTurnOutput,
-                        on_step=on_step,
-                        max_llm_calls=FORMATTER_LLM_CALL_LIMIT,
-                    ),
-                    timeout=self.settings.request_timeout_seconds,
-                )
+                output = _parse_structured_text(draft, AgentTurnOutput)
+                if output is None:
+                    raise RuntimeError("Root Coordinator returned an invalid AgentTurnOutput contract")
                 actual_specialists = sorted({
                     item["detail"] for item in trace
                     if item.get("label") == "giverny_coordinator" and item.get("detail") in allowed_specialists
@@ -407,6 +444,7 @@ class AgentRuntime:
                         prompt=audit_prompt,
                         schema=AuditOutput,
                         on_step=on_step,
+                        on_thought=lambda text: thought("证据复核", text),
                         max_llm_calls=AUDITOR_LLM_CALL_LIMIT,
                     ),
                     timeout=self.settings.request_timeout_seconds,
@@ -446,7 +484,6 @@ class AgentRuntime:
                         {"type": "plan", "label": "范围总管", "detail": routing.intent_summary},
                         *routing_trace,
                         *trace,
-                        *formatter_trace,
                         *audit_trace,
                         {
                             "type": "result" if passed else "error",

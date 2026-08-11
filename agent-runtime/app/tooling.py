@@ -116,6 +116,29 @@ class ToolFactory:
             preserve_property_names=True,
         )
 
+    def toolsets_for_operations(self, *, role: str, operation_ids: set[str]) -> list[OpenAPIToolset]:
+        """Build a least-privilege toolset for an orchestration stage.
+
+        Scope resolution must be able to ground a named business object, but it
+        must not inherit every workspace read tool or any write capability.
+        """
+        allowed = set(select_operation_ids(
+            self.routing_spec,
+            role=role,
+            groups=set().union(*READ_GROUPS.values()),
+            include_preview=False,
+        ))
+        selected = sorted(allowed.intersection(operation_ids))
+        if not selected:
+            return []
+        return [OpenAPIToolset(
+            spec_dict=self.runtime_spec,
+            tool_filter=selected,
+            header_provider=self._headers,
+            httpx_client_factory=self._client,
+            preserve_property_names=True,
+        )]
+
     def pending_action(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None:
         preview_operation = None
         preview_path = ""
