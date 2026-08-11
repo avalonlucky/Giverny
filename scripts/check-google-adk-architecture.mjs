@@ -68,7 +68,7 @@ assert.ok(worker.includes('工作助手服务版本不一致，已阻止返回�
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
-assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "bounded-by-time-1"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "value-reconciliation-1"'), 'the runtime must publish a verifiable streaming contract version')
 assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')
@@ -210,7 +210,10 @@ assert.ok(!/"detail": tool_name\}\)/.test(runtimeSource), 'the delegation entry 
 assert.ok(!runtimeSource.includes('thought("证据复核"'), 'the auditor stage must never feed the user-visible reasoning channel')
 // 结论不是 answered 时 passed 恒为 False、答案已被固定文案取代，那次调用改变不了任何输出。
 assert.ok(runtimeSource.includes('audited = output.status == "answered"'), 'the auditor must be skipped when its verdict cannot change the output')
-assert.ok(runtimeSource.includes('passed = audited and deterministic.passed'), 'skipping the auditor must never turn into publishing an unaudited answer')
+assert.ok(
+  runtimeSource.includes('passed = (fast_path or audited) and deterministic.passed and semantic_audit.passed'),
+  'publishing always requires deterministic reconciliation to pass, whether or not the semantic auditor ran',
+)
 
 // 每阶段各拿一份单阶段超时，最坏能跑到 450 秒，而 Worker 280 秒就掐断。
 assert.ok(runtimeSource.includes('turn_deadline = time.monotonic() + self.settings.turn_budget_seconds'), 'one turn must carry a single total budget')
@@ -222,11 +225,27 @@ assert.ok(runtimeSource.includes('turn_budget_seconds: float'), 'the turn budget
 assert.ok(!/\$\{baseUrl\}\/v1\/chat`/.test(worker), 'the Worker must not fall back to the non-streaming endpoint that Cloudflare turns into a 520')
 assert.ok(worker.includes("args.onTrace ?? (async () => {})"), 'callers without a trace sink must still use the streaming transport')
 
+// 核心判据是"答案里的事实值在不在证据里"，不是模型自己声明的证据编号。
+// 编号对账要求模型手抄哈希，而线上真实案例是每个数值都真实存在于证据中、
+// 只因抄错哈希被整段拦下——这是整个闸门此前的承重墙，也是最不可靠的一环。
+assert.ok(evidenceSource.includes('def unsupported_values'), 'the gate must reconcile answer values against the evidence corpus')
+assert.ok(evidenceSource.includes('答案里的「'), 'an unsupported value must be reported as the blocking reason')
+assert.ok(
+  /advisory\.append\(f"声明引用了不存在的证据编号/.test(evidenceSource),
+  'a wrong evidence id must be recorded for audit, never used to block a factually grounded answer',
+)
+assert.ok(evidenceSource.includes('def _subject_is_grounded'), 'subject grounding must tolerate paraphrase instead of requiring a substring')
+// 派生值（"14 天"是两个日期算出来的）不在证据里，对账它只会大量误拦。
+assert.ok(evidenceSource.includes('刻意不对账派生值'), 'derived arithmetic must stay out of value reconciliation')
+// 用户的猜测不是事实：问"是 B09 还是 B10"时 B10 只是候选。
+assert.ok(evidenceSource.includes('刻意不把用户问题算进来'), 'a value the user merely guessed must not count as grounded')
+// 值全部对上时直接发布：审核员的输入是全轮最大的一份，它是尾部延迟的来源。
+assert.ok(runtimeSource.includes('fast_path = output.status == "answered" and deterministic.passed and reconcilable'), 'a fully reconciled answer must publish without a semantic audit call')
+assert.ok(runtimeSource.includes('elif audited:'), 'the semantic auditor must remain reachable when reconciliation is inconclusive')
+
 // 确定性证据门只能拦真正在陈述业务事实的回答。既没工具证据也没事实声明的请求
 // （写文案、闲聊）被拦下来时，用户会收到一句系统根本没做过的"我已查到相关资料"。
-assert.ok(evidenceSource.includes('asserts_workspace_facts = bool(evidence.records) or bool(output.claims)'), 'the subject binding gate must only apply to turns that assert workspace facts')
 assert.ok(evidenceSource.includes('if output.status == "answered" and output.claims and not evidence.records'), 'claims without any tool evidence must still be blocked')
-assert.ok(runtimeSource.includes('if evidence.records\n'), 'the blocked-answer copy must not claim a lookup that never happened')
 assert.ok(
   /VERSION_PATTERN = re\.compile\(r"\(\?<!\[A-Za-z0-9\]\)\(v\|ver\|rev\|rc\|b\)/.test(evidenceSource),
   'version detection must be limited to real version prefixes so "Logo 3" cannot block a correct answer',

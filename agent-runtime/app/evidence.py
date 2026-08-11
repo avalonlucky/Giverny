@@ -25,6 +25,76 @@ def extract_versions(value: str) -> set[str]:
     return {f"{prefix.upper()}{int(number)}" for prefix, number in VERSION_PATTERN.findall(value)}
 
 
+# 内容对账：直接拿答案里的高辨识度事实值去证据里对，而不是相信模型自己声明的 evidenceId。
+#
+# 为什么换掉编号对账：原设计要求模型把 `ev-cc1f894753e14a63` 这种哈希准确抄进每条 claim，
+# 然后把整个闸门押在这件事上——这是能让 LLM 做的最不可靠的事之一。线上真实案例：答案里
+# 07/28 23:09、¥3,293.75、14 个任务全都真实存在于证据中，却因为抄错了哈希被整段拦下。
+#
+# 只对账"模型编不出来"的高辨识度值：日期、时间、金额、版本号、文件名、编号。
+# 刻意不对账派生值（"14 天"是 07/28 到 08/11 算出来的，证据里根本不会有这个数），
+# 也不对账小整数——那样会把正确答案大量误拦，比现在更糟。
+_DATE_PATTERNS = (
+    re.compile(r"(20\d{2})\s*[-/年]\s*(\d{1,2})\s*[-/月]\s*(\d{1,2})"),
+)
+_MONTH_DAY_PATTERN = re.compile(r"(?<!\d)(\d{1,2})\s*[/月]\s*(\d{1,2})\s*日?(?!\d)")
+_TIME_PATTERN = re.compile(r"(?<!\d)([01]?\d|2[0-3])\s*[:：]\s*([0-5]\d)(?!\d)")
+# 金额与小时只取带千分位或小数的写法：整数太容易和计数、天数混在一起。
+_DECIMAL_PATTERN = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)(?![\d.])")
+_FILENAME_PATTERN = re.compile(r"[\w一-鿿][\w一-鿿.\-]*\.(?:pdf|png|jpg|jpeg|xlsx|xls|docx|doc|pptx|ppt|ai|psd|zip|svg|webp)", re.IGNORECASE)
+_ENTITY_ID_PATTERN = re.compile(r"#(\d{4,})")
+
+
+def salient_values(value: str) -> set[str]:
+    """抽取高辨识度事实值，归一化后用于对账。"""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    values: set[str] = set()
+    for pattern in _DATE_PATTERNS:
+        for year, month, day in pattern.findall(text):
+            values.add(f"d{int(year):04d}{int(month):02d}{int(day):02d}")
+    for month, day in _MONTH_DAY_PATTERN.findall(text):
+        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            values.add(f"md{int(month):02d}{int(day):02d}")
+    for hour, minute in _TIME_PATTERN.findall(text):
+        values.add(f"t{int(hour):02d}{int(minute):02d}")
+    for number in _DECIMAL_PATTERN.findall(text):
+        cleaned = number.replace(",", "").rstrip("0").rstrip(".")
+        values.add(f"n{cleaned}")
+    for name in _FILENAME_PATTERN.findall(text):
+        values.add(f"f{normalize_text(name)}")
+    for entity_id in _ENTITY_ID_PATTERN.findall(text):
+        values.add(f"i{entity_id}")
+    values.update(f"v{version}" for version in extract_versions(text))
+    return values
+
+
+def unsupported_values(answer: str, evidence_text: str) -> list[str]:
+    """答案里出现、证据里找不到的事实值。这才是真正的编造。"""
+    grounded = salient_values(evidence_text)
+    # 日期在证据里常以完整形式出现，答案里可能只写月日；两种形态互相认账。
+    grounded |= {f"md{item[5:9]}" for item in grounded if item.startswith("d")}
+    claimed = salient_values(answer)
+    claimed |= {f"md{item[5:9]}" for item in claimed if item.startswith("d")}
+    return sorted(claimed - grounded)
+
+
+def describe_value(token: str) -> str:
+    """把归一化的值还原成人能读的说法，用于审计说明。"""
+    if token.startswith("d") and len(token) == 9:
+        return f"{token[1:5]}/{token[5:7]}/{token[7:9]}"
+    if token.startswith("md"):
+        return f"{token[2:4]}/{token[4:6]}"
+    if token.startswith("t"):
+        return f"{token[1:3]}:{token[3:5]}"
+    if token.startswith("n"):
+        return token[1:]
+    if token.startswith("v"):
+        return token[1:]
+    if token.startswith("i"):
+        return f"#{token[1:]}"
+    return token[1:] if len(token) > 1 else token
+
+
 def compact_result(value: Any, max_chars: int = 12000) -> dict[str, Any]:
     if isinstance(value, dict):
         result = value
@@ -81,55 +151,82 @@ class EvidenceStore:
         return None
 
 
-def deterministic_verify(question: str, output: AgentTurnOutput, evidence: EvidenceStore) -> AuditOutput:
+def _subject_is_grounded(subject_key: str, corpus_key: str) -> bool:
+    """主体是否出现在问题或回答里。
+
+    不能用子串匹配：模型给主体起的概括标签常和用户的措辞词序不同
+    （"结算回单导出记录" vs 用户问的"导出结算回单"），子串一比就判"不存在"，
+    把完全正确的答案拦掉。改成字符覆盖率——凭空造的主体覆盖率会很低。
+    """
+    if not subject_key:
+        return True
+    chars = set(subject_key)
+    if not chars:
+        return True
+    covered = sum(1 for char in chars if char in corpus_key)
+    return covered / len(chars) >= 0.6
+
+
+def deterministic_verify(
+    question: str,
+    output: AgentTurnOutput,
+    evidence: EvidenceStore,
+    context: str = "",
+) -> AuditOutput:
+    """确定性核对。判断依据是**答案里的事实值在不在证据里**，不是模型自己声明的证据编号。
+
+    编号对账已经废弃：它要求模型手抄哈希，而线上真实案例是答案里每个数值都真实存在于
+    证据中、只因为抄错哈希被整段拦下。编号现在只用于审计展示。
+    """
     issues: list[str] = []
+    advisory: list[str] = []
     evidence_ids = set(evidence.records)
+    # 只有工具证据和本轮上下文（当前月份、今天日期）算已知事实。今天的日期永远
+    # 不会出现在工具证据里，所以必须单列。
+    #
+    # 刻意不把用户问题算进来：用户问"是 B09 还是 B10"时，B10 只是待核对的候选，
+    # 不是事实。把问题算成已知，模型就能不带证据地把用户的猜测复述成结论。
+    evidence_text = json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)
+    grounded_corpus = f"{evidence_text}\n{context}"
 
     if output.status == "answered" and not output.answer.strip():
         issues.append("缺少最终回答")
 
+    # 核心检查：答案里的日期、时间、金额、版本、文件名、编号必须能在证据里找到。
+    # 编造的事实值根本不会出现在证据里，躲不过这一条；而抄错编号不再影响判定。
+    for token in unsupported_values(output.answer, grounded_corpus):
+        issues.append(f"答案里的「{describe_value(token)}」在证据中找不到")
+
+    # 编号写错不再阻断，但要记进审计，方便排查模型的记账质量。
     for claim in output.claims:
         unknown_refs = [ref for ref in claim.evidence_refs if ref not in evidence_ids]
         if unknown_refs:
-            issues.append(f"声明引用了不存在的证据：{', '.join(unknown_refs)}")
+            advisory.append(f"声明引用了不存在的证据编号：{', '.join(unknown_refs)}")
         if output.status == "answered" and claim.kind != "interpretation" and not claim.evidence_refs:
-            issues.append(f"事实声明没有证据：{claim.text[:80]}")
-
-    evidence_text = json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)
-    answer_versions = extract_versions(output.answer)
-    evidence_versions = extract_versions(evidence_text)
-    unsupported_versions = sorted(answer_versions - evidence_versions)
-    if unsupported_versions:
-        issues.append(f"版本结论缺少证据：{', '.join(unsupported_versions)}")
-
-    subject_key = normalize_text(output.subject.name) if output.subject and output.subject.name else ""
-
-    # 主体绑定只在这一轮确实在陈述业务事实时才检查。既没有工具证据也没有事实声明的
-    # 请求（闲聊、写文案、纯语言任务）本来就不该被当成"证据没绑上主体"拦下来，
-    # 否则用户会收到一句"我已查到相关资料，但未通过校验"——而系统根本没查过任何资料。
-    asserts_workspace_facts = bool(evidence.records) or bool(output.claims)
-    if output.status == "answered" and asserts_workspace_facts and subject_key:
-        if subject_key not in normalize_text(evidence_text):
-            issues.append(f"证据未能绑定主体“{output.subject.name}”")
+            advisory.append(f"事实声明没有填写证据编号：{claim.text[:60]}")
 
     if output.status == "answered" and output.claims and not evidence.records:
         issues.append("存在事实结论，但本轮没有工具证据")
 
+    subject_key = normalize_text(output.subject.name) if output.subject and output.subject.name else ""
     question_key = normalize_text(question)
     answer_key = normalize_text(output.answer)
-    # 这条不负责判断"回答得好不好"——语义是否真正回应问题由独立的证据审核员判定。
-    # 它只拦一种确定性错误：模型报了一个问题和回答里都不存在的主体，即主体是凭空造的。
-    subject_exists_in_dialogue = not subject_key or subject_key in answer_key or subject_key in question_key
-    question_addressed = bool(answer_key) and subject_exists_in_dialogue
-    if output.status == "answered" and not subject_exists_in_dialogue:
+    # 主体只要在问题或回答里出现过就算成立。要求它出现在证据文本里是错的：
+    # 模型常给主体起一个概括性标签（"结算回单导出记录"），证据里当然没有这个短语，
+    # 而答案本身完全正确——线上就是这样被拦掉的。
+    subject_grounded = _subject_is_grounded(subject_key, f"{question_key}{answer_key}")
+    if output.status == "answered" and not subject_grounded:
         issues.append(f"回答主体“{output.subject.name}”在问题和回答里都不存在")
+    elif subject_key and subject_key not in normalize_text(evidence_text):
+        advisory.append(f"主体“{output.subject.name}”是概括标签，证据里没有同名条目")
 
     passed = not issues
     return AuditOutput(
         passed=passed,
         issues=issues,
-        question_addressed=question_addressed,
-        subject_aligned=not any("绑定主体" in issue for issue in issues),
-        evidence_sufficient=not any("证据" in issue for issue in issues),
+        advisory=advisory,
+        question_addressed=bool(answer_key) and subject_grounded,
+        subject_aligned=subject_grounded,
+        evidence_sufficient=not any("找不到" in issue or "没有工具证据" in issue for issue in issues),
         recommendation="publish" if passed else ("clarify" if output.status == "needs_clarification" else "refuse"),
     )

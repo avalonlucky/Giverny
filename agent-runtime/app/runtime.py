@@ -19,7 +19,7 @@ from google.genai import types
 
 from .agents import REPAIR_INSTRUCTION_SUFFIX, build_agent_bundle, build_scope_supervisor, reasoning_is_requested
 from .config import Settings
-from .evidence import EvidenceStore, deterministic_verify
+from .evidence import EvidenceStore, deterministic_verify, salient_values
 from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, EntityReference, RoutingDecision, SelectedModelConfig
 from .tooling import RequestScope, ToolFactory, request_scope
 
@@ -660,12 +660,33 @@ class AgentRuntime:
                 })
 
             attribute_specialists(output, trace)
-            deterministic = deterministic_verify(request.question, output, evidence)
+            verify_context = f"{request.current_month} {time.strftime('%Y/%m/%d')} {request.context}"
+            deterministic = deterministic_verify(request.question, output, evidence, verify_context)
+            # 事实值已经逐项和证据对上时，直接发布，不再调审核员。
+            #
+            # 这是尾部延迟的来源：审核员的输入是全轮最大的一份（问题 + 候选答案 +
+            # 全部证据 + 确定性报告），要跑 15–25 秒。而它对"数值是否有据"这件事的
+            # 判断能力并不比逐项对账更强——线上恰恰相反，它把每个数值都有据的正确答案
+            # 因为编号抄错而拦掉了。所以只在对账无法定论时才让它介入：
+            # 有值对不上（可能只是表述差异），或者答案里没有任何可对账的值。
+            reconcilable = bool(salient_values(output.answer))
+            fast_path = output.status == "answered" and deterministic.passed and reconcilable
             # 状态不是 answered 时，passed 恒为 False，答案也已经被固定文案取代，
             # 审核结论改变不了任何输出——那次模型调用是纯浪费的等待与费用。
-            audited = output.status == "answered"
+            audited = output.status == "answered" and not fast_path
             repaired_publish = False
-            if audited:
+            if fast_path:
+                semantic_audit = AuditOutput(
+                    passed=True,
+                    issues=[],
+                    advisory=["事实值已逐项与证据对账通过，未调用语义审核"],
+                    question_addressed=True,
+                    subject_aligned=True,
+                    evidence_sufficient=True,
+                    recommendation="publish",
+                )
+                audit_trace = []
+            elif audited:
                 audit_prompt = json.dumps(
                     {
                         "question": request.question,
@@ -732,7 +753,7 @@ class AgentRuntime:
                         repaired, repair_trace = None, []
                     if repaired is not None:
                         attribute_specialists(repaired, [*trace, *repair_trace])
-                        repaired_deterministic = deterministic_verify(request.question, repaired, evidence)
+                        repaired_deterministic = deterministic_verify(request.question, repaired, evidence, verify_context)
                         if repaired_deterministic.passed and repaired.status == "answered":
                             await step("正在复核修正后的结论")
                             reaudit_timeout = stage_timeout()
@@ -779,7 +800,7 @@ class AgentRuntime:
                     recommendation="clarify" if output.status == "needs_clarification" else "refuse",
                 )
                 audit_trace = []
-            passed = audited and deterministic.passed and semantic_audit.passed and semantic_audit.recommendation == "publish"
+            passed = (fast_path or audited) and deterministic.passed and semantic_audit.passed and semantic_audit.recommendation == "publish"
             issues = list(dict.fromkeys([*deterministic.issues, *semantic_audit.issues]))
             preview = evidence.ready_preview()
             pending_action = self.tool_factory.pending_action(preview[0].tool_name, preview[1]) if preview else None
@@ -822,7 +843,7 @@ class AgentRuntime:
                         "label": "证据审核",
                         # 修复轮救回来的答案要如实说明，别让用户以为它一次成型。
                         "detail": (
-                            ("按复核意见修正后通过" if repaired_publish else "通过")
+                            ("按复核意见修正后通过" if repaired_publish else ("事实值已逐项对账通过" if fast_path else "通过"))
                             if passed
                             else ("结论未成形，未进入复核" if not audited else "未通过，已阻止未验证结论")
                         ),

@@ -94,6 +94,69 @@ class EvidenceTest(unittest.TestCase):
         self.assertFalse(audit.passed)
         self.assertTrue(any("在问题和回答里都不存在" in issue for issue in audit.issues))
 
+    def _settlement_store(self):
+        store = EvidenceStore()
+        store.add("query_settlement_exports", {}, {"exports": [{
+            "exportedAt": "2026-07-28T23:09:00", "startDate": "2026-07-01", "endDate": "2026-07-31",
+            "taskCount": 14, "hours": 38.75, "amount": 3293.75,
+        }]})
+        return store
+
+    def _settlement_output(self, answer):
+        return AgentTurnOutput.model_validate({
+            "status": "answered",
+            "intent_summary": "查上次导出时间",
+            # 模型给主体起的概括标签，和用户措辞词序不同；证据里也没有这个短语。
+            "subject": {"entity_type": "record", "name": "结算回单导出记录", "confidence": 0.9},
+            "answer": answer,
+            # 故意抄错哈希：线上就是这样把一个完全正确的答案毁掉的。
+            "claims": [{"text": "最后一次导出在 2026/07/28 23:09", "kind": "date", "evidence_refs": ["ev-does-not-exist"]}],
+            "used_specialists": ["workspace_analyst"],
+        })
+
+    def test_correct_answer_survives_wrong_evidence_ids_and_a_paraphrased_subject(self):
+        """线上真实案例：每个数值都真实存在于证据中，却因为抄错编号被整段拦下。"""
+        output = self._settlement_output(
+            "最新一次导出结算回单是 **2026/07/28 23:09**，覆盖 2026/07/01 至 2026/07/31，"
+            "共 14 个任务、38.75 小时、¥3,293.75。距离今天（2026/08/11）已过去 14 天。"
+        )
+        audit = deterministic_verify(
+            "你帮我查看一下上一次导出结算回单是什么时候？距离今天多久了？",
+            output, self._settlement_store(), "2026-08 2026/08/11",
+        )
+        self.assertTrue(audit.passed, audit.issues)
+        # 记账问题降级为审计记录，不再阻断发布。
+        self.assertTrue(any("证据编号" in item for item in audit.advisory))
+
+    def test_fabricated_values_are_still_blocked(self):
+        output = self._settlement_output("最新一次导出结算回单是 **2026/07/29 10:00**，金额 ¥9,999.99。")
+        audit = deterministic_verify("上次导出结算回单是什么时候？", output, self._settlement_store(), "2026-08 2026/08/11")
+        self.assertFalse(audit.passed)
+        for fabricated in ("07/29", "9999.99", "10:00"):
+            self.assertTrue(any(fabricated in issue for issue in audit.issues), fabricated)
+
+    def test_a_value_the_user_guessed_is_not_treated_as_grounded(self):
+        """用户问"是 B09 还是 B10"时，B10 只是候选，不是事实。"""
+        store = EvidenceStore()
+        record = store.add("get_task_detail", {}, {"files": ["昂楷之道_B09.pdf"]})
+        output = AgentTurnOutput.model_validate({
+            "status": "answered", "intent_summary": "确认版本",
+            "subject": {"entity_type": "publication", "name": "昂楷之道", "confidence": 1},
+            "answer": "当前上传的是 B10。",
+            "claims": [{"text": "当前上传版本是 B10", "kind": "version", "evidence_refs": [record.evidence_id]}],
+            "used_specialists": ["workspace_analyst"],
+        })
+        audit = deterministic_verify("《昂楷之道》现在是 B09 还是 B10？", output, store, "2026-08")
+        self.assertFalse(audit.passed)
+
+    def test_todays_date_is_grounded_by_context_not_by_tool_evidence(self):
+        """今天的日期来自系统时钟，永远不会出现在工具证据里。"""
+        store = self._settlement_store()
+        output = self._settlement_output("上一次导出结算回单在 **2026/07/28 23:09**，今天是 2026/08/11。")
+        self.assertTrue(deterministic_verify("上次导出？", output, store, "2026-08 2026/08/11").passed)
+        blocked = deterministic_verify("上次导出？", output, store, "")
+        self.assertFalse(blocked.passed)
+
     def test_ready_preview_is_kept_for_deterministic_confirmation(self):
         store = EvidenceStore()
         store.add("create_task_preview", {"title": "A"}, {

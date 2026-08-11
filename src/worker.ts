@@ -8857,16 +8857,22 @@ async function agentResolveWorkspaceSubjectTool(env: Env, request: Request) {
     `${item.source}:${item.taskId || ''}:${item.attachmentId || ''}:${item.at}:${item.versions.map(normalizeAgentVersion).join(',')}:${item.text}`,
     item,
   ])).values()].sort((left, right) => String(right.at || '').localeCompare(String(left.at || '')))
-  const latestEvidence = dedupedEvidence[0]
+  // resolved 只能表示"确实认出了对象"。此前写的是 `resolvedTask || results.length`：
+  // 全文搜索命中任何一条（哪怕只是用户自己的一条历史对话）就报 resolved，然后把
+  // 工作区里最新的那条无关证据当结果递回去。线上真实后果：问"结算回单"拿回
+  // 硬封套 V1.0B10 的版本信息，模型照着这条垃圾证据写 claim，整轮答案被拦。
+  const resolutionStatus = resolvedTask ? 'resolved' : 'not_found'
+  // 没认出对象时不要递回"最新的那一条"——它只会把无关数据灌进证据库。
+  const resolvedEvidence = resolvedTask ? dedupedEvidence : []
+  const latestEvidence = resolvedEvidence[0]
   const latestVersion = latestEvidence?.versions[0] || ''
-  const resolutionStatus = resolvedTask || results.length ? 'resolved' : 'not_found'
 
   return agentOk({
     tool: 'resolve_workspace_subject', subject, factKind: 'version', resolutionStatus,
     task: task ? { id: Number(task.id), title: String(task.title || ''), status: String(task.status || '') } : undefined,
     latestVersion,
     latestEvidence: latestEvidence || null,
-    evidence: dedupedEvidence.slice(0, 30),
+    evidence: resolvedEvidence.slice(0, 30),
     candidates,
     searchedSources: ['task', 'attachment', 'conversation'],
     generatedAt: nowIso(),
