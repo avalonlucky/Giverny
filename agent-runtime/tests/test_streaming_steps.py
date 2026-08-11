@@ -264,6 +264,26 @@ class InternalNameScrubTest(unittest.TestCase):
         self.assertNotIn("evidence_refs", scrubbed)
         self.assertNotIn("intent_summary", scrubbed)
 
+    def test_bare_role_words_are_replaced(self):
+        """模型在推理里用裸词称呼自己：「因为 coordinator 自己没调用」。"""
+        scrubbed = self.runtime._scrub_internal("因为 coordinator 自己没调用，auditor 也没要求，supervisor 已给出结论")
+        for leaked in ("coordinator", "auditor", "supervisor"):
+            self.assertNotIn(leaked, scrubbed.lower())
+        self.assertIn("主协调", scrubbed)
+        self.assertIn("结论复核", scrubbed)
+
+    def test_evidence_hashes_are_not_shown_to_the_user(self):
+        scrubbed = self.runtime._scrub_internal("证据编号 应该引用 ev-b940ffd36e705c5f")
+        self.assertNotIn("ev-b940ffd36e705c5f", scrubbed)
+        self.assertIn("某条证据", scrubbed)
+
+    def test_protocol_field_names_get_distinct_readable_names(self):
+        """两个不同字段不能替换成同一个词，否则 JSON 片段会变成两个同名字段。"""
+        scrubbed = self.runtime._scrub_internal('{"entity_type": "task", "entity_id": "1"}')
+        self.assertIn("对象类型", scrubbed)
+        self.assertIn("对象编号", scrubbed)
+        self.assertNotIn("entity_", scrubbed)
+
     def test_ordinary_text_survives_untouched(self):
         for text in ("硬封套最新是 V3 打样稿", "任务标题叫 hard_cover 封面", ""):
             self.assertEqual(self.runtime._scrub_internal(text), text)

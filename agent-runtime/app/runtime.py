@@ -235,6 +235,19 @@ _FRAMEWORK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# 模型在推理里会用裸词称呼自己的角色（"因为 coordinator 自己没调用"）。
+# 上面那条只匹配 `Root Coordinator` 这种全称，裸词漏了出去。
+# 这里换成可读的中文而不是统一占位词，否则句子照样读不通。
+_INTERNAL_ROLE_WORDS = (
+    (re.compile(r"\bcoordinator\b", re.IGNORECASE), "主协调"),
+    (re.compile(r"\bauditor\b", re.IGNORECASE), "结论复核"),
+    (re.compile(r"\bsupervisor\b", re.IGNORECASE), "对象判断"),
+    (re.compile(r"\bspecialists?\b", re.IGNORECASE), "专家环节"),
+)
+
+# 证据哈希对用户没有任何意义，只会让回答看起来像内部管道。
+_EVIDENCE_ID_PATTERN = re.compile(r"\bev-[0-9a-f]{8,}\b", re.IGNORECASE)
+
 # 每个外层聊天请求的模型调用硬预算：2（范围主管，含一次对象取证）
 # + 4（协调器及专家）+ 1（证据审核）+ 1（按审核意见修正）+ 1（修正稿复核）= 最多 9 次。
 # 后两次只在审核不通过时才发生，且只有一轮。结构整理改为本地
@@ -366,7 +379,10 @@ class AgentRuntime:
         for name in sorted(replacements, key=len, reverse=True):
             if name in value:
                 value = value.replace(name, replacements[name])
-        return _FRAMEWORK_PATTERN.sub("内部流程", value)
+        value = _FRAMEWORK_PATTERN.sub("内部流程", value)
+        for pattern, phrase in _INTERNAL_ROLE_WORDS:
+            value = pattern.sub(phrase, value)
+        return _EVIDENCE_ID_PATTERN.sub("某条证据", value)
 
     def _runners(self, selected_model: SelectedModelConfig, role: str, allowed_specialists: set[str]) -> tuple[Runner, Runner]:
         key = (*self._model_key(selected_model), role, tuple(sorted(allowed_specialists)))
