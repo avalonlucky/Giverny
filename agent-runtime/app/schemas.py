@@ -116,7 +116,11 @@ class AgentTurnOutput(BaseModel):
 
 class AuditOutput(BaseModel):
     passed: bool
+    # 阻断问题：会让整个答案不被输出。只允许放"用户会因此得到错误事实"的缺陷。
     issues: list[str] = Field(default_factory=list, max_length=20)
+    # 建议：措辞、详略、可以更严谨之类。只进审计记录，永远不参与是否发布的判断。
+    # 两者混在一个字段时，审核员会把措辞偏好当成缺陷，把正确答案整段拦掉。
+    advisory: list[str] = Field(default_factory=list, max_length=20)
     question_addressed: bool
     subject_aligned: bool
     evidence_sufficient: bool

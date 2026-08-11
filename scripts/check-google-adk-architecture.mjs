@@ -47,14 +47,14 @@ assert.ok(worker.includes('模型一致性校验失败'), 'Worker must reject an
 assert.ok(runtimeSource.includes('selected_model: SelectedModelConfig'), 'ADK request schema must require the exact selected model')
 assert.ok(runtimeSource.includes('"modelPolicy": "exact-selected-model-no-fallback"'), 'ADK response must attest the no-fallback exact-model policy')
 assert.ok(runtimeSource.includes('model=selected_model.model'), 'ADK response must report the exact requested model')
-assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 7'), 'ADK must cap one outer request at seven model calls')
+assert.ok(runtimeSource.includes('TOTAL_LLM_CALL_LIMIT = 9'), 'ADK must cap one outer request at nine model calls')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'coordinator and specialists must receive a hard ADK model-call limit')
 assert.ok(runtimeSource.includes('RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=max_llm_calls)'), 'all model stages must stream under a hard ADK model-call limit')
-assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 7'), 'Worker must reject a runtime that does not attest the seven-call limit')
+assert.ok(worker.includes('data.orchestration?.modelCallLimit !== 9'), 'Worker must reject a runtime that does not attest the nine-call limit')
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
-assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "reasoning-stream-1"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "repair-round-1"'), 'the runtime must publish a verifiable streaming contract version')
 assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')
@@ -137,7 +137,23 @@ assert.ok(
 assert.ok(runtimeSource.includes('kwargs["extra_body"] = extra_body'), 'the reasoning switch must travel as extra_body, never as a litellm top-level param')
 assert.ok(!/kwargs\["thinking"\]/.test(runtimeSource), 'a top-level thinking param would make every openai-route request fail')
 assert.ok(runtimeSource.includes('_model(selected_model, reasoning=True)'), 'the long orchestration stages must request reasoning output')
-assert.ok(runtimeSource.includes('auditor_model = _model(selected_model, reasoning=False)'), 'the auditor gate needs no visible reasoning and must not pay for it')
+assert.ok(runtimeSource.includes('auditor_model = _model(selected_model, reasoning=False, deterministic=True)'), 'the auditor gate needs no visible reasoning and must run deterministically')
+// 审核员是判定器：默认温度下同一份输入会时松时严，线上同一个问题出现过 拦/过/拦。
+assert.ok(runtimeSource.includes('kwargs["temperature"] = 0'), 'the auditor must not vary run to run')
+// 阻断问题与措辞建议必须分开，否则措辞偏好会把正确答案整段拦掉。
+assert.ok(runtimeSource.includes('advisory: list[str]'), 'the audit contract must separate blocking defects from wording advice')
+assert.ok(runtimeSource.includes('只能写进 advisory，不得因此拒绝'), 'the auditor must be told which findings may never block')
+// 一轮修复：审核不通过时按意见重写，重写稿必须重新过审。只有一轮，绝不循环。
+assert.ok(runtimeSource.includes('REPAIR_LLM_CALL_LIMIT = 1'), 'the repair round must be bounded to a single model call')
+assert.ok(runtimeSource.includes('and deterministic.passed'), 'a deterministic failure is a hard defect and must never be papered over by a rewrite')
+assert.ok(
+  runtimeSource.includes('if reaudit is not None and reaudit.passed and reaudit.recommendation == "publish":'),
+  'a repaired draft may only publish after passing the same audit again',
+)
+assert.ok(
+  !/(?:while|for)[^\n]*repair/i.test(runtimeSource),
+  'the repair round must never become a retry loop',
+)
 assert.ok(runtimeSource.includes('BuiltInPlanner(thinking_config=types.ThinkingConfig(include_thoughts=True))'), 'the native Gemini route needs a thinking planner to emit thought parts')
 assert.ok(runtimeSource.includes('def reasoning_stream_expected'), 'the runtime must tell the client whether reasoning was requested at all')
 assert.ok(worker.includes("if (parsed?.type === 'accepted') onReasoningExpected?.(parsed.reasoning === true)"), 'Worker must relay the reasoning declaration from the handshake frame')

@@ -208,6 +208,111 @@ class AuditorSkipTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("先确认对象", thoughts[-1])
 
 
+AUDIT_REFUSE = {
+    "passed": False,
+    "issues": ["Claim '三个版本的附件分析均处于 dead_letter 状态' 无法由证据支持"],
+    "advisory": [],
+    "question_addressed": True,
+    "subject_aligned": True,
+    "evidence_sufficient": True,
+    "recommendation": "refuse",
+}
+
+# 夹具里没有工具证据，所以答案不能出现版本号——确定性校验会正确地判它"版本结论缺少证据"。
+# 这里要测的是"拒绝→修复→重新过审→发布"这条路径本身。
+REPAIRED = {**ANSWERED, "answer": "最新上传的一版由设计组在上周完成，没有其他维度的更新。"}
+
+
+class _SequenceRunner:
+    """按调用次序返回不同事件序列，用来区分首轮与修复轮。"""
+
+    def __init__(self, *rounds):
+        self.rounds = list(rounds)
+        self.calls = 0
+
+    async def run_async(self, **_kwargs):
+        events = self.rounds[min(self.calls, len(self.rounds) - 1)]
+        self.calls += 1
+        for item in events:
+            yield item
+
+
+def coordinator_rounds(first, second):
+    return _SequenceRunner(
+        [event("giverny_coordinator", text=json.dumps(first, ensure_ascii=False))],
+        [event("giverny_coordinator", text=json.dumps(second, ensure_ascii=False))],
+    )
+
+
+def auditor_rounds(first, second):
+    return _SequenceRunner(
+        [event("evidence_auditor", text=json.dumps(first, ensure_ascii=False))],
+        [event("evidence_auditor", text=json.dumps(second, ensure_ascii=False))],
+    )
+
+
+class RepairRoundTest(unittest.IsolatedAsyncioTestCase):
+    """审核不通过时不要把整段正确答案扔掉，但也绝不能因此降低发布标准。"""
+
+    def _runtime(self, coordinator, auditor):
+        return build_runtime(
+            _Runner([event("scope_supervisor", text=json.dumps(ROUTING, ensure_ascii=False))]),
+            coordinator,
+            auditor,
+        )
+
+    async def test_repaired_draft_is_published_after_passing_the_audit_again(self):
+        coordinator = coordinator_rounds(ANSWERED, REPAIRED)
+        auditor = auditor_rounds(AUDIT_REFUSE, AUDIT_PUBLISH)
+        response = await self._runtime(coordinator, auditor).chat(build_request())
+        self.assertEqual(response.answer, REPAIRED["answer"])
+        self.assertTrue(response.fact_verification["passed"])
+        self.assertEqual(coordinator.calls, 2)
+        self.assertEqual(auditor.calls, 2)
+        self.assertIn(
+            "按复核意见修正后通过",
+            [str(item.get("detail", "")) for item in response.trace],
+        )
+
+    async def test_repair_runs_at_most_once(self):
+        """重写稿又被拒时维持原判，不得继续重试——那会变成无上限的费用与等待。"""
+        coordinator = coordinator_rounds(ANSWERED, REPAIRED)
+        auditor = auditor_rounds(AUDIT_REFUSE, AUDIT_REFUSE)
+        response = await self._runtime(coordinator, auditor).chat(build_request())
+        self.assertEqual(coordinator.calls, 2)
+        self.assertEqual(auditor.calls, 2)
+        self.assertFalse(response.fact_verification["passed"])
+        self.assertIn("没有通过", response.answer)
+
+    async def test_repaired_draft_that_fails_the_audit_is_never_published(self):
+        coordinator = coordinator_rounds(ANSWERED, REPAIRED)
+        auditor = auditor_rounds(AUDIT_REFUSE, AUDIT_REFUSE)
+        response = await self._runtime(coordinator, auditor).chat(build_request())
+        self.assertNotIn(REPAIRED["answer"], response.answer)
+
+    async def test_deterministic_failure_gets_no_repair_round(self):
+        """引用不存在的证据是硬伤，靠重写掩盖等于绕过闸门。"""
+        forged = {
+            **ANSWERED,
+            "claims": [{"text": "最新上传的是 V1.0B10", "kind": "version", "evidence_refs": ["ev-does-not-exist"]}],
+        }
+        coordinator = coordinator_rounds(forged, REPAIRED)
+        auditor = auditor_rounds(AUDIT_REFUSE, AUDIT_PUBLISH)
+        response = await self._runtime(coordinator, auditor).chat(build_request())
+        self.assertEqual(coordinator.calls, 1)
+        self.assertFalse(response.fact_verification["passed"])
+
+    async def test_wording_advice_alone_never_blocks_the_answer(self):
+        """措辞建议进 advisory，不参与是否发布的判断。"""
+        advisory_only = {**AUDIT_PUBLISH, "advisory": ["可以补充说明其他维度的最新情况"]}
+        coordinator = coordinator_rounds(ANSWERED, REPAIRED)
+        auditor = auditor_rounds(advisory_only, AUDIT_PUBLISH)
+        response = await self._runtime(coordinator, auditor).chat(build_request())
+        self.assertEqual(response.answer, ANSWERED["answer"])
+        self.assertEqual(coordinator.calls, 1)
+        self.assertEqual(auditor.calls, 1)
+
+
 class CacheBoundTest(unittest.IsolatedAsyncioTestCase):
     """Runtime 的 systemd 单元设了 MemoryMax=1200M，无界字典就是慢性 OOM。"""
 

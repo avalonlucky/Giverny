@@ -16,7 +16,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 
-from .agents import build_agent_bundle, build_scope_supervisor, reasoning_is_requested
+from .agents import REPAIR_INSTRUCTION_SUFFIX, build_agent_bundle, build_scope_supervisor, reasoning_is_requested
 from .config import Settings
 from .evidence import EvidenceStore, deterministic_verify
 from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, EntityReference, RoutingDecision, SelectedModelConfig
@@ -236,13 +236,16 @@ _FRAMEWORK_PATTERN = re.compile(
 )
 
 # 每个外层聊天请求的模型调用硬预算：2（范围主管，含一次对象取证）
-# + 4（协调器及专家）+ 1（证据审核）= 最多 7 次。结构整理改为本地
+# + 4（协调器及专家）+ 1（证据审核）+ 1（按审核意见修正）+ 1（修正稿复核）= 最多 9 次。
+# 后两次只在审核不通过时才发生，且只有一轮。结构整理改为本地
 # 强类型解析，不再为修 JSON 额外调用一次模型。Google ADK 默认是 500，
 # 绝不能直接用于生产，否则一次超时/循环就可能产生大量费用。
 SUPERVISOR_LLM_CALL_LIMIT = 2
 COORDINATOR_LLM_CALL_LIMIT = 4
 AUDITOR_LLM_CALL_LIMIT = 1
-TOTAL_LLM_CALL_LIMIT = 7
+# 审核不通过时按意见重写一次，重写稿再过一次审核：+1 +1。只有一轮，绝不循环。
+REPAIR_LLM_CALL_LIMIT = 1
+TOTAL_LLM_CALL_LIMIT = 9
 
 
 def _sanitize_step(text: str) -> str:
@@ -532,18 +535,19 @@ class AgentRuntime:
             await step(routing.intent_summary)
             allowed_specialists = set(routing.allowed_specialists)
             coordinator_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
+            coordinator_prompt_base = (
+                f"<scope_supervisor>{json.dumps(routing.model_dump(), ensure_ascii=False)}</scope_supervisor>\n"
+                f"<grounded_evidence>{json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)}</grounded_evidence>\n"
+                "只能委派 allowed_specialists 中列出的专家，不得请求其他领域。\n"
+                f"{conversation_prompt}"
+            )
             coordinator_timeout = stage_timeout()
             output, trace = await asyncio.wait_for(
                 self._run_structured(
                     coordinator_runner,
                     user_id=request.principal.principal_id,
                     session_id=request.conversation_id,
-                    prompt=(
-                        f"<scope_supervisor>{json.dumps(routing.model_dump(), ensure_ascii=False)}</scope_supervisor>\n"
-                        f"<grounded_evidence>{json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)}</grounded_evidence>\n"
-                        "只能委派 allowed_specialists 中列出的专家，不得请求其他领域。\n"
-                        f"{conversation_prompt}"
-                    ),
+                    prompt=coordinator_prompt_base,
                     on_step=on_step,
                     on_thought=lambda text: thought("分析与取证", text),
                     max_llm_calls=COORDINATOR_LLM_CALL_LIMIT,
@@ -552,15 +556,18 @@ class AgentRuntime:
                 ),
                 timeout=coordinator_timeout,
             )
-            actual_specialists = sorted({
-                str(item["agent"]) for item in trace
-                if item.get("label") == "giverny_coordinator" and item.get("agent") in allowed_specialists
-            })
-            output.used_specialists = actual_specialists
+            def attribute_specialists(target: AgentTurnOutput, items: list[dict[str, str]]) -> None:
+                target.used_specialists = sorted({
+                    str(item["agent"]) for item in items
+                    if item.get("label") == "giverny_coordinator" and item.get("agent") in allowed_specialists
+                })
+
+            attribute_specialists(output, trace)
             deterministic = deterministic_verify(request.question, output, evidence)
             # 状态不是 answered 时，passed 恒为 False，答案也已经被固定文案取代，
             # 审核结论改变不了任何输出——那次模型调用是纯浪费的等待与费用。
             audited = output.status == "answered"
+            repaired_publish = False
             if audited:
                 audit_prompt = json.dumps(
                     {
@@ -589,6 +596,82 @@ class AgentRuntime:
                     ),
                     timeout=auditor_timeout,
                 )
+                # 审核不通过时不要把整段正确答案扔掉。线上同一个问题三次是 拦/过/拦，
+                # 两次拒绝理由完全不同，而核心结论每次都对——只有一条多余断言或一处措辞被挑。
+                # 所以给一轮、且只给一轮修复机会：按审核意见重写，重写稿必须重新过同一个审核员。
+                # 确定性校验不通过时不修复：那是硬伤（证据编号不存在、主体绑不上），
+                # 靠重写掩盖等于绕过闸门。
+                repairable = (
+                    not (semantic_audit.passed and semantic_audit.recommendation == "publish")
+                    and deterministic.passed
+                    and output.status == "answered"
+                )
+                if repairable:
+                    await step("正在按复核意见修正结论")
+                    repair_timeout = stage_timeout()
+                    repair_prompt = (
+                        f"{coordinator_prompt_base}\n"
+                        f"<previous_answer>{json.dumps(output.model_dump(), ensure_ascii=False, default=str)}</previous_answer>\n"
+                        f"<audit_issues>{json.dumps(semantic_audit.issues, ensure_ascii=False)}</audit_issues>"
+                        f"{REPAIR_INSTRUCTION_SUFFIX}"
+                    )
+                    try:
+                        repaired, repair_trace = await asyncio.wait_for(
+                            self._run_structured(
+                                coordinator_runner,
+                                user_id=request.principal.principal_id,
+                                session_id=f"repair-{uuid.uuid4()}",
+                                prompt=repair_prompt,
+                                schema=AgentTurnOutput,
+                                on_step=on_step,
+                                on_thought=lambda text: thought("按复核意见修正", text),
+                                max_llm_calls=REPAIR_LLM_CALL_LIMIT,
+                                result_author="giverny_coordinator",
+                            ),
+                            timeout=repair_timeout,
+                        )
+                    except (TimeoutError, RuntimeError):
+                        # 修复本身失败时保持原判：拿不到可发布结论，就照旧不发布。
+                        repaired, repair_trace = None, []
+                    if repaired is not None:
+                        attribute_specialists(repaired, [*trace, *repair_trace])
+                        repaired_deterministic = deterministic_verify(request.question, repaired, evidence)
+                        if repaired_deterministic.passed and repaired.status == "answered":
+                            await step("正在复核修正后的结论")
+                            reaudit_timeout = stage_timeout()
+                            try:
+                                reaudit, reaudit_trace = await asyncio.wait_for(
+                                    self._run_structured(
+                                        auditor_runner,
+                                        user_id=request.principal.principal_id,
+                                        session_id=f"audit-{uuid.uuid4()}",
+                                        prompt=json.dumps(
+                                            {
+                                                "question": request.question,
+                                                "candidate": repaired.model_dump(),
+                                                "evidence": evidence.as_prompt_data(),
+                                                "deterministicAudit": repaired_deterministic.model_dump(),
+                                            },
+                                            ensure_ascii=False,
+                                            default=str,
+                                        ),
+                                        schema=AuditOutput,
+                                        on_step=on_step,
+                                        max_llm_calls=AUDITOR_LLM_CALL_LIMIT,
+                                        result_author="evidence_auditor",
+                                    ),
+                                    timeout=reaudit_timeout,
+                                )
+                            except (TimeoutError, RuntimeError):
+                                reaudit, reaudit_trace = None, []
+                            # 重写稿只有自己过了审核才能取代原稿；没过就维持原判，
+                            # 绝不因为"改过一次"而降低发布标准。
+                            if reaudit is not None and reaudit.passed and reaudit.recommendation == "publish":
+                                output = repaired
+                                deterministic = repaired_deterministic
+                                semantic_audit = reaudit
+                                trace = [*trace, *repair_trace, *reaudit_trace]
+                                repaired_publish = True
             else:
                 semantic_audit = AuditOutput(
                     passed=False,
@@ -640,7 +723,12 @@ class AgentRuntime:
                     {
                         "type": "result" if passed or not audited else "error",
                         "label": "证据审核",
-                        "detail": "通过" if passed else ("结论未成形，未进入复核" if not audited else "未通过，已阻止未验证结论"),
+                        # 修复轮救回来的答案要如实说明，别让用户以为它一次成型。
+                        "detail": (
+                            ("按复核意见修正后通过" if repaired_publish else "通过")
+                            if passed
+                            else ("结论未成形，未进入复核" if not audited else "未通过，已阻止未验证结论")
+                        ),
                     },
                 ],
                 factVerification={

@@ -3539,7 +3539,7 @@ async function callAdkAgentRuntime(
     data.model !== selectedModel.model ||
     data.orchestration?.provider !== selectedModel.provider ||
     data.orchestration?.model !== selectedModel.model ||
-    data.orchestration?.modelCallLimit !== 7 ||
+    data.orchestration?.modelCallLimit !== 9 ||
     data.factVerification?.auditorModel !== selectedModel.model
   ) {
     throw new Error(`模型一致性校验失败：设置选择 ${selectedModel.provider}/${selectedModel.model}，ADK 回报 ${data.orchestration?.provider || 'unknown'}/${data.model || 'unknown'}。已阻止返回结果。`)

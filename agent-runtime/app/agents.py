@@ -80,18 +80,39 @@ SPECIALIST_BASE = """
 
 AUDITOR_INSTRUCTION = """
 你是独立 Evidence Auditor，不与用户对话，不调用工具，不得引入任何新事实。
-你只检查：
-1. 回答是否真正回应用户问题，而不是回答了相关但不同的问题。
-2. 回答主体是否与用户指向的人、任务、项目、期刊或产品一致。
-3. 每条事实声明是否能由其 evidence_refs 指向的证据直接支持。
-4. “最新”是否写明了维度（讨论/制作/上传/提交/反馈/审批）。答案在句子里点明维度即视为满足，
-   不得因为它没有并列列举其他维度、或没有额外声明"仅基于上传时间"而拒绝——那是措辞偏好，不是事实缺陷。
-5. 当证据不足或冲突时，系统是否正确澄清或拒答。
-任何一项失败都不得 publish。
+你是判定器，不是编辑：你的职责是判断答案会不会让用户得到错误的事实，不是让答案更符合你的措辞偏好。
+
+**只有以下四类属于阻断问题（issues），它们会让整个答案不被输出：**
+1. 回答的是相关但不同的问题，用户真正问的那件事没有得到回答。
+2. 回答主体与用户指向的人、任务、项目、刊物或产品不一致。
+3. 某条事实声明无法由它 evidence_refs 指向的证据直接支持，或引用了不存在的证据。
+4. “最新/最后/当前”混淆了维度（讨论/制作/上传/提交/反馈/审批），导致结论本身可能是错的。
+
+**以下一律不属于阻断问题，只能写进 advisory，不得因此拒绝：**
+- 答案已在句子里点明维度，只是没有并列列举其他维度，或没有额外声明“仅基于上传时间”。
+- 措辞、详略、语气、排版、字段顺序偏好。
+- 答案没有主动补充用户没问的信息。
+- 证据里存在但用户没问的细节没被写出来。
+- 你自己觉得“可以更严谨”，但按现有证据该结论并不会误导用户。
+
+拿不准某条属于哪一类时，先问自己：用户照这个答案去做事，会不会因此得到错误的事实？
+会 → issues；不会 → advisory。
+
+issues 为空即 recommendation=publish。证据确实不足或主体确实无法唯一确定时用 clarify/refuse。
 最终只返回 JSON 对象，不要 Markdown 代码块：
-passed(boolean), issues([string]), question_addressed(boolean), subject_aligned(boolean),
-evidence_sufficient(boolean), recommendation(publish|clarify|refuse)。
+passed(boolean), issues([string]), advisory([string]), question_addressed(boolean),
+subject_aligned(boolean), evidence_sufficient(boolean), recommendation(publish|clarify|refuse)。
 """.strip()
+
+
+REPAIR_INSTRUCTION_SUFFIX = """
+
+上一版结论没有通过证据审核。请只针对下面列出的问题修正，然后重新输出完整的 JSON 结论：
+- 不得引入任何新的事实或新的证据编号。
+- 被指出无法验证的声明，直接删掉或改写成证据能支持的说法；不要为它编造证据。
+- 其余已经通过的内容保持原样，不要顺手重写。
+- 如果按现有证据无法修正，就把 status 改成 needs_clarification 或 refused，不要硬答。
+"""
 
 
 SUPERVISOR_INSTRUCTION = """
@@ -144,7 +165,7 @@ def reasoning_is_requested(config: SelectedModelConfig) -> bool:
     return bool(reasoning_extra_body(config)) or _thinking_planner(config) is not None
 
 
-def _model(config: SelectedModelConfig, *, reasoning: bool = False) -> str | BaseLlm:
+def _model(config: SelectedModelConfig, *, reasoning: bool = False, deterministic: bool = False) -> str | BaseLlm:
     # Gemini without an API key uses ADK's native Vertex adapter. Every other
     # route uses the exact provider/model/base URL selected in Giverny settings.
     # There is intentionally no fallback model here.
@@ -168,6 +189,10 @@ def _model(config: SelectedModelConfig, *, reasoning: bool = False) -> str | Bas
         extra_body = reasoning_extra_body(config)
         if extra_body:
             kwargs["extra_body"] = extra_body
+    if deterministic:
+        # 审核员是判定器而不是作者。默认温度下同一份输入会时松时严——线上同一个问题
+        # 三次是 拦/过/拦，两次拒绝理由还完全不同。分类器不需要创造性。
+        kwargs["temperature"] = 0
     return LiteLlm(model=model_name, **kwargs)
 
 
@@ -198,7 +223,7 @@ def build_agent_bundle(selected_model: SelectedModelConfig, tool_factory: ToolFa
     # 推理输出只向协调器与专家申请：审核员是布尔闸门，它的推理既不该展示给用户
     # （里面带着还没过闸的答案草稿），也没必要为此多付推理 token。
     coordinator_model = _model(selected_model, reasoning=True)
-    auditor_model = _model(selected_model, reasoning=False)
+    auditor_model = _model(selected_model, reasoning=False, deterministic=True)
     reasoning_kwargs = _reasoning_kwargs(selected_model)
 
     workspace_analyst = LlmAgent(
