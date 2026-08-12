@@ -37,7 +37,8 @@
 - **握手帧 `accepted` 携带 `reasoning`**，声明本轮是否向供应商申请了推理输出。混合推理模型（DeepSeek V4）必须显式打开开关才会返回推理内容，开关经 LiteLLM 的 `extra_body` 透传——顶层 `thinking` 参数在 openai 兼容路由上会直接抛 `UnsupportedParamsError`，导致每个请求失败。推理输出会产生推理 token，费用高于关闭推理。
 - **DMIT Runtime 必须先于 Worker 发布。** Worker 一旦上线就会请求 `/v1/chat/stream`；若 Runtime 仍是旧代码或未启动，对话会整体失败关闭，因此顺序不可颠倒。
 - Runtime 使用 `179.253.249.92.sslip.io:8443` 的独立 Let’s Encrypt TLS。防火墙只新增 IPv4 TCP 8443；不得重载 Xray/x-ui、占用 443/2096/24443/42989，证书续期只允许 `try-restart giverny-adk.service`。
-- **`/health` 的 `contract` 字段是发布顺序的判据。** 当前契约为 `value-reconciliation-1`。Worker 发布前必须先看到 Runtime 报出这个值，不能只凭"我已经更新了"这句话。`/api/health?runtime=1` 会把它透出来。
+- **`/health` 的 `contract` 字段是发布顺序的判据。** 当前契约为 `domain-map-1`。Worker 发布前必须先看到 Runtime 报出这个值，不能只凭"我已经更新了"这句话。`/api/health?runtime=1` 会把它透出来。
+- **`/health` 的 `domains` 字段核对两端是否对齐。** 领域地图由 Worker 随 OpenAPI 的 `x-giverny-domains` 下发，Runtime 启动时读取。`domains` 为空说明 Runtime 拿到的仍是不带该扩展的旧版 OpenAPI——Runtime 会照常工作但退回没有地图的行为，只靠模糊搜索认路。Worker 发布后要复查一次这个字段（Runtime 需重启才会重新拉取 OpenAPI）。设计与防漂移约束见 `docs/AGENT_DOMAIN_MAP.md`。
 
 ### Runtime 发布步骤（DMIT VPS）
 
@@ -62,11 +63,22 @@ grep -q ADK_TURN_BUDGET_SECONDS /etc/giverny-adk/runtime.env \
 systemctl restart giverny-adk.service
 systemctl is-active giverny-adk.service
 curl -s https://179.253.249.92.sslip.io:8443/health | python3 -m json.tool
-#    期望：ok=true、contract="value-reconciliation-1"、turnBudgetSeconds=240
+#    期望：ok=true、contract="domain-map-1"、turnBudgetSeconds=240
 
 # 5) 核对 VPN 端口未被影响
 ss -lntp | grep -E ':(443|2096|8443|24443|42989)'
 ```
+
+```bash
+# 6) Worker 发布完成后再重启一次，让 Runtime 拉到带领域地图的新 OpenAPI
+systemctl restart giverny-adk.service
+curl -s https://179.253.249.92.sslip.io:8443/health | python3 -m json.tool
+#    期望：domains 是八个领域，不是空数组
+```
+
+领域地图由 Worker 下发、Runtime 启动时读取，所以它的发布顺序与契约相反：**契约要求 Runtime 先发，
+地图要求 Worker 先发**。两者不冲突——发完 Worker 再重启一次 Runtime 即可，中间那段时间 Runtime
+只是退回没有地图的行为，不会失败。
 
 失败回滚：`git checkout <上一个 tag> && systemctl restart giverny-adk.service`。
 推理开关若被供应商拒绝（表现为每个请求立刻 400），把 `agent-runtime/app/agents.py` 里三处 `reasoning=True` 改成 `False` 后重启即可，不必整体回滚。

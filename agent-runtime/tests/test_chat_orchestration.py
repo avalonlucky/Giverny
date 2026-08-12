@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 
 from app.config import Settings
+from app.domain import DomainMap
 from app.runtime import AgentRuntime
 from app.schemas import ChatRequest
 
@@ -20,7 +21,18 @@ SPEC = {
         "/api/agent/tools/search-attachments": {
             "get": {"operationId": "search_attachments", "summary": "搜索任务附件"},
         },
-    }
+    },
+    "x-giverny-domains": [
+        {
+            "domain": "结算",
+            "summary": "按日期范围冻结的结算回单快照。",
+            "aliases": ["结算", "结算回单", "回单", "对账"],
+            "specialist": "workspace_analyst",
+            "unreadable": "",
+            "objects": [{"name": "结算回单", "fields": ["导出时间（exportedAt）", "结算金额（amount）"]}],
+            "operations": [{"operation": "query_settlement_exports", "title": "查询结算导出记录", "description": "按日期范围查询结算导出。"}],
+        },
+    ],
 }
 
 ROUTING = {
@@ -79,9 +91,14 @@ class _Runner:
         self._events = events
         self.delay = delay
         self.calls = 0
+        # 每一轮送进模型的完整 prompt。领域地图是否真的到了模型手里，
+        # 只有在这里核对才算数——源码里存在这个字符串不代表它被注入了。
+        self.prompts: list[str] = []
 
-    async def run_async(self, **_kwargs):
+    async def run_async(self, **kwargs):
         self.calls += 1
+        message = kwargs.get("new_message")
+        self.prompts.append("".join(part.text or "" for part in getattr(message, "parts", []) or []))
         if self.delay:
             await asyncio.sleep(self.delay)
         for item in self._events:
@@ -114,6 +131,7 @@ def build_runtime(supervisor, coordinator, auditor, *, turn_budget=240.0, reques
         turn_budget_seconds=turn_budget,
     )
     runtime.spec = SPEC
+    runtime.domain_map = DomainMap.from_spec(SPEC)
     runtime._conversation_locks = {}
     runtime.tool_factory = SimpleNamespace(pending_action=lambda *_a, **_kw: None)
     runtime._supervisor = lambda _model, _role: supervisor
@@ -476,6 +494,36 @@ class TurnBudgetTest(unittest.IsolatedAsyncioTestCase):
     async def test_budget_stays_inside_the_worker_subrequest_bound(self):
         settings = Settings.from_env()
         self.assertLess(settings.turn_budget_seconds, 280.0)
+
+
+class DomainInjectionTest(unittest.IsolatedAsyncioTestCase):
+    """领域地图必须真的走进这一轮的两个 prompt，而不只是存在于源码里。"""
+
+    def _runtime(self, routing):
+        supervisor = _Runner([event("scope_supervisor", text=json.dumps(routing, ensure_ascii=False))])
+        coordinator = _Runner([event("giverny_coordinator", text=json.dumps(ANSWERED, ensure_ascii=False))])
+        auditor = _Runner([event("evidence_auditor", text=json.dumps(AUDIT_PUBLISH, ensure_ascii=False))])
+        return build_runtime(supervisor, coordinator, auditor), supervisor, coordinator
+
+    async def test_literal_hit_reaches_the_scope_stage(self):
+        runtime, supervisor, _ = self._runtime(ROUTING)
+        await runtime.chat(build_request("最近一次导出结算回单是什么时候？"))
+        self.assertIn("<domain_hits>结算</domain_hits>", supervisor.prompts[0])
+
+    async def test_resolved_domain_hands_the_coordinator_its_playbook(self):
+        runtime, _, coordinator = self._runtime({**ROUTING, "domain": "结算"})
+        await runtime.chat(build_request("最近一次导出结算回单是什么时候？"))
+        prompt = coordinator.prompts[0]
+        self.assertIn("<domain_playbook domain=\"结算\">", prompt)
+        self.assertIn("query_settlement_exports", prompt)
+        self.assertIn("导出时间（exportedAt）", prompt)
+
+    async def test_unrelated_question_carries_no_domain_noise(self):
+        # 地图是有成本的。不属于任何领域的问题不该白付这几百 token。
+        runtime, supervisor, coordinator = self._runtime(ROUTING)
+        await runtime.chat(build_request("明天北京天气怎么样？"))
+        self.assertNotIn("domain_hits", supervisor.prompts[0])
+        self.assertNotIn("domain_playbook", coordinator.prompts[0])
 
 
 if __name__ == "__main__":

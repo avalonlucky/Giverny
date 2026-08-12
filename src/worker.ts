@@ -8,6 +8,7 @@ import JSZip from 'jszip'
 import { z } from 'zod'
 import { phoneticVariants , phoneticEditDistance } from './chineseFuzzy'
 import { agentCapabilityAllows, agentCapabilityManifest, agentCapabilityRegistry, agentReadToolRegistry, agentWorkflowWriteEndpoints, agentWritePreviewConfig } from './agentToolRegistry'
+import { agentDomainManifest } from './agentDomainMap'
 import { callAgentTool } from './agentToolClient'
 import { CONFIRM_RE, REJECT_RE, buildExecutionSummary } from './agentApprovalFlow'
 import { extractAgentVersions, normalizeAgentVersion } from './agentVersionEvidence'
@@ -7257,6 +7258,9 @@ function agentOpenApiSpec(request: Request) {
       { name: 'Write Tools', description: 'Preview/execute tools for confirmed writes.' },
     ],
     'x-giverny-capabilities': agentCapabilityManifest(),
+    // 站内业务领域地图。Agent 靠它把「结算回单」这类一等业务概念直接定域到工具，
+    // 而不是当成不认识的对象名去模糊搜任务标题。
+    'x-giverny-domains': agentDomainManifest(),
     paths: {
       '/api/agent/tools/month-finance': {
         get: {

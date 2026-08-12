@@ -21,7 +21,7 @@ _HEARTBEAT_SECONDS = 10.0
 
 # 每次改动 Worker 与 Runtime 之间的流式契约都要往上推一版，
 # 发布前用 /health 核对，避免 Worker 先上而 Runtime 还是旧代码。
-RUNTIME_CONTRACT = "value-reconciliation-1"
+RUNTIME_CONTRACT = "domain-map-1"
 
 
 settings = Settings.from_env()
@@ -43,9 +43,13 @@ def authorize(x_adk_runtime_key: str | None = Header(default=None)) -> None:
 
 @app.get("/health")
 async def health(request: Request):
-    runtime_ready = isinstance(getattr(request.app.state, "runtime", None), AgentRuntime)
+    runtime = getattr(request.app.state, "runtime", None)
+    runtime_ready = isinstance(runtime, AgentRuntime)
     return {
         "ok": runtime_ready and settings.ready,
+        # 领域地图来自 Worker 下发的 OpenAPI。Runtime 先于 Worker 发布时它会是 0，
+        # 这是"新旧两端还没对齐"唯一能在外部看到的信号。
+        "domains": list(runtime.domain_map.names()) if runtime_ready else [],
         "runtime": "google-adk-2",
         "framework": "google-adk",
         "modelPolicy": "exact-selected-model-no-fallback",

@@ -390,6 +390,17 @@ class StructuredStreamCollectorTest(unittest.IsolatedAsyncioTestCase):
         # 聚合帧取代同段增量，不能把同一句话拼成两遍。
         self.assertEqual(thoughts[-1], "用户问的是最新那一版，我先用 「搜索任务附件」 查附件")
 
+    def test_domain_map_tags_never_reach_the_user(self):
+        # 领域地图整段在 prompt 里，模型复述它的标签概率很高，而推理是直接渲染给用户的。
+        scrubbed = AgentRuntime._scrub_internal(
+            self.runtime,
+            '按 <domain_playbook domain="结算"> 的说明，我看一下 domain_hits 命中的领域',
+        )
+        self.assertNotIn("<", scrubbed)
+        self.assertNotIn("domain_playbook", scrubbed)
+        self.assertNotIn("domain_hits", scrubbed)
+        self.assertIn("结算", scrubbed)
+
 
 if __name__ == "__main__":
     unittest.main()

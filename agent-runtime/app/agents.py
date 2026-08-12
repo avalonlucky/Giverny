@@ -9,6 +9,7 @@ from google.adk.models.base_llm import BaseLlm
 from google.adk.planners import BuiltInPlanner
 from google.genai import types
 
+from .domain import DomainMap
 from .schemas import SelectedModelConfig
 from .tooling import READ_GROUPS, ToolFactory, capture_tool_evidence
 
@@ -79,7 +80,10 @@ SPECIALIST_BASE = """
 引用工具结果时必须保留 evidenceId，不得创造证据 ID。
 
 每一次多余的模型调用都让用户多等约 20 秒，一轮问答有总时长上限，超时就什么都拿不到。所以：
-- 先用覆盖面最广的那个搜索工具。它已经同时覆盖任务、附件和会话，命中后不要再把
+- <domain_playbook> 已经写明本轮属于哪个业务领域、该领域的对象有哪些字段、该用哪个工具。
+  它在场时按它点名的工具直接取数，不要先用搜索去"确认这个东西存在"——它就在站内导航里。
+  playbook 写了读取边界的，如实说明读不到，不要换关键词反复搜。
+- 没有 playbook 时，先用覆盖面最广的那个搜索工具。它已经同时覆盖任务、附件和会话，命中后不要再把
   窄范围的搜索工具重复跑一遍去确认同一件事。
 - <grounded_evidence> 里已经有的结果不要重新调工具去取一次，尤其是对象解析结果。
 - 一轮检索没有精确命中，就直接如实汇报"没有精确匹配 + 最接近的候选"，
@@ -128,6 +132,18 @@ SUPERVISOR_INSTRUCTION = """
 你是 Giverny 的 Scope Supervisor，位于 Root Coordinator 之上。你先确认用户所指对象，再决定本轮允许哪些专家可见。
 你的推理过程会实时展示给用户，必须全程使用中文，不要中英混写。
 
+第一步永远是定域。<domain_map> 列出了站内所有业务领域，它们是网站的一等概念——
+导航上就有，属于你应该已经知道的事，不是需要检索才能确认存在的对象。
+<domain_hits> 是问题里字面命中的领域，除非语义上明显不符，否则应当采纳。
+
+定域和锁定具名对象是两件独立的事，两者都要判断，不要互相替代：
+- **地图里写明的词本身不是具名对象**。“结算回单”、“对账单”、“附件”、“需求人画像”都是
+  业务概念，拿它们去调 resolve_workspace_subject 只会一无所获，还白花一次调用和二十秒。
+- **用户另外说出的专有名称仍然要解析**。“汇联易改版这个任务做到哪一步了”——domain 是任务域，
+  但“汇联易改版”是一个具名对象，仍然必须调 resolve_workspace_subject 锁定它。
+- 问题里只有领域概念、没有专有名称时（“最近一次导出结算回单是什么时候”），
+  定完域就够了，不要取证。
+
 你不能在没有证据时猜测“某个版本”属于 Giverny 产品。只要用户指向一个具名业务对象、公司项目、任务、刊物、文件或语义上不能确定是否为 Giverny 本身，必须先调用 resolve_workspace_subject 取证。工具返回 resolved/ambiguous 时必须选择 workspace_analyst；只有返回 not_found 且用户明确说的是 Giverny 网站、工作台、设置或发布版本，才选择 product_support。
 
 不得根据“版本”、“最新”等单个词决定领域，必须先识别用户问的具体主体：
@@ -138,7 +154,8 @@ SUPERVISOR_INSTRUCTION = """
 
 不要“以防万一”开放无关专家。一般问答可以不开放任何专家。
 工具取证最多一次。最终只返回 JSON 对象，不要 Markdown 代码块：
-intent_summary, subject, allowed_specialists, requires_evidence, rationale。
+intent_summary, subject, domain, allowed_specialists, requires_evidence, rationale。
+domain 必须是 <domain_map> 里的领域名之一；确实不属于任何站内领域时填空字符串。
 """.strip()
 
 
@@ -211,14 +228,23 @@ def _reasoning_kwargs(config: SelectedModelConfig) -> dict[str, Any]:
     return {"planner": planner} if planner else {}
 
 
-def build_scope_supervisor(selected_model: SelectedModelConfig, tool_factory: ToolFactory, role: str) -> LlmAgent:
+def build_scope_supervisor(
+    selected_model: SelectedModelConfig,
+    tool_factory: ToolFactory,
+    role: str,
+    domain_map: DomainMap | None = None,
+) -> LlmAgent:
     # 对象判断是本轮最先执行的阶段，用户等待的头几十秒全在这里。它必须开推理，
     # 否则思考链在开场阶段一定是空的。
+    #
+    # 领域地图烘进指令而不是每轮拼进 prompt：它对整个进程是常量，
+    # 而指令随 Runner 一起缓存，等于每轮省下一次重复序列化。
+    catalog = domain_map.render_catalog() if domain_map else ""
     return LlmAgent(
         name="scope_supervisor",
         description="理解用户真实主体与意图，在编排前限定专家可见性。",
         model=_model(selected_model, reasoning=True),
-        instruction=SUPERVISOR_INSTRUCTION,
+        instruction=f"{SUPERVISOR_INSTRUCTION}\n\n{catalog}" if catalog else SUPERVISOR_INSTRUCTION,
         tools=tool_factory.toolsets_for_operations(role=role, operation_ids={"resolve_workspace_subject"}),
         mode="chat",
         include_contents="none",

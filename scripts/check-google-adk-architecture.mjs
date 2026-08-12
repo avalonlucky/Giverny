@@ -68,7 +68,7 @@ assert.ok(worker.includes('工作助手服务版本不一致，已阻止返回�
 assert.ok(worker.includes('async function probeAdkRuntimeHealth'), 'Worker must expose a no-model ADK connectivity probe')
 assert.ok(worker.includes("`${baseUrl}/health`"), 'ADK connectivity probe must call health rather than a model endpoint')
 // 发布顺序必须可核对，而不是只能声称：Runtime 先上才会在 /health 报出新契约。
-assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "value-reconciliation-1"'), 'the runtime must publish a verifiable streaming contract version')
+assert.ok(runtimeSource.includes('RUNTIME_CONTRACT = "domain-map-1"'), 'the runtime must publish a verifiable streaming contract version')
 assert.ok(worker.includes("contract: String(payload.contract || '')"), 'the no-model probe must surface the runtime contract so deploy order can be verified')
 assert.ok(worker.includes("searchParams.get('runtime') === '1'"), 'runtime health probing must be explicit rather than added to every health request')
 assert.ok(!runtimeSource.includes('GIVERNY_COORDINATOR_MODEL'), 'ADK must not retain a hidden fixed coordinator model')

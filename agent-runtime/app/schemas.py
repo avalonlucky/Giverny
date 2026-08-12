@@ -130,6 +130,10 @@ class AuditOutput(BaseModel):
 class RoutingDecision(BaseModel):
     intent_summary: str = Field(min_length=1, max_length=600)
     subject: EntityReference | None = None
+    # 本轮命中的站内业务领域。空字符串表示不属于任何领域，模型编出来的领域名
+    # 在 _apply_domain_routing 里会被丢掉——这里不做 Literal 校验，因为领域清单
+    # 由 Worker 下发，写死在这里就是又一份会漂移的副本。
+    domain: str = Field(default="", max_length=40)
     allowed_specialists: list[Literal["workspace_analyst", "product_support", "web_researcher", "transaction_specialist"]] = Field(default_factory=list, max_length=4)
     requires_evidence: bool = True
     rationale: str = Field(min_length=1, max_length=800)

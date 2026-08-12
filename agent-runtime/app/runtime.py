@@ -19,6 +19,7 @@ from google.genai import types
 
 from .agents import REPAIR_INSTRUCTION_SUFFIX, build_agent_bundle, build_scope_supervisor, reasoning_is_requested
 from .config import Settings
+from .domain import DomainMap, render_domain_hits, scrub_domain_tags
 from .evidence import EvidenceStore, deterministic_verify, salient_values
 from .schemas import AgentTurnOutput, AuditOutput, ChatRequest, ChatResponse, EntityReference, RoutingDecision, SelectedModelConfig
 from .tooling import RequestScope, ToolFactory, request_scope
@@ -104,6 +105,28 @@ class _StreamText:
 
     def text(self) -> str:
         return "".join([*self.segments, self.current])
+
+
+def _apply_domain_routing(routing: RoutingDecision, domain_map: DomainMap, hits: tuple[str, ...]) -> RoutingDecision:
+    """把领域判断落成实际的专家可见性。
+
+    两个方向都要兜：模型编了一个不存在的领域名要丢掉；模型漏了定域但问题里
+    字面写着导航名（"结算回单"）时要补上。补的前提是只命中一个领域——命中多个
+    说明问题本身跨域，那就交给模型的语义判断，不要用字面匹配去覆盖它。
+    """
+    if not domain_map:
+        return routing
+    domain = domain_map.get(routing.domain)
+    if domain is None:
+        routing.domain = ""
+        if len(hits) == 1:
+            domain = domain_map.get(hits[0])
+            routing.domain = domain.name if domain else ""
+    if domain is None:
+        return routing
+    if domain.specialist and domain.specialist not in routing.allowed_specialists:
+        routing.allowed_specialists.append(domain.specialist)
+    return routing
 
 
 def _apply_grounded_scope(routing: RoutingDecision, evidence: EvidenceStore) -> RoutingDecision:
@@ -215,6 +238,9 @@ _INTERNAL_FIELD_PHRASES = {
     "entity_type": "对象类型",
     "entity_id": "对象编号",
     "grounded_evidence": "已取得的证据",
+    "domain_playbook": "领域说明",
+    "domain_map": "领域地图",
+    "domain_hits": "命中领域",
     "conversation_history": "对话历史",
     "current_user_question": "当前问题",
     "attached_context": "附带上下文",
@@ -294,6 +320,9 @@ class AgentRuntime:
 
     def __post_init__(self) -> None:
         self.session_service = DatabaseSessionService(db_url=self.settings.session_db_url)
+        # 领域地图随 OpenAPI 一起下发，进程生命周期内是常量。旧版 Worker 没有这个
+        # 扩展时它是空的，编排照常跑，只是退回没有地图的行为。
+        self.domain_map = DomainMap.from_spec(self.spec)
         self.tool_factory = ToolFactory(
             spec=self.spec,
             token=self.settings.tool_token,
@@ -316,7 +345,7 @@ class AgentRuntime:
         if cached:
             return cached
         runner = Runner(
-            agent=build_scope_supervisor(selected_model, self.tool_factory, role),
+            agent=build_scope_supervisor(selected_model, self.tool_factory, role, self.domain_map),
             app_name="giverny-adk-supervisor",
             session_service=self.session_service,
             auto_create_session=True,
@@ -378,6 +407,9 @@ class AgentRuntime:
         value = str(text or "")
         if not value:
             return ""
+        # 先摘掉领域地图的标签壳，再做词替换：否则 `<domain_playbook …>` 里的
+        # 词被换掉之后，标签就匹配不上了，尖括号会原样留在用户看到的推理里。
+        value = scrub_domain_tags(value)
         replacements = self._internal_name_replacements()
         # 长名字先替换：否则 search_attachments_post 会被 search_attachments 截成半截。
         for name in sorted(replacements, key=len, reverse=True):
@@ -588,6 +620,10 @@ class AgentRuntime:
     ) -> ChatResponse:
         selected_model = request.selected_model
         conversation_prompt = _conversation_prompt(request, self.settings.max_history_messages)
+        # 字面命中的领域。它不替模型做决定，只保证"用户把导航名说出口了"这种
+        # 最直白的情况不会被漏掉——线上正是这一类被当成陌生对象名去搜任务标题的。
+        domain_hits = self.domain_map.match(f"{request.question}\n{request.context}")
+        supervisor_prompt = "\n".join(part for part in (render_domain_hits(domain_hits), conversation_prompt) if part)
         evidence = EvidenceStore()
         token = request_scope.set(RequestScope(principal=request.principal, evidence=evidence))
         try:
@@ -600,7 +636,7 @@ class AgentRuntime:
                     self._supervisor(selected_model, request.principal.role),
                     user_id=request.principal.principal_id,
                     session_id=f"scope-{uuid.uuid4()}",
-                    prompt=conversation_prompt,
+                    prompt=supervisor_prompt,
                     schema=RoutingDecision,
                     on_step=on_step,
                     on_thought=lambda text: thought("对象判断", text),
@@ -617,13 +653,18 @@ class AgentRuntime:
                     evidence=evidence,
                     routing_trace=[],
                 )
+            routing = _apply_domain_routing(routing, self.domain_map, domain_hits)
             routing = _apply_grounded_scope(routing, evidence)
             await step(routing.intent_summary)
             allowed_specialists = set(routing.allowed_specialists)
             coordinator_runner, auditor_runner = self._runners(selected_model, request.principal.role, allowed_specialists)
+            # 定域之后只展开这一个域：字段叫什么、该用哪个工具。全量地图对协调阶段
+            # 是噪音，而这一段是它真正需要的——它决定了取数走专用工具还是模糊搜索。
+            playbook = self.domain_map.render_playbook(routing.domain)
             coordinator_prompt_base = (
                 f"<scope_supervisor>{json.dumps(routing.model_dump(), ensure_ascii=False)}</scope_supervisor>\n"
-                f"<grounded_evidence>{json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)}</grounded_evidence>\n"
+                + (f"{playbook}\n" if playbook else "")
+                + f"<grounded_evidence>{json.dumps(evidence.as_prompt_data(), ensure_ascii=False, default=str)}</grounded_evidence>\n"
                 "只能委派 allowed_specialists 中列出的专家，不得请求其他领域。\n"
                 f"{conversation_prompt}"
             )
