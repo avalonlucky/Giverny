@@ -21,6 +21,8 @@ import { AppSidebar } from './components/AppSidebar'
 import { AppTopbar } from './components/AppTopbar'
 import { AppOverlayLayer } from './components/AppOverlayLayer'
 import { DashboardView } from './views/DashboardView'
+import { api } from './lib/api'
+import { localCliBrowserDeviceKey } from './lib/localCli'
 import { initializeGivernyTheme } from './lib/givernyTheme'
 import { monthLabelOf } from './lib/month'
 import { isTaskListBlankContextTarget } from './lib/taskListPresentation'
@@ -109,6 +111,22 @@ function App() {
     backendStatus, backendSyncSlow: effectiveBackendSyncSlow, isOffline, storageUsage,
     attachmentAnalyses, refreshState, retryRefreshState, isAdmin,
   } = workspaceData
+  useEffect(() => {
+    if (!auth || role === 'demo') return
+    const browserDeviceKey = localCliBrowserDeviceKey()
+    const renew = () => {
+      if (document.visibilityState === 'visible') {
+        void api.renewLocalCliPageLease(browserDeviceKey).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', renew)
+    const timer = window.setInterval(renew, 20_000)
+    renew()
+    return () => {
+      document.removeEventListener('visibilitychange', renew)
+      window.clearInterval(timer)
+    }
+  }, [auth, role])
   const settingsOperations = useSettingsOperations({
     workspace: workspaceData,
     notify,

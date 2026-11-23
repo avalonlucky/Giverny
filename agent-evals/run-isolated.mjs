@@ -1589,7 +1589,7 @@ async function runLocalCliBridgeCheck(cookie) {
   const bridgePairResponse = await fetch(`${base}/api/local-cli/bridge/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.4.1', clis: initialClis }),
+    body: JSON.stringify({ code: pairing.code, name: 'Eval Mac', platform: 'darwin', arch: 'arm64', bridgeVersion: '0.4.2', clis: initialClis }),
   })
   const bridgePair = await bridgePairResponse.json().catch(() => ({}))
   if (!bridgePairResponse.ok || !bridgePair.deviceId || !bridgePair.token) throw new Error(`Local CLI bridge pairing failed: ${JSON.stringify(bridgePair)}`)
@@ -1602,17 +1602,25 @@ async function runLocalCliBridgeCheck(cookie) {
   if (replayPair.status !== 404) throw new Error(`Local CLI pairing code replay was not rejected: ${replayPair.status}`)
 
   const bridgeHeaders = { authorization: `Bearer ${bridgePair.token}`, 'content-type': 'application/json' }
+  const idle = await fetch(`${base}/api/local-cli/bridge/commands`, { headers: bridgeHeaders })
+  if ((await idle.json()).pageActive !== false) throw new Error('Bridge should idle before the paired page opens')
+  const pageLease = await fetch(`${base}/api/local-cli/page-lease`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ browserDeviceKey }),
+  })
+  if (!pageLease.ok) throw new Error('Paired page could not activate the Bridge')
   const heartbeat = await fetch(`${base}/api/local-cli/bridge/heartbeat`, {
     method: 'POST',
     headers: bridgeHeaders,
-    body: JSON.stringify({ bridgeVersion: '0.4.1', clis: initialClis }),
+    body: JSON.stringify({ bridgeVersion: '0.4.2', clis: initialClis }),
   })
   const heartbeatResult = await heartbeat.json().catch(() => ({}))
-  if (!heartbeat.ok || heartbeatResult.bridgeRuntimeVersion !== '0.4.1' || heartbeatResult.bridgeDownloadUrl !== `${base}/giverny-bridge.mjs`) {
+  if (!heartbeat.ok || heartbeatResult.bridgeRuntimeVersion !== '0.4.2' || heartbeatResult.bridgeDownloadUrl !== `${base}/giverny-bridge.mjs`) {
     throw new Error(`Local CLI heartbeat did not advertise the runtime update: ${JSON.stringify(heartbeatResult)}`)
   }
   const bridgeSource = await fetch(pairing.bridgeUrl).then((response) => response.text())
-  if (!bridgeSource.includes("const VERSION = '0.4.1'") || !bridgeSource.includes('proxyAwareEnv') || !bridgeSource.includes('refreshCachedCli') || !bridgeSource.includes("--disable', 'plugins'") || !bridgeSource.includes('model_reasoning_effort="low"') || !bridgeSource.includes('executeRunCommand(config, payload.command, clis)')) {
+  if (!bridgeSource.includes("const VERSION = '0.4.2'") || !bridgeSource.includes('proxyAwareEnv') || !bridgeSource.includes('refreshCachedCli') || !bridgeSource.includes("--disable', 'plugins'") || !bridgeSource.includes('model_reasoning_effort="low"') || !bridgeSource.includes('executeRunCommand(config, payload.command, clis)')) {
     throw new Error('Published Bridge is missing the isolated proxy-aware Codex runtime')
   }
 
@@ -1913,7 +1921,7 @@ async function runLocalCliBridgeCheck(cookie) {
         content: '这是本机 Codex CLI 的回答。',
         sessionId: 'eval-codex-session',
         workspace: '/tmp/giverny',
-        diagnostics: { proxyMode: 'system', configMode: 'isolated', bridgeVersion: '0.4.1', proxyUrl: 'must-not-persist' },
+        diagnostics: { proxyMode: 'system', configMode: 'isolated', bridgeVersion: '0.4.2', proxyUrl: 'must-not-persist' },
         timings: { bridgeStartedAt: 1000, cliSpawnedAt: 1100, firstEventAt: 1200, firstContentAt: 2500, completedAt: 2800, durationMs: 1800, unsafe: 99 },
       },
     }),

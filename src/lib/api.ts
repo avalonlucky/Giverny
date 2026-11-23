@@ -1408,6 +1408,12 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ browserDeviceKey }),
     }),
+  renewLocalCliPageLease: (browserDeviceKey: string) =>
+    requestJson<{ ok: boolean }>('/api/local-cli/page-lease', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ browserDeviceKey }),
+    }),
   getLocalCliDevices: (browserDeviceKey: string) =>
     requestJson<{ devices: LocalCliDevice[]; browserDeviceKey: string }>(`/api/local-cli/devices?browserDeviceKey=${encodeURIComponent(browserDeviceKey)}`),
   scanLocalCliDevice: (deviceId: string) =>

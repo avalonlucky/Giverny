@@ -22569,6 +22569,7 @@ type DbLocalCliDevice = {
   principal_id: string
   role: string
   browser_device_key: string
+  browser_active_until: number | null
   name: string
   platform: string
   arch: string
@@ -22615,7 +22616,8 @@ const LOCAL_CLI_COMPLEX_RUN_TTL_MS = 45 * 1000
 const LOCAL_CLI_BRIDGE_OVERHEAD_MS = 3 * 1000
 const LOCAL_CLI_RUN_TTL_MS = 50 * 1000
 const LOCAL_CLI_ONLINE_MS = 45 * 1000
-const LOCAL_CLI_RUNTIME_VERSION = '0.4.1'
+const LOCAL_CLI_RUNTIME_VERSION = '0.4.2'
+const LOCAL_CLI_PAGE_LEASE_SECONDS = 40
 
 function normalizeLocalCliReport(value: unknown): LocalCliReport | null {
   if (!value || typeof value !== 'object') return null
@@ -22800,18 +22802,52 @@ async function pairLocalCliBridge(env: Env, request: Request) {
   return ok({ deviceId, deviceName: name, token }, 201)
 }
 
+async function renewLocalCliPageLease(env: Env, request: Request) {
+  const principal = await resolveRequestPrincipal(env, request)
+  if (!principal) return fail('请先登录', 401)
+  const body = await request.json().catch(() => ({})) as { browserDeviceKey?: string }
+  const key = String(body.browserDeviceKey || '').trim().slice(0, 128)
+  if (!key) return fail('缺少当前浏览器设备标识')
+  await env.DB.prepare(
+    'UPDATE local_cli_devices SET browser_active_until = unixepoch() + ? WHERE principal_id = ? AND browser_device_key = ? AND revoked_at IS NULL AND coalesce(browser_active_until, 0) < unixepoch() + 25',
+  ).bind(LOCAL_CLI_PAGE_LEASE_SECONDS, principal.principalId, key).run()
+  return ok({ ok: true })
+}
+
+function localCliPageActive(device: DbLocalCliDevice) {
+  return Number(device.browser_active_until ?? 0) > Date.now() / 1000
+}
+
 async function heartbeatLocalCliBridge(env: Env, request: Request) {
   const device = await resolveLocalCliBridgeDevice(env, request)
   if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
   const body = await request.json().catch(() => ({})) as Record<string, unknown>
-  await env.DB.prepare('UPDATE local_cli_devices SET bridge_version = ?, last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .bind(String(body.bridgeVersion || device.bridge_version).slice(0, 40), device.id)
-    .run()
-  if (Array.isArray(body.clis)) await replaceLocalCliAdapters(env, device.id, normalizeLocalCliReports(body.clis))
+  const pageActive = localCliPageActive(device)
+  if (pageActive) {
+    await env.DB.prepare(
+      "UPDATE local_cli_devices SET bridge_version = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ? AND browser_active_until > unixepoch() AND (last_seen_at IS NULL OR last_seen_at <= datetime('now', '-25 seconds') OR bridge_version != ?)",
+    ).bind(String(body.bridgeVersion || device.bridge_version).slice(0, 40), device.id,
+      String(body.bridgeVersion || device.bridge_version).slice(0, 40)).run()
+    if (Array.isArray(body.clis)) {
+      const reports = normalizeLocalCliReports(body.clis)
+      const stored = await env.DB.prepare('SELECT * FROM local_cli_adapters WHERE device_id = ?')
+        .bind(device.id).all<DbLocalCliAdapter>()
+      const byId = new Map((stored.results || []).map(row => [row.adapter_id, row]))
+      const changed = reports.length !== byId.size || reports.some(item => {
+        const row = byId.get(item.id)
+        return !row || row.name !== item.name || row.command !== item.command ||
+          row.version !== item.version || row.status !== item.status || row.auth_status !== item.authStatus ||
+          Boolean(row.supports_streaming) !== item.supportsStreaming || Boolean(row.supports_mcp) !== item.supportsMcp ||
+          row.detail !== item.detail
+      })
+      if (changed) await replaceLocalCliAdapters(env, device.id, reports)
+    }
+  }
   return ok({
     ok: true,
     deviceId: device.id,
     selectedCliId: device.selected_cli_id,
+    pageActive,
     bridgeRuntimeVersion: LOCAL_CLI_RUNTIME_VERSION,
     bridgeDownloadUrl: `${new URL(request.url).origin}/giverny-bridge.mjs`,
   })
@@ -22820,13 +22856,14 @@ async function heartbeatLocalCliBridge(env: Env, request: Request) {
 async function pollLocalCliBridgeCommand(env: Env, request: Request) {
   const device = await resolveLocalCliBridgeDevice(env, request)
   if (!device) return fail('Bridge 凭证无效，请重新配对', 401)
+  if (!localCliPageActive(device)) return ok({ command: null, pageActive: false })
   await env.DB.prepare("UPDATE local_cli_commands SET status = 'expired', completed_at = CURRENT_TIMESTAMP WHERE device_id = ? AND status IN ('queued', 'running') AND expires_at <= ?")
     .bind(device.id, nowIso())
     .run()
   const command = await env.DB.prepare("SELECT * FROM local_cli_commands WHERE device_id = ? AND status = 'queued' AND expires_at > ? ORDER BY created_at LIMIT 1")
     .bind(device.id, nowIso())
     .first<DbLocalCliCommand>()
-  if (!command) return ok({ command: null })
+  if (!command) return ok({ command: null, pageActive: true })
   const payload = JSON.parse(command.payload_json || '{}') as Record<string, unknown>
   const sanitizedPayload = command.command_type === 'run'
     ? { ...payload, mcpToken: undefined }
@@ -22834,8 +22871,8 @@ async function pollLocalCliBridgeCommand(env: Env, request: Request) {
   const claimed = await env.DB.prepare("UPDATE local_cli_commands SET status = 'running', claimed_at = CURRENT_TIMESTAMP, payload_json = ? WHERE id = ? AND status = 'queued'")
     .bind(JSON.stringify(sanitizedPayload), command.id)
     .run()
-  if (!Number(claimed.meta?.changes)) return ok({ command: null })
-  return ok({ command: { id: command.id, type: command.command_type, payload } })
+  if (!Number(claimed.meta?.changes)) return ok({ command: null, pageActive: true })
+  return ok({ pageActive: true, command: { id: command.id, type: command.command_type, payload } })
 }
 
 function normalizeLocalCliCommandResult(value: unknown) {
@@ -23158,6 +23195,9 @@ async function handleApi(request: Request, env: Env, ctx?: WorkerExecutionContex
   }
   if (path === '/api/local-cli/pairings' && request.method === 'POST') {
     return createLocalCliPairing(env, request)
+  }
+  if (path === '/api/local-cli/page-lease' && request.method === 'POST') {
+    return renewLocalCliPageLease(env, request)
   }
   if (path === '/api/local-cli/devices' && request.method === 'GET') {
     return listLocalCliDevices(env, request)

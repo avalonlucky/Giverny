@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { homedir, hostname, platform, arch } from 'node:os'
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 
-const VERSION = '0.4.1'
+const VERSION = '0.4.2'
 const CONFIG_DIR = join(homedir(), '.giverny')
 const CONFIG_FILE = join(CONFIG_DIR, 'bridge.json')
 const WORKSPACE_DIR = join(CONFIG_DIR, 'workspace')
@@ -600,18 +600,19 @@ async function pollCommand(config, clis) {
     method: 'GET',
     headers: { authorization: `Bearer ${config.token}` },
   })
-  if (!payload.command) return null
+  if (payload.pageActive === false) return { active: false }
+  if (!payload.command) return { active: true }
   if (payload.command.type === 'scan') {
     const clis = scanLocalClis()
     await completeCommand(config, payload.command.id, { clis })
-    return clis
+    return { active: true, clis }
   }
   if (payload.command.type === 'run') {
     await executeRunCommand(config, payload.command, clis)
-    return null
+    return { active: true }
   }
   await completeCommand(config, payload.command.id, {}, '当前 Bridge 不支持该命令')
-  return null
+  return { active: true }
 }
 
 function sleep(ms) {
@@ -621,25 +622,38 @@ function sleep(ms) {
 async function start() {
   const config = readConfig()
   if (!config?.token || !config?.server) throw new Error('尚未配对，请先运行 pair 命令。')
-  let clis = scanLocalClis()
-  const initialHeartbeat = await heartbeat(config, clis)
-  if (await maybeUpdateBridge(config, initialHeartbeat)) return
-  let selectedCliId = String(initialHeartbeat?.selectedCliId || '')
-  process.stdout.write(`Giverny Local Bridge ${VERSION} 已连接，设备：${config.deviceName || config.deviceId}\n`)
-  process.stdout.write('按 Ctrl+C 停止。\n')
-  let lastHeartbeat = Date.now()
+  let clis = []
+  let pageActive = false
+  let selectedCliId = ''
+  let lastHeartbeat = 0
+  let reportedClis = ''
+  process.stdout.write(`Giverny Local Bridge ${VERSION} 已启动，等待已配对的网页打开。\n`)
   while (true) {
     try {
-      const scanned = await pollCommand(config, clis)
-      if (scanned) clis = scanned
+      const result = await pollCommand(config, clis)
+      if (!result.active) {
+        pageActive = false
+        await sleep(5_000)
+        continue
+      }
+      if (!pageActive) {
+        clis = result.clis ?? scanLocalClis()
+        lastHeartbeat = 0
+        reportedClis = ''
+      } else if (result.clis) {
+        clis = result.clis
+      }
+      pageActive = true
       if (Date.now() - lastHeartbeat >= 15_000) {
-        if (selectedCliId && !clis.some((item) => item.id === selectedCliId && item.status === 'available' && item.command)) {
-          const refreshed = refreshCachedCli(clis, selectedCliId)
-          if (refreshed?.status === 'available') process.stdout.write(`[Bridge] ${refreshed.name} 已恢复可用。\n`)
+        if (selectedCliId && !clis.some(item => item.id === selectedCliId && item.status === 'available' && item.command)) {
+          refreshCachedCli(clis, selectedCliId)
         }
-        const heartbeatResult = await heartbeat(config, clis)
+        const snapshot = JSON.stringify(clis)
+        const heartbeatResult = await heartbeat(config, snapshot === reportedClis ? undefined : clis)
         if (await maybeUpdateBridge(config, heartbeatResult)) return
-        selectedCliId = String(heartbeatResult?.selectedCliId || selectedCliId)
+        selectedCliId = String(heartbeatResult?.selectedCliId || '')
+        pageActive = heartbeatResult?.pageActive !== false
+        reportedClis = snapshot
         lastHeartbeat = Date.now()
       }
     } catch (error) {

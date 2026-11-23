@@ -867,6 +867,7 @@ CREATE TABLE IF NOT EXISTS local_cli_devices (
   token_hash TEXT NOT NULL UNIQUE,
   selected_cli_id TEXT,
   last_seen_at TEXT,
+  browser_active_until INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   revoked_at TEXT

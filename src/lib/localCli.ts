@@ -1,4 +1,4 @@
-export const LOCAL_CLI_RUNTIME_VERSION = '0.4.0'
+export const LOCAL_CLI_RUNTIME_VERSION = '0.4.2'
 const LOCAL_CLI_BROWSER_KEY = 'giverny-local-cli-browser-device'
 
 export function localCliRuntimeReady(version: string) {
